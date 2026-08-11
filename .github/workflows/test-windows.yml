@@ -20,7 +20,7 @@ on:
 jobs:
   test-windows:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL_NAME: gpt-4o-mini

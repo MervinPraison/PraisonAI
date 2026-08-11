@@ -72,7 +72,8 @@ class InteractiveConfig:
         """Create config from environment variables."""
         return cls(
             model=os.environ.get("PRAISON_MODEL"),
-            workspace=os.environ.get("PRAISON_WORKSPACE", os.getcwd()),
+            workspace=os.environ.get("PRAISONAI_WORKSPACE")
+            or os.environ.get("PRAISON_WORKSPACE", os.getcwd()),
             approval_mode=os.environ.get("PRAISON_APPROVAL_MODE", "prompt"),
             enable_acp=os.environ.get("PRAISON_DISABLE_ACP", "").lower() != "true",
             enable_lsp=os.environ.get("PRAISON_DISABLE_LSP", "").lower() != "true",

@@ -9,7 +9,6 @@ import os
 import json
 import time
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 import subprocess
 from typing import List, Optional, Dict, Any
@@ -124,6 +123,16 @@ class HookRunner:
             results.extend(sequential_results)
         
         return results
+    
+    async def execute_async(
+        self,
+        event: HookEvent,
+        input_data: HookInput,
+        target: Optional[str] = None,
+        _hooks: Optional[List["HookDefinition"]] = None
+    ) -> List[HookExecutionResult]:
+        """Alias of execute() for call sites expecting an explicit async entry point."""
+        return await self.execute(event, input_data, target=target, _hooks=_hooks)
     
     def execute_sync(
         self,

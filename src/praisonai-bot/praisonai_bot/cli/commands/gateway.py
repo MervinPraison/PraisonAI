@@ -25,6 +25,12 @@ def gateway_start(
         "--preflight/--no-preflight",
         help="Validate channel credentials before starting (fail fast on bad tokens)",
     ),
+    strict_tools: bool = typer.Option(
+        True,
+        "--strict-tools/--no-strict-tools",
+        help="Fail fast if any tool named in the config cannot be resolved. "
+        "Use --no-strict-tools to skip unresolved tools and start anyway (#3553)",
+    ),
     openai_api: bool = typer.Option(
         False,
         "--openai-api",
@@ -36,6 +42,59 @@ def gateway_start(
         "--mcp",
         help="Serve an MCP JSON-RPC endpoint (/mcp) exposing the gateway's agents",
     ),
+    drain_timeout: Optional[float] = typer.Option(
+        None, "--drain-timeout",
+        help="Seconds to wait for in-flight agent turns to finish on shutdown "
+        "(0 disables; #2375)",
+    ),
+    max_concurrent_runs: Optional[int] = typer.Option(
+        None, "--max-concurrent-runs",
+        help="Gateway-wide ceiling on simultaneously-running agent turns "
+        "(0 disables; #2454)",
+    ),
+    queue_depth: Optional[int] = typer.Option(
+        None, "--queue-depth",
+        help="Bounded wait queue depth when at the concurrency ceiling (#2454)",
+    ),
+    overflow_policy: Optional[str] = typer.Option(
+        None, "--overflow-policy",
+        help="Behaviour when the wait queue is full: reject | queue | shed_oldest "
+        "(default: reject; #2454)",
+    ),
+    reliability: Optional[str] = typer.Option(
+        None, "--reliability",
+        help="Named reliability posture composing drain + admission in one switch: "
+        "production | default | off (#2531)",
+    ),
+    identity_store: Optional[str] = typer.Option(
+        None, "--identity-store",
+        help="Enable cross-platform conversation continuity: path to the identity "
+        "link-map JSON (default ~/.praisonai/identity.json). Paired/linked users "
+        "share one session + memory across channels (#3020)",
+    ),
+    scale_to_zero: bool = typer.Option(
+        False, "--scale-to-zero",
+        help="Quiesce the gateway when idle for --idle-minutes (scale-to-zero; #3021)",
+    ),
+    idle_minutes: Optional[float] = typer.Option(
+        None, "--idle-minutes",
+        help="Minutes of no inbound / in-flight work before quiescing (#3021)",
+    ),
+    drain_marker: Optional[str] = typer.Option(
+        None, "--drain-marker",
+        help="Path to watch for an epoch-aware external drain marker file (#3021)",
+    ),
+    watchdog: bool = typer.Option(
+        False, "--watchdog",
+        help="Enable the event-loop liveness watchdog: an OS-thread backstop "
+        "that dumps stacks and hard-exits (restart code 75) if the loop freezes, "
+        "so the supervisor relaunches the process (#3410)",
+    ),
+    watchdog_timeout: Optional[float] = typer.Option(
+        None, "--watchdog-timeout",
+        help="Seconds the event loop may stall before the watchdog trips a "
+        "restart (default ~15s = 5s x 3 strikes; #3410)",
+    ),
 ):
     """Start the gateway server.
 
@@ -45,6 +104,8 @@ def gateway_start(
         praisonai gateway start --agents agents.yaml --port 9000
         praisonai gateway start --config gateway.yaml --no-preflight
         praisonai gateway start --config gateway.yaml --openai-api --mcp
+        praisonai gateway start --config gateway.yaml --reliability production
+        praisonai gateway start --config gateway.yaml --max-concurrent-runs 8 --queue-depth 32
         GATEWAY_PORT=9000 praisonai gateway start
     """
     import os
@@ -94,17 +155,48 @@ def gateway_start(
                     "--no-preflight to skip this check."
                 )
 
+    # Tool pre-flight: a tool named in the config that cannot be resolved (a
+    # typo, an uninstalled optional package, or a gated local tools.py) is
+    # otherwise silently skipped — the bot starts quietly under-powered with
+    # only a log warning an operator never sees (#3553). Mirror the credential
+    # pre-flight: fail fast by default with a per-name reason + fix hint, or
+    # warn-and-continue under --no-strict-tools.
+    if config and os.path.exists(config):
+        _preflight_tools(config, strict_tools=strict_tools)
+
     handler = GatewayHandler()
     # Pass True only when the flag is set so an unset flag does not override a
-    # YAML ``gateway.api.*`` value (None = "fall back to config").
-    handler.start(
+    # YAML ``gateway.api.*`` value (None = "fall back to config"). The same
+    # None-means-fall-back-to-YAML rule applies to the reliability/admission/
+    # idle/drain/identity flags below, so operators get one canonical, fully
+    # discoverable ``gateway start --help`` surface (#3161).
+    #
+    # Propagate the supervisor-friendly exit code (#2437, #3160): Typer ignores
+    # a plain returned int, so a fatal-config (78) / transient (75) / clean (0)
+    # result must be surfaced via ``typer.Exit`` — otherwise the installed
+    # daemon (which runs ``python -m praisonai_bot gateway start``) always exits
+    # 0, and the generated units' Restart=on-failure / RestartPreventExitStatus
+    # / KeepAlive.SuccessfulExit directives never see the real code.
+    code = handler.start(
         host=host,
         port=port,
         agent_file=agents,
         config_file=config,
         openai_api=True if openai_api else None,
         mcp=True if mcp else None,
+        drain_timeout=drain_timeout,
+        max_concurrent_runs=max_concurrent_runs,
+        queue_depth=queue_depth,
+        overflow_policy=overflow_policy,
+        reliability=reliability,
+        identity_store=identity_store,
+        scale_to_zero=True if scale_to_zero else None,
+        idle_minutes=idle_minutes,
+        drain_marker=drain_marker,
+        watchdog=True if watchdog else None,
+        watchdog_timeout=watchdog_timeout,
     )
+    raise typer.Exit(code if isinstance(code, int) else 0)
 
 
 @app.command("stop")
@@ -135,17 +227,131 @@ def gateway_stop(
     handler.stop(host=host, port=port, force=force)
 
 
+@app.command("restart")
+def gateway_restart(
+    host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Gateway port"),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Path to gateway.yaml (for direct relaunch)"
+    ),
+    agents: Optional[str] = typer.Option(
+        None, "--agents", help="Path to agent configuration file (for direct relaunch)"
+    ),
+    drain_timeout: Optional[float] = typer.Option(
+        None, "--drain-timeout",
+        help="Seconds to wait for in-flight agent turns to finish before "
+        "relaunch (default: the persisted start value, else 10)",
+    ),
+):
+    """Gracefully drain in-flight turns, then relaunch the gateway.
+
+    Daemon-aware: if the gateway is installed as an OS service
+    (launchd / systemd / scheduled task), the service manager restarts it so
+    operators never hand-copy ``launchctl kickstart`` / ``systemctl --user
+    restart`` / ``schtasks`` per platform, preserving the installed unit's
+    launch arguments. Otherwise it drains the running PID and relaunches
+    directly (#3161).
+
+    The direct (non-service) relaunch replays the CLI-only runtime flags the
+    original process was started with (e.g. ``--openai-api``,
+    ``--reliability``, ``--max-concurrent-runs``) from the persisted start-flags
+    artefact written at ``start`` time, so a restart faithfully reproduces the
+    running gateway instead of silently reverting to defaults (#3349). Flags
+    passed explicitly to ``restart`` still win over the persisted values; an
+    omitted ``--drain-timeout`` replays the persisted drain window rather than
+    forcing a fixed default.
+
+    Examples:
+        praisonai gateway restart
+        praisonai gateway restart --config gateway.yaml
+        praisonai gateway restart --drain-timeout 30
+    """
+    import os
+    from praisonai_bot.daemon import restart_daemon, get_daemon_status
+    from ..features.gateway import GatewayHandler, load_start_flags
+    from ..output.console import get_output_controller
+
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
+
+    output = get_output_controller()
+
+    # Daemon-aware path: let the service manager perform the restart when a
+    # service is installed, so drain/relaunch semantics match `install`.
+    try:
+        daemon_status = get_daemon_status()
+    except Exception:
+        daemon_status = {"installed": False}
+
+    if daemon_status.get("installed"):
+        result = restart_daemon()
+        if result.get("ok"):
+            output.print_success(result.get("message", "Service restarted"))
+            return
+        output.print_warning(
+            f"Daemon restart unavailable ({result.get('error', 'unknown')}); "
+            "falling back to direct drain + relaunch."
+        )
+
+    # Replay the CLI-only runtime flags the original process was started with so
+    # the restart reproduces the exact posture (durable delivery, concurrency
+    # ceiling, OpenAI-compat surface, lifecycle) instead of silently reverting
+    # to defaults (#3349). Flags passed explicitly to ``restart`` (config /
+    # agents / drain_timeout) still win over the persisted values.
+    persisted = load_start_flags(host, port)
+    start_kwargs = dict(persisted)
+    if config is not None:
+        start_kwargs["config_file"] = config
+    if agents is not None:
+        start_kwargs["agent_file"] = agents
+    # An omitted --drain-timeout (None) must replay the persisted start value,
+    # not clobber it with Typer's old fixed 10s default — otherwise every
+    # restart silently shortens a production drain window (#3349). An explicit
+    # value still wins over the persisted one.
+    if drain_timeout is not None:
+        start_kwargs["drain_timeout"] = drain_timeout
+    # Effective window for draining the OLD process before relaunch: explicit
+    # flag > persisted start value > 10s fallback, so a long configured drain is
+    # not cut off by a fixed wait before force-kill (#3161).
+    effective_drain = drain_timeout
+    if effective_drain is None:
+        effective_drain = persisted.get("drain_timeout")
+    if effective_drain is None:
+        effective_drain = 10.0
+
+    # Direct path: gracefully stop the running gateway (honouring drain), then
+    # start a fresh instance in the foreground.
+    handler = GatewayHandler()
+    handler.stop(host=host, port=port, force=False, drain_timeout=effective_drain)
+
+    if persisted:
+        output.print_info(
+            "Replaying persisted start flags: "
+            + ", ".join(sorted(persisted.keys()))
+        )
+    output.print_info("Relaunching gateway...")
+    handler.start(host=host, port=port, **start_kwargs)
+
+
 @app.command("status")
 def gateway_status(
     host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
     port: Optional[int] = typer.Option(None, "--port", help="Gateway port"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Gateway config path"),
     daemon_only: bool = typer.Option(False, "--daemon-only", help="Show only daemon status"),
+    deep: bool = typer.Option(False, "--deep", help="Extended diagnostics (health + log tail)"),
+    probe: bool = typer.Option(False, "--probe", help="Live credential probe per channel"),
 ):
     """Check gateway status and daemon service status.
 
     Examples:
         praisonai gateway status
         praisonai gateway status --port 9000
+        praisonai gateway status --deep --config bot.yaml
+        praisonai gateway status --probe --config bot.yaml
         praisonai gateway status --daemon-only
     """
     import os
@@ -189,18 +395,315 @@ def gateway_status(
     if not daemon_only:
         try:
             handler = GatewayHandler()
-            handler.status(host=host, port=port)
+            handler.status(host=host, port=port, deep=deep)
+            if deep and config and os.path.exists(config):
+                from praisonai_bot.daemon.launchd import get_logs
+
+                output.print_info("Recent log tail:")
+                print(get_logs(lines=20))
+                channels = _load_channels(config)
+                for name, ch in channels.items():
+                    platform = (ch or {}).get("platform", name)
+                    dlq_path = _resolve_platform_dlq_path(str(platform))
+                    output.print_info(
+                        f"DLQ ({name}): praisonai bot dlq list --path {dlq_path}"
+                    )
+            if probe and config and os.path.exists(config):
+                import asyncio
+
+                channels = _load_channels(config)
+                results = asyncio.run(_probe_channels(channels))
+                output.print_info("Live channel probe:")
+                _render_probe_results(results, json_output=False)
         except Exception as e:
             output.print_error(f"Error checking gateway server status: {str(e)}")
 
 
-def _resolve_env_token(value):
-    """Resolve a ``${VAR}`` placeholder to its env value (pass-through otherwise)."""
-    import os
+def _check_gateway_secret_strength(config_path: str):
+    """Inspect the gateway's own auth_token for known-weak/placeholder values.
 
-    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-        return os.environ.get(value[2:-1], "")
-    return value
+    Returns an actionable error string when the gateway is on an EXTERNAL bind
+    and its resolved ``auth_token`` is either missing or a known-weak/
+    placeholder value (caller should fail closed, mirroring startup). On a
+    loopback bind a warning is printed for a weak token and ``None`` is returned
+    (consistent with the permissive-loopback posture). Returns ``None`` when the
+    token is strong, absent on a loopback bind, or the config cannot be read.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(config_path):
+        return None
+
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive
+        return None
+
+    gw = cfg.get("gateway", cfg) or {}
+    raw_token = gw.get("auth_token") or os.environ.get("GATEWAY_AUTH_TOKEN", "")
+    token = _resolve_env_token(raw_token) if raw_token else ""
+
+    from praisonaiagents.gateway.protocols import (
+        is_weak_secret,
+        resolve_auth_mode,
+        WeakGatewaySecretError,
+    )
+
+    # A strong, present token needs no further checks.
+    if token and not is_weak_secret(token):
+        return None
+
+    bind_host = gw.get("bind_host") or gw.get("host") or "127.0.0.1"
+    is_local = resolve_auth_mode(str(bind_host)) == "local"
+
+    # Absent token: only a concern on an external bind, where startup fails
+    # closed for a missing required secret. Doctor must agree (#3259).
+    if not token:
+        if is_local:
+            return None
+        return (
+            f"Refusing to start: gateway.auth_token is required for external "
+            f"bind {bind_host} but is missing.\n"
+            f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
+            f'Or:   export GATEWAY_AUTH_TOKEN="$(openssl rand -hex 16)"'
+        )
+
+    # Present-but-weak token: warn on loopback, fail closed externally.
+    if is_local:
+        print(
+            f"⚠  gateway.auth_token is a known-weak/placeholder value "
+            f"(loopback bind {bind_host}). Rotate before exposing externally."
+        )
+        return None
+
+    return str(WeakGatewaySecretError(field="gateway.auth_token"))
+
+
+def _config_has_explicit_weak_token(config_path: str) -> bool:
+    """True when gateway.yaml pins an explicit (non-``${ENV}``) weak auth_token.
+
+    Such a value is read verbatim at startup (``GatewayConfig.auth_token``) and
+    by :func:`_check_gateway_secret_strength`, so it takes precedence over the
+    ``GATEWAY_AUTH_TOKEN`` env var. Minting only into the env would leave the
+    weak YAML value active — the repair must rewrite the YAML too (#3554).
+    A ``${ENV}`` reference is NOT rewritten: it resolves from the env store the
+    env-var repair already fixes, so overwriting it would clobber operator
+    indirection.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(config_path):
+        return False
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive
+        return False
+
+    gw = cfg.get("gateway", cfg) or {}
+    raw_token = gw.get("auth_token")
+    if not raw_token or not isinstance(raw_token, str):
+        return False
+    if raw_token.startswith("${") and raw_token.endswith("}"):
+        return False
+
+    from praisonaiagents.gateway.protocols import is_weak_secret
+
+    return is_weak_secret(raw_token)
+
+
+def _persist_yaml_auth_token(config_path: str, new_token: str) -> None:
+    """Rewrite the ``gateway.auth_token`` in gateway.yaml in place (#3554)."""
+    import yaml
+
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh) or {}
+
+    if isinstance(cfg.get("gateway"), dict):
+        cfg["gateway"]["auth_token"] = new_token
+    else:
+        cfg["auth_token"] = new_token
+
+    with open(config_path, "w") as fh:
+        yaml.safe_dump(cfg, fh, default_flow_style=False, sort_keys=False)
+
+
+def _check_config_version(config_path: str):
+    """Return applied-migration reasons if gateway.yaml is out of date (#3841).
+
+    Reads the raw YAML and asks the canonical core migrator whether any
+    declarative rule fires or the ``config_version`` stamp is missing/stale.
+    Returns ``(reasons, from_version, to_version)`` when a migration would run,
+    else ``None`` — so ``doctor`` can surface "your config is out of date, run
+    --fix" without writing anything. A single ``str`` error is returned when the
+    config was written by a newer build or carries a malformed stamp, so doctor
+    can warn without attempting a (downgrading) migration.
+
+    Older core installs that predate the migration API (praisonaiagents without
+    ``migrate_config_with_doctor``) make this a graceful no-op rather than
+    crashing ``doctor`` with an ``ImportError``.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(config_path):
+        return None
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive
+        return None
+    if not isinstance(cfg, dict):
+        return None
+
+    try:
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            ConfigVersionError,
+            is_config_current,
+            migrate_config_with_doctor,
+        )
+    except ImportError:
+        # Core too old to know about config versioning; nothing to migrate.
+        return None
+
+    try:
+        current = is_config_current(cfg)
+        _, reasons = migrate_config_with_doctor(cfg)
+    except ConfigVersionError as exc:
+        return str(exc)
+    if current and not reasons:
+        return None
+    from_version = cfg.get("config_version", "unstamped")
+    return reasons, from_version, GATEWAY_CONFIG_VERSION
+
+
+def _repair_config_version(config_path: str):
+    """Migrate gateway.yaml forward once and stamp ``config_version`` (#3841).
+
+    Applies the canonical declarative migration rules via the core executor and
+    rewrites the YAML, preserving key order. Returns the list of operator-facing
+    reasons for the applied rules (may be empty when only the version stamp
+    needed writing).
+
+    The rewrite is atomic: the migrated YAML is serialised to a temporary file
+    in the same directory and ``os.replace``'d over the live ``gateway.yaml``, so
+    an interruption, full disk, or I/O error during ``doctor --fix`` can never
+    leave the config truncated or half-written.
+    """
+    import os
+    import tempfile
+    import yaml
+
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh) or {}
+
+    from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+    migrated, reasons = migrate_config_with_doctor(cfg)
+
+    directory = os.path.dirname(os.path.abspath(config_path))
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".gateway.", suffix=".yaml.tmp", dir=directory
+    )
+    try:
+        with os.fdopen(fd, "w") as fh:
+            yaml.safe_dump(
+                migrated, fh, default_flow_style=False, sort_keys=False
+            )
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    return reasons
+
+
+def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):
+    """Mint a strong gateway auth token to repair a weak/missing one.
+
+    The safe, idempotent repair behind ``gateway doctor --fix``: the caller has
+    already detected a weak/absent ``gateway.auth_token`` (via
+    :func:`_check_gateway_secret_strength`); this generates a fresh
+    ``secrets.token_hex(16)`` value and persists it to ``~/.praisonai/.env`` (the
+    same store ``praisonai onboard`` uses) so it survives daemon restarts. The
+    new token is also exported into this process's environment so the caller can
+    immediately **re-validate** that the finding cleared.
+
+    When gateway.yaml pins an explicit (non-``${ENV}``) weak ``auth_token``, that
+    value wins over the env var at both startup and re-validation, so the same
+    strong token is ALSO written back into the YAML — otherwise ``--fix`` would
+    report success while the weak YAML value stays active (#3554). When
+    ``dry_run`` is True no token is minted or written.
+
+    Returns ``"would-repair"`` (dry-run preview) or ``"repaired"`` so the
+    ``doctor`` command can render a detect → repair → re-validate line.
+    """
+    if dry_run:
+        return "would-repair"
+
+    import os
+    import secrets as _secrets
+    from praisonai_bot.cli.features.onboard import _save_env_vars
+
+    new_token = _secrets.token_hex(16)
+    _save_env_vars({"GATEWAY_AUTH_TOKEN": new_token})
+    os.environ["GATEWAY_AUTH_TOKEN"] = new_token
+    if config_path and _config_has_explicit_weak_token(config_path):
+        _persist_yaml_auth_token(config_path, new_token)
+    return "repaired"
+
+
+from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
+    apply_probe_ca_bundle as _apply_probe_ca_bundle,
+    check_duplicates as _check_duplicates,
+    check_gateway_running as _check_gateway_running,
+    check_inbound as _check_inbound,
+    check_runtime as _check_runtime,
+    probe_channels as _probe_channels,
+    probe_results_to_dict as _probe_results_to_dict,
+    resolve_env_token as _resolve_env_token,
+    resolve_platform_dlq_path as _resolve_platform_dlq_path,
+    run_shell_readiness_check as _run_shell_readiness_check,
+    run_turn_test as _run_gateway_turn_test,
+)
+
+
+def _secret_availability(value) -> str:
+    """Report a credential's availability WITHOUT printing its value (#3102).
+
+    Returns ``available`` | ``configured-but-unavailable`` | ``missing`` for a
+    reference/`${ENV}`/plaintext input so operators can validate secret wiring
+    before start.
+
+    An ``exec``-sourced reference is reported as ``configured`` WITHOUT running
+    its command: the command has side effects (a one-shot / rate-limited /
+    rotating secret-manager call) and the probe resolves the same reference
+    moments later, so executing it here would run it twice. env/file/plaintext
+    resolution is side-effect-free and fully checked.
+    """
+    try:
+        from praisonaiagents.secrets import resolve_secret, AVAILABLE, MISSING
+
+        if isinstance(value, dict) and value.get("source") == "exec":
+            return "configured"
+
+        result = resolve_secret(value, redact=False)
+        if result.available:
+            return AVAILABLE
+        if result.status == MISSING:
+            return MISSING
+        return result.status
+    except Exception:  # pragma: no cover — defensive
+        return "missing"
 
 
 def _is_ssl_error(result) -> bool:
@@ -227,41 +730,72 @@ def _is_ssl_error(result) -> bool:
     )
 
 
-def _apply_probe_ca_bundle() -> None:
-    """Point the probe HTTP client at a custom CA bundle if configured.
+def _preflight_tools(config: str, strict_tools: bool = True) -> None:
+    """Validate that every tool named in the config can be resolved (#3553).
 
-    Honors ``PRAISONAI_SSL_CA_BUNDLE`` (preferred), ``REQUESTS_CA_BUNDLE`` and
-    ``SSL_CERT_FILE`` so enterprise users behind an SSL-inspecting proxy can
-    supply their corporate CA and have the preflight probe trust it — mirroring
-    what the runtime adapter's SSL stack already honors (#2845). Setting
-    ``SSL_CERT_FILE`` is what Python's default ``ssl`` context (used by
-    ``aiohttp``) reads at load time.
+    An unresolved tool reference (typo, uninstalled optional package, or a
+    local ``tools.py`` gated behind ``PRAISONAI_ALLOW_LOCAL_TOOLS``) is
+    otherwise silently dropped, leaving a quietly under-powered agent. This
+    mirrors the credential pre-flight: in strict mode (default) it prints a
+    per-name reason + fix hint and aborts; ``strict_tools=False`` (or
+    ``strict_tools: false`` in the YAML) warns and continues.
+
+    The CLI ``--strict-tools/--no-strict-tools`` flag wins over the YAML
+    ``strict_tools:`` key only when set to non-strict — an explicit YAML
+    ``strict_tools: false`` also disables the gate so operators can opt into a
+    partial tool set from config alone.
     """
-    import os
+    import yaml
 
-    preferred = os.environ.get("PRAISONAI_SSL_CA_BUNDLE")
-    ca_bundle = (
-        preferred
-        or os.environ.get("REQUESTS_CA_BUNDLE")
-        or os.environ.get("SSL_CERT_FILE")
-    )
-    if not ca_bundle:
+    try:
+        with open(config) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive; start will surface it
         return
 
-    if not os.path.exists(ca_bundle):
+    if cfg.get("strict_tools") is False:
+        strict_tools = False
+
+    # Load ~/.praisonai/.env before resolving so a local tools.py enabled via
+    # PRAISONAI_ALLOW_LOCAL_TOOLS in that file is not falsely rejected — the
+    # gate runs before GatewayHandler.start() does the same load, and the
+    # runtime resolver would accept it (#3553). Idempotent; existing env wins.
+    try:
+        from praisonai_bot.cli.features.gateway import _load_praisonai_env_file
+
+        _load_praisonai_env_file()
+    except Exception:  # pragma: no cover — never block start on env-load
+        pass
+
+    try:
+        from praisonai_bot._code_bridge import import_code_module
+
+        resolver_mod = import_code_module("praisonai_code.tool_resolver")
+    except Exception:  # pragma: no cover — resolver unavailable in lean install
+        return
+
+    unresolved = resolver_mod.validate_yaml_tools(cfg)
+    if not unresolved:
+        return
+
+    reasons = []
+    for name in sorted(unresolved):
+        if str(name).startswith("toolset:"):
+            reasons.append(f"    - {name} not found (unknown toolset)")
+        else:
+            reasons.append(f"    - {resolver_mod.describe_unresolved(name)}")
+
+    if strict_tools:
+        print("\n\u2717 Tool pre-flight failed:")
+        print("\n".join(reasons))
         print(
-            f"Warning: CA bundle path '{ca_bundle}' does not exist — "
-            "SSL_CERT_FILE / REQUESTS_CA_BUNDLE not updated for probe."
+            "  Fix the names in your config, or start with --no-strict-tools "
+            "to run without them."
         )
-        return
+        raise typer.Exit(78)
 
-    if preferred and preferred == ca_bundle:
-        # Explicit PraisonAI override wins over any pre-existing values.
-        os.environ["SSL_CERT_FILE"] = ca_bundle
-        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
-    else:
-        os.environ.setdefault("SSL_CERT_FILE", ca_bundle)
-        os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_bundle)
+    print("\n\u26a0 Tool pre-flight (non-strict) — starting without:")
+    print("\n".join(reasons))
 
 
 def _load_channels(config: str) -> dict:
@@ -279,63 +813,37 @@ def _load_channels(config: str) -> dict:
     return cfg.get("channels", {})
 
 
-async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
-    """Build a lightweight Bot per channel and probe its credentials.
+def _compute_secret_availability(channels: dict) -> dict:
+    """Per-channel credential availability without revealing values (#3102).
 
-    Probing builds the adapter lazily and calls the platform identity API
-    (Telegram getMe, Slack auth.test, …) without starting message
-    processing. No agent is required. Returns ``{name: ProbeResult}``.
-
-    Each probe is bounded by ``timeout`` (seconds) so one stuck adapter
-    cannot hang the whole pre-flight; a timeout is reported as a failure.
-
-    Loads ``~/.praisonai/.env`` first so ``${VAR}`` tokens stored there
-    (e.g. by ``praisonai onboard``) resolve — mirroring what
-    ``GatewayHandler.start()`` does at runtime, so every credential check
-    (doctor / channels --probe / start --preflight) uses the same
-    token-resolution behavior (#2426).
+    Reports the ``token`` (and Slack ``app_token`` / WhatsApp ``verify_token``
+    when present) as ``available`` | ``configured-but-unavailable`` |
+    ``configured`` | ``missing``. Returns ``{channel: {field: status}}``.
     """
-    import asyncio as _asyncio
-
-    # Load env-file BEFORE resolving ${VAR} tokens so all probe paths
-    # (doctor, channels --probe, start --preflight) match runtime behavior.
-    try:
-        from ..features.gateway import _load_praisonai_env_file
-        _load_praisonai_env_file()
-    except Exception:  # pragma: no cover — defensive
-        pass
-
-    # Honor a custom CA bundle so the probe's HTTP client trusts a corporate
-    # proxy/MITM certificate the same way the runtime adapter does (#2845).
-    _apply_probe_ca_bundle()
-
-    from praisonai_bot.bots import Bot
-    from praisonaiagents.bots import ProbeResult
-
-    async def _probe_one(name: str, ch_cfg: dict):
-        platform = ch_cfg.get("platform", name)
-        token = _resolve_env_token(ch_cfg.get("token", ""))
-        extras = {
-            k: _resolve_env_token(v)
-            for k, v in ch_cfg.items()
-            if k not in ("platform", "token")
+    _fields = ("token", "app_token", "verify_token")
+    report: dict = {}
+    for name, ch_cfg in channels.items():
+        ch_cfg = ch_cfg or {}
+        fields = {
+            f: _secret_availability(ch_cfg[f])
+            for f in _fields
+            if f in ch_cfg and ch_cfg[f] not in (None, "")
         }
-        try:
-            bot = Bot(platform, token=token, **extras)
-            return name, await _asyncio.wait_for(bot.probe(), timeout=timeout)
-        except _asyncio.TimeoutError:
-            return name, ProbeResult(
-                ok=False,
-                platform=platform,
-                error=f"probe timed out after {timeout:g}s",
-            )
-        except Exception as e:  # pragma: no cover — defensive
-            return name, ProbeResult(ok=False, platform=platform, error=str(e))
+        if fields:
+            report[name] = fields
+    return report
 
-    results = await _asyncio.gather(
-        *(_probe_one(name, ch_cfg or {}) for name, ch_cfg in channels.items())
-    )
-    return dict(results)
+
+def _print_secret_availability(report: dict) -> None:
+    """Print the availability report as a table (values never shown)."""
+    if not report:
+        return
+    print("Credential availability (values never shown):")
+    for name, fields in report.items():
+        for f, status in fields.items():
+            mark = "✓" if status == "available" else "✗"
+            print(f"{name:<12} {f:<13} {mark}  {status}")
+    print()
 
 
 def _render_probe_results(results: dict, json_output: bool = False) -> bool:
@@ -345,15 +853,7 @@ def _render_probe_results(results: dict, json_output: bool = False) -> bool:
     if json_output:
         import json
 
-        print(
-            json.dumps(
-                {
-                    name: r.to_dict() if hasattr(r, "to_dict") else vars(r)
-                    for name, r in results.items()
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps(_probe_results_to_dict(results), indent=2))
         return all_ok
 
     for name, r in results.items():
@@ -381,6 +881,31 @@ def _render_probe_results(results: dict, json_output: bool = False) -> bool:
 def gateway_doctor(
     config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    channel: Optional[str] = typer.Option(
+        None,
+        "--channel",
+        help="Channel name for --turn (default: first configured channel)",
+    ),
+    turn: Optional[str] = typer.Option(
+        None,
+        "--turn",
+        help="Run one live inbound agent turn offline (requires LLM API key)",
+    ),
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help=(
+            "Repair safe findings: mint a strong gateway auth token when "
+            "weak/missing, and migrate an out-of-date gateway.yaml forward "
+            "(applies safe config migrations and stamps config_version), "
+            "then re-validate"
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="With --fix, preview repairs without writing anything",
+    ),
 ):
     """Validate every configured channel's credentials (pre-flight check).
 
@@ -388,20 +913,372 @@ def gateway_doctor(
     (Telegram getMe, Slack auth.test, Discord identify, WhatsApp token check)
     without starting message processing. Exits non-zero if any channel fails.
 
+    Optional ``--turn`` runs an offline inbound agent turn via
+    ``BotSessionManager.chat`` (including ``allow_shell`` setup). It does
+    **not** exercise Slack Bolt/socket handlers or @mention routing.
+
+    ``--fix`` performs the safe, idempotent repairs its own retry hints promise:
+    when ``gateway.auth_token`` is weak/missing it mints a strong token
+    (persisted to ``~/.praisonai/.env``) and **re-validates** that the finding
+    cleared, and when ``gateway.yaml`` is out of date it atomically rewrites the
+    file — applying the canonical config migrations and stamping the current
+    ``config_version``. A config written by a newer build is reported and left
+    untouched rather than downgraded. Pair with ``--dry-run`` to preview without
+    writing.
+
     Examples:
         praisonai gateway doctor
+        praisonai gateway doctor --fix
+        praisonai gateway doctor --fix --dry-run
         praisonai gateway doctor --config my-gateway.yaml --json
+        praisonai gateway doctor --config gateway.yaml --channel slack --turn "Say OK"
     """
     import asyncio
+    import json
+
+    gateway_secret_error = _check_gateway_secret_strength(config)
+
+    fix_report = None
+    if fix and gateway_secret_error:
+        action = _repair_gateway_secret(dry_run=dry_run, config_path=config)
+        if action == "would-repair":
+            fix_report = "gateway_auth_token: weak → would mint a strong token (--dry-run)"
+        elif action == "repaired":
+            gateway_secret_error = _check_gateway_secret_strength(config)
+            if gateway_secret_error is None:
+                fix_report = (
+                    "gateway_auth_token: weak → generated a strong token… done\n"
+                    "re-validated: gateway_auth_token now strong"
+                )
+            else:
+                fix_report = "gateway_auth_token: repair attempted but still weak"
+        if fix_report and not json_output:
+            print(fix_report)
+
+    # Config version stamp + declarative migration (#3841). Detect an
+    # out-of-date config (missing/stale ``config_version`` or a rule that fires)
+    # and, with ``--fix``, migrate it forward once and stamp the new version.
+    config_migration = _check_config_version(config)
+    config_fix_report = None
+    # A ``str`` means the config is newer than this build / malformed: warn and
+    # refuse to migrate (never downgrade a newer config with an older binary).
+    config_version_error = config_migration if isinstance(config_migration, str) else None
+    if config_version_error:
+        config_migration = None
+        if not json_output:
+            print(f"config: {config_version_error}")
+    if config_migration:
+        reasons, from_version, to_version = config_migration
+        if fix and not dry_run:
+            applied = _repair_config_version(config)
+            lines = [f"config: {r}" for r in applied]
+            lines.append(f"config: config_version {from_version} -> {to_version}")
+            config_fix_report = "\n".join(lines)
+            config_migration = None
+        elif fix and dry_run:
+            lines = [f"config: would {r}" for r in reasons]
+            lines.append(
+                f"config: would stamp config_version {from_version} -> {to_version} (--dry-run)"
+            )
+            config_fix_report = "\n".join(lines)
+        if config_fix_report and not json_output:
+            print(config_fix_report)
 
     channels = _load_channels(config)
+
     if not channels:
-        print("No channels configured.")
+        payload: dict = {"probes": {}}
+        if gateway_secret_error:
+            payload["gateway_auth_token"] = "weak"
+        if config_migration:
+            payload["config_version"] = "out-of-date"
+        if config_version_error:
+            payload["config_version"] = "unsupported"
+            payload["config_version_error"] = config_version_error
+        if fix_report:
+            payload["fix"] = fix_report
+        if config_fix_report:
+            payload["config_fix"] = config_fix_report
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("No channels configured.")
+            if gateway_secret_error:
+                print(gateway_secret_error)
+        if gateway_secret_error:
+            raise typer.Exit(1)
         raise typer.Exit(0)
 
+    availability = _compute_secret_availability(channels)
     results = asyncio.run(_probe_channels(channels))
-    all_ok = _render_probe_results(results, json_output=json_output)
+    all_ok = all(getattr(r, "ok", False) for r in results.values())
+    turn_gate_ok = all_ok
+    if channel and channel in results:
+        turn_gate_ok = getattr(results[channel], "ok", False)
+
+    payload: dict = {"probes": _probe_results_to_dict(results)}
+    if availability:
+        payload["secrets"] = availability
+    if gateway_secret_error:
+        payload["gateway_auth_token"] = "weak"
+    if config_migration:
+        payload["config_version"] = "out-of-date"
+    if config_version_error:
+        payload["config_version"] = "unsupported"
+        payload["config_version_error"] = config_version_error
+    if fix_report:
+        payload["fix"] = fix_report
+    if config_fix_report:
+        payload["config_fix"] = config_fix_report
+
+    if not json_output:
+        _print_secret_availability(availability)
+        _render_probe_results(results, json_output=False)
+        if gateway_secret_error:
+            print(gateway_secret_error)
+        if config_migration:
+            print(
+                "config: out of date (config_version "
+                f"{config_migration[1]} -> {config_migration[2]}); "
+                "run 'gateway doctor --fix'"
+            )
+
+    if gateway_secret_error:
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        raise typer.Exit(1)
+
+    probe_blocks_turn = not all_ok and not (turn and channel and turn_gate_ok)
+    if probe_blocks_turn and not turn:
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        raise typer.Exit(1)
+
+    if turn:
+        target = channel or (next(iter(channels.keys())) if channels else None)
+        if not target:
+            err = "--turn requires at least one configured channel"
+            payload["turn"] = {"channel": None, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        if not turn_gate_ok:
+            err = f"channel '{target}' probe failed — cannot run --turn"
+            payload["turn"] = {"channel": target, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
+        payload["turn"] = {"channel": target, "ok": ok, "response": message}
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"\nTurn test ({target}): {'OK' if ok else 'FAIL'}")
+            print(message if ok else f"Error: {message}")
+        if not ok or not all_ok:
+            raise typer.Exit(1)
+        return
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
     if not all_ok:
+        raise typer.Exit(1)
+
+
+@app.command("test")
+def gateway_test(
+    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    channel: Optional[str] = typer.Option(
+        None,
+        "--channel",
+        help="Channel name for --turn (default: first configured channel)",
+    ),
+    turn: Optional[str] = typer.Option(
+        None,
+        "--turn",
+        help="Run one live inbound agent turn offline (requires LLM API key)",
+    ),
+    check_running: bool = typer.Option(
+        False,
+        "--check-running",
+        help="Verify the gateway REST /info endpoint is reachable",
+    ),
+    check_runtime: bool = typer.Option(
+        False,
+        "--check-runtime",
+        help="Probe /info, /health, /ready, and /live (superset of --check-running)",
+    ),
+    check_inbound: bool = typer.Option(
+        False,
+        "--check-inbound",
+        help="Verify recent inbound delivery via gateway logs",
+    ),
+    check_duplicates: bool = typer.Option(
+        False,
+        "--check-duplicates",
+        help="Scan for competing gateway services and shared tokens",
+    ),
+    since: str = typer.Option(
+        "10m",
+        "--since",
+        help="Time window for --check-inbound (e.g. 5m, 2h)",
+    ),
+):
+    """One-shot gateway readiness check (probes + shell wiring + optional turn).
+
+    Recommended onboarding path before ``gateway start``. Combines credential
+    probes, offline shell wiring validation, and optional offline agent turn.
+
+    ``--turn`` uses ``BotSessionManager.chat`` only — it does not prove live
+    Slack @mention delivery. After starting, confirm ``@mention received`` in
+    gateway logs or use ``--check-inbound``.
+
+    Examples:
+        praisonai gateway test --config bot.yaml
+        praisonai gateway test --config bot.yaml --channel slack --turn "Say OK"
+        praisonai gateway test --config bot.yaml --check-runtime --check-duplicates
+        praisonai gateway test --config bot.yaml --check-inbound --since 5m
+    """
+    import asyncio
+    import json
+
+    gateway_secret_error = _check_gateway_secret_strength(config)
+    channels = _load_channels(config)
+    payload: dict = {}
+
+    if gateway_secret_error:
+        payload["gateway_auth_token"] = "weak"
+
+    if not channels:
+        payload.setdefault("probes", {})
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("No channels configured.")
+            if gateway_secret_error:
+                print(gateway_secret_error)
+        raise typer.Exit(1 if gateway_secret_error else 0)
+
+    availability = _compute_secret_availability(channels)
+    results = asyncio.run(_probe_channels(channels))
+    all_ok = all(getattr(r, "ok", False) for r in results.values())
+    turn_gate_ok = all_ok
+    if channel and channel in results:
+        turn_gate_ok = getattr(results[channel], "ok", False)
+
+    payload["probes"] = _probe_results_to_dict(results)
+    if availability:
+        payload["secrets"] = availability
+
+    shell_result = _run_shell_readiness_check(config)
+    payload["shell"] = {
+        "ok": shell_result.ok,
+        "message": shell_result.message,
+        "issues": shell_result.issues,
+    }
+
+    if not json_output:
+        _print_secret_availability(availability)
+        _render_probe_results(results, json_output=False)
+        shell_mark = "✓" if shell_result.ok else "✗"
+        print(f"shell wiring  {shell_mark}  {shell_result.message}")
+        if shell_result.issues:
+            for issue in shell_result.issues:
+                print(f"  - {issue}")
+        if gateway_secret_error:
+            print(gateway_secret_error)
+
+    failed = bool(gateway_secret_error) or not all_ok or not shell_result.ok
+
+    runtime_requested = check_runtime or check_running
+    if runtime_requested:
+        if check_runtime:
+            runtime_result = _check_runtime(config)
+            payload["runtime"] = runtime_result.to_dict()
+            runtime_ok = runtime_result.ok
+            if not json_output:
+                for name, key in (
+                    ("info", "info"),
+                    ("health", "health"),
+                    ("ready", "ready"),
+                    ("live", "live"),
+                ):
+                    probe = getattr(runtime_result, key)
+                    mark = "✓" if probe.ok else "✗"
+                    print(f"gateway {name:<6} {mark}  HTTP {probe.status_code or '—'}")
+        else:
+            running_ok, running_msg = _check_gateway_running(config)
+            payload["running"] = {"ok": running_ok, "message": running_msg}
+            runtime_ok = running_ok
+            if not json_output:
+                mark = "✓" if running_ok else "✗"
+                print(f"gateway up    {mark}  {running_msg}")
+        failed = failed or not runtime_ok
+
+    if check_duplicates:
+        dup_result = _check_duplicates(config)
+        payload["duplicates"] = dup_result.to_dict()
+        if not json_output:
+            mark = "✓" if dup_result.ok else "✗"
+            print(f"duplicates  {mark}  {len(dup_result.warnings)} warning(s)")
+            for warning in dup_result.warnings:
+                print(f"  - {warning}")
+        failed = failed or not dup_result.ok
+
+    if check_inbound:
+        inbound_result = _check_inbound(
+            config,
+            since=since,
+            probe_results=results,
+        )
+        payload["inbound"] = inbound_result.to_dict()
+        if not json_output:
+            mark = "✓" if inbound_result.ok else "✗"
+            print(
+                f"inbound     {mark}  "
+                f"{inbound_result.mentions_in_window} mention(s) in window "
+                f"(proves {inbound_result.proves})"
+            )
+            if inbound_result.last_mention_at:
+                print(f"  last: {inbound_result.last_mention_at}")
+            if inbound_result.hint:
+                print(f"  hint: {inbound_result.hint}")
+        failed = failed or not inbound_result.ok
+
+    if turn:
+        target = channel or (next(iter(channels.keys())) if channels else None)
+        if not target:
+            err = "--turn requires at least one configured channel"
+            payload["turn"] = {"channel": None, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        if not turn_gate_ok:
+            err = f"channel '{target}' probe failed — cannot run --turn"
+            payload["turn"] = {"channel": target, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
+        payload["turn"] = {"channel": target, "ok": ok, "response": message}
+        if not json_output:
+            print(f"\nTurn test ({target}): {'OK' if ok else 'FAIL'}")
+            print(message if ok else f"Error: {message}")
+        failed = failed or not ok
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+
+    if failed:
         raise typer.Exit(1)
 
 
@@ -512,130 +1389,167 @@ def gateway_channels(
             print(f"{name:<20} {platform:<12} {has_token:<12}")
 
 
+def _resolve_gateway_rest_url(
+    url: Optional[str],
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> str:
+    """Resolve the gateway REST base URL for channel control commands.
+
+    When ``--url`` is not passed, resolve the running gateway from the PID
+    lock/config (host+port) rather than forcing the operator to hand-type a
+    WebSocket URL (#3161). The lock file is keyed by host+port, so an explicit
+    ``--host``/``--port`` (or ``GATEWAY_PORT``) is honoured to locate a gateway
+    bound to a non-default endpoint; otherwise it falls back to
+    ``127.0.0.1:8765``. An explicit ``--url`` (ws/wss/http/https) always wins.
+    """
+    import os
+    from urllib.parse import urlparse, urlunparse
+
+    if url:
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme in ("wss", "https") else "http"
+    else:
+        resolved_host = host or "127.0.0.1"
+        if port is None:
+            try:
+                resolved_port = int(os.environ.get("GATEWAY_PORT", "8765"))
+            except ValueError:
+                resolved_port = 8765
+        else:
+            resolved_port = port
+        try:
+            from praisonai_bot.gateway.port_utils import GatewayPIDLock
+
+            # Key the lock lookup by the requested host+port so a gateway on a
+            # non-default endpoint is found instead of silently probing 8765.
+            info = GatewayPIDLock(
+                host=resolved_host, port=resolved_port
+            ).get_lock_info()
+            if info and info.get("is_running"):
+                resolved_host, resolved_port = info["host"], info["port"]
+        except Exception:  # pragma: no cover — advisory only
+            pass
+        parsed = urlparse(f"http://{resolved_host}:{resolved_port}")
+        scheme = "http"
+
+    rest_url = urlunparse(
+        (scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+    if not rest_url.endswith("/"):
+        rest_url += "/"
+    return rest_url
+
+
+def _channel_control(
+    name: str,
+    action: str,
+    url: Optional[str],
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> None:
+    """POST a pause/resume/reconnect action to the running gateway."""
+    import requests
+    import sys
+
+    rest_url = _resolve_gateway_rest_url(url, host=host, port=port)
+    try:
+        response = requests.post(f"{rest_url}api/channels/{name}/{action}", timeout=10)
+        response.raise_for_status()
+
+        result = response.json()
+        if result.get("success"):
+            print(f"✅ Channel '{name}' {action}{'ed' if action != 'pause' else 'd'} successfully")
+        else:
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to {action} channel '{name}': {message}")
+            sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"❌ Error running {action} on channel '{name}': {str(e)}")
+        sys.exit(1)
+
+
 @app.command("pause")
 def gateway_pause_channel(
     name: str = typer.Argument(help="Channel name to pause"),
-    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+    url: Optional[str] = typer.Option(
+        None, "--url",
+        help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
+    ),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Gateway host to locate (for non-default binds)",
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Gateway port to locate (for non-default binds)",
+    ),
 ):
     """Pause a gateway channel.
-    
+
+    Resolves the running gateway from the PID lock when --url is omitted;
+    pass --host/--port to control a gateway bound to a non-default endpoint.
+
     Examples:
         praisonai gateway pause telegram
         praisonai gateway pause discord --url ws://localhost:8000
+        praisonai gateway pause telegram --port 9000
     """
-    import requests
-    import sys
-    from urllib.parse import urlparse, urlunparse
-    
-    try:
-        # Parse URL and convert WebSocket to HTTP
-        parsed = urlparse(url)
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        # Reconstruct base URL preserving path and query
-        rest_url = urlunparse((
-            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
-        ))
-        if not rest_url.endswith("/"):
-            rest_url += "/"
-        
-        response = requests.post(f"{rest_url}api/channels/{name}/pause", timeout=10)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result.get("success"):
-            print(f"✅ Channel '{name}' paused successfully")
-        else:
-            message = result.get("message", result.get("error", "Unknown error"))
-            print(f"❌ Failed to pause channel '{name}': {message}")
-            sys.exit(1)
-    
-    except Exception as e:
-        print(f"❌ Error pausing channel '{name}': {str(e)}")
-        sys.exit(1)
+    _channel_control(name, "pause", url, host=host, port=port)
 
 
 @app.command("resume")
 def gateway_resume_channel(
     name: str = typer.Argument(help="Channel name to resume"),
-    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+    url: Optional[str] = typer.Option(
+        None, "--url",
+        help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
+    ),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Gateway host to locate (for non-default binds)",
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Gateway port to locate (for non-default binds)",
+    ),
 ):
     """Resume a paused gateway channel.
-    
+
+    Resolves the running gateway from the PID lock when --url is omitted;
+    pass --host/--port to control a gateway bound to a non-default endpoint.
+
     Examples:
         praisonai gateway resume telegram
         praisonai gateway resume discord --url ws://localhost:8000
+        praisonai gateway resume telegram --port 9000
     """
-    import requests
-    import sys
-    from urllib.parse import urlparse, urlunparse
-    
-    try:
-        # Parse URL and convert WebSocket to HTTP
-        parsed = urlparse(url)
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        # Reconstruct base URL preserving path and query
-        rest_url = urlunparse((
-            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
-        ))
-        if not rest_url.endswith("/"):
-            rest_url += "/"
-        
-        response = requests.post(f"{rest_url}api/channels/{name}/resume", timeout=10)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result.get("success"):
-            print(f"✅ Channel '{name}' resumed successfully")
-        else:
-            message = result.get("message", result.get("error", "Unknown error"))
-            print(f"❌ Failed to resume channel '{name}': {message}")
-            sys.exit(1)
-    
-    except Exception as e:
-        print(f"❌ Error resuming channel '{name}': {str(e)}")
-        sys.exit(1)
+    _channel_control(name, "resume", url, host=host, port=port)
 
 
 @app.command("reconnect")
 def gateway_reconnect_channel(
     name: str = typer.Argument(help="Channel name to reconnect"),
-    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+    url: Optional[str] = typer.Option(
+        None, "--url",
+        help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
+    ),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Gateway host to locate (for non-default binds)",
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Gateway port to locate (for non-default binds)",
+    ),
 ):
     """Reconnect a gateway channel.
-    
+
+    Resolves the running gateway from the PID lock when --url is omitted;
+    pass --host/--port to control a gateway bound to a non-default endpoint.
+
     Examples:
         praisonai gateway reconnect telegram
         praisonai gateway reconnect discord --url ws://localhost:8000
+        praisonai gateway reconnect telegram --port 9000
     """
-    import requests
-    import sys
-    from urllib.parse import urlparse, urlunparse
-    
-    try:
-        # Parse URL and convert WebSocket to HTTP
-        parsed = urlparse(url)
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        # Reconstruct base URL preserving path and query
-        rest_url = urlunparse((
-            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
-        ))
-        if not rest_url.endswith("/"):
-            rest_url += "/"
-        
-        response = requests.post(f"{rest_url}api/channels/{name}/reconnect", timeout=10)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result.get("success"):
-            print(f"✅ Channel '{name}' reconnected successfully")
-        else:
-            message = result.get("message", result.get("error", "Unknown error"))
-            print(f"❌ Failed to reconnect channel '{name}': {message}")
-            sys.exit(1)
-    
-    except Exception as e:
-        print(f"❌ Error reconnecting channel '{name}': {str(e)}")
-        sys.exit(1)
+    _channel_control(name, "reconnect", url, host=host, port=port)
 
 
 @app.command("install")
@@ -876,6 +1790,140 @@ def gateway_send(
         raise typer.Exit(1)
 
 
+hooks_app = typer.Typer(
+    help="Manage inbound trigger hooks (POST /hooks/<path>) in gateway.yaml",
+    no_args_is_help=True,
+)
+app.add_typer(hooks_app, name="hooks")
+
+
+sessions_app = typer.Typer(
+    help="Inspect stored gateway conversation sessions",
+    no_args_is_help=True,
+)
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("list")
+def gateway_sessions_list(
+    platform: Optional[str] = typer.Option(None, "--platform", help="Filter by platform (e.g. slack)"),
+    active: Optional[int] = typer.Option(None, "--active", help="Only sessions updated within N seconds"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """List stored bot session files under ~/.praisonai/sessions/."""
+    import json
+
+    from praisonai_bot.gateway.preflight import list_gateway_sessions
+
+    rows = list_gateway_sessions(platform=platform, active_seconds=active)
+    if json_output:
+        print(json.dumps(rows, indent=2))
+    else:
+        if not rows:
+            print("No sessions found.")
+        for row in rows:
+            print(
+                f"{row['session_id']:<40} "
+                f"msgs={row['message_count']:<4} "
+                f"user={row.get('user_id') or '—'}"
+            )
+        print(
+            "\nSessions reflect stored history; use "
+            "`praisonai gateway test --check-inbound` for live delivery."
+        )
+
+
+@sessions_app.command("show")
+def gateway_sessions_show(
+    session_ref: str = typer.Argument(..., help="Session id, user id, or partial filename match"),
+    tail: int = typer.Option(20, "--tail", help="Number of recent messages to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Show a stored session's recent messages."""
+    import json
+
+    from praisonai_bot.gateway.preflight import show_gateway_session
+
+    try:
+        data = show_gateway_session(session_ref, tail=tail)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        raise typer.Exit(1) from exc
+
+    if json_output:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Session: {data.get('session_id')}  user={data.get('user_id')}")
+        print(f"Agent: {data.get('agent_name')}  messages={data.get('message_count')}")
+        for msg in data.get("messages") or []:
+            role = msg.get("role", "?")
+            content = (msg.get("content") or "")[:200]
+            print(f"  [{role}] {content}")
+        print(f"\n{data.get('footer')}")
+
+
+def _run_hooks_action(**kwargs) -> None:
+    """Reuse GatewayHandler.hooks() by adapting kwargs to its Namespace API."""
+    from types import SimpleNamespace
+    from ..features.gateway import GatewayHandler
+
+    code = GatewayHandler().hooks(SimpleNamespace(**kwargs))
+    if code:
+        raise typer.Exit(code)
+
+
+@hooks_app.command("add")
+def gateway_hooks_add(
+    path: str = typer.Argument(..., help="Hook path, e.g. 'gmail' -> POST /hooks/gmail"),
+    agent: Optional[str] = typer.Option(None, "--agent", help="Agent id to run (default: first agent)"),
+    action_type: str = typer.Option(
+        "agent", "--action",
+        help="agent runs a turn, wake nudges a session (agent | wake)",
+    ),
+    auth: Optional[str] = typer.Option(None, "--auth", help="Bearer token / shared secret for this hook"),
+    session_key: Optional[str] = typer.Option(None, "--session-key", help="Session key template"),
+    idempotency_key: Optional[str] = typer.Option(None, "--idempotency-key", help="Idempotency key template"),
+    deliver_to: Optional[str] = typer.Option(None, "--deliver-to", help="channel:target for the reply"),
+    message: Optional[str] = typer.Option(None, "--message", help="Message template from the payload"),
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """Add an inbound trigger hook to gateway.yaml.
+
+    Examples:
+        praisonai gateway hooks add gmail --agent inbox --deliver-to telegram:12345
+    """
+    _run_hooks_action(
+        hooks_command="add", path=path, agent=agent, action_type=action_type,
+        auth=auth, session_key=session_key, idempotency_key=idempotency_key,
+        deliver_to=deliver_to, message=message, config_file=config,
+    )
+
+
+@hooks_app.command("list")
+def gateway_hooks_list(
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """List configured inbound trigger hooks.
+
+    Examples:
+        praisonai gateway hooks list
+    """
+    _run_hooks_action(hooks_command="list", config_file=config)
+
+
+@hooks_app.command("remove")
+def gateway_hooks_remove(
+    path: str = typer.Argument(..., help="Hook path to remove"),
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """Remove an inbound trigger hook from gateway.yaml.
+
+    Examples:
+        praisonai gateway hooks remove gmail
+    """
+    _run_hooks_action(hooks_command="remove", path=path, config_file=config)
+
+
 @app.callback(invoke_without_command=True)
 def gateway_callback(ctx: typer.Context):
     """Show gateway help if no subcommand provided."""
@@ -887,15 +1935,24 @@ Manage the gateway server: praisonai gateway <command>
 
 [bold]Commands:[/bold]
   [green]start[/green]       Start the gateway server
+  [green]restart[/green]     Gracefully drain + relaunch (daemon-aware)
   [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
   [green]doctor[/green]      Validate channel credentials (pre-flight check)
+  [green]test[/green]        One-shot readiness (probes + shell + optional turn)
   [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)
   [green]send[/green]        Send a test message to a channel
+  [green]hooks[/green]       Manage inbound trigger hooks (add | list | remove)
   [green]install[/green]     Install as OS daemon service
   [green]uninstall[/green]   Uninstall daemon service
   [green]logs[/green]        Show daemon service logs
   [green]mint-link[/green]   Generate a one-time magic link (options: --ttl, --host, --port)
+
+[bold]Production Start Flags:[/bold]
+  --reliability {production,default,off}  --max-concurrent-runs N  --queue-depth N
+  --overflow-policy {reject,queue,shed_oldest}  --drain-timeout S
+  --scale-to-zero --idle-minutes N  --identity-store PATH  --drain-marker PATH
+  --watchdog [--watchdog-timeout S]
 
 [bold]Multi-Bot Mode:[/bold]
   praisonai gateway start --config gateway.yaml

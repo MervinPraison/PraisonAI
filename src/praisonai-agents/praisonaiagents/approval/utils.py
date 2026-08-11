@@ -7,9 +7,29 @@ across the approval system.
 
 import asyncio
 import concurrent.futures
+import hashlib
+import json
 from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 
 T = TypeVar('T')
+
+
+def hash_tool_args(arguments: Optional[Dict[str, Any]]) -> str:
+    """Return the canonical 16-char identity hash of a tool call's arguments.
+
+    Produces a 16-character SHA-256 digest over the canonical JSON encoding
+    (``sort_keys=True, default=str``) of the arguments. This is the single
+    source of truth for the tool-call identity key shared by approval
+    de-duplication (``ApprovalRegistry``) and doom-loop detection, so the two
+    safety subsystems cannot silently diverge.
+
+    Falls back to ``"unhashable"`` if the arguments cannot be serialised.
+    """
+    try:
+        payload = json.dumps(arguments or {}, sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    except (TypeError, ValueError):
+        return "unhashable"
 
 
 # Tool names that map to a shell-command permission target (``bash:<command>``)
@@ -55,6 +75,14 @@ def build_permission_target(
     * shell tools -> ``bash:<command>``
     * file tools  -> ``<edit|write|delete|…>:<path>``
     * everything else -> ``tool:<tool_name>``
+
+    The command identity is preserved verbatim so command-specific rules
+    (e.g. ``deny: bash:rm *``) still match. The out-of-workspace boundary is
+    enforced downstream by :class:`~praisonaiagents.permissions.PermissionManager`
+    (its ``external_dir:`` gate), which decomposes the ``bash:<command>`` target
+    and gates any escaping path — so a broad ``bash:*`` / "allow shell" /
+    session grant cannot silently authorise out-of-workspace access while a
+    command-specific ``deny`` still fires.
 
     Falls back to ``tool:<tool_name>`` whenever the expected argument is missing
     so a target is always produced.

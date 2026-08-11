@@ -1,3 +1,4 @@
+# praisonai: skip=true
 import gradio as gr
 from praisonaiagents import Agent, Tools
 from praisonaiagents.tools import duckduckgo

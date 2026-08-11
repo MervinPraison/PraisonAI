@@ -9,6 +9,7 @@ Examples:
     praisonai checkpoint save "before refactor"
     praisonai checkpoint list
     praisonai checkpoint restore <id|last>
+    praisonai checkpoint rewind [steps]
     praisonai checkpoint diff [from] [to]
     praisonai checkpoint delete
 """
@@ -109,13 +110,25 @@ def list_checkpoints(
 
 @app.command("restore")
 def restore(
-    checkpoint_id: str = typer.Argument(..., help="Checkpoint id, short id, or 'last'"),
+    checkpoint_id: Optional[str] = typer.Argument(None, help="Checkpoint id, short id, or 'last'"),
+    step: Optional[int] = typer.Option(None, "--step", help="Rewind to the per-step checkpoint with this step index"),
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
 ):
-    """Restore the workspace to a checkpoint (accepts 'last')."""
+    """Restore the workspace to a checkpoint (accepts 'last' or --step N)."""
     handler = _handler(workspace)
 
     async def _run() -> bool:
+        if step is not None and checkpoint_id is not None:
+            handler._print_error("Provide either a checkpoint id/'last' or --step N, not both")
+            return False
+        if step is not None:
+            ok = await handler.restore(step=step)
+            if not ok:
+                handler._print_error(f"No checkpoint found for step: {step}")
+            return ok
+        if checkpoint_id is None:
+            handler._print_error("Provide a checkpoint id/'last' or --step N")
+            return False
         resolved = await _resolve_checkpoint_id(handler, checkpoint_id)
         if resolved is None:
             handler._print_error(f"No checkpoint found for: {checkpoint_id}")
@@ -123,6 +136,17 @@ def restore(
         return await handler.restore(resolved)
 
     if not asyncio.run(_run()):
+        raise typer.Exit(1)
+
+
+@app.command("rewind")
+def rewind(
+    steps: int = typer.Argument(1, min=1, help="How many checkpoints to step back (default: 1 = undo last checkpoint)"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+):
+    """Rewind the workspace back N turns (default 1 = undo the last turn's file changes)."""
+    handler = _handler(workspace)
+    if not asyncio.run(handler.rewind(steps)):
         raise typer.Exit(1)
 
 

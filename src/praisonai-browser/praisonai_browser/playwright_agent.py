@@ -194,7 +194,7 @@ class PlaywrightBrowserAgent:
                 }
                 
                 # Get action from agent
-                action = agent.process_observation(observation)
+                action = await agent.aprocess_observation(observation)
                 action = normalize_action(action)
                 
                 if self.verbose:

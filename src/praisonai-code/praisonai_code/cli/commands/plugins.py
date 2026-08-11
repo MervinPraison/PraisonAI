@@ -13,6 +13,40 @@ app = typer.Typer(
 )
 
 
+def _resolve_installer(global_env: bool = False):
+    """Resolve the installer command, honouring how PraisonAI was installed.
+
+    Prefers ``uv pip`` when the ``uv`` binary is available, otherwise falls
+    back to ``<python> -m pip`` for the active interpreter.
+
+    The ``uv`` branch pins ``--python <sys.executable>`` so the package lands
+    in the interpreter running the CLI rather than an unrelated environment
+    ``uv`` might auto-discover (``VIRTUAL_ENV`` / ``CONDA_PREFIX`` / nearby
+    ``.venv``). When ``global_env`` is set the target is the ambient system
+    interpreter instead (``uv``'s ``--system`` / plain ``pip``).
+    """
+    import shutil
+    import sys
+
+    if shutil.which("uv"):
+        if global_env:
+            return ["uv", "pip", "install", "--system"]
+        return ["uv", "pip", "install", "--python", sys.executable]
+    if global_env:
+        return ["pip", "install"]
+    return [sys.executable, "-m", "pip", "install"]
+
+
+def _registered_entry_point_names():
+    """Return the set of currently registered entry-point plugin names."""
+    try:
+        from praisonaiagents.plugins.manager import get_plugin_manager
+    except ImportError:
+        return set()
+    manager = get_plugin_manager()
+    return {info.name for info in manager.list_plugins()}
+
+
 @app.command("list")
 def plugins_list(
     enabled_only: bool = typer.Option(False, "--enabled", help="Show only enabled plugins"),
@@ -41,18 +75,21 @@ def plugins_list(
             
             console = Console()
             table = Table(title=f"Plugins ({len(plugins)} available)")
-            table.add_column("ID", style="cyan")
-            table.add_column("Name")
+            table.add_column("Name", style="cyan")
+            table.add_column("Source")
             table.add_column("Status")
             table.add_column("Description")
             
             for plugin in plugins:
                 status = "[green]enabled[/green]" if plugin.get("enabled") else "[dim]disabled[/dim]"
+                desc = plugin.get("description", "") or "-"
+                if len(desc) > 40:
+                    desc = desc[:40] + "..."
                 table.add_row(
-                    plugin.get("id", "-"),
                     plugin.get("name", "-"),
+                    plugin.get("source", "-"),
                     status,
-                    plugin.get("description", "-")[:40] + "..." if len(plugin.get("description", "")) > 40 else plugin.get("description", "-"),
+                    desc,
                 )
             
             console.print(table)
@@ -69,8 +106,7 @@ def plugins_info(
     """Show detailed information about a plugin.
     
     Examples:
-        praisonai plugins info memory-core
-        praisonai plugins info browser-tool
+        praisonai plugins info my-plugin
     """
     try:
         plugins = _get_available_plugins()
@@ -87,6 +123,7 @@ def plugins_info(
         
         console.print(f"\n[bold cyan]{plugin.get('name', plugin_id)}[/bold cyan]")
         console.print(f"ID: {plugin.get('id', '-')}")
+        console.print(f"Source: {plugin.get('source', '-')}")
         console.print(f"Status: {'[green]enabled[/green]' if plugin.get('enabled') else '[dim]disabled[/dim]'}")
         console.print(f"Description: {plugin.get('description', '-')}")
         
@@ -113,29 +150,31 @@ def plugins_enable(
     """Enable a plugin.
     
     Examples:
-        praisonai plugins enable memory-core
-        praisonai plugins enable browser-tool
+        praisonai plugins enable my-plugin
     """
     try:
-        # Update config to enable plugin
-        config_path = _get_config_path()
-        config = _load_config(config_path)
-        
-        if "plugins" not in config:
-            config["plugins"] = {}
-        if "enabled" not in config["plugins"]:
-            config["plugins"]["enabled"] = []
-        
-        if plugin_id not in config["plugins"]["enabled"]:
-            config["plugins"]["enabled"].append(plugin_id)
-            _save_config(config_path, config)
-            typer.echo(f"[green]✓[/green] Plugin enabled: {plugin_id}")
-        else:
-            typer.echo(f"Plugin already enabled: {plugin_id}")
-            
+        from praisonaiagents.config.loader import set_plugin_enabled
+
+        path = set_plugin_enabled(plugin_id, True)
+        typer.echo(f"Plugin enabled: {plugin_id} ({path})")
+
+        # If a runtime is live in this process, wire it in immediately.
+        try:
+            from praisonaiagents.plugins.manager import get_plugin_manager
+
+            manager = get_plugin_manager()
+            if manager.enable(plugin_id):
+                manager.wire_into_hook_registry()
+        except Exception as wire_err:
+            typer.echo(
+                f"Note: could not wire '{plugin_id}' into the live runtime: "
+                f"{wire_err}",
+                err=True,
+            )
+
     except Exception as e:
         typer.echo(f"Error enabling plugin: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("disable")
@@ -145,26 +184,47 @@ def plugins_disable(
     """Disable a plugin.
     
     Examples:
-        praisonai plugins disable memory-core
-        praisonai plugins disable browser-tool
+        praisonai plugins disable my-plugin
     """
     try:
-        config_path = _get_config_path()
-        config = _load_config(config_path)
-        
-        if "plugins" in config and "enabled" in config["plugins"]:
-            if plugin_id in config["plugins"]["enabled"]:
-                config["plugins"]["enabled"].remove(plugin_id)
-                _save_config(config_path, config)
-                typer.echo(f"[yellow]![/yellow] Plugin disabled: {plugin_id}")
-            else:
-                typer.echo(f"Plugin not enabled: {plugin_id}")
-        else:
-            typer.echo(f"Plugin not enabled: {plugin_id}")
-            
+        from praisonaiagents.config.loader import set_plugin_enabled
+
+        path = set_plugin_enabled(plugin_id, False)
+        typer.echo(f"Plugin disabled: {plugin_id} ({path})")
+
+        # If a runtime is live in this process, unwire its hooks immediately.
+        try:
+            from praisonaiagents.plugins.manager import get_plugin_manager
+
+            get_plugin_manager().disable(plugin_id)
+        except Exception as wire_err:
+            typer.echo(
+                f"Note: could not unwire '{plugin_id}' hooks from the live "
+                f"runtime: {wire_err}",
+                err=True,
+            )
+
+        # A single-file plugin also contributes tools to the global registry;
+        # manager.disable() only unwires hooks, so unload the module to remove
+        # its tools instead of leaving them callable for the rest of the run.
+        try:
+            from praisonaiagents.plugins.manager import get_plugin_manager
+            from praisonaiagents.plugins.discovery import unload_plugin
+
+            meta = get_plugin_manager().get_single_file_plugin(plugin_id)
+            module_name = meta.get("module") if meta else None
+            if module_name:
+                unload_plugin(module_name)
+        except Exception as unload_err:
+            typer.echo(
+                f"Note: could not unload single-file plugin '{plugin_id}' "
+                f"tools: {unload_err}",
+                err=True,
+            )
+
     except Exception as e:
         typer.echo(f"Error disabling plugin: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("doctor")
@@ -186,6 +246,23 @@ def plugins_doctor():
         enabled_plugins = [p for p in plugins if p.get("enabled")]
         
         console.print("[bold]Plugin Health Check[/bold]\n")
+
+        # Show whether external plugins are suppressed for the current process,
+        # and how to reproduce a clean, plugin-free baseline for debugging/CI.
+        import os as _os_doctor
+        if _os_doctor.environ.get("PRAISONAI_NO_PLUGINS", "").strip().lower() in (
+            "true", "1", "yes",
+        ):
+            console.print(
+                "[yellow]External plugins are suppressed for this run "
+                "(--pure / PRAISONAI_NO_PLUGINS).[/yellow]\n"
+            )
+        else:
+            console.print(
+                "[dim]Tip: run any command with --pure / --no-plugins "
+                "(or PRAISONAI_NO_PLUGINS=1) for a clean, plugin-free "
+                "baseline.[/dim]\n"
+            )
         
         if not enabled_plugins:
             console.print("[yellow]No plugins enabled[/yellow]")
@@ -198,22 +275,31 @@ def plugins_doctor():
         
         issues_found = 0
         
+        # Gate status for project-local single-file plugins.
+        try:
+            from praisonaiagents.plugins.discovery import _project_plugins_allowed
+            gate_open = _project_plugins_allowed()
+        except Exception:
+            gate_open = False
+
         for plugin in enabled_plugins:
             issues = []
-            
-            # Check if plugin module exists
-            if plugin.get("module"):
-                try:
-                    __import__(plugin["module"])
-                except ImportError:
-                    issues.append("Module not found")
-            
-            # Check required config
-            if plugin.get("required_config"):
-                for key in plugin["required_config"]:
-                    # Check if config key exists
-                    pass  # Would check actual config
-            
+            source = plugin.get("source", "")
+
+            # Single-file project plugins require the trust gate to load.
+            if source == "single_file" and not gate_open:
+                issues.append("blocked: set PRAISONAI_ALLOW_PROJECT_PLUGINS=true")
+
+            # A registered plugin with no hooks is wired but contributes no
+            # lifecycle behaviour (it may still expose tools).
+            if source == "registered" and not plugin.get("hooks"):
+                issues.append("no hooks wired")
+
+            # An entry-point plugin present but not yet loaded imports its
+            # hooks only when enabled, so hooks are empty until then.
+            if source.startswith("entry_point") and not plugin.get("hooks"):
+                issues.append("not loaded (hooks import on enable)")
+
             if issues:
                 status = "[red]✗ Issues[/red]"
                 issues_found += len(issues)
@@ -236,6 +322,146 @@ def plugins_doctor():
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@app.command("reload")
+def plugins_reload():
+    """Reload plugins without restarting.
+
+    Forces rediscovery of single-file and entry-point plugins, then rewires
+    enabled plugins into the runtime hook registry — so newly added plugins
+    take effect in the current process instead of on the next run.
+
+    Examples:
+        praisonai plugins reload
+    """
+    try:
+        from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents.plugins.discovery import unload_plugin
+    except ImportError as exc:
+        typer.echo("Error: praisonaiagents package not found.", err=True)
+        raise typer.Exit(1) from exc
+
+    try:
+        manager = get_plugin_manager()
+
+        # Unload previously-loaded single-file plugins first so an edited file
+        # is re-executed and re-registered cleanly. Without this, the old
+        # tool stays in the registry and rediscovery skips re-registration,
+        # leaving agents on the stale implementation.
+        for meta in manager.list_single_file_plugins():
+            module_name = meta.get("module")
+            if module_name:
+                unload_plugin(module_name)
+
+        single_file = manager.auto_discover_plugins()
+        entry_points = manager.discover_entry_points()
+        wired = manager.wire_into_hook_registry()
+        typer.echo(
+            f"Reloaded plugins: {single_file} single-file, "
+            f"{entry_points} entry-point, {wired} hook(s) wired"
+        )
+        if single_file == 0:
+            typer.echo(
+                "No single-file plugins were loaded. Set "
+                "PRAISONAI_ALLOW_PLUGIN_DISCOVERY=true (and "
+                "PRAISONAI_ALLOW_PROJECT_PLUGINS=true for project-local "
+                "plugins) to load them."
+            )
+    except Exception as e:
+        typer.echo(f"Error reloading plugins: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command("add")
+def plugins_add(
+    package: str = typer.Argument(..., help="Plugin package to install (pip requirement spec)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Only run discovery/verification, do not install"
+    ),
+    upgrade: bool = typer.Option(
+        False, "--upgrade", "-U", help="Upgrade the package if already installed"
+    ),
+    global_env: bool = typer.Option(
+        False,
+        "--global",
+        help="Install into the ambient/system environment instead of the CLI interpreter",
+    ),
+):
+    """Install a plugin package and verify it registers.
+
+    Installs the package into the active environment, triggers entry-point
+    discovery for the ``praisonai.plugins`` group, and reports exactly which
+    plugins were registered (name, type, hooks) — or a clear error if nothing
+    was discovered.
+
+    Examples:
+        praisonai plugins add praisonai-my-plugin
+        praisonai plugins add praisonai-my-plugin --upgrade
+        praisonai plugins add praisonai-my-plugin --dry-run
+    """
+    try:
+        from praisonaiagents.plugins.manager import get_plugin_manager
+    except ImportError:
+        typer.echo(
+            "Error: praisonaiagents package not found. Install with: pip install praisonaiagents",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    before = _registered_entry_point_names()
+
+    if not dry_run:
+        import importlib
+        import subprocess
+
+        cmd = _resolve_installer(global_env)
+        if upgrade:
+            cmd = cmd + ["--upgrade"]
+        cmd = cmd + [package]
+        typer.echo(f"Installing {package} ...")
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            typer.echo(f"Error: installation failed for '{package}'.", err=True)
+            raise typer.Exit(1)
+        # A package installed into the running interpreter is only importable
+        # after the finder caches are refreshed; otherwise entry-point
+        # discovery below can miss the just-installed distribution.
+        importlib.invalidate_caches()
+
+    manager = get_plugin_manager()
+    manager.discover_entry_points()
+    after = _registered_entry_point_names()
+
+    new_names = sorted(after - before)
+
+    if not new_names:
+        typer.echo(
+            f"[yellow]No new plugins were registered by '{package}'.[/yellow]\n"
+            "The package installed but exposed no 'praisonai.plugins' entry points, "
+            "or an entry point failed to load. Run 'praisonai plugins list' to inspect.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    verb = "Discovered" if dry_run else "Registered"
+    table = Table(title=f"{verb} {len(new_names)} plugin(s) from {package}")
+    table.add_column("Plugin", style="cyan")
+    table.add_column("Type")
+    table.add_column("Hooks", style="green")
+
+    for name in new_names:
+        plugin = manager.get_plugin(name)
+        info = plugin.info if plugin is not None else None
+        ptype = type(plugin).__name__ if plugin is not None else "-"
+        hooks = ", ".join(h.value for h in info.hooks) if info and info.hooks else "-"
+        table.add_row(name, ptype, hooks)
+
+    console.print(table)
 
 
 # ============ Single-File Plugin Commands ============
@@ -351,7 +577,8 @@ def plugins_install(
         shutil.copy2(source_path, dest_path)
         
         typer.echo(f"[green]✓[/green] Installed '{plugin_name}' to {dest_path}")
-        typer.echo(f"\nTools will be available on next run.")
+        typer.echo("\nRun 'praisonai plugins reload' to load it now, or it "
+                   "loads on next run.")
         
     except ImportError:
         typer.echo(f"Error: praisonaiagents package not found.", err=True)
@@ -505,77 +732,21 @@ def plugins_remove(
 
 
 def _get_available_plugins():
-    """Get list of available plugins."""
-    # Built-in plugins
-    plugins = [
-        {
-            "id": "memory-core",
-            "name": "Memory Core",
-            "description": "Semantic memory indexing and search",
-            "enabled": True,
-            "hooks": ["on_message", "on_session_start"],
-        },
-        {
-            "id": "browser-tool",
-            "name": "Browser Tool",
-            "description": "Browser automation and control",
-            "enabled": False,
-            "hooks": ["on_tool_call"],
-        },
-        {
-            "id": "knowledge-rag",
-            "name": "Knowledge RAG",
-            "description": "Retrieval-augmented generation",
-            "enabled": False,
-            "hooks": ["on_message", "on_context_build"],
-        },
-        {
-            "id": "telemetry",
-            "name": "Telemetry",
-            "description": "Usage tracking and analytics",
-            "enabled": False,
-            "hooks": ["on_request", "on_response"],
-        },
-    ]
-    
-    # Try to load actual plugin registry
-    try:
-        from praisonaiagents.plugins import get_plugin_registry
-        registry = get_plugin_registry()
-        if registry:
-            # Merge with actual plugins
-            pass
-    except ImportError:
-        pass
-    
-    return plugins
+    """Return the real, unified plugin registry from core.
 
+    Delegates entirely to ``praisonaiagents.plugins.get_plugin_registry()``,
+    which reports entry-point, registered, and single-file plugins with their
+    provenance and enabled state. There is no hardcoded/fake list — the CLI
+    shows exactly what the runtime can load. Each entry's ``name`` is reused as
+    its ``id`` so existing ``info``/``enable``/``disable`` argument handling
+    keeps working.
+    """
+    from praisonaiagents.plugins import get_plugin_registry
 
-def _get_config_path():
-    """Get config file path."""
-    from pathlib import Path
-    
-    config_dir = Path.home() / ".praisonai"
-    config_dir.mkdir(exist_ok=True)
-    return config_dir / "config.json"
-
-
-def _load_config(path):
-    """Load config from file."""
-    import json
-    
-    if path.exists():
-        with open(path) as f:
-            return json.load(f)
-    return {}
-
-
-def _save_config(path, config):
-    """Save config to file."""
-    import json
-    
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
+    entries = get_plugin_registry() or []
+    for entry in entries:
+        entry.setdefault("id", entry.get("name"))
+    return entries
 
 
 @app.callback(invoke_without_command=True)
@@ -589,15 +760,19 @@ Manage plugins with: praisonai plugins <command>
 
 [bold]Commands:[/bold]
   [green]list[/green]        List available plugins
+  [green]add[/green]         Install a plugin package and verify it registers
   [green]info[/green]        Show plugin details
   [green]enable[/green]      Enable a plugin
   [green]disable[/green]     Disable a plugin
+  [green]reload[/green]      Reload plugins without restarting
   [green]doctor[/green]      Check plugin health
 
 [bold]Examples:[/bold]
   praisonai plugins list
-  praisonai plugins info memory-core
-  praisonai plugins enable browser-tool
+  praisonai plugins add praisonai-my-plugin
+  praisonai plugins info my-plugin
+  praisonai plugins enable my-plugin
+  praisonai plugins reload
   praisonai plugins doctor
 """
         try:

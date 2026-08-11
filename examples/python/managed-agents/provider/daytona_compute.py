@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Daytona compute provider — run agent tools inside a Daytona cloud sandbox.
 
 Requires: DAYTONA_API_KEY environment variable set.

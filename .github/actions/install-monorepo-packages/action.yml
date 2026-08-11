@@ -1,5 +1,5 @@
 name: Install PraisonAI monorepo packages
-description: Install praisonai-agents, praisonai-code, praisonai-bot, praisonai-train, praisonai-browser, praisonai-mcp, and praisonai wrapper from local paths (mirrors PyPI seven-package install order).
+description: Install praisonai-agents, praisonai-code, praisonai-bot, praisonai-train, praisonai-browser, praisonai-mcp, praisonai-sandbox, praisonai-deploy, and praisonai wrapper from local paths (mirrors PyPI nine-package install order).
 
 inputs:
   repo-root:
@@ -39,6 +39,8 @@ runs:
         TRAIN_PKG="${BASE}src/praisonai-train"
         BROWSER_PKG="${BASE}src/praisonai-browser"
         MCP_PKG="${BASE}src/praisonai-mcp"
+        SANDBOX_PKG="${BASE}src/praisonai-sandbox"
+        DEPLOY_PKG="${BASE}src/praisonai-deploy"
         WRAPPER_PKG="${BASE}src/praisonai"
 
         normalise_extras() {
@@ -66,6 +68,10 @@ runs:
           uv pip install --system -e .
           cd "$MCP_PKG"
           uv pip install --system -e .
+          cd "$SANDBOX_PKG"
+          uv pip install --system -e .
+          cd "$DEPLOY_PKG"
+          uv pip install --system -e .
           cd "$WRAPPER_PKG"
           uv pip install --system "${WRAPPER_SUFFIX}"
         else
@@ -80,6 +86,10 @@ runs:
           cd "$BROWSER_PKG"
           pip install -e .
           cd "$MCP_PKG"
+          pip install -e .
+          cd "$SANDBOX_PKG"
+          pip install -e .
+          cd "$DEPLOY_PKG"
           pip install -e .
           cd "$WRAPPER_PKG"
           pip install -e "${WRAPPER_SUFFIX}"

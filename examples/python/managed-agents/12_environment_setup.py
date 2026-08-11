@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonai import Agent, ManagedAgent, ManagedConfig
 
 # Just add packages to the config — environment is created automatically

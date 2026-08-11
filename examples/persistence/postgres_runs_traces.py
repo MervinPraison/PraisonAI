@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 PostgreSQL with Runs and Traces
 

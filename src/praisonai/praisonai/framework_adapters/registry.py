@@ -8,35 +8,16 @@ Uses dependency injection instead of singleton pattern.
 
 from __future__ import annotations
 
-from typing import Dict, Type, Optional
+from typing import Type, Optional
 import inspect
 import logging
+import threading
 
 from .base import FrameworkAdapter
 from .._registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
-
-def _crewai_loader():
-    from .crewai_adapter import CrewAIAdapter
-    return CrewAIAdapter
-
-def _autogen_loader():
-    from .autogen_adapter import AutoGenFamilyAdapter
-    return AutoGenFamilyAdapter
-
-def _autogen_v2_loader():
-    from .autogen_adapter import AutoGenAdapter
-    return AutoGenAdapter
-
-def _autogen_v4_loader():
-    from .autogen_adapter import AutoGenV4Adapter
-    return AutoGenV4Adapter
-
-def _ag2_loader():
-    from .autogen_adapter import AG2Adapter
-    return AG2Adapter
 
 def _praisonai_loader():
     from .praisonai_adapter import PraisonAIAdapter
@@ -75,6 +56,21 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             builtins=_BUILTIN_ADAPTERS,
             discover_entry_points=discover_entry_points,
         )
+        # Hot-path caches: availability is probed once per process (invalidatable
+        # in tests), and protocol validation runs once per adapter class rather
+        # than on every create()/run()/arun(). Both are guarded by a lock so
+        # multi-tenant/threaded callers don't race.
+        self._avail_cache: dict[str, bool] = {}
+        self._avail_lock = threading.Lock()
+        self._validated_classes: set[type] = set()
+        # Capability probes (SUPPORTS_WORKFLOW / SUPPORTS_RUNTIME_FEATURES / ...)
+        # are memoised PER REGISTRY, not process-globally: two registries can
+        # register different adapters under the same name, so a shared cache
+        # keyed only by (name, flag) would return one registry's flag for the
+        # other's adapter. Keying on the instance keeps each registry's answers
+        # isolated while still skipping repeated construction on the hot path.
+        self._cap_cache: dict[tuple[str, str], bool] = {}
+        self._cap_lock = threading.Lock()
 
     def pick_default(self) -> str:
         """Return the name of the default framework to use.
@@ -115,23 +111,48 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         )
     
     def _validate_adapter(self, name: str, adapter) -> None:
-        """Validate that adapter implements the required protocol signature."""
+        """Validate that adapter implements the required protocol signature.
+
+        Signature inspection is memoised per adapter *class* so repeated
+        ``create()`` calls on the hot path do not re-run ``inspect.signature``.
+        """
+        cls = type(adapter)
+        if cls in self._validated_classes:
+            return
+
         if getattr(adapter, "is_router", False):
+            self._validated_classes.add(cls)
             return
 
         _REQUIRED_KW = {"tools_dict", "agent_callback", "task_callback", "cli_config"}
 
-        sig = inspect.signature(type(adapter).run)
-        kw_only = {
-            p.name for p in sig.parameters.values()
-            if p.kind in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        }
-        missing = _REQUIRED_KW - kw_only
-        if missing:
-            raise TypeError(
-                f"FrameworkAdapter {name!r} does not implement the protocol: "
-                f"missing keyword-only parameters {sorted(missing)}"
-            )
+        def _accepts_required(fn) -> Optional[str]:
+            params = inspect.signature(fn).parameters.values()
+            # A **kwargs catch-all accepts every required keyword by definition,
+            # so entry-point plugins that forward **kwargs to a delegate (the
+            # advertised extension surface) validate instead of being silently
+            # dropped from pick_default()/list_available_frameworks().
+            if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+                return None
+            named = {
+                p.name for p in params
+                if p.kind in (inspect.Parameter.KEYWORD_ONLY,
+                              inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            }
+            missing = _REQUIRED_KW - named
+            return f"missing keyword parameters {sorted(missing)}" if missing else None
+
+        for method_name in ("run", "arun"):
+            fn = getattr(cls, method_name, None)
+            if fn is None:
+                continue  # arun is optional; sync-only adapters keep working
+            err = _accepts_required(fn)
+            if err:
+                raise TypeError(
+                    f"FrameworkAdapter {name!r}.{method_name} does not implement "
+                    f"the protocol: {err}"
+                )
+        self._validated_classes.add(cls)
 
     def create(self, name: str, *args, **kwargs):
         """Create an adapter instance with protocol validation."""
@@ -158,27 +179,61 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     def is_available(self, name: str) -> bool:
         """
         Check if a framework adapter is available and functional.
-        
+
+        The probe (adapter construction + ``adapter.is_available()``, which may
+        run import machinery for a third-party package) is memoised per process
+        so hot-path callers like ``pick_default`` — invoked on every default
+        ``run()``/``arun()`` — do not re-probe. Use
+        :meth:`invalidate_availability` to drop cached results in tests.
+
         Args:
             name: Name of the adapter to check
-            
+
         Returns:
             bool: True if adapter exists and is available
         """
+        # Normalize the cache key the same way the underlying registry resolves
+        # names (case-insensitive, see PluginRegistry.resolve). Without this,
+        # is_available("CrewAI") and invalidate_availability("crewai") would key
+        # different cache entries, leaving the documented escape hatch inert.
+        key = name.lower()
+        with self._avail_lock:
+            cached = self._avail_cache.get(key)
+        if cached is not None:
+            return cached
+
         try:
             adapter = self.create(name)
-        except (ValueError, TypeError, ImportError):
             # ImportError covers ModuleNotFoundError raised when an adapter's
             # constructor touches a missing optional dependency; treat the
             # framework as simply unavailable rather than leaking a raw import
             # error to callers (CLI validation, doctor checks, pick_default).
-            return False
-        
-        try:
-            return adapter.is_available()
+            ok = bool(adapter.is_available())
+        except (ValueError, TypeError, ImportError):
+            ok = False
         except Exception:
             logger.warning("is_available() raised for adapter %r", name, exc_info=True)
-            return False
+            ok = False
+
+        with self._avail_lock:
+            self._avail_cache[key] = ok
+        return ok
+
+    def invalidate_availability(self, name: Optional[str] = None) -> None:
+        """Drop cached availability probe results.
+
+        Test hook / runtime escape hatch for when an optional framework is
+        installed or removed after the first probe.
+
+        Args:
+            name: Adapter name to invalidate, or ``None`` to clear the whole cache.
+        """
+        with self._avail_lock:
+            if name is None:
+                self._avail_cache.clear()
+            else:
+                # Match the case-insensitive key used by is_available().
+                self._avail_cache.pop(name.lower(), None)
 
 
 # Default registry access - replaced by FrameworkAdapterRegistry.default()
@@ -213,13 +268,18 @@ def list_available_frameworks() -> list[str]:
     return get_default_registry().list_available_frameworks()
 
 
-def get_install_hint(name: str) -> str:
+def get_install_hint(name: str, *, registry: Optional[FrameworkAdapterRegistry] = None) -> str:
     """Return install hint for a framework, consulting the adapter when registered.
 
     Falls back to ``pip install 'praisonai[<extra>]'`` when the adapter cannot
     be resolved (e.g. its dependencies are missing) or does not declare a hint.
+
+    Args:
+        name: Framework name to build the install hint for.
+        registry: Optional adapter registry to consult; defaults to the
+            process-default registry when omitted (DI-friendly).
     """
-    registry = get_default_registry()
+    registry = registry or get_default_registry()
     try:
         adapter = registry.create(name)
         hint = getattr(adapter, "install_hint", None)
@@ -234,6 +294,47 @@ def get_install_hint(name: str) -> str:
         "pydantic_ai": "pydantic-ai",
     }.get(name, name)
     return f"pip install 'praisonai-frameworks[{extra_name}]'"
+
+
+def adapter_capability(
+    name: str,
+    flag: str,
+    *,
+    registry: Optional[FrameworkAdapterRegistry] = None,
+) -> Optional[bool]:
+    """Return the value of capability ``flag`` on adapter ``name``.
+
+    Reads the capability from the adapter class attribute (e.g.
+    ``SUPPORTS_WORKFLOW`` / ``SUPPORTS_RUNTIME_FEATURES``) instead of hardcoding
+    a framework-name check, so third-party adapters are first-class citizens.
+
+    Returns ``None`` when the adapter cannot currently be resolved (missing
+    optional dependency, lazy-loader race, ``is_available`` probe raising, ...).
+    Callers decide whether ``None`` means "refuse the operation" or "fall back",
+    but they should never fall back to a hardcoded framework-name check.
+
+    Successful probes are memoised **on the resolving registry** (not a process
+    global) so two registries that register different adapters under the same
+    name never read each other's flags. An adapter that reported ``True`` once is
+    not silently downgraded if its next construction attempt transiently raises.
+    """
+    if registry is None:
+        registry = get_default_registry()
+
+    key = (name.lower(), flag)
+    with registry._cap_lock:
+        cached = registry._cap_cache.get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        adapter = registry.create(name)
+    except Exception:
+        return None
+    value = bool(getattr(adapter, flag, False))
+    with registry._cap_lock:
+        registry._cap_cache[key] = value
+    return value
 
 
 def framework_option_help() -> str:

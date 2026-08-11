@@ -93,10 +93,20 @@ def test_get_daemon_status_routes_to_systemd(mock_systemd_status, mock_detect):
 
 @patch('praisonai_bot.daemon.windows.subprocess.run')
 def test_windows_scheduled_task_command_is_well_formed(mock_run):
-    """Test Windows scheduled task command format is valid."""
+    """Test Windows scheduled task command format is valid.
+
+    The task action (/TR) points at the generated ``.cmd`` wrapper rather than
+    an inline ``<python> ... --config ...`` command so that paths containing
+    spaces (e.g. ``C:\\Program Files``) aren't broken by nested quoting. The
+    wrapper itself owns the ``--config`` invocation and the exit-78 mapping.
+    """
     mock_run.return_value = MagicMock(stdout="ok")
 
-    from praisonai_bot.daemon.windows import _create_scheduled_task
+    from praisonai_bot.daemon.windows import (
+        _create_scheduled_task,
+        _startup_script_path,
+        _generate_startup_script,
+    )
     result = _create_scheduled_task(config_path="bot.yaml")
 
     assert result["ok"] is True
@@ -104,4 +114,11 @@ def test_windows_scheduled_task_command_is_well_formed(mock_run):
     assert "/SD" not in cmd
     assert "/TR" in cmd
     tr_value = cmd[cmd.index("/TR") + 1]
-    assert "--config" in tr_value
+
+    assert _startup_script_path() in tr_value
+    assert tr_value.endswith(".cmd") or tr_value.endswith('.cmd"')
+    assert "&" not in tr_value
+    assert "%ERRORLEVEL%" not in tr_value
+
+    wrapper = _generate_startup_script("bot.yaml")
+    assert "--config" in wrapper

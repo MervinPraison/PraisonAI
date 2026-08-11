@@ -85,11 +85,120 @@ def test_resolve_with_provenance_env_overrides_project(tmp_path, monkeypatch):
     assert prov["agent.model"]["layer"] == "environment"
 
 
-def test_resolve_with_provenance_defaults_present(tmp_path):
+def test_resolve_with_provenance_defaults_present(tmp_path, monkeypatch):
+    
+    monkeypatch.setattr(
+        ConfigResolver,
+        "_load_global_config",
+        lambda self: None,
+    )
+
     resolver = ConfigResolver(cwd=tmp_path)
     prov = resolver.resolve_with_provenance()
-    # With no config files, values come from built-in defaults.
+
     assert prov["telemetry"]["layer"] == "defaults"
+
+
+def test_project_config_ignores_home_directory(tmp_path, monkeypatch):
+    # A config at the user's home directory must not be discovered as a
+    # project config (regression for the home-directory walk-up boundary).
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "praison.yaml").write_text("agent:\n  model: home-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=home)
+    assert resolver._load_project_config() is None
+
+
+def test_project_config_ignores_home_when_cwd_below_home(tmp_path, monkeypatch):
+    # Walking up from a sub-directory must stop before home, so a home-level
+    # config is never picked up while still allowing project-level configs.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (home / "praison.yaml").write_text("agent:\n  model: home-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    assert resolver._load_project_config() is None
+
+
+def test_project_config_discovers_praisonai_yaml(tmp_path, monkeypatch):
+    # ``praisonai.yaml`` is the canonical project-root name (matches the agents
+    # SDK loader) and must be discovered as a ``project:`` config.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (project / "praisonai.yaml").write_text("agent:\n  model: project-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    data = resolver._load_project_config()
+    assert data is not None
+    assert data["agent"]["model"] == "project-model"
+    assert data["_source"].endswith("praisonai.yaml")
+
+
+def test_project_config_legacy_praison_yaml_still_supported(tmp_path, monkeypatch):
+    # The legacy ``praison.yaml`` spelling remains discoverable for backward
+    # compatibility.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (project / "praison.yaml").write_text("agent:\n  model: legacy-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    data = resolver._load_project_config()
+    assert data is not None
+    assert data["agent"]["model"] == "legacy-model"
+
+
+def test_project_config_discovers_praisonai_yml(tmp_path, monkeypatch):
+    # The ``.yml`` extension of the canonical name is also discoverable.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (project / "praisonai.yml").write_text("agent:\n  model: yml-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    data = resolver._load_project_config()
+    assert data is not None
+    assert data["agent"]["model"] == "yml-model"
+    assert data["_source"].endswith("praisonai.yml")
+
+
+def test_project_config_legacy_praison_yml_still_supported(tmp_path, monkeypatch):
+    # The legacy ``praison.yml`` spelling remains discoverable too.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (project / "praison.yml").write_text("agent:\n  model: legacy-yml-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    data = resolver._load_project_config()
+    assert data is not None
+    assert data["agent"]["model"] == "legacy-yml-model"
+
+
+def test_project_config_canonical_wins_over_legacy(tmp_path, monkeypatch):
+    # When both canonical and legacy names exist in the same directory, the
+    # canonical ``praisonai.yaml`` must win per the documented precedence order.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (project / "praisonai.yaml").write_text("agent:\n  model: canonical-model\n")
+    (project / "praison.yaml").write_text("agent:\n  model: legacy-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    data = resolver._load_project_config()
+    assert data is not None
+    assert data["agent"]["model"] == "canonical-model"
+    assert data["_source"].endswith("praisonai.yaml")
 
 
 def test_interpolate_env_missing_no_default_preserves_directive(monkeypatch):

@@ -179,8 +179,13 @@ def test_deploy_api_server_code_escapes_agents_file():
 
     malicious = 'agents.yaml"); import os; os.system("echo pwned'
     code = generate_api_server_code(malicious)
+    # The raw, unescaped payload must never appear interpolated into codegen.
     assert f'agent_file="{malicious}"' not in code
-    assert f"PraisonAI(agent_file={repr(malicious)})" in code
+    assert 'os.system("echo pwned")' not in code
+    # The path must be safely repr-escaped wherever it is interpolated
+    # (regardless of whether it is passed to the wrapper ``run`` entrypoint
+    # or a ``PraisonAI(agent_file=...)`` constructor call).
+    assert repr(malicious) in code
 
 
 def test_deploy_api_server_code_escapes_host():

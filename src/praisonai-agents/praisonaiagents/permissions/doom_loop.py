@@ -4,7 +4,6 @@ Doom Loop Detection for PraisonAI Agents.
 Detects and prevents agents from getting stuck in repetitive loops.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from collections import defaultdict
@@ -103,14 +102,8 @@ class DoomLoopDetector:
     
     def _hash_arguments(self, arguments: Dict[str, Any]) -> str:
         """Create a hash of tool arguments."""
-        import hashlib
-        import json
-        
-        try:
-            arg_str = json.dumps(arguments, sort_keys=True, default=str)
-            return hashlib.sha256(arg_str.encode()).hexdigest()[:16]
-        except (TypeError, ValueError):
-            return "unhashable"
+        from praisonaiagents.approval.utils import hash_tool_args
+        return hash_tool_args(arguments)
     
     def _cleanup_old_records(self):
         """Remove records outside the time window."""

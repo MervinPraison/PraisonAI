@@ -16,6 +16,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 logger = logging.getLogger(__name__)
 
 
+def _register_redaction(value: str) -> None:
+    """Register a resolved secret value for log redaction (best-effort).
+
+    Delegates to the core redaction registry (Issue #3102) but never fails
+    config validation if core is unavailable.
+    """
+    try:
+        from praisonaiagents.secrets import register_secret_for_redaction
+
+        register_secret_for_redaction(value)
+    except Exception:  # pragma: no cover - redaction is best-effort
+        pass
+
+
 class AgentConfigSchema(BaseModel):
     """Schema for agent configuration in bot.yaml."""
     name: str = "assistant"
@@ -153,7 +167,7 @@ class SessionConfigSchema(BaseModel):
 
 class StreamingConfigSchema(BaseModel):
     """Schema for streaming reply configuration."""
-    mode: str = "off"  # off | draft | progress
+    mode: str = "off"  # off | draft | progress | auto
     min_interval: float = 1.5  # Minimum seconds between edits
     min_delta: int = 120  # Minimum character delta before edit
     placeholder_text: str = "🤔 Thinking..."
@@ -172,7 +186,7 @@ class StreamingConfigSchema(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_streaming_mode(cls, v: str) -> str:
-        allowed = {"off", "draft", "progress"}
+        allowed = {"off", "draft", "progress", "auto"}
         if v not in allowed:
             raise ValueError(
                 f"Invalid streaming mode '{v}'. Must be one of: {', '.join(sorted(allowed))}"
@@ -257,6 +271,44 @@ class SttConfigSchema(BaseModel):
     model: Optional[str] = None  # Optional STT model override (default whisper-1)
 
 
+class TtsConfigSchema(BaseModel):
+    """Schema for outbound voice-reply (text-to-speech) configuration (Issue #3623).
+
+    The symmetric outbound counterpart to :class:`SttConfigSchema`. Off by
+    default (opt-in): set ``voice.enabled: true`` to have the gateway synthesise
+    the agent's reply and deliver it as a native voice note on adapters that
+    support one. ``mode`` chooses when to speak — ``always`` for every reply, or
+    ``match_inbound`` to reply in voice only when the user sent a voice memo.
+    """
+    enabled: bool = False
+    mode: str = "off"  # off | always | match_inbound
+    model: Optional[str] = None  # Optional TTS model override (default tts-1)
+    voice: Optional[str] = None  # Optional voice name (e.g. "alloy")
+    speed: Optional[float] = None  # Optional speaking-rate multiplier
+    format: str = "ogg"  # Voice-note native formats: ogg/opus
+    max_chars: int = Field(default=4000, ge=0)  # Skip TTS above this length (0 = no cap)
+
+
+class BotCommandsConfigSchema(BaseModel):
+    """Schema for exposing file-based custom slash commands in bot chats.
+
+    Bridges the ``.praisonai/commands/{name}.md`` convention (and plugin-bundle
+    commands) into Telegram/Slack/Discord/etc. with a safe-by-default posture:
+
+    * ``allow_shell`` — live ``!`cmd``` substitution stays **off** by default
+      regardless of a command's frontmatter, so a chat message never triggers
+      server-side shell substitution silently. Opt in per deployment.
+    * ``expose`` — optional allow-list of command names; when empty, all
+      *project*-scope commands are exposed.
+    * ``include_user_scope`` — user-home (``~/.praisonai``) commands are
+      excluded by default; the operator's project defines the surface.
+    """
+
+    allow_shell: bool = False
+    expose: List[str] = Field(default_factory=list)
+    include_user_scope: bool = False
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration.
 
@@ -270,10 +322,14 @@ class ChannelConfigSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     platform: Optional[str] = None
-    token: str = ""
-    app_token: Optional[str] = None  # For Slack Socket Mode
+    # Credential fields accept plaintext, a ``${ENV}`` reference, or the
+    # additive secret-reference form ``{source: file|env|exec, id: ...}``
+    # (Issue #3102). The reference form is resolved by the core secret
+    # resolver and the resolved value is registered for log redaction.
+    token: Union[str, Dict[str, Any]] = ""
+    app_token: Optional[Union[str, Dict[str, Any]]] = None  # For Slack Socket Mode
     mode: str = "poll"  # poll | ws | webhook | hybrid
-    group_policy: str = "mention_only"  # Default to secure: respond_all, mention_only, command_only
+    group_policy: str = "mention_only"  # respond_all, mention_only, command_only, observe (record unmentioned msgs as context)
     allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
     silence_token: Optional[str] = None  # Custom silence token (defaults to NO_REPLY)
     allowlist: List[str] = Field(default_factory=list)
@@ -292,6 +348,10 @@ class ChannelConfigSchema(BaseModel):
     outbound_resilience: Optional[OutboundResilienceSchema] = None
     delivery: Optional[DeliveryConfigSchema] = None  # Durable inbound/outbound delivery
     session: Optional[SessionConfigSchema] = None
+    # File-based custom slash commands bridged into chat (Issue #3729). When
+    # omitted, project-scope ``.praisonai/commands/*.md`` are still exposed
+    # read-only with shell substitution off; this block tunes the exposure.
+    commands: Optional[BotCommandsConfigSchema] = None
     max_history: Optional[int] = None  # Backward compatibility
     # Inbound media (Issue #2350): when a user sends a photo/document/video,
     # adapters download and validate it (SSRF-safe, magic-byte checked) and
@@ -302,10 +362,31 @@ class ChannelConfigSchema(BaseModel):
     # adapters transcribe it and feed the transcript to the agent. On by
     # default; set ``stt.enabled: false`` to opt out.
     stt: Optional[SttConfigSchema] = None
+    # Outbound voice reply (Issue #3623): when enabled, the gateway synthesises
+    # the agent's reply and delivers it as a native voice note (the symmetric
+    # counterpart to ``stt``). Off by default; ``voice.mode`` selects always vs.
+    # match_inbound. ``tts`` is accepted as an alias via ``extra="allow"``.
+    voice: Optional[TtsConfigSchema] = None
+
+    # Shell execution opt-in for inbound channel bots (Slack/Telegram/etc.)
+    allow_shell: bool = False
+    auto_approve_shell: bool = True
+    # Blanket auto-approval of shell is only safe on a loopback-bound, single
+    # operator (DM) surface. On an externally-bound or multi-user/group channel
+    # it silently grants RCE to every sender, so it is downgraded to explicit
+    # approval unless the operator acknowledges the exposure here.
+    auto_approve_shell_acknowledge_exposed: bool = False
+    approval_channel: Optional[str] = None
+    approval_users: Optional[Union[str, List[str]]] = None
+    # channel (default) | gateway | http | webhook
+    approval_mode: Optional[str] = None
+    approval_webhook_url: Optional[str] = None
+    approval_http_host: Optional[str] = None
+    approval_http_port: Optional[int] = None
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp
-    verify_token: Optional[str] = None  # WhatsApp
+    verify_token: Optional[Union[str, Dict[str, Any]]] = None  # WhatsApp
     whatsapp_mode: Optional[str] = None  # WhatsApp-specific mode: "cloud" or "web"
     creds_dir: Optional[str] = None  # WhatsApp web mode credentials directory
     email_address: Optional[str] = None  # Email
@@ -324,30 +405,101 @@ class ChannelConfigSchema(BaseModel):
             )
         return v
     
-    @field_validator("token")
+    @field_validator("token", "app_token", "verify_token", mode="before")
     @classmethod
-    def resolve_env_var(cls, v: str) -> str:
-        """Resolve ${ENV_VAR} references in token."""
-        if v.startswith("${") and v.endswith("}"):
-            env_key = v[2:-1]
-            resolved = os.environ.get(env_key, "")
-            if not resolved:
-                raise ValueError(
-                    f"Environment variable '{env_key}' not set. "
-                    f"Set it with: export {env_key}=your_token"
-                )
-            return resolved
-        return v
+    def resolve_secret_ref(cls, v):
+        """Resolve credential inputs for every secret field (Issue #3102).
+
+        Backward compatible: plaintext and ``${ENV}`` continue to work. The
+        additive reference form ``{source: file|env|exec, id: ...}`` (or a
+        core ``SecretRef``) is resolved via the core secret resolver, and the
+        resolved value is registered for log redaction so it never leaks into
+        logs or tracebacks.
+        """
+        if v is None or v == "":
+            return v
+
+        # Plain ${ENV} kept inline to avoid importing core for the common case.
+        if isinstance(v, str):
+            if v.startswith("${") and v.endswith("}"):
+                env_key = v[2:-1]
+                resolved = os.environ.get(env_key, "")
+                if not resolved:
+                    # Partial-credential isolation (Issue #3159): an unset
+                    # channel token env var (rotation, expiry, a fresh deploy)
+                    # must NOT abort the whole gateway. Return an empty token
+                    # so the runtime skips just this channel and every healthy
+                    # channel keeps serving; ``gateway status``/``doctor``
+                    # report it as configured-unavailable.
+                    logger.warning(
+                        "Channel token env var '%s' not set — channel will be "
+                        "skipped (degraded). Set it with: export %s=your_token",
+                        env_key,
+                        env_key,
+                    )
+                    return ""
+                _register_redaction(resolved)
+                return resolved
+            _register_redaction(v)
+            return v
+
+        # Reference form (dict / SecretRef) → resolve via core.
+        try:
+            from praisonaiagents.secrets import resolve_secret
+        except ImportError:  # pragma: no cover - core always present in-tree
+            raise ValueError(
+                "Secret-reference form requires praisonaiagents.secrets; "
+                "use a plaintext string or ${ENV} reference instead."
+            )
+        result = resolve_secret(v)
+        if not result.available or result.value is None:
+            # Partial-credential isolation (Issue #3159): a channel whose
+            # secret is ``configured-but-unavailable``/``missing`` (rotation,
+            # expiry, a secret-store blip) must NOT abort the whole gateway.
+            # Return an empty token and mark the channel degraded so the
+            # runtime skips just this channel and every healthy channel keeps
+            # serving. Fail-closed stays reserved for structurally invalid
+            # config and the gateway's own ingress/auth secret (validated
+            # elsewhere). ``gateway status``/``doctor`` still report the
+            # per-channel availability from the raw reference.
+            detail = result.detail or "unavailable"
+            logger.warning(
+                "Channel secret configured-unavailable — channel will be "
+                "skipped (degraded): %s",
+                detail,
+            )
+            return ""
+        return result.value
     
     @field_validator("group_policy")
     @classmethod
     def validate_group_policy(cls, v: str) -> str:
-        allowed = {"respond_all", "mention_only", "command_only"}
+        allowed = {"respond_all", "mention_only", "command_only", "observe"}
         if v not in allowed:
             raise ValueError(
                 f"Invalid group_policy '{v}'. Must be one of: {', '.join(sorted(allowed))}"
             )
         return v
+
+    @field_validator("approval_mode")
+    @classmethod
+    def validate_approval_mode(cls, v: Optional[str]) -> Optional[str]:
+        """Fail-closed on an unknown shell-approval backend selector.
+
+        A typo (``chanel``/``webook``) must be rejected at load time rather
+        than silently falling through to the gateway-queue fallback, which
+        would leave shell approvals stuck where the operator never looks.
+        """
+        if v is None:
+            return v
+        allowed = {"channel", "gateway", "http", "webhook"}
+        normalized = v.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"Invalid approval_mode '{v}'. Must be one of: "
+                f"{', '.join(sorted(allowed))}"
+            )
+        return normalized
     
     @model_validator(mode="after")
     def validate_security(self):
@@ -429,6 +581,151 @@ class DaemonConfigSchema(BaseModel):
         return v
 
 
+class HealthMonitorSchema(BaseModel):
+    """Schema for the gateway channel health-monitor block (``gateway.health``).
+
+    Mirrors the knobs read by ``gateway/server.py`` (via
+    ``HealthMonitorConfig.from_dict``) so a misspelled threshold is caught at
+    load time instead of silently falling back to the default.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    interval: float = Field(300.0, gt=0)
+    startup_grace: float = Field(60.0, ge=0)
+    stale_after: float = Field(120.0, gt=0)
+    stuck_after: float = Field(900.0, gt=0)
+    max_restarts_per_hour: int = Field(10, ge=0)
+    # Issue #3840: fleet-level crash-loop breaker thresholds (aggregate view on
+    # top of the per-channel ``max_restarts_per_hour`` budget).
+    fleet_restarts_per_hour: int = Field(40, ge=1)
+    failing_channel_fraction: float = Field(0.5, gt=0, le=1.0)
+    breaker_cooldown_s: float = Field(120.0, ge=0)
+
+
+class GatewayServerSchema(BaseModel):
+    """Typed schema for the ``gateway:`` server block (issue #3050).
+
+    Replaces the previous opaque ``Dict[str, Any]`` so a misspelled or
+    mistyped server knob (``drain_timout``, ``"10s"`` instead of ``10``) is
+    rejected at load time with a friendly, field-named error instead of being
+    silently dropped and running with the default. Field names/types/ranges
+    mirror core's ``praisonaiagents.gateway.config.GatewayConfig`` so there is
+    one definition of a gateway server setting.
+
+    ``extra="forbid"`` surfaces unknown keys; ``hooks`` is validated as a
+    nested list here too since the runtime accepts hooks nested under
+    ``gateway:``.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    host: Optional[str] = None
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    bind_host: Optional[str] = None
+    cors_origins: Optional[List[str]] = None
+    allowed_origins: Optional[List[str]] = None
+    auth_token: Optional[str] = None
+    auth: Optional[Dict[str, Any]] = None
+    auth_scopes: Optional[Dict[str, List[str]]] = None
+    max_connections: Optional[int] = Field(None, ge=0)
+    max_sessions_per_agent: Optional[int] = Field(None, ge=0)
+    session_config: Optional[Dict[str, Any]] = None
+    heartbeat_interval: Optional[int] = Field(None, ge=0)
+    reconnect_timeout: Optional[int] = Field(None, ge=0)
+    # Per-turn wall-clock ceiling (#3467). 0 = disabled (default).
+    per_turn_timeout: Optional[float] = Field(None, ge=0)
+    ssl_cert: Optional[str] = None
+    ssl_key: Optional[str] = None
+    max_buffered_bytes: Optional[int] = Field(None, ge=0)
+    max_queued_frames: Optional[int] = Field(None, ge=0)
+    # Admission control (#2454)
+    max_concurrent_runs: Optional[int] = Field(None, ge=0)
+    queue_depth: Optional[int] = Field(None, ge=0)
+    overflow_policy: Optional[str] = None
+    preauth_max_connections_per_ip: Optional[int] = Field(None, ge=0)
+    max_unauthorized_frames: Optional[int] = Field(None, ge=0)
+    # Graceful-drain windows (#2375 / #2533)
+    drain_timeout: Optional[float] = Field(None, ge=0)
+    reload_drain_timeout: Optional[float] = Field(None, ge=0)
+    # Single-switch reliability preset (#2531)
+    reliability: Optional[str] = None
+    # Close-the-loop on permanently-undelivered replies (#3297). Opt-in; when
+    # enabled a permanent delivery failure fires MESSAGE_UNDELIVERED and
+    # best-effort sends a short plain-text notice on the same channel.
+    notify_on_undelivered: Optional[bool] = None
+    undelivered_template: Optional[str] = None
+    # Additive protocol surfaces (#2715), liveness (#2798), health monitor
+    api: Optional[Dict[str, Any]] = None
+    liveness: Optional[Dict[str, Any]] = None
+    health: Optional[HealthMonitorSchema] = None
+    # Crash/shutdown forensics (#2436)
+    forensics: Optional[Dict[str, Any]] = None
+    # Hooks may be nested under ``gateway:`` for grouping
+    hooks: Optional[List["HookSchema"]] = None
+
+    @field_validator("overflow_policy")
+    @classmethod
+    def validate_overflow_policy(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("reject", "queue", "shed_oldest"):
+            raise ValueError(
+                "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
+            )
+        return v
+
+
+class HookSchema(BaseModel):
+    """Schema for a single inbound trigger hook (``hooks:`` entries, #2281).
+
+    Mirrors ``praisonaiagents.gateway.hooks.HookConfig``; ``extra="allow"``
+    keeps free-form extras (folded into ``metadata`` by ``HookConfig.from_dict``)
+    while still requiring a non-empty ``path`` and a valid ``action``.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    path: str
+    agent: Optional[str] = None
+    action: str = "agent"
+    auth: Optional[str] = None
+    session_key: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    deliver_to: Optional[str] = None
+    message: Optional[str] = None
+    enabled: bool = True
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Provider signature verification (#3165)
+    secret: Optional[str] = None
+    signature_header: Optional[str] = None
+    signature_algo: str = "sha256"
+    signature_prefix: Optional[str] = None
+    # Event-type filtering (#3165)
+    events: Optional[List[str]] = None
+    event_header: Optional[str] = None
+    # No-LLM pass-through delivery (#3165)
+    deliver_only: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        if not (v or "").strip().strip("/"):
+            raise ValueError("hook 'path' must be a non-empty path segment")
+        return v
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str) -> str:
+        allowed = {"agent", "wake"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid hook action '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
+
+
+# Resolve the forward reference to ``HookSchema`` in
+# ``GatewayServerSchema.hooks`` now that ``HookSchema`` is defined.
+GatewayServerSchema.model_rebuild()
+
+
 class GatewayConfigSchema(BaseModel):
     """Unified schema for gateway.yaml/bot.yaml configuration.
     
@@ -456,17 +753,28 @@ class GatewayConfigSchema(BaseModel):
     daemon: Optional[DaemonConfigSchema] = None
 
     # Gateway server settings (host/port, drain_timeout, admission control,
-    # etc.) and inbound trigger hooks. These are read by
-    # ``gateway/server.py::load_gateway_config`` / ``_apply_hooks_from_config``
-    # rather than modelled field-by-field here; kept permissive so a real
-    # ``gateway.yaml`` with a top-level ``gateway:``/``hooks:`` block validates
-    # through this single schema instead of being rejected. See issue #2585.
+    # etc.) and inbound trigger hooks. Kept as dicts/lists on this model so
+    # downstream consumers (``gateway/server.py`` reads them via ``.get(...)``)
+    # and existing dict-style access keep working, but validated field-by-field
+    # in ``normalize_and_validate`` via ``GatewayServerSchema``/``HookSchema``
+    # so a misspelled or mistyped server knob is rejected at load time with a
+    # friendly, field-named error instead of being silently dropped (#3050).
     gateway: Optional[Dict[str, Any]] = None
     hooks: Optional[List[Dict[str, Any]]] = None
     
     @model_validator(mode="after")
     def normalize_and_validate(self):
         """Normalize different config formats to canonical form and validate."""
+        # Validate the gateway server block + inbound hooks field-by-field
+        # (#3050). These are stored as dicts for downstream dict access, but a
+        # typo/wrong-type/out-of-range value must fail closed here instead of
+        # silently running with the default. ``GatewayServerSchema`` forbids
+        # unknown keys, so ``drain_timout`` names itself in the error.
+        if self.gateway is not None:
+            GatewayServerSchema(**self.gateway)
+        if self.hooks is not None:
+            for entry in self.hooks:
+                HookSchema(**entry)
         # Migrate single-bot format (platform + token at top level)
         if self.platform and self.token and not self.channels:
             self.channels = {
@@ -527,6 +835,16 @@ class GatewayConfigSchema(BaseModel):
             if not channel.platform:
                 channel.platform = name
 
+        # Fail fast on route/binding targets that don't name a declared agent
+        # (Issue #3468). A one-character typo in ``routes``/``routing`` or a
+        # ``bindings`` ``agent`` key must not silently misroute to some other
+        # agent at runtime — surface it here (and in ``gateway doctor``, which
+        # loads via this schema) with the channel, the bad target, and the
+        # closest valid agent id. Only enforced when ``agents:`` is declared,
+        # so single-bot configs (top-level ``agent``/``platform``) are
+        # unaffected and stay backward-compatible.
+        self._validate_route_targets()
+
         # Wire plugin-declared config fields (Issue #2801): a channel registered
         # with a descriptor can resolve env fallbacks and enforce its required
         # fields. Descriptor lookup is best-effort — built-in platforms without
@@ -546,6 +864,50 @@ class GatewayConfigSchema(BaseModel):
                     channel.apply_channel_descriptor(descriptor)
 
         return self
+
+    def _validate_route_targets(self) -> None:
+        """Fail fast when a route/binding names an undeclared agent (#3468).
+
+        Cross-checks every channel's ``routes``/``routing`` targets (including
+        the ``default`` slot) and each ``bindings`` entry's ``agent`` against
+        the declared ``agents:`` map. A typo becomes an actionable load-time
+        error naming the channel, the bad target, and the closest valid agent
+        id — instead of a runtime ``logger.warning`` and a silent misroute.
+
+        Only runs when ``agents:`` is declared. Single-bot configs (top-level
+        ``agent``/``platform``) have no agent map to check against and are
+        left untouched for backward compatibility.
+        """
+        agent_ids = set(self.agents or {})
+        if not agent_ids:
+            return
+
+        import difflib
+
+        def _hint(target: str) -> str:
+            valid = ", ".join(sorted(agent_ids))
+            close = difflib.get_close_matches(target, agent_ids, n=1)
+            if close:
+                return f"did you mean '{close[0]}'? valid agents: {valid}"
+            return f"valid agents: {valid}"
+
+        for ch_name, channel in self.channels.items():
+            routes = dict(channel.routes or {})
+            if channel.routing:
+                routes.update(channel.routing)
+            for slot, target in routes.items():
+                if target is not None and target not in agent_ids:
+                    raise ValueError(
+                        f"channel '{ch_name}' route '{slot}' -> unknown agent "
+                        f"'{target}'; {_hint(target)}"
+                    )
+            for binding in channel.bindings or []:
+                target = binding.get("agent") if isinstance(binding, dict) else None
+                if target is not None and target not in agent_ids:
+                    raise ValueError(
+                        f"channel '{ch_name}' binding -> unknown agent "
+                        f"'{target}'; {_hint(target)}"
+                    )
 
 
 # Legacy alias for backward compatibility

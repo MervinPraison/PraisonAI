@@ -5,8 +5,8 @@ Manages permission rules, persistent approvals, and integrates
 with doom loop detection.
 """
 
+import fnmatch
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import os
 import threading
@@ -226,6 +226,92 @@ class PermissionManager:
         "delete_file:",
     )
 
+    # Read-tool prefixes whose ``<prefix>:<path>`` target is gated by the
+    # secret-file default. A default coding agent can otherwise ``read`` a
+    # ``.env``/private key and forward its contents to the model provider — a
+    # silent secret-exfiltration path. Reads of these files default to ``ask``.
+    _READ_PREFIXES = (
+        "read:",
+        "read_file:",
+    )
+
+    # Basename globs that identify a secret file. Matched case-insensitively
+    # against the *basename* so ``config/.env`` and ``.env`` both gate. Safe
+    # example/sample files are excluded via ``_SECRET_ALLOW_PATTERNS`` below.
+    _SECRET_PATTERNS = (
+        ".env",
+        "*.env",
+        ".env.*",
+        "*.env.*",
+        "*.pem",
+        "*.key",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "*.pfx",
+        "*.p12",
+    )
+
+    # Basename globs that are always safe to read even though they match a
+    # secret pattern (documentation templates without real secrets).
+    _SECRET_ALLOW_PATTERNS = (
+        "*.env.example",
+        "*.env.sample",
+        "*.env.template",
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+        "*.example",
+        "*.sample",
+        "*.template",
+    )
+
+    def _is_secret_read_path(self, path: str) -> bool:
+        """Return ``True`` if *path* is a secret file that should gate reads.
+
+        Matches the file's basename (case-insensitively) against the built-in
+        secret globs, excluding safe example/sample/template files. Purely
+        pattern-based (no filesystem access) so it is cheap and side-effect
+        free.
+        """
+        basename = os.path.basename(path.rstrip("/\\").strip()).lower()
+        if not basename:
+            return False
+        if any(fnmatch.fnmatch(basename, p) for p in self._SECRET_ALLOW_PATTERNS):
+            return False
+        return any(fnmatch.fnmatch(basename, p) for p in self._SECRET_PATTERNS)
+
+    # Non-secret basenames used to probe whether an allow rule is a broad
+    # catch-all (matches everything) rather than a secret-specific opt-in.
+    _NON_SECRET_PROBES = ("main.py", "readme.md", "data.txt")
+
+    def _is_specific_secret_allow(self, rule: "PermissionRule") -> bool:
+        """Return ``True`` if *rule* is a secret-specific read allow (opt-in).
+
+        A rule opts a secret read in only when it targets secrets specifically
+        (e.g. ``read:*.env``, ``read:*.pem``) — not when it is a broad catch-all
+        such as ``read:*`` that also matches ordinary files. We test the rule's
+        glob against a set of clearly non-secret basenames: if it matches any of
+        them it is treated as broad and does *not* silently authorise secrets.
+        Regex rules are conservatively treated as specific (author was explicit).
+        """
+        if rule.action != PermissionAction.ALLOW:
+            return False
+        if getattr(rule, "is_regex", False):
+            return True
+        pattern = rule.pattern
+        for prefix in self._READ_PREFIXES:
+            if pattern.startswith(prefix):
+                pattern = pattern[len(prefix):]
+                break
+        glob = os.path.basename(pattern.rstrip("/\\")) or pattern
+        # A broad glob (``*``) matches ordinary files too → not secret-specific.
+        for probe in self._NON_SECRET_PROBES:
+            if fnmatch.fnmatch(probe, glob.lower()):
+                return False
+        return True
+
     def check(self, target: str, agent_name: Optional[str] = None) -> PermissionResult:
         """
         Check permission for a target.
@@ -264,6 +350,41 @@ class PermissionManager:
                 )
                 if boundary is not None:
                     return boundary
+
+        # Secret-file read gate: reading ``.env``/private keys and forwarding
+        # them to the model provider is a silent secret-leak path. Such reads
+        # default to ``ask`` even when no rule matches. An explicit user
+        # rule/approval (e.g. ``read:*.env=allow``) still overrides, so opting
+        # in for a trusted workflow remains one rule.
+        read_prefix = next(
+            (p for p in self._READ_PREFIXES if target.startswith(p)), None
+        )
+        if read_prefix is not None and self._is_secret_read_path(
+            target[len(read_prefix):]
+        ):
+            flat = self._check_flat(target, agent)
+            # A persistent approval or an explicit *deny* always wins (opt-in or
+            # hardening). An *allow* only opts in when it comes from a rule that
+            # specifically targets secrets — a broad wildcard (``read:*``) must
+            # not silently authorise credential files, otherwise the gate is
+            # trivially defeated by the catch-all rule most agents ship with.
+            if flat.approved is not None:
+                return flat
+            if flat.rule is not None:
+                if flat.action == PermissionAction.DENY:
+                    return flat
+                if self._is_specific_secret_allow(flat.rule):
+                    return flat
+                # Broad allow/ask rule: fall through to the secret ASK default.
+            return PermissionResult(
+                action=PermissionAction.ASK,
+                target=target,
+                reason=(
+                    "Reading a secret file requires approval "
+                    "(override with a secret-specific 'read' allow rule, "
+                    "e.g. read:*.env, to opt in)"
+                ),
+            )
 
         return self._check_flat(target, agent)
 
@@ -309,14 +430,19 @@ class PermissionManager:
         """Legacy flat matching against approvals and rules for a target."""
         with self._lock:
             # Check persistent approvals first
-            for approval in self._approvals:
+            for approval in list(self._approvals):
                 if approval.matches(target, agent):
-                    return PermissionResult(
+                    result = PermissionResult(
                         action=PermissionAction.ALLOW if approval.approved else PermissionAction.DENY,
                         target=target,
                         reason=f"Persistent approval: {'approved' if approval.approved else 'denied'}",
                         approved=approval.approved,
                     )
+                    # A "once" approval/denial is consumed on first match so it
+                    # does not silently become permanent for the process.
+                    if approval.scope == "once":
+                        self._approvals.remove(approval)
+                    return result
             
             # Check rules
             for rule in self._rules:
@@ -351,7 +477,31 @@ class PermissionManager:
         """
         original_target = prefix + command
         try:
-            from .command_parser import parse_command
+            from .command_parser import parse_command, has_unresolvable_expansion
+        except Exception:
+            return None
+
+        # Shell parameter/command expansion (``${IFS}``, ``$(...)``, backticks)
+        # is resolved by bash at runtime and is invisible to the static
+        # tokenizer, so a payload like ``rm${IFS}-rf${IFS}/`` could slip past a
+        # specific deny rule while a broad ``bash:*`` allow matches. When such
+        # expansion is present we cannot statically verify the command: an
+        # explicit deny still wins, but otherwise we escalate to ASK rather than
+        # letting the flat matcher optimistically ALLOW it.
+        if has_unresolvable_expansion(command):
+            flat = self._check_flat(original_target, agent)
+            if flat.action == PermissionAction.DENY:
+                return flat
+            return PermissionResult(
+                action=PermissionAction.ASK,
+                target=original_target,
+                reason=(
+                    "Command contains shell expansion that cannot be "
+                    "statically verified; requires approval"
+                ),
+            )
+
+        try:
             ops = parse_command(command)
         except Exception:
             return None

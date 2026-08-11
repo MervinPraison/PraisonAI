@@ -539,6 +539,138 @@ class TestProactiveDurability:
         assert penalties == [("-1001", 7.0)]  # server Retry-After widened the lane
 
 
+# ─── Undelivered notice + MESSAGE_UNDELIVERED hook (issue #3297) ──────
+class _FailFirstBot:
+    """Fails the first (rich) send but accepts a later plain-text notice.
+
+    Mirrors the real-world case the fix targets: a large/rich reply fails
+    permanently while a short one-line note still lands on the same channel.
+    """
+
+    def __init__(self, exc):
+        self.exc = exc
+        self.sends = []
+        self._calls = 0
+
+    async def send_message(self, channel_id, text):
+        self._calls += 1
+        if self._calls == 1:
+            raise self.exc
+        self.sends.append((channel_id, text))
+        return True
+
+
+class _FakeRunner:
+    """Records hook events fired through the async ``execute`` path."""
+
+    def __init__(self):
+        self.events = []
+
+    async def execute(self, event, event_input):
+        self.events.append((event, event_input))
+        return []
+
+
+class _HookBotOS(_FakeBotOS):
+    def __init__(self, bot, runner=None):
+        super().__init__(bot)
+        self._runner = runner
+
+    def _get_hook_runner(self):
+        return self._runner
+
+
+class TestUndeliveredNotice:
+    @pytest.mark.asyncio
+    async def test_default_off_no_notice(self, tmp_path):
+        from praisonai_bot.bots import DeadTargetRegistry
+        from praisonai_bot.bots.delivery import DeliveryRouter
+
+        reg = DeadTargetRegistry(persist_path=tmp_path / "dead.json")
+        bot = _FailFirstBot(_StatusError(403, "Forbidden: bot was kicked"))
+        router = DeliveryRouter(_FakeBotOS(bot), dead_targets=reg)
+        router.directory.set_home_channel("telegram", "-1001")
+
+        ok = await router.deliver("telegram", "long rich reply")
+        assert ok is False
+        # Default OFF: no last-resort notice attempted.
+        assert bot.sends == []
+        assert reg.is_dead("telegram", "-1001") is True
+
+    @pytest.mark.asyncio
+    async def test_permanent_failure_sends_plain_notice(self, tmp_path):
+        from praisonai_bot.bots import DeadTargetRegistry
+        from praisonai_bot.bots.delivery import DeliveryRouter
+
+        reg = DeadTargetRegistry(persist_path=tmp_path / "dead.json")
+        bot = _FailFirstBot(_StatusError(403, "Forbidden: bot was kicked"))
+        router = DeliveryRouter(
+            _FakeBotOS(bot), dead_targets=reg, notify_on_undelivered=True
+        )
+        router.directory.set_home_channel("telegram", "-1001")
+
+        ok = await router.deliver("telegram", "long rich reply")
+        assert ok is False
+        # A short plain-text notice reached the same channel.
+        assert len(bot.sends) == 1
+        assert bot.sends[0][0] == "-1001"
+        assert "couldn't be delivered" in bot.sends[0][1]
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_no_notice(self, tmp_path):
+        from praisonai_bot.bots import DeadTargetRegistry
+        from praisonai_bot.bots.delivery import DeliveryRouter
+
+        reg = DeadTargetRegistry(persist_path=tmp_path / "dead.json")
+        bot = _FailFirstBot(_StatusError(503, "service unavailable"))
+        router = DeliveryRouter(
+            _FakeBotOS(bot), dead_targets=reg, notify_on_undelivered=True
+        )
+        router.directory.set_home_channel("telegram", "-1001")
+
+        ok = await router.deliver("telegram", "hi")
+        assert ok is False
+        # Transient failure stays on the retry path: no undelivered notice.
+        assert bot.sends == []
+
+    @pytest.mark.asyncio
+    async def test_custom_template_used(self, tmp_path):
+        from praisonai_bot.bots.delivery import DeliveryRouter
+
+        bot = _FailFirstBot(_StatusError(403, "Forbidden: bot was kicked"))
+        router = DeliveryRouter(
+            _FakeBotOS(bot),
+            notify_on_undelivered=True,
+            undelivered_template="notice: lost",
+        )
+        router.directory.set_home_channel("telegram", "-1001")
+
+        await router.deliver("telegram", "big reply")
+        assert bot.sends == [("-1001", "notice: lost")]
+
+    @pytest.mark.asyncio
+    async def test_message_undelivered_hook_fires(self, tmp_path):
+        from praisonai_bot.bots.delivery import DeliveryRouter
+        from praisonaiagents.hooks.types import HookEvent
+
+        runner = _FakeRunner()
+        bot = _FailFirstBot(_StatusError(403, "Forbidden: bot was kicked"))
+        router = DeliveryRouter(
+            _HookBotOS(bot, runner), notify_on_undelivered=True
+        )
+        router.directory.set_home_channel("telegram", "-1001")
+
+        await router.deliver("telegram", "big reply")
+        assert len(runner.events) == 1
+        event, event_input = runner.events[0]
+        assert event == HookEvent.MESSAGE_UNDELIVERED
+        assert event_input.platform == "telegram"
+        assert event_input.channel_id == "-1001"
+        assert event_input.content == "big reply"
+        assert event_input.notice_delivered is True
+        assert "Forbidden" in event_input.error
+
+
 class _NoOpLimiter:
     """A stub rate limiter so dedup/retry tests never touch the real one."""
 

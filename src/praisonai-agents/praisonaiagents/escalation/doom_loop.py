@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from enum import Enum
 import time
 import hashlib
-import logging
 from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)

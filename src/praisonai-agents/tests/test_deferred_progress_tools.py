@@ -21,6 +21,10 @@ from praisonaiagents.tools.call_executor import (
     create_tool_call_executor,
     run_single_tool_call,
     defer,
+    DeferredResolver,
+    get_deferred_resolver,
+    register_deferred,
+    resolve_deferred,
 )
 
 
@@ -224,6 +228,116 @@ def test_explicit_progress_source_not_overwritten():
 def test_factory_still_returns_expected_executors():
     assert isinstance(create_tool_call_executor(parallel=False), SequentialToolCallExecutor)
     assert isinstance(create_tool_call_executor(parallel=True), ParallelToolCallExecutor)
+
+
+# --- Deferred resolution (Issue #3716) --------------------------------------
+
+def test_deferred_resolver_register_and_resolve():
+    resolver = DeferredResolver()
+    received = []
+
+    def on_resolved(handle_id, value, session_id):
+        received.append((handle_id, value, session_id))
+
+    resolver.register("job-1", on_resolved, session_id="s-9")
+    assert resolver.is_pending("job-1") is True
+
+    # Resolve delivers value + drops the registration.
+    assert resolver.resolve("job-1", "final report") is True
+    assert received == [("job-1", "final report", "s-9")]
+    assert resolver.is_pending("job-1") is False
+
+    # Resolving again is a no-op (already dropped).
+    assert resolver.resolve("job-1", "again") is False
+
+
+def test_deferred_resolver_unknown_handle():
+    resolver = DeferredResolver()
+    assert resolver.resolve("nope", 123) is False
+
+
+def test_deferred_resolver_cancel():
+    resolver = DeferredResolver()
+    resolver.register("job-2", lambda *a: None)
+    assert resolver.cancel("job-2") is True
+    assert resolver.is_pending("job-2") is False
+    assert resolver.cancel("job-2") is False
+
+
+def test_deferred_resolver_callback_error_swallowed():
+    resolver = DeferredResolver()
+
+    def boom(handle_id, value, session_id):
+        raise RuntimeError("delivery down")
+
+    resolver.register("job-3", boom)
+    # Must not raise even though the callback does.
+    assert resolver.resolve("job-3", "x") is True
+    assert resolver.is_pending("job-3") is False
+
+
+def test_global_resolver_helpers_end_to_end():
+    resolver = get_deferred_resolver()
+    seen = []
+    handle = defer(note="later", handle_id="global-1").handle_id
+
+    register_deferred(handle, lambda h, v, s: seen.append((h, v, s)))
+    assert resolve_deferred(handle, "done") is True
+    assert seen == [("global-1", "done", None)]
+    # Cleaned up so the global registry does not leak between runs.
+    assert resolver.is_pending(handle) is False
+
+
+def test_deferred_early_resolution_is_buffered_then_delivered():
+    # Background job finishes BEFORE the run loop registers the handle: the
+    # value must be buffered and delivered on registration, not discarded.
+    resolver = DeferredResolver()
+    assert resolver.resolve("job-early", "report") is False
+    assert resolver.is_pending("job-early") is False
+
+    seen = []
+    resolver.register("job-early", lambda h, v, s: seen.append((h, v, s)),
+                      session_id="s-1")
+    assert seen == [("job-early", "report", "s-1")]
+    # Buffer consumed; no lingering pending registration.
+    assert resolver.is_pending("job-early") is False
+
+
+def test_register_if_absent_is_atomic_and_no_clobber():
+    resolver = DeferredResolver()
+    first = []
+    second = []
+
+    assert resolver.register_if_absent("job-a", lambda h, v, s: first.append(v)) is True
+    # Second concurrent registration must NOT replace the first callback.
+    assert resolver.register_if_absent("job-a", lambda h, v, s: second.append(v)) is False
+
+    resolver.resolve("job-a", "ok")
+    assert first == ["ok"]
+    assert second == []
+
+
+def test_cancel_clears_buffered_early_resolution():
+    resolver = DeferredResolver()
+    assert resolver.resolve("job-c", "v") is False
+    # Cancel must drop the buffered early value so a later register gets nothing.
+    assert resolver.cancel("job-c") is False
+    seen = []
+    resolver.register("job-c", lambda h, v, s: seen.append(v))
+    assert seen == []
+
+
+def test_resolver_exported_from_tools_package():
+    from praisonaiagents.tools import (
+        DeferredResolver as DR,
+        get_deferred_resolver as g,
+        register_deferred as reg,
+        resolve_deferred as res,
+    )
+    assert DR is DeferredResolver
+    assert g is get_deferred_resolver
+    assert reg is register_deferred
+    assert res is resolve_deferred
 
 
 if __name__ == "__main__":

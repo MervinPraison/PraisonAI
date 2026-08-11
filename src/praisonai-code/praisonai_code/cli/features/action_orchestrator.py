@@ -456,6 +456,31 @@ class ActionOrchestrator:
                     "returncode": -1
                 }
                 
+            # Honor an optional per-step working directory (relative to the
+            # workspace). Reject anything that escapes the workspace so a
+            # command can't be run outside the sandbox.
+            run_cwd = workspace
+            requested_cwd = step.params.get("cwd")
+            if requested_cwd:
+                candidate = (workspace / requested_cwd).resolve()
+                try:
+                    candidate.relative_to(workspace)
+                except ValueError:
+                    return {
+                        "command": step.target,
+                        "stdout": "",
+                        "stderr": f"cwd escapes workspace: {requested_cwd}",
+                        "returncode": -1,
+                    }
+                if not candidate.is_dir():
+                    return {
+                        "command": step.target,
+                        "stdout": "",
+                        "stderr": f"cwd not found: {requested_cwd}",
+                        "returncode": -1,
+                    }
+                run_cwd = candidate
+
             # Use shell=False with shlex.split for safer execution
             args = shlex.split(step.target)
             result = subprocess.run(
@@ -463,7 +488,7 @@ class ActionOrchestrator:
                 shell=False,  # Use shell=False for security
                 capture_output=True,
                 text=True,
-                cwd=str(workspace),
+                cwd=str(run_cwd),
                 timeout=30
             )
             return {

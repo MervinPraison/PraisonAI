@@ -108,6 +108,23 @@ def default_model_for_available_provider(
     return _DEFAULT_MODEL
 
 
+def has_provider_credential() -> bool:
+    """Return ``True`` if any known cloud provider credential is in the env.
+
+    Uses the same credential env-vars that :func:`default_model_for_available_provider`
+    inspects, so callers can cheaply tell whether a hosted provider is available
+    before deciding to fall back to a locally-detected model. ``OLLAMA_HOST`` is
+    intentionally excluded here — a local host being set is not a *cloud* key and
+    is handled by the local-detection path.
+    """
+    for key_var, _model in _PROVIDER_DEFAULTS:
+        if key_var == "OLLAMA_HOST":
+            continue
+        if os.environ.get(key_var):
+            return True
+    return False
+
+
 def _first_set(*names: str) -> Optional[str]:
     """Return the first environment variable that is set and non-empty."""
     for name in names:

@@ -9,7 +9,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import json
-import logging
 from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)

@@ -145,22 +145,9 @@ def create_app(
 
         app.add_middleware(JobsAuthRequiredMiddleware)
     elif jobs_api_key:
-        import hmac
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import JSONResponse
+        from praisonai._api_auth import build_api_key_middleware
 
-        class JobsAPIKeyMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                if request.url.path == "/health":
-                    return await call_next(request)
-                auth = request.headers.get("Authorization", "")
-                header_key = request.headers.get("X-API-Key", "")
-                token = auth[7:] if auth.startswith("Bearer ") else header_key
-                if not token or not hmac.compare_digest(token, jobs_api_key):
-                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
-                return await call_next(request)
-
-        app.add_middleware(JobsAPIKeyMiddleware)
+        app.add_middleware(build_api_key_middleware(jobs_api_key, {"/health"}))
     
     # Add jobs router
     jobs_router = create_router(get_store(), get_executor())

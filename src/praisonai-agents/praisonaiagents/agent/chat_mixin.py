@@ -106,7 +106,10 @@ class ChatMixin:
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
-                return cached_prompt
+                # Path-scoped glob rules are per-turn (they depend on the files
+                # touched so far) so they are appended after the cache, never
+                # baked into the cached base prompt.
+                return self._append_glob_rules_context(cached_prompt)
         else:
             cache_key = None  # Don't cache when memory is enabled
             
@@ -279,7 +282,87 @@ Your Goal: {self.goal}"""
             pass  # Trust module not available, skip security instructions
         
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
-        return system_prompt
+        # Append per-turn path-scoped (glob) rules last so they are never cached.
+        return self._append_glob_rules_context(system_prompt)
+
+    def _append_glob_rules_context(self, system_prompt):
+        """Append path-scoped (activation: glob) rules for files touched this run.
+
+        Path-scoped rules activate dynamically: as the agent reads or edits
+        files during a run, any glob rule whose pattern matches a touched path
+        is injected once, deduplicated against the always/manual rules already
+        present in the base prompt. This is per-turn context, so it is added
+        after the (cached) base prompt and never baked into the cache.
+
+        The whole path is gated on ``has_glob_rules()`` so workspaces without
+        any glob rules incur zero cost.
+        """
+        if not system_prompt:
+            return system_prompt
+        if not (getattr(self, "_rules_enabled", True) and self.rules_manager):
+            return system_prompt
+        manager = self.rules_manager
+        if not getattr(manager, "has_glob_rules", None) or not manager.has_glob_rules():
+            return system_prompt
+
+        file_paths = self._collect_touched_file_paths()
+        if not file_paths:
+            return system_prompt
+
+        # Deduplicate against rules already emitted in the base prompt.
+        already = {r.name for r in manager.get_active_rules()}
+        matched = manager.get_glob_rules_for_paths(list(file_paths), exclude_names=already)
+        if not matched:
+            return system_prompt
+
+        sections = []
+        for rule in matched:
+            text = (rule.content or "").strip()
+            if not text:
+                continue
+            header = f"## {rule.name}: {rule.description}" if rule.description else f"## {rule.name}"
+            sections.append(f"{header}\n{text}")
+        if not sections:
+            return system_prompt
+
+        return (
+            system_prompt
+            + "\n\n## Path-Scoped Rules (apply to the files being worked on)\n"
+            + "\n\n".join(sections)
+        )
+
+    def _collect_touched_file_paths(self):
+        """Extract candidate file paths referenced in the current conversation.
+
+        Scans user prompts and tool results in chat history for path-like
+        tokens (containing a supported extension). This gives dynamic, per-turn
+        glob activation without threading a path argument through every tool
+        call site: as the agent reads/edits files, matching glob rules appear.
+        """
+        history = getattr(self, "chat_history", None)
+        if not history:
+            return set()
+
+        pattern = getattr(self, "_glob_path_pattern", None)
+        if pattern is None:
+            import re as _re
+            # Match bare or quoted path tokens ending in a file extension, e.g.
+            # foo.py, src/main.py, "tests/test_x.py".
+            pattern = _re.compile(r"[\w./\\-]+\.[A-Za-z0-9]{1,8}")
+            self._glob_path_pattern = pattern
+
+        paths = set()
+        for msg in history:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str) or not content:
+                continue
+            for match in pattern.findall(content):
+                normalized = match.strip("'\"").replace("\\", "/")
+                if "." in normalized:
+                    paths.add(normalized)
+        return paths
 
     def _build_response_format(self, schema_model):
         """Build response_format dict for native structured output.
@@ -542,11 +625,26 @@ Your Goal: {self.goal}"""
                     formatted_tools.extend(openai_tools)
                 elif openai_tools is not None:
                     formatted_tools.append(openai_tools)
-            # Handle callable functions
-            elif callable(tool):
-                tool_def = self._generate_tool_definition(tool.__name__)
+            # Handle BaseTool-style instances (ClarifyTool, etc.)
+            elif getattr(tool, "name", None) and hasattr(tool, "run"):
+                tool_def = self._generate_tool_definition(tool.name)
                 if tool_def:
                     formatted_tools.append(tool_def)
+                else:
+                    logging.warning(
+                        "Could not generate definition for tool: %s", tool.name
+                    )
+            # Handle callable functions
+            elif callable(tool):
+                fname = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+                if not fname:
+                    logging.warning("Tool %r not recognized (no name)", tool)
+                    continue
+                tool_def = self._generate_tool_definition(fname)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+                else:
+                    logging.warning(f"Could not generate definition for tool: {fname}")
             else:
                 logging.warning(f"Tool {tool} not recognized")
         
@@ -644,10 +742,12 @@ Your Goal: {self.goal}"""
         Returns the possibly-mutated list of tool definitions. Synchronous
         path; use ``_aapply_before_tool_definitions_hook`` in async contexts.
         """
-        if not formatted_tools or not getattr(self, '_hook_runner', None):
+        from ..hooks import HookEvent
+        _runner = getattr(self, '_hook_runner', None)
+        if (not formatted_tools or _runner is None
+                or not _runner.registry.has_hooks(HookEvent.BEFORE_TOOL_DEFINITIONS)):
             return formatted_tools
         try:
-            from ..hooks import HookEvent
             _inp = self._build_before_tool_definitions_input(formatted_tools)
             _results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
             # Fail closed on a blocking hook/plugin: a POLICY/GUARDRAIL that
@@ -676,10 +776,12 @@ Your Goal: {self.goal}"""
         ``execute_sync`` raises inside a running event loop, so the async chat
         path must await the hook runner directly to actually run the hook.
         """
-        if not formatted_tools or not getattr(self, '_hook_runner', None):
+        from ..hooks import HookEvent
+        _runner = getattr(self, '_hook_runner', None)
+        if (not formatted_tools or _runner is None
+                or not _runner.registry.has_hooks(HookEvent.BEFORE_TOOL_DEFINITIONS)):
             return formatted_tools
         try:
-            from ..hooks import HookEvent
             _inp = self._build_before_tool_definitions_input(formatted_tools)
             _results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
             # Fail closed on a blocking hook/plugin (see sync variant).
@@ -1132,6 +1234,7 @@ Your Goal: {self.goal}"""
 
     async def _apply_compaction_async(self, messages, compactor, policy):
         """Async version of _apply_compaction."""
+        import asyncio
         from ..compaction.strategy import CompactionStrategy as LegacyStrategy
         from ..hooks import HookEvent as _HookEvent
         import logging
@@ -1161,7 +1264,18 @@ Your Goal: {self.goal}"""
             f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
-        
+
+        # Issue #2741/#3062: persist the summary so async resume is cheap too,
+        # matching the sync proactive-compaction path above. No-op unless a
+        # session store + session_id are bound and a summary was produced.
+        # append_compaction_checkpoint() does a locked read/modify/write to
+        # disk, so offload it to a worker thread to avoid stalling the event
+        # loop (streaming, tool calls, other agents) during the file I/O.
+        try:
+            await asyncio.to_thread(self._persist_compaction_checkpoint, result)
+        except Exception as e:
+            logging.debug(f"Failed to persist compaction checkpoint (async): {e}")
+
         try:
             await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
         except Exception as e:
@@ -1190,6 +1304,104 @@ Your Goal: {self.goal}"""
         if fallback_index >= len(self.fallback_models):
             return None
         return self.fallback_models[fallback_index]
+
+    def _emit_model_fallback(self, from_model, to_model, reason_category, fallback_index,
+                             stream_callback=None):
+        """Surface a mid-turn model fallback as an observable state transition.
+
+        Fired at the exact point the recovery loop swaps the primary model for
+        the next entry in ``fallback_models``. Emits a ``MODEL_FALLBACK`` hook
+        (so plugins/gateways can react — notice, alert, metrics) and, when a
+        stream callback is active, a ``StreamEventType.MODEL_FALLBACK`` event so
+        the streaming/draft layer can mark the switch. Only the failure class is
+        exposed; provider internals stay redacted. Fully guarded and a cheap
+        no-op when nothing is subscribed — preserving today's behaviour plus the
+        existing log line (Issue #3820).
+        """
+        try:
+            from ..hooks.types import HookEvent
+
+            runner = getattr(self, '_hook_runner', None)
+            if runner is not None and runner.registry.has_hooks(HookEvent.MODEL_FALLBACK):
+                runner.execute_sync(
+                    HookEvent.MODEL_FALLBACK,
+                    self._build_model_fallback_input(
+                        from_model, to_model, reason_category, fallback_index, HookEvent
+                    ),
+                )
+        except Exception:  # observability must never break the fallback path
+            logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
+
+        self._emit_model_fallback_stream(
+            from_model, to_model, reason_category, fallback_index, stream_callback
+        )
+
+    async def _aemit_model_fallback(self, from_model, to_model, reason_category, fallback_index,
+                                    stream_callback=None):
+        """Async variant of :meth:`_emit_model_fallback` for the async recovery path.
+
+        Awaits the hook runner in the active event loop (``execute_sync`` would
+        raise inside a running loop, silently dropping ``MODEL_FALLBACK`` hooks).
+        Same guarantees: cheap no-op when nothing is subscribed and never raises
+        into the fallback path.
+        """
+        try:
+            from ..hooks.types import HookEvent
+
+            runner = getattr(self, '_hook_runner', None)
+            if runner is not None and runner.registry.has_hooks(HookEvent.MODEL_FALLBACK):
+                await runner.execute(
+                    HookEvent.MODEL_FALLBACK,
+                    self._build_model_fallback_input(
+                        from_model, to_model, reason_category, fallback_index, HookEvent
+                    ),
+                )
+        except Exception:  # observability must never break the fallback path
+            logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
+
+        self._emit_model_fallback_stream(
+            from_model, to_model, reason_category, fallback_index, stream_callback
+        )
+
+    def _build_model_fallback_input(self, from_model, to_model, reason_category,
+                                    fallback_index, HookEvent):
+        """Build the typed ``ModelFallbackInput`` (only the failure class is exposed)."""
+        from ..hooks.events import ModelFallbackInput
+
+        return ModelFallbackInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.MODEL_FALLBACK.value,
+            timestamp=str(time.time()),
+            agent_name=getattr(self, 'name', None),
+            from_model=str(from_model),
+            to_model=str(to_model),
+            reason_category=str(reason_category or ""),
+            fallback_index=fallback_index,
+        )
+
+    def _emit_model_fallback_stream(self, from_model, to_model, reason_category,
+                                    fallback_index, stream_callback):
+        """Emit the ``StreamEventType.MODEL_FALLBACK`` event when a callback is active."""
+        if stream_callback is None:
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+
+            stream_callback(StreamEvent(
+                type=StreamEventType.MODEL_FALLBACK,
+                metadata={
+                    "from_model": str(from_model),
+                    "to_model": str(to_model),
+                    "reason_category": str(reason_category or ""),
+                    "fallback_index": fallback_index,
+                },
+                agent_id=getattr(self, 'name', None),
+                session_id=getattr(self, '_session_id', None),
+                run_id=getattr(self, '_current_run_id', None),
+            ))
+        except Exception:
+            logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
 
     def _max_retry_depth(self) -> int:
         """Maximum LLM retry depth honoured by the recovery loop.
@@ -1231,34 +1443,36 @@ Your Goal: {self.goal}"""
         self._apply_context_compaction(messages, _HookEvent)
 
         # Trigger BEFORE_LLM hook
+        # Only build the input if a BEFORE_LLM hook is actually registered
         from ..hooks import HookEvent, BeforeLLMInput
-        before_llm_input = BeforeLLMInput(
-            session_id=getattr(self, '_session_id', 'default'),
-            cwd=os.getcwd(),
-            event_name=HookEvent.BEFORE_LLM,
-            timestamp=str(time.time()),
-            agent_name=self.name,
-            messages=messages,
-            model=self.llm if isinstance(self.llm, str) else str(self.llm),
-            temperature=temperature
-        )
-        _before_llm_results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
-        # Honour a blocking BEFORE_LLM hook/plugin (POLICY/GUARDRAIL) by
-        # refusing to dispatch the request, mirroring how BEFORE_TOOL/BEFORE_AGENT
-        # enforce blocks. Without this, a plugin that returns PluginDecision.deny()
-        # (or raises GuardrailBlocked) would fail open and still hit the model.
-        if self._hook_runner.is_blocked(_before_llm_results):
-            _block_reason = next(
-                (getattr(r.output, "reason", None) for r in _before_llm_results
-                 if r.output and getattr(r.output, "is_denied", lambda: False)()),
-                None,
-            ) or "Blocked by hook"
-            logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
-            return f"[LLM request blocked by hook: {_block_reason}]"
-        # C7 - honour any BEFORE_LLM hook that mutated the message stream
-        # (e.g. PII redactor). The runner applies modified_input in-place on
-        # before_llm_input.messages; adopt that value for the actual LLM call.
-        messages = before_llm_input.messages
+        if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_LLM):
+            before_llm_input = BeforeLLMInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_LLM,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                messages=messages,
+                model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                temperature=temperature
+            )
+            _before_llm_results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
+            # Honour a blocking BEFORE_LLM hook/plugin (POLICY/GUARDRAIL) by
+            # refusing to dispatch the request, mirroring how BEFORE_TOOL/BEFORE_AGENT
+            # enforce blocks. Without this, a plugin that returns PluginDecision.deny()
+            # (or raises GuardrailBlocked) would fail open and still hit the model.
+            if self._hook_runner.is_blocked(_before_llm_results):
+                _block_reason = next(
+                    (getattr(r.output, "reason", None) for r in _before_llm_results
+                     if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                    None,
+                ) or "Blocked by hook"
+                logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
+                return f"[LLM request blocked by hook: {_block_reason}]"
+            # C7 - honour any BEFORE_LLM hook that mutated the message stream
+            # (e.g. PII redactor). The runner applies modified_input in-place on
+            # before_llm_input.messages; adopt that value for the actual LLM call.
+            messages = before_llm_input.messages
 
         # Pre-call budget guard (zero overhead when _max_budget is None).
         # Estimate this call's minimum cost from the known input size plus the
@@ -1412,19 +1626,21 @@ Your Goal: {self.goal}"""
                     self._on_budget_exceeded(current_cost, self._max_budget)
             
             # Trigger AFTER_LLM hook
+            # Only build the input if an AFTER_LLM hook is actually registered
             from ..hooks import HookEvent, AfterLLMInput
-            after_llm_input = AfterLLMInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.AFTER_LLM,
-                timestamp=str(time.time()),
-                agent_name=self.name,
-                messages=messages,
-                response=str(final_response),
-                model=self.llm if isinstance(self.llm, str) else str(self.llm),
-                latency_ms=(time.time() - start_time) * 1000
-            )
-            self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
+            if self._hook_runner.registry.has_hooks(HookEvent.AFTER_LLM):
+                after_llm_input = AfterLLMInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.AFTER_LLM,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    messages=messages,
+                    response=str(final_response),
+                    model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    latency_ms=(time.time() - start_time) * 1000
+                )
+                self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
             
             return final_response
 
@@ -1510,7 +1726,22 @@ Your Goal: {self.goal}"""
                 if next_model:
                     current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
                     logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
-                    
+
+                    # Surface the otherwise-silent switch as an observable event.
+                    # Forward the active stream callback so streaming consumers
+                    # receive the MODEL_FALLBACK event when this follows a
+                    # streaming request.
+                    _sync_stream_callback = (
+                        self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+                    )
+                    self._emit_model_fallback(
+                        from_model=current_model,
+                        to_model=next_model,
+                        reason_category=classification.error_category,
+                        fallback_index=_fallback_index,
+                        stream_callback=_sync_stream_callback,
+                    )
+
                     # Apply backoff if suggested
                     if classification.backoff_seconds and classification.backoff_seconds > 0:
                         time.sleep(classification.backoff_seconds)
@@ -1673,7 +1904,20 @@ Your Goal: {self.goal}"""
             if next_model:
                 current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
                 logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
-                
+
+                # Surface the otherwise-silent switch as an observable event.
+                # Await the async emitter so MODEL_FALLBACK hooks run in the
+                # active event loop, and honour emit_events so internal calls
+                # (emit_events=False) don't leak a stream event into the public
+                # stream.
+                await self._aemit_model_fallback(
+                    from_model=current_model,
+                    to_model=next_model,
+                    reason_category=classification.error_category,
+                    fallback_index=_fallback_index,
+                    stream_callback=stream_callback if emit_events else None,
+                )
+
                 # Apply backoff if suggested
                 if classification.backoff_seconds and classification.backoff_seconds > 0:
                     await asyncio.sleep(classification.backoff_seconds)
@@ -2213,7 +2457,7 @@ Your Goal: {self.goal}"""
             return output
         
         try:
-            run_id = getattr(self, '_run_id', None)
+            run_id = getattr(self, '_current_run_id', None)
             return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id, run_id)
         except Exception as e:
             logging.warning(f"Tool output truncation error: {e}")
@@ -2348,8 +2592,7 @@ Your Goal: {self.goal}"""
         """Internal chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
-        if not getattr(self, "_in_skill_review", False):
-            self._turn_tools_used = []
+        self._reset_turn_tools()
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -2950,8 +3193,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Internal async chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
-        if not getattr(self, "_in_skill_review", False):
-            self._turn_tools_used = []
+        self._reset_turn_tools()
         # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
@@ -3619,62 +3861,31 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                         arguments = {}
                     
-                    # Find the matching tool
-                    tool = next((t for t in tools if t.__name__ == function_name), None)
+                    # Find the matching tool by comparing every supported identifier:
+                    # __name__ (plain callables), .name (BaseTool instances like
+                    # BrowserBaseTool, or aliased FunctionTools), or the class name.
+                    # Compare all candidates (not short-circuit) so an aliased .name
+                    # that differs from __name__ still resolves and BaseTool
+                    # subclasses without __name__ do not crash dispatch.
+                    tool = next(
+                        (t for t in tools if function_name in (
+                            getattr(t, "__name__", None),
+                            getattr(t, "name", None),
+                            type(t).__name__,
+                        )),
+                        None,
+                    )
                     if not tool:
                         _get_display_functions()['display_error'](f"Tool {function_name} not found")
                         continue
 
-                    # --- BEFORE_TOOL hook ---
-                    try:
-                        from ..hooks import HookEvent, BeforeToolInput
-                        _before_tool_input = BeforeToolInput(
-                            session_id=getattr(self, '_session_id', 'default'),
-                            cwd=os.getcwd(),
-                            event_name=HookEvent.BEFORE_TOOL,
-                            timestamp=str(time.time()),
-                            agent_name=self.name,
-                            tool_name=function_name,
-                            tool_input=arguments,
-                        )
-                        _before_results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL, _before_tool_input)
-                        _tool_blocked = self._hook_runner.is_blocked(_before_results)
-                    except Exception as _hook_err:
-                        logging.debug(f"BEFORE_TOOL hook error (non-fatal): {_hook_err}")
-                        _tool_blocked = False
-                    if _tool_blocked:
-                        # Reason extraction must not be able to re-open a block:
-                        # use attributes present on both HookResult (plugin
-                        # bridge) and HookOutput, defaulting safely.
-                        _block_reason = next(
-                            (getattr(r.output, "reason", None) for r in _before_results
-                             if r.output and getattr(r.output, "is_denied", lambda: False)()),
-                            None,
-                        ) or "Blocked by hook"
-                        results.append(f"[Tool blocked by hook: {_block_reason}]")
-                        continue
-
-                    # Route through safety pipeline instead of direct execution
+                    # Route through safety pipeline instead of direct execution.
+                    # BEFORE_TOOL/AFTER_TOOL hooks (blocking, arg mutation and
+                    # after-context aggregation) are fired once, guarded, inside
+                    # execute_tool_async — no inline duplicate dispatch here.
                     # Pass the tools list to honor task-scoped tools
                     result = await self.execute_tool_async(function_name, arguments, tools_override=tools)
 
-                    # --- AFTER_TOOL hook ---
-                    try:
-                        from ..hooks import AfterToolInput
-                        _after_tool_input = AfterToolInput(
-                            session_id=getattr(self, '_session_id', 'default'),
-                            cwd=os.getcwd(),
-                            event_name=HookEvent.AFTER_TOOL,
-                            timestamp=str(time.time()),
-                            agent_name=self.name,
-                            tool_name=function_name,
-                            tool_input=arguments,
-                            tool_output=result,
-                        )
-                        await self._hook_runner.execute(HookEvent.AFTER_TOOL, _after_tool_input)
-                    except Exception as _hook_err:
-                        logging.debug(f"AFTER_TOOL hook error (non-fatal): {_hook_err}")
-                    
                     results.append(result)
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error executing tool {function_name}: {e}")
@@ -3763,8 +3974,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         # Force streaming, no display by default (app-friendly)
         kwargs['stream'] = True
-        
-        # Use the internal streaming generator
+
+        # Use the internal streaming generator (guardrail-bypass warning is
+        # emitted inside _start_stream so it covers start(stream=True) too).
         for chunk in self._start_stream(prompt, **kwargs):
             yield chunk
         
@@ -3773,6 +3985,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Stream generator for real-time response chunks."""
+        # Warn if an output guardrail is configured: token-level streaming
+        # yields chunks before a full response exists to validate, so the
+        # guardrail cannot be applied without breaking the streaming contract.
+        # This lives here (the single common streaming path) so both
+        # iter_stream() and start(stream=True) surface the bypass loudly.
+        if getattr(self, 'guardrail', None) is not None:
+            logging.warning(
+                f"Agent {getattr(self, 'name', '')}: output guardrail is not "
+                "applied to streamed responses (iter_stream / stream=True). "
+                "Use chat() for guardrail-validated output."
+            )
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
@@ -4021,7 +4244,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 } for tc in tool_calls_data if tc['id']
                             ]
                         self._append_to_chat_history(assistant_message)
-                        
+                        # Persist the assistant tool-call turn so resume replays
+                        # it (Issue #3089).
+                        self._persist_message(
+                            "assistant",
+                            response_text,
+                            tool_calls=assistant_message.get("tool_calls"),
+                        )
+
                         # Execute tool calls and add results to chat history.
                         # Media-bearing follow-up messages are deferred until all
                         # tool replies for this turn are appended, keeping the
@@ -4058,6 +4288,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             "tool_call_id": tool_call['id'],
                                             "content": str(tool_result)
                                         })
+                                    # Persist the tool-result turn (Issue #3089).
+                                    self._persist_message(
+                                        "tool",
+                                        str(tool_result),
+                                        tool_call_id=tool_call['id'],
+                                    )
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history
@@ -4066,6 +4302,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         "tool_call_id": tool_call['id'],
                                         "content": f"Error: {str(tool_error)}"
                                     })
+                                    self._persist_message(
+                                        "tool",
+                                        f"Error: {str(tool_error)}",
+                                        tool_call_id=tool_call['id'],
+                                    )
 
                         # Flush deferred media follow-ups after all tool replies.
                         for _m in _deferred_media_followups:
@@ -4302,6 +4543,64 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
 
+    def _emit_retry_stream_event(self, *, attempt, max_attempts, delay, reason):
+        """Emit a ``StreamEventType.RETRY`` event during backoff.
+
+        Lets consumers (e.g. the CLI stream-json bridge) render a live
+        "retrying in Ns (attempt k/N)" status instead of appearing hung.
+        Guarded by ``has_callbacks`` so it stays zero-overhead when nothing is
+        listening, and never raises into the retry loop.
+        """
+        emitter = getattr(self, 'stream_emitter', None)
+        if emitter is None or not getattr(emitter, 'has_callbacks', False):
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+            emitter.emit(self._build_retry_stream_event(
+                StreamEvent, StreamEventType,
+                attempt=attempt, max_attempts=max_attempts, delay=delay, reason=reason,
+            ))
+        except Exception as _re:
+            logger.debug(f"Failed to emit RETRY stream event: {_re}")
+
+    async def _aemit_retry_stream_event(self, *, attempt, max_attempts, delay, reason):
+        """Async counterpart of ``_emit_retry_stream_event``.
+
+        Uses ``emit_async`` so consumers registered via the public
+        ``add_async_callback()`` API also receive RETRY events; ``emit`` alone
+        only visits synchronous callbacks. Same zero-overhead guard and
+        never-raise contract as the sync path.
+        """
+        emitter = getattr(self, 'stream_emitter', None)
+        if emitter is None or not getattr(emitter, 'has_callbacks', False):
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+            event = self._build_retry_stream_event(
+                StreamEvent, StreamEventType,
+                attempt=attempt, max_attempts=max_attempts, delay=delay, reason=reason,
+            )
+            emit_async = getattr(emitter, 'emit_async', None)
+            if emit_async is not None:
+                await emit_async(event)
+            else:
+                emitter.emit(event)
+        except Exception as _re:
+            logger.debug(f"Failed to emit RETRY stream event: {_re}")
+
+    def _build_retry_stream_event(self, StreamEvent, StreamEventType, *, attempt, max_attempts, delay, reason):
+        """Construct the RETRY ``StreamEvent`` shared by the sync/async emitters."""
+        return StreamEvent(
+            type=StreamEventType.RETRY,
+            metadata={
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "delay": delay,
+                "reason": reason,
+            },
+            agent_id=getattr(self, 'name', None),
+        )
+
     def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
@@ -4362,6 +4661,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     attempt=attempt
                 )
                 self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
+                
+                # Surface the retry as a first-class stream event so CLI/UI
+                # consumers can show a live "retrying in Ns" status instead of
+                # appearing hung. Guarded so it is zero-overhead when nothing
+                # is listening.
+                self._emit_retry_stream_event(
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    delay=delay,
+                    reason=str(e),
+                )
                 
                 # Log retry attempt (buffered to avoid spam during transient failures)
                 logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
@@ -4443,6 +4753,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     attempt=attempt
                 )
                 await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
+                
+                # Surface a streaming RETRY event (see sync path for rationale).
+                # Use the async emitter so async-only consumers registered via
+                # add_async_callback() also receive the event.
+                await self._aemit_retry_stream_event(
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    delay=delay,
+                    reason=str(e),
+                )
                 
                 # Log retry attempt
                 logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")

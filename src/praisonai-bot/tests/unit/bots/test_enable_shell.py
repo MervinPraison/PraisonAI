@@ -1,0 +1,670 @@
+"""Tests for allow_shell channel opt-in."""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from praisonai_bot.bots._defaults import enable_shell_tools
+from praisonaiagents.bots.config import BotConfig
+
+
+def test_enable_shell_noop_when_disabled():
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    enable_shell_tools(agent, ch_cfg={"allow_shell": False})
+
+    assert agent.tools == []
+    assert "execute_command" in agent._perm_deny
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_adds_tool_and_clears_deny(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command", "delete_file"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    assert mock_execute_command in agent.tools
+    assert "execute_command" not in agent._perm_deny
+    assert "delete_file" in agent._perm_deny
+    assert agent._approval_backend is not None
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_instruction_asks_to_report_stdout(mock_execute_command):
+    """Instruction must tell the agent to return the command's stdout, so the
+    model does not reply 'there was no output' when the tool produced output
+    (regression for the flaky E2E sandbox marker check)."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent.instructions = ""
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    lowered = agent.instructions.lower()
+    assert "execute_command" in lowered
+    assert "include the command's stdout verbatim" in lowered
+    assert "do not claim there was no output" in lowered
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_instruction_added_when_prompt_already_names_tool(mock_execute_command):
+    """A preconfigured agent whose own prompt already mentions execute_command
+    must still receive the stdout-reporting directive (regression: the old
+    bare-tool-name guard skipped it, keeping the 'no output' bug reachable)."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent.instructions = "You may use the execute_command tool when needed."
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    lowered = agent.instructions.lower()
+    assert "include the command's stdout verbatim" in lowered
+    assert "do not claim there was no output" in lowered
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_instruction_not_duplicated(mock_execute_command):
+    """Idempotent: re-enabling shell must not append the directive twice."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent.instructions = ""
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+        first = agent.instructions
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    assert agent.instructions == first
+    assert agent.instructions.lower().count("include the command's stdout verbatim") == 1
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_slack_approval_when_not_auto(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.SlackApproval") as slack_cls:
+            slack_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(owner_user_id="UOWNER", token="xoxb-test"),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "approval_channel": "UOWNER",
+                    "approval_users": "UOWNER",
+                },
+                channel_type="slack",
+            )
+
+    slack_cls.assert_called_once_with(
+        token="xoxb-test",
+        channel="UOWNER",
+        allowed_approvers=["UOWNER"],
+    )
+    assert agent._approval_backend is slack_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_telegram_approval(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.TelegramApproval") as tg_cls:
+            tg_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(token="tg-token"),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "approval_channel": "123456789",
+                    "token": "tg-token",
+                },
+                channel_type="telegram",
+            )
+
+    tg_cls.assert_called_once_with(
+        token="tg-token",
+        chat_id="123456789",
+        allowed_approvers=None,
+    )
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_discord_approval(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.DiscordApproval") as dc_cls:
+            dc_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(token="dc-token"),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "home_channel": "9876543210",
+                    "token": "dc-token",
+                },
+                channel_type="discord",
+            )
+
+    dc_cls.assert_called_once_with(
+        token="dc-token",
+        channel_id="9876543210",
+        allowed_approvers=None,
+    )
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_gateway_approval_mode(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend") as gw_cls:
+            gw_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "approval_mode": "gateway",
+                },
+                channel_type="whatsapp",
+            )
+
+    gw_cls.assert_called_once()
+    assert agent._approval_backend is gw_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_http_approval_mode(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.HTTPApproval") as http_cls:
+            http_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "approval_mode": "http",
+                    "approval_http_host": "0.0.0.0",
+                    "approval_http_port": 9000,
+                },
+                channel_type="email",
+            )
+
+    http_cls.assert_called_once_with(host="0.0.0.0", port=9000)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_webhook_mode_without_url_falls_back(mock_execute_command):
+    """approval_mode=webhook with no URL must not build WebhookApproval("None")."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.WebhookApproval") as wh_cls:
+            with patch(
+                "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend"
+            ) as gw_cls:
+                gw_cls.return_value = object()
+                enable_shell_tools(
+                    agent,
+                    config=BotConfig(),
+                    ch_cfg={
+                        "allow_shell": True,
+                        "auto_approve_shell": False,
+                        "approval_mode": "webhook",
+                    },
+                    channel_type="whatsapp",
+                )
+
+    wh_cls.assert_not_called()
+    gw_cls.assert_called_once()
+    assert agent._approval_backend is gw_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_webhook_mode_with_url(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.WebhookApproval") as wh_cls:
+            wh_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "approval_mode": "webhook",
+                    "approval_webhook_url": "https://hooks.example.com/approve",
+                },
+                channel_type="whatsapp",
+            )
+
+    wh_cls.assert_called_once_with(webhook_url="https://hooks.example.com/approve")
+    assert agent._approval_backend is wh_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_whatsapp_falls_back_to_gateway(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend") as gw_cls:
+            gw_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": False},
+                channel_type="whatsapp",
+            )
+
+    gw_cls.assert_called_once()
+    assert agent._approval_backend is gw_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_manual_approval_replaces_stale_auto_backend(mock_execute_command, monkeypatch):
+    """auto_approve_shell=false must not leave a prior AutoApproveBackend that
+    silently auto-approves shell (Greptile security P1)."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+    from praisonaiagents.approval.protocols import ApprovalRequest
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    # Simulate apply_bot_smart_defaults() having installed auto-approve.
+    agent._approval_backend = AutoApproveBackend()
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": False},
+                channel_type="slack",  # no approval_channel -> no SlackApproval
+            )
+
+    backend = agent._approval_backend
+    assert not isinstance(backend, AutoApproveBackend)
+    # Shell commands are denied fail-closed.
+    decision = backend.request_approval_sync(
+        ApprovalRequest(tool_name="execute_command", arguments={}, risk_level="high")
+    )
+    assert decision.approved is False
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_syncs_approval_registry(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    from praisonaiagents.approval import get_approval_registry
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    reg = get_approval_registry()
+    assert isinstance(reg.get_backend("assistant"), AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_critical_tool_honours_agent_approval(mock_execute_command):
+    """Agent-level approval must flow through to @require_approval(critical)."""
+    from praisonaiagents import Agent
+    from praisonaiagents.approval import get_approval_registry, mark_approved
+    from praisonaiagents.tools import execute_command
+
+    mock_execute_command.name = "execute_command"
+    agent = Agent(name="assistant", tools=[])
+    enable_shell_tools(
+        agent,
+        config=BotConfig(),
+        ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+        channel_type="slack",
+    )
+
+    decision = agent._resolve_approval_decision(
+        "execute_command", {"command": "uname -a"}, is_async=False
+    )
+    assert decision.approved is True
+    mark_approved("execute_command")
+    assert get_approval_registry().is_already_approved("execute_command")
+    assert execute_command in (agent.tools or [])
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_manual_approval_without_backend_denies_shell(mock_execute_command, monkeypatch):
+    """auto_approve_shell=false with no pre-existing backend also fails closed."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+    from praisonaiagents.approval.protocols import ApprovalRequest
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": False},
+                channel_type="slack",
+            )
+
+    backend = agent._approval_backend
+    assert not isinstance(backend, AutoApproveBackend)
+    decision = backend.request_approval_sync(
+        ApprovalRequest(tool_name="execute_command", arguments={}, risk_level="high")
+    )
+    assert decision.approved is False
+
+
+def _exposure_config(bind_host):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(bind_host=bind_host, token=None, owner_user_id=None)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_downgraded_on_external_bind(mock_execute_command, monkeypatch):
+    """Blanket auto-approve must not survive an externally-bound gateway."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=_exposure_config("0.0.0.0"),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+                channel_type="slack",
+            )
+
+    assert not isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_downgraded_on_group_channel(mock_execute_command, monkeypatch):
+    """A multi-user/group surface must downgrade blanket auto-approve."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=_exposure_config("127.0.0.1"),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": True,
+                    "group_policy": "mention_only",
+                },
+                channel_type="telegram",
+            )
+
+    assert not isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_kept_on_loopback_dm(mock_execute_command):
+    """Loopback bind + non-group surface keeps the convenience auto-approve."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=_exposure_config("127.0.0.1"),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    assert isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_kept_when_exposure_acknowledged(mock_execute_command):
+    """Explicit acknowledgement re-enables blanket auto-approve on exposed bind."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=_exposure_config("0.0.0.0"),
+            ch_cfg={
+                "allow_shell": True,
+                "auto_approve_shell": True,
+                "auto_approve_shell_acknowledge_exposed": True,
+            },
+            channel_type="slack",
+        )
+
+    assert isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_downgraded_on_command_only_group(mock_execute_command, monkeypatch):
+    """``command_only`` is still a multi-user group surface: a group member's
+    command reaches execute_command, so blanket auto-approve must downgrade."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=_exposure_config("127.0.0.1"),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": True,
+                    "group_policy": "command_only",
+                },
+                channel_type="telegram",
+            )
+
+    assert not isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_downgraded_when_gateway_bind_host_external(mock_execute_command, monkeypatch):
+    """The gateway passes its real bind host explicitly (the per-channel
+    BotConfig does not carry it); an external bind must still downgrade even
+    when ``config`` has no host attribute."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+                channel_type="slack",
+                gateway_bind_host="0.0.0.0",
+            )
+
+    assert not isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_kept_when_gateway_bind_host_loopback(mock_execute_command):
+    """An explicit loopback gateway bind host keeps blanket auto-approve."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+            gateway_bind_host="127.0.0.1",
+        )
+
+    assert isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+def test_gateway_bind_host_resolves_callable_accessor():
+    """``_gateway_bind_host`` must call a method/property host accessor (e.g.
+    ``GatewayServer.host``) before stringifying, so is_loopback classifies it
+    correctly instead of seeing a bound-method repr."""
+    from types import SimpleNamespace
+
+    from praisonai_bot.bots._defaults import _gateway_bind_host
+
+    config = SimpleNamespace(host=lambda: "127.0.0.1")
+    assert _gateway_bind_host(config) == "127.0.0.1"

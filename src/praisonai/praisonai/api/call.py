@@ -1,13 +1,14 @@
 import os
 import json
 import base64
+import hmac
+import secrets
 import asyncio
 import websockets
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect
-from dotenv import load_dotenv
 import uvicorn
 from pyngrok import ngrok, conf
 from rich import print
@@ -15,9 +16,25 @@ import argparse
 import logging
 import importlib.util
 import time
+from typing import Optional
 from collections import defaultdict
 
-load_dotenv()
+
+def _maybe_load_dotenv() -> None:
+    """Load a ``.env`` file only when explicitly opted in.
+
+    Importing a library should never mutate ``os.environ``. Loading the
+    ``.env`` at import time surprises callers who deliberately unset variables
+    and makes test isolation harder. Opt in with
+    ``PRAISONAI_CALL_LOAD_DOTENV=true`` (or run the ``praisonai call`` CLI which
+    enables it explicitly).
+    """
+    if os.getenv("PRAISONAI_CALL_LOAD_DOTENV", "").lower() == "true":
+        from dotenv import load_dotenv
+        load_dotenv()
+
+
+_maybe_load_dotenv()
 
 # Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # requires OpenAI Realtime API Access
@@ -47,6 +64,79 @@ RATE_LIMIT_WINDOW = 3600
 
 active_connections = 0
 client_ips = defaultdict(list)
+
+# Guard the shared, async-mutated counters so concurrent WebSocket handlers
+# can't over-commit MAX_CONCURRENT_CONNECTIONS / MAX_REQUESTS_PER_WINDOW via a
+# check-then-mutate TOCTOU across ``await`` points.
+_conn_lock = asyncio.Lock()
+_ips_lock = asyncio.Lock()
+
+# One-shot, short-lived session tokens handed to the Twilio media-stream client
+# so the shared server secret is never embedded in a URL (which leaks into
+# access logs / referrers / history). Maps token -> expiry timestamp.
+_STREAM_SESSION_TTL = 60  # seconds
+_pending_stream_sessions: "dict[str, float]" = {}
+
+
+def _mint_stream_session_token() -> str:
+    """Create a single-use, TTL-bound token for the media-stream handshake."""
+    now = time.time()
+    # Opportunistically drop expired tokens so the map can't grow unbounded.
+    for tok in [t for t, exp in _pending_stream_sessions.items() if exp < now]:
+        _pending_stream_sessions.pop(tok, None)
+    token = secrets.token_urlsafe(32)
+    _pending_stream_sessions[token] = now + _STREAM_SESSION_TTL
+    return token
+
+
+def _consume_stream_session_token(token: str) -> bool:
+    """Validate and consume a one-shot stream-session token (constant-time)."""
+    if not token:
+        return False
+    now = time.time()
+    for candidate, expiry in list(_pending_stream_sessions.items()):
+        if expiry < now:
+            _pending_stream_sessions.pop(candidate, None)
+            continue
+        if hmac.compare_digest(candidate, token):
+            _pending_stream_sessions.pop(candidate, None)
+            return True
+    return False
+
+
+def _tokens_match(provided: Optional[str], expected: Optional[str]) -> bool:
+    """Constant-time token comparison to avoid a timing side channel."""
+    if not provided or not expected:
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
+def _refresh_env_globals() -> None:
+    """Re-read env-derived config into module globals.
+
+    These globals are captured once at import. When ``.env`` is loaded later
+    (e.g. explicitly in ``main()``), the request-time handlers would otherwise
+    keep reading the stale import-time values. Refreshing them keeps a
+    ``.env``-only ``OPENAI_API_KEY`` / ``CALL_SERVER_TOKEN`` / rate-limit
+    working, matching the pre-existing import-time ``load_dotenv`` behaviour.
+    """
+    global OPENAI_API_KEY, PORT, NGROK_AUTH_TOKEN, PUBLIC
+    global CALL_SERVER_TOKEN, MAX_CONCURRENT_CONNECTIONS, MAX_REQUESTS_PER_WINDOW
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    PORT = int(os.getenv('PORT', 8090))
+    NGROK_AUTH_TOKEN = os.getenv('NGROK_AUTH_TOKEN')
+    PUBLIC = os.getenv('PUBLIC', 'false').lower() == 'true'
+    CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
+    MAX_CONCURRENT_CONNECTIONS = int(os.getenv('MAX_CONCURRENT_CONNECTIONS', '5'))
+    MAX_REQUESTS_PER_WINDOW = int(os.getenv('MAX_REQUESTS_PER_WINDOW', '100'))
+    # The included n8n invoke router captures CALL_SERVER_TOKEN in its own
+    # module at import; refresh it there too so its auth stays consistent.
+    try:
+        from . import agent_invoke as _agent_invoke
+        _agent_invoke.CALL_SERVER_TOKEN = CALL_SERVER_TOKEN
+    except Exception:
+        pass
+
 
 app = FastAPI()
 
@@ -154,7 +244,7 @@ async def handle_incoming_call(request: Request):
                     token = decoded
             except Exception:
                 pass
-    if token != CALL_SERVER_TOKEN:
+    if not _tokens_match(token, CALL_SERVER_TOKEN):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
     response = VoiceResponse()
@@ -163,11 +253,15 @@ async def handle_incoming_call(request: Request):
     # response.say("")
     host = request.url.hostname
     connect = Connect()
-    
+
+    # Never embed the shared server secret in the stream URL — a query-string
+    # token leaks into intermediary access logs, referrers and history. Mint a
+    # one-shot, TTL-bound session token the media-stream handshake validates and
+    # consumes exactly once.
     stream_url = f'wss://{host}/media-stream'
-    if CALL_SERVER_TOKEN:
-        stream_url += f'?token={CALL_SERVER_TOKEN}'
-    
+    session_token = _mint_stream_session_token()
+    stream_url += f'?session={session_token}'
+
     connect.stream(url=stream_url)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
@@ -177,30 +271,44 @@ async def handle_media_stream(websocket: WebSocket):
     """Handle WebSocket connections between Twilio and OpenAI."""
     global active_connections
     
-    # 1. Authentication
+    # 1. Authentication — accept a one-shot, per-connection session token
+    #    (from the ``session`` query param minted by the incoming-call handler,
+    #    or an ``x-call-token`` header). The shared CALL_SERVER_TOKEN is never
+    #    carried in the URL. Header-supplied secrets are compared in constant
+    #    time. Absent a session token, a valid header token is accepted for
+    #    direct/back-compat callers.
     if not CALL_SERVER_TOKEN:
         await websocket.close(code=4003, reason="CALL_SERVER_TOKEN not configured")
         return
-    token = websocket.query_params.get("token")
-    if token != CALL_SERVER_TOKEN:
+    session_token = websocket.query_params.get("session")
+    header_token = websocket.headers.get("x-call-token")
+    authorized = _consume_stream_session_token(session_token or "") or _tokens_match(
+        header_token, CALL_SERVER_TOKEN
+    )
+    if not authorized:
         await websocket.close(code=4003, reason="Unauthorized")
         return
-            
-    # 2. Rate Limiting Request Rate
+
+    # 2. Rate Limiting Request Rate — guarded so concurrent handlers can't
+    #    over-commit the window via a check-then-mutate race across ``await``.
     client_ip = websocket.client.host if websocket.client else "unknown"
     now = time.time()
-    client_ips[client_ip] = [t for t in client_ips[client_ip] if now - t < RATE_LIMIT_WINDOW]
-    if len(client_ips[client_ip]) >= MAX_REQUESTS_PER_WINDOW:
-        await websocket.close(code=4029, reason="Rate limit exceeded")
-        return
-    client_ips[client_ip].append(now)
-    
-    # 3. Connection Limiting
-    if active_connections >= MAX_CONCURRENT_CONNECTIONS:
-        await websocket.close(code=1013, reason="Server busy")
-        return
-        
-    active_connections += 1
+    async with _ips_lock:
+        window = [t for t in client_ips[client_ip] if now - t < RATE_LIMIT_WINDOW]
+        if len(window) >= MAX_REQUESTS_PER_WINDOW:
+            client_ips[client_ip] = window
+            await websocket.close(code=4029, reason="Rate limit exceeded")
+            return
+        window.append(now)
+        client_ips[client_ip] = window
+
+    # 3. Connection Limiting — atomically check-and-increment under the lock so
+    #    MAX_CONCURRENT_CONNECTIONS is never over-committed.
+    async with _conn_lock:
+        if active_connections >= MAX_CONCURRENT_CONNECTIONS:
+            await websocket.close(code=1013, reason="Server busy")
+            return
+        active_connections += 1
     try:
         print("Client connected")
         await websocket.accept()
@@ -269,7 +377,8 @@ async def handle_media_stream(websocket: WebSocket):
 
             await asyncio.gather(receive_from_twilio(), send_to_twilio())
     finally:
-        active_connections -= 1
+        async with _conn_lock:
+            active_connections -= 1
 
 async def handle_response_done(response, openai_ws):
     """Handle the response.done event and process any function calls."""
@@ -380,9 +489,20 @@ def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
 
 def main(args=None):
     """Run the Praison AI Call Server."""
+    # The ``praisonai call`` entry point runs a real server, so honour the
+    # user's ``.env`` here (explicit run-time load, not an import-time side
+    # effect). Module globals were captured at import — before this load — so
+    # refresh the ones consumed at request time, otherwise a ``.env``-only
+    # ``OPENAI_API_KEY``/``CALL_SERVER_TOKEN``/rate-limit would be ignored.
+    from dotenv import load_dotenv
+    load_dotenv()
+    _refresh_env_globals()
+    default_port = int(os.getenv('PORT', PORT))
+    use_public_env = os.getenv('PUBLIC', 'false').lower() == 'true'
+
     parser = argparse.ArgumentParser(description="Run the Praison AI Call Server.")
     parser.add_argument('--public', action='store_true', help="Use ngrok to expose the server publicly")
-    parser.add_argument('--port', type=int, default=PORT, help="Port to run the server on")
+    parser.add_argument('--port', type=int, default=default_port, help="Port to run the server on")
     parser.add_argument('--host', type=str, default="127.0.0.1", help="Host to bind the server to")
 
     if args is None:
@@ -392,7 +512,7 @@ def main(args=None):
 
     port = args.port
     host = args.host
-    use_public = args.public or PUBLIC
+    use_public = args.public or use_public_env
 
     run_server(port=port, host=host, use_public=use_public)
 

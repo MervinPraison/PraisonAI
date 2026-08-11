@@ -264,3 +264,65 @@ class TestExecutorEnforcement:
         assert result.status == "succeeded"
         # no scoping without a policy
         assert len(agent.tools) == 1
+
+
+# ── Intentional-silence contract on the full-gateway path ────────────
+
+
+class _SilentAgent(FakeAgent):
+    def __init__(self, reply):
+        super().__init__()
+        self._reply = reply
+
+    def chat(self, message):
+        return self._reply
+
+
+class TestExecutorIntentionalSilence:
+    """The full-gateway executor honours the core intentional-silence contract."""
+
+    @pytest.mark.parametrize("marker", ["NO_REPLY", "[SILENT]", "SILENT", " no_reply "])
+    def test_silence_marker_suppresses_delivery(self, marker):
+        runner = FakeRunner()
+        delivered = []
+        executor = ScheduledAgentExecutor(
+            runner=runner,
+            agent_resolver=lambda _id: _SilentAgent(marker),
+            delivery_handler=lambda target, text: delivered.append(text),
+        )
+        job = FakeJob(delivery=FakeDelivery())
+        result = _run(executor._execute_one(job))
+        # Run still completes and is recorded as succeeded; only delivery is
+        # suppressed so the raw control token is never posted.
+        assert result.status == "succeeded"
+        assert result.delivered is False
+        assert delivered == []
+        assert runner.runs and runner.runs[-1]["status"] == "succeeded"
+        assert runner.runs[-1]["delivered"] is False
+
+    def test_ordinary_output_delivered(self):
+        runner = FakeRunner()
+        delivered = []
+        executor = ScheduledAgentExecutor(
+            runner=runner,
+            agent_resolver=lambda _id: _SilentAgent("2 urgent emails need reply"),
+            delivery_handler=lambda target, text: delivered.append(text),
+        )
+        job = FakeJob(delivery=FakeDelivery())
+        result = _run(executor._execute_one(job))
+        assert result.status == "succeeded"
+        assert result.delivered is True
+        assert delivered == ["2 urgent emails need reply"]
+
+    def test_prose_mentioning_marker_delivered(self):
+        runner = FakeRunner()
+        delivered = []
+        executor = ScheduledAgentExecutor(
+            runner=runner,
+            agent_resolver=lambda _id: _SilentAgent("I think NO_REPLY is a good idea"),
+            delivery_handler=lambda target, text: delivered.append(text),
+        )
+        job = FakeJob(delivery=FakeDelivery())
+        result = _run(executor._execute_one(job))
+        assert result.delivered is True
+        assert delivered == ["I think NO_REPLY is a good idea"]

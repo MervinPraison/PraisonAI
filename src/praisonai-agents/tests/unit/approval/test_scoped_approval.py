@@ -94,6 +94,104 @@ class TestBuildPermissionTarget:
 
         assert build_permission_target("edit_file", {}) == "tool:edit_file"
 
+    def test_shell_target_preserves_command_identity(self, tmp_path, monkeypatch):
+        # The shell target is always ``bash:<command>`` verbatim — including for
+        # out-of-workspace commands — so command-specific rules (e.g.
+        # ``deny: bash:rm *``) can still match. The out-of-workspace boundary is
+        # enforced downstream by ``PermissionManager`` (see the boundary tests
+        # below), NOT by mangling the target into a path-only namespace (which
+        # would silently evade command-scoped deny rules).
+        from praisonaiagents.approval.utils import build_permission_target
+
+        monkeypatch.chdir(tmp_path)
+        assert (
+            build_permission_target("execute_command", {"command": "cat ./notes.txt"})
+            == "bash:cat ./notes.txt"
+        )
+        assert (
+            build_permission_target("execute_command", {"command": "cat /etc/passwd"})
+            == "bash:cat /etc/passwd"
+        )
+        assert (
+            build_permission_target(
+                "execute_command", {"command": "echo hi > /tmp/evil.txt"}
+            )
+            == "bash:echo hi > /tmp/evil.txt"
+        )
+
+
+# ── Workspace-boundary enforcement (PermissionManager) ──────────────────────
+
+
+class TestShellWorkspaceBoundary:
+    """The out-of-workspace boundary is enforced by ``PermissionManager`` on the
+    plain ``bash:<command>`` target, so a broad ``bash:*`` / "allow shell" /
+    session grant cannot silently authorise external paths *and* a
+    command-specific ``deny`` still fires (no target-namespace evasion)."""
+
+    def _mgr(self, tmp_path, rule_pattern, action):
+        from praisonaiagents.permissions import (
+            PermissionManager,
+            PermissionAction,
+        )
+        from praisonaiagents.permissions.rules import PermissionRule
+
+        mgr = PermissionManager(
+            storage_dir=str(tmp_path / "perm"),
+            agent_name="w",
+            workspace_root=str(tmp_path / "ws"),
+        )
+        mgr.add_rule(
+            PermissionRule(pattern=rule_pattern, action=PermissionAction(action))
+        )
+        return mgr
+
+    def test_broad_allow_does_not_cover_external_path(self, tmp_path):
+        # PR core goal: ``bash:*`` allow must NOT silently authorise a command
+        # touching a path outside the workspace — it escalates to ASK.
+        from praisonaiagents.permissions import PermissionAction
+
+        mgr = self._mgr(tmp_path, "bash:*", "allow")
+        result = mgr.check("bash:cat /etc/passwd", agent_name="w")
+        assert result.action == PermissionAction.ASK
+
+    def test_broad_allow_still_covers_in_workspace(self, tmp_path):
+        # In-workspace commands under a broad allow are unchanged (no regression).
+        from praisonaiagents.permissions import PermissionAction
+
+        ws = tmp_path / "ws"
+        ws.mkdir(parents=True, exist_ok=True)
+        mgr = self._mgr(tmp_path, "bash:*", "allow")
+        result = mgr.check(f"bash:cat {ws}/notes.txt", agent_name="w")
+        assert result.action == PermissionAction.ALLOW
+
+    def test_command_deny_still_fires_on_external_path(self, tmp_path):
+        # Regression guard for the reviewer-reported bypass: an explicit
+        # ``deny: bash:rm *`` MUST still win even when the path is external —
+        # the target must keep its command identity so the deny matches.
+        from praisonaiagents.permissions import PermissionAction
+
+        mgr = self._mgr(tmp_path, "bash:rm *", "deny")
+        result = mgr.check("bash:rm /tmp/evil.txt", agent_name="w")
+        assert result.action == PermissionAction.DENY
+
+    def test_no_workspace_root_is_backward_compatible(self, tmp_path):
+        # Backward-compat: with no ``workspace_root`` configured, the boundary
+        # stays off and a broad allow covers the external command (unchanged).
+        from praisonaiagents.permissions import (
+            PermissionManager,
+            PermissionAction,
+        )
+        from praisonaiagents.permissions.rules import PermissionRule
+
+        mgr = PermissionManager(storage_dir=str(tmp_path / "perm"), agent_name="w")
+        assert mgr.workspace_root is None
+        mgr.add_rule(
+            PermissionRule(pattern="bash:*", action=PermissionAction("allow"))
+        )
+        result = mgr.check("bash:cat /etc/passwd", agent_name="w")
+        assert result.action == PermissionAction.ALLOW
+
 
 # ── ConsoleBackend scoped prompt ────────────────────────────────────────────
 
@@ -314,3 +412,60 @@ class TestRegistryScopeBridge:
         assert not registry._is_session_scoped(
             "worker", "execute_command", {"command": "rm -rf /"}
         )
+
+
+# ── @require_approval positional-argument scoping ───────────────────────────
+
+
+class TestRequireApprovalPositionalScoping:
+    """A single approval must not unlock a decorated tool for *other* argument
+    values — including when the tool is invoked with positional args.
+    """
+
+    def test_positional_call_is_argument_scoped(self, monkeypatch):
+        # One env auto-approved positional call must NOT unlock a different
+        # positional value on the same tool.
+        from praisonaiagents.approval import (
+            require_approval,
+            is_already_approved,
+            _bind_call_args,
+            clear_approval_context,
+        )
+
+        clear_approval_context()
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
+        @require_approval(risk_level="high")
+        def read_secret(path):
+            return f"read {path}"
+
+        read_secret("/tmp/notes.txt")
+
+        assert is_already_approved(
+            "read_secret", _bind_call_args(read_secret, ("/tmp/notes.txt",), {})
+        )
+        # A different positional value must still require approval.
+        assert not is_already_approved(
+            "read_secret", _bind_call_args(read_secret, ("/etc/cron.d/evil",), {})
+        )
+
+    def test_bind_call_args_matches_positional_and_keyword(self):
+        # Calling positionally vs by keyword for the same value yields the same
+        # approval key, so an approval granted one way is honoured the other.
+        from praisonaiagents.approval import _bind_call_args
+
+        def tool(path, mode="r"):
+            return path
+
+        assert _bind_call_args(tool, ("/a",), {}) == _bind_call_args(
+            tool, (), {"path": "/a"}
+        )
+
+    def test_bind_call_args_falls_back_for_builtin(self):
+        # C-implemented callables have no bindable signature; distinct positional
+        # calls must still yield distinct keys (via ``__args__``), never collapse.
+        from praisonaiagents.approval import _bind_call_args
+
+        a = _bind_call_args(len, ("abc",), {})
+        b = _bind_call_args(len, ("abcd",), {})
+        assert a != b

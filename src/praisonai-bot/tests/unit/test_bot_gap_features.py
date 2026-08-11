@@ -328,11 +328,41 @@ class TestConfigSchema:
         finally:
             del os.environ["_TEST_BOT_TOKEN"]
 
-    def test_missing_env_var_fails(self):
+    def test_missing_env_var_isolates_channel(self):
+        # Partial-credential isolation (Issue #3159): an unset channel token
+        # env var must NOT abort the whole gateway config. The channel keeps
+        # a degraded (empty) token so the runtime skips only that channel and
+        # every healthy channel keeps serving.
         from praisonai_bot.bots._config_schema import validate_bot_config
         os.environ.pop("_NONEXISTENT_TOKEN", None)
-        with pytest.raises(ValueError, match="not set"):
-            validate_bot_config({"channels": {"telegram": {"token": "${_NONEXISTENT_TOKEN}"}}})
+        os.environ["_TEST_HEALTHY_TOKEN"] = "healthy-token"
+        try:
+            result = validate_bot_config({
+                "channels": {
+                    "telegram": {"token": "${_NONEXISTENT_TOKEN}"},
+                    "slack": {"token": "${_TEST_HEALTHY_TOKEN}"},
+                }
+            })
+            # Degraded channel: empty token → runtime skips it.
+            assert result.channels["telegram"].token == ""
+            # Healthy channel is unaffected and keeps serving.
+            assert result.channels["slack"].token == "healthy-token"
+        finally:
+            del os.environ["_TEST_HEALTHY_TOKEN"]
+
+    def test_degraded_channel_visible_in_health(self):
+        # Observability (Issue #3159): a channel skipped at startup because its
+        # credential was unavailable must stay queryable in health() as
+        # ``degraded`` — it must not silently vanish and become
+        # indistinguishable from a channel that was never configured.
+        from praisonai_bot.gateway.server import GatewayConfig, WebSocketGateway
+
+        gw = WebSocketGateway(GatewayConfig())
+        gw._degraded_channels["telegram"] = "credential unavailable"
+        health = gw.health()
+        assert "telegram" in health["channels"]
+        assert health["channels"]["telegram"]["status"] == "degraded"
+        assert health["channels"]["telegram"]["running"] is False
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -497,7 +527,11 @@ class TestDaemonService:
         assert "[Service]" in unit
         assert "praisonai" in unit
         assert "/tmp/test_bot.yaml" in unit
-        assert "Restart=always" in unit
+        # Honour the gateway exit-code contract: restart on failure but stop on
+        # the fatal-config exit (78) instead of crash-looping forever.
+        assert "Restart=on-failure" in unit
+        assert "RestartPreventExitStatus=78" in unit
+        assert "Restart=always" not in unit
 
     def test_launchd_plist_generation(self):
         from praisonai_bot.daemon.launchd import _generate_plist
@@ -506,6 +540,52 @@ class TestDaemonService:
         assert "ai.praison.bot" in plist
         assert "/tmp/test_bot.yaml" in plist
         assert "KeepAlive" in plist
+        # Only relaunch on failure/crash, never on a clean exit (not <true/>).
+        assert "<key>SuccessfulExit</key>" in plist
+        assert "<key>KeepAlive</key>\n    <true/>" not in plist
+
+    def test_windows_startup_script_honours_fatal_config_exit(self):
+        from praisonai_bot.daemon.windows import _generate_startup_script
+        script = _generate_startup_script("/tmp/test_bot.yaml")
+        assert "78" in script
+        assert "ERRORLEVEL" in script
+
+    def test_windows_scheduled_task_points_at_wrapper_no_nested_quotes(self, monkeypatch, tmp_path):
+        # #3160 / Greptile P1: the task must invoke the generated .cmd wrapper
+        # (single, well-formed quoting) rather than an inline
+        # `cmd /c "<python> ... & if %ERRORLEVEL% ..."` string, which nests
+        # double quotes and misparses paths under `C:\Program Files`.
+        from praisonai_bot.daemon import windows as win
+
+        captured = {}
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+
+            class R:
+                returncode = 0
+                stdout = "SUCCESS"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(win.subprocess, "run", fake_run)
+        monkeypatch.setattr(win, "_startup_folder", lambda: str(tmp_path))
+
+        result = win._create_scheduled_task("/tmp/test_bot.yaml")
+        assert result["ok"]
+
+        tr_value = captured["cmd"][captured["cmd"].index("/TR") + 1]
+        # The task command is just the wrapper path — no inline cmd /c chain.
+        assert "cmd /c" not in tr_value
+        assert "%ERRORLEVEL%" not in tr_value
+        assert win.TASK_NAME in tr_value
+        # The wrapper script was written and owns the exit-78 translation.
+        script_path = win._startup_script_path()
+        assert os.path.exists(script_path)
+        with open(script_path) as f:
+            body = f.read()
+        assert str(win.GATEWAY_FATAL_CONFIG_EXIT_CODE) in body
+        assert "ERRORLEVEL" in body
 
     def test_detect_platform(self):
         from praisonai_bot.daemon import _detect_platform

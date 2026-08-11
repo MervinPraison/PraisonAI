@@ -229,6 +229,87 @@ class _BaseAgentScheduler:
     _total_cost: float
     _start_time: Optional[datetime]
 
+    def _should_suppress_delivery(self, text: str) -> bool:
+        """Return True when a run's whole output is an exact silence marker.
+
+        Honours the core intentional-silence contract (NO_REPLY / [SILENT] /
+        SILENT) on the unattended path so both sync and async schedulers stay
+        quiet instead of delivering the literal marker. Prose that merely
+        mentions the token is unaffected (exact-match).
+        """
+        try:
+            from praisonaiagents.bots.silence import is_intentional_silence_response
+            return is_intentional_silence_response(text)
+        except Exception:  # pragma: no cover - core primitive always present
+            return False
+
+    def _deliver_result(self, result: Any) -> None:
+        """Route a successful result to the configured chat target.
+
+        No-op when no ``deliver`` target is set. The delivery target is
+        resolved and sent through the shared ``DeliveryRouter`` (rate limiting,
+        idempotency dedup, dead-target self-heal), reusing the same machinery
+        the gateway uses — without requiring the full gateway. Never raises: a
+        delivery problem must not tear down the scheduler. Shared by both the
+        sync and async schedulers.
+        """
+        if not self.deliver:
+            return
+        text = str(result)
+        # Honour the core intentional-silence contract on the unattended path:
+        # a run whose whole output is an exact silence marker (NO_REPLY /
+        # [SILENT] / SILENT) means "nothing worth sending — stay quiet". The
+        # run still completes and is recorded in history; only delivery is
+        # suppressed. Prose that merely mentions the token is unaffected
+        # (is_intentional_silence_response is exact-match).
+        if self._should_suppress_delivery(text):
+            logger.info(
+                "Scheduled run chose intentional silence; delivery suppressed"
+            )
+            return
+        try:
+            if self._delivery is None:
+                # Normally built eagerly at __init__ for a creation-time
+                # pre-flight; rebuild here as a fallback if that was skipped.
+                self._build_delivery()
+            if self._delivery is not None:
+                self._delivery.deliver(text)
+        except Exception as e:
+            logger.error(f"Scheduler delivery error: {e}")
+
+    def _build_delivery(self) -> None:
+        """Construct the delivery wrapper, running its creation-time pre-flight.
+
+        Building :class:`SchedulerDelivery` here resolves the ``deliver`` token
+        (rewriting a symbolic ``"origin"`` to the persisted concrete origin) and
+        logs a preview / actionable warning for the configured destination —
+        without touching the network. Called eagerly at ``__init__`` so that
+        pre-flight happens at *creation*, with a lazy fallback in
+        ``_deliver_result``. Never raises: a delivery-setup problem must not
+        prevent the scheduler from being created or a run from completing.
+        Shared by both the sync and async schedulers.
+        """
+        try:
+            from praisonai.scheduler._delivery import SchedulerDelivery
+            job_id = self.config.get("agent_id", "") if self.config else ""
+            # Pass the persisted origin (if any) so a ``deliver="origin"``
+            # target resolves to the concrete channel the job was created
+            # in — without the full gateway.
+            origin = SchedulerDelivery.origin_from_config(self.config)
+            self._delivery = SchedulerDelivery(
+                self.deliver, job_id=job_id, origin=origin
+            )
+        except Exception as e:
+            logger.error(f"Scheduler delivery setup error: {e}")
+
+    def _budget_exceeded(self) -> bool:
+        """Return True when the accumulated cost has reached ``max_cost``.
+
+        A ``max_cost`` of 0 is a real (zero) budget and must trip immediately;
+        only ``None`` means "no budget limit".
+        """
+        return self.max_cost is not None and self._total_cost >= self.max_cost
+
     def _build_stats(
         self,
         *,
@@ -279,6 +360,12 @@ class _BaseAgentScheduler:
                     if state.get("pid") == current_pid:
                         state["executions"] = self._execution_count
                         state["cost"] = round(self._total_cost, 4)
+                        # Persist the wall-clock anchor so a restart resumes the
+                        # schedule at the next real occurrence instead of
+                        # re-phasing from process start (see issue #3526).
+                        last_run = getattr(self, "_last_run_at", None)
+                        if last_run is not None:
+                            state["last_run_at"] = last_run
                         with open(path, "w") as f:
                             json.dump(state, f, indent=2)
                         break
@@ -286,3 +373,33 @@ class _BaseAgentScheduler:
                     continue
         except Exception as e:
             logger.debug("Failed to update state: %s", e)
+
+    def _load_persisted_last_run(self) -> None:
+        """Restore ``_last_run_at`` from this PID's daemon state file, if any.
+
+        Lets a restarted daemon resume a wall-clock (cron) schedule from where
+        it left off — a slot missed during downtime runs once, then re-anchors
+        — instead of re-phasing from process start (see issue #3526). No-op for
+        plain interval schedules and when no daemon state file exists.
+        """
+        try:
+            state_dir = os.path.expanduser("~/.praisonai/schedulers")
+            if not os.path.exists(state_dir):
+                return
+            current_pid = os.getpid()
+            for fname in os.listdir(state_dir):
+                if not fname.endswith(".json"):
+                    continue
+                path = os.path.join(state_dir, fname)
+                try:
+                    with open(path, "r") as f:
+                        state = json.load(f)
+                    if state.get("pid") == current_pid:
+                        last_run = state.get("last_run_at")
+                        if last_run is not None:
+                            self._last_run_at = float(last_run)
+                        break
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug("Failed to load persisted last_run_at: %s", e)

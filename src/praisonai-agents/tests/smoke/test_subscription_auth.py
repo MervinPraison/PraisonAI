@@ -64,66 +64,42 @@ def test_claude_code_auth_flow():
             assert params.get("api_key") == "sk-ant-oat-test-oauth-token"
 
 
-def test_auth_refresh_on_401():
-    """Test that auth errors trigger credential refresh and retry."""
-    # First call: return 401, second call: success
+def test_claude_code_does_not_refresh_on_auth_error():
+    """claude-code must not rotate shared OAuth tokens on auth errors."""
     mock_response = Mock()
     mock_response.choices = [Mock()]
     mock_response.choices[0].message = Mock()
-    mock_response.choices[0].message.content = "Success after refresh"
-    
-    auth_error = Exception("AuthenticationError: Invalid API key")
-    
+    mock_response.choices[0].message.content = "Success after retry"
+
+    auth_error = Exception("Unauthorized")
+
     with patch('litellm.completion') as mock_completion:
-        # First call raises auth error, second succeeds
         mock_completion.side_effect = [auth_error, mock_response]
-        
-        # Mock credential resolution and refresh
+
         initial_creds = SubscriptionCredentials(
             api_key="sk-ant-oat-expired-token",
-            base_url="https://api.anthropic.com", 
-            headers={},
-            auth_scheme="bearer",
-            source="claude-code-test"
-        )
-        
-        refreshed_creds = SubscriptionCredentials(
-            api_key="sk-ant-oat-fresh-token",
             base_url="https://api.anthropic.com",
             headers={},
-            auth_scheme="bearer", 
-            source="claude-code-refreshed"
+            auth_scheme="bearer",
+            source="claude-code-keychain",
         )
-        
+
         with patch('praisonaiagents.auth.resolve_subscription_credentials') as mock_resolve:
             mock_resolve.return_value = initial_creds
-            
+
             with patch('praisonaiagents.auth.subscription.registry.get_subscription_provider') as mock_provider:
                 mock_auth_provider = Mock()
-                mock_auth_provider.refresh.return_value = refreshed_creds
                 mock_provider.return_value = mock_auth_provider
-                
-                # Mock error classification to detect auth error
-                from praisonaiagents.llm.llm import LLM
-                with patch.object(LLM, '_classify_error_and_should_retry') as mock_classify:
-                    # First call: auth error, can retry
-                    # Second call: shouldn't be called since retry succeeds
-                    mock_classify.return_value = ("auth", True, 0.0)
-                    
-                    agent = Agent(
-                        name="test-agent",
-                        instructions="Test agent",
-                        auth="claude-code"
-                    )
-                    
-                    # This should trigger refresh on first 401 and succeed on retry
-                    response = agent.start("Test refresh flow")
-                    
-                    # Verify refresh was called
-                    assert mock_auth_provider.refresh.called
-                    
-                    # Verify we got success response
-                    assert "Success after refresh" in response
+
+                agent = Agent(
+                    name="test-agent",
+                    instructions="Test agent",
+                    auth="claude-code",
+                )
+
+                agent.start("Test no refresh on auth error")
+
+                assert not mock_auth_provider.refresh.called
 
 
 def test_invalid_auth_provider():
@@ -160,7 +136,7 @@ def test_gemini_experimental_error():
 if __name__ == "__main__":
     # Manual test runner for development
     test_claude_code_auth_flow()
-    test_auth_refresh_on_401()
+    test_claude_code_does_not_refresh_on_auth_error()
     test_invalid_auth_provider()
     test_codex_experimental_error()
     test_gemini_experimental_error()

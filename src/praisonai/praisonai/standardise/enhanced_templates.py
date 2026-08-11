@@ -567,7 +567,7 @@ if __name__ == "__main__":
     agents = AgentTeam(
         agents=[primary_agent, secondary_agent],
         tasks=[primary_task, verification_task],
-        verbose=True,
+        output="verbose",
     )
     
     # Execute

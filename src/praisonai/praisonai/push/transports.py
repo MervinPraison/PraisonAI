@@ -157,6 +157,18 @@ class PollingTransport:
                 headers=headers,
             ) as resp:
                 resp.raise_for_status()
+        else:
+            # The polling contract does not currently include publish, create,
+            # or presence-query endpoints, so silently returning here would
+            # drop the message. Surface the drop so callers can decide (fail
+            # startup, retry over WS, or disable fallback) instead of losing it.
+            raise NotImplementedError(
+                f"PollingTransport does not support message type {msg_type!r}. "
+                "This operation requires the WebSocket transport. Either disable "
+                "fallback_to_polling, or add server-side /api/push/poll/publish + "
+                "/api/push/poll/create + /api/push/poll/presence routes and map "
+                "them here."
+            )
 
     async def receive(self) -> Dict[str, Any]:
         """Long-poll for the next message."""

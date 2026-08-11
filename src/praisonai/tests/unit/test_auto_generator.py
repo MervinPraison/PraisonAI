@@ -595,20 +595,31 @@ class TestBaseAutoGenerator:
         for task in moderate_tasks:
             assert BaseAutoGenerator.analyze_complexity(task) == 'moderate', f"Failed for: {task}"
     
-    def test_get_available_tools(self):
-        """Test that available tools list is returned correctly."""
+    def test_get_available_tools_falls_back_to_static_list(self):
+        """When the resolver is unavailable, the frozen legacy list is returned."""
         from praisonai.auto import BaseAutoGenerator, AVAILABLE_TOOLS
-        
-        tools = BaseAutoGenerator.get_available_tools()
-        
-        # Should return a copy, not the original
+
+        gen = BaseAutoGenerator.__new__(BaseAutoGenerator)
+        with patch.object(gen, "_available_tools", return_value=[]):
+            tools = gen.get_available_tools()
+
+        # Should return a copy of the frozen list, not the original
         assert tools == AVAILABLE_TOOLS
         assert tools is not AVAILABLE_TOOLS
-        
-        # Should contain expected tools
         assert "WebsiteSearchTool" in tools
         assert "PDFSearchTool" in tools
         assert "ScrapeWebsiteTool" in tools
+
+    def test_get_available_tools_prefers_resolver(self):
+        """When the resolver reports tools, they take precedence over the static list."""
+        from praisonai.auto import BaseAutoGenerator
+
+        gen = BaseAutoGenerator.__new__(BaseAutoGenerator)
+        resolved = ["read_file", "write_file", "internet_search"]
+        with patch.object(gen, "_available_tools", return_value=resolved):
+            tools = gen.get_available_tools()
+
+        assert tools == resolved
 
 
 class TestWorkflowDynamicAgentCount:
@@ -625,11 +636,24 @@ class TestWorkflowDynamicAgentCount:
             assert "STEP 3: ASSIGN TOOLS" in prompt
     
     def test_prompt_includes_tools_list(self):
-        """Test that workflow prompt includes available tools."""
+        """Test that workflow prompt lists the resolver-provided tools."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(topic="Research AI trends")
-            prompt = generator._get_prompt("sequential")
-            
+            resolved = ["internet_search", "read_file", "write_file"]
+            with patch.object(generator, "_available_tools", return_value=resolved):
+                prompt = generator._get_prompt("sequential")
+
+            assert "Available Tools:" in prompt
+            for tool in resolved:
+                assert tool in prompt
+
+    def test_prompt_falls_back_to_static_tools_when_resolver_empty(self):
+        """When the resolver returns nothing, the frozen legacy list is used."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(topic="Research AI trends")
+            with patch.object(generator, "_available_tools", return_value=[]):
+                prompt = generator._get_prompt("sequential")
+
             assert "Available Tools:" in prompt
             assert "WebsiteSearchTool" in prompt
             assert "PDFSearchTool" in prompt
@@ -798,27 +822,56 @@ class TestWorkflowMergeSupport:
 class TestWorkflowFrameworkSupport:
     """Test suite for framework support in WorkflowAutoGenerator."""
     
+    @staticmethod
+    def _fake_registry(name="crewai", default="praisonai", supports_workflow=True):
+        """Registry double whose adapter reports available, so framework
+        validation passes without the framework actually being installed.
+
+        ``supports_workflow`` mirrors the adapter ``SUPPORTS_WORKFLOW`` flag the
+        WorkflowAutoGenerator now enforces via ``require_workflow=True``.
+        """
+        from unittest.mock import MagicMock
+        adapter = MagicMock()
+        adapter.name = name
+        adapter.is_available.return_value = True
+        adapter.SUPPORTS_WORKFLOW = supports_workflow
+        registry = MagicMock()
+        registry.create.return_value = adapter
+        registry.pick_default.return_value = default
+        return registry
+
     def test_workflow_generator_accepts_framework_parameter(self):
-        """Test that WorkflowAutoGenerator accepts framework parameter."""
+        """Explicit framework goes straight to create() without pick_default()."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            registry = self._fake_registry("crewai")
             generator = WorkflowAutoGenerator(
                 topic="Test task",
-                framework="crewai"
+                framework="crewai",
+                adapter_registry=registry,
             )
             assert generator.framework == "crewai"
+            registry.create.assert_called_once_with("crewai")
+            registry.pick_default.assert_not_called()
     
     def test_workflow_generator_default_framework_is_praisonai(self):
-        """Test that default framework is praisonai."""
+        """Omitted framework resolves via the shared registry default selector."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            generator = WorkflowAutoGenerator(topic="Test task")
+            registry = self._fake_registry("praisonai", default="praisonai")
+            generator = WorkflowAutoGenerator(
+                topic="Test task",
+                adapter_registry=registry,
+            )
             assert generator.framework == "praisonai"
+            registry.pick_default.assert_called_once()
+            registry.create.assert_called_once_with("praisonai")
     
     def test_save_workflow_respects_framework(self):
         """Test that _save_workflow uses the specified framework."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(
                 topic="Test task",
-                framework="crewai"
+                framework="crewai",
+                adapter_registry=self._fake_registry("crewai"),
             )
             # The framework should be stored and used in output
             assert generator.framework == "crewai"

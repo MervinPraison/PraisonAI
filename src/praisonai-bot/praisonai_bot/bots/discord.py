@@ -39,6 +39,7 @@ from ._commands import (
     handle_sessions_command,
     handle_resume_command,
     handle_reasoning_command,
+    handle_tasks_command,
     get_last_user_message,
     build_command_access_policy,
 )
@@ -366,6 +367,13 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 elif command == "reasoning":
                     user_id = str(message.author.id)
                     response = handle_reasoning_command(self._session, user_id, self._agent)
+                    await message.reply(response)
+                    return
+                elif command == "tasks":
+                    user_id = str(message.author.id)
+                    parts = bot_message.text.split(maxsplit=1)
+                    args = parts[1] if len(parts) > 1 else None
+                    response = handle_tasks_command(user_id, args)
                     await message.reply(response)
                     return
                 elif command and command in self._command_handlers:

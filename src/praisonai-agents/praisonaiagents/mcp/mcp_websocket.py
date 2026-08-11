@@ -18,7 +18,6 @@ Protocol Revision: 2025-11-25
 
 import asyncio
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import threading
 import inspect
@@ -28,7 +27,7 @@ from typing import Any, Dict, Optional, List
 logger = get_logger("mcp-websocket")
 
 # Import shared utilities for thread-safe event loop and schema fixing
-from .mcp_schema_utils import ThreadLocalEventLoop, fix_array_schemas
+from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict
 
 def is_websocket_url(url: str) -> bool:
     """
@@ -354,18 +353,7 @@ class WebSocketMCPTool:
     
     def to_openai_tool(self) -> Dict[str, Any]:
         """Convert the tool to OpenAI function calling format."""
-        # Fix array schemas to include 'items' attribute (using shared utility)
-        fixed_schema = fix_array_schemas(self.input_schema)
-        
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": fixed_schema
-            },
-            "__praisonai_deferrable__": True  # Mark MCP tools as deferrable for tool search
-        }
+        return build_openai_tool_dict(self.name, self.description, self.input_schema)
 
 class WebSocketMCPClient:
     """

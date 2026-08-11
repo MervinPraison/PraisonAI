@@ -15,6 +15,7 @@ __all__ = [
     'traces_app',
     'env_app',
     'session_app',
+    'usage_app',
     'schedule_app',
     'serve_app',
     'completion_app',
@@ -54,6 +55,9 @@ def __getattr__(name: str):
     elif name == 'session_app':
         from .session import app as session_app
         return session_app
+    elif name == 'usage_app':
+        from .usage import app as usage_app
+        return usage_app
     elif name == 'schedule_app':
         from .schedule import app as schedule_app
         return schedule_app

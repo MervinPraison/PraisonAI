@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "praisonai-gateway.fullname" . }}
+  labels:
+    {{- include "praisonai-gateway.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: gateway
+      protocol: TCP
+      name: gateway
+  selector:
+    {{- include "praisonai-gateway.selectorLabels" . | nindent 4 }}

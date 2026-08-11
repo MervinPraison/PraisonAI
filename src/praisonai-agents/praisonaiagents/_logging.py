@@ -4,7 +4,6 @@ This module consolidates all logging configuration in one place to avoid duplica
 """
 
 import os
-import json
 import logging
 from typing import Any, Dict, List, Optional, Union
 
@@ -195,6 +194,9 @@ class StructuredFormatter(logging.Formatter):
         if hasattr(record, 'extra_data'):
             extra = {k: v for k, v in record.extra_data.items() if k not in self._STANDARD_FIELDS}
             log_data.update(extra)
+
+        # Deferred: json is only needed for opt-in structured logging
+        import json
 
         return json.dumps(log_data)
 

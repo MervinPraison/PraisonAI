@@ -248,6 +248,140 @@ class TestDefaultSessionStore:
         assert data["session_id"] == "test-session"
         assert len(data["messages"]) == 1
     
+    def test_corrupt_file_quarantined_not_silently_dropped(self, temp_store):
+        """A malformed session file is quarantined aside, not silently reset.
+
+        Regression for Issue #3715: previously a corrupt JSON file was read as
+        an empty session and then overwritten by the next write, permanently
+        destroying recoverable history with only a log line. Now the raw file
+        is renamed to ``<file>.corrupt-*`` before starting fresh so the bytes
+        survive for recovery and the reset is surfaced, not silent.
+        """
+        filepath = os.path.join(temp_store.session_dir, "corrupt-session.json")
+        corrupt_bytes = b'{"session_id": "corrupt-session", "messages": ['  # truncated
+        with open(filepath, "wb") as f:
+            f.write(corrupt_bytes)
+
+        # Reading returns a fresh (empty) session so callers keep working ...
+        history = temp_store.get_chat_history("corrupt-session")
+        assert history == []
+
+        # ... but the corrupt bytes are preserved *byte-for-byte* in a quarantine
+        # file and the original path no longer holds the unusable content that a
+        # subsequent write would otherwise clobber.
+        quarantined = [
+            name
+            for name in os.listdir(temp_store.session_dir)
+            if name.startswith("corrupt-session.json.corrupt-")
+        ]
+        assert len(quarantined) == 1
+        with open(
+            os.path.join(temp_store.session_dir, quarantined[0]), "rb"
+        ) as f:
+            assert f.read() == corrupt_bytes
+
+    def test_corruption_fires_persist_failed_hook(self, temp_store):
+        """A corrupt-session read surfaces via SESSION_PERSIST_FAILED (#3715)."""
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent, HookResult
+
+        registry = get_default_registry()
+        captured = {}
+
+        def _hook(event_input):
+            captured["session_id"] = event_input.session_id
+            captured["spill_path"] = event_input.spill_path
+            captured["error"] = event_input.error
+            return HookResult.allow()
+
+        hook_id = registry.register_function(
+            HookEvent.SESSION_PERSIST_FAILED, _hook
+        )
+        try:
+            filepath = os.path.join(temp_store.session_dir, "bad.json")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("not json at all }}}")
+
+            temp_store.get_chat_history("bad")
+        finally:
+            registry.unregister(hook_id)
+
+        assert captured.get("session_id") == "bad"
+        assert captured.get("spill_path")
+        assert ".corrupt-" in captured["spill_path"]
+        assert "corrupt session file" in captured.get("error", "")
+
+    def test_invalid_utf8_file_quarantined(self, temp_store):
+        """Invalid-UTF-8 bytes are quarantined, not propagated (#3715).
+
+        ``json.load`` on a non-UTF-8 file raises ``UnicodeDecodeError`` (a
+        ``ValueError`` subclass, not ``JSONDecodeError``) *before* JSON parsing.
+        It must follow the same quarantine-and-recover path rather than crashing
+        the read.
+        """
+        filepath = os.path.join(temp_store.session_dir, "binary-session.json")
+        invalid_utf8 = b"\xff\xfe\x00\x01 not valid utf-8"
+        with open(filepath, "wb") as f:
+            f.write(invalid_utf8)
+
+        # Read recovers instead of raising UnicodeDecodeError.
+        assert temp_store.get_chat_history("binary-session") == []
+
+        quarantined = [
+            name
+            for name in os.listdir(temp_store.session_dir)
+            if name.startswith("binary-session.json.corrupt-")
+        ]
+        assert len(quarantined) == 1
+        with open(
+            os.path.join(temp_store.session_dir, quarantined[0]), "rb"
+        ) as f:
+            assert f.read() == invalid_utf8
+
+    def test_hierarchical_store_quarantines_corrupt_file(self, temp_store):
+        """HierarchicalSessionStore inherits the quarantine-and-surface path (#3715).
+
+        The ``ExtendedSessionData`` override is exercised directly to confirm a
+        malformed hierarchical session file is quarantined and the corruption is
+        reported via ``SESSION_PERSIST_FAILED`` with the session id, quarantine
+        path, and error.
+        """
+        from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent, HookResult
+
+        store = HierarchicalSessionStore(session_dir=temp_store.session_dir)
+        registry = get_default_registry()
+        captured = {}
+
+        def _hook(event_input):
+            captured["session_id"] = event_input.session_id
+            captured["spill_path"] = event_input.spill_path
+            captured["error"] = event_input.error
+            return HookResult.allow()
+
+        hook_id = registry.register_function(
+            HookEvent.SESSION_PERSIST_FAILED, _hook
+        )
+        try:
+            filepath = os.path.join(store.session_dir, "hier-bad.json")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write('{"session_id": "hier-bad", "messages":')  # truncated
+
+            assert store.get_chat_history("hier-bad") == []
+        finally:
+            registry.unregister(hook_id)
+
+        quarantined = [
+            name
+            for name in os.listdir(store.session_dir)
+            if name.startswith("hier-bad.json.corrupt-")
+        ]
+        assert len(quarantined) == 1
+        assert captured.get("session_id") == "hier-bad"
+        assert ".corrupt-" in (captured.get("spill_path") or "")
+        assert "corrupt session file" in captured.get("error", "")
+
     def test_max_messages_limit(self):
         """Test that messages are trimmed to max limit."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1205,3 +1339,233 @@ class TestCompactionCheckpoint:
         session = temp_store.get_session("s1")
         assert session.last_compaction is None
         assert temp_store.get_working_history("s1") == []
+
+
+class TestSpillOnWriteFailure:
+    """Issue #3597: durable-write failure spills + signals + recovers."""
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        """Isolate PRAISONAI_HOME so the spill dir is under a temp path."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("PRAISONAI_HOME", str(home))
+        # paths.get_data_dir() caches; clear it so PRAISONAI_HOME is honoured.
+        from praisonaiagents import paths
+        paths._clear_cache()
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        store = DefaultSessionStore(session_dir=str(sessions))
+        yield store, home
+        paths._clear_cache()
+
+    def _spill_dir(self, home):
+        return home / "state" / "session_spill"
+
+    def test_write_failure_spills_message(self, env):
+        """A failed atomic write salvages the turn to a spill file."""
+        store, home = env
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            ok = store.add_user_message("s1", "hello-durable")
+        assert ok is False
+
+        spill_dir = self._spill_dir(home)
+        files = list(spill_dir.glob("s1.*.json"))
+        assert len(files) == 1
+        data = json.loads(files[0].read_text())
+        assert data["session_id"] == "s1"
+        assert data["messages"][0]["content"] == "hello-durable"
+
+    def test_spill_file_permissions_0600(self, env):
+        """Spill files are written with restrictive 0600 permissions."""
+        store, home = env
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "secret")
+        files = list(self._spill_dir(home).glob("s1.*.json"))
+        assert files
+        mode = os.stat(files[0]).st_mode & 0o777
+        assert mode == 0o600
+
+    def test_persist_failed_hook_fires(self, env):
+        """SESSION_PERSIST_FAILED is emitted on a durable-write failure."""
+        store, home = env
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent, HookResult
+
+        registry = get_default_registry()
+        captured = {}
+
+        def _hook(event_input):
+            captured["role"] = event_input.role
+            captured["content"] = event_input.content
+            captured["spilled"] = event_input.spilled
+            return HookResult.allow()
+
+        hook_id = registry.register_function(HookEvent.SESSION_PERSIST_FAILED, _hook)
+        try:
+            with patch.object(store, "_atomic_write_json", return_value=False):
+                store.add_assistant_message("s1", "reply-content")
+        finally:
+            registry.unregister(hook_id)
+
+        assert captured.get("role") == "assistant"
+        assert captured.get("content") == "reply-content"
+        assert captured.get("spilled") is True
+
+    def test_reingest_on_load(self, env):
+        """A spilled turn is folded back into the session on next load."""
+        store, home = env
+        # First a real message persists normally.
+        store.add_user_message("s1", "first")
+        # Then a write failure spills the second turn.
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "spilled-turn")
+
+        # A fresh store instance re-ingests on load.
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert "first" in contents
+        assert "spilled-turn" in contents
+
+        # Spill file is consumed after successful re-ingest.
+        assert not list(self._spill_dir(home).glob("s1.*.json"))
+
+    def test_reingest_no_duplicate(self, env):
+        """Re-ingest does not duplicate a turn already present on disk."""
+        store, home = env
+        store.add_user_message("s1", "first")
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "spilled-turn")
+
+        # Load twice; the second load must not re-add the same turn.
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        store2.get_chat_history("s1")
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert contents.count("spilled-turn") == 1
+
+    def test_no_spill_on_success(self, env):
+        """Happy path writes nothing to the spill dir."""
+        store, home = env
+        store.add_user_message("s1", "ok")
+        assert not self._spill_dir(home).exists() or not list(
+            self._spill_dir(home).glob("s1.*.json")
+        )
+
+    def test_rapid_failures_do_not_overwrite_spills(self, env):
+        """Consecutive failures in the same ms keep distinct spill files."""
+        store, home = env
+        fixed_ms = 1_700_000_000.0
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            with patch("praisonaiagents.session.store.time.time", return_value=fixed_ms):
+                store.add_user_message("s1", "turn-a")
+                store.add_user_message("s1", "turn-b")
+
+        files = list(self._spill_dir(home).glob("s1.*.json"))
+        assert len(files) == 2
+        contents = set()
+        for f in files:
+            data = json.loads(f.read_text())
+            contents.add(data["messages"][0]["content"])
+        assert contents == {"turn-a", "turn-b"}
+
+    def test_reingest_enforces_retention_window(self, env):
+        """Recovered turns go through the retention window like normal writes."""
+        store, home = env
+        store = DefaultSessionStore(
+            session_dir=store.session_dir,
+            max_messages=2,
+            retention=RETENTION_TRUNCATE,
+            active_window=2,
+        )
+        store.add_user_message("s1", "m1")
+        store.add_user_message("s1", "m2")
+        # Spill two more turns beyond the window.
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "m3")
+            store.add_user_message("s1", "m4")
+
+        store2 = DefaultSessionStore(
+            session_dir=store.session_dir,
+            max_messages=2,
+            retention=RETENTION_TRUNCATE,
+            active_window=2,
+        )
+        session = store2.get_session("s1")
+        assert len(session.messages) == 2
+
+    def test_reingest_skips_malformed_spill(self, env):
+        """A malformed spill payload never blocks recovery of valid ones."""
+        store, home = env
+        spill_dir = self._spill_dir(home)
+        spill_dir.mkdir(parents=True, exist_ok=True)
+        # Valid-JSON but wrong-shape spills (list root, non-list messages).
+        (spill_dir / "s1.1.1.aa.json").write_text(json.dumps([1, 2, 3]))
+        (spill_dir / "s1.2.1.bb.json").write_text(
+            json.dumps({"session_id": "s1", "messages": "not-a-list"})
+        )
+        (spill_dir / "s1.3.1.cc.json").write_text(
+            json.dumps({"session_id": "s1", "messages": [{"role": "user", "content": "good"}]})
+        )
+
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert "good" in contents
+
+
+class TestRenameSession:
+    """Tests for human-readable session titles (Issue #3737)."""
+
+    def test_rename_persists_and_lists(self):
+        """A renamed session persists its title and surfaces it in listings."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("sess-1", "how do I fix auth?")
+
+            assert store.rename_session("sess-1", "fix-auth-bug") is True
+
+            # Persists in metadata across a fresh store instance.
+            reloaded = DefaultSessionStore(session_dir=tmpdir)
+            assert reloaded.get_session("sess-1").metadata["title"] == "fix-auth-bug"
+
+            # Surfaces in the listing rows.
+            rows = {r["session_id"]: r for r in reloaded.list_sessions()}
+            assert rows["sess-1"]["title"] == "fix-auth-bug"
+
+    def test_resume_by_unrenamed_still_works(self):
+        """Sessions without a title keep resolving by id (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("sess-2", "hello there")
+
+            row = {r["session_id"]: r for r in store.list_sessions()}["sess-2"]
+            assert row["title"] is None
+            # Full history still resumable by the opaque id.
+            history = store.get_chat_history("sess-2")
+            assert history[0]["content"] == "hello there"
+
+    def test_rename_empty_clears_title(self):
+        """An empty title clears a previously set one, falling back to snippet."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("sess-3", "first user message here")
+            store.rename_session("sess-3", "temp-name")
+            assert store.get_session("sess-3").metadata.get("title") == "temp-name"
+
+            assert store.rename_session("sess-3", "   ") is True
+            assert "title" not in store.get_session("sess-3").metadata
+            # _session_title falls back to the first user message snippet.
+            data = store.get_session("sess-3").to_dict()
+            assert store._session_title(data) == "first user message here"
+
+    def test_session_title_prefers_explicit_title(self):
+        """_session_title prefers an explicit title over agent name / snippet."""
+        data = {
+            "session_id": "s",
+            "agent_name": "Assistant",
+            "metadata": {"title": "my-conversation"},
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        assert DefaultSessionStore._session_title(data) == "my-conversation"

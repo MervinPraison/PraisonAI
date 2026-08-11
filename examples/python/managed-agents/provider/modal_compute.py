@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Modal compute provider — run agent tools inside a Modal cloud sandbox.
 
 Requires: modal CLI configured (modal token set) or MODAL_TOKEN_ID + MODAL_TOKEN_SECRET.

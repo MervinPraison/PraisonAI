@@ -34,7 +34,18 @@ def _get_entry_points():
     return _entry_points
 
 
-# Entry point group name for external plugins
+# Canonical entry-point group for distributable tool packages. This is the
+# single documented "publish a tool" contract; a package that registers a tool
+# under it becomes resolvable by name across CLI, YAML and Python.
+CANONICAL_ENTRY_POINT_GROUP = "praisonai.tools"
+
+# Deprecated group aliases retained for backward compatibility. Tools already
+# registered under these continue to resolve (with a one-cycle DeprecationWarning
+# on first discovery). The canonical group wins on a name collision.
+_ALIAS_ENTRY_POINT_GROUPS = ("praisonaiagents.tools", "praisonai.tool_sources")
+
+# Backward-compatible export: the historical group name kept as an alias so any
+# external reader of ``registry.ENTRY_POINT_GROUP`` keeps working.
 ENTRY_POINT_GROUP = "praisonaiagents.tools"
 
 
@@ -96,6 +107,11 @@ class ToolRegistry:
         # TTL cache for availability checks (tool_name -> (is_available, timestamp))
         self._availability_cache: Dict[str, tuple[bool, float]] = {}
         self._availability_cache_ttl: float = 30.0  # seconds
+        # Last successful probe timestamp per tool (tool_name -> timestamp).
+        # Used to serve last-good on a transient probe failure within the grace
+        # window so a flaky check doesn't strip a recently-healthy tool.
+        self._availability_last_success: Dict[str, float] = {}
+        self._availability_grace: float = 30.0  # seconds
     
     def register(
         self,
@@ -142,10 +158,19 @@ class ToolRegistry:
                 raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
             
             # Check for existing tool
-            if tool_name in self._tools and not overwrite:
+            existing = self._tools.get(tool_name)
+            if existing is not None and not overwrite:
                 logging.debug(f"Tool '{tool_name}' already registered, skipping")
                 return
-            
+
+            # Replacing a different tool instance under the same name must not
+            # inherit the previous tool's availability state, otherwise a broken
+            # replacement could be served as available within the grace window on
+            # its very first (failing) probe. Evict the stale cache + last-success.
+            if existing is not None and existing.tool is not tool:
+                self._availability_cache.pop(tool_name, None)
+                self._availability_last_success.pop(tool_name, None)
+
             # Create tool entry with optional dynamic override and trust level
             entry = ToolEntry(
                 tool=tool,
@@ -175,8 +200,9 @@ class ToolRegistry:
         with self._lock:
             if name in self._tools:
                 del self._tools[name]
-                # Evict cache entry to prevent stale growth
+                # Evict cache entries to prevent stale growth
                 self._availability_cache.pop(name, None)
+                self._availability_last_success.pop(name, None)
                 return True
             return False
     
@@ -325,13 +351,26 @@ class ToolRegistry:
                         self._availability_cache[registered_name] = (is_available, current_time)
                         
                         if is_available:
+                            self._availability_last_success[registered_name] = current_time
                             available.append(entry.tool)
                         elif reason:
                             logging.debug(f"Tool '{registered_name}' unavailable: {reason}")
                     except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
-                        # Cache as unavailable on error
-                        self._availability_cache[registered_name] = (False, current_time)
+                        # A probe exception is inherently flaky (daemon busy, import
+                        # hiccup, network blip). Within the grace window of a recent
+                        # success, serve last-good and do NOT cache a durable negative
+                        # so a single transient failure can't strip a healthy tool.
+                        last_ok = self._availability_last_success.get(registered_name)
+                        if last_ok is not None and (current_time - last_ok) < self._availability_grace:
+                            logging.debug(
+                                f"Availability check failed for tool '{registered_name}' "
+                                f"but serving last-good within grace window: {e}"
+                            )
+                            available.append(entry.tool)
+                        else:
+                            logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
+                            # Sustained failure - cache as unavailable
+                            self._availability_cache[registered_name] = (False, current_time)
                 else:
                     # No availability check = always available
                     available.append(entry.tool)
@@ -381,56 +420,87 @@ class ToolRegistry:
                 result[name] = entry.tool
             return result
     
-    def discover_plugins(self) -> int:
-        """Discover and register tools from entry_points.
-        
-        External packages can register tools by adding to pyproject.toml:
-        
-            [project.entry-points."praisonaiagents.tools"]
-            my_tool = "my_package.tools:MyTool"
-        
-        Returns:
-            Number of tools discovered
-        """
-        if self._discovered:
-            return 0
-        
-        count = 0
+    def _entry_points_for_group(self, group: str) -> list:
+        """Fetch entry points for a group, tolerating the Python 3.9 API shape."""
         try:
             # Python 3.10+ style
-            eps = _get_entry_points()(group=ENTRY_POINT_GROUP)
+            return list(_get_entry_points()(group=group))
         except TypeError:
             # Python 3.9 fallback
             try:
                 all_eps = _get_entry_points()()
-                eps = all_eps.get(ENTRY_POINT_GROUP, [])
+                return list(all_eps.get(group, []))
             except Exception:
-                eps = []
-        
-        for ep in eps:
-            try:
-                tool_class_or_func = ep.load()
-                
-                # If it's a class, instantiate it
-                if isinstance(tool_class_or_func, type) and issubclass(tool_class_or_func, BaseTool):
-                    tool_instance = tool_class_or_func()
-                    self.register(tool_instance, name=ep.name)
-                # If it's already an instance or callable
-                elif isinstance(tool_class_or_func, BaseTool):
-                    self.register(tool_class_or_func, name=ep.name)
-                elif callable(tool_class_or_func):
-                    self.register(tool_class_or_func, name=ep.name)
-                else:
-                    logging.warning(f"Entry point '{ep.name}' is not a valid tool")
-                    continue
-                
-                count += 1
-                logging.info(f"Discovered plugin tool: {ep.name}")
-            except Exception as e:
-                logging.warning(f"Failed to load plugin '{ep.name}': {e}")
-        
-        self._discovered = True
-        return count
+                return []
+
+    def discover_plugins(self) -> int:
+        """Discover and register tools from entry_points.
+
+        External packages publish a tool by registering it under the canonical
+        ``praisonai.tools`` entry-point group in pyproject.toml::
+
+            [project.entry-points."praisonai.tools"]
+            my_tool = "my_package.tools:MyTool"
+
+        The historical ``praisonaiagents.tools`` and ``praisonai.tool_sources``
+        groups are still discovered as deprecated aliases (a one-time
+        ``DeprecationWarning`` is emitted on first hit). The canonical group wins
+        on a name collision, so a name is never overwritten by an alias group.
+
+        Returns:
+            Number of tools discovered
+        """
+        # Serialize the first scan under the registry lock (re-entrant, so the
+        # register() calls below re-acquire it safely). Concurrent callers that
+        # arrive while the first scan runs block here, then see _discovered set
+        # and return 0 without rescanning or double-loading entry points.
+        with self._lock:
+            if self._discovered:
+                return 0
+
+            count = 0
+            seen: set[str] = set()
+            for group in (CANONICAL_ENTRY_POINT_GROUP, *_ALIAS_ENTRY_POINT_GROUPS):
+                is_alias = group != CANONICAL_ENTRY_POINT_GROUP
+                for ep in self._entry_points_for_group(group):
+                    # Canonical group wins: skip an alias entry whose name was
+                    # already registered from the canonical (or an earlier) group.
+                    if ep.name in seen:
+                        continue
+                    try:
+                        tool_class_or_func = ep.load()
+
+                        # If it's a class, instantiate it
+                        if isinstance(tool_class_or_func, type) and issubclass(tool_class_or_func, BaseTool):
+                            tool_instance = tool_class_or_func()
+                            self.register(tool_instance, name=ep.name)
+                        # If it's already an instance or callable
+                        elif isinstance(tool_class_or_func, BaseTool):
+                            self.register(tool_class_or_func, name=ep.name)
+                        elif callable(tool_class_or_func):
+                            self.register(tool_class_or_func, name=ep.name)
+                        else:
+                            logging.warning(f"Entry point '{ep.name}' is not a valid tool")
+                            continue
+
+                        if is_alias:
+                            import warnings
+                            warnings.warn(
+                                f"Tool '{ep.name}' is registered under the deprecated "
+                                f"entry-point group '{group}'. Publish under the "
+                                f"canonical '{CANONICAL_ENTRY_POINT_GROUP}' group instead.",
+                                DeprecationWarning,
+                                stacklevel=2,
+                            )
+
+                        seen.add(ep.name)
+                        count += 1
+                        logging.info(f"Discovered plugin tool: {ep.name}")
+                    except Exception as e:
+                        logging.warning(f"Failed to load plugin '{ep.name}': {e}")
+
+            self._discovered = True
+            return count
     
     def discover_single_file_plugins(self) -> int:
         """Discover and load tools from single-file plugins.
@@ -472,6 +542,7 @@ class ToolRegistry:
         with self._lock:
             self._tools.clear()
             self._availability_cache.clear()
+            self._availability_last_success.clear()
             self._discovered = False
     
     def __contains__(self, name: str) -> bool:

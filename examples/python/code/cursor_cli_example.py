@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Cursor CLI Integration Example
 

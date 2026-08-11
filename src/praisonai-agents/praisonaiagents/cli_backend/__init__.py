@@ -25,6 +25,19 @@ def __getattr__(name: str):
     elif name == "CliBackendDelta":
         from .protocols import CliBackendDelta
         return CliBackendDelta
+    elif name == "cli_backend_debug_enabled":
+        raise AttributeError(
+            f"module '{__name__}' has no attribute '{name}'. "
+            "CLI backend logging moved to praisonai-plugins cli_backend_tracer."
+        )
+    elif name == "log_cli_backend_execution":
+        raise AttributeError(
+            f"module '{__name__}' has no attribute '{name}'. "
+            "CLI backend logging moved to praisonai-plugins cli_backend_tracer."
+        )
+    elif name == "backend_label":
+        from .debug import backend_label
+        return backend_label
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
@@ -33,5 +46,6 @@ __all__ = [
     "CliBackendConfig", 
     "CliSessionBinding",
     "CliBackendResult",
-    "CliBackendDelta"
+    "CliBackendDelta",
+    "backend_label",
 ]

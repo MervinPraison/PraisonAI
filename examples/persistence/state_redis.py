@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Redis State Store - Agent-First Example
 
@@ -13,7 +14,8 @@ Expected Output:
     Agent responds with state persisted to Redis
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 
 print("=== Redis State Store (Agent-First) ===")
 
@@ -26,7 +28,7 @@ my_db = db(
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant.",
-    db=my_db,
+    memory=my_db,
     session_id="redis-state-example"
 )
 

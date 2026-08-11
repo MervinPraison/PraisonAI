@@ -5,7 +5,6 @@ Provides automatic summarization when context window fills up.
 Reuses existing telemetry/token_collector for token tracking.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 

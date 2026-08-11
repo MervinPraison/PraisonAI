@@ -67,17 +67,16 @@ class DependencyChecker:
     def _get_resolver(self):
         """Lazily construct a shared ToolResolver (the canonical resolution chain).
 
-        Returns None if the resolver cannot be imported/constructed, so the
-        legacy partial checks remain available as a fallback.
+        Delegates construction to :mod:`praisonai.templates._tool_sources` and
+        caches the result. Returns None if the resolver cannot be
+        imported/constructed, so the legacy partial checks remain available as
+        a fallback.
         """
         if self._resolver_loaded:
             return self._resolver
         self._resolver_loaded = True
-        try:
-            from praisonai.tool_resolver import ToolResolver
-            self._resolver = ToolResolver()
-        except Exception:
-            self._resolver = None
+        from praisonai.templates._tool_sources import get_resolver
+        self._resolver = get_resolver()
         return self._resolver
     
     def check_tool(self, tool_name: str) -> Dict[str, Any]:
@@ -176,24 +175,15 @@ class DependencyChecker:
         """
         if self._sources_cache is not None:
             return self._sources_cache
-        sources: Dict[str, str] = {}
-        resolver = self._get_resolver()
-        if resolver is not None:
-            try:
-                sources = dict(resolver.list_available_sources())
-            except Exception:
-                sources = {}
-        self._sources_cache = sources
-        return sources
+        from praisonai.templates._tool_sources import resolver_source_map
+        self._sources_cache = resolver_source_map(self._get_resolver())
+        return self._sources_cache
     
     def _check_builtin_tool(self, tool_name: str) -> Optional[str]:
         """Check if tool exists in built-in registry."""
-        try:
-            from praisonaiagents.tools import TOOL_MAPPINGS
-            if tool_name in TOOL_MAPPINGS:
-                return "builtin"
-        except ImportError:
-            pass
+        from praisonai.templates._tool_sources import builtin_tool_names
+        if tool_name in builtin_tool_names():
+            return "builtin"
         return None
     
     def _check_praisonai_tools(self, tool_name: str) -> Optional[str]:

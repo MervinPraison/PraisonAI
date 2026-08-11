@@ -1,0 +1,95 @@
+## Default values for the praisonai-gateway chart.
+## Reuses the official GHCR image; no new build pipeline required.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mervinpraison/praisonai
+  # Pin to a released tag in production (e.g. "4.6.157"). Defaults to Chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+## Command/args used to start the gateway inside the container.
+command:
+  - praisonai
+  - gateway
+  - start
+  - --host
+  - 0.0.0.0
+
+## Gateway authentication (GATEWAY_AUTH_TOKEN).
+## For security the chart refuses to render when auth is enabled with ingress
+## exposed but no token/secret is provided.
+auth:
+  enabled: true
+  ## Preferred: reference an existing Kubernetes Secret you created out-of-band.
+  ##   kubectl create secret generic praisonai-gateway-auth \
+  ##     --from-literal=GATEWAY_AUTH_TOKEN="$(openssl rand -hex 16)"
+  existingSecret: ""
+  secretKey: GATEWAY_AUTH_TOKEN
+  ## Alternatively pass a token inline (NOT recommended for GitOps). If set and
+  ## existingSecret is empty, the chart creates a Secret for you.
+  token: ""
+
+## Extra environment variables (e.g. OPENAI_API_KEY). Prefer valueFrom secretKeyRef.
+## Example:
+##   env:
+##     - name: OPENAI_API_KEY
+##       valueFrom:
+##         secretKeyRef:
+##           name: praisonai-llm
+##           key: OPENAI_API_KEY
+env: []
+
+service:
+  type: ClusterIP
+  port: 8765
+
+ingress:
+  enabled: false
+  className: nginx
+  ## WebSocket-friendly annotations for NGINX ingress. Adjust for Traefik/others.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  hosts:
+    - host: agents.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+## Kubernetes liveness/readiness probes hit the gateway /health endpoint.
+probes:
+  enabled: true
+  path: /health
+
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 512Mi
+  # requests:
+  #   cpu: 250m
+  #   memory: 256Mi
+
+## Optional Horizontal Pod Autoscaler. NOTE: multi-replica gateways hold
+## per-connection WebSocket state; enable sticky sessions or a shared session
+## backend before scaling beyond 1 replica.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+serviceAccount:
+  create: true
+  name: ""
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

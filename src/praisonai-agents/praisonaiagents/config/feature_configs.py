@@ -778,6 +778,9 @@ class ExecutionConfig:
     max_steps: Optional[int] = None
     
     # Rate limiting
+    # When set (positive int) and ``rate_limiter`` is omitted, the Agent
+    # auto-creates ``RateLimiter(requests_per_minute=max_rpm)``. Provide
+    # ``rate_limiter`` explicitly for burst/TPM control (it takes precedence).
     max_rpm: Optional[int] = None
     
     # Time limits
@@ -950,7 +953,16 @@ class ExecutionConfig:
         if isinstance(context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
             context_compaction = ContextCompactionPolicy.from_dict(context_compaction)
-        
+
+        # Handle compaction_strategy restoration (serialised as a string value in to_dict)
+        compaction_strategy = data.get("compaction_strategy")
+        if isinstance(compaction_strategy, str):
+            from ..compaction.strategy import CompactionStrategy
+            try:
+                compaction_strategy = CompactionStrategy(compaction_strategy)
+            except ValueError:
+                compaction_strategy = None
+
         return cls(
             max_iter=data.get("max_iter", 20),
             max_steps=data.get("max_steps", None),
@@ -958,13 +970,17 @@ class ExecutionConfig:
             max_rpm=data.get("max_rpm", None),
             max_execution_time=data.get("max_execution_time", None),
             max_retry_limit=data.get("max_retry_limit", 2),
+            retry_initial_delay=data.get("retry_initial_delay", 1.0),
+            retry_backoff_factor=data.get("retry_backoff_factor", 2.0),
+            retry_jitter=data.get("retry_jitter", 0.1),
             code_execution=data.get("code_execution", False),
             code_mode=data.get("code_mode", "safe"),
-            code_sandbox_mode=data.get("code_sandbox_mode", "docker"),
+            code_sandbox_mode=data.get("code_sandbox_mode", "sandbox"),
             code_tools=data.get("code_tools", False),
             code_tools_allow=data.get("code_tools_allow", None),
             context_compaction=context_compaction,
             max_context_tokens=data.get("max_context_tokens", None),
+            compaction_strategy=compaction_strategy,
             max_budget=data.get("max_budget", None),
             parallel_tool_calls=data.get("parallel_tool_calls", False),
         )
@@ -1076,7 +1092,13 @@ class ToolConfig:
     artifact_retention_days: int = 7  # Days to retain artifacts before garbage collection
     artifact_store: Optional[Any] = None  # Custom artifact store instance
     redact_secrets: bool = True  # Whether to redact secrets from artifacts
-    
+
+    # Allow resolving tool calls via the process-global @tool registry when a
+    # tool name is not in this agent's declared tools=[...]. Default False so an
+    # agent is scoped strictly to its own tools (safe by default); opt in for
+    # plugin-host style dynamic dispatch.
+    allow_global_tools: bool = False
+
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         if self.output_limit <= 0:
@@ -1105,6 +1127,7 @@ class ToolConfig:
             "artifact_retention_days": self.artifact_retention_days,
             "artifact_store": self.artifact_store,
             "redact_secrets": self.redact_secrets,
+            "allow_global_tools": self.allow_global_tools,
         }
     
     @classmethod
@@ -1130,6 +1153,7 @@ class ToolConfig:
             artifact_retention_days=data.get("artifact_retention_days", 7),
             artifact_store=data.get("artifact_store"),
             redact_secrets=data.get("redact_secrets", True),
+            allow_global_tools=data.get("allow_global_tools", False),
         )
 
 
@@ -1438,11 +1462,22 @@ class MultiAgentMemoryConfig:
         }
 
 
-# Import ToolSearchConfig from tools module to avoid duplication
-def __get_tool_search_config():
+# Resolve ToolSearchConfig from tools module to avoid duplication.
+# Deferred via PEP 562 module-level __getattr__ so that `import Agent`
+# does not eagerly initialise the whole tools subsystem (see issue #3191).
+_TOOL_SEARCH_CONFIG_CACHE = None
+
+
+def _resolve_tool_search_config():
+    # Memoize so the resolved class (including the ImportError fallback) is a
+    # single stable object. Without this, the fallback path would define a new
+    # dataclass per call, breaking isinstance() checks across invocations.
+    global _TOOL_SEARCH_CONFIG_CACHE
+    if _TOOL_SEARCH_CONFIG_CACHE is not None:
+        return _TOOL_SEARCH_CONFIG_CACHE
     try:
         from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
-        return _ToolSearchConfig
+        _TOOL_SEARCH_CONFIG_CACHE = _ToolSearchConfig
     except ImportError:
         # Fallback minimal config if tools module not available
         @dataclass
@@ -1452,9 +1487,8 @@ def __get_tool_search_config():
             search_default_limit: int = 5
             max_search_limit: int = 20
             core_tools: Optional[FrozenSet[str]] = None
-        return FallbackToolSearchConfig
-
-ToolSearchConfig = __get_tool_search_config()
+        _TOOL_SEARCH_CONFIG_CACHE = FallbackToolSearchConfig
+    return _TOOL_SEARCH_CONFIG_CACHE
 
 
 class AutonomyLevel(str, Enum):
@@ -1477,7 +1511,7 @@ CachingParam = Union[bool, CachingConfig]
 HooksParam = Union[List[Any], HooksConfig]
 SkillsParam = Union[List[str], SkillsConfig]
 AutonomyParam = Union[bool, Dict[str, Any], "AutonomyConfig"]
-ToolSearchParam = Union[bool, str, Dict[str, Any], ToolSearchConfig]
+ToolSearchParam = Union[bool, str, Dict[str, Any], "ToolSearchConfig"]
 ToolParam = Union[bool, ToolConfig]  # bool = defaults, ToolConfig = custom
 
 
@@ -1621,7 +1655,7 @@ def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
     return _resolve(value, AutonomyConfig)
 
 
-def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
+def resolve_tool_search(value: ToolSearchParam) -> Optional["ToolSearchConfig"]:
     """
     Resolve tool_search= parameter following precedence ladder.
     
@@ -1631,6 +1665,9 @@ def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
     # Simple implementation since it's unused
     if value is None or value is False:
         return None
+    # Lazy-load ToolSearchConfig only when tool search is actually configured,
+    # so the tools subsystem is not imported on the `import Agent` path.
+    ToolSearchConfig = _resolve_tool_search_config()
     if value is True:
         return ToolSearchConfig()
     if isinstance(value, str):
@@ -1813,3 +1850,17 @@ __all__ = [
     "resolve_tools",
     "resolve_runtime",
 ]
+
+
+def __getattr__(name):
+    """PEP 562 lazy attribute access.
+
+    ``ToolSearchConfig`` is resolved (and the tools subsystem imported) only on
+    first access, so ``from praisonaiagents import Agent`` does not eagerly load
+    the entire tools package (issue #3191).
+    """
+    if name == "ToolSearchConfig":
+        cfg = _resolve_tool_search_config()
+        globals()["ToolSearchConfig"] = cfg  # cache for subsequent access
+        return cfg
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

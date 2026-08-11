@@ -19,7 +19,10 @@ Design constraints (per PraisonAI principles):
     adapters that declare ``PlatformCapabilities.reconciles_unknown_send`` can),
     it is asked whether the prior attempt actually landed; if so the entry is
     marked ``sent`` without re-dispatch. Without a reconciler, ``recovered``
-    entries fall back to at-least-once re-send (current behaviour).
+    entries fall back to at-least-once re-send. Such an unreconciled re-send may
+    be a duplicate, so ``drain`` accepts an optional ``recovery_annotator`` that
+    labels that copy (e.g. a short "possible duplicate after restart" prefix)
+    instead of re-sending it silently.
 
 Storage schema::
 
@@ -59,7 +62,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple, Union
 
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, server_retry_after
+from ._resilience import (
+    BackoffPolicy,
+    LocalDeadLetterPolicy,
+    compute_backoff,
+    is_permanent_target_failure,
+    is_recoverable_error,
+    server_retry_after,
+)
+
+try:  # Core delivery-guarantee policy (Issue #3519); optional at import time.
+    from praisonaiagents.gateway import AttemptAndAgeDeadLetterPolicy
+except Exception:  # pragma: no cover - only when core predates the shared policy
+    # Core installs older than the policy (the dependency floor
+    # ``praisonaiagents>=1.6.152`` admits them) lack this symbol; fall back to
+    # the dependency-free local policy so the age gate still holds instead of
+    # silently reverting to attempt-only dead-lettering.
+    AttemptAndAgeDeadLetterPolicy = LocalDeadLetterPolicy  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +86,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TTL_SECONDS = 7 * 86400
 _DEFAULT_MAX_SIZE = 50_000
 _DEFAULT_MAX_ATTEMPTS = 5
+# Issue #3519: a recoverable/transient failure must be BOTH attempt-exhausted
+# AND at least this old before it is dead-lettered, so a brief channel outage
+# no longer permanently drops deliverable messages. 6h ≫ any realistic channel
+# incident yet well under the 7-day retention TTL.
+_DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS = 6 * 3600
 
 
 @dataclass(frozen=True)
@@ -146,12 +170,28 @@ class OutboundQueue:
         max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
         backoff: Optional[BackoffPolicy] = None,
         ordering: Literal["strict", "best_effort"] = "best_effort",
+        dead_letter_min_age: float = _DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS,
+        dead_letter_policy: Optional[Any] = None,
     ) -> None:
         self.path = Path(path).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self.max_attempts = int(max_attempts)
         self.backoff = backoff or BackoffPolicy()
+        # Issue #3519: dead-letter only when BOTH attempt-exhausted AND old
+        # enough, so a transient channel outage no longer drops deliverable
+        # traffic. An explicit policy wins; otherwise build the core default
+        # (or fall back to attempt-only if core is unavailable).
+        self.dead_letter_min_age = max(0.0, float(dead_letter_min_age))
+        if dead_letter_policy is not None:
+            self._dead_letter_policy = dead_letter_policy
+        elif AttemptAndAgeDeadLetterPolicy is not None:
+            self._dead_letter_policy = AttemptAndAgeDeadLetterPolicy(
+                max_attempts=self.max_attempts,
+                min_age_seconds=self.dead_letter_min_age,
+            )
+        else:  # pragma: no cover - core always present in full installs
+            self._dead_letter_policy = None
         if ordering not in ("strict", "best_effort"):
             raise ValueError(
                 f"ordering must be 'strict' or 'best_effort', got {ordering!r}"
@@ -321,12 +361,34 @@ class OutboundQueue:
         key: str,
         error: str,
         permanent: bool = False,
+        *,
+        keep_recovered: bool = False,
     ) -> bool:
-        """Mark a message as failed."""
+        """Mark a message as failed.
+
+        Args:
+            key: Tracking key for the entry.
+            error: Error text to persist for retry/backoff decisions.
+            permanent: Mark a permanent failure that is never retried.
+            keep_recovered: When True, a transient (non-permanent) failure of a
+                crash-``recovered`` entry preserves its ``recovered`` status
+                instead of demoting it to ``failed``. This keeps the
+                "possible duplicate after restart" semantics sticky across
+                retries, so a ``recovery_annotator`` still labels the copy on
+                the next drain. Ignored for permanent failures.
+        """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._sync_mark_failed, key, error, permanent)
+        return await loop.run_in_executor(
+            None, self._sync_mark_failed, key, error, permanent, keep_recovered
+        )
     
-    def _sync_mark_failed(self, key: str, error: str, permanent: bool) -> bool:
+    def _sync_mark_failed(
+        self,
+        key: str,
+        error: str,
+        permanent: bool,
+        keep_recovered: bool = False,
+    ) -> bool:
         """Synchronous version of mark_failed for thread pool execution."""
         entry_id = self._extract_id_from_key(key)
         status = 'permanent_failure' if permanent else 'failed'
@@ -336,11 +398,26 @@ class OutboundQueue:
             # already recorded 'sent' for this row; clobbering it with 'failed'
             # here would re-queue an entry that already reached the channel and
             # produce a duplicate. Only in-flight states may transition to failed.
-            cur = conn.execute("""
-                UPDATE outbound_queue
-                SET status = ?, error = ?, last_attempt = ?, attempts = attempts + 1
-                WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
-            """, (status, error, time.time(), entry_id))
+            #
+            # Keep a crash-recovered entry in the 'recovered' state on a
+            # transient failure (keep_recovered) so its "possible duplicate"
+            # semantics survive the retry: otherwise the row would flip to
+            # 'failed', the recovered-only annotator would be skipped on the
+            # next drain, and a later successful retry would deliver an
+            # unlabelled duplicate.
+            if keep_recovered and not permanent:
+                cur = conn.execute("""
+                    UPDATE outbound_queue
+                    SET status = 'recovered', error = ?, last_attempt = ?,
+                        attempts = attempts + 1
+                    WHERE id = ? AND status IN ('sending', 'recovered')
+                """, (error, time.time(), entry_id))
+            else:
+                cur = conn.execute("""
+                    UPDATE outbound_queue
+                    SET status = ?, error = ?, last_attempt = ?, attempts = attempts + 1
+                    WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
+                """, (status, error, time.time(), entry_id))
             conn.commit()
             
             # Release active claim
@@ -354,6 +431,9 @@ class OutboundQueue:
         limit: Optional[int] = None,
         *,
         reconciler: Optional[Callable[[OutboundEntry], Awaitable[bool]]] = None,
+        recovery_annotator: Optional[
+            Callable[[OutboundEntry, Dict[str, Any]], Dict[str, Any]]
+        ] = None,
     ) -> Tuple[int, int]:
         """Process pending messages.
         
@@ -368,6 +448,15 @@ class OutboundQueue:
                 fresh ``pending``/``failed`` entries are sent normally. If no
                 reconciler is supplied, recovered entries are re-sent
                 (at-least-once).
+            recovery_annotator: Optional sync function applied ONLY on the
+                unreconciled ``recovered`` branch — i.e. a mid-send-crash entry
+                whose delivery outcome is unknown and which is about to be
+                re-dispatched at-least-once. Given ``(entry, payload)`` it
+                returns a (possibly new) payload to send, so the copy the
+                recipient receives can be visibly labelled a possible duplicate
+                produced by a gateway restart. Never applied to fresh
+                ``pending``/``failed`` entries or to entries confirmed by the
+                reconciler.
             
         Returns:
             Tuple of (succeeded, failed) counts
@@ -377,11 +466,19 @@ class OutboundQueue:
         succeeded = failed = 0
         
         for entry in entries:
-            # Skip if we've hit max attempts
+            # Dead-letter decision (Issue #3519): a recoverable/transient
+            # failure is only terminal once it is BOTH attempt-exhausted AND
+            # genuinely old, so a brief channel outage keeps retrying under
+            # capped backoff instead of permanently dropping the message. A
+            # known-permanent error still short-circuits. Below both thresholds
+            # the entry falls through to the normal backoff/retry path.
             if entry.attempts >= self.max_attempts:
-                self._mark_permanent_failure(entry.id, "Max attempts exceeded")
-                failed += 1
-                continue
+                if self._should_dead_letter(entry):
+                    self._mark_permanent_failure(
+                        entry.id, "Max attempts exceeded"
+                    )
+                    failed += 1
+                    continue
             
             # Calculate backoff delay. Honour a server-mandated wait
             # (Telegram retry_after / HTTP Retry-After) recorded in the prior
@@ -428,17 +525,53 @@ class OutboundQueue:
                         f"falling back to re-send"
                     )
             
+            # Whether this entry entered the drain as a crash-recovered one.
+            # Captured before any status write so a transient re-send failure can
+            # keep it 'recovered' (sticky "possible duplicate" semantics) rather
+            # than demoting it to 'failed' and dropping the recovery label on the
+            # next retry.
+            was_recovered = entry.status == "recovered"
+
             try:
                 # Attempt delivery
                 payload = json.loads(entry.payload)
+                # Honest at-least-once: a recovered entry re-dispatched without
+                # positive reconciliation may be a duplicate, so let the caller
+                # visibly label it. Applied only on this unreconciled recovered
+                # branch — never to fresh pending/failed or reconciled entries.
+                if was_recovered and recovery_annotator is not None:
+                    try:
+                        # Hand the annotator its own fresh copy of the payload so
+                        # a partial in-place mutation followed by a raise cannot
+                        # leak a half-labelled payload into the send. Only adopt
+                        # the result once it completes and returns a dict;
+                        # otherwise fall back to the original unlabelled payload.
+                        annotated = recovery_annotator(entry, json.loads(entry.payload))
+                        if not isinstance(annotated, dict):
+                            raise TypeError(
+                                "recovery_annotator must return a dict, got "
+                                f"{type(annotated).__name__}"
+                            )
+                        payload = annotated
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.warning(
+                            f"recovery_annotator failed for {key}: {e}; "
+                            f"sending unlabelled"
+                        )
                 success = await sender(entry.target, payload)
                 
                 if success:
                     await self.mark_sent(key)
                     succeeded += 1
                 else:
-                    # Transient failure, will retry
-                    await self.mark_failed(key, "Delivery returned false", permanent=False)
+                    # Transient failure, will retry. Keep a recovered entry
+                    # 'recovered' so the duplicate label survives the retry.
+                    await self.mark_failed(
+                        key,
+                        "Delivery returned false",
+                        permanent=False,
+                        keep_recovered=was_recovered,
+                    )
                     failed += 1
                     
             except Exception as e:
@@ -453,7 +586,12 @@ class OutboundQueue:
                 mandated = server_retry_after(e)
                 if mandated is not None and "retry_after" not in error_text.lower():
                     error_text = f"{error_text} [retry_after: {mandated:g}]"
-                await self.mark_failed(key, error_text, permanent=permanent)
+                await self.mark_failed(
+                    key,
+                    error_text,
+                    permanent=permanent,
+                    keep_recovered=was_recovered,
+                )
                 failed += 1
                 
                 if permanent:
@@ -503,6 +641,41 @@ class OutboundQueue:
                     
             return True
     
+    def _classify_error(self, error: Optional[str]) -> str:
+        """Classify a stored error string for the dead-letter policy.
+
+        Returns ``"permanent_target"`` for known-permanent target failures
+        (which should dead-letter immediately regardless of age) and
+        ``"recoverable"`` otherwise. Credential parking is handled upstream by
+        the supervisor (``ChannelState.CREDENTIAL_UNAVAILABLE``) so it never
+        reaches this attempt-exhausted path; entries here are treated as
+        transient unless the recorded error is a permanent target failure.
+        """
+        if not error:
+            return "recoverable"
+        try:
+            if is_permanent_target_failure(Exception(error)):
+                return "permanent_target"
+        except Exception:  # pragma: no cover - classifier is best-effort
+            pass
+        return "recoverable"
+
+    def _should_dead_letter(self, entry: OutboundEntry) -> bool:
+        """Whether an attempt-exhausted entry may be dead-lettered now.
+
+        Consults the injected dead-letter policy (Issue #3519). Falls back to
+        the legacy attempt-count-only behaviour if core is unavailable.
+        """
+        if self._dead_letter_policy is None:  # pragma: no cover - full installs have core
+            return True
+        decision = self._dead_letter_policy.should_dead_letter(
+            attempts=entry.attempts,
+            first_seen_epoch=entry.ts,
+            now_epoch=time.time(),
+            error_class=self._classify_error(entry.error),
+        )
+        return bool(decision.dead_letter)
+
     def _mark_permanent_failure(self, entry_id: int, error: str) -> None:
         """Mark entry as permanently failed."""
         with self._lock, closing(self._connect()) as conn:
@@ -615,6 +788,22 @@ class OutboundQueue:
         
         return deleted
     
+    def status_for(self, idempotency_key: str) -> Optional[str]:
+        """Return the current status of the entry for ``idempotency_key``.
+
+        Returns ``None`` when no entry exists for the key. Lets a caller that
+        enqueued under a stable key tell an already-delivered duplicate (status
+        ``"sent"``) apart from a genuine delivery failure after a drain — so a
+        deduplicated re-fire (issue #3231) is reported as a suppressed success
+        rather than a spurious failure.
+        """
+        with self._lock, closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT status FROM outbound_queue WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        return row[0] if row else None
+
     def pending_count(self) -> int:
         """Get count of pending messages awaiting delivery."""
         with self._lock, closing(self._connect()) as conn:

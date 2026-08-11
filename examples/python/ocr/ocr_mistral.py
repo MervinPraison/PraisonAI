@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import OCRAgent
 
 agent = OCRAgent(llm="mistral/mistral-ocr-latest")

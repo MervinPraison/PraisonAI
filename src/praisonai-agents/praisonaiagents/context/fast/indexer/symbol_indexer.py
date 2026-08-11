@@ -11,7 +11,6 @@ Extracts code symbols from source files:
 
 import os
 import re
-import logging
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional, Any

@@ -12,6 +12,9 @@ from praisonaiagents.gateway import (
     ConcurrencyLimitPolicy,
     GatewayConcurrencyPolicyProtocol,
     GatewayConfig,
+    MemoryPressurePolicy,
+    ResourcePressurePolicyProtocol,
+    ResourceSample,
 )
 
 
@@ -92,3 +95,60 @@ def test_gateway_config_validation():
         GatewayConfig(max_concurrent_runs=-1)
     with pytest.raises(ValueError):
         GatewayConfig(overflow_policy="nope")
+
+
+# ---------------------------------------------------------------------------
+# Resource-pressure admission (Issue #3445)
+# ---------------------------------------------------------------------------
+
+
+def test_resource_policy_protocol_conformance():
+    policy = MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    assert isinstance(policy, ResourcePressurePolicyProtocol)
+
+
+def test_resource_policy_disabled_admits_everything():
+    policy = MemoryPressurePolicy()  # no thresholds
+    assert policy.enabled is False
+    assert policy.evaluate(ResourceSample(rss_mb=99999)) is AdmissionDecision.ADMIT
+
+
+def test_resource_policy_admits_below_soft():
+    policy = MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    assert policy.evaluate(ResourceSample(rss_mb=399.9)) is AdmissionDecision.ADMIT
+
+
+def test_resource_policy_queues_at_soft():
+    policy = MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    assert policy.evaluate(ResourceSample(rss_mb=400)) is AdmissionDecision.QUEUE
+    assert policy.evaluate(ResourceSample(rss_mb=549)) is AdmissionDecision.QUEUE
+
+
+def test_resource_policy_rejects_at_hard():
+    policy = MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    assert policy.evaluate(ResourceSample(rss_mb=550)) is AdmissionDecision.REJECT
+    assert policy.evaluate(ResourceSample(rss_mb=9999)) is AdmissionDecision.REJECT
+
+
+def test_resource_policy_missing_sample_admits():
+    policy = MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    assert policy.evaluate(ResourceSample(rss_mb=None)) is AdmissionDecision.ADMIT
+    assert policy.evaluate(ResourceSample()) is AdmissionDecision.ADMIT
+
+
+def test_resource_policy_hard_only():
+    policy = MemoryPressurePolicy(hard_rss_mb=550)
+    assert policy.enabled is True
+    assert policy.evaluate(ResourceSample(rss_mb=100)) is AdmissionDecision.ADMIT
+    assert policy.evaluate(ResourceSample(rss_mb=550)) is AdmissionDecision.REJECT
+
+
+@pytest.mark.parametrize("bad", [-1, "x"])
+def test_resource_policy_invalid_soft_raises(bad):
+    with pytest.raises(ValueError):
+        MemoryPressurePolicy(soft_rss_mb=bad)
+
+
+def test_resource_policy_soft_above_hard_raises():
+    with pytest.raises(ValueError):
+        MemoryPressurePolicy(soft_rss_mb=600, hard_rss_mb=400)

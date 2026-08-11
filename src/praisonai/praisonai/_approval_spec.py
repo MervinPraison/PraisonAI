@@ -7,13 +7,10 @@ ensuring consistent behavior across all entry points.
 """
 from dataclasses import dataclass
 from typing import Optional, Literal, Union, Dict, Any
-import logging
 
 Backend = Literal["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none"]
 ApprovalLevel = Literal["low", "medium", "high", "critical"]
 DefaultPolicy = Literal["deny", "prompt", "allow"]
-
-logger = logging.getLogger(__name__)
 
 
 def _parse_timeout(timeout_val: Optional[Union[str, int, float]]) -> Optional[float]:
@@ -150,39 +147,3 @@ class ApprovalSpec:
         if self.approve_tools is not None:
             result["approve_tools"] = self.approve_tools
         return result
-    
-    def install_hook(self) -> None:
-        """Install a before_tool hook to enforce approval."""
-        try:
-            from praisonaiagents.hooks import add_hook
-            from praisonaiagents.hooks.events import BeforeToolInput
-            from praisonaiagents.hooks.types import HookResult
-            
-            def approval_hook(data: BeforeToolInput) -> Optional[HookResult]:
-                """Check if tool execution should be approved."""
-                if not self.enabled:
-                    return None  # No opinion, let other hooks decide
-                
-                tool_name = data.tool_name
-                
-                # Check per-tool policy
-                if self.approve_tools and tool_name in self.approve_tools:
-                    level = self.approve_tools[tool_name]
-                    # TODO: Implement actual approval logic based on level
-                    logger.debug(f"Tool {tool_name} requires approval level: {level}")
-                
-                # Apply default policy
-                if self.default_policy == "deny":
-                    logger.warning(f"Tool {tool_name} denied by default policy")
-                    return HookResult.deny(f"Tool {tool_name} denied by default policy")
-                elif self.default_policy == "allow":
-                    return None  # Allow
-                else:  # "prompt"
-                    # TODO: Implement prompting logic based on backend
-                    logger.info(f"Tool {tool_name} would prompt for approval (backend: {self.backend})")
-                    return None
-            
-            add_hook("before_tool", approval_hook)
-            logger.info("Approval hook installed")
-        except ImportError:
-            logger.warning("Could not import praisonaiagents.hooks - approval enforcement unavailable")

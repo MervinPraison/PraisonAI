@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from .base import ScheduleParser, PraisonAgentExecutor
-from .shared import backoff_delay
+from .shared import ScheduleTicker, backoff_delay
 from ._base_scheduler import (
     _BaseAgentScheduler,
     _compute_run_cost,
@@ -92,6 +92,12 @@ class AgentScheduler(_BaseAgentScheduler):
         # ``from_blueprint`` / YAML) so a target set there is honoured too.
         self.deliver = deliver or (self.config.get("deliver", "") if self.config else "")
         self._delivery = None
+        # Creation-time pre-flight (Issue #3800): build the delivery wrapper now,
+        # not lazily at fire time, so "where will this go?" is answered — and an
+        # unroutable token warned on — the moment the scheduler is created,
+        # instead of only after the first scheduled run completes.
+        if self.deliver:
+            self._build_delivery()
         
         self.is_running = False
         self._stop_event = threading.Event()
@@ -103,6 +109,43 @@ class AgentScheduler(_BaseAgentScheduler):
         self._total_cost = 0.0
         self._start_time = None
         self._stats_lock = threading.Lock()
+        # Instance-owned timeout pool with leak accounting, mirroring the
+        # AgentsGenerator tool-timeout pattern. A single pool is reused across
+        # retries/runs instead of allocating a fresh one per attempt; workers
+        # stuck on a timed-out task are counted, and the pool is recycled once
+        # half its workers have leaked so new runs aren't starved forever.
+        self._timeout_executor: Optional[ThreadPoolExecutor] = None
+        self._timeout_executor_lock = threading.Lock()
+        self._leaked_workers = 0
+        self._max_leaked_workers = 4
+
+    def _get_timeout_executor(self) -> ThreadPoolExecutor:
+        """Lazily create/reuse this scheduler's bounded timeout pool.
+
+        Recycles the pool once half its workers have leaked to stuck tasks so
+        subsequent runs get fresh workers instead of queuing behind dead ones.
+        """
+        with self._timeout_executor_lock:
+            if (
+                self._leaked_workers >= self._max_leaked_workers
+                and self._timeout_executor is not None
+            ):
+                self._timeout_executor.shutdown(wait=False, cancel_futures=True)
+                self._timeout_executor = None
+                self._leaked_workers = 0
+            if self._timeout_executor is None:
+                self._timeout_executor = ThreadPoolExecutor(
+                    max_workers=self._max_leaked_workers,
+                    thread_name_prefix=f"praisonai-scheduler-{id(self):x}",
+                )
+            return self._timeout_executor
+
+    def close(self) -> None:
+        """Release the owned timeout pool; safe to call repeatedly."""
+        with self._timeout_executor_lock:
+            if self._timeout_executor is not None:
+                self._timeout_executor.shutdown(wait=False, cancel_futures=True)
+                self._timeout_executor = None
         
     def start(
         self,
@@ -126,13 +169,24 @@ class AgentScheduler(_BaseAgentScheduler):
             return False
             
         try:
-            interval = ScheduleParser.parse(schedule_expr)
+            # Wall-clock aware ticker: cron fires at the real time-of-day (with
+            # once-only catch-up across downtime); plain intervals are unchanged.
+            self._load_persisted_last_run()
+            ticker = ScheduleTicker(
+                schedule_expr, last_run_at=getattr(self, "_last_run_at", None)
+            )
             self.is_running = True
             self._stop_event.clear()
-            
+
             logger.debug(f"Starting agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
             logger.debug(f"Task: {self.task}")
-            logger.debug(f"Schedule: {schedule_expr} ({interval}s interval)")
+            if ticker.is_cron:
+                logger.debug(f"Schedule: {schedule_expr} (wall-clock cron)")
+            else:
+                logger.debug(
+                    f"Schedule: {schedule_expr} "
+                    f"({int(ticker.seconds_until_next())}s interval)"
+                )
             self.is_running = True
             self._stop_event.clear()
             self._start_time = datetime.now()
@@ -141,10 +195,12 @@ class AgentScheduler(_BaseAgentScheduler):
             if run_immediately:
                 logger.debug("Running agent immediately before starting schedule...")
                 self._execute_with_retry(max_retries)
+                ticker.mark_ran()
+                self._last_run_at = ticker.last_run_at
             
             self._thread = threading.Thread(
                 target=self._run_schedule,
-                args=(interval, max_retries),
+                args=(ticker, max_retries),
                 daemon=True
             )
             self._thread.start()
@@ -179,6 +235,8 @@ class AgentScheduler(_BaseAgentScheduler):
             self._thread.join(timeout=10)
             
         self.is_running = False
+        # Release the owned timeout pool so idle daemons don't retain workers.
+        self.close()
         logger.debug("Agent scheduler stopped")
         logger.debug(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
@@ -198,22 +256,48 @@ class AgentScheduler(_BaseAgentScheduler):
                 total_cost=self._total_cost,
             )
     
-    def _run_schedule(self, interval: int, max_retries: int):
-        """Internal method to run scheduled agent executions."""
+    def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int):
+        """Internal method to run scheduled agent executions.
+
+        For a wall-clock cron schedule this sleeps until the next real
+        occurrence (running once immediately if a slot was already missed
+        during downtime); for a plain interval it sleeps the fixed interval —
+        preserving the previous behaviour.
+        """
         while not self._stop_event.is_set():
             # Check budget limit
-            if self.max_cost and self._total_cost >= self.max_cost:
+            if self._budget_exceeded():
                 logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
                 logger.warning("Stopping scheduler to prevent additional costs")
                 self.stop()
                 break
-            
+
+            # For cron, sleep until the next wall-clock slot *before* running
+            # (unless a missed slot is already due → catch up exactly once).
+            if ticker.is_cron and not ticker.is_due():
+                delay = ticker.seconds_until_next()
+                logger.debug(f"Next execution in {delay:.0f} seconds (cron)")
+                if self._stop_event.wait(delay):
+                    break  # Stop event was set
+
             logger.debug(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled agent execution")
-            
+
+            # Advance the wall-clock anchor *before* running so the state write
+            # inside _execute_with_retry persists this slot (not the previous
+            # one). Otherwise a restart would restore the prior anchor and
+            # replay an already-completed slot (see issue #3526 review).
+            ticker.mark_ran()
+            self._last_run_at = ticker.last_run_at
+
             self._execute_with_retry(max_retries)
-            
-            # Wait for next scheduled time
-            logger.debug(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
+
+            if ticker.is_cron:
+                # Loop back: the top of the loop computes the next slot.
+                continue
+
+            # Interval schedule: wait the fixed interval then run again.
+            interval = ticker.seconds_until_next()
+            logger.debug(f"Next execution in {interval:.0f} seconds ({interval/3600:.1f} hours)")
             if self.max_cost:
                 remaining = self.max_cost - self._total_cost
                 logger.debug(f"Budget remaining: ${remaining:.4f}")
@@ -230,18 +314,26 @@ class AgentScheduler(_BaseAgentScheduler):
             try:
                 logger.debug(f"Attempt {attempt + 1}/{max_retries}")
                 
-                # Execute with timeout if specified
+                # Execute with timeout if specified, reusing the instance-owned
+                # pool. A worker stuck past the timeout cannot be cancelled once
+                # running, so it is accounted as leaked and the pool recycles
+                # once enough workers are stuck (see _get_timeout_executor).
                 if self.timeout:
-                    executor = ThreadPoolExecutor(max_workers=1)
+                    executor = self._get_timeout_executor()
                     future = executor.submit(self._executor.execute, self.task)
                     try:
                         result = future.result(timeout=self.timeout)
                     except FuturesTimeout as e:
-                        future.cancel()
-                        executor.shutdown(wait=False, cancel_futures=True)
+                        cancelled = future.cancel()
+                        if not cancelled:
+                            with self._timeout_executor_lock:
+                                self._leaked_workers += 1
+                            logger.warning(
+                                "Scheduler task exceeded %.1fs; worker may "
+                                "continue running in the background.",
+                                float(self.timeout),
+                            )
                         raise TimeoutError(f"Execution exceeded {self.timeout}s timeout") from e
-                    else:
-                        executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     result = self._executor.execute(self.task)
                 
@@ -280,10 +372,9 @@ class AgentScheduler(_BaseAgentScheduler):
                     
                 break
             
-            except TimeoutError as e:
-                logger.error(f"Execution timeout on attempt {attempt + 1}: {e}")
-                
             except Exception as e:
+                # Timeouts and generic failures share the same backoff path so a
+                # retry storm always honours a cooldown and stop() can preempt it.
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
@@ -332,26 +423,6 @@ class AgentScheduler(_BaseAgentScheduler):
             logger.error(f"One-time execution failed: {e}")
             raise
 
-    def _deliver_result(self, result: Any) -> None:
-        """Route a successful result to the configured chat target.
-
-        No-op when no ``deliver`` target is set. The delivery target is
-        resolved and sent through the shared ``DeliveryRouter`` (rate limiting,
-        idempotency dedup, dead-target self-heal), reusing the same machinery
-        the gateway uses — without requiring the full gateway. Never raises: a
-        delivery problem must not tear down the scheduler.
-        """
-        if not self.deliver:
-            return
-        try:
-            if self._delivery is None:
-                from praisonai.scheduler._delivery import SchedulerDelivery
-                job_id = self.config.get("agent_id", "") if self.config else ""
-                self._delivery = SchedulerDelivery(self.deliver, job_id=job_id)
-            self._delivery.deliver(str(result))
-        except Exception as e:
-            logger.error(f"Scheduler delivery error: {e}")
-    
     @classmethod
     def from_yaml(
         cls,

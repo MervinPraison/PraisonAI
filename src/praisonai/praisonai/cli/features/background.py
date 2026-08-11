@@ -25,19 +25,23 @@ class BackgroundHandler:
     - Clear completed tasks
     """
     
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, runner=None):
         self.verbose = verbose
-        self._runner = None
+        self._runner = runner
     
     @property
     def feature_name(self) -> str:
         return "background"
     
     async def _get_runner(self):
-        """Lazy load the background runner."""
+        """Lazy load the background runner.
+
+        When no runner was injected, resolve the shared process-wide runner so
+        tasks submitted elsewhere in the session are visible here.
+        """
         if self._runner is None:
-            from praisonaiagents.background import BackgroundRunner
-            self._runner = BackgroundRunner()
+            from praisonaiagents.background import get_background_runner
+            self._runner = get_background_runner()
         return self._runner
     
     async def list_tasks(self, status: Optional[str] = None) -> List[dict]:
@@ -162,7 +166,7 @@ class BackgroundHandler:
 [bold]Created:[/bold] {task.get('created_at')}
 [bold]Started:[/bold] {task.get('started_at') or '-'}
 [bold]Completed:[/bold] {task.get('completed_at') or '-'}
-[bold]Duration:[/bold] {task.get('duration_seconds', 0):.2f}s
+[bold]Duration:[/bold] {(task.get('duration_seconds') or 0):.2f}s
 """
             if task.get("error"):
                 content += f"[bold]Error:[/bold] [red]{task.get('error')}[/red]\n"

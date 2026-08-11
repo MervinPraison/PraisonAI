@@ -146,6 +146,45 @@ class TestContextBudgeter:
         assert "allocation" in data
 
 
+class TestModelInfoResolution:
+    """Tests for data-driven model-info resolution (litellm first)."""
+
+    def test_litellm_lookup_preferred(self, monkeypatch):
+        """Known model window comes from litellm model_cost, not the static table."""
+        import praisonaiagents.context.budgeter as budgeter
+
+        fake_cost = {
+            "some-1m-model": {"max_input_tokens": 1000000, "max_output_tokens": 32768},
+        }
+        monkeypatch.setitem(
+            __import__("sys").modules, "litellm", type("m", (), {"model_cost": fake_cost})
+        )
+
+        assert budgeter.get_model_limit("some-1m-model") == 1000000
+        assert budgeter.get_output_reserve("some-1m-model") == 32768
+
+    def test_litellm_provider_prefix(self, monkeypatch):
+        """Provider-prefixed model ids resolve via base model name."""
+        import praisonaiagents.context.budgeter as budgeter
+
+        fake_cost = {"tiny-32k": {"max_input_tokens": 32768}}
+        monkeypatch.setitem(
+            __import__("sys").modules, "litellm", type("m", (), {"model_cost": fake_cost})
+        )
+
+        assert budgeter.get_model_limit("someprovider/tiny-32k") == 32768
+
+    def test_falls_back_to_static_when_litellm_absent(self, monkeypatch):
+        """When litellm is unavailable, the static table is used."""
+        import praisonaiagents.context.budgeter as budgeter
+
+        monkeypatch.setattr(budgeter, "_litellm_model_info", lambda model: None)
+
+        assert budgeter.get_model_limit("gpt-4o") == 128000
+        assert budgeter.get_model_limit("unknown-model-xyz") == 128000
+        assert budgeter.get_output_reserve("gpt-4o") == 16384
+
+
 class TestBudgetAllocation:
     """Tests for BudgetAllocation dataclass."""
     

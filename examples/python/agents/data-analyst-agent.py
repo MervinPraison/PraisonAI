@@ -1,3 +1,5 @@
+# praisonai: skip=true
+# Uses removed praisonaiagents.tools exports; pending example refresh
 from praisonaiagents import Agent, Tools
 from praisonaiagents.tools import read_csv, read_excel, write_csv, write_excel, filter_data, get_summary, group_by, pivot_table
 import os

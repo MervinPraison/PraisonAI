@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-07-16",
+  "lastUpdated": "2026-08-10",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 409,
+    "pythonCoreFeatures": 410,
     "rustFeatures": 667,
-    "gapCount": 127,
-    "parityPercentage": 163.1
+    "gapCount": 128,
+    "parityPercentage": 162.7
   },
   "pythonCoreSDK": {
     "exports": [
@@ -220,6 +220,7 @@
       "PluginParseError",
       "PluginProtocol",
       "PluginsConfig",
+      "PraisonAIAgents",
       "PraisonAIConfigError",
       "PraisonAIError",
       "PraisonConfig",
@@ -251,6 +252,7 @@
       "Route",
       "RoutingConditionProtocol",
       "RulesConfig",
+      "RunOutcome",
       "RunStatus",
       "SandboxConfig",
       "SandboxProtocol",
@@ -318,7 +320,6 @@
       "config",
       "configure_structured_logging",
       "create_context_agent",
-      "db",
       "detect_url_scheme",
       "disable_performance_mode",
       "disable_telemetry",
@@ -1179,7 +1180,6 @@
         "WebSearchProvider"
       ],
       "config_loader": [
-        "AutoRagConfig",
         "SessionConfig"
       ],
       "context": [
@@ -1801,7 +1801,6 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
-        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1815,6 +1814,9 @@
       "sandbox": [],
       "session": [],
       "skills": [],
+      "specialized": [
+        "AutoRagConfig"
+      ],
       "specialized_agents": [],
       "streaming": [],
       "task": [],
@@ -1823,6 +1825,7 @@
       "tools": [
         "FunctionTool",
         "Tool",
+        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
@@ -2502,15 +2505,6 @@
         "effort": "high",
         "status": "TODO",
         "category": "workflows"
-      },
-      {
-        "feature": "db",
-        "python": true,
-        "rust": false,
-        "priority": "P1",
-        "effort": "low",
-        "status": "TODO",
-        "category": "db"
       },
       {
         "feature": "if_",
@@ -4362,6 +4356,15 @@
         "category": "config"
       },
       {
+        "feature": "PraisonAIAgents",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "agents"
+      },
+      {
         "feature": "PraisonAIConfigError",
         "python": true,
         "rust": false,
@@ -4468,6 +4471,15 @@
         "effort": "low",
         "status": "TODO",
         "category": "config"
+      },
+      {
+        "feature": "RunOutcome",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "RunStatus",

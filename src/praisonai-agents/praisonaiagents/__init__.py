@@ -258,6 +258,7 @@ _LAZY_IMPORTS = {
     
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'RunOutcome': ('praisonaiagents.agent.run_outcome', 'RunOutcome'),
     'RetryBackoffConfig': ('praisonaiagents.agent.retry_utils', 'RetryBackoffConfig'),
     'BudgetExceededError': ('praisonaiagents.errors', 'BudgetExceededError'),
     
@@ -303,9 +304,10 @@ _LAZY_IMPORTS = {
     'CodeAgent': ('praisonaiagents.agent.code_agent', 'CodeAgent'),
     'CodeConfig': ('praisonaiagents.agent.code_agent', 'CodeConfig'),
     
-    # AgentTeam (primary) / AgentManager (alias)
+    # AgentTeam (primary) / AgentManager, PraisonAIAgents (aliases)
     'AgentTeam': ('praisonaiagents.agents.agents', 'AgentTeam'),
     'AgentManager': ('praisonaiagents.agents.agents', 'AgentManager'),  # Silent alias
+    'PraisonAIAgents': ('praisonaiagents.agents.agents', 'PraisonAIAgents'),  # Silent alias (pre-1.0 name)
     # Note: 'Agents' is handled by _custom_handler for deprecation warning
     'Task': ('praisonaiagents.task.task', 'Task'),
     'AutoAgents': ('praisonaiagents.agents.autoagents', 'AutoAgents'),
@@ -515,8 +517,7 @@ _LAZY_IMPORTS = {
     'ManagerConfig': ('praisonaiagents.context.manager', 'ManagerConfig'),
     'ContextManager': ('praisonaiagents.context.manager', 'ContextManager'),
     
-    # db module
-    'db': ('praisonaiagents.db', 'db'),
+    # db shortcut (handled by custom_handler to return _LazyDbModule instance)
     # Note: 'obs' is handled by custom_handler to return _LazyObsModule instance
     
     # Gateway protocols and config (implementations in praisonai wrapper)
@@ -712,8 +713,8 @@ def _custom_handler(name, cache):
     if name == 'db':
         import importlib
         mod = importlib.import_module('.db', 'praisonaiagents')
-        cache['db'] = mod
-        return mod
+        cache['db'] = mod.db  # Return the _LazyDbModule instance, not the module
+        return mod.db
     if name == 'toolsets':
         import importlib
         mod = importlib.import_module('.toolsets', 'praisonaiagents')
@@ -839,9 +840,11 @@ __all__ = [
     
     # Core classes - the essentials
     'Agent',
+    'RunOutcome',
     'RetryBackoffConfig',
     'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
     'AgentManager',  # Silent alias for AgentTeam
+    'PraisonAIAgents',  # Silent alias for AgentTeam (pre-1.0 name)
     'Agents',  # Deprecated alias for AgentTeam (emits warning)
     'Task',
     

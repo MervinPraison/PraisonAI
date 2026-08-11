@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 MongoDB StateStore — Full Persistence Example
 

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Unified Handoff Configuration Example.
 

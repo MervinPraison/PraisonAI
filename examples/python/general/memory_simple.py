@@ -1,4 +1,4 @@
-from praisonaiagents.agents.agents import Agent, Task, Agents
+from praisonaiagents.agents.agents import Agent, Task, Agents, AgentTeam
 from praisonaiagents.tools import duckduckgo
 
 # Test facts

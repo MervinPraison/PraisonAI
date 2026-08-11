@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import AudioAgent
 
 agent = AudioAgent(llm="elevenlabs/eleven_multilingual_v2")

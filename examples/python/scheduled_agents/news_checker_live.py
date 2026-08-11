@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Live News Checker Agent - 24/7 Scheduled Agent
 

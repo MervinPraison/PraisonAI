@@ -7,7 +7,6 @@ Thread-safe, no external dependencies.
 
 import contextlib
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import os
 import threading
@@ -66,18 +65,43 @@ class FileScheduleStore:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def get_by_name(self, name: str) -> Optional[ScheduleJob]:
+    def get_by_name(
+        self,
+        name: str,
+        principal: Optional[str] = None,
+    ) -> Optional[ScheduleJob]:
+        """Return a job by name, optionally scoped to ``principal``.
+
+        When ``principal`` is given, a job owned by a *different* identity is
+        treated as not found (returns ``None``) so one gateway user cannot
+        read another's automation by guessing its name. ``None`` (the default)
+        preserves the pre-scoping global lookup.
+        """
         with self._lock:
             for job in self._jobs.values():
                 if job.name == name:
+                    if principal is not None and job.principal != principal:
+                        continue
                     return job
             return None
 
-    def list(self, agent_id: Optional[str] = None) -> List[ScheduleJob]:
+    def list(
+        self,
+        agent_id: Optional[str] = None,
+        principal: Optional[str] = None,
+    ) -> List[ScheduleJob]:
+        """List jobs, optionally filtered by owning agent and/or principal.
+
+        ``principal`` isolates a gateway end-user's automations from
+        another's. ``None`` (the default) returns everything, preserving
+        the pre-scoping global behaviour.
+        """
         with self._lock:
             jobs = list(self._jobs.values())
         if agent_id is not None:
             jobs = [j for j in jobs if j.agent_id == agent_id]
+        if principal is not None:
+            jobs = [j for j in jobs if j.principal == principal]
         return jobs
 
     def update(self, job: ScheduleJob) -> None:
@@ -103,11 +127,20 @@ class FileScheduleStore:
                 return True
             return False
 
-    def remove_by_name(self, name: str) -> bool:
+    def remove_by_name(self, name: str, principal: Optional[str] = None) -> bool:
+        """Remove a job by name, optionally scoped to ``principal``.
+
+        When ``principal`` is given, a job owned by a *different* identity is
+        skipped (not removed) so one gateway user cannot delete another's
+        automation by guessing its name. ``None`` (the default) preserves the
+        pre-scoping global removal.
+        """
         with self._lock, self._file_lock():
             self._reload_locked()
             for jid, job in list(self._jobs.items()):
                 if job.name == name:
+                    if principal is not None and job.principal != principal:
+                        continue
                     del self._jobs[jid]
                     self._save()
                     return True
@@ -164,7 +197,15 @@ class FileScheduleStore:
                     # One-shot: remove now so no competitor re-claims it.
                     del self._jobs[job.id]
             if changed:
-                self._save()
+                if not self._save():
+                    # The lease/last_run_at advance was NOT persisted (full
+                    # disk, permissions, failed replace). Returning these jobs
+                    # would let the runner execute them while the next poll —
+                    # reloading the unchanged file — sees them as due again and
+                    # fires a duplicate. Drop the claim so it is retried cleanly.
+                    for job in claimed:
+                        self._held_leases.pop(job.id, None)
+                    return []
         return claimed
 
     def complete(self, job_id: str, owner_id: str) -> None:
@@ -295,7 +336,12 @@ class FileScheduleStore:
         except Exception as e:
             logger.warning("Failed to load schedule store from %s: %s", self._path, e)
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
+        """Persist jobs to disk.
+
+        Returns ``True`` if the write succeeded, ``False`` otherwise so
+        callers (e.g. ``claim_due``) can avoid acting on unpersisted state.
+        """
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [j.to_dict() for j in self._jobs.values()]
@@ -303,8 +349,10 @@ class FileScheduleStore:
             with open(tmp, "w") as f:
                 json.dump(data, f, indent=2)
             os.replace(tmp, self._path)
+            return True
         except Exception as e:
             logger.warning("Failed to save schedule store to %s: %s", self._path, e)
+            return False
 
     def _load_history(self) -> None:
         """Load execution history from history.json."""

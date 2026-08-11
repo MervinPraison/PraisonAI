@@ -51,7 +51,11 @@ def test_improved_decorator():
         # Test 2: Mark as approved and call (should succeed)
         print("\n2. Testing with approval context (should succeed)...")
         
-        mark_approved("test_function")
+        # Approvals are argument-scoped: mark with the same effective args the
+        # call uses so the cache key matches. A bare mark_approved(name) no
+        # longer unlocks arbitrary argument values (that was the sticky-cache
+        # bypass this decorator now prevents).
+        mark_approved("test_function", {"message": "approved context"})
         
         try:
             result = test_function("approved context")
@@ -82,7 +86,9 @@ def test_improved_decorator():
         # Test 4: Verify context is working
         print("\n4. Testing context persistence...")
         
-        if is_already_approved("test_function"):
+        # The auto-approval above recorded the call's effective args, so the
+        # persistence check must use those same args (argument-scoped cache).
+        if is_already_approved("test_function", {"message": "auto approved"}):
             print("✅ Context correctly shows function as approved")
         else:
             print("❌ Context not working correctly")

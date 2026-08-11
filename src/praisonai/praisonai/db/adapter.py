@@ -299,24 +299,25 @@ class PraisonAIDB:
             return []
         
         from ..persistence.conversation.base import ConversationSession
+        from ..persistence.conversation._ops import resume_or_create_session
         
-        # Check if session exists
-        session = self._conversation_store.get_session(session_id)
-        
-        if session is None:
-            # Create new session
-            session = ConversationSession(
+        store = self._conversation_store
+        messages = resume_or_create_session(
+            store,
+            store.get_session(session_id),
+            session_id,
+            build_session=lambda: ConversationSession(
                 session_id=session_id,
                 user_id=user_id or "default",
                 agent_id=agent_name,
                 name=f"Session {session_id}",
-                metadata=metadata or {}
-            )
-            self._conversation_store.create_session(session)
-            return []
+                metadata=metadata or {},
+            ),
+            get_messages=lambda: store.get_messages(session_id),
+        )
         
-        # Resume existing session - get messages
-        messages = self._conversation_store.get_messages(session_id)
+        if messages is None:
+            return []
         
         # Convert to DbMessage format
         from praisonaiagents.db.protocol import DbMessage
@@ -379,6 +380,21 @@ class PraisonAIDB:
         )
         self._conversation_store.add_message(session_id, msg)
     
+    @staticmethod
+    def _serialize_tool_call(tool_name: str, args: Any, result: Any) -> str:
+        """Serialise a tool call for persistence without dropping data.
+
+        A persistence layer's contract is preservation: the full tool result is
+        kept verbatim so an agent that resumes sees exactly what it did. Shared
+        by both the sync and async paths so they cannot drift.
+        """
+        import json
+        return json.dumps({
+            "tool": tool_name,
+            "args": args,
+            "result": str(result),
+        })
+
     def on_tool_call(
         self,
         session_id: str,
@@ -394,14 +410,8 @@ class PraisonAIDB:
         
         from ..persistence.conversation.base import ConversationMessage
         import uuid
-        import json
         
-        # Store tool call as a special message
-        tool_content = json.dumps({
-            "tool": tool_name,
-            "args": args,
-            "result": str(result)[:1000]  # Truncate large results
-        })
+        tool_content = self._serialize_tool_call(tool_name, args, result)
         
         msg = ConversationMessage(
             id=f"tool-{uuid.uuid4().hex[:12]}",
@@ -737,31 +747,32 @@ class PraisonAIDB:
 
         if self._conversation_store:
             from ..persistence.conversation.base import ConversationSession
+            from ..persistence.conversation._ops import aresume_or_create_session
 
+            store = self._conversation_store
             session = await self._dispatch_async(
-                self._conversation_store, "get_session", "async_get_session", session_id
+                store, "get_session", "async_get_session", session_id
             )
 
-            if session is None:
-                new_session = ConversationSession(
+            raw = await aresume_or_create_session(
+                store,
+                session,
+                session_id,
+                build_session=lambda: ConversationSession(
                     session_id=session_id,
                     agent_id=agent_id or name,
                     name=f"Session {session_id}",
                     metadata=metadata or {},
-                )
-                await self._dispatch_async(
-                    self._conversation_store,
-                    "create_session",
-                    "async_create_session",
-                    new_session,
-                )
-            else:
-                raw = await self._dispatch_async(
-                    self._conversation_store,
-                    "get_messages",
-                    "async_get_messages",
-                    session_id,
-                )
+                ),
+                create_session=lambda s: self._dispatch_async(
+                    store, "create_session", "async_create_session", s
+                ),
+                get_messages=lambda: self._dispatch_async(
+                    store, "get_messages", "async_get_messages", session_id
+                ),
+            )
+
+            if raw is not None:
                 from praisonaiagents.db.protocol import DbMessage
 
                 messages = [
@@ -874,13 +885,8 @@ class PraisonAIDB:
                 # async path matches the sync on_tool_call behaviour.
                 from ..persistence.conversation.base import ConversationMessage
                 import uuid
-                import json
 
-                tool_content = json.dumps({
-                    "tool": tool_name,
-                    "args": arguments,
-                    "result": str(result)[:1000],
-                })
+                tool_content = self._serialize_tool_call(tool_name, arguments, result)
                 msg = ConversationMessage(
                     id=f"tool-{uuid.uuid4().hex[:12]}",
                     session_id=session_id,

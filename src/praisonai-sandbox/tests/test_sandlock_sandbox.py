@@ -1,0 +1,322 @@
+"""
+Tests for SandlockSandbox implementation.
+"""
+
+import asyncio
+import importlib
+import os
+import sys
+import tempfile
+import pytest
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+from praisonaiagents.sandbox import ResourceLimits, SandboxConfig, SandboxStatus
+
+
+def _make_sandbox(mock_sandlock):
+    """Instantiate SandlockSandbox with *mock_sandlock* injected via sys.modules."""
+    # The SDK gates on landlock_abi_version() >= min_landlock_abi(); give the
+    # mock a concrete minimum (sandlock currently requires ABI 6) so the
+    # numeric comparison in __init__/is_available works.  Tests that exercise
+    # the "unsupported" path set landlock_abi_version below this.
+    if not isinstance(mock_sandlock.min_landlock_abi.return_value, int):
+        mock_sandlock.min_landlock_abi.return_value = 6
+    # Remove any cached version so the import block inside __init__ re-runs.
+    sys.modules.pop("praisonai_sandbox.sandlock", None)
+    with patch.dict("sys.modules", {"sandlock": mock_sandlock}):
+        from praisonai_sandbox.sandlock import SandlockSandbox
+        sandbox = SandlockSandbox()
+    # Keep the mock wired up after the context manager exits.
+    sandbox._sandlock = mock_sandlock
+    return sandbox
+
+
+class TestSandlockSandbox:
+    """Test SandlockSandbox functionality."""
+
+    def test_import_without_sandlock(self):
+        """Test that SandlockSandbox raises ImportError without sandlock."""
+        sys.modules.pop("praisonai_sandbox.sandlock", None)
+        # Ensure sandlock is absent from sys.modules so the import inside
+        # __init__ actually raises ImportError.
+        with patch.dict("sys.modules", {"sandlock": None}):
+            # Re-import the module fresh so it picks up the patched sys.modules.
+            if "praisonai_sandbox.sandlock" in sys.modules:
+                del sys.modules["praisonai_sandbox.sandlock"]
+            from praisonai_sandbox.sandlock import SandlockSandbox
+
+            with pytest.raises(ImportError, match="sandlock package required"):
+                SandlockSandbox()
+
+    def test_raises_when_landlock_unavailable(self):
+        """Instantiation must fail loud on kernels without Landlock support.
+
+        Silent degradation to SubprocessSandbox would violate the caller's
+        explicit choice of kernel-level isolation — a SandlockSandbox that
+        isn't actually using Landlock is a security footgun.
+        """
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 0  # unsupported
+
+        with pytest.raises(RuntimeError, match="requires Landlock"):
+            _make_sandbox(mock_sandlock)
+
+    def test_sandbox_kwargs_with_minimal_limits(self):
+        """Sandbox kwargs are built directly from resource limits.
+
+        sandlock dropped the ``Policy`` object; config is now passed straight
+        to ``Sandbox(**kwargs)``.
+        """
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6  # supported
+
+        sandbox = _make_sandbox(mock_sandlock)
+
+        limits = ResourceLimits.minimal()
+        call_kwargs = sandbox._build_sandbox_kwargs(limits, "/tmp/workspace")
+
+        assert "fs_readable" in call_kwargs
+        assert "fs_writable" in call_kwargs
+        assert call_kwargs["max_memory"] == "128M"  # From minimal limits
+        assert call_kwargs["max_processes"] == 5
+        assert call_kwargs["max_cpu"] == 50  # From minimal limits
+        # Network disabled → deny all outbound (empty allowlist).
+        assert call_kwargs["net_allow"] == []
+        # Clean baseline env: never inherit the host's full environment.
+        assert call_kwargs["clean_env"] is True
+
+    def test_sandbox_kwargs_network_enabled(self):
+        """Network-enabled limits open all TCP plus UDP DNS."""
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6
+
+        sandbox = _make_sandbox(mock_sandlock)
+
+        limits = ResourceLimits(network_enabled=True)
+        call_kwargs = sandbox._build_sandbox_kwargs(limits)
+
+        assert "*:*" in call_kwargs["net_allow"]
+        assert "udp://*:53" in call_kwargs["net_allow"]
+
+    @pytest.mark.asyncio
+    async def test_env_isolation_no_host_leak(self):
+        """clean_env=True isolates the host env; env={} is honoured, not skipped.
+
+        Regression: ``if env:`` skipped an explicitly-passed empty dict, and
+        with sandlock's default ``clean_env=False`` the child inherited the
+        parent's FULL environment — leaking host secrets regardless of what
+        the caller passed.  The baseline must be clean, and ``env={}`` must
+        still set the field (guard is ``is not None``).
+        """
+        mock_sandlock = Mock()
+        mock_result = Mock(success=True, exit_code=0, stdout=b"", stderr=b"")
+        sandbox_cm = MagicMock()
+        sandbox_cm.__enter__.return_value = Mock(run=Mock(return_value=mock_result))
+        mock_sandlock.Sandbox.return_value = sandbox_cm
+        mock_sandlock.landlock_abi_version.return_value = 6
+
+        sandbox = _make_sandbox(mock_sandlock)
+        await sandbox.start()
+
+        # An explicit empty dict must still set env (honour caller intent).
+        await sandbox.execute("pass", env={})
+        kwargs = mock_sandlock.Sandbox.call_args.kwargs
+        assert kwargs["clean_env"] is True
+        assert kwargs["env"] == {}
+
+        # A populated dict is layered on top of the clean baseline.
+        await sandbox.execute("pass", env={"MY_VAR": "x"})
+        kwargs = mock_sandlock.Sandbox.call_args.kwargs
+        assert kwargs["clean_env"] is True
+        assert kwargs["env"] == {"MY_VAR": "x"}
+
+        # env=None: no overrides, but the baseline is still clean.
+        await sandbox.execute("pass")
+        kwargs = mock_sandlock.Sandbox.call_args.kwargs
+        assert kwargs["clean_env"] is True
+        assert "env" not in kwargs
+
+    def test_status_reporting(self):
+        """Test sandbox status reporting."""
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
+
+        sandbox = _make_sandbox(mock_sandlock)
+        status = sandbox.get_status()
+
+        assert status["type"] == "sandlock"
+        assert status["available"] is True
+        assert status["landlock_supported"] is True
+        assert "features" in status
+        assert status["features"]["filesystem_isolation"] is True
+        assert status["features"]["network_isolation"] is True
+        assert status["features"]["syscall_filtering"] is True
+
+    @pytest.mark.asyncio
+    async def test_sandlock_execution_success(self):
+        """Test successful code execution with sandlock."""
+        mock_sandlock = Mock()
+        mock_result = Mock()
+        mock_result.success = True
+        mock_result.exit_code = 0
+        # Real sandlock returns bytes; exercise the _decode() byte path.
+        mock_result.stdout = b"Hello, World!"
+        mock_result.stderr = b""
+
+        mock_sandlock.Sandbox.return_value = Mock(run=Mock(return_value=mock_result))
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
+
+        sandbox = _make_sandbox(mock_sandlock)
+
+        with patch("asyncio.get_running_loop") as mock_loop:
+            mock_loop.return_value.run_in_executor = AsyncMock(return_value=mock_result)
+
+            await sandbox.start()
+            result = await sandbox.execute("print('Hello, World!')")
+
+        assert result.status == SandboxStatus.COMPLETED
+        assert result.exit_code == 0
+        assert result.stdout == "Hello, World!"
+        assert result.metadata["sandbox_type"] == "sandlock"
+        assert result.metadata["landlock_enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_sandlock_execution_timeout(self):
+        """Timeout is detected via exit_code == -1 (ExitStatus::Timeout)."""
+        mock_sandlock = Mock()
+        mock_sandlock.Sandbox.return_value = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6
+
+        sandbox = _make_sandbox(mock_sandlock)
+
+        mock_timeout_result = Mock()
+        mock_timeout_result.success = False
+        # sandlock's timeout sentinel — Sandbox.run() does not populate
+        # result.error on timeout, so we rely on the exit_code instead.
+        mock_timeout_result.exit_code = -1
+        mock_timeout_result.stdout = b""
+        mock_timeout_result.stderr = b""
+        mock_timeout_result.error = None
+
+        with patch("asyncio.get_running_loop") as mock_loop:
+            mock_loop.return_value.run_in_executor = AsyncMock(
+                return_value=mock_timeout_result
+            )
+
+            await sandbox.start()
+            result = await sandbox.execute(
+                "import time; time.sleep(100)",
+                limits=ResourceLimits(timeout_seconds=10),
+            )
+
+        assert result.status == SandboxStatus.TIMEOUT
+        assert "timed out" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_sandlock_execution_failure(self):
+        """Non-timeout failures keep the FAILED status and surface stderr."""
+        mock_sandlock = Mock()
+        mock_sandlock.Sandbox.return_value = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6
+
+        sandbox = _make_sandbox(mock_sandlock)
+
+        mock_failed_result = Mock()
+        mock_failed_result.success = False
+        mock_failed_result.exit_code = 1
+        mock_failed_result.stdout = b""
+        mock_failed_result.stderr = b"Permission denied"
+        mock_failed_result.error = None  # not a timeout
+
+        with patch("asyncio.get_running_loop") as mock_loop:
+            mock_loop.return_value.run_in_executor = AsyncMock(
+                return_value=mock_failed_result
+            )
+
+            await sandbox.start()
+            result = await sandbox.execute("import os; os.system('rm -rf /')")
+
+        assert result.status == SandboxStatus.FAILED
+        assert "exit code 1" in result.error
+        assert "Permission denied" in result.error
+
+    @pytest.mark.asyncio
+    async def test_safe_sandbox_path_traversal_blocked(self):
+        """Test that path traversal attempts are blocked by _safe_sandbox_path."""
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
+
+        sandbox = _make_sandbox(mock_sandlock)
+        await sandbox.start()
+
+        # Attempt to escape the sandbox root via ".."
+        result = sandbox._safe_sandbox_path("../../etc/passwd")
+        assert result is None
+
+        # A normal relative path should resolve inside the sandbox.
+        # Compare via ``os.path.realpath`` so the assertion works on macOS
+        # where ``/var/folders`` is a symlink to ``/private/var/folders`` —
+        # ``_safe_sandbox_path`` returns the realpath form while
+        # ``sandbox._temp_dir`` holds the unresolved ``mkdtemp`` output.
+        normal = sandbox._safe_sandbox_path("subdir/file.txt")
+        assert normal is not None
+        assert normal.startswith(os.path.realpath(sandbox._temp_dir) + os.sep)
+
+        await sandbox.stop()
+
+    @pytest.mark.asyncio
+    async def test_write_file_blocks_traversal(self):
+        """Test that write_file refuses paths that escape the sandbox root."""
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
+
+        sandbox = _make_sandbox(mock_sandlock)
+        await sandbox.start()
+
+        success = await sandbox.write_file("../../etc/crontab", "malicious")
+        assert success is False
+
+        await sandbox.stop()
+
+    @pytest.mark.asyncio
+    async def test_real_sandlock_integration(self):
+        """Integration test with real sandlock package if available.
+        
+        This test uses the actual sandlock package (if available) to ensure
+        the integration works with the real API surface, not just mocks.
+        """
+        try:
+            # Try to import real sandlock
+            import sandlock
+
+            # SandlockSandbox.__init__ raises RuntimeError unless the kernel's
+            # Landlock ABI meets sandlock's own minimum (min_landlock_abi()).
+            # Skip on anything below that threshold so this test cleanly skips
+            # on intermediate-ABI kernels instead of hard-failing in the
+            # constructor.
+            if sandlock.landlock_abi_version() < sandlock.min_landlock_abi():
+                pytest.skip("Landlock ABI below sandlock's minimum on this system")
+
+            # Test with real sandlock package
+            from praisonai_sandbox.sandlock import SandlockSandbox
+
+            sandbox = SandlockSandbox()
+            assert sandbox.is_available
+            
+            await sandbox.start()
+            
+            # Execute simple code that should succeed
+            result = await sandbox.execute(
+                "print('Real sandlock integration test')", 
+                limits=ResourceLimits(timeout_seconds=5, memory_mb=64)
+            )
+            
+            # Should complete successfully
+            assert result.status == SandboxStatus.COMPLETED
+            assert result.exit_code == 0
+            assert "Real sandlock integration test" in result.stdout
+            
+            await sandbox.stop()
+            
+        except ImportError:
+            pytest.skip("sandlock package not available for integration test")

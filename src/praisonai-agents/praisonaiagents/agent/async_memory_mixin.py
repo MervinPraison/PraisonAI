@@ -7,7 +7,6 @@ async capabilities following the AsyncMemoryProtocol.
 """
 
 import asyncio
-import logging
 from typing import List, Dict, Any, Optional, Union
 from praisonaiagents._logging import get_logger
 from ..memory.protocols import AsyncMemoryProtocol

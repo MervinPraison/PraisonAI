@@ -70,16 +70,16 @@ if conda info --envs | grep -q "$ENV_NAME"; then
     echo "Environment $ENV_NAME already exists. Recreating..."
     conda env remove -y -n "$ENV_NAME"
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        conda create --name "$ENV_NAME" python=3.10 pytorch=2.3.0 -c pytorch -y
+        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 -c pytorch -y
     elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        conda create --name "$ENV_NAME" python=3.10 pytorch=2.3.0 cudatoolkit=11.8 -c pytorch -c nvidia -y
+        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 pytorch-cuda=12.4 -c pytorch -c nvidia -y
     fi
 else
     echo "Creating new environment $ENV_NAME..."
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        conda create --name "$ENV_NAME" python=3.10 pytorch=2.3.0 -c pytorch -y
+        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 -c pytorch -y
     elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        conda create --name "$ENV_NAME" python=3.10 pytorch=2.3.0 cudatoolkit=11.8 -c pytorch -c nvidia -y
+        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 pytorch-cuda=12.4 -c pytorch -c nvidia -y
     fi
 fi
 
@@ -94,12 +94,11 @@ conda install -y cmake
 PIP_FULL_PATH=$(conda run -n "$ENV_NAME" which pip)
 
 # Install other packages using pip
-$PIP_FULL_PATH install --upgrade pip 
-$PIP_FULL_PATH install "xformers==0.0.26.post1"
-$PIP_FULL_PATH install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git@53a773e4fbc53a1d96c7ba107e5fe75dab07027b"
-$PIP_FULL_PATH install --no-deps "trl<0.9.0" peft accelerate bitsandbytes 
-$PIP_FULL_PATH install unsloth_zoo
-$PIP_FULL_PATH install cut_cross_entropy
+$PIP_FULL_PATH install --upgrade pip
+# Latest Unsloth pulls a compatible xformers/trl/transformers set itself; pinning an
+# ancient unsloth commit + trl<0.9.0 broke new-model support (Gemma 4, Qwen3, ...).
+$PIP_FULL_PATH install "unsloth>=2025.9.1" unsloth_zoo
+$PIP_FULL_PATH install "trl>=0.18.2" "peft>=0.13.0" "accelerate>=0.34.0" "bitsandbytes>=0.45.0"
 $PIP_FULL_PATH install sentencepiece protobuf datasets huggingface_hub hf_transfer wandb
 
 echo "Setup completed successfully!"

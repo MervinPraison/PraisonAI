@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 Managed Agent Backend Example — Real end-to-end test.

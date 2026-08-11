@@ -94,7 +94,9 @@ async def verify_token(
     if not token:
         token = request.query_params.get("token")
     
-    if token != CALL_SERVER_TOKEN:
+    # Constant-time comparison to avoid a token-recovery timing side channel.
+    import hmac
+    if not token or not hmac.compare_digest(token, CALL_SERVER_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Request/Response Models
@@ -168,6 +170,159 @@ def list_registered_agents() -> list:
     return list(_agent_registry.keys())
 
 
+def _is_real_agent(agent: Any) -> bool:
+    """Return True when ``agent`` is a genuine ``praisonaiagents`` ``Agent``.
+
+    Uses ``isinstance`` against the real ``Agent`` class so **subclasses defined
+    in application code** are recognised too (they inherit the per-session
+    machinery and ``clone_for_channel``). Plain mocks / lightweight callables are
+    not ``Agent`` instances, so they fall back to the shared instance for
+    backward compatibility. If ``praisonaiagents`` cannot be imported we treat
+    the object as non-isolatable.
+    """
+    try:
+        from praisonaiagents import Agent
+    except Exception:
+        return False
+    return isinstance(agent, Agent)
+
+
+def _supports_session_isolation(agent: Any) -> bool:
+    """Return True when ``agent`` can be safely cloned per session.
+
+    A real ``Agent`` (or any subclass) exposes the per-session machinery
+    (``_session_id`` binding, ``chat_history`` and a safe clone path). Plain
+    mocks / lightweight callables do not, so they stay on the shared instance to
+    preserve backward compatibility.
+    """
+    if not _is_real_agent(agent):
+        return False
+    if not hasattr(agent, "_session_id"):
+        return False
+    if not hasattr(agent, "chat_history"):
+        return False
+    return callable(getattr(agent, "clone_for_channel", None))
+
+
+def _clone_agent(agent: Any) -> Any:
+    """Create an independent copy of a real ``Agent``.
+
+    Prefers ``clone_for_channel`` (purpose-built for multi-channel isolation
+    with fresh locks), falling back to ``deepcopy``.
+    """
+    clone_for_channel = getattr(agent, "clone_for_channel", None)
+    if callable(clone_for_channel):
+        return clone_for_channel()
+    import copy as _copy
+
+    return _copy.deepcopy(agent)
+
+
+def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
+    """Resolve an isolated, session-scoped agent for a single request.
+
+    The registry holds a *template* agent, not a live conversation. Every
+    request gets its own clone so concurrent callers never share mutable
+    ``chat_history``:
+
+    - With a ``session_id``: the clone is bound to that session so its history
+      is loaded from (and persisted to) the shared, file-locked session store —
+      giving continuity across requests and isolation between sessions.
+    - Without a ``session_id``: the clone is ephemeral (no session binding), so
+      no global state is mutated.
+
+    Agents that don't support cloning/session binding (e.g. plain mocks) fall
+    back to the shared registry instance for backward compatibility.
+    """
+    template = get_agent(agent_id)
+    if template is None:
+        return None
+
+    if not _supports_session_isolation(template):
+        return template
+
+    try:
+        agent = _clone_agent(template)
+    except Exception as e:
+        # A clone failure must never silently fall back to the shared template:
+        # doing so would leak one session's chat_history into another. Fail the
+        # request instead so isolation is guaranteed.
+        logger.error(
+            f"Failed to clone agent '{agent_id}' for session isolation: {e}"
+        )
+        raise RuntimeError(
+            f"Failed to isolate agent '{agent_id}' for session: {e}"
+        ) from e
+
+    # Reset per-request conversation state so the clone starts clean and
+    # (re)loads the requested session's history lazily on first chat.
+    try:
+        agent.chat_history = []
+    except Exception:
+        pass
+    if hasattr(agent, "_session_store_initialized"):
+        agent._session_store_initialized = False
+    if session_id:
+        agent._session_id = session_id
+        if hasattr(agent, "_history_session_id"):
+            agent._history_session_id = session_id
+    else:
+        agent._session_id = None
+        if hasattr(agent, "_history_session_id"):
+            agent._history_session_id = None
+    return agent
+
+
+_APPLYABLE_OVERRIDES = frozenset({
+    "instructions", "goal", "role", "backstory",
+    "llm", "max_iter",
+    "verbose", "markdown",
+})
+
+
+class AgentConfigError(ValueError):
+    """Raised when an agent_config override is unsupported or cannot be applied."""
+
+
+def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> None:
+    """Apply per-request overrides to an isolated agent clone.
+
+    Only whitelisted fields are settable. An unknown or unsettable key raises
+    ``AgentConfigError`` so the caller learns their override wasn't honoured
+    instead of silently drifting. Callers translate this into a 400 response.
+
+    Refuses to mutate a shared, non-isolated agent (e.g. a plain mock that took
+    the shared-instance fallback): writing overrides onto a registry-shared
+    object would leak this request's config into subsequent/concurrent requests.
+    In that case the override is rejected rather than silently applied globally.
+    """
+    if not agent_config:
+        return
+    if not _supports_session_isolation(agent):
+        raise AgentConfigError(
+            "agent_config overrides require a session-isolatable Agent; this "
+            "agent is shared across requests and cannot be safely overridden "
+            "per request."
+        )
+    unknown = set(agent_config) - _APPLYABLE_OVERRIDES
+    if unknown:
+        raise AgentConfigError(
+            f"Unsupported agent_config override(s): {sorted(unknown)}. "
+            f"Allowed: {sorted(_APPLYABLE_OVERRIDES)}"
+        )
+    for key, value in agent_config.items():
+        if not hasattr(agent, key):
+            raise AgentConfigError(
+                f"Agent has no attribute {key!r}; cannot override."
+            )
+        try:
+            setattr(agent, key, value)
+        except (AttributeError, TypeError) as e:
+            raise AgentConfigError(
+                f"Cannot override {key!r} on this agent: {e}"
+            )
+
+
 def _supports_async_start(agent: Any) -> bool:
     """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
@@ -218,8 +373,17 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         }
         ```
         """
-        # Get agent from registry
-        agent = get_agent(agent_id)
+        # Resolve a per-session isolated agent view so concurrent callers never
+        # share mutable chat_history. A provided session_id gives continuity via
+        # the shared session store; its absence yields an ephemeral conversation.
+        try:
+            agent = resolve_session_agent(agent_id, request.session_id)
+        except Exception as e:
+            logger.error(f"Failed to isolate agent {agent_id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Agent execution failed: {str(e)}"
+            )
         if not agent:
             logger.error(f"Agent not found: {agent_id}")
             raise HTTPException(
@@ -227,25 +391,29 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 detail=f"Agent '{agent_id}' not found"
             )
         
+        # Apply per-request agent_config overrides to the isolated clone, or
+        # reject unsupported keys with a 400 so the caller isn't silently
+        # running a different config than they asked for.
         try:
-            # Set session ID if provided
+            _apply_agent_config(agent, request.agent_config)
+        except AgentConfigError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        try:
+            # Session ID echoed back to the caller
             session_id = request.session_id or "default"
-            
-            # Apply agent config overrides if provided
-            if request.agent_config:
-                # This would depend on the specific agent implementation
-                # For now, we'll just log it
-                logger.debug(f"Agent config overrides provided: {request.agent_config}")
             
             # Invoke agent (handle both sync and async agents)
             if _supports_async_start(agent):
                 # Async agent
                 result = await agent.astart(request.message)
             elif _supports_sync_start(agent):
-                # Sync agent - run in thread pool to avoid blocking the event loop
+                # Sync agent - run in a worker thread to avoid blocking the event
+                # loop. ``asyncio.to_thread`` is the correct primitive inside a
+                # running request coroutine (``get_event_loop()`` is deprecated
+                # there since Python 3.10).
                 import asyncio
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, agent.start, request.message)
+                result = await asyncio.to_thread(agent.start, request.message)
             else:
                 raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
             
@@ -362,29 +530,42 @@ async def invoke_agent_standalone(
     This can be used in environments where FastAPI is not available
     or when integrating with other web frameworks.
     """
-    agent = get_agent(agent_id)
-    if not agent:
+    if get_agent(agent_id) is None:
         return {
             "error": f"Agent '{agent_id}' not found",
             "status": "error",
             "available_agents": list_registered_agents()
         }
-    
+
     try:
-        # Apply config if provided
-        if agent_config:
-            logger.debug(f"Agent config provided: {agent_config}")
-        
+        # Per-session isolated agent view (see resolve_session_agent). Done
+        # inside the try so a clone/isolation failure returns a clean error
+        # rather than leaking one session's history into another.
+        agent = resolve_session_agent(agent_id, session_id)
+
+        # Apply per-request overrides, or surface a clean error dict if a key
+        # isn't supported (mirrors the route's 400 without raising HTTP here).
+        try:
+            _apply_agent_config(agent, agent_config)
+        except AgentConfigError as e:
+            return {
+                "error": str(e),
+                "status": "error",
+                "agent_id": agent_id,
+            }
+
         # Invoke agent
         session_id = session_id or "default"
         
         if _supports_async_start(agent):
             result = await agent.astart(message)
         elif _supports_sync_start(agent):
-            # Sync agent - run in thread pool to avoid blocking the event loop
+            # Sync agent - run in a worker thread to avoid blocking the event
+            # loop. ``asyncio.to_thread`` is the correct primitive inside a
+            # running request coroutine (``get_event_loop()`` is deprecated
+            # there since Python 3.10).
             import asyncio
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, agent.start, message)
+            result = await asyncio.to_thread(agent.start, message)
         else:
             raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
         

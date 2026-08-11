@@ -10,6 +10,10 @@ from praisonaiagents.bots import (
     DisplayPolicy,
     MessageType,
     resolve_display_policy,
+    format_for_dialect,
+    escape_markdown_v2,
+    markdown_to_slack,
+    strip_markdown,
 )
 
 
@@ -331,3 +335,127 @@ class TestMessageType:
         assert MessageType.COMMAND.value == "command"
         assert MessageType.REPLY.value == "reply"
         assert MessageType.EDIT.value == "edit"
+
+
+class TestFormatForDialect:
+    """Tests for markdown dialect conversion (consumes markdown_dialect)."""
+
+    def test_telegram_markdown_v2_escapes_and_sets_mode(self):
+        """Telegram dialect escapes specials and requests MarkdownV2."""
+        text, mode = format_for_dialect(
+            "Deploy `svc_1` (see [runbook](url))",
+            "telegram_markdown_v2",
+        )
+        assert mode == "MarkdownV2"
+        # Bare _ [ ] ( ) ` . that would trigger a 400 are backslash-escaped.
+        assert r"svc\_1" in text
+        assert r"\`" in text
+        assert r"\[runbook\]" in text
+        assert r"\(url\)" in text
+
+    def test_escape_markdown_v2_all_specials(self):
+        """Every reserved MarkdownV2 char is escaped."""
+        for ch in r"_*[]()~`>#+-=|{}.!\\":
+            assert escape_markdown_v2(ch) == "\\" + ch
+
+    def test_slack_dialect_converts_markup(self):
+        """Slack dialect maps bold/link/heading to mrkdwn, no parse_mode."""
+        text, mode = format_for_dialect(
+            "# Title\n**bold** and [label](https://x.io)",
+            "slack",
+        )
+        assert mode is None
+        assert "*bold*" in text
+        assert "<https://x.io|label>" in text
+        assert "*Title*" in text
+        assert "#" not in text
+
+    def test_discord_dialect_passthrough(self):
+        """Discord speaks CommonMark: text passes through untouched."""
+        src = "**bold** and `code`"
+        text, mode = format_for_dialect(src, "discord_markdown")
+        assert text == src
+        assert mode is None
+
+    def test_unknown_dialect_plain_text_fallback(self):
+        """Unknown/plain dialect strips markup to safe plain text."""
+        text, mode = format_for_dialect(
+            "# Heading\n**bold** [label](https://x.io)",
+            "markdown",
+        )
+        assert mode is None
+        assert "**" not in text
+        assert "#" not in text
+        assert "Heading" in text
+        assert "label" in text
+        assert "https://x.io" not in text
+
+    def test_none_and_empty(self):
+        """None and empty inputs are handled safely."""
+        assert format_for_dialect(None, "telegram_markdown_v2") == ("", None)
+        assert format_for_dialect("", "slack") == ("", None)
+
+    def test_strip_markdown_unwraps_links(self):
+        """strip_markdown keeps the label, drops the url and emphasis."""
+        assert strip_markdown("see [docs](https://x.io) now") == "see docs now"
+        assert strip_markdown("**hi** _there_") == "hi there"
+
+    def test_markdown_to_slack_plain_passthrough(self):
+        """Plain text without markup is unchanged for Slack."""
+        assert markdown_to_slack("just plain text") == "just plain text"
+
+    def test_strip_markdown_preserves_literal_delimiters(self):
+        """Lone/literal *_` are NOT deleted (no svc_1 -> svc1 corruption)."""
+        # Identifiers, globs and arithmetic must survive the plain-text fallback.
+        assert strip_markdown("restart svc_1 now") == "restart svc_1 now"
+        assert strip_markdown("match *.py files") == "match *.py files"
+        assert strip_markdown("compute a*b + c") == "compute a*b + c"
+        assert strip_markdown("path a_b_c_d") == "path a_b_c_d"
+
+    def test_strip_markdown_unwraps_code_and_paired(self):
+        """Paired emphasis/code spans are unwrapped, contents kept."""
+        assert strip_markdown("run `deploy` twice") == "run deploy twice"
+        assert strip_markdown("**bold** text") == "bold text"
+
+
+class TestFormatMessageConsumesCapability:
+    """The BasePlatformAdapter default send seam consumes markdown_dialect."""
+
+    def _adapter(self, dialect):
+        from praisonaiagents.bots import (
+            BasePlatformAdapter,
+            PlatformCapabilities,
+            SendResult,
+        )
+
+        class _Adapter(BasePlatformAdapter):
+            capabilities = PlatformCapabilities(markdown_dialect=dialect)
+
+            async def connect(self, *, is_reconnect=False):
+                return True
+
+            async def disconnect(self):
+                return None
+
+            async def send(self, chat_id, content, *, reply_to=None, metadata=None):
+                return SendResult(ok=True, chat_id=chat_id)
+
+            async def get_chat_info(self, chat_id):
+                return {"id": chat_id}
+
+        return _Adapter()
+
+    def test_default_format_message_applies_slack_dialect(self):
+        """A Slack adapter's default format_message yields mrkdwn."""
+        out = self._adapter("slack").format_message("**bold**")
+        assert out == "*bold*"
+
+    def test_default_format_message_escapes_for_telegram(self):
+        """A Telegram adapter escapes specials so replies are never dropped."""
+        out = self._adapter("telegram_markdown_v2").format_message("svc_1.")
+        assert out == r"svc\_1\."
+
+    def test_default_format_message_markdown_is_backward_compatible(self):
+        """Default 'markdown' dialect keeps literals intact (no regression)."""
+        out = self._adapter("markdown").format_message("restart svc_1")
+        assert out == "restart svc_1"

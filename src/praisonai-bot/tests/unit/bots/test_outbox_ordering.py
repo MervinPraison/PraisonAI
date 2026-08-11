@@ -148,8 +148,14 @@ def test_reliability_production_selects_strict():
     assert r.outbound_ordering == "strict"
 
 
-def test_reliability_default_and_off_stay_best_effort():
-    assert resolve_reliability(None).outbound_ordering == "best_effort"
+def test_reliability_unset_default_is_strict():
+    # Safe by default (#3438): the unset posture upgrades to strict per-lane
+    # FIFO along with its admission ceiling.
+    assert resolve_reliability(None).outbound_ordering == "strict"
+
+
+def test_reliability_explicit_default_and_off_stay_best_effort():
+    # The explicit legacy presets remain backward-compatible (best-effort).
     assert resolve_reliability("default").outbound_ordering == "best_effort"
     assert resolve_reliability("off").outbound_ordering == "best_effort"
 

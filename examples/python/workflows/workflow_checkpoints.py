@@ -6,7 +6,7 @@ Useful for long-running workflows that may be interrupted.
 """
 
 from praisonaiagents import AgentFlow, Task
-from praisonaiagents import AgentFlowManager
+from praisonaiagents.workflows import WorkflowManager
 
 # Create a multi-step workflow
 workflow = AgentFlow(
@@ -34,7 +34,7 @@ workflow = AgentFlow(
 
 if __name__ == "__main__":
     manager = WorkflowManager()
-    manager.workflows["Long Process"] = workflow
+    manager._workflows[workflow.name.lower()] = workflow
     
     # Execute with checkpoint - saves after each step
     print("=== Starting workflow with checkpoint ===")

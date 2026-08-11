@@ -1,3 +1,4 @@
+# praisonai: skip=true
 import json
 import pathlib
 from praisonai import Agent, ManagedAgent, ManagedConfig

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 import streamlit as st
 from praisonaiagents import Agent, Task, AgentTeam
 from pydantic import BaseModel

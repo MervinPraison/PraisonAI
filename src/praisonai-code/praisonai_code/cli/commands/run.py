@@ -4,6 +4,7 @@ Run command group for PraisonAI CLI.
 Provides agent execution commands.
 """
 
+from contextlib import contextmanager
 from typing import Any, Dict, Optional, List
 
 import typer
@@ -11,6 +12,7 @@ import typer
 from ..output.console import get_output_controller
 from ..state.identifiers import get_current_context
 from ..configuration.resolver import resolve_config
+from ..utils.env_utils import scopes_no_plugins
 
 app = typer.Typer(help="Run agents")
 
@@ -18,6 +20,48 @@ app = typer.Typer(help="Run agents")
 _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 _ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
+
+
+def _run_succeeded(result: Any) -> bool:
+    """Whether an agent run result represents a genuine success.
+
+    The public ``Agent.start``/``run`` surface collapses failures (swallowed
+    LLM/auth error, guardrail block, tool failure, ``max_iter`` without
+    completion) to a falsy result (``None``/empty), while a real answer is a
+    non-empty string. Treat a falsy result as failure so ``praisonai run`` can
+    exit non-zero and emit a machine-readable outcome instead of reporting
+    success unconditionally.
+    """
+    if result is None:
+        return False
+    if isinstance(result, str):
+        return bool(result.strip())
+    return True
+
+
+def _report_run_failure(output: Any) -> None:
+    """Report an agent-run failure and exit non-zero.
+
+    Mirrors the existing arg-error exit convention (``typer.Exit(1)``) but for a
+    *run* failure: emits a machine-readable outcome under ``--output json`` and
+    prints a human-facing error, so CI/scripts can branch on the exit code and
+    the JSON ``status`` instead of scraping stderr.
+    """
+    message = "Run failed: the agent did not produce a result."
+    output.emit_result(
+        message=message,
+        data={"status": "failed", "result": None},
+    )
+    output.emit_error(message=message, data={"status": "failed"})
+    output.print_error(
+        message,
+        code="run_failed",
+        remediation=(
+            "Re-run with --verbose to see the underlying error, "
+            "or check credentials with: praisonai setup"
+        ),
+    )
+    raise typer.Exit(1)
 
 
 def _is_yaml_file(target: Optional[str]) -> bool:
@@ -139,6 +183,31 @@ def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], pe
         config["*"] = default
     
     return config if config else None
+
+
+def _plan_permission_conflicts(
+    approval: Optional[str],
+    allow: Optional[List[str]],
+    deny: Optional[List[str]],
+    permission_default: Optional[str],
+) -> List[str]:
+    """Return the permission flags that contradict ``--plan``.
+
+    ``--plan`` is a self-contained read-only preset (``PermissionMode.PLAN``);
+    combining it with an explicit approval backend or bespoke allow/deny rules
+    is unenforceable, so the caller fails closed. Returns the human-readable
+    flag names that were set, or an empty list when ``--plan`` may proceed.
+    """
+    return [
+        name
+        for name, value in (
+            ("--approval", approval),
+            ("--allow", allow),
+            ("--deny", deny),
+            ("--permission-default", permission_default),
+        )
+        if value
+    ]
 
 
 def _mcp_server_to_command(server: dict) -> Optional[tuple]:
@@ -504,6 +573,40 @@ def _apply_config_defaults(
     return mcp, mcp_env, permissions_config, mcp_servers
 
 
+def _resolve_config_instructions() -> List[str]:
+    """Return config-declared ``instructions`` sources (layered, concat-merged).
+
+    The resolver already concatenates list-valued keys across the config
+    hierarchy (global → user → project), so an org-wide instruction set under
+    a project-specific one is preserved rather than overridden. The key lives
+    under ``extra`` because it is a wrapper-only top-level key. Non-list or
+    absent values yield an empty list (fully backward-compatible).
+    """
+    try:
+        config = resolve_config()
+    except (ValueError, OSError):
+        return []
+    value = (getattr(config, "extra", None) or {}).get("instructions")
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(v) for v in value if isinstance(v, (str,)) and v.strip()]
+    return []
+
+
+def _merge_instructions(cli_instructions: Optional[List[str]]) -> List[str]:
+    """Merge config-declared instruction sources with repeatable CLI ones.
+
+    Config sources come first (org/project layering) and CLI ``--instructions``
+    entries are appended on top, matching the documented precedence (flag
+    merges on top of config). Returns an empty list when neither is present.
+    """
+    merged = _resolve_config_instructions()
+    if cli_instructions:
+        merged = merged + [s for s in cli_instructions if isinstance(s, str) and s.strip()]
+    return merged
+
+
 def _checkpoints_auto_enabled() -> bool:
     """Whether automatic run-checkpointing is enabled via project config.
 
@@ -620,6 +723,7 @@ def _try_attach_runtime(
     model: Optional[str],
     output_mode: Optional[str],
     session_id: Optional[str],
+    event_id: Optional[str] = None,
 ) -> bool:
     """Forward a plain prompt to a warm runtime when one is running.
 
@@ -649,11 +753,18 @@ def _try_attach_runtime(
     output = get_output_controller()
     try:
         client = RuntimeClient(descriptor)
-        result = client.run(prompt, model=model, session_id=session_id)
+        result = client.run(
+            prompt, model=model, session_id=session_id, event_id=event_id
+        )
     except RuntimeUnavailable:
         # Runtime went away mid-flight; fall back to in-process execution.
         return False
 
+    # The warm runtime handled the request; apply the same failure contract as
+    # the in-process paths so an empty result exits non-zero instead of silently
+    # reporting success.
+    if not _run_succeeded(result):
+        _report_run_failure(output)
     output.emit_result(
         message="Prompt completed",
         data={"result": str(result) if result else None},
@@ -663,7 +774,142 @@ def _try_attach_runtime(
     return True
 
 
+@contextmanager
+def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
+    """Run the enclosed block inside an isolated git worktree/branch.
+
+    Provisions a fresh worktree via the core ``GitWorktreeAdapter`` and chdirs
+    into it for the duration of the run so the agent edits an isolated branch
+    instead of the working tree. On exit it reports the branch name and a
+    summary of changes (tracked *and* untracked), then tears the worktree down.
+    Degrades to a transparent no-op when isolation is disabled or the directory
+    is not a git repository (the adapter reports ``available=False``), so callers
+    can wrap unconditionally.
+
+    Per-run isolation: a short random token is appended to ``name`` so two
+    concurrent or repeated runs of the same target never resolve to the same
+    worktree/branch and mix each other's uncommitted changes.
+
+    Data-safety on teardown: the agent's output may be entirely *untracked* new
+    files, which ``git diff`` does not see. So before removing the worktree we
+    snapshot any change (tracked or untracked, via ``git status --porcelain``)
+    onto the branch with an automatic commit and *retain that branch* — only the
+    worktree checkout directory is pruned. A run that produced no changes is
+    torn down completely (worktree + branch). ``--keep`` additionally retains the
+    worktree checkout itself for in-place review.
+    """
+    if not enabled:
+        yield None
+        return
+
+    import os
+    import subprocess
+    import uuid
+
+    from praisonaiagents.workspace import GitWorktreeAdapter
+
+    output = get_output_controller()
+    adapter = GitWorktreeAdapter()
+    if not adapter.available:
+        output.print_warning(
+            "Not a git repository; running without worktree isolation."
+        )
+        yield None
+        return
+
+    def _git(*args, cwd):
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=cwd, capture_output=True, text=True
+            )
+        except (FileNotFoundError, OSError):
+            return None
+
+    def _branch_of(worktree_path: str) -> str:
+        result = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path)
+        if result is not None and result.returncode == 0:
+            return result.stdout.strip() or "?"
+        return "?"
+
+    def _has_changes(worktree_path: str) -> bool:
+        # ``--porcelain`` reports staged, unstaged *and* untracked entries, so a
+        # run that only creates brand-new files (invisible to ``git diff``) is
+        # still recognised as having produced output.
+        result = _git("status", "--porcelain", cwd=worktree_path)
+        if result is None or result.returncode != 0:
+            return False
+        return bool((result.stdout or "").strip())
+
+    def _summary(worktree_path: str) -> str:
+        result = _git("status", "--short", cwd=worktree_path)
+        if result is None or result.returncode != 0:
+            return ""
+        return (result.stdout or "").strip()
+
+    # Make the run's worktree/branch unique per invocation so identical targets
+    # (same prompt/YAML) run concurrently without sharing state.
+    unique_name = f"{name}-{uuid.uuid4().hex[:8]}"
+
+    original_cwd = os.getcwd()
+    path = adapter.create(unique_name)
+    branch = _branch_of(path)
+    if not output.is_json_mode:
+        output.print_info(f"Isolated run on branch '{branch}' ({path})")
+    os.chdir(path)
+    try:
+        yield path
+    finally:
+        os.chdir(original_cwd)
+
+        summary = _summary(path)
+        changed = _has_changes(path)
+        if not output.is_json_mode:
+            if summary:
+                output.print_info(f"Changes on '{branch}':\n{summary}")
+            else:
+                output.print_info(f"No changes on '{branch}'.")
+
+        if keep:
+            if not output.is_json_mode:
+                output.print_info(
+                    f"Worktree kept at {path} (branch '{branch}'). "
+                    "Review/merge then remove with: git worktree remove."
+                )
+            return
+
+        if changed:
+            # Never destroy the agent's output. Persist every change (tracked +
+            # untracked) as a commit on the isolated branch and retain the
+            # branch; only the worktree checkout directory is pruned.
+            _git("add", "-A", cwd=path)
+            committed = _git(
+                "commit", "--no-verify", "-m", f"praisonai run: {name}", cwd=path
+            )
+            if committed is None or committed.returncode != 0:
+                # Couldn't persist the work (e.g. no git identity configured):
+                # keep the worktree checkout in place so output is never lost.
+                if not output.is_json_mode:
+                    output.print_warning(
+                        f"Could not commit isolated changes; worktree kept at "
+                        f"{path} (branch '{branch}') for manual review."
+                    )
+                return
+            # ``worktree remove`` deletes the checkout but leaves the branch
+            # intact for review/merge (unlike ``adapter.remove`` which also
+            # force-deletes the branch and would lose the committed work).
+            _git("worktree", "remove", "--force", path, cwd=original_cwd)
+            if not output.is_json_mode:
+                output.print_info(
+                    f"Committed changes to branch '{branch}'. "
+                    f"Review/merge with: git merge {branch}"
+                )
+        else:
+            # No output produced: safe to remove worktree and branch entirely.
+            adapter.remove(unique_name)
+
+
 @app.callback(invoke_without_command=True)
+@scopes_no_plugins
 def run_main(
     ctx: typer.Context,
     target: Optional[str] = typer.Argument(None, help="Agent file or prompt"),
@@ -685,11 +931,14 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
+    instructions: Optional[List[str]] = typer.Option(None, "--instructions", help="Extra instruction/context source (file path, glob, or http(s):// URL) to load alongside AGENTS.md/CLAUDE.md. Repeatable; merges on top of config-declared 'instructions'."),
     # Permission flags for CI-safe declarative policies
     allow: Optional[List[str]] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
     deny: Optional[List[str]] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
     permissions: Optional[str] = typer.Option(None, "--permissions", help="Permission file path (YAML or JSON) with allow/deny rules"),
     permission_default: Optional[str] = typer.Option(None, "--permission-default", help="Default action for unmatched patterns: allow, deny, ask (default: ask)"),
+    plan: bool = typer.Option(False, "--plan", help="Read-only planning mode: the agent may explore/read/search but every mutating tool is denied (maps to --approval plan)"),
     # Session continuity options
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
@@ -706,6 +955,9 @@ def run_main(
     restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace to a checkpoint id (or 'last') and exit"),
     # Warm-runtime live session: tag this run so other terminals can `attach`.
     attach: Optional[str] = typer.Option(None, "--attach", help="Run on the warm runtime under this session id so other terminals can observe it via `praisonai attach <id>`"),
+    # Per-run git-worktree isolation: run on a fresh branch/worktree.
+    worktree: bool = typer.Option(False, "--worktree", help="Run on an isolated git worktree/branch (branch-per-task); no-op when not a git repo"),
+    keep: bool = typer.Option(False, "--keep", help="With --worktree, keep the worktree/branch after the run for review instead of tearing it down"),
 ):
     """
     Run agents from a file or prompt.
@@ -721,6 +973,12 @@ def run_main(
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
 
+    # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
+    # decorator, which sets PRAISONAI_NO_PLUGINS (read by the core PluginManager)
+    # for the duration of this call and always restores the prior value on
+    # return, so it never leaks into a later in-process run_main() call.
+    # Persisted enable/disable state is untouched.
+
     # --allow-local-tools is a discoverable equivalent to the env-var opt-in.
     # It is a per-invocation grant: the actual gate is applied (and restored)
     # only around tool discovery below, so a later in-process run_main() call
@@ -732,6 +990,11 @@ def run_main(
     if restore:
         _restore_checkpoint(restore)
         return
+
+    # Merge config-declared instruction sources (layered global→project) with
+    # repeatable ``--instructions`` flags so both the prompt and profiled run
+    # paths load the same extra guidance alongside AGENTS.md/CLAUDE.md.
+    merged_instructions = _merge_instructions(instructions)
 
     # Ingest piped stdin so `run` composes in Unix pipelines and CI, e.g.
     #   cat error.log | praisonai run "Diagnose the root cause"
@@ -753,60 +1016,44 @@ def run_main(
         output.print_error(str(exc))
         raise typer.Exit(1)
 
+    # --plan is a discoverable alias for the existing read-only planning mode
+    # (--approval plan → PermissionMode.PLAN). It maps onto the same permission
+    # plumbing rather than a bespoke deny-set, so the agent may explore/read but
+    # every mutating tool is denied. Guard against contradictory permission
+    # flags so an unenforceable combination fails closed rather than silently
+    # dropping one intent.
+    if plan:
+        _conflicts = _plan_permission_conflicts(
+            approval, allow, deny, permission_default
+        )
+        if _conflicts:
+            output.print_error(
+                "--plan cannot be combined with "
+                + ", ".join(_conflicts)
+                + " (it already selects the read-only planning mode)"
+            )
+            raise typer.Exit(1)
+        approval = "plan"
+
     _require_wrapper_for_default_run(
         target, agent=agent, command=command, output_mode=output_mode
     )
 
-    # Early credential check before any processing
-    if target:  # Only check if we actually have something to run
-        from praisonai_code.llm.credentials import (
-            inject_credentials_into_env,
-            is_configured,
-        )
-        import sys
-        
-        # Check if credentials are configured (use model if provided, else check general)
-        inject_credentials_into_env()
-        if not is_configured(model):
-            # In non-interactive mode, show clear error
-            if not sys.stdin.isatty() or output.is_json_mode:
-                output.print_error(
-                    "No API key configured. Run: praisonai setup\n"
-                    "or set environment variables like OPENAI_API_KEY"
-                )
-                raise typer.Exit(1)
-            
-            # In interactive mode, offer to run setup
-            typer.echo(f"No API key configured{f' for model {model}' if model else ''}.")
-            run_setup = typer.confirm("Would you like to run the setup wizard now?")
-            
-            if run_setup:
-                from praisonai_code.cli.commands.setup import _run_setup
-                exit_code = _run_setup(
-                    non_interactive=False,
-                    provider=None,
-                    api_key=None,
-                    model=None
-                )
-                if exit_code != 0:
-                    output.print_error("Setup failed. Exiting.")
-                    raise typer.Exit(exit_code)
-                
-                output.print_success("Setup complete! Continuing with your run...")
-                # Re-check after setup
-                inject_credentials_into_env()
-                if not is_configured(model):
-                    output.print_error("Setup completed but credentials still not detected.")
-                    raise typer.Exit(1)
-            else:
-                output.print_info(
-                    "To configure credentials:\n"
-                    "  - Run: praisonai setup\n"
-                    "  - Or set environment variables like OPENAI_API_KEY"
-                )
-                raise typer.Exit(0)
-    
-    # Resolve configuration if model not explicitly provided
+    # Validate session options before any model/credential resolution so an
+    # invalid combination fails closed and session-model restoration below sees
+    # a well-formed request.
+    if fork and not session:
+        output.print_error("--fork requires --session to specify which session to fork from")
+        raise typer.Exit(1)
+
+    if continue_session and session:
+        output.print_error("Cannot use both --continue and --session together")
+        raise typer.Exit(1)
+
+    # Resolve the effective model BEFORE the credential/local-endpoint gate so a
+    # resumed session (or config) model is honoured rather than being shadowed
+    # by the keyless local-first fallback (Issue #3685). Precedence:
+    #   explicit --model  >  config model  >  recorded session model  >  default
     if model is None:
         try:
             config = resolve_config()
@@ -818,14 +1065,113 @@ def run_main(
             # Continue if config resolution fails, but log in verbose mode
             if verbose:
                 output.print_info(f"Skipping config-based model fallback: {e}")
-    
-    # Validate session options
-    if fork and not session:
-        output.print_error("--fork requires --session to specify which session to fork from")
+
+    # Restore the resumed session's model when none was explicitly chosen
+    # (Issue #3685). Without this, resume re-resolves the *current* default, so
+    # a change to the user's default between runs silently switches the model
+    # mid-conversation. An explicit --model (or config model above) still wins
+    # and updates the session's recorded model for subsequent turns. Placing it
+    # before the credential gate ensures a reachable local endpoint no longer
+    # silently shadows the recorded model on resume.
+    if model is None and (continue_session or session):
+        try:
+            from ..state.project_sessions import find_last_session, find_session_model
+
+            resumed_id = session or find_last_session()
+            if resumed_id:
+                recorded = find_session_model(resumed_id)
+                if recorded:
+                    model = recorded
+                    output.print_info(f"Restored session model: {model}")
+        except Exception:
+            # Model restore is best-effort; fall back to default resolution.
+            pass
+
+    # Early credential check before any processing
+    if target:  # Only check if we actually have something to run
+        from praisonai_code.llm.credentials import (
+            detect_local_endpoint,
+            inject_credentials_into_env,
+            is_configured,
+        )
+        import sys
+        
+        # Check if credentials are configured (use model if provided, else check general)
+        inject_credentials_into_env()
+        if not is_configured(model):
+            # Keyless local-first: when no explicit model was requested and no
+            # cloud key is configured, prefer a reachable local endpoint (e.g.
+            # Ollama) so `praisonai run "..."` just works before any auth. An
+            # explicit --model is left to its own provider gate.
+            local = detect_local_endpoint() if not model else None
+            if local is not None:
+                output.print_info(
+                    f"No cloud key found; using local model {local.model}. "
+                    "Run `praisonai setup` to add a hosted provider."
+                )
+                # Adopt the detected local model + base URL for this run so the
+                # Agent reaches the local endpoint. An explicit env base_url,
+                # if any, is left untouched.
+                import os as _os_local
+                model = local.model
+                _os_local.environ.setdefault("OPENAI_BASE_URL", local.base_url)
+            # In non-interactive mode, show clear error
+            elif not sys.stdin.isatty() or output.is_json_mode:
+                output.print_error(
+                    "No API key configured. Run: praisonai setup\n"
+                    "or set environment variables like OPENAI_API_KEY\n"
+                    "(a running local endpoint such as Ollama would be used "
+                    "automatically)"
+                )
+                raise typer.Exit(1)
+            
+            # In interactive mode, offer to run setup
+            else:
+                typer.echo(f"No API key configured{f' for model {model}' if model else ''}.")
+                run_setup = typer.confirm("Would you like to run the setup wizard now?")
+
+                if run_setup:
+                    from praisonai_code.cli.commands.setup import _run_setup
+                    exit_code = _run_setup(
+                        non_interactive=False,
+                        provider=None,
+                        api_key=None,
+                        model=None
+                    )
+                    if exit_code != 0:
+                        output.print_error("Setup failed. Exiting.")
+                        raise typer.Exit(exit_code)
+
+                    output.print_success("Setup complete! Continuing with your run...")
+                    # Re-check after setup
+                    inject_credentials_into_env()
+                    if not is_configured(model):
+                        output.print_error("Setup completed but credentials still not detected.")
+                        raise typer.Exit(1)
+                else:
+                    output.print_info(
+                        "To configure credentials:\n"
+                        "  - Run: praisonai setup\n"
+                        "  - Or set environment variables like OPENAI_API_KEY"
+                    )
+                    raise typer.Exit(0)
+
+    # Worktree isolation runs the agent in a chdir'd worktree in-process; the
+    # warm runtime is a separate process whose cwd we can't redirect, so reject
+    # the combination up front rather than silently ignoring isolation.
+    if worktree and attach:
+        output.print_error("--worktree cannot be combined with --attach")
         raise typer.Exit(1)
-    
-    if continue_session and session:
-        output.print_error("Cannot use both --continue and --session together")
+    if keep and not worktree:
+        output.print_error("--keep requires --worktree")
+        raise typer.Exit(1)
+    # Scope isolation to the primary `run "<task>"` / `run agents.yaml` surfaces.
+    # Custom agent/command and profiling flows have their own execution paths;
+    # keep the feature focused rather than threading a worktree through each.
+    if worktree and (agent or command or profile or profile_deep):
+        output.print_error(
+            "--worktree is only supported for direct prompt and YAML file runs"
+        )
         raise typer.Exit(1)
 
     # --attach tags a warm-runtime run so other terminals can observe it, but
@@ -870,6 +1216,8 @@ def run_main(
             no_save=no_save,
             thinking_budget=thinking_budget,
             subagents=subagents,
+            no_rules=no_rules,
+            instructions=merged_instructions,
         )
         return
     
@@ -917,6 +1265,7 @@ def run_main(
             no_save=no_save,
             thinking_budget=thinking_budget,
             allow_local_tools=allow_local_tools,
+            instructions=merged_instructions,
         )
         return
     
@@ -1002,6 +1351,9 @@ def run_main(
                 session=session,
                 fork=fork,
                 no_save=no_save,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
             )
         else:
             # Profiling for direct prompt
@@ -1014,61 +1366,90 @@ def run_main(
                 session=session,
                 fork=fork,
                 no_save=no_save,
+                no_rules=no_rules,
+                instructions=merged_instructions,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
             )
         return
     
-    if is_file:
-        # Run from file
-        _run_from_file(
-            target,
-            model=model,
-            framework=framework,
-            interactive=interactive,
-            verbose=verbose,
-            stream=stream,
-            trace=trace,
-            memory=memory,
-            tools=tools,
-            max_tokens=max_tokens,
-            output_mode=output_mode,
-            continue_session=continue_session,
-            session=session,
-            fork=fork,
-            no_save=no_save,
-        )
-    else:
-        # Run as prompt
-        permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
-        mcp_command, mcp_env, permissions_config, mcp_servers = _apply_config_defaults(
-            None, None, permissions_config
-        )
-        _run_prompt(
-            target,
-            model=model,
-            verbose=verbose,
-            stream=stream,
-            trace=trace,
-            memory=memory,
-            tools=tools,
-            toolset=toolset,
-            max_tokens=max_tokens,
-            output_mode=output_mode,
-            approval=approval,
-            approve_all_tools=approve_all_tools,
-            approval_timeout=approval_timeout,
-            no_rules=no_rules,
-            permissions_config=permissions_config,
-            mcp=mcp_command,
-            mcp_env=mcp_env,
-            mcp_servers=mcp_servers,
-            continue_session=continue_session,
-            session=session,
-            fork=fork,
-            no_save=no_save,
-            attach_session=attach,
-            thinking_budget=thinking_budget,
-            allow_local_tools=allow_local_tools,
-        )
+    # Resolve a YAML file target to an absolute path *before* isolation chdirs
+    # away. The config is loaded from the original checkout so an untracked or
+    # git-ignored ``./agents.yaml`` (absent from the fresh worktree) still loads;
+    # the agent then produces its output inside the isolated worktree.
+    run_target = target
+    if worktree and is_file:
+        import os as _os_ff
+        run_target = _os_ff.path.abspath(target)
+
+    # Provision a per-run git worktree/branch when --worktree is set and the cwd
+    # is a git repo; otherwise this is a transparent no-op. The agent runs with
+    # its cwd redirected into the isolated worktree for the duration of the run.
+    with _worktree_isolation(worktree, target, keep=keep):
+        if is_file:
+            # Resolve permission rules (CLI flags + project config) so YAML
+            # workflows are permission-gated on the same declarative rules as
+            # single-agent `run`, instead of bypassing the approval gate.
+            file_permissions = _parse_permissions(allow, deny, permissions, permission_default)
+            _, _, file_permissions, _ = _apply_config_defaults(None, None, file_permissions)
+            # Run from file
+            _run_from_file(
+                run_target,
+                model=model,
+                framework=framework,
+                interactive=interactive,
+                verbose=verbose,
+                stream=stream,
+                trace=trace,
+                memory=memory,
+                tools=tools,
+                max_tokens=max_tokens,
+                output_mode=output_mode,
+                continue_session=continue_session,
+                session=session,
+                fork=fork,
+                no_save=no_save,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
+                permissions_config=file_permissions,
+            )
+        else:
+            # Run as prompt
+            permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
+            mcp_command, mcp_env, permissions_config, mcp_servers = _apply_config_defaults(
+                None, None, permissions_config
+            )
+            _run_prompt(
+                target,
+                model=model,
+                verbose=verbose,
+                stream=stream,
+                trace=trace,
+                memory=memory,
+                tools=tools,
+                toolset=toolset,
+                max_tokens=max_tokens,
+                output_mode=output_mode,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
+                no_rules=no_rules,
+                permissions_config=permissions_config,
+                mcp=mcp_command,
+                mcp_env=mcp_env,
+                mcp_servers=mcp_servers,
+                continue_session=continue_session,
+                session=session,
+                fork=fork,
+                no_save=no_save,
+                attach_session=attach,
+                thinking_budget=thinking_budget,
+                allow_local_tools=allow_local_tools,
+                isolated=worktree,
+                instructions=merged_instructions,
+            )
 
 
 def _run_from_file(
@@ -1087,6 +1468,10 @@ def _run_from_file(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
+    permissions_config: Optional[dict] = None,
 ):
     """Run agents from a YAML file."""
     output = get_output_controller()
@@ -1145,9 +1530,21 @@ def _run_from_file(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-        
-        # Create args-like object for session configuration
-        if session_id or auto_save_name:
+
+        # Derive an approval backend so YAML runs are permission-gated like the
+        # single-agent `run` path. An explicit --approval wins; otherwise a
+        # console backend is selected when --allow/--deny/--permissions rules are
+        # present so deny/ask patterns are enforced instead of silently bypassed.
+        effective_approval = approval
+        if effective_approval is None and permissions_config:
+            effective_approval = "console"
+
+        # Create args-like object for session + permission configuration. The
+        # legacy YAML path (PraisonAI.run -> _extract_cli_config) already reads
+        # approval / approve_all_tools / approval_timeout and session ids from
+        # ``args``, so threading them here gives YAML the same permission gating
+        # and continuity as `run "<prompt>"` — no new engine wiring needed.
+        if session_id or auto_save_name or effective_approval or approve_all_tools:
             class Args:
                 pass
             
@@ -1155,13 +1552,21 @@ def _run_from_file(
             args.auto_save = auto_save_name
             args.resume_session = session_id
             args.cli_project_sessions = bool(session_id or auto_save_name)
-            
+            if effective_approval:
+                args.approval = effective_approval
+            if approve_all_tools:
+                args.approve_all_tools = approve_all_tools
+            if approval_timeout is not None:
+                args.approval_timeout = approval_timeout
+
             praison.args = args
         
         # Run
         result = praison.run()
         
         _record_session_usage(session_id or auto_save_name, model, output)
+        if not _run_succeeded(result):
+            _report_run_failure(output)
         output.emit_result(
             message="Run completed",
             data={"result": str(result) if result else None}
@@ -1171,6 +1576,11 @@ def _run_from_file(
             if not output.is_json_mode:
                 output.print_success("Run completed")
     
+    except typer.Exit:
+        # A deliberate non-zero exit (e.g. a classified run failure) must
+        # propagate unchanged; the broad handler below is only for unexpected
+        # errors and would otherwise re-report the same failure.
+        raise
     except Exception as e:
         output.emit_error(message=str(e))
         output.print_error(str(e))
@@ -1203,6 +1613,8 @@ def _run_prompt(
     attach_session: Optional[str] = None,
     thinking_budget: Optional[int] = None,
     allow_local_tools: bool = False,
+    isolated: bool = False,
+    instructions: Optional[List[str]] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -1272,26 +1684,47 @@ def _run_prompt(
         # in-process execution otherwise. Only the simple text path attaches;
         # per-invocation tool/approval/memory overrides stay in-process so their
         # behaviour is preserved exactly.
-        # Session continuity/forking is handled in-process; the warm runtime does
-        # not carry session state, so any explicit session flag stays local.
-        # Default auto-save also stays in-process until the warm path can persist
-        # sessions the same way as the normal run path.
+        # Session continuity now attaches to a warm, per-session agent in the
+        # runtime: a `--continue`/`--session` run rehydrates history once into a
+        # warm agent held per session id and reuses it across turns, so the
+        # iterative coding loop no longer pays cold-start every turn. The runtime
+        # persists per-turn deltas through the same project session store, so a
+        # crash/eviction resumes deterministically.
+        # A fresh fork (`--fork`) is created in-process because the fork id is
+        # minted here; subsequent turns against that id then attach warm.
         # An explicit --thinking budget is a per-invocation override (like tools/
         # approval/memory), so it stays in-process: the warm runtime reuses a
         # cached agent and does not carry a per-call thinking budget, so attaching
         # would silently drop the requested setting.
-        runtime_eligible = no_save and thinking_budget is None and not any([
-            mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
-            memory, permissions_config, continue_session, session, fork,
-        ])
-        # When --attach <id> is given, tag the warm-runtime run with that id so
-        # other terminals (`praisonai attach <id>`) observe its live events.
-        runtime_session_id = attach_session or session_id
+        # Isolated (--worktree) runs must stay in-process: the warm runtime is a
+        # separate process whose cwd we can't redirect into the worktree, so
+        # attaching would run the task outside the isolated branch.
+        stateful_attach = bool(session_id) and not fork
+        runtime_eligible = (
+            (no_save or stateful_attach)
+            and thinking_budget is None
+            and not isolated
+            and not any([
+                mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
+                memory, permissions_config, fork, instructions,
+            ])
+        )
+        # Keep the two identities separate:
+        #  - session_id is the persistence/conversation identity that drives the
+        #    warm stateful path (history rehydrate + per-turn persist). A
+        #    --no-save run has session_id=None, so it stays on the isolated,
+        #    non-persisted anonymous path.
+        #  - --attach <id> is only an event-stream label so other terminals
+        #    (`praisonai attach <id>`) observe live events; it must NEVER select
+        #    or persist a conversation. Passed as event_id, falling back to the
+        #    session id so a plain --session run is still observable under its id.
+        runtime_event_id = attach_session or session_id
         if runtime_eligible and _try_attach_runtime(
             prompt,
             model=model,
             output_mode=output_mode,
-            session_id=runtime_session_id,
+            session_id=session_id,
+            event_id=runtime_event_id,
         ):
             return
 
@@ -1348,6 +1781,9 @@ def _run_prompt(
             if selected_tools:
                 agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
 
+            _wire_subtree_context_hook(
+                agent_config, no_rules=no_rules, instructions=instructions
+            )
             agent = Agent(**agent_config)
             # Reasoning effort applied via the property setter (not a
             # constructor kwarg) so defaults are unchanged when omitted.
@@ -1368,9 +1804,12 @@ def _run_prompt(
             finally:
                 detach_bridge(agent, bridge)
 
+            succeeded = _run_succeeded(result)
             if bridge is not None:
-                bridge.emit_run_result(result, ok=True)
+                bridge.emit_run_result(result, ok=succeeded)
             _record_session_usage(session_id or auto_save_name, model, output)
+            if not succeeded:
+                _report_run_failure(output)
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
@@ -1438,6 +1877,8 @@ def _run_prompt(
         result = praison.handle_direct_prompt(prompt)
         
         _record_session_usage(session_id or auto_save_name, model, output)
+        if not _run_succeeded(result):
+            _report_run_failure(output)
         output.emit_result(
             message="Prompt completed",
             data={"result": str(result) if result else None}
@@ -1505,6 +1946,9 @@ def _run_from_file_profiled(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -1567,7 +2011,12 @@ def _run_from_file_profiled(
     if not no_save:
         import uuid
         auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-    if session_id or auto_save_name:
+
+    # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) through
+    # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
+    # permission-gated identically to the non-profiled path instead of silently
+    # dropping the deny policy.
+    if session_id or auto_save_name or approval or approve_all_tools:
         class Args:
             pass
         
@@ -1575,6 +2024,12 @@ def _run_from_file_profiled(
         args.auto_save = auto_save_name
         args.resume_session = session_id
         args.cli_project_sessions = bool(session_id or auto_save_name)
+        if approval:
+            args.approval = approval
+        if approve_all_tools:
+            args.approve_all_tools = approve_all_tools
+        if approval_timeout is not None:
+            args.approval_timeout = approval_timeout
         
         praison.args = args
     
@@ -1595,6 +2050,12 @@ def _run_from_file_profiled(
     
     # Print profiling report
     profiler.print_report()
+
+    # Honour the same failure contract as the non-profiled YAML path: an empty
+    # agent result is a run failure and must exit non-zero (reported after the
+    # profiling output so the profile is still shown).
+    if not _run_succeeded(result):
+        _report_run_failure(get_output_controller())
 
 
 def _wire_subagent_delegation(
@@ -1637,6 +2098,104 @@ def _wire_subagent_delegation(
     agent_config["tools"] = list(agent_config.get("tools") or []) + [tool]
 
 
+def _wire_subtree_context_hook(
+    agent_config: Dict[str, Any],
+    *,
+    no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
+) -> None:
+    """Attach the just-in-time subtree instruction hook to ``agent_config``.
+
+    The interactive REPL already lazily attaches a subdirectory's
+    ``AGENTS.md``/``CLAUDE.md`` the first time the agent reads/edits a file
+    under it (see ``praisonai/cli/interactive/core.py``). The scriptable
+    ``praisonai run`` path constructed ``Agent(**agent_config)`` without it, so
+    a monorepo run like ``refactor packages/foo/bar.py`` never saw
+    ``packages/foo/AGENTS.md`` even though ``praisonai chat`` in the same repo
+    did. This registers the *existing* ``AFTER_TOOL`` subtree hook on a fresh,
+    session-scoped registry so the non-interactive/CI/SDK-via-CLI surface
+    matches interactive behaviour.
+
+    ``instructions`` are config/flag-declared instruction sources (files,
+    globs, ``~`` paths, or ``http(s)://`` URLs) that extend the convention-only
+    ``AGENTS.md``/``CLAUDE.md`` auto-load. They are resolved and concatenated
+    up front into the agent's ``backstory`` (so the guidance is present in the
+    system context before any tool call) and passed to the subtree hook as
+    ``already_loaded`` so nested files are not duplicated.
+
+    No-op (leaving the default run unchanged) when the up-front rules are
+    disabled via ``--no-rules`` / ``PRAISON_NO_RULES`` or when the optional
+    helper is unavailable. Honours the existing ``PRAISON_CONTEXT_BUDGET``
+    character budget shared with the interactive path.
+    """
+    import os
+
+    if no_rules or os.environ.get("PRAISON_NO_RULES", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+
+    try:
+        import importlib
+
+        # The subtree-context helper is optional. Its canonical home is the
+        # ``praisonai_bot`` support package; the ``praisonai`` wrapper only
+        # re-exports it via a compat shim. Prefer ``praisonai_bot`` so the hook
+        # is available on any install that ships it (matching ``chat``) without
+        # forcing the full wrapper, then fall back to the wrapper shim. Either
+        # way ``run.py`` avoids a module-level ``praisonai`` import (C7 gate).
+        context_files = None
+        for _mod in ("praisonai_bot.integration.context_files",
+                     "praisonai.integration.context_files"):
+            try:
+                context_files = importlib.import_module(_mod)
+                break
+            except ImportError:
+                continue
+        if context_files is None:
+            return
+        build_subtree_context_hook = context_files.build_subtree_context_hook
+        file_tool_matcher = context_files.file_tool_matcher
+        from praisonaiagents.hooks import HookEvent, HookRegistry
+    except (ImportError, AttributeError):
+        return
+
+    # Resolve config/flag-declared instruction sources and inject them up front
+    # so they sit in the system context alongside the AGENTS.md/CLAUDE.md load.
+    already_loaded = ""
+    if instructions:
+        try:
+            already_loaded = context_files.resolve_instruction_sources(instructions)
+        except Exception:
+            already_loaded = ""
+        if already_loaded:
+            existing = agent_config.get("backstory") or ""
+            block = f"# Project Instructions\n{already_loaded}"
+            agent_config["backstory"] = (
+                f"{existing}\n\n{block}" if existing else block
+            )
+
+    try:
+        budget = int(os.environ.get("PRAISON_CONTEXT_BUDGET", "0") or "0")
+    except ValueError:
+        budget = 0
+
+    try:
+        hook = build_subtree_context_hook(already_loaded, max_chars=budget)
+        registry = HookRegistry()
+        registry.register_function(
+            event=HookEvent.AFTER_TOOL,
+            func=hook,
+            matcher=file_tool_matcher(),
+            name="subtree_instruction_injection",
+        )
+        agent_config["hooks"] = registry
+    except Exception:
+        return
+
+
 def _run_custom_agent(
     agent_config: Dict[str, Any],
     prompt: str,
@@ -1659,6 +2218,8 @@ def _run_custom_agent(
     no_save: bool = False,
     thinking_budget: Optional[int] = None,
     subagents: Optional[str] = None,
+    no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
 ):
     """Run a custom agent definition."""
     output = get_output_controller()
@@ -1669,6 +2230,33 @@ def _run_custom_agent(
         # Override model if specified
         if model:
             agent_config["llm"] = model
+
+        # Compose the agent's toolset: frontmatter ``tools:`` (name strings)
+        # + explicit --tools/--toolset + auto-discovered project-local
+        # .praisonai/tools/*.py callables. Discovery mirrors the default and
+        # actions run paths so `--agent` runs honour the same zero-registration
+        # convention (gated by PRAISONAI_ALLOW_LOCAL_TOOLS in the safe loader).
+        existing_tools = agent_config.get("tools") or []
+        if not isinstance(existing_tools, list):
+            existing_tools = [existing_tools]
+        extra_tools = _resolve_tools_arg(tools, verbose=verbose)
+        if toolset:
+            from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
+            toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
+            if toolset_names:
+                extra_tools.extend(_resolve_toolsets(toolset_names))
+        extra_tools.extend(_auto_discover_project_tools(extra_tools, verbose=verbose))
+        if extra_tools:
+            seen = {id(t) for t in existing_tools}
+            merged_extra: list = []
+            for t in extra_tools:
+                if id(t) in seen:
+                    continue
+                seen.add(id(t))
+                merged_extra.append(t)
+            existing_tools = list(existing_tools) + merged_extra
+        if existing_tools:
+            agent_config["tools"] = existing_tools
 
         # Offer discovered named agents as delegation targets. The primary
         # agent can then call spawn_subagent(agent_name="researcher", ...) to
@@ -1757,6 +2345,9 @@ def _run_custom_agent(
             agent_config["auto_save"] = auto_save_name
         
         # Create and run agent
+        _wire_subtree_context_hook(
+            agent_config, no_rules=no_rules, instructions=instructions
+        )
         agent = Agent(**agent_config)
         # Reasoning effort applied via the property setter (not a constructor
         # kwarg) so defaults are unchanged when --thinking is omitted.
@@ -1773,9 +2364,12 @@ def _run_custom_agent(
         finally:
             detach_bridge(agent, bridge)
 
+        succeeded = _run_succeeded(result)
         if bridge is not None:
-            bridge.emit_run_result(result, ok=True)
+            bridge.emit_run_result(result, ok=succeeded)
         _record_session_usage(session_id or auto_save_name, model, output)
+        if not succeeded:
+            _report_run_failure(output)
         output.emit_result(
             message="Agent completed",
             data={"result": str(result) if result else None}
@@ -1803,6 +2397,11 @@ def _run_prompt_profiled(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -1837,7 +2436,16 @@ def _run_prompt_profiled(
     }
     if model:
         agent_config["llm"] = model
-    
+
+    # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) into the
+    # profiled agent so a read-only planning run stays read-only under
+    # --profile instead of silently dropping the deny policy.
+    if approval:
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+        agent_config["approval"] = resolve_approval_config(
+            approval, all_tools=approve_all_tools, timeout=approval_timeout,
+        )
+
     # Apply session continuity if requested
     session_id = None
     auto_save_name = None
@@ -1874,6 +2482,9 @@ def _run_prompt_profiled(
         if memory_cfg is not None:
             agent_config["memory"] = memory_cfg
     
+    _wire_subtree_context_hook(
+        agent_config, no_rules=no_rules, instructions=instructions
+    )
     agent = Agent(**agent_config)
     if session_id or auto_save_name:
         apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
@@ -1895,3 +2506,9 @@ def _run_prompt_profiled(
     
     # Print profiling report
     profiler.print_report()
+
+    # Honour the same failure contract as the non-profiled paths: an empty
+    # agent result is a run failure and must exit non-zero (the report is
+    # emitted after the profiling output so the profile is still shown).
+    if not _run_succeeded(response):
+        _report_run_failure(get_output_controller())

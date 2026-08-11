@@ -69,11 +69,14 @@ __all__ = [
     # Doctor migration protocol
     "DoctorContractProtocol",
     "Finding",
+    "ConfigDiff",
+    "RepairPlan",
     "get_default_registry",
     "register_rule",
     "get_rules",
     "collect_findings",
     "apply_fixes",
+    "plan_fixes",
     # Capability types
     "RuntimeCapability",
     "RuntimeCapabilityMatrix",
@@ -151,6 +154,8 @@ _LAZY_GROUPS = {
     'doctor_protocol': {
         'DoctorContractProtocol': ('praisonaiagents.runtime.doctor_protocol', 'DoctorContractProtocol'),
         'Finding': ('praisonaiagents.runtime.doctor_protocol', 'Finding'),
+        'ConfigDiff': ('praisonaiagents.runtime.doctor_protocol', 'ConfigDiff'),
+        'RepairPlan': ('praisonaiagents.runtime.doctor_protocol', 'RepairPlan'),
     },
     'doctor_registry': {
         'get_default_registry': ('praisonaiagents.runtime.doctor_registry', 'get_default_registry'),
@@ -158,6 +163,7 @@ _LAZY_GROUPS = {
         'get_rules': ('praisonaiagents.runtime.doctor_registry', 'get_rules'),
         'collect_findings': ('praisonaiagents.runtime.doctor_registry', 'collect_findings'),
         'apply_fixes': ('praisonaiagents.runtime.doctor_registry', 'apply_fixes'),
+        'plan_fixes': ('praisonaiagents.runtime.doctor_registry', 'plan_fixes'),
     },
     'journal': {
         'RunJournal': ('praisonaiagents.runtime.journal', 'RunJournal'),

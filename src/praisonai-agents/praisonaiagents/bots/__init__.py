@@ -27,10 +27,16 @@ from .protocols import (
     EmailProtocol,
     EmailInbox,
     SupportsPresentation,
+    PresentationRendererProtocol,
     PlatformCapabilities,
     ChannelField,
     ChannelDescriptor,
     WebhookVerifierProtocol,
+    CallbackPayloadStoreProtocol,
+    InMemoryCallbackPayloadStore,
+    GatewayRuntimeSeams,
+    SupportsGatewayRuntime,
+    GatewayAdapterContractError,
 )
 from .base import (
     BasePlatformAdapter,
@@ -47,6 +53,12 @@ from .presentation import (
     ButtonStyle,
     BlockType,
     adapt_presentation,
+    adapt_presentation_with_report,
+    DegradedDelivery,
+    table_to_markdown,
+    chart_to_text,
+    register_presentation_renderer,
+    get_presentation_renderer,
 )
 from .interactive import (
     InteractiveContext,
@@ -64,14 +76,37 @@ from .interactive import (
 )
 from .agent_reply import (
     AgentReply,
+    TurnCompletion,
     extract_presentation,
+    extract_completion,
+    append_completion_note,
+)
+from .format import (
+    format_for_dialect,
+    escape_markdown_v2,
+    markdown_to_slack,
+    strip_markdown,
+)
+from .webhook_filter import (
+    WebhookFilter,
+    evaluate_webhook_filter,
+    resolve_field,
 )
 from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
 from .silence import (
     SILENT_REPLY_TOKEN,
     is_intentional_silence_response,
+    classify_final,
     BotLoopPolicy,
     BotLoopGuard,
+)
+from .failure import (
+    FailureReply,
+    render_failure_reply,
+)
+from .admission import (
+    IngressDecision,
+    resolve_ingress_admission,
 )
 from .run_status import (
     RunPhase,
@@ -111,10 +146,25 @@ __all__ = [
     "ButtonStyle",
     "BlockType",
     "adapt_presentation",
+    "adapt_presentation_with_report",
+    "DegradedDelivery",
+    "table_to_markdown",
+    "chart_to_text",
+    "PresentationRendererProtocol",
+    "register_presentation_renderer",
+    "get_presentation_renderer",
     "PlatformCapabilities",
     "ChannelField",
     "ChannelDescriptor",
     "WebhookVerifierProtocol",
+    "WebhookFilter",
+    "evaluate_webhook_filter",
+    "resolve_field",
+    "CallbackPayloadStoreProtocol",
+    "InMemoryCallbackPayloadStore",
+    "GatewayRuntimeSeams",
+    "SupportsGatewayRuntime",
+    "GatewayAdapterContractError",
     "BasePlatformAdapter",
     "SendResult",
     "InteractiveContext",
@@ -130,11 +180,23 @@ __all__ = [
     "make_reply_handler",
     "REPLY_NAMESPACE",
     "AgentReply",
+    "TurnCompletion",
     "extract_presentation",
+    "extract_completion",
+    "append_completion_note",
+    "format_for_dialect",
+    "escape_markdown_v2",
+    "markdown_to_slack",
+    "strip_markdown",
     "SILENT_REPLY_TOKEN",
     "is_intentional_silence_response",
+    "classify_final",
     "BotLoopPolicy",
     "BotLoopGuard",
+    "FailureReply",
+    "render_failure_reply",
+    "IngressDecision",
+    "resolve_ingress_admission",
     "RunPhase",
     "RunStatusController",
     "StallState",

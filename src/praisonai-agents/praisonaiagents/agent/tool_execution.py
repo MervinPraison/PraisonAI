@@ -426,8 +426,90 @@ class ToolExecutionMixin:
             metadata={'agent_name': self.name}
         )
         
-        # Execute within injection context
-        return self._execute_tool_with_context(function_name, arguments, state, tool_call_id)
+        # Route through user-supplied tool middleware (Agent(hooks=[...])) when
+        # present. Zero overhead when no hooks: the fast path calls straight
+        # into _execute_tool_with_context.
+        manager = self._get_tool_middleware_manager()
+        if manager is None:
+            return self._execute_tool_with_context(function_name, arguments, state, tool_call_id)
+
+        from ..hooks import ToolRequest, ToolResponse, InvocationContext
+        request = ToolRequest(
+            tool_name=function_name,
+            arguments=arguments,
+            context=InvocationContext(
+                agent_id=self.name,
+                run_id=getattr(self, '_current_run_id', 'unknown'),
+                session_id=getattr(self, '_session_id', None) or 'default',
+                tool_name=function_name,
+            ),
+        )
+
+        def _final_handler(req: ToolRequest) -> ToolResponse:
+            result = self._execute_tool_with_context(
+                req.tool_name, req.arguments, state, tool_call_id
+            )
+            return ToolResponse(tool_name=req.tool_name, result=result)
+
+        response = manager.execute_tool_call(request, _final_handler)
+        return response.result if isinstance(response, ToolResponse) else response
+
+    def _get_tool_middleware_manager(self):
+        """Return a MiddlewareManager if user tool hooks are registered, else None.
+
+        Lazily constructs the manager from ``self._hooks`` (the list passed via
+        ``Agent(hooks=[...])``) on first use. Returns ``None`` when there are no
+        hooks or no tool-level hooks, preserving the zero-overhead fast path.
+        """
+        hooks = getattr(self, '_hooks', None)
+        if not hooks:
+            return None
+        manager = getattr(self, '_middleware_manager', None)
+        if manager is None:
+            from ..hooks import MiddlewareManager
+            manager = MiddlewareManager(hooks)
+            self._middleware_manager = manager
+        return manager if manager.has_tool_hooks else None
+
+    def _get_turn_tools_lock(self):
+        """Return the DualLock guarding the per-turn tool buffer.
+
+        Falls back to a lazily-created lock so subclasses or objects that
+        predate the lock attribute stay safe. The lock protects
+        ``_turn_tools_used`` from corruption when concurrent chat()/achat()
+        turns run on the same Agent instance (issue #3307).
+        """
+        lock = getattr(self, "_turn_tools_lock", None)
+        if lock is None:
+            from .async_safety import DualLock
+            lock = DualLock()
+            self._turn_tools_lock = lock
+        return lock
+
+    def _reset_turn_tools(self):
+        """Reset the per-turn tool buffer under lock (start of a chat turn)."""
+        if getattr(self, "_in_skill_review", False):
+            return
+        with self._get_turn_tools_lock().sync():
+            self._turn_tools_used = []
+
+    def _record_turn_tool(self, function_name):
+        """Append a tool name to the per-turn buffer under lock."""
+        if getattr(self, "_in_skill_review", False):
+            return
+        with self._get_turn_tools_lock().sync():
+            turn_tools = getattr(self, "_turn_tools_used", None)
+            if turn_tools is None:
+                turn_tools = []
+                self._turn_tools_used = turn_tools
+            turn_tools.append(function_name)
+
+    def _drain_turn_tools(self):
+        """Return a copy of the per-turn buffer and clear it, under lock."""
+        with self._get_turn_tools_lock().sync():
+            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
+            self._turn_tools_used = []
+        return tools_used
 
     def _execute_tool_with_context(self, function_name, arguments, state, tool_call_id=None):
         """Execute tool within injection context, with optional output truncation.
@@ -445,13 +527,9 @@ class ToolExecutionMixin:
         
         # Record the tool name for this turn so the self-improve review policy
         # can see what ran (issue #3037). Skipped during a guarded review turn
-        # to avoid tracking the review's own tool calls or recursing.
-        if not getattr(self, "_in_skill_review", False):
-            turn_tools = getattr(self, "_turn_tools_used", None)
-            if turn_tools is None:
-                self._turn_tools_used = []
-                turn_tools = self._turn_tools_used
-            turn_tools.append(function_name)
+        # to avoid tracking the review's own tool calls or recursing. Locked so
+        # concurrent turns on the same Agent don't corrupt the buffer (#3307).
+        self._record_turn_tool(function_name)
 
         # Emit tool call start event (zero overhead when not set)
         _trace_emitter = get_context_emitter()
@@ -685,7 +763,7 @@ class ToolExecutionMixin:
                             # For other error dicts: approval/permission denials are legitimate
                             # non-retryable outcomes; everything else represents a tool failure
                             # that should engage the outer retry/backoff loop.
-                            elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error"):
+                            elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error") or result.get("policy_denied") or result.get("guardrail_denied"):
                                 break
                             else:
                                 # Avoid compounding with the inner retry loop in
@@ -794,12 +872,34 @@ class ToolExecutionMixin:
             # model-visible image parts via format_tool_result_messages().
             _is_multimodal_result = _normalize_multimodal_result(result) is not None
 
+            # Context economy: if the tool declared a compact, model-facing view
+            # (ToolResult.model_output, or a to_model_output(result) hook on the
+            # @tool/BaseTool), resolve it now while the FULL result is still
+            # intact for tracing/hooks/display below. The compact view is only
+            # swapped in at the very end, right before the string returned to
+            # the model is built, so downstream consumers keep the full payload.
+            _model_facing_override = None
+            if not _is_multimodal_result:
+                _model_facing_override = self._resolve_model_facing_result(
+                    function_name, result
+                )
+
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             if not _is_multimodal_result:
                 try:
                     from ..tools.trust import wrap_if_external
                     result = wrap_if_external(function_name, result)
+                    # The compact, model-facing view is untrusted external
+                    # content too when the producing tool is external, so it
+                    # MUST pass through the same prompt-injection fence before
+                    # it can reach the model. Resolving it above (pre-fence)
+                    # kept the full payload intact for hooks/tracing; fence the
+                    # override here so it never bypasses the security markers.
+                    if _model_facing_override is not None:
+                        _model_facing_override = wrap_if_external(
+                            function_name, _model_facing_override
+                        )
                 except Exception:
                     # Trust module unavailable (partial/broken install) must not
                     # abort tool execution; fall through with the raw result.
@@ -892,8 +992,12 @@ class ToolExecutionMixin:
                     logging.debug(f"Tool truncation skipped: {e}")
             
             # Emit tool call end event (truncation handled by context_events.py)
+            # Only stringify the result if the emitter is actually enabled; the
+            # default emitter is a disabled NoOp, so str(result) would otherwise
+            # re-serialise the whole structure for nothing on every tool call.
             _duration_ms = (_time.time() - _tool_start_time) * 1000
-            _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, _duration_ms)
+            if _trace_emitter.enabled:
+                _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, _duration_ms)
             
             # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
             # Zero overhead when no callbacks registered
@@ -935,7 +1039,18 @@ class ToolExecutionMixin:
                     tool_error = self._last_normalized_result.error_message
                 # Clean up temporary attribute
                 delattr(self, '_last_normalized_result')
-            
+
+            # Context economy: ``result`` stays the FULL output through the
+            # AFTER_TOOL hook, result-aware loop detection, and the loop guard
+            # (below), so those channels keep seeing real, changing outcomes.
+            # A tool-declared compact model-facing view (if any) is only swapped
+            # in at the very end, right before ``return``, purely to shrink what
+            # the LLM sees. No override => behaviour is unchanged. Model-facing
+            # annotations added below (AFTER_TOOL additional_context, loop-guard
+            # notices) are collected here so they can be re-applied to the
+            # compact view and therefore always reach the model.
+            _model_facing_annotations = []
+
             # Only build the input if an AFTER_TOOL hook is actually registered
             if self._hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
                 after_tool_input = AfterToolInput(
@@ -964,6 +1079,9 @@ class ToolExecutionMixin:
                         result.setdefault("_additional_context", extra_context)
                     else:
                         result = {"value": result, "_additional_context": extra_context}
+                    # Mirror any model-facing annotation onto the compact view so
+                    # it survives the context-economy swap at the end.
+                    _model_facing_annotations.append(extra_context)
             
             # Back-fill the result hash so the result-aware detector can tell a
             # genuine stall (identical output) from legitimate polling (changing
@@ -987,10 +1105,15 @@ class ToolExecutionMixin:
             if hasattr(self, '_ensure_loop_guard'):
                 loop_guard = self._ensure_loop_guard()
                 is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
-                loop_guard.record(function_name, arguments, is_success)
-                # Handle warning injection for WARN decisions
-                decision = loop_guard.check(function_name, arguments, is_pre_execution=False) 
-                if decision.action.value == "warn":
+                loop_guard.record(function_name, arguments, is_success, result=result)
+                # Surface the loop-guard decision back to the model on this same
+                # iteration. Previously only WARN was injected, so a post-exec
+                # BLOCK/HALT (e.g. the call that first reaches a threshold) was
+                # silently discarded and only took effect on the next
+                # pre-execution check. Injecting block/halt here ensures the stop
+                # signal reaches the model immediately without raising mid-turn.
+                decision = loop_guard.check(function_name, arguments, is_pre_execution=False)
+                if decision.action.value in ("warn", "block", "halt"):
                     if isinstance(result, str):
                         result = f"{result}\n\n[loop-guard] {decision.message}"
                     elif isinstance(result, dict):
@@ -1002,10 +1125,28 @@ class ToolExecutionMixin:
                     else:
                         # Wrap non-string/dict/list results to preserve original data plus warning
                         result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
+                    # Ensure the loop-guard notice also reaches the model when a
+                    # compact model-facing view replaces ``result`` below.
+                    _model_facing_annotations.append(f"[loop-guard] {decision.message}")
             
             # Increment per-turn tool count for no-tool-call detection
             self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
-            
+
+            # Context economy: now that tracing, hooks, loop detection and the
+            # loop guard have all observed the FULL result, swap in the compact,
+            # tool-declared model-facing view for the LLM. Re-apply any
+            # model-facing annotations so they are never lost. No override =>
+            # the full result is returned exactly as before.
+            if _model_facing_override is not None:
+                result = _model_facing_override
+                for _annotation in _model_facing_annotations:
+                    if isinstance(result, str):
+                        result = f"{result}\n\n{_annotation}"
+                    elif isinstance(result, dict):
+                        result.setdefault("_additional_context", _annotation)
+                    else:
+                        result = {"value": result, "_additional_context": _annotation}
+
             return result
         except Exception as e:
             # Emit tool call end with error for exceptions that escape the retry loop
@@ -1085,8 +1226,9 @@ class ToolExecutionMixin:
         # tools_used, so without this the review policy always sees an empty
         # list and never runs. Consume the buffer so the next turn starts clean.
         if tools_used is None:
-            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
-        self._turn_tools_used = []
+            tools_used = self._drain_turn_tools()
+        else:
+            self._drain_turn_tools()
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
@@ -1142,8 +1284,9 @@ class ToolExecutionMixin:
         # Default tools_used from the per-turn buffer when the caller did not
         # pass it explicitly (issue #3037); mirrors the sync path.
         if tools_used is None:
-            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
-        self._turn_tools_used = []
+            tools_used = self._drain_turn_tools()
+        else:
+            self._drain_turn_tools()
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
@@ -1272,7 +1415,7 @@ class ToolExecutionMixin:
                 try:
                     from ..runtime.tool_output_store import get_tool_output_store
                     from uuid import uuid4
-                    store = get_tool_output_store(getattr(self, '_run_id', None))
+                    store = get_tool_output_store(getattr(self, '_current_run_id', None))
                     # Add unique suffix to prevent collisions with repeated keys
                     unique_suffix = uuid4().hex[:8]
                     field_call_id = f"{tool_call_id}_{key}_{unique_suffix}" if tool_call_id else f"{tool_name}_{key}_{unique_suffix}"
@@ -1348,7 +1491,9 @@ class ToolExecutionMixin:
             # only gate the built-in DEFAULT_DANGEROUS_TOOLS and silently skip
             # registry-required tools.
             approval_registry = get_approval_registry()
-            registry_required = approval_registry.is_required(tool_name)
+            registry_required = approval_registry.is_required(
+                tool_name, getattr(self, 'name', None)
+            )
             # Check if tool needs approval based on multiple criteria
             needs_approval = (
                 approve_all 
@@ -1362,7 +1507,7 @@ class ToolExecutionMixin:
                     tool_name=tool_name,
                     arguments=tool_args,
                     risk_level=(
-                        approval_registry.get_risk_level(tool_name)
+                        approval_registry.get_risk_level(tool_name, getattr(self, 'name', None))
                         or DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium")
                     ),
                     agent_name=getattr(self, 'name', None),
@@ -1427,21 +1572,19 @@ class ToolExecutionMixin:
                     return ApprovalDecision(approved=True, reason="Not a dangerous tool")
         else:
             # No approval backend configured. An explicit PermissionManager
-            # ``ask`` rule must still gate the call, so mark it required in the
-            # approval registry (idempotent) before delegating so the registry
-            # prompts instead of silently allowing.
-            if manager_forces_approval:
-                try:
-                    get_approval_registry().add_requirement(tool_name)
-                except Exception:  # noqa: BLE001
-                    pass
+            # ``ask`` rule must still gate the call. Rather than mutating shared
+            # registry state (which leaked onto other agents when this agent had
+            # no stable name), pass the intent per-call via ``force`` so the
+            # registry prompts for *this* call only without side effects.
             if is_async:
                 return get_approval_registry().approve_async(
                     getattr(self, 'name', None), tool_name, tool_args,
+                    force=manager_forces_approval,
                 )
             else:
                 return get_approval_registry().approve_sync(
                     getattr(self, 'name', None), tool_name, tool_args,
+                    force=manager_forces_approval,
                 )
 
     def _permission_manager_requires_approval(self, function_name) -> bool:
@@ -1480,7 +1623,9 @@ class ToolExecutionMixin:
         - ``PLAN``: read-only exploration → deny any tool not tagged read-only.
         - ``DONT_ASK``: auto-deny anything that would otherwise prompt for input
           (an explicit ``ask`` rule or a known dangerous tool).
-        - ``DEFAULT``/``ACCEPT_EDITS``/unset: defer (return ``None``).
+        - ``ACCEPT_EDITS``: auto-approve file edit/write tools; defer the rest so
+          non-edit prompts (shell exec, deletes, external tools) still apply.
+        - ``DEFAULT``/unset: defer (return ``None``).
         """
         mode = getattr(self, "_permission_mode", None)
         if mode is None:
@@ -1538,6 +1683,17 @@ class ToolExecutionMixin:
                 ))
             return None
 
+        if mode == PermissionMode.ACCEPT_EDITS:
+            # Auto-approve file edit/write tools so edits flow without prompting,
+            # while deferring everything else (shell exec, deletes, external
+            # tools) to the normal approval flow so they still gate as usual.
+            if self._is_edit_tool(function_name):
+                return _wrap(ApprovalDecision(
+                    approved=True,
+                    reason=f"PermissionMode.ACCEPT_EDITS: auto-approved edit tool '{function_name}'",
+                ))
+            return None
+
         return None
 
     def _tool_would_prompt(self, function_name) -> bool:
@@ -1555,7 +1711,9 @@ class ToolExecutionMixin:
             if self._permission_manager_requires_approval(function_name):
                 return True
             from ..approval import get_approval_registry
-            if get_approval_registry().is_required(function_name):
+            if get_approval_registry().is_required(
+                function_name, getattr(self, 'name', None)
+            ):
                 return True
             from ..tools import get_registry as get_tool_registry
             if get_tool_registry().get_trust_level(function_name) == "external":
@@ -1581,6 +1739,23 @@ class ToolExecutionMixin:
             "kill", "apply_patch", "install", "deploy",
         )
         return not any(marker in name for marker in write_markers)
+
+    @staticmethod
+    def _is_edit_tool(function_name) -> bool:
+        """Best-effort heuristic for whether a tool edits/writes a file.
+
+        Used by ``PermissionMode.ACCEPT_EDITS`` to auto-approve edit-class tools
+        (write/edit/append/create/save/patch/mkdir) while leaving destructive or
+        execution tools (delete/exec/shell/…) to the normal approval flow.
+        """
+        if not function_name:
+            return False
+        name = str(function_name).lower()
+        edit_markers = (
+            "write", "edit", "append", "create", "mkdir", "save",
+            "insert", "patch", "apply_patch",
+        )
+        return any(marker in name for marker in edit_markers)
 
     def _check_permission_manager_deny(self, function_name):
         """Return an error dict if the PermissionManager hard-denies the tool.
@@ -1647,12 +1822,14 @@ class ToolExecutionMixin:
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
         
-        from ..approval import get_approval_registry
-        get_approval_registry().mark_approved(function_name)
-        
         if decision.modified_args:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
+
+        from ..approval import get_approval_registry
+        get_approval_registry().mark_approved(
+            function_name, arguments, agent_name=getattr(self, "name", None)
+        )
         return None, arguments
 
     async def _check_tool_approval_async(self, function_name, arguments):
@@ -1678,12 +1855,14 @@ class ToolExecutionMixin:
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
         
-        from ..approval import get_approval_registry
-        get_approval_registry().mark_approved(function_name)
-        
         if decision.modified_args:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
+
+        from ..approval import get_approval_registry
+        get_approval_registry().mark_approved(
+            function_name, arguments, agent_name=getattr(self, "name", None)
+        )
         return None, arguments
 
     def _execute_tool_with_circuit_breaker(self, function_name, arguments):
@@ -1712,6 +1891,8 @@ class ToolExecutionMixin:
                     if (result.get("approval_denied") or 
                         result.get("permission_denied") or 
                         result.get("approval_error") or
+                        result.get("policy_denied") or
+                        result.get("guardrail_denied") or
                         result.get("circuit_open")):
                         return result
                     
@@ -1790,6 +1971,35 @@ class ToolExecutionMixin:
             raise last_exception
         return {"error": "Maximum retry attempts exceeded"}
 
+    @staticmethod
+    def _remove_circuit_breaker(breaker_name):
+        """Remove a circuit breaker entry from the process-global registry."""
+        try:
+            from ..tools.circuit_breaker import _get_global_registry
+        except Exception:
+            return
+        try:
+            _get_global_registry().remove(breaker_name)
+        except Exception:
+            pass
+
+    def _register_breaker_finalizer(self, breaker_name):
+        """Register a weakref finalizer so this agent's breaker entry is removed
+        the moment the agent is garbage-collected, even if close() is never called.
+        """
+        registered = self.__dict__.setdefault('_breaker_finalizer_names', set())
+        if breaker_name in registered:
+            return
+        registered.add(breaker_name)
+        try:
+            import weakref
+            finalizers = self.__dict__.setdefault('_breaker_finalizers', [])
+            finalizers.append(
+                weakref.finalize(self, self._remove_circuit_breaker, breaker_name)
+            )
+        except Exception:
+            pass
+
     def _execute_tool_with_circuit_breaker_impl(self, function_name, arguments):
         """Execute tool with circuit breaker protection (internal implementation).
         
@@ -1810,8 +2020,10 @@ class ToolExecutionMixin:
 
         try:
             
-            # Get or create circuit breaker for this tool
-            breaker_name = f"tool_{function_name}"
+            # Get or create circuit breaker for this tool.
+            # Scope the key to this Agent instance so one agent's failing tool
+            # cannot trip the breaker for another agent's same-named tool.
+            breaker_name = f"tool_{id(self)}_{function_name}"
             config = CircuitBreakerConfig(
                 failure_threshold=5,        # Open after 5 failures
                 recovery_timeout=60.0,      # Wait 60s before trying half-open
@@ -1819,7 +2031,13 @@ class ToolExecutionMixin:
                 graceful_degradation=True   # Return error instead of raising exception
             )
             breaker = get_circuit_breaker(breaker_name, config)
-            
+
+            # Ensure the registry entry is removed the moment this Agent is
+            # actually garbage-collected, regardless of whether close()/aclose()
+            # was ever called. This closes the CPython id-reuse window where a
+            # new Agent at the same address could inherit a stale OPEN breaker.
+            self._register_breaker_finalizer(breaker_name)
+
             # Execute tool through circuit breaker with failure detection wrapper
             def _tool_wrapper():
                 result = self._execute_tool_impl(function_name, arguments)
@@ -1828,7 +2046,9 @@ class ToolExecutionMixin:
                 if isinstance(result, dict) and result.get("error") and \
                    not result.get("approval_denied") and \
                    not result.get("permission_denied") and \
-                   not result.get("approval_error"):
+                   not result.get("approval_error") and \
+                   not result.get("policy_denied") and \
+                   not result.get("guardrail_denied"):
                     # Create a sentinel exception to register failure with circuit breaker
                     class _ToolFailure(Exception):
                         def __init__(self, error_dict):
@@ -1857,6 +2077,68 @@ class ToolExecutionMixin:
                 "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
             }
 
+    def _check_tool_policy_and_guardrails(self, function_name, arguments):
+        """Gate a tool call through the attached PolicyEngine and tool guardrails.
+
+        Consults ``self._policy`` (a ``PolicyEngine``) via ``check_tool`` and any
+        tool-call guardrails exposing ``validate_tool_call``. Returns an error
+        dict when the call is denied, or ``(None, arguments)`` (arguments possibly
+        rewritten by a guardrail) when allowed. Zero overhead when neither is set.
+        """
+        policy = getattr(self, "_policy", None)
+        if policy is not None and hasattr(policy, "check_tool"):
+            try:
+                result = policy.check_tool(function_name, arguments)
+            except Exception as e:  # noqa: BLE001
+                # Fail closed: an operator opted into policy enforcement, so a
+                # broken/misconfigured PolicyEngine must deny rather than let a
+                # protected tool run without a decision.
+                logging.warning(
+                    f"Tool '{function_name}' denied: policy check_tool raised: {e}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' denied: policy check failed ({e})",
+                    "policy_denied": True,
+                }
+            if not getattr(result, "allowed", True):
+                reason = getattr(result, "reason", "denied by policy")
+                logging.warning(
+                    f"Tool '{function_name}' denied by policy: {reason}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' denied by policy: {reason}",
+                    "policy_denied": True,
+                }
+
+        for guardrail in getattr(self, "_tool_call_guardrails", None) or []:
+            validate = getattr(guardrail, "validate_tool_call", None)
+            if validate is None:
+                continue
+            try:
+                is_valid, processed = validate(function_name, arguments)
+            except Exception as e:  # noqa: BLE001
+                # Fail closed: mirror the guardrail-chain default. A guardrail
+                # dependency/implementation error must block, not permit, the
+                # unchecked call.
+                logging.warning(
+                    f"Tool '{function_name}' denied: guardrail validate_tool_call raised: {e}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' denied: guardrail check failed ({e})",
+                    "guardrail_denied": True,
+                }
+            if not is_valid:
+                logging.warning(
+                    f"Tool '{function_name}' rejected by tool-call guardrail"
+                )
+                return {
+                    "error": f"Tool '{function_name}' rejected by guardrail",
+                    "guardrail_denied": True,
+                }
+            if isinstance(processed, dict):
+                arguments = processed
+        return None, arguments
+
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
@@ -1870,6 +2152,14 @@ class ToolExecutionMixin:
             error_msg = f"Error during approval process: {str(e)}"
             logging.error(error_msg)
             return {"error": error_msg, "approval_error": True}
+
+        # Policy/guardrail gate (protocol-driven). Runs after approval so an
+        # explicit PolicyEngine deny or a tool-call guardrail can block a tool
+        # before dispatch (native + MCP, uniform). Zero overhead when unset.
+        policy_result = self._check_tool_policy_and_guardrails(function_name, arguments)
+        if isinstance(policy_result, dict):
+            return policy_result  # Error dict
+        _, arguments = policy_result
 
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
@@ -1944,8 +2234,11 @@ class ToolExecutionMixin:
                 func = tool
                 break
         
-        if func is None:
-            # Check the global tool registry for plugins
+        if func is None and getattr(self, '_allow_global_tools', False):
+            # Check the process-global tool registry for plugins. Gated behind
+            # ToolConfig(allow_global_tools=True) so an agent is scoped strictly
+            # to its declared tools=[...] by default (safe by default) and cannot
+            # execute an @tool-decorated callable it was never given.
             try:
                 from ..tools.registry import get_registry
                 registry = get_registry()
@@ -1956,46 +2249,263 @@ class ToolExecutionMixin:
         if func is None:
             # Tool not found in declared tools or registry — do not fall back to
             # globals() or __main__ as that allows undeclared callables to execute.
-            pass
+            # Cheap, deterministic self-repair: the model often emits a name that
+            # only differs by case/separator (e.g. 'WebSearch' -> 'web_search').
+            # Build a normalised index of the agent's active tools and re-match.
+            def _norm(n):
+                return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
+
+            normalised = {}
+            for name, tool in self._iter_active_named_tools():
+                normalised.setdefault(_norm(name), []).append((name, tool))
+            match = normalised.get(_norm(function_name))
+            if match and len(match) == 1:
+                matched_name, func = match[0]
+                logging.debug(
+                    f"Self-repaired tool name {function_name!r} -> {matched_name!r}"
+                )
 
         if func:
+            bind_target = func
+            bind_arguments = arguments
             try:
                 # BaseTool instances (plugin system) - call run() method
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
+                    bind_target = func.run
                     casted_arguments = self._cast_arguments(func.run, arguments)
+                    bind_arguments = casted_arguments
                     return func.run(**casted_arguments)
                 
                 # Langchain: If it's a class with run but not _run, instantiate and call run
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
                     instance = func()
+                    bind_target = instance.run
                     run_params = {k: v for k, v in arguments.items() 
                                   if k in inspect.signature(instance.run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance.run, run_params)
+                    bind_arguments = casted_params
                     return instance.run(**casted_params)
 
                 # CrewAI: If it's a class with an _run method, instantiate and call _run
                 elif inspect.isclass(func) and hasattr(func, '_run'):
                     instance = func()
+                    bind_target = instance._run
                     run_params = {k: v for k, v in arguments.items() 
                                   if k in inspect.signature(instance._run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance._run, run_params)
+                    bind_arguments = casted_params
                     return instance._run(**casted_params)
 
                 # Otherwise treat as regular function
                 elif callable(func):
+                    bind_target = func
                     casted_arguments = self._cast_arguments(func, arguments)
+                    bind_arguments = casted_arguments
                     return func(**casted_arguments)
             except Exception as e:
                 error_msg = str(e)
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
+                # Only echo the parameter schema when the failure is a genuine
+                # argument-binding error (wrong/missing/extra kwargs). A
+                # TypeError/ValueError raised *inside* a successfully-bound tool
+                # (domain validation) must not be mislabelled as a parameter
+                # problem, or the model would alter valid call arguments instead
+                # of fixing the offending value.
+                if self._is_argument_binding_error(bind_target, bind_arguments):
+                    schema = self._tool_parameter_hint(func)
+                    if schema:
+                        # Fold the parameter names into the error string itself so
+                        # the hint survives conversion to ToolExecutionError (which
+                        # keeps only the message) and actually reaches the model.
+                        error_msg = (
+                            f"{error_msg} Expected parameters for '{function_name}' — "
+                            f"required: {schema['required']}, optional: {schema['optional']}."
+                        )
+                        return {"error": error_msg, "expected_parameters": schema}
                 return {"error": error_msg}
-        
-        error_msg = f"Tool '{function_name}' is not callable"
+
+        # Unresolved: return a corrective, model-readable message so the model can
+        # retry with a valid name instead of repeating the same mistake.
+        available = self._available_active_tool_names()
+        suggestion = None
+        try:
+            import difflib
+            near = difflib.get_close_matches(function_name, available, n=1, cutoff=0.5)
+            suggestion = near[0] if near else None
+        except Exception:
+            pass
+        hint = f" Did you mean '{suggestion}'?" if suggestion else ""
+        error_msg = (
+            f"Tool '{function_name}' not found.{hint} "
+            f"Available tools: {available}"
+        )
         logging.error(error_msg)
-        return {"error": error_msg}
+        return {"error": error_msg, "available_tools": available}
+
+    def _get_tool_display_name(self, tool):
+        """Best-effort display name for an agent tool of any supported kind."""
+        try:
+            from ..tools.base import BaseTool
+            if isinstance(tool, BaseTool):
+                return getattr(tool, 'name', None)
+        except ImportError:
+            pass
+        name = getattr(tool, 'name', None)
+        if isinstance(name, str) and name:
+            return name
+        if callable(tool) or inspect.isclass(tool):
+            return getattr(tool, '__name__', None)
+        return None
+
+    def _resolve_model_facing_result(self, function_name, result):
+        """Return a tool's compact, model-facing view for ``result``, or ``None``.
+
+        Resolution order (first hit wins):
+
+        1. ``result.model_output`` — a ToolResult carrying its own compact view.
+        2. The producing tool's ``to_model_output(output)`` hook — set via
+           ``@tool(to_model_output=fn)`` or a ``BaseTool`` override.
+
+        The hook is invoked with the tool's raw output **value**, matching the
+        single ``BaseTool.to_model_output`` contract: if ``result`` is a
+        ``ToolResult`` the enclosed ``output`` is passed, otherwise ``result``
+        itself. ``None`` means the tool opted out, so the caller keeps today's
+        full stringification (fully backward-compatible).
+        """
+        try:
+            from ..tools.base import resolve_model_output
+            compact = resolve_model_output(result)
+            if compact is not None:
+                return compact
+        except Exception:
+            pass
+
+        # Unwrap to the raw output value so the hook receives the same payload
+        # BaseTool.safe_run passes (the ``output`` channel), keeping one contract.
+        hook_input = getattr(result, 'output', result)
+        try:
+            for name, tool in self._iter_active_named_tools():
+                if name != function_name:
+                    continue
+                hook = getattr(tool, 'to_model_output', None)
+                if callable(hook):
+                    try:
+                        return hook(hook_input)
+                    except Exception as e:
+                        logging.debug(
+                            f"to_model_output hook failed for '{function_name}': {e}"
+                        )
+                return None
+        except Exception:
+            pass
+        return None
+
+    def _iter_active_named_tools(self):
+        """Yield ``(name, tool)`` for every active tool.
+
+        MCP instances are expanded into their contained tools (each MCP tool is
+        an iterable callable with a ``__name__``/``name``) so they participate
+        in name repair and appear in the corrective inventory, rather than only
+        exposing the opaque container.
+        """
+        MCP = None
+        try:
+            from ..mcp.mcp import MCP
+        except ImportError:
+            pass
+
+        def _expand(tool):
+            if MCP is not None and isinstance(tool, MCP):
+                try:
+                    for sub in tool:
+                        sub_name = self._get_tool_display_name(sub)
+                        if sub_name:
+                            yield sub_name, sub
+                except Exception:
+                    pass
+                return
+            name = self._get_tool_display_name(tool)
+            if name:
+                yield name, tool
+
+        tools = self.tools
+        if MCP is not None and isinstance(tools, MCP):
+            yield from _expand(tools)
+            return
+        for tool in tools if isinstance(tools, (list, tuple)) else []:
+            yield from _expand(tool)
+
+    def _available_active_tool_names(self):
+        """Names of the agent's currently active tools, for corrective feedback."""
+        names = [name for name, _tool in self._iter_active_named_tools()]
+        return sorted(set(names))
+
+    def _resolve_callable_signature_target(self, func):
+        """Return the callable whose signature describes ``func``'s arguments."""
+        target = func
+        try:
+            from ..tools.base import BaseTool
+            if isinstance(func, BaseTool):
+                return func.run
+        except ImportError:
+            pass
+        if inspect.isclass(func):
+            run = getattr(func, 'run', None) or getattr(func, '_run', None)
+            if run is not None:
+                target = run
+        return target
+
+    def _is_argument_binding_error(self, func, arguments) -> bool:
+        """True only when ``arguments`` cannot bind to ``func``'s signature.
+
+        Distinguishes a genuine call-boundary failure (wrong/missing/extra
+        kwargs) from a ``TypeError``/``ValueError`` raised *inside* a
+        successfully-bound tool during its own domain logic. Only the former
+        should receive a parameter-schema hint; the latter is a runtime error
+        the model must fix by changing the value, not the parameter names.
+        """
+        target = self._resolve_callable_signature_target(func)
+        try:
+            sig = inspect.signature(target)
+        except (TypeError, ValueError):
+            return False
+        try:
+            sig.bind(**(arguments or {}))
+        except TypeError:
+            return True
+        return False
+
+    def _tool_parameter_hint(self, func):
+        """Return {'required': [...], 'optional': [...]} for a callable tool."""
+        target = func
+        try:
+            from ..tools.base import BaseTool
+            if isinstance(func, BaseTool):
+                target = func.run
+            elif inspect.isclass(func):
+                target = getattr(func, 'run', None) or getattr(func, '_run', None)
+            if target is None or not callable(target):
+                return None
+            sig = inspect.signature(target)
+            required, optional = [], []
+            for pname, param in sig.parameters.items():
+                if pname == 'self' or param.kind in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                ):
+                    continue
+                if param.default is inspect.Parameter.empty:
+                    required.append(pname)
+                else:
+                    optional.append(pname)
+            if not required and not optional:
+                return None
+            return {"required": required, "optional": optional}
+        except (ValueError, TypeError):
+            return None
 
     async def submit_for_approval(self, function_name: str, arguments: Dict[str, Any]) -> str:
         """Fire an approval request in the background without blocking.

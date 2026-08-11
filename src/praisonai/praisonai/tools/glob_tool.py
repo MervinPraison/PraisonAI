@@ -10,6 +10,36 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+def _workspace_root() -> Optional[str]:
+    """Resolve the workspace root that file tools are confined to.
+
+    Confinement is *opt-in*: it only applies when ``PRAISONAI_WORKSPACE`` is
+    explicitly set. Without it we return ``None`` (no sandbox) so callers that
+    legitimately pass an arbitrary ``directory`` keep working — ``cwd`` is not a
+    real security boundary and enforcing it would break normal usage.
+    """
+    root = os.getenv("PRAISONAI_WORKSPACE")
+    if not root:
+        return None
+    return os.path.realpath(root)
+
+
+def _within_workspace(path: str) -> bool:
+    """Return True if ``path`` is inside the configured workspace root.
+
+    When no ``PRAISONAI_WORKSPACE`` is configured, confinement is disabled and
+    every path is permitted.
+    """
+    root = _workspace_root()
+    if root is None:
+        return True
+    try:
+        return os.path.commonpath([os.path.realpath(path), root]) == root
+    except ValueError:
+        # Different drives (Windows) or otherwise incomparable paths.
+        return False
+
+
 def glob_files(
     pattern: str,
     directory: Optional[str] = None,
@@ -54,8 +84,12 @@ def glob_files(
         if directory is None:
             directory = os.getcwd()
         
-        directory = os.path.abspath(directory)
-        
+        directory = os.path.realpath(directory)
+
+        if not _within_workspace(directory):
+            result["error"] = "Directory outside workspace"
+            return result
+
         if not os.path.isdir(directory):
             result["error"] = f"Directory not found: {directory}"
             return result
@@ -73,11 +107,17 @@ def glob_files(
         else:
             search_pattern = pattern
         
+        from praisonai.security import is_protected
+
         for path in base_path.glob(search_pattern):
             # Skip directories
             if path.is_dir():
                 continue
-            
+
+            # Never expose protected paths (.env, keys, wallets, SDK internals)
+            if is_protected(str(path)):
+                continue
+
             # Skip hidden files/directories if not included
             if not include_hidden:
                 parts = path.relative_to(base_path).parts
@@ -146,8 +186,12 @@ def glob_directories(
         if directory is None:
             directory = os.getcwd()
         
-        directory = os.path.abspath(directory)
-        
+        directory = os.path.realpath(directory)
+
+        if not _within_workspace(directory):
+            result["error"] = "Directory outside workspace"
+            return result
+
         if not os.path.isdir(directory):
             result["error"] = f"Directory not found: {directory}"
             return result
@@ -162,8 +206,13 @@ def glob_directories(
         else:
             search_pattern = pattern
         
+        from praisonai.security import is_protected
+
         for path in base_path.glob(search_pattern):
             if not path.is_dir():
+                continue
+
+            if is_protected(str(path)):
                 continue
             
             rel_path = str(path.relative_to(base_path))

@@ -56,6 +56,7 @@ class ComputeConfig:
             cpu=2,
             memory_mb=2048,
             packages={"pip": ["pandas", "numpy"]},
+            setup=["pip install -e ."],
             env={"OPENAI_API_KEY": "sk-..."},
             auto_shutdown=True,
             idle_timeout_s=300,
@@ -66,6 +67,7 @@ class ComputeConfig:
     memory_mb: int = 1024
     gpu: Optional[str] = None
     packages: Dict[str, List[str]] = field(default_factory=dict)
+    setup: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     working_dir: str = "/workspace"
     mount_paths: List[str] = field(default_factory=list)
@@ -73,6 +75,262 @@ class ComputeConfig:
     auto_shutdown: bool = True
     idle_timeout_s: int = 300
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+_ENV_FILENAME = "environment.yaml"
+_ENV_DIRNAME = ".praisonai"
+
+_ENV_KNOWN_KEYS = {
+    "image", "packages", "setup", "refresh", "env", "resources",
+    "network", "backend", "working_dir", "mount_paths", "capture",
+}
+
+
+def find_environment_definition(start: Optional[str] = None) -> Optional[str]:
+    """Discover ``.praisonai/environment.yaml`` by walking up from ``start``.
+
+    Args:
+        start: Directory to start searching from (defaults to CWD).
+
+    Returns:
+        Absolute path to the definition file, or ``None`` if not found.
+    """
+    import os
+
+    current = os.path.abspath(start or os.getcwd())
+    while True:
+        candidate = os.path.join(current, _ENV_DIRNAME, _ENV_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def load_environment_definition(
+    path: Optional[str] = None,
+) -> Optional[ComputeConfig]:
+    """Load a repo-committed ``.praisonai/environment.yaml`` into a ComputeConfig.
+
+    This is the single resolution path shared by every ``compute=`` consumer:
+    the file declares image / packages / setup / env / resources / network /
+    backend, and is mapped onto the existing :class:`ComputeConfig` schema.
+
+    Args:
+        path: Explicit path to a definition file. If ``None``, discovery walks
+            up from the current directory looking for ``.praisonai/environment.yaml``.
+
+    Returns:
+        A :class:`ComputeConfig`, or ``None`` when no file is found (callers then
+        fall back to today's defaults — the file is strictly opt-in).
+
+    Raises:
+        ValueError: If the file contains unknown top-level keys or is malformed.
+    """
+    if path is None:
+        path = find_environment_definition()
+        if path is None:
+            return None
+
+    import yaml  # lazy — stdlib-adjacent, already a dependency
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{path}: environment definition must be a mapping, got {type(data).__name__}"
+        )
+
+    unknown = set(data) - _ENV_KNOWN_KEYS
+    if unknown:
+        raise ValueError(
+            f"{path}: unknown key(s) {sorted(unknown)}; "
+            f"allowed keys are {sorted(_ENV_KNOWN_KEYS)}"
+        )
+
+    def _require(key: str, value: Any, expected: type, kind: str) -> None:
+        if value is not None and not isinstance(value, expected):
+            raise ValueError(
+                f"{path}: '{key}' must be {kind}, got {type(value).__name__}"
+            )
+
+    cfg = ComputeConfig()
+
+    if "image" in data:
+        _require("image", data["image"], str, "a string")
+        cfg.image = data["image"]
+    if "packages" in data:
+        pkgs = data["packages"] or {}
+        _require("packages", pkgs, dict, "a mapping")
+        cfg.packages = pkgs
+    if "setup" in data:
+        setup = data["setup"] or []
+        if isinstance(setup, str):
+            setup = [setup]
+        _require("setup", setup, list, "a string or list of strings")
+        cfg.setup = list(setup)
+    if "refresh" in data:
+        refresh = data["refresh"] or []
+        if isinstance(refresh, str):
+            refresh = [refresh]
+        _require("refresh", refresh, list, "a string or list of strings")
+        # ``refresh`` runs only when starting from a capture (cheap incremental
+        # step). Carried in metadata so no new dataclass field is added without
+        # a typed consumer; the docker capture path reads it.
+        cfg.metadata["refresh"] = list(refresh)
+    if "env" in data:
+        env = data["env"] or {}
+        _require("env", env, dict, "a mapping")
+        cfg.env = {str(k): str(v) for k, v in env.items()}
+    if "working_dir" in data:
+        _require("working_dir", data["working_dir"], str, "a string")
+        cfg.working_dir = data["working_dir"]
+    if "mount_paths" in data:
+        mounts = data["mount_paths"] or []
+        _require("mount_paths", mounts, list, "a list")
+        cfg.mount_paths = list(mounts)
+
+    resources = data.get("resources") or {}
+    _require("resources", resources, dict, "a mapping")
+    if "cpu" in resources:
+        cfg.cpu = int(resources["cpu"])
+    if "memory_mb" in resources:
+        cfg.memory_mb = int(resources["memory_mb"])
+    if "gpu" in resources:
+        cfg.gpu = resources["gpu"]
+
+    # Carry network / backend preferences in existing typed fields so no new
+    # dataclass surface is added without a consumer.
+    if "network" in data:
+        cfg.networking = {"type": data["network"]}
+    if "backend" in data:
+        cfg.metadata["backend"] = data["backend"]
+    if "capture" in data:
+        # Opt-in flag for backends where capture may carry provider cost
+        # (cloud snapshots). Local docker commit is free and always on.
+        cfg.metadata["capture"] = bool(data["capture"])
+
+    return cfg
+
+
+def _definition_payload(config: "ComputeConfig") -> Dict[str, Any]:
+    """Normalised, order-insensitive view of the fields that change *what gets
+    built* (image, packages, setup, env variable names, resources, working_dir).
+
+    ``env`` **values** are deliberately excluded here — see :func:`definition_hash`.
+    """
+    def _norm_packages(pkgs: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        return {k: sorted(map(str, v or [])) for k, v in sorted((pkgs or {}).items())}
+
+    return {
+        "image": config.image,
+        "packages": _norm_packages(config.packages),
+        "setup": list(config.setup or []),
+        "env_names": sorted((config.env or {}).keys()),
+        "cpu": config.cpu,
+        "memory_mb": config.memory_mb,
+        "gpu": config.gpu,
+        "working_dir": config.working_dir,
+    }
+
+
+def definition_hash(config: "ComputeConfig") -> str:
+    """Stable content hash of an environment definition, for display/logging.
+
+    Hashes only the fields that change *what gets built* (image, packages,
+    setup, env variable names, resources, working_dir). Values of ``env`` are
+    excluded because they are typically secrets/tenant-specific and must not
+    leak into a hash that may be logged or shown in ``list_captures``. The
+    result is a short, stable sha256 hex digest: reordering keys/lists that
+    describe the same environment yields the same hash; changing a package or
+    setup step yields a new one.
+
+    .. note::
+        This value-free hash is safe to log but is **not** a safe reuse key on
+        its own: ``setup:`` runs with ``env`` values injected and may bake
+        env-derived state into the filesystem, so a capture must not be reused
+        across differing secret values. Use :func:`capture_key` for the actual
+        reuse/cache key — it additionally binds the ``env`` **values** so
+        different secrets produce a different capture, while never being logged.
+
+    Args:
+        config: The :class:`ComputeConfig` to fingerprint.
+
+    Returns:
+        A 12-char hex digest.
+    """
+    import hashlib
+    import json
+
+    blob = json.dumps(
+        _definition_payload(config), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def capture_key(config: "ComputeConfig") -> str:
+    """Secret-aware reuse key for capturing/reusing a provisioned environment.
+
+    Extends :func:`definition_hash` by additionally binding the ``env``
+    **values**. ``setup:`` executes with those values injected and may persist
+    env-derived state (tokens, tenant config) into the committed filesystem, so
+    a capture is only safe to reuse when the values match too. Two definitions
+    that are identical except for their secret values therefore get *different*
+    capture keys and never share a committed image.
+
+    The env values are folded into the digest (never returned in the clear and
+    never logged), so this key is suitable for an image tag
+    (``praisonai-env:{key}``) but should not itself be surfaced to users.
+
+    Args:
+        config: The :class:`ComputeConfig` to fingerprint.
+
+    Returns:
+        A 12-char hex digest that changes with any build input *or* secret value.
+    """
+    import hashlib
+    import json
+
+    payload = dict(_definition_payload(config))
+    payload["env_values"] = {
+        str(k): str(v) for k, v in sorted((config.env or {}).items())
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+@runtime_checkable
+class SupportsCapture(Protocol):
+    """Optional capability: capture a provisioned instance and reuse it.
+
+    Backends that can snapshot post-setup state (docker ``commit``, cloud SDK
+    pause/snapshot) implement this so a second provision of the same definition
+    starts *from the capture* — skipping pull + package install + ``setup:``.
+
+    Backends that cannot (subprocess/ssh) simply don't implement it; the
+    provision flow then falls back to today's ephemeral behaviour. Methods
+    return ``None`` to signal "no capture available", never raising, so a failed
+    capture degrades to ephemeral rather than blocking the run.
+    """
+
+    def capture(self, instance_id: str, ref: str) -> Optional[str]:
+        """Capture ``instance_id``'s current state under ``ref``.
+
+        Args:
+            instance_id: Instance to capture.
+            ref: Stable name to record the capture under (e.g. a definition hash).
+
+        Returns:
+            An opaque capture reference (image tag / snapshot id) on success,
+            or ``None`` if capture was unavailable or failed.
+        """
+        ...
+
+    def has_capture(self, ref: str) -> bool:
+        """Whether a reusable capture exists for ``ref``."""
+        ...
 
 
 @dataclass

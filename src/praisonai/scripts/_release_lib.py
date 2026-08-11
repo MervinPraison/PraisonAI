@@ -20,10 +20,12 @@ PYPI_NAMES = {
     "train": "praisonai-train",
     "browser": "praisonai-browser",
     "mcp": "praisonai-mcp",
+    "sandbox": "praisonai-sandbox",
+    "deploy": "praisonai-deploy",
     "wrapper": "praisonai",
 }
 
-PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "wrapper")
+PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "deploy", "wrapper")
 
 # Path prefixes used to detect which packages changed in git (longest match wins).
 PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
@@ -33,6 +35,8 @@ PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "train": ("src/praisonai-train/",),
     "browser": ("src/praisonai-browser/",),
     "mcp": ("src/praisonai-mcp/",),
+    "sandbox": ("src/praisonai-sandbox/",),
+    "deploy": ("src/praisonai-deploy/",),
     "wrapper": ("src/praisonai/", "docker/"),
 }
 
@@ -63,6 +67,14 @@ def browser_dir() -> Path:
 
 def mcp_dir() -> Path:
     return project_root() / "src/praisonai-mcp"
+
+
+def sandbox_dir() -> Path:
+    return project_root() / "src/praisonai-sandbox"
+
+
+def deploy_dir() -> Path:
+    return project_root() / "src/praisonai-deploy"
 
 
 def wrapper_dir() -> Path:
@@ -126,6 +138,8 @@ def read_current_versions() -> dict[str, str]:
         "train": read_pyproject_version(train_dir() / "pyproject.toml"),
         "browser": read_pyproject_version(browser_dir() / "pyproject.toml"),
         "mcp": read_pyproject_version(mcp_dir() / "pyproject.toml"),
+        "sandbox": read_pyproject_version(sandbox_dir() / "pyproject.toml"),
+        "deploy": read_pyproject_version(deploy_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
 
@@ -260,6 +274,26 @@ def bump_mcp_files(new_version: str) -> None:
     )
 
 
+def bump_sandbox_files(new_version: str) -> None:
+    path = sandbox_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = sandbox_dir() / "praisonai_sandbox/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
+def bump_deploy_files(new_version: str) -> None:
+    path = deploy_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = deploy_dir() / "praisonai_deploy/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
 def resolve_pypi_token() -> str | None:
     """Return PyPI token from env (UV_PUBLISH_TOKEN, PYPI_TOKEN, or PYPI_API_TOKEN)."""
     return (
@@ -287,7 +321,10 @@ def publish_package(package_dir: Path) -> None:
     if dist.exists():
         import shutil
         shutil.rmtree(dist)
-    run(["uv", "lock", "--frozen"], cwd=package_dir)
+    # Regenerate the lockfile so it matches the current pyproject. `--frozen` fails
+    # when a package has no committed lockfile or when dependencies changed; a plain
+    # `uv lock` creates/updates it, keeping publish resilient to dependency edits.
+    run(["uv", "lock"], cwd=package_dir)
     run(["uv", "build"], cwd=package_dir)
     run(["uv", "publish", "--trusted-publishing", "never"], cwd=package_dir)
 

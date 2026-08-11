@@ -368,6 +368,22 @@ class SessionManager:
             metadata.updated_at = datetime.now(timezone.utc)
             self._save_metadata(metadata)
 
+    def rename(self, session_id: str, title: str) -> bool:
+        """Give a legacy session a human-readable name (Issue #3737).
+
+        Persists the title in the existing ``name`` metadata field so
+        ``session list``/``--transcript`` display it. An empty/whitespace-only
+        title clears the name, matching the canonical store's semantics.
+        Returns ``True`` only when a matching session was found and saved.
+        """
+        metadata = self._load_metadata(session_id)
+        if not metadata:
+            return False
+        metadata.name = title.strip() or None
+        metadata.updated_at = datetime.now(timezone.utc)
+        self._save_metadata(metadata)
+        return True
+
 
 # Global session manager
 _session_manager: Optional[SessionManager] = None

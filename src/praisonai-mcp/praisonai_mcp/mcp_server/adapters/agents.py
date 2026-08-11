@@ -19,14 +19,18 @@ def register_agent_tools() -> None:
     def agent_chat(
         message: str,
         model: str = "gpt-4o-mini",
-        instructions: Optional[str] = None,
     ) -> str:
-        """Chat with a PraisonAI agent."""
+        """Chat with a PraisonAI assistant.
+
+        The server owns the persona; the connecting client cannot set the
+        agent's instructions. To publish *your* product's agents (with their
+        own instructions/tools) use ``serve_agents([...])``.
+        """
         try:
             from praisonaiagents import Agent
             
             agent = Agent(
-                instructions=instructions or "You are a helpful assistant.",
+                instructions="You are a helpful assistant.",
                 llm=model,
             )
             result = agent.chat(message)
@@ -40,14 +44,13 @@ def register_agent_tools() -> None:
     def agent_run(
         task: str,
         model: str = "gpt-4o-mini",
-        instructions: Optional[str] = None,
     ) -> str:
-        """Run a task with a PraisonAI agent."""
+        """Run a task with a PraisonAI assistant (server-owned persona)."""
         try:
             from praisonaiagents import Agent
             
             agent = Agent(
-                instructions=instructions or "You are a helpful assistant.",
+                instructions="You are a helpful assistant.",
                 llm=model,
             )
             result = agent.start(task)

@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (Python)
 
-> **Categories:** 66 | **Documented:** 66 | **Parity:** 100.0%
+> **Categories:** 65 | **Documented:** 65 | **Parity:** 100.0%
 
 This report compares **Python SDK feature categories** against **Python documentation** (docs/concepts, docs/features, etc.).
 
@@ -8,8 +8,8 @@ This report compares **Python SDK feature categories** against **Python document
 
 | Metric | Count |
 |--------|-------|
-| Feature Categories | 66 |
-| **Documented Categories** | **66** |
+| Feature Categories | 65 |
+| **Documented Categories** | **65** |
 | **Undocumented Categories** | **0** |
 | **Parity** | **100.0%** |
 
@@ -18,76 +18,76 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 44 | 13662 |
+| ✅ Agent | 22 | 49 | 15473 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
-| ✅ Approval | 1 | 5 | 2262 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 684 |
+| ✅ Approval | 1 | 5 | 2500 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 9 | 2591 |
-| ✅ Autonomy | 3 | 7 | 2705 |
-| ✅ Bots | 7 | 28 | 10942 |
+| ✅ Auto Generation | 5 | 10 | 3005 |
+| ✅ Autonomy | 3 | 7 | 2736 |
+| ✅ Bots | 7 | 31 | 13274 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 116 | 31593 |
+| ✅ CLI | 5 | 121 | 35658 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3893 |
-| ✅ Conditions | 1 | 3 | 1175 |
-| ✅ Configuration | 3 | 7 | 2763 |
-| ✅ Context Management | 16 | 34 | 13124 |
-| ✅ Database | 1 | 40 | 6124 |
+| ✅ Code Execution | 2 | 14 | 4548 |
+| ✅ Conditions | 1 | 3 | 1179 |
+| ✅ Configuration | 3 | 8 | 3047 |
+| ✅ Context Management | 16 | 34 | 13388 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
-| ✅ Evaluation | 1 | 7 | 2829 |
+| ✅ Evaluation | 1 | 7 | 2905 |
 | ✅ Events | 1 | 2 | 749 |
-| ✅ Execution | 3 | 4 | 1528 |
-| ✅ Failover | 2 | 1 | 400 |
-| ✅ Files | 2 | 6 | 1964 |
-| ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 48 | 16453 |
-| ✅ Guardrails | 4 | 4 | 1673 |
-| ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 3850 |
+| ✅ Execution | 3 | 4 | 1560 |
+| ✅ Failover | 2 | 1 | 432 |
+| ✅ Files | 2 | 7 | 2273 |
+| ✅ Flow | 1 | 3 | 788 |
+| ✅ Gateway | 7 | 66 | 24288 |
+| ✅ Guardrails | 4 | 4 | 1833 |
+| ✅ Handoffs | 11 | 6 | 2563 |
+| ✅ Hooks | 2 | 9 | 4281 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 13 | 4160 |
-| ✅ LLM | 3 | 14 | 4767 |
-| ✅ Loops | 4 | 4 | 1075 |
-| ✅ MCP | 1 | 56 | 12475 |
-| ✅ Memory | 6 | 17 | 6475 |
+| ✅ Knowledge | 4 | 13 | 4233 |
+| ✅ LLM | 3 | 14 | 4955 |
+| ✅ Loops | 4 | 5 | 1422 |
+| ✅ MCP | 1 | 60 | 13724 |
+| ✅ Memory | 6 | 17 | 6766 |
 | ✅ OCR | 2 | 1 | 237 |
-| ✅ Observability | 2 | 23 | 2771 |
+| ✅ Observability | 2 | 23 | 2800 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
-| ✅ Planning | 6 | 6 | 1545 |
-| ✅ Plugins | 8 | 3 | 1879 |
-| ✅ Prompts | 2 | 7 | 1452 |
-| ✅ Providers | 1 | 55 | 7455 |
+| ✅ Planning | 6 | 6 | 1549 |
+| ✅ Plugins | 8 | 4 | 2703 |
+| ✅ Prompts | 2 | 9 | 1965 |
+| ✅ Providers | 1 | 56 | 7723 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 680 |
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 6 | 2559 |
-| ✅ Security | 1 | 3 | 2863 |
-| ✅ Sessions | 4 | 13 | 4971 |
-| ✅ Skills | 6 | 13 | 4893 |
-| ✅ Tasks | 2 | 6 | 2743 |
+| ✅ Sandbox | 5 | 6 | 2806 |
+| ✅ Security | 1 | 3 | 3135 |
+| ✅ Sessions | 4 | 17 | 6960 |
+| ✅ Skills | 6 | 15 | 5638 |
+| ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
-| ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 131 | 36741 |
+| ✅ Templates | 1 | 8 | 1663 |
+| ✅ Tools | 12 | 138 | 40206 |
 | ✅ Tracing | 3 | 2 | 139 |
-| ✅ Vector Store | 1 | 12 | 1193 |
+| ✅ Vector Store | 1 | 12 | 1207 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
-| ✅ Web | 3 | 8 | 2055 |
-| ✅ Workflows | 5 | 16 | 6435 |
+| ✅ Web | 3 | 9 | 2467 |
+| ✅ Workflows | 5 | 16 | 6589 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
+- ℹ️ Database (42 docs, 6703 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---

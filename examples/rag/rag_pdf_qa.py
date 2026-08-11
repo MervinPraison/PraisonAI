@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 RAG Document Q&A Example
 

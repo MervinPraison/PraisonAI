@@ -64,6 +64,13 @@ class DeliveryTarget:
                     context when the cron fires.
         deliver: Optional routing token (e.g., "origin", "telegram", "all").
                  Takes precedence over channel/channel_id when set.
+        continuable: When ``True`` (default) a delivered result seeds a
+                    resumable session so the user's reply in the same chat
+                    resumes the job's conversation with full context — the
+                    delivery is a *conversation opener*, not a dead-end.
+                    Set ``False`` for pure fire-and-forget notifications.
+                    A declarable contract only; the seeding itself is done by
+                    the gateway delivery path in the ``praisonai-bot`` layer.
     """
 
     channel: str = ""
@@ -71,6 +78,7 @@ class DeliveryTarget:
     thread_id: Optional[str] = None
     session_id: Optional[str] = None
     deliver: str = ""
+    continuable: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -83,6 +91,10 @@ class DeliveryTarget:
             d["session_id"] = self.session_id
         if self.deliver:
             d["deliver"] = self.deliver
+        # Only persist when opting out — the default (True) is implied by
+        # absence so existing serialised targets keep behaving unchanged.
+        if not self.continuable:
+            d["continuable"] = False
         return d
 
     @classmethod
@@ -93,6 +105,7 @@ class DeliveryTarget:
             thread_id=d.get("thread_id"),
             session_id=d.get("session_id"),
             deliver=d.get("deliver", ""),
+            continuable=d.get("continuable", True),
         )
 
     @classmethod
@@ -142,6 +155,39 @@ class DeliveryTarget:
 
         # Bare platform name → resolve to its home channel via the router.
         return cls(channel=token, deliver=token)
+
+    def preview(self, *, session_target: str = "") -> str:
+        """Return a human-readable, dry-run preview of where this will deliver.
+
+        A pure, dependency-free description of the resolved destination so the
+        creator — user, agent, or a blueprint accept — sees "where will this
+        go?" the moment a scheduled / agent-initiated send is created, not only
+        at fire time. Symbolic tokens (``origin`` / ``all``) are surfaced as
+        such; concrete targets render as ``platform:channel_id[:thread_id]``.
+
+        Args:
+            session_target: Optional ``"main"`` / ``"isolated"`` session hint to
+                append (e.g. ``" (session main)"``), when known by the caller.
+
+        Returns:
+            A short, display-only string such as ``"telegram:@alice"`` or
+            ``"telegram:123:789 (session main)"``.
+        """
+        token = (self.deliver or "").strip()
+        symbolic = token.lower()
+        if symbolic in ("origin", "all"):
+            base = symbolic
+        elif self.channel:
+            base = self.channel
+            if self.channel_id:
+                base = f"{base}:{self.channel_id}"
+            if self.thread_id:
+                base = f"{base}:{self.thread_id}"
+        else:
+            base = token or "<unrouted>"
+        if session_target:
+            base = f"{base} (session {session_target})"
+        return base
 
 
 @dataclass
@@ -226,6 +272,43 @@ class ScheduleJob:
                    and surfaced for readability but is NOT itself enforced; the
                    default :class:`ShellConditionGate` gates on ``pre_run``. A
                    custom ``condition_resolver`` may interpret it.
+        principal: Optional resolved canonical identity of the *end-user* who
+                   owns this job (from the gateway's identity resolver).
+                   Distinct from ``agent_id`` (the owning agent) and ``origin``
+                   (where it was created): ``principal`` is the access-control
+                   key used by ``store.list(principal=...)`` to isolate one
+                   gateway user's automations from another's. ``None`` means
+                   global / single-tenant — preserving pre-scoping behaviour.
+        command: Optional shell command whose stdout is delivered verbatim.
+                 When set, the job runs this command on its schedule and
+                 delivers the output as-is to ``delivery`` — with NO agent
+                 resolved and NO model turn taken. This is a first-class
+                 model-free execution *action* (a cheap, deterministic
+                 watchdog: ``df -h``, ``uptime``, a health-check ``curl``),
+                 distinct from ``pre_run`` which is only a go/no-go *gate*
+                 feeding the model turn. Additive and backward-compatible:
+                 jobs without a ``command`` keep the existing agent path.
+        command_timeout: Maximum seconds the ``command`` may run before it is
+                 killed (with its process group on POSIX) and the tick is
+                 recorded as ``failed``. Bounds the action so a hung command
+                 cannot stall the ticker. Defaults to 60s.
+        provider: Optional model *provider* snapshotted when the job was
+                 created (e.g. ``"openai"``). Advisory metadata paired with
+                 ``model`` so a drift check can report both. ``None`` means no
+                 snapshot was taken — the job keeps today's follow-the-default
+                 behaviour and no drift is enforced.
+        model: Optional model identifier snapshotted when the job was created
+                 (e.g. ``"gpt-4o-mini"``). Because unattended runs fire with no
+                 human present, a job created against a cheap/local default
+                 must not silently inherit a later, pricier default. When set
+                 and ``pin_model`` is ``True`` the wrapper executor pins the run
+                 to this model and *fails closed* if the resolved agent has
+                 drifted. ``None`` preserves the pre-snapshot behaviour, so
+                 existing jobs are fully backward-compatible.
+        pin_model: When ``True`` (default) a ``model`` snapshot is enforced —
+                 the run is pinned and drift fails closed. Set ``False`` to opt
+                 into following whatever the default becomes. Only meaningful
+                 when ``model`` is set; a job with no snapshot never enforces.
     """
 
     name: str = ""
@@ -242,6 +325,12 @@ class ScheduleJob:
     origin: Optional[DeliveryTarget] = None
     pre_run: Optional[str] = None
     condition: Optional[str] = None
+    principal: Optional[str] = None
+    command: Optional[str] = None
+    command_timeout: float = 60.0
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    pin_model: bool = True
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -266,6 +355,23 @@ class ScheduleJob:
             d["pre_run"] = self.pre_run
         if self.condition is not None:
             d["condition"] = self.condition
+        if self.principal is not None:
+            d["principal"] = self.principal
+        if self.command is not None:
+            d["command"] = self.command
+            # Only persist the timeout when a command is configured and it
+            # differs from the default, keeping agent-only jobs unchanged.
+            if self.command_timeout != 60.0:
+                d["command_timeout"] = self.command_timeout
+        # Model pin snapshot. Only persist when a snapshot exists so agent-only
+        # jobs stay byte-for-byte unchanged; ``pin_model`` is likewise persisted
+        # only when opting out of the default (True), keeping the payload minimal.
+        if self.provider is not None:
+            d["provider"] = self.provider
+        if self.model is not None:
+            d["model"] = self.model
+            if not self.pin_model:
+                d["pin_model"] = False
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -295,6 +401,12 @@ class ScheduleJob:
             origin=DeliveryTarget.from_dict(origin_data) if isinstance(origin_data, dict) else None,
             pre_run=d.get("pre_run"),
             condition=d.get("condition"),
+            principal=d.get("principal"),
+            command=d.get("command"),
+            command_timeout=d.get("command_timeout", 60.0),
+            provider=d.get("provider"),
+            model=d.get("model"),
+            pin_model=d.get("pin_model", True),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0

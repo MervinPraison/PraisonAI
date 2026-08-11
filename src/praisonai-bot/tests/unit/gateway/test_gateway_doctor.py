@@ -373,3 +373,345 @@ def test_start_no_preflight_skips_probe(monkeypatch, tmp_path):
     result = runner.invoke(app, ["start", "--config", str(cfg), "--no-preflight"])
     assert result.exit_code == 0
     assert started.get("called") is True
+
+
+def test_doctor_json_single_document_with_turn(monkeypatch, tmp_path):
+    """--json with --turn must emit one parseable document (#gateway-readiness)."""
+    typer_testing = pytest.importorskip("typer.testing")
+    import json
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: None,
+    )
+
+    async def fake_turn(config_path, channel_name, prompt):
+        return True, "turn-ok"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._run_gateway_turn_test",
+        fake_turn,
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(cfg), "--json", "--channel", "slack", "--turn", "hi"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip())
+    assert "probes" in payload
+    assert payload["turn"]["ok"] is True
+    assert payload["turn"]["response"] == "turn-ok"
+
+
+def test_doctor_turn_runs_when_other_channel_fails(monkeypatch, tmp_path):
+    """--channel slack --turn runs when slack ok even if telegram fails."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def mixed_probe(self):
+        if self._platform == "slack":
+            return ProbeResult(ok=True, platform="slack", bot_username="slackbot")
+        return ProbeResult(ok=False, platform=self._platform, error="bad")
+
+    monkeypatch.setattr(Bot, "probe", mixed_probe)
+
+    async def fake_turn(config_path, channel_name, prompt):
+        return True, "slack-turn"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._run_gateway_turn_test",
+        fake_turn,
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  telegram:\n    platform: telegram\n    token: t\n"
+        "  slack:\n    platform: slack\n    token: s\n"
+    )
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(cfg), "--channel", "slack", "--turn", "hi"],
+    )
+    assert result.exit_code == 1  # telegram still failed overall
+    assert "Turn test (slack): OK" in result.stdout
+    assert "slack-turn" in result.stdout
+
+
+def test_gateway_test_command(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["test", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert "shell wiring" in result.stdout
+    assert "slack" in result.stdout
+
+
+def test_gateway_test_check_runtime_json(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: None,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_runtime",
+        lambda _cfg: type(
+            "R",
+            (),
+            {
+                "ok": True,
+                "to_dict": lambda self: {"ok": True, "health": {"ok": True}},
+            },
+        )(),
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app, ["test", "--config", str(cfg), "--check-runtime", "--json"]
+    )
+    assert result.exit_code == 0
+    import json
+
+    payload = json.loads(result.stdout)
+    assert payload["runtime"]["ok"] is True
+
+
+def test_gateway_test_check_inbound_fails(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: None,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_inbound",
+        lambda *a, **k: type(
+            "I",
+            (),
+            {
+                "ok": False,
+                "proves": "inbound_delivery",
+                "mentions_in_window": 0,
+                "hint": "No inbound",
+                "to_dict": lambda self: {
+                    "ok": False,
+                    "proves": "inbound_delivery",
+                    "mentions_in_window": 0,
+                },
+            },
+        )(),
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app, ["test", "--config", str(cfg), "--check-inbound", "--since", "5m"]
+    )
+    assert result.exit_code == 1
+    assert "inbound" in result.stdout
+
+
+def test_doctor_fix_mints_strong_token_and_revalidates(monkeypatch, tmp_path):
+    """`gateway doctor --fix` mints a strong token and re-validates it cleared (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    calls = {"n": 0}
+
+    def _weak_then_strong(_cfg):
+        calls["n"] += 1
+        return "weak: gateway.auth_token" if calls["n"] == 1 else None
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        _weak_then_strong,
+    )
+
+    saved = {}
+
+    def _fake_save(env_vars):
+        saved.update(env_vars)
+        return tmp_path / ".env"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars", _fake_save
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels: {}\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix"])
+    assert result.exit_code == 0, result.stdout
+    assert "GATEWAY_AUTH_TOKEN" in saved and len(saved["GATEWAY_AUTH_TOKEN"]) >= 32
+    assert "generated a strong token" in result.stdout
+    assert "re-validated" in result.stdout
+
+
+def test_doctor_fix_dry_run_writes_nothing(monkeypatch, tmp_path):
+    """`--fix --dry-run` previews the repair without minting/writing (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: "weak: gateway.auth_token",
+    )
+
+    def _must_not_save(env_vars):  # pragma: no cover - must not run
+        raise AssertionError("--dry-run must not write env vars")
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars", _must_not_save
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels: {}\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix", "--dry-run"])
+    assert result.exit_code == 1  # still weak, nothing repaired
+    assert "would mint" in result.stdout
+
+
+def test_doctor_fix_rewrites_explicit_weak_yaml_token(monkeypatch, tmp_path):
+    """`--fix` must rewrite an explicit weak YAML auth_token, not only the env
+    var — otherwise the YAML value (which wins at startup + re-validation)
+    stays active and re-validation still reports weak (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+    import yaml
+
+    # External bind so a weak/absent token fails closed (matches startup).
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  bind_host: 0.0.0.0\n"
+        "  auth_token: change-me\n"
+        "channels: {}\n"
+    )
+
+    # Persist to a throwaway .env so ~/.praisonai/.env is untouched.
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars",
+        lambda env_vars: tmp_path / ".env",
+    )
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    # Real _check_gateway_secret_strength runs (unmocked): the weak YAML value
+    # must be replaced for re-validation to clear.
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix"])
+    assert result.exit_code == 0, result.stdout
+    assert "re-validated" in result.stdout
+
+    rewritten = yaml.safe_load(cfg.read_text())
+    new_token = rewritten["gateway"]["auth_token"]
+    assert new_token != "change-me"
+    assert len(new_token) >= 32
+
+
+def test_doctor_fix_preserves_env_ref_yaml_token(monkeypatch, tmp_path):
+    """A ``${ENV}`` auth_token reference must NOT be overwritten by --fix — it
+    resolves from the env store the env repair already fixes (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+    import yaml
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  bind_host: 0.0.0.0\n"
+        "  auth_token: ${GATEWAY_AUTH_TOKEN}\n"
+        "channels: {}\n"
+    )
+
+    calls = {"n": 0}
+
+    def _weak_then_strong(_cfg):
+        calls["n"] += 1
+        return "weak: gateway.auth_token" if calls["n"] == 1 else None
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        _weak_then_strong,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars",
+        lambda env_vars: tmp_path / ".env",
+    )
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix"])
+    assert result.exit_code == 0, result.stdout
+
+    preserved = yaml.safe_load(cfg.read_text())
+    assert preserved["gateway"]["auth_token"] == "${GATEWAY_AUTH_TOKEN}"
+
+
+def test_gateway_sessions_list_cli(tmp_path, monkeypatch):
+    typer_testing = pytest.importorskip("typer.testing")
+    import json
+
+    monkeypatch.setattr(
+        "praisonai_bot.gateway.preflight.list_gateway_sessions",
+        lambda **kwargs: [
+            {"session_id": "bot_slack_U1", "message_count": 2, "user_id": "U1"}
+        ],
+    )
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["sessions", "list", "--platform", "slack"])
+    assert result.exit_code == 0
+    assert "bot_slack_U1" in result.stdout
+    assert "--check-inbound" in result.stdout
+

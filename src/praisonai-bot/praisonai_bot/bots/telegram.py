@@ -39,19 +39,27 @@ from ._commands import (
     handle_model_command,
     handle_usage_command,
     handle_compress_command,
+    handle_recap_command,
     handle_queue_command,
     handle_learn_command,
     handle_undo_command,
     handle_sessions_command,
     handle_resume_command,
     handle_reasoning_command,
+    handle_tasks_command,
     get_last_user_message,
     build_command_access_policy,
-    get_command_registry
+    get_command_registry,
+    build_custom_command_resolver,
 )
 from . import _automations
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
+from ._album import (
+    AlbumCoalescer,
+    resolve_album_window_ms,
+    resolve_album_max_items,
+)
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
@@ -160,6 +168,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
         )
+        # Coalesce inbound media albums (Issue #3298): a burst of updates
+        # sharing one ``media_group_id`` is merged into a single multimodal
+        # turn. Disabled by default (window 0) so behaviour is unchanged
+        # unless the operator opts in via config metadata.
+        self._album: AlbumCoalescer = AlbumCoalescer(
+            window_ms=resolve_album_window_ms(self.config),
+            max_items=resolve_album_max_items(self.config),
+            on_orphan=self._remove_inbound_media,
+        )
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
@@ -174,9 +191,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # is attached so /approve taps resolve against the durable store.
         self._approval_backend = None
         
-        # Create adapter-specific registry and register handlers
-        from praisonaiagents.bots import create_registry
-        self._interactive_registry = create_registry()
+        # Create adapter-specific registry and register handlers.
+        # A single in-memory callback-payload store is shared between the render
+        # side (render_presentation) and the inbound registry so a reply/select
+        # value too long for Telegram's 64-byte inline-callback cap is persisted
+        # under a short ``@<ref>`` on send and resolved back to the exact value
+        # on click, instead of being replaced by an unrecoverable hash.
+        from praisonaiagents.bots import create_registry, InMemoryCallbackPayloadStore
+        self._callback_store = InMemoryCallbackPayloadStore()
+        self._interactive_registry = create_registry(store=self._callback_store)
         self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
         
@@ -242,6 +265,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
         # Get the global command registry
         self._command_registry = get_command_registry()
+
+        # File-based custom slash commands bridged into chat (Issue #3729).
+        # Consumed by the shared ChatCommandMixin for /help + dispatch; safe
+        # defaults (shell off, project-scope only) unless the ``commands``
+        # config block opts in.
+        self._custom_command_resolver = build_custom_command_resolver(self.config)
     
     def _register_interactive_handlers(self):
         """Register handlers for interactive callbacks."""
@@ -648,6 +677,26 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 # Download/validate any inbound photo or document so the agent's
                 # vision capability can act on it (Issue #2350).
                 attachments = await self._cache_inbound_telegram_media(update)
+
+                # Coalesce media albums (Issue #3298): several photos/files sent
+                # together arrive as N updates sharing one ``media_group_id``.
+                # Buffer their parts and merge into one multimodal turn so the
+                # agent reasons over the whole set. Sibling updates return None
+                # here (their media folds into the owning update's turn).
+                media_group_id = getattr(update.message, "media_group_id", None)
+                if media_group_id:
+                    merged = await self._album.collect(
+                        str(media_group_id), attachments, message.content
+                    )
+                    if merged is None:
+                        # This update's media was buffered into a sibling's
+                        # turn; nothing more to do (and nothing to clean up —
+                        # the owning turn owns those temp files).
+                        return
+                    attachments = merged.attachments
+                    if merged.caption:
+                        message.content = merged.caption
+
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
                     
@@ -711,6 +760,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             
                             # Finalize with text content (after hook processing and media extraction)
                             await streamer.finalize(text_content if text_content else send_result["content"])
+
+                            # Issue #3623: the streamed reply is delivered as text
+                            # by the streamer, so the outbound voice-reply policy
+                            # must be applied here too (the non-streaming path does
+                            # this inside _send_response_with_media). Otherwise
+                            # ``voice.mode: always``/``match_inbound`` would be a
+                            # no-op whenever streaming is enabled. Best-effort.
+                            await self._maybe_send_voice_reply(
+                                update.message.chat_id,
+                                text_content if text_content else send_result["content"],
+                                inbound_was_voice=bool(
+                                    update.message.voice or update.message.audio
+                                ),
+                            )
                             
                             # Send media files separately (same as non-streaming path)
                             if media_urls:
@@ -804,6 +867,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             update.message.chat_id,
                             send_result["content"],
                             reply_to=update.message.message_id,
+                            inbound_was_voice=bool(
+                                update.message.voice or update.message.audio
+                            ),
                         )
                         # If the agent attached a portable presentation
                         # (buttons/menus), render it natively as an inline
@@ -831,11 +897,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 finally:
                     # Inbound media is cached to temp files for this turn only;
                     # remove them so media-heavy bots don't fill the temp volume.
-                    for _path in attachments:
-                        try:
-                            os.remove(_path)
-                        except OSError:
-                            pass
+                    self._remove_inbound_media(attachments)
         
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle voice messages."""
@@ -868,6 +930,65 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             handler(message)
                     except Exception as e:
                         logger.error(f"Command handler error: {e}")
+                    return
+
+                # File-based custom slash commands (Issue #3729): resolve
+                # ``.praisonai/commands/{command}.md`` and submit the rendered
+                # body as a normal chat turn. Falls through to chat on a miss.
+                text = update.message.text or ""
+                parts = text.split(maxsplit=1)
+                arguments = parts[1] if len(parts) > 1 else ""
+                rendered = self.render_custom_command(command, arguments)
+                if rendered is not None:
+                    user_name = (
+                        update.message.from_user.username
+                        or update.message.from_user.first_name
+                        or ""
+                    ) if update.message.from_user else ""
+                    try:
+                        response = await self._session.chat(
+                            self._agent, user_id, rendered,
+                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                            user_name=user_name,
+                            message_id=str(update.message.message_id),
+                            account=getattr(self.config, "account", "default"),
+                        )
+                        # Route through the same delivery pipeline as a normal
+                        # chat turn so presentation cleanup, outbound hooks and
+                        # media/long-response handling all apply (not a bare
+                        # reply_text). Pop any agent-attached presentation first.
+                        presentation = self._session.pop_last_presentation(user_id)
+                        send_result = self.fire_message_sending(
+                            str(update.message.chat_id), str(response),
+                            reply_to=str(update.message.message_id),
+                        )
+                        if send_result["cancel"]:
+                            return
+                        await self._send_response_with_media(
+                            update.message.chat_id,
+                            send_result["content"],
+                            reply_to=update.message.message_id,
+                        )
+                        try:
+                            if presentation is not None:
+                                await self.render_presentation(
+                                    str(update.message.chat_id), presentation
+                                )
+                        except Exception as e:  # pragma: no cover — defensive
+                            logger.debug("presentation render skipped: %s", e)
+                        self.fire_message_sent(
+                            str(update.message.chat_id), send_result["content"],
+                        )
+                    except Exception as e:  # noqa: BLE001 - surface a friendly message
+                        logger.warning(
+                            "custom command /%s failed: %s",
+                            command,
+                            safe_log_message(e),
+                        )
+                        user_error = extract_root_cause_from_error(str(e))
+                        await update.message.reply_text(
+                            f"❌ /{command} failed: {safe_error_message(user_error)}"
+                        )
         
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
@@ -984,7 +1105,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 return
             response = handle_compress_command(self._session, user_id, self._agent)
             await update.message.reply_text(response)
-        
+
+        async def handle_recap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "recap"):
+                await update.message.reply_text("⛔ You are not permitted to run /recap")
+                return
+            response = handle_recap_command(self._session, user_id, self._agent)
+            await update.message.reply_text(response)
+
         async def handle_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message or not update.message.text:
                 return
@@ -1104,6 +1238,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             response = handle_reasoning_command(self._session, user_id, self._agent)
             await update.message.reply_text(response)
 
+        async def handle_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "tasks"):
+                await update.message.reply_text("⛔ You are not permitted to run /tasks")
+                return
+            parts = (update.message.text or "").split(maxsplit=1)
+            args = parts[1] if len(parts) > 1 else None
+            response = handle_tasks_command(user_id, args)
+            await update.message.reply_text(response)
+
         async def handle_automations(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
                 return
@@ -1153,6 +1302,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("model", handle_model))
         self._application.add_handler(CommandHandler("usage", handle_usage))
         self._application.add_handler(CommandHandler("compress", handle_compress))
+        self._application.add_handler(CommandHandler("recap", handle_recap))
         self._application.add_handler(CommandHandler("queue", handle_queue))
         self._application.add_handler(CommandHandler("learn", handle_learn))
         self._application.add_handler(CommandHandler("undo", handle_undo))
@@ -1160,6 +1310,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("resume", handle_resume))
         self._application.add_handler(CommandHandler("retry", handle_retry))
         self._application.add_handler(CommandHandler("reasoning", handle_reasoning))
+        self._application.add_handler(CommandHandler("tasks", handle_tasks))
         # ``automations`` / ``blueprint`` are generic names, so let an existing
         # custom @bot.on_command handler of the same name win instead of being
         # shadowed by these built-ins (the custom loop below registers it).
@@ -1170,7 +1321,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
-        
+
+        # Catch-all for any other slash command (Issue #3729): file-based and
+        # entry-point custom commands are discovered at runtime by
+        # ``_custom_command_resolver`` and are NOT registered as explicit
+        # ``CommandHandler`` instances above. Because handlers in a group are
+        # evaluated in registration order and the first match wins, this
+        # ``MessageHandler(filters.COMMAND, …)`` only ever sees slash commands
+        # that none of the built-in/registered handlers above claimed, routing
+        # them into ``handle_command`` (which renders the custom command and
+        # falls through to normal chat on a miss).
+        self._application.add_handler(
+            MessageHandler(filters.COMMAND, handle_command)
+        )
+
         self._application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
         )
@@ -1331,6 +1495,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         # Cancel pending debounce timers
         self._debouncer.cancel_all()
+
+        # Flush any pending media-album buffers (Issue #3298)
+        self._album.cancel_all()
         
         # Signal the stop event so the start() loop exits cleanly
         if hasattr(self, '_stop_event') and self._stop_event:
@@ -1447,6 +1614,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     }
                 )
     
+    @staticmethod
+    def _remove_inbound_media(paths: List[str]) -> None:
+        """Remove per-turn cached inbound media temp files (best effort).
+
+        Shared by the post-turn ``finally`` cleanup and the album coalescer's
+        orphan hook (Issue #3298) so a cancelled owning turn never leaks the
+        merged album's temp files.
+        """
+        for _path in paths or []:
+            try:
+                os.remove(_path)
+            except OSError:
+                pass
+
     async def _cache_inbound_telegram_media(self, update) -> List[str]:
         """Download and validate inbound photo/document for the agent (Issue #2350).
 
@@ -1597,6 +1778,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         chat_id: int,
         response: str,
         reply_to: Optional[int] = None,
+        inbound_was_voice: bool = False,
     ) -> None:
         """Send response, extracting and sending any MEDIA: files."""
         # Parse response for media
@@ -1608,6 +1790,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Send text first if present
         if text:
             await self._send_long_message(chat_id, text, reply_to=reply_to)
+
+        # Issue #3623: outbound voice reply. When the operator has enabled a
+        # ``voice`` policy, synthesise the agent's plain text and deliver it as
+        # a native Telegram voice note — the symmetric counterpart to inbound
+        # STT. The agent authors plain text; voice is a transport concern here.
+        # Skipped silently (text already sent) when disabled or synthesis fails.
+        await self._maybe_send_voice_reply(
+            chat_id, text, inbound_was_voice=inbound_was_voice
+        )
         
         # Send audio files
         for media_path in media_urls:
@@ -1646,6 +1837,60 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             )
                 except Exception as e:
                     logger.error(f"Failed to send audio: {e}")
+
+    async def _maybe_send_voice_reply(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        inbound_was_voice: bool = False,
+    ) -> None:
+        """Synthesise and send ``text`` as a voice note per the ``voice`` policy.
+
+        The outbound mirror of :meth:`_transcribe_audio`: resolves the operator's
+        ``voice`` config, decides whether to speak (``always`` /
+        ``match_inbound``), synthesises via the shared TTS helper, and delivers a
+        native Telegram voice note. Best-effort — any failure is logged and the
+        already-sent text stands, so voice never breaks a reply.
+        """
+        if not text or not text.strip():
+            return
+        from ._tts import (
+            resolve_tts_config,
+            should_voice_reply,
+            synthesize_voice_reply,
+        )
+
+        cfg = resolve_tts_config(self.config)
+        if not should_voice_reply(cfg, inbound_was_voice=inbound_was_voice):
+            return
+
+        audio_path: Optional[str] = None
+        try:
+            audio_path = await asyncio.to_thread(synthesize_voice_reply, text, cfg)
+            if not audio_path or not os.path.exists(audio_path):
+                return
+            with open(audio_path, "rb") as f:
+                async def send_voice_reply():
+                    f.seek(0)
+                    return await self._application.bot.send_voice(
+                        chat_id=chat_id, voice=f
+                    )
+
+                await deliver_with_retry(
+                    send_voice_reply,
+                    policy=self._outbound_backoff,
+                    platform="telegram",
+                    parked_store=None,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send voice reply: {e}")
+        finally:
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except OSError:
+                    pass
 
     
     async def edit_message(
@@ -1905,7 +2150,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             elif cmd in self._command_handlers:
                 # Custom commands
                 lines.append(f"/{cmd} - Custom command")
-        
+
+        # File-based / entry-point custom commands (Issue #3729): merge them in
+        # via the shared resolver so they surface in /help just like builtins.
+        # Builtins and adapter-registered handlers keep precedence (skip names
+        # already listed). Best-effort — a resolver error never breaks /help.
+        resolver = getattr(self, "_custom_command_resolver", None)
+        if resolver is not None:
+            try:
+                for name, desc in sorted(resolver.descriptions().items()):
+                    if name in all_commands:
+                        continue
+                    lines.append(f"/{name} - {desc}")
+            except Exception:  # noqa: BLE001 — /help must never raise
+                pass
+
         lines.append(f"\nAgent: {agent_name}")
         lines.append(f"Model: {model}")
         
@@ -2035,7 +2294,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     btn = {**btn, "web_app": WebAppInfo(**web_app)}
                 return InlineKeyboardButton(**btn)
 
-            rendered = TelegramPresentationRenderer.render(presentation)
+            rendered = TelegramPresentationRenderer.render(
+                presentation,
+                callback_store=getattr(self, "_callback_store", None),
+            )
             send_kwargs: Dict[str, Any] = {
                 "chat_id": int(target),
                 "text": rendered.get("text") or "\u200b",
@@ -2054,6 +2316,38 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         except Exception as e:
             logger.error(f"Failed to render presentation: {e}")
             return None
+
+
+def _record_passive_group_message(bot: "TelegramBot", message) -> None:
+    """Record an unmentioned group message as passive session context.
+
+    Issue #3380: used by the ``observe`` group policy so that unmentioned
+    messages are retained in the transcript (without triggering an agent run)
+    and are visible to the agent when it is next addressed. Best-effort — a
+    missing session manager or any failure is swallowed so inbound handling is
+    never broken by observation.
+    """
+    session_mgr = getattr(bot, "_session", None)
+    if session_mgr is None or not hasattr(session_mgr, "record_passive"):
+        return
+    try:
+        content = message.get_text() if hasattr(message, "get_text") else str(message.content)
+        user_id = message.sender.user_id if message.sender else ""
+        sender = (message.sender.display_name or user_id) if message.sender else user_id
+        # Thread the same routing fields an addressed turn uses so that with
+        # session_scope="per_chat" the passive entry lands on the shared group
+        # key the next mentioned run reads from (Issue #3380 / #2376). With the
+        # default per_user scope these are simply ignored.
+        session_mgr.record_passive(
+            user_id,
+            content,
+            sender=sender,
+            chat_id=str(message.channel.channel_id) if message.channel and message.channel.channel_id else "",
+            thread_id=str(message.thread_id) if getattr(message, "thread_id", None) else "",
+            account=getattr(bot.config, "account", "default"),
+        )
+    except Exception as e:  # pragma: no cover — defensive
+        logger.debug(f"Failed to record passive group message: {e}")
 
 
 async def process_inbound_telegram_message(
@@ -2149,7 +2443,7 @@ async def process_inbound_telegram_message(
             if message.message_type != MessageType.COMMAND:
                 logger.debug(f"Message dropped: non-command in command_only group {channel_id}")
                 return None
-        elif group_policy == "mention_only":
+        elif group_policy in ("mention_only", "observe"):
             # Check if bot was mentioned in the message
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             mention_handle = f"@{bot_username}" if bot_username else ""
@@ -2158,7 +2452,15 @@ async def process_inbound_telegram_message(
             ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
             
             if not bot_mentioned:
-                logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
+                # Issue #3380: under ``observe`` an unmentioned group message is
+                # recorded into the session transcript as passive context (no
+                # agent run) so the bot has memory of the conversation when it is
+                # next addressed. ``mention_only`` still drops it outright.
+                if group_policy == "observe":
+                    _record_passive_group_message(bot, message)
+                    logger.debug(f"Message observed (no run) in group {channel_id}")
+                else:
+                    logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
                 return None
         elif group_policy == "respond_all":
             # Allow all group messages

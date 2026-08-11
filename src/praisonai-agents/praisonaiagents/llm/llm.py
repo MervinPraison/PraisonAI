@@ -87,6 +87,18 @@ except ImportError:
 # NOTE: The custom-LLM path (Agent.chat → get_response) and OpenAI path
 # (Agent.chat → _chat_completion) are separate code paths, not duplicate
 # API calls per request. This is a DRY/maintenance concern, not a billing issue.
+class LLMResponseError(Exception):
+    """Raised when the LLM tool-calling loop fails and cannot produce a response.
+
+    This ensures a mid-loop failure surfaces as a distinguishable exception to
+    the caller instead of being silently swallowed and returned as an empty
+    string.
+    """
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
+
 class LLMContextLengthExceededException(Exception):
     """Raised when LLM context length is exceeded"""
     def __init__(self, message: str):
@@ -714,30 +726,6 @@ Respond with ONLY a valid JSON tool call in this format:
 
         return any(indicator in error_str or indicator in error_type for indicator in indicators)
 
-    def _classify_error_and_should_retry_legacy(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
-        """Legacy error classification - deprecated, use resolve_failover_decision() instead.
-        
-        Args:
-            error: Exception to classify
-            attempt: Current attempt number (1-based)
-            
-        Returns:
-            Tuple of (category, should_retry, retry_delay)
-        """
-        import warnings
-        warnings.warn(
-            "_classify_error_and_should_retry is deprecated, use resolve_failover_decision() instead",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        
-        # Delegate to new typed classification system
-        decision = self.resolve_failover_decision(error, {"attempt": attempt, "max_retries": self._max_retries})
-        return decision.reason, decision.is_retryable, decision.backoff_ms / 1000.0
-    
-    # Backward compatibility alias for existing code
-    _classify_error_and_should_retry = _classify_error_and_should_retry_legacy
-    
     def classify_error_kind(self, error: Exception) -> AgentErrorKind:
         """
         Classify error into typed AgentErrorKind instead of freeform strings.
@@ -755,15 +743,17 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Check for permanent auth errors first (non-retryable)
         if any(indicator in error_str for indicator in [
-            "invalid api key", "api key not found", "invalid_api_key", 
-            "incorrect api key", "authentication_error"
+            "invalid api key", "api key not found", "invalid_api_key",
+            "incorrect api key", "authentication_error",
+            "oauth access token has been revoked", "token has been revoked",
+            "oauth session expired", "could not be refreshed",
         ]):
             return "auth_permanent"
         
         # Retryable authentication errors
         if any(indicator in error_str for indicator in [
             "unauthorized", "api key", "authentication failed",
-            "invalid_request_error", "openai_error"
+            "openai_error",
         ]):
             return "auth"
         
@@ -975,6 +965,10 @@ Respond with ONLY a valid JSON tool call in this format:
         for the same exception, which would double-count those mutations.
         """
         if not (self._auth_provider_id and attempt == 0):
+            return False
+        # Shared OAuth stores (Claude Code Keychain) must not be refreshed here:
+        # rotation invalidates tokens for other CLI consumers without persisting back.
+        if self._auth_provider_id == "claude-code":
             return False
         return self.classify_error_kind(e) == "auth"
 
@@ -1518,47 +1512,21 @@ Respond with ONLY a valid JSON tool call in this format:
         
         return "\n".join(lines).strip()
 
-    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
+    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
         """
         Format tool result message for Ollama provider.
-        Enhanced to instruct model to use the result for final answer.
-        Handles error results with specific instructions to provide user-friendly responses.
+
+        Delegates to the protocol-driven ``OllamaAdapter.format_tool_result_message``
+        so this provider-specific formatting lives in the adapter layer (single
+        source of truth). Reuses the already-constructed ``_provider_adapter`` when
+        it is the Ollama adapter, otherwise instantiates one (these call sites are
+        guarded by ``_is_ollama_provider()``, so Ollama formatting is always used).
         """
-        # Check if the result is an error
-        is_error = False
-        error_message = None
-        
-        if isinstance(tool_result, dict) and 'error' in tool_result:
-            is_error = True
-            error_message = tool_result.get('error', 'Unknown error')
-        elif isinstance(tool_result, list) and len(tool_result) > 0:
-            first_item = tool_result[0]
-            if isinstance(first_item, dict) and 'error' in first_item:
-                is_error = True
-                error_message = first_item.get('error', 'Unknown error')
-        
-        if is_error:
-            # For errors, provide clear instructions to give a helpful response
-            return {
-                "role": "user",
-                "content": f"""The tool "{function_name}" encountered an error:
-{error_message}
-
-Please provide a helpful response to the user explaining that the operation could not be completed. 
-Be apologetic and suggest alternatives if possible. Do NOT repeat the raw error message.
-Give a natural, conversational response."""
-            }
-        else:
-            # For successful results, format normally
-            tool_result_str = str(tool_result)
-            return {
-                "role": "user",
-                "content": f"""Tool execution complete.
-Function: {function_name}
-Result: {tool_result_str}
-
-Now provide your final answer using this result. Summarize the information naturally for the user."""
-            }
+        from .adapters import OllamaAdapter
+        adapter = getattr(self, '_provider_adapter', None)
+        if not isinstance(adapter, OllamaAdapter):
+            adapter = OllamaAdapter()
+        return adapter.format_tool_result_message(function_name, tool_result)
 
     def _try_append_multimodal_tool_result(
         self,
@@ -1707,17 +1675,7 @@ Now provide your final answer using this result. Summarize the information natur
         
         # Capture tool calls from streaming chunks if provider supports it
         if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-            for tc in delta.tool_calls:
-                if tc.index >= len(tool_calls):
-                    tool_calls.append({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""}
-                    })
-                if tc.function.name:
-                    tool_calls[tc.index]["function"]["name"] = tc.function.name
-                if tc.function.arguments:
-                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+            self._process_tool_calls_from_stream(delta, tool_calls)
         
         return response_text, tool_calls
 
@@ -1870,6 +1828,48 @@ Now provide your final answer using this result. Summarize the information natur
                 return True, tool_summary, iteration_count
                 
         return False, None, iteration_count
+
+    def _register_deferred_if_any(self, tool_result: Any) -> None:
+        """Register a deferred tool result so its eventual value is not lost.
+
+        Closes the deferred loop (Issue #3716): when a tool returns
+        ``defer(handle_id=...)`` the run loop already surfaces the note (carried
+        in ``tool_result.result``); here we also register the handle on the
+        global :class:`DeferredResolver` so a later ``resolve_deferred(handle_id,
+        value)`` (fired on background completion) re-injects the result into the
+        shared ``messages`` history as a follow-up tool message.
+
+        No-op for non-deferred results, preserving existing behaviour. A gateway
+        that wants to deliver the result to an external channel can register its
+        own resolver for the same handle first — this only registers when the
+        handle is not already pending, so it never overrides that.
+        """
+        deferred = getattr(tool_result, "deferred", None)
+        if deferred is None:
+            return
+        try:
+            from ..tools.call_executor import get_deferred_resolver
+            resolver = get_deferred_resolver()
+            tool_call_id = tool_result.tool_call_id
+            function_name = tool_result.function_name
+
+            def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
+                # Best-effort: this closure is invoked from a background worker
+                # thread; appending to the LLM's persistent ``chat_history``
+                # (the same list follow-up turns replay via _build_messages)
+                # makes the resolved value available on the next turn.
+                self.chat_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"[deferred:{function_name}] {value}",
+                })
+
+            # Atomic: only register when not already pending, so a gateway that
+            # registered its own resolver for this handle first is never
+            # overridden and concurrent turns cannot clobber each other.
+            resolver.register_if_absent(deferred.handle_id, _reinject)
+        except Exception as e:  # noqa: BLE001 — registration must never break the turn
+            logging.debug("Deferred registration skipped (non-fatal): %s", e)
 
     def _finalise_on_limit(self, messages: List[Dict], response_text: str,
                            temperature: float = 0.2, **kwargs) -> str:
@@ -2710,6 +2710,9 @@ Now provide your final answer using this result. Summarize the information natur
                             for tool_call_obj, tool_result_obj in zip(tool_calls_batch, tool_results_batch):
                                 if tool_result_obj.error is not None:
                                     raise tool_result_obj.error
+                                # Register any deferred handle so its eventual
+                                # background result is re-injected, not lost.
+                                self._register_deferred_if_any(tool_result_obj)
                                 tool_result = tool_result_obj.result
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
@@ -3617,9 +3620,16 @@ Now provide your final answer using this result. Summarize the information natur
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
+                except LLMResponseError:
+                    raise
                 except Exception as e:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
-                    break
+                    # Don't swallow the failure and return an empty string as if
+                    # the call succeeded. Re-raise as a distinguishable exception
+                    # so the caller (e.g. Agent.chat) can surface the real error.
+                    raise LLMResponseError(
+                        f"LLM tool-calling loop failed at iteration {iteration_count}: {e}"
+                    ) from e
                     
             # End of while loop - return final response
             if final_response_text:
@@ -4192,6 +4202,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                         
                         for tool_result in tool_results:
+                            # Register any deferred handle so its eventual
+                            # background result is re-injected, not lost.
+                            self._register_deferred_if_any(tool_result)
                             if tool_result.error is None:
                                 # Successful execution
                                 tool_message = self._create_tool_message(
@@ -5258,7 +5271,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return 4000  # Safe default
 
     def _setup_event_tracking(self, events: List[Any]) -> None:
-        """Setup callback functions for tracking model usage"""
+        """Setup callback functions for tracking model usage.
+
+        ``litellm.callbacks`` is a process-global list shared by every LLM
+        instance. Overwriting it wipes callbacks registered by other concurrent
+        agents, so we merge into it instead: only the callbacks *this* instance
+        previously registered are removed, and unrelated instances' callbacks
+        are never touched. An empty ``events`` list is a no-op.
+        """
+        if not events:
+            return
+
         try:
             import litellm
         except ImportError:
@@ -5277,8 +5300,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for event in litellm._async_success_callback[:]:
             if type(event) in event_types:
                 litellm._async_success_callback.remove(event)
-                
-        litellm.callbacks = events
+
+        # Merge into the global list rather than replacing it. Only remove the
+        # callbacks this instance registered on a prior call, then append the
+        # current ones, preserving other instances' callbacks.
+        if litellm.callbacks is None:
+            litellm.callbacks = []
+        for cb in getattr(self, "_registered_callbacks", []):
+            if cb in litellm.callbacks:
+                litellm.callbacks.remove(cb)
+        for event in events:
+            if event not in litellm.callbacks:
+                litellm.callbacks.append(event)
+        self._registered_callbacks = list(events)
 
     def _track_token_usage(self, response: Dict[str, Any], model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""

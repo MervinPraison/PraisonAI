@@ -125,7 +125,8 @@ class TestModelContextWindows:
         assert get_model_context_window("claude-3-sonnet") == 200000
         assert get_model_context_window("claude-3-haiku") == 200000
         assert get_model_context_window("gemini-pro") == 32768
-        assert get_model_context_window("gemini-1.5-pro") == 1000000
+        # gemini-1.5-pro now resolves from the canonical budgeter table
+        assert get_model_context_window("gemini-1.5-pro") == 2097152
     
     def test_unknown_model_fallback(self):
         """Unknown models should return safe fallback."""

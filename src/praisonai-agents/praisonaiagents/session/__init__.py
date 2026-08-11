@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .store import DefaultSessionStore, SessionMessage, SessionData, CompactionCheckpoint
     from .sqlite_store import SqliteSessionStore
-    from .protocols import SessionStoreProtocol
+    from .sqlite_transcript_store import SqliteTranscriptStore
+    from .protocols import SessionStoreProtocol, SessionMirrorProtocol
     from .hierarchy import HierarchicalSessionStore, SessionSnapshot, ExtendedSessionData
 
 # Lazy loading for zero import overhead
@@ -56,6 +57,11 @@ def __getattr__(name: str):
         from .sqlite_store import SqliteSessionStore
         _module_cache[name] = SqliteSessionStore
         return SqliteSessionStore
+
+    if name == "SqliteTranscriptStore":
+        from .sqlite_transcript_store import SqliteTranscriptStore
+        _module_cache[name] = SqliteTranscriptStore
+        return SqliteTranscriptStore
     
     if name == "SessionMessage":
         from .store import SessionMessage
@@ -86,6 +92,11 @@ def __getattr__(name: str):
         from .protocols import SearchableSessionStoreProtocol
         _module_cache[name] = SearchableSessionStoreProtocol
         return SearchableSessionStoreProtocol
+
+    if name == "SessionMirrorProtocol":
+        from .protocols import SessionMirrorProtocol
+        _module_cache[name] = SessionMirrorProtocol
+        return SessionMirrorProtocol
 
     if name == "SessionHit":
         from .protocols import SessionHit
@@ -153,6 +164,12 @@ def __getattr__(name: str):
         _module_cache[name] = clear_session_context
         return clear_session_context
 
+    # Workspace-scoped default session identity (Issue #3154)
+    if name == "workspace_id":
+        from .workspace import workspace_id
+        _module_cache[name] = workspace_id
+        return workspace_id
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -160,12 +177,14 @@ __all__ = [
     "Session",
     "DefaultSessionStore",
     "SqliteSessionStore",
+    "SqliteTranscriptStore",
     "SessionMessage", 
     "SessionData",
     "CompactionCheckpoint",
     "get_default_session_store",
     "SessionStoreProtocol",
     "SearchableSessionStoreProtocol",
+    "SessionMirrorProtocol",
     "SessionHit",
     "SessionSummary",
     "HierarchicalSessionStore",
@@ -181,4 +200,5 @@ __all__ = [
     "set_session_context",
     "get_session_context",
     "clear_session_context",
+    "workspace_id",
 ]

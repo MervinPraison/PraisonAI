@@ -11,7 +11,11 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .base import StateStore
-from ..._async_bridge import run_sync
+# Route sync wrappers through run_sync_or_offload so these methods are safe
+# from inside a running loop (FastAPI handler, async test, notebook). A bare
+# run_sync would raise RuntimeError there, making sync persistence hooks that
+# ride an async store unusable in exactly the environments they target.
+from ..._async_bridge import run_sync_or_offload as run_sync
 
 logger = logging.getLogger(__name__)
 

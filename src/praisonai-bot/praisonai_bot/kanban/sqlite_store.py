@@ -55,6 +55,8 @@ class SQLiteKanbanStore:
                     tenant TEXT DEFAULT 'default',
                     board TEXT DEFAULT 'default',
                     workspace_kind TEXT DEFAULT 'default',
+                    branch TEXT,  -- per-task integration branch (worktree isolation)
+                    worktree_path TEXT,  -- filesystem path of the task's git worktree
                     claim_lock TEXT,
                     claim_expires TIMESTAMP,  -- Claim lease expiry (TTL)
                     worker_pid INTEGER,  -- PID of claiming worker for liveness checks
@@ -157,6 +159,9 @@ class SQLiteKanbanStore:
             "claim_expires": "TIMESTAMP",
             "worker_pid": "INTEGER",
             "last_heartbeat_at": "TIMESTAMP",
+            "workspace_kind": "TEXT DEFAULT 'default'",
+            "branch": "TEXT",
+            "worktree_path": "TEXT",
         })
 
         # Drop a pre-existing idempotency index that is not tenant-scoped so the
@@ -207,6 +212,59 @@ class SQLiteKanbanStore:
             (event_id, task_id, event_type, json.dumps(data))
         )
 
+    @staticmethod
+    def _is_git_repo(path: Any) -> bool:
+        """True when ``path`` points inside a git working tree.
+
+        Used purely to decide worktree auto-upgrade from *linkage* to a repo,
+        never from task content. Any error resolving the path is treated as
+        "not a repo" so a bad value can never fail the create.
+        """
+        if not path or not isinstance(path, str):
+            return False
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+                capture_output=True, text=True,
+            )
+            return result.returncode == 0 and result.stdout.strip() == "true"
+        except Exception:
+            return False
+
+    def _resolve_workspace_kind(self, task_data: Dict[str, Any]) -> str:
+        """Resolve the effective ``workspace_kind`` for a new task.
+
+        Structural auto-upgrade (Refinement 1): when a task is *linked to a git
+        repo* (``repo_path`` on the task, or ``repo_path`` in its metadata) and
+        the caller left ``workspace_kind`` unset/``"default"``, upgrade it to
+        ``"worktree"`` so parallel workers get isolated checkouts without each
+        card author remembering a flag. Isolation intent is carried by linkage,
+        not by inspecting the task body.
+
+        Escape hatches: an explicit ``workspace_kind`` in ``task_data`` is
+        always respected; a board/task level ``auto_worktree: false`` (top-level
+        or in metadata) disables the upgrade entirely.
+        """
+        explicit = task_data.get('workspace_kind')
+        # An explicitly-provided kind is always respected (escape hatch):
+        # only the *unset* case is eligible for structural auto-upgrade, so a
+        # caller that deliberately asks for "default" keeps shared-cwd.
+        if 'workspace_kind' in task_data and explicit is not None:
+            return explicit
+        metadata = task_data.get('metadata') or {}
+        auto = task_data.get('auto_worktree')
+        if auto is None and isinstance(metadata, dict):
+            auto = metadata.get('auto_worktree')
+        if auto is False:
+            return 'default'
+        repo_path = task_data.get('repo_path')
+        if not repo_path and isinstance(metadata, dict):
+            repo_path = metadata.get('repo_path')
+        if self._is_git_repo(repo_path):
+            return 'worktree'
+        return explicit or 'default'
+
     def create_task(self, task_data: Dict[str, Any], *, idempotency_key: Optional[str] = None) -> Task:
         """Create a new task.
 
@@ -235,6 +293,23 @@ class SQLiteKanbanStore:
                 if max_retries < 1:
                     max_retries = None
 
+        # Resolve workspace_kind with structural auto-upgrade for repo-linked
+        # tasks (Refinement 1). Derive and persist the per-task branch up-front
+        # when isolated so the dispatcher just consumes it.
+        workspace_kind = self._resolve_workspace_kind(task_data)
+        branch = task_data.get('branch')
+        if workspace_kind == 'worktree' and not branch:
+            branch = f"kanban/{task_id}"
+
+        # Preserve the repo linkage that drove the upgrade: carry a top-level
+        # ``repo_path`` into metadata so the isolating repository is never
+        # discarded between create and dispatch. Metadata already present wins,
+        # so an explicit metadata.repo_path is left untouched.
+        metadata = dict(task_data.get('metadata') or {})
+        top_repo_path = task_data.get('repo_path')
+        if top_repo_path and not metadata.get('repo_path'):
+            metadata['repo_path'] = top_repo_path
+
         task = Task(
             id=task_id,
             title=task_data['title'],
@@ -244,8 +319,10 @@ class SQLiteKanbanStore:
             priority=task_data.get('priority', 0),
             tenant=tenant,
             board=board,
-            workspace_kind=task_data.get('workspace_kind', 'default'),
-            metadata=task_data.get('metadata', {}),
+            workspace_kind=workspace_kind,
+            branch=branch,
+            worktree_path=task_data.get('worktree_path'),
+            metadata=metadata,
             max_retries=max_retries,
             created_at=now,
             updated_at=now
@@ -271,15 +348,15 @@ class SQLiteKanbanStore:
                 conn.execute("""
                     INSERT INTO tasks (
                         id, title, body, status, assignee, priority,
-                        tenant, board, workspace_kind, metadata,
-                        idempotency_key, max_retries, consecutive_failures,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        tenant, board, workspace_kind, branch, worktree_path,
+                        metadata, idempotency_key, max_retries,
+                        consecutive_failures, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task.id, task.title, task.body, task.status.value,
                     task.assignee, task.priority, task.tenant, task.board,
-                    task.workspace_kind, json.dumps(task.metadata),
-                    idempotency_key, max_retries, 0,
+                    task.workspace_kind, task.branch, task.worktree_path,
+                    json.dumps(task.metadata), idempotency_key, max_retries, 0,
                     task.created_at.isoformat(), task.updated_at.isoformat()
                 ))
             except sqlite3.IntegrityError:
@@ -324,7 +401,7 @@ class SQLiteKanbanStore:
             values = []
             
             for field, value in updates.items():
-                if field in ['status', 'title', 'body', 'assignee', 'priority', 'claim_lock', 'metadata']:
+                if field in ['status', 'title', 'body', 'assignee', 'priority', 'claim_lock', 'metadata', 'branch', 'worktree_path', 'workspace_kind']:
                     if field == 'status' and isinstance(value, str):
                         value = TaskStatus(value).value
                     elif field == 'metadata':

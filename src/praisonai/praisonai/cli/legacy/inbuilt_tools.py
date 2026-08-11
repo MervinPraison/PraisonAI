@@ -24,11 +24,10 @@ def get_agents_generator():
 
 
 def get_call_module():
-    import importlib.util
-
-    if not importlib.util.find_spec("praisonai.api.call"):
+    try:
+        from praisonai.api import call as call_module
+    except ImportError as exc:
         raise ImportError(
             'Call feature is not installed. Install with: pip install "praisonai[call]"'
-        )
-    from praisonai.api import call as call_module
+        ) from exc
     return call_module

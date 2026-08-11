@@ -24,6 +24,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _accepts_thread_id(bot: Any) -> bool:
+    """Whether ``bot.send_message`` accepts a ``thread_id`` argument.
+
+    Adapters that support threads (Telegram/Slack/Discord) expose a
+    ``thread_id`` parameter or ``**kwargs``; lightweight adapters that do not
+    are left untouched so passing a thread cannot raise ``TypeError`` for them
+    — a target naming a thread is simply delivered to the parent chat.
+    """
+    send = getattr(bot, "send_message", None)
+    if send is None:
+        return False
+    try:
+        import inspect
+
+        params = inspect.signature(send).parameters
+    except (TypeError, ValueError):
+        return False
+    return "thread_id" in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 @dataclass
 class ChannelRef:
     """Lightweight descriptor of a reachable channel enumerated by an adapter.
@@ -427,9 +449,31 @@ class DeliveryRouter:
     - "<alias>" - friendly name from the channel directory
     """
     
-    def __init__(self, botos: BotOS, dead_targets: Optional[Any] = None):
+    #: Default plain-text notice used when a permanent failure is surfaced to
+    #: the user. Kept short so it can slip through where the original (possibly
+    #: large/rich) reply could not.
+    DEFAULT_UNDELIVERED_TEMPLATE = (
+        "\u26a0\ufe0f Your request was processed but the reply couldn't be delivered."
+    )
+
+    def __init__(
+        self,
+        botos: BotOS,
+        dead_targets: Optional[Any] = None,
+        *,
+        notify_on_undelivered: bool = False,
+        undelivered_template: Optional[str] = None,
+    ):
         self._botos = botos
         self.directory = ChannelDirectory()
+        # Close-the-loop on permanent delivery failure (issue #3297). Default
+        # OFF so behaviour is unchanged unless an operator opts in: when a send
+        # fails permanently, fire a MESSAGE_UNDELIVERED hook (operator routing)
+        # and best-effort deliver a short plain-text notice on the same channel.
+        self._notify_on_undelivered = notify_on_undelivered
+        self._undelivered_template = (
+            undelivered_template or self.DEFAULT_UNDELIVERED_TEMPLATE
+        )
         # Optional self-healing dead-target registry (issue #2486). Default OFF:
         # when None, delivery behaves exactly as before (no suppression).
         self._dead_targets = dead_targets
@@ -531,17 +575,22 @@ class DeliveryRouter:
                 adapters[platform] = bot
         self.directory.refresh_from_adapters(adapters)
     
-    def resolve(self, target: str, origin: Optional[SessionSource] = None) -> Tuple[str, str]:
+    def resolve(
+        self, target: str, origin: Optional[SessionSource] = None
+    ) -> Tuple[str, str, Optional[str]]:
         """
-        Resolve a target string to (platform, channel_id).
-        
+        Resolve a target string to (platform, channel_id, thread_id).
+
         Args:
-            target: Target specification (origin|platform|platform:channel|alias)
+            target: Target specification
+                (origin|platform|platform:channel|platform:channel:thread|alias)
             origin: Optional source of the original request
-            
+
         Returns:
-            Tuple of (platform, channel_id)
-            
+            Tuple of (platform, channel_id, thread_id). ``thread_id`` is ``None``
+            when the target names no thread; adapters that do not support threads
+            ignore it, so delivery is unchanged for them.
+
         Raises:
             ValueError: If target cannot be resolved
         """
@@ -549,11 +598,16 @@ class DeliveryRouter:
         if target == "origin":
             if not origin:
                 raise ValueError("Cannot resolve 'origin' without source context")
-            return (origin.platform, origin.channel_id)
+            return (origin.platform, origin.channel_id, getattr(origin, "thread_id", None))
         
-        # Handle "platform:channel_id" format
+        # Handle "platform:channel_id[:thread_id]" format. A third segment names
+        # a thread (Slack thread_ts, Telegram forum topic, Discord thread) and is
+        # preserved end-to-end so proactive/scheduled sends land in the thread
+        # rather than the parent channel.
         if ":" in target:
-            platform, channel_id = [p.strip() for p in target.split(":", 1)]
+            parts = [p.strip() for p in target.split(":")]
+            platform, channel_id = parts[0], parts[1] if len(parts) > 1 else ""
+            thread_id = parts[2] if len(parts) > 2 and parts[2] else None
             if not platform or not channel_id:
                 raise ValueError(
                     "Invalid target format. Expected '<platform>:<channel_id>'"
@@ -564,20 +618,21 @@ class DeliveryRouter:
             if not self._botos.get_bot(platform_key):
                 raise ValueError(f"Platform '{platform}' not configured")
             
-            return (platform_key, channel_id)
+            return (platform_key, channel_id, thread_id)
         
         # Check if it's a platform name (use home channel) - check this BEFORE aliases
         platform_key = target.lower()
         if self._botos.get_bot(platform_key):
             home_channel = self.directory.get_home_channel(platform_key)
             if home_channel:
-                return (platform_key, home_channel)
+                return (platform_key, home_channel, None)
             raise ValueError(f"Platform '{target}' has no home channel configured")
         
         # Check if it's an alias
         alias_result = self.directory.resolve_alias(target)
         if alias_result:
-            return alias_result
+            platform_key, channel_id = alias_result
+            return (platform_key, channel_id, None)
         
         # If nothing matches, it might be an undefined alias
         raise ValueError(f"Cannot resolve target '{target}': not a platform, alias, or platform:channel format")
@@ -606,7 +661,7 @@ class DeliveryRouter:
             True if delivered successfully, False otherwise
         """
         try:
-            platform, channel_id = self.resolve(target, origin)
+            platform, channel_id, thread_id = self.resolve(target, origin)
             bot = self._botos.get_bot(platform)
             
             if not bot:
@@ -669,7 +724,15 @@ class DeliveryRouter:
                     )
 
             try:
-                result = await bot.send_message(channel_id, text)
+                # Thread the resolved thread_id through so a target that names a
+                # thread (Slack thread_ts, Telegram forum topic, Discord thread)
+                # is delivered into that thread. Passed only when present and
+                # only if the adapter accepts it, so adapters without a
+                # ``thread_id`` parameter are completely unaffected.
+                if thread_id is not None and _accepts_thread_id(bot):
+                    result = await bot.send_message(channel_id, text, thread_id=thread_id)
+                else:
+                    result = await bot.send_message(channel_id, text)
                 # An adapter that explicitly returns ``False`` is signalling a
                 # failed send without raising. Treat that as a failure so we do
                 # not cache the idempotency key or clear a dead target for a
@@ -699,22 +762,38 @@ class DeliveryRouter:
                             "DeliveryRouter: rate-limit penalise failed",
                             exc_info=True,
                         )
-                # On a *confirmed permanent* failure, mark the whole target dead
-                # so future cycles short-circuit. Transient errors and
+                # Classify once: a *confirmed permanent* failure marks the whole
+                # target dead so future cycles short-circuit, and (when opted in)
+                # surfaces an undelivered notice. Transient errors and
                 # message-scoped 404s stay on the existing retry path.
-                if self._dead_targets is not None:
-                    try:
-                        from ._resilience import is_permanent_target_failure
+                permanent = False
+                try:
+                    from ._resilience import is_permanent_target_failure
 
-                        if is_permanent_target_failure(send_err, platform):
-                            self._dead_targets.mark_dead(
-                                platform, channel_id, reason=str(send_err)
-                            )
+                    permanent = is_permanent_target_failure(send_err, platform)
+                except Exception:
+                    logger.debug(
+                        "DeliveryRouter: permanent-failure classification failed",
+                        exc_info=True,
+                    )
+                if permanent and self._dead_targets is not None:
+                    try:
+                        self._dead_targets.mark_dead(
+                            platform, channel_id, reason=str(send_err)
+                        )
                     except Exception:
                         logger.debug(
-                            "DeliveryRouter: dead-target classification failed",
+                            "DeliveryRouter: dead-target mark failed",
                             exc_info=True,
                         )
+                # Close the loop (issue #3297): on a *confirmed permanent*
+                # failure the reply is otherwise lost silently. Best-effort a
+                # short plain-text notice on the same channel and fire the
+                # MESSAGE_UNDELIVERED hook so operators can route the failure.
+                if permanent and self._notify_on_undelivered:
+                    await self._notify_undelivered(
+                        platform, channel_id, text, send_err
+                    )
                 raise
 
             # Success self-heals: any earlier dead flag is cleared so a recovered
@@ -740,7 +819,71 @@ class DeliveryRouter:
         except Exception as e:
             logger.error(f"DeliveryRouter: delivery failed for '{target}': {e}")
             return False
-    
+
+    async def _notify_undelivered(
+        self,
+        platform: str,
+        channel_id: str,
+        original_text: str,
+        error: BaseException,
+    ) -> None:
+        """Close the loop on a permanently-undeliverable reply (issue #3297).
+
+        Best-effort and fully guarded so it can never mask the original send
+        failure: attempt a short plain-text notice on the same channel (a large
+        or rich reply may fail while a one-line note still lands) and fire the
+        ``MESSAGE_UNDELIVERED`` hook so operators can route the failure without
+        patching adapters. Any error here is swallowed — the caller re-raises the
+        original exception regardless.
+        """
+        notice_delivered = False
+        template = self._undelivered_template
+        if template:
+            try:
+                bot = self._botos.get_bot(platform)
+                if bot is not None:
+                    result = await bot.send_message(channel_id, template)
+                    notice_delivered = result is not False
+            except Exception:
+                logger.debug(
+                    "DeliveryRouter: undelivered notice failed for %s:%s",
+                    platform,
+                    channel_id,
+                    exc_info=True,
+                )
+
+        try:
+            runner = None
+            get_runner = getattr(self._botos, "_get_hook_runner", None)
+            if callable(get_runner):
+                runner = get_runner()
+            if runner is not None:
+                import os
+                import time
+
+                from praisonaiagents.hooks.types import HookEvent
+                from praisonaiagents.hooks.events import MessageUndeliveredInput
+
+                event_input = MessageUndeliveredInput(
+                    session_id="",
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.MESSAGE_UNDELIVERED,
+                    timestamp=str(time.time()),
+                    agent_name="bot",
+                    platform=platform,
+                    content=original_text,
+                    channel_id=channel_id,
+                    error=f"{type(error).__name__}: {error}",
+                    notice_delivered=notice_delivered,
+                )
+                # We are inside the router's running event loop, so await the
+                # async runner directly (execute_sync raises inside a live loop).
+                await runner.execute(HookEvent.MESSAGE_UNDELIVERED, event_input)
+        except Exception:
+            logger.debug(
+                "DeliveryRouter: MESSAGE_UNDELIVERED hook failed", exc_info=True
+            )
+
     async def send_media(
         self,
         target: str,
@@ -751,16 +894,19 @@ class DeliveryRouter:
     ) -> bool:
         """Upload a local file ``path`` to a resolved ``target``.
 
-        Resolves the symbolic target to a concrete (platform, channel_id) and
-        dispatches the upload through the live adapter's native file primitive
-        (see :func:`praisonai.bots._outbound_media.deliver_media_to_adapter`).
-        The path is expected to have already passed the outbound-path guard.
+        Resolves the symbolic target to a concrete (platform, channel_id,
+        thread_id) and dispatches the upload through the live adapter's native
+        file primitive (see
+        :func:`praisonai.bots._outbound_media.deliver_media_to_adapter`). When
+        the target names a thread the attachment is delivered into that thread,
+        matching the text path. The path is expected to have already passed the
+        outbound-path guard.
 
         Returns:
             True if the adapter attached the file, False otherwise.
         """
         try:
-            platform, channel_id = self.resolve(target, origin)
+            platform, channel_id, thread_id = self.resolve(target, origin)
             bot = self._botos.get_bot(platform)
             if not bot:
                 logger.warning(
@@ -783,8 +929,35 @@ class DeliveryRouter:
             # underlying adapter, so unwrap it before dispatch.
             media_target = getattr(bot, "adapter", None) or bot
 
-            ok = await deliver_media_to_adapter(
-                media_target, channel_id, safe_path, caption=caption
+            # Give media the same transient-failure resilience text already
+            # enjoys (issue #3184): the text path wraps every ``send_message``
+            # in ``deliver_with_retry`` (bounded exponential backoff honouring a
+            # server ``Retry-After``) inside the adapters, but a raw media
+            # upload was attempted exactly once — a network blip silently
+            # dropped the file. Wrap the upload in the same retry helper so a
+            # transient upload error (HTTP 5xx, rate limit, reset) is retried
+            # with backoff instead of dropped. A non-retryable ``False`` return
+            # (adapter exposes no upload primitive) is left untouched, and a
+            # permanent error still raises through to the caller's False path.
+            from ._resilience import BackoffPolicy, deliver_with_retry
+
+            backoff = getattr(media_target, "_outbound_backoff", None)
+            if not isinstance(backoff, BackoffPolicy):
+                backoff = BackoffPolicy(
+                    initial_ms=1000, max_ms=10000, factor=1.5, max_attempts=3
+                )
+
+            async def _upload() -> bool:
+                return await deliver_media_to_adapter(
+                    media_target,
+                    channel_id,
+                    safe_path,
+                    caption=caption,
+                    thread_id=thread_id,
+                )
+
+            ok = await deliver_with_retry(
+                _upload, policy=backoff, platform=platform
             )
             if ok:
                 logger.info(

@@ -20,9 +20,51 @@ from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
 
-
-
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
+
+# Shared HTTP launch state (Agent.launch() multi-endpoint registration)
+_server_lock = threading.Lock()
+_server_started: Dict[int, bool] = {}
+_registered_agents: Dict[int, Dict[str, str]] = {}
+_shared_apps: Dict[int, Any] = {}
+
+
+def cleanup_launch_registration(agent_id: str) -> None:
+    """Remove launch() endpoints registered for ``agent_id`` from the shared
+    HTTP state that ``Agent.launch()`` actually populates.
+
+    ``Agent.launch()`` writes routes into the module-level ``_registered_agents``
+    and ``_shared_apps`` dicts above. This tears those routes back down so a
+    closed agent's endpoint stops accepting requests and the request handler
+    closure no longer keeps the Agent object graph alive.
+    """
+    with _server_lock:
+        for port, paths in list(_registered_agents.items()):
+            stale_paths = [p for p, aid in paths.items() if aid == agent_id]
+            for p in stale_paths:
+                del paths[p]
+                app = _shared_apps.get(port)
+                if app is not None:
+                    try:
+                        # Only drop the agent-owned POST route. launch() always
+                        # registers the handler via ``.post(path)``, so filtering
+                        # on both path AND method preserves unrelated routes that
+                        # share the path with a different verb (e.g. the built-in
+                        # GET /health and GET /).
+                        app.router.routes = [
+                            r for r in app.router.routes
+                            if not (
+                                getattr(r, "path", None) == p
+                                and "POST" in (getattr(r, "methods", None) or set())
+                            )
+                        ]
+                        # Invalidate cached OpenAPI schema so removed routes
+                        # disappear from /openapi.json and /docs.
+                        app.openapi_schema = None
+                    except Exception:
+                        pass
+            if not paths:
+                _registered_agents.pop(port, None)
 
 if TYPE_CHECKING:
     pass
@@ -121,16 +163,30 @@ class ExecutionMixin:
         
         Args:
             prompt: The input prompt to process
-            **kwargs: Additional arguments passed to achat()
+            **kwargs: Additional arguments passed to achat():
+                - return_outcome (bool): If True, return a canonical
+                  ``RunOutcome`` (completed | hard_timeout | cancelled |
+                  aborted | failed) instead of raising on error/timeout/
+                  cancellation. Default: False.
+                - timeout (float): When used with ``return_outcome=True``,
+                  a hard timeout budget for the run.
             
         Returns:
-            The agent's response as a string, or AutonomyResult if autonomy enabled
+            The agent's response as a string, or AutonomyResult if autonomy
+            enabled, or a ``RunOutcome`` when ``return_outcome=True``.
             
         Note:
             If autonomy=True was set on the agent, astart() automatically uses
             the autonomous loop (run_autonomous_async) instead of single-turn chat.
         """
         import sys
+
+        return_outcome = kwargs.pop('return_outcome', False)
+        if return_outcome:
+            outcome_timeout = kwargs.pop('timeout', None)
+            return await self._astart_with_outcome(
+                prompt, outcome_timeout, **kwargs
+            )
         
         # ─────────────────────────────────────────────────────────────────────
         # UNIFIED AUTONOMY API: If autonomy is enabled, route to run_autonomous_async
@@ -192,6 +248,57 @@ class ExecutionMixin:
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
 
+    async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
+        """Run astart() and normalise its result/exception into a RunOutcome.
+
+        Optionally enforces a hard run-level timeout budget. The budget is the
+        *authoritative* source of ``hard_timeout``: when our own
+        ``asyncio.wait_for`` fires we return ``hard_timeout`` directly, so a
+        nested operation timeout (which surfaces as a generic
+        ``asyncio.TimeoutError`` from inside the run) is never misreported as a
+        run-budget timeout — it falls through to ``failed`` via
+        ``RunOutcome.from_exception``.
+
+        External ``asyncio.CancelledError`` (e.g. the enclosing task being
+        cancelled during host shutdown) is re-raised, not swallowed, so
+        cooperative cancellation semantics are honoured.
+        """
+        import asyncio
+        from .run_outcome import RunOutcome
+
+        enforce_budget = timeout is not None and timeout > 0
+
+        # Enforce the run budget with an explicit deadline on a task we own, so
+        # that only *our* budget expiry maps to hard_timeout. This deliberately
+        # avoids ``asyncio.wait_for`` catching a bare inner ``TimeoutError``:
+        # a nested operation timeout raised inside the run must fall through to
+        # ``failed`` rather than be misreported as a run-budget ``hard_timeout``.
+        try:
+            if enforce_budget:
+                task = asyncio.ensure_future(self.astart(prompt, **kwargs))
+                try:
+                    done, _ = await asyncio.wait({task}, timeout=timeout)
+                except asyncio.CancelledError:
+                    # Enclosing task cancelled (e.g. host shutdown): cancel the
+                    # child and propagate so cooperative cancellation is honoured.
+                    task.cancel()
+                    raise
+                if task not in done:
+                    # Our budget expired first: authoritative, sticky hard_timeout.
+                    task.cancel()
+                    return RunOutcome(reason="hard_timeout")
+                result = task.result()
+            else:
+                result = await self.astart(prompt, **kwargs)
+        except asyncio.CancelledError:
+            # External cancellation of the awaiting task: honour asyncio
+            # cancellation / host shutdown by propagating instead of converting
+            # it into a benign RunOutcome.
+            raise
+        except Exception as exc:  # noqa: BLE001 - normalised into outcome
+            return RunOutcome.from_exception(exc)
+        return RunOutcome.completed(output=str(result) if result is not None else None)
+
     def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
         """Execute agent silently and return structured result.
         
@@ -204,9 +311,14 @@ class ExecutionMixin:
             **kwargs: Additional arguments:
                 - stream (bool): Force streaming if True. Default: False
                 - output (str): Output preset override (rarely needed)
+                - return_outcome (bool): If True, return a canonical
+                  ``RunOutcome`` describing how the run ended
+                  (completed | hard_timeout | cancelled | aborted | failed)
+                  instead of raising on error. Default: False.
                 
         Returns:
-            The agent's response as a string
+            The agent's response as a string, or a ``RunOutcome`` when
+            ``return_outcome=True``.
             
         Example:
             ```python
@@ -223,8 +335,14 @@ class ExecutionMixin:
             - Background processing
             - API endpoints
         """
+        return_outcome = kwargs.pop('return_outcome', False)
+
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
+            if return_outcome:
+                return self._run_with_outcome(
+                    lambda: self._delegate_to_backend(prompt, **kwargs)
+                )
             return self._delegate_to_backend(prompt, **kwargs)
         
         # Production defaults: no streaming, no display
@@ -238,17 +356,34 @@ class ExecutionMixin:
         
         # Load history context
         self._load_history_context()
-        
-        # Check if planning mode is enabled
-        if self.planning:
-            result = self._start_with_planning(prompt, **kwargs)
-        else:
-            result = self.chat(prompt, **kwargs)
-        
-        # Auto-save session if enabled
-        self._auto_save_session()
-        
-        return result
+
+        def _execute():
+            if self.planning:
+                _result = self._start_with_planning(prompt, **kwargs)
+            else:
+                _result = self.chat(prompt, **kwargs)
+            # Auto-save session if enabled
+            self._auto_save_session()
+            return _result
+
+        if return_outcome:
+            return self._run_with_outcome(_execute)
+
+        return _execute()
+
+    def _run_with_outcome(self, executor):
+        """Run ``executor`` and normalise its result/exception into a RunOutcome.
+
+        Keeps the canonical terminal-outcome logic in one place so callers get
+        a single, closed description of how the run ended instead of inferring
+        it from exception identity.
+        """
+        from .run_outcome import RunOutcome
+        try:
+            result = executor()
+        except BaseException as exc:  # noqa: BLE001 - normalised into outcome
+            return RunOutcome.from_exception(exc)
+        return RunOutcome.completed(output=str(result) if result is not None else None)
 
     def _delegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
         """Delegate execution to external managed backend (e.g., ManagedAgentIntegration).
@@ -742,7 +877,7 @@ Write the complete compiled report:"""
                 
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
-                    from ..main import PRAISON_COLORS, sync_display_callbacks
+                    from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
                     import threading
                     import time as time_module
                     
@@ -763,9 +898,11 @@ Write the complete compiled report:"""
                             tools_called.append(tool_name)
                             current_status[0] = f"Calling tool: {tool_name}..."
                     
-                    # Store original callback and register ours
-                    original_tool_callback = sync_display_callbacks.get('tool_call')
-                    sync_display_callbacks['tool_call'] = status_tool_callback
+                    # Store original callback and register ours (use the module's
+                    # own lock so this doesn't race concurrent verbose agents)
+                    with _callbacks_lock:
+                        original_tool_callback = sync_display_callbacks.get('tool_call')
+                        sync_display_callbacks['tool_call'] = status_tool_callback
                     
                     # Animation state
                     result_holder = [None]
@@ -803,11 +940,16 @@ Write the complete compiled report:"""
                             error_holder[0] = e
                         finally:
                             self.verbose = original_verbose_chat
-                            # Restore original callback
-                            if original_tool_callback:
-                                sync_display_callbacks['tool_call'] = original_tool_callback
-                            elif 'tool_call' in sync_display_callbacks:
-                                del sync_display_callbacks['tool_call']
+                            # Restore original callback under the lock. The identity
+                            # check guards the entire restore, so we only mutate the
+                            # entry while it's still ours and never clobber a callback
+                            # a concurrent verbose agent has since installed.
+                            with _callbacks_lock:
+                                if sync_display_callbacks.get('tool_call') is status_tool_callback:
+                                    if original_tool_callback:
+                                        sync_display_callbacks['tool_call'] = original_tool_callback
+                                    else:
+                                        del sync_display_callbacks['tool_call']
                     
                     # Start chat in background thread
                     chat_thread = threading.Thread(target=run_chat)
@@ -985,6 +1127,83 @@ Write the complete compiled report:"""
         """Backward-compatible async alias for :meth:`alearn_skill`."""
         return await self.alearn_skill(request, **kwargs)
 
+    def optimize_instructions(
+        self,
+        evalset: List[Any],
+        *,
+        metric: Optional[Any] = None,
+        scorer: Optional[Any] = None,
+        criteria: str = "",
+        n_candidates: int = 6,
+        apply: bool = True,
+    ) -> Any:
+        """Optimise this agent's own ``instructions`` against an eval set.
+
+        Opt-in, off by default. Generates ``n_candidates`` instruction variants,
+        scores each over ``evalset`` (LLM ``Judge`` by default, or a numeric
+        ``metric`` you supply), keeps the highest-scoring one, and — when
+        ``apply=True`` — writes it back to ``self.instructions``.
+
+        Args:
+            evalset: List of ``(prompt, expected)`` cases to score candidates on.
+            metric: Optional numeric metric ``(output, expected) -> float``.
+                When set, empirical scoring replaces the LLM Judge.
+            scorer: Optional custom ``Judge`` instance (ignored if ``metric`` set).
+            criteria: Optional criteria for the default Judge.
+            n_candidates: Number of instruction variants to try (default: 6).
+            apply: Write the winning instructions back to the agent (default: True).
+
+        Returns:
+            ``OptimizeResult`` with ``best_instructions``, ``best_score``,
+            ``base_score`` and the full ``trials`` list.
+
+        Example::
+
+            result = agent.optimize_instructions(
+                evalset=[("summarise X", gold_x)], metric=rouge_l,
+            )
+            print(result.best_score, result.best_instructions)
+        """
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        return PromptOptimizer(
+            self,
+            evalset,
+            scorer=scorer,
+            metric=metric,
+            criteria=criteria,
+            n_candidates=n_candidates,
+            apply=apply,
+        ).optimize()
+
+    async def aoptimize_instructions(
+        self,
+        evalset: List[Any],
+        *,
+        metric: Optional[Any] = None,
+        scorer: Optional[Any] = None,
+        criteria: str = "",
+        n_candidates: int = 6,
+        apply: bool = True,
+    ) -> Any:
+        """Async twin of :meth:`optimize_instructions`.
+
+        The optimiser runs synchronous agent calls internally; this variant
+        offloads the run to a worker thread so async callers never block the
+        event loop.
+        """
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.optimize_instructions,
+            evalset,
+            metric=metric,
+            scorer=scorer,
+            criteria=criteria,
+            n_candidates=n_candidates,
+            apply=apply,
+        )
+
     def _ensure_skill_management_tools(self) -> None:
         """Ensure the agent has the ``skill_manage`` tool for authoring skills.
 
@@ -1046,18 +1265,140 @@ Write the complete compiled report:"""
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
-        """Async version of execute_tool with retry policy support"""
+        """Async version of execute_tool with retry policy support.
+
+        Routes through the user-supplied tool middleware (``Agent(hooks=[...])``)
+        when present so ``before_tool``/``after_tool``/``wrap_tool_call`` gate
+        async tool calls exactly as they do sync ones (security parity). The
+        fast path (no tool hooks) calls straight into the retry loop with zero
+        overhead.
+        """
 
         # Record the tool name for this turn so the self-improve review policy
         # sees async tool usage too (issue #3037). Mirrors the sync path in
         # _execute_tool_with_context; skipped during a guarded review turn so
-        # the review's own calls are not tracked and cannot recurse.
-        if not getattr(self, "_in_skill_review", False):
-            turn_tools = getattr(self, "_turn_tools_used", None)
-            if turn_tools is None:
-                self._turn_tools_used = []
-                turn_tools = self._turn_tools_used
-            turn_tools.append(function_name)
+        # the review's own calls are not tracked and cannot recurse. Locked so
+        # concurrent turns on the same Agent don't corrupt the buffer (#3307).
+        self._record_turn_tool(function_name)
+
+        # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,
+        # mirroring the sync execute_tool path in tool_execution.py. Without
+        # this the primary async path (_execute_unified_achat_completion) would
+        # silently skip HookEvent.BEFORE_TOOL gating registered via
+        # Agent(hooks=HookRegistry(...)). Zero overhead when no hooks apply.
+        hook_runner = getattr(self, '_hook_runner', None)
+        if hook_runner is not None:
+            from ..hooks import HookEvent
+            if hook_runner.registry.has_hooks(HookEvent.BEFORE_TOOL):
+                from ..hooks import BeforeToolInput
+                before_tool_input = BeforeToolInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.BEFORE_TOOL,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    tool_name=function_name,
+                    tool_input=arguments,
+                )
+                before_results = await hook_runner.execute(
+                    HookEvent.BEFORE_TOOL, before_tool_input, target=function_name
+                )
+                if hook_runner.is_blocked(before_results):
+                    logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
+                    return f"Execution of {function_name} was blocked by security policy."
+                for res in before_results:
+                    if res.output and res.output.modified_input:
+                        arguments.update(res.output.modified_input)
+
+            result = await self._execute_tool_async_dispatch(
+                function_name, arguments, tool_call_id, tools_override
+            )
+
+            if hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
+                from ..hooks import AfterToolInput
+                after_tool_input = AfterToolInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.AFTER_TOOL,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    tool_name=function_name,
+                    tool_input=arguments,
+                    tool_output=result,
+                )
+                after_results = await hook_runner.execute(
+                    HookEvent.AFTER_TOOL, after_tool_input, target=function_name
+                )
+                extra_context = hook_runner.aggregate_context(after_results)
+                if extra_context:
+                    if isinstance(result, str):
+                        result = f"{result}\n\n{extra_context}"
+                    elif isinstance(result, dict):
+                        result.setdefault("_additional_context", extra_context)
+            return result
+
+        return await self._execute_tool_async_dispatch(
+            function_name, arguments, tool_call_id, tools_override
+        )
+
+    async def _execute_tool_async_dispatch(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Route an async tool call through the middleware chain (if any) then retry loop."""
+        # Route async tool calls through the same tool middleware chain as the
+        # sync path. The chain (before_tool/after_tool/wrap_tool_call) is
+        # synchronous, so we run it in a worker thread and bridge its final
+        # handler back to this event loop via run_coroutine_threadsafe.
+        manager = self._get_tool_middleware_manager()
+        if manager is not None:
+            return await self._execute_tool_async_via_middleware(
+                manager, function_name, arguments, tool_call_id, tools_override
+            )
+        return await self._execute_tool_async_with_retry(
+            function_name, arguments, tool_call_id, tools_override
+        )
+
+    async def _execute_tool_async_via_middleware(
+        self, manager, function_name, arguments, tool_call_id, tools_override
+    ):
+        """Drive the (sync) tool middleware chain around an async tool call.
+
+        The middleware manager and its ``wrap_tool_call`` chain are synchronous
+        by contract, so they run in a thread-pool worker; the innermost handler
+        schedules the actual async execution back on the current running loop
+        and blocks the worker on the result. This preserves short-circuit,
+        audit, and argument-mutation semantics for async tools.
+        """
+        from ..hooks import ToolRequest, ToolResponse, InvocationContext
+
+        loop = asyncio.get_running_loop()
+        request = ToolRequest(
+            tool_name=function_name,
+            arguments=arguments,
+            context=InvocationContext(
+                agent_id=self.name,
+                run_id=getattr(self, '_current_run_id', 'unknown'),
+                session_id=getattr(self, '_session_id', None) or 'default',
+                tool_name=function_name,
+            ),
+        )
+
+        def _final_handler(req):
+            future = asyncio.run_coroutine_threadsafe(
+                self._execute_tool_async_with_retry(
+                    req.tool_name, req.arguments, tool_call_id, tools_override
+                ),
+                loop,
+            )
+            result = future.result()
+            return ToolResponse(tool_name=req.tool_name, result=result)
+
+        def _run_chain():
+            return manager.execute_tool_call(request, _final_handler)
+
+        response = await loop.run_in_executor(None, _run_chain)
+        return response.result if isinstance(response, ToolResponse) else response
+
+    async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Async tool execution with retry policy (middleware-agnostic core)."""
 
         # Get retry policy (tool-level > agent-level > default)
         retry_policy = self._get_tool_retry_policy(function_name)
@@ -1144,12 +1485,33 @@ Write the complete compiled report:"""
                 error_msg = f"Error during approval process: {str(e)}"
                 logging.error(error_msg)
                 return {"error": error_msg, "approval_error": True}
-            
-            # Try to find the function in the override tools list first, then agent's tools list
+
+            # Policy/guardrail gate (protocol-driven). Mirrors the sync path in
+            # _execute_tool_impl so async callers cannot bypass a PolicyEngine
+            # deny or a tool-call guardrail. The check is pure/sync (no awaits).
+            check = getattr(self, "_check_tool_policy_and_guardrails", None)
+            if check is not None:
+                policy_result = check(function_name, arguments)
+                if isinstance(policy_result, dict):
+                    return policy_result  # Error dict
+                _, arguments = policy_result
+
+            # Try to find the function in the override tools list first, then agent's tools list.
+            # Resolve by BaseTool/FunctionTool ``.name`` (instances like BrowserBaseTool or
+            # aliased decorated tools), plain callable ``__name__``, or class name so async
+            # dispatch matches the robust sync resolution in _execute_tool_impl.
             func = None
             tools_to_search = tools_override if tools_override is not None else self.tools
+            from ..tools.base import BaseTool
             for tool in tools_to_search:
-                if (callable(tool) and getattr(tool, '__name__', '') == function_name):
+                if isinstance(tool, BaseTool) and getattr(tool, 'name', None) == function_name:
+                    func = tool
+                    break
+                if hasattr(tool, 'name') and getattr(tool, 'name', None) == function_name:
+                    func = tool
+                    break
+                if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
+                   (inspect.isclass(tool) and tool.__name__ == function_name):
                     func = tool
                     break
             
@@ -1157,17 +1519,40 @@ Write the complete compiled report:"""
                 logging.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
 
+            # Activate the tool-progress channel so tools running under the async
+            # path can stream incremental output (emit_tool_progress) and the
+            # built-in todo tool can publish live updates (emit_todo_update),
+            # mirroring the sync execute_tool path. Zero overhead when no stream
+            # callbacks are registered — the sink stays None and the contextvar
+            # is set to None (a no-op for emitters).
+            _progress_sink = None
+            _stream_emitter = self._get_existing_stream_emitter() if hasattr(self, "_get_existing_stream_emitter") else None
+            if _stream_emitter is not None and _stream_emitter.has_callbacks:
+                def _progress_sink(_event, _emitter=_stream_emitter):  # noqa: ANN001 — StreamEvent forwarder
+                    _event.tool_call = {"name": function_name, "id": tool_call_id}
+                    _event.agent_id = self.name
+                    _emitter.emit(_event)
+
+            from ..streaming.events import tool_progress_channel
+
             try:
-                if inspect.iscoroutinefunction(func):
+                # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
+                # directly callable — dispatch to their .run() method like the sync path.
+                call_target = func.run if isinstance(func, BaseTool) else func
+                if inspect.iscoroutinefunction(call_target):
                     logging.debug(f"Executing async function: {function_name}")
-                    result = await func(**arguments)
+                    with tool_progress_channel(_progress_sink):
+                        result = await call_target(**arguments)
                 else:
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
-                    result = await loop.run_in_executor(
-                        None, copy_context_to_callable(lambda: func(**arguments))
-                    )
+                    # Set the channel BEFORE copy_context_to_callable so the sink
+                    # propagates into the executor thread via contextvars.
+                    with tool_progress_channel(_progress_sink):
+                        result = await loop.run_in_executor(
+                            None, copy_context_to_callable(lambda: call_target(**arguments))
+                        )
                 
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")
@@ -1248,229 +1633,196 @@ Write the complete compiled report:"""
             print("pip install 'praisonaiagents[api]'")
             return None
                 
+        should_start = False
         with _server_lock:
-            # Initialize port-specific collections if needed
+            # Initialize port-specific collections if needed (once per port)
             if port not in _registered_agents:
                 _registered_agents[port] = {}
 
-                # Initialize shared FastAPI app if not already created for this port
-                if _shared_apps.get(port) is None:
-                    _shared_apps[port] = FastAPI(
-                        title=f"PraisonAI Agents API (Port {port})",
-                        description="API for interacting with PraisonAI Agents"
+            # Initialize shared FastAPI app if not already created for this port
+            if _shared_apps.get(port) is None:
+                _shared_apps[port] = FastAPI(
+                    title=f"PraisonAI Agents API (Port {port})",
+                    description="API for interacting with PraisonAI Agents"
+                )
+
+                # Add a root endpoint with a welcome message
+                @_shared_apps[port].get("/")
+                async def root():
+                    return {
+                        "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                        "endpoints": list(_registered_agents[port].keys())
+                    }
+
+                # Add healthcheck endpoint
+                @_shared_apps[port].get("/health")
+                async def healthcheck():
+                    return {
+                        "status": "ok",
+                        "endpoints": list(_registered_agents[port].keys())
+                    }
+
+            # The path registration below must run on EVERY call, not just when the
+            # port is new, so multiple agents can share a single port.
+
+            # Normalize path to ensure it starts with /
+            if not path.startswith('/'):
+                path = f'/{path}'
+
+            # Check if path is already registered for this port
+            if path in _registered_agents[port]:
+                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                # Use a modified path to avoid conflicts
+                original_path = path
+                path = f"{path}_{self.agent_id[:6]}"
+                logging.warning(f"Using '{path}' instead of '{original_path}'")
+                print(f"🔄 Using '{path}' instead")
+
+            # Register the agent to this path
+            _registered_agents[port][path] = self.agent_id
+
+            # Define the endpoint handler
+            @_shared_apps[port].post(path)
+            async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
+                # Handle both direct JSON with query field and form data
+                if query_data is None:
+                    try:
+                        request_data = await request.json()
+                        if "query" not in request_data:
+                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                        query = request_data["query"]
+                    except Exception:
+                        # Fallback to form data or query params
+                        form_data = await request.form()
+                        if "query" in form_data:
+                            query = form_data["query"]
+                        else:
+                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                else:
+                    query = query_data.query
+
+                try:
+                    # Use async version if available, otherwise use sync version
+                    if asyncio.iscoroutinefunction(self.chat):
+                        response = await self.achat(query, task_name=None, task_description=None, task_id=None)
+                    else:
+                        # Run sync function in a thread to avoid blocking
+                        loop = asyncio.get_running_loop()
+                        response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
+
+                    return {"response": response}
+                except Exception as e:
+                    logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                    return JSONResponse(
+                        status_code=500,
+                        content={"error": f"Error processing query: {str(e)}"}
                     )
 
-                    # Add a root endpoint with a welcome message
-                    @_shared_apps[port].get("/")
-                    async def root():
-                        return {
-                            "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                            "endpoints": list(_registered_agents[port].keys())
-                        }
+            # Invalidate the cached OpenAPI schema so routes registered by later
+            # shared-port launch() calls still show up in /openapi.json and /docs.
+            # FastAPI caches app.openapi_schema on first access and does not
+            # regenerate it when new routes are added afterwards.
+            _shared_apps[port].openapi_schema = None
 
-                    # Add healthcheck endpoint
-                    @_shared_apps[port].get("/health")
-                    async def healthcheck():
-                        return {
-                            "status": "ok",
-                            "endpoints": list(_registered_agents[port].keys())
-                        }
+            print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
 
-                # Normalize path to ensure it starts with /
-                if not path.startswith('/'):
-                    path = f'/{path}'
-
-                # Check if path is already registered for this port
-                if path in _registered_agents[port]:
-                    logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                    print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                    # Use a modified path to avoid conflicts
-                    original_path = path
-                    path = f"{path}_{self.agent_id[:6]}"
-                    logging.warning(f"Using '{path}' instead of '{original_path}'")
-                    print(f"🔄 Using '{path}' instead")
-
-                # Register the agent to this path
-                _registered_agents[port][path] = self.agent_id
-
-                # Define the endpoint handler
-                @_shared_apps[port].post(path)
-                async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
-                    # Handle both direct JSON with query field and form data
-                    if query_data is None:
-                        try:
-                            request_data = await request.json()
-                            if "query" not in request_data:
-                                raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                            query = request_data["query"]
-                        except Exception:
-                            # Fallback to form data or query params
-                            form_data = await request.form()
-                            if "query" in form_data:
-                                query = form_data["query"]
-                            else:
-                                raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                    else:
-                        query = query_data.query
-
-                    try:
-                        # Use async version if available, otherwise use sync version
-                        if asyncio.iscoroutinefunction(self.chat):
-                            response = await self.achat(query, task_name=None, task_description=None, task_id=None)
-                        else:
-                            # Run sync function in a thread to avoid blocking
-                            loop = asyncio.get_running_loop()
-                            response = await loop.run_in_executor(None, lambda p=query: self.chat(p))
-
-                        return {"response": response}
-                    except Exception as e:
-                        logging.error(f"Error processing query: {str(e)}", exc_info=True)
-                        return JSONResponse(
-                            status_code=500,
-                            content={"error": f"Error processing query: {str(e)}"}
-                        )
-
-                print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
-
-                # Check and mark server as started atomically to prevent race conditions
-                should_start = not _server_started.get(port, False)
-                if should_start:
-                    _server_started[port] = True
-
-            # Server start/wait outside the lock to avoid holding it during sleep  
+            # Check and mark server as started atomically to prevent race conditions
+            should_start = not _server_started.get(port, False)
             if should_start:
-                # Start the server in a separate thread
-                def run_server():
-                    try:
-                        print(f"✅ FastAPI server started at http://{host}:{port}")
-                        print(f"📚 API documentation available at http://{host}:{port}/docs")
-                        print(f"🔌 Available endpoints: {', '.join(list(_registered_agents[port].keys()))}")
-                        uvicorn.run(_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
-                    except Exception as e:
-                        logging.error(f"Error starting server: {str(e)}", exc_info=True)
-                        print(f"❌ Error starting server: {str(e)}")
+                _server_started[port] = True
 
-                # Run server in a background thread
-                server_thread = threading.Thread(target=run_server, daemon=True)
-                server_thread.start()
-
-                # Wait for a moment to allow the server to start and register endpoints
-                self._safe_sleep(0.5)
-            else:
-                # If server is already running, wait a moment to make sure the endpoint is registered
-                self._safe_sleep(0.1)
-                print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
-            
-            # Get the stack frame to check if this is the last launch() call in the script
-            import inspect
-            stack = inspect.stack()
-            
-            # If this is called from a Python script (not interactive), try to detect if it's the last launch call
-            if len(stack) > 1 and stack[1].filename.endswith('.py'):
-                caller_frame = stack[1]
-                caller_line = caller_frame.lineno
-                
+        # Server start/wait outside the lock to avoid holding it during sleep
+        if should_start:
+            # Start the server in a separate thread
+            def run_server():
                 try:
-                    # Read the file to check if there are more launch calls after this one
-                    with open(caller_frame.filename, 'r') as f:
-                        lines = f.readlines()
-                    
-                    # Check if there are more launch() calls after the current line
-                    has_more_launches = False
-                    for line_content in lines[caller_line:]: # renamed line to line_content
-                        if '.launch(' in line_content and not line_content.strip().startswith('#'):
-                            has_more_launches = True
-                            break
-                    
-                    # If this is the last launch call, block the main thread
-                    if not has_more_launches:
-                        try:
-                            print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
-                            while True:
-                                self._safe_sleep(1)
-                        except KeyboardInterrupt:
-                            print("\nServers stopped")
+                    print(f"✅ FastAPI server started at http://{host}:{port}")
+                    print(f"📚 API documentation available at http://{host}:{port}/docs")
+                    print(f"🔌 Available endpoints: {', '.join(list(_registered_agents[port].keys()))}")
+                    uvicorn.run(_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
                 except Exception as e:
-                    # If something goes wrong with detection, block anyway to be safe
-                    logging.error(f"Error in launch detection: {e}")
+                    logging.error(f"Error starting server: {str(e)}", exc_info=True)
+                    print(f"❌ Error starting server: {str(e)}")
+
+            # Run server in a background thread
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
+
+            # Wait for a moment to allow the server to start and register endpoints
+            self._safe_sleep(0.5)
+        else:
+            # If server is already running, wait a moment to make sure the endpoint is registered
+            self._safe_sleep(0.1)
+            print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
+
+        # Get the stack frame to check if this is the last launch() call in the script
+        import inspect
+        stack = inspect.stack()
+
+        # If this is called from a Python script (not interactive), try to detect if it's the last launch call
+        if len(stack) > 1 and stack[1].filename.endswith('.py'):
+            caller_frame = stack[1]
+            caller_line = caller_frame.lineno
+
+            try:
+                # Read the file to check if there are more launch calls after this one
+                with open(caller_frame.filename, 'r') as f:
+                    lines = f.readlines()
+
+                # Check if there are more launch() calls after the current line
+                has_more_launches = False
+                for line_content in lines[caller_line:]: # renamed line to line_content
+                    if '.launch(' in line_content and not line_content.strip().startswith('#'):
+                        has_more_launches = True
+                        break
+
+                # If this is the last launch call, block the main thread
+                if not has_more_launches:
                     try:
-                        print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
+                        print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
                         while True:
                             self._safe_sleep(1)
                     except KeyboardInterrupt:
                         print("\nServers stopped")
-            return None
+            except Exception as e:
+                # If something goes wrong with detection, block anyway to be safe
+                logging.error(f"Error in launch detection: {e}")
+                try:
+                    print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
+                    while True:
+                        self._safe_sleep(1)
+                except KeyboardInterrupt:
+                    print("\nServers stopped")
+        return None
 
     def _launch_mcp_server(self, path: str, port: int, host: str, debug: bool):
         """
-        Launch MCP server (internal implementation).
-        
-        NOTE: This implementation will be moved to wrapper layer in future version.
-        For now, it maintains backward compatibility while following lazy import patterns.
+        Launch this single agent as an MCP server.
+
+        Delegates to the ``praisonai-mcp`` agent adapter via ``serve_agents([self])``
+        so that ``Agent.launch(protocol="mcp")`` and
+        ``PraisonAIAgents.launch(protocol="mcp")`` share one code path and one
+        vocabulary (publishing ``ask_{agent_name}`` + ``list_agents``). The mcp
+        package is an optional dependency imported lazily here so core keeps no
+        hard dependency on it.
         """
-        # For now, delegate to the existing MCP implementation 
-        # This will be extracted to a proper adapter in the future
         try:
-            import uvicorn
-            from mcp.server.fastmcp import FastMCP
-            from mcp.server.sse import SseServerTransport
-            from starlette.applications import Starlette
-            from starlette.routing import Mount
-            import threading
-            import time
-            import asyncio
-            
-            mcp_server_instance_name = f"{self.name}_mcp_server" if self.name else "agent_mcp_server"
-            mcp = FastMCP(mcp_server_instance_name)
+            from praisonai_mcp import serve_agents
 
-            # Determine the MCP tool name based on self.name
-            actual_mcp_tool_name = f"execute_{self.name.lower().replace(' ', '_').replace('-', '_')}_task" if self.name else "execute_task"
-
-            @mcp.tool(name=actual_mcp_tool_name)
-            async def execute_agent_task(prompt: str) -> str:
-                """Executes the agent's primary task with the given prompt."""
-                try:
-                    if hasattr(self, 'achat') and asyncio.iscoroutinefunction(self.achat):
-                        response = await self.achat(prompt, tools=self.tools, task_name=None, task_description=None, task_id=None)
-                    elif hasattr(self, 'chat'):
-                        from ..trace.context_events import copy_context_to_callable
-                        loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(None, copy_context_to_callable(lambda p=prompt: self.chat(p, tools=self.tools)))
-                    else:
-                        return f"Error: Agent {self.name} misconfigured for MCP."
-                    return response if response is not None else "Agent returned no response."
-                except Exception as e:
-                    return f"Error executing task: {str(e)}"
-
-            # Create and run MCP server
-            transport = SseServerTransport(f"{path}/sse")
-            starlette_app = Starlette(
-                routes=[Mount(f"{path}", mcp.create_app())]
+            # Keep the call inside the ImportError guard: serve_agents() lazily
+            # imports its transport backend, so a package that is installed
+            # without its optional transport extras surfaces the missing
+            # dependency here rather than at the import line above. Catching it
+            # in the same place yields one actionable install message instead of
+            # an uncaught traceback.
+            return serve_agents([self], host=host, port=port)
+        except ImportError:
+            _get_display_functions()['display_error'](
+                "MCP serving requires the 'praisonai-mcp' package."
             )
-
-            def run_mcp_server():
-                try:
-                    uvicorn.run(starlette_app, host=host, port=port, log_level="debug" if debug else "info")
-                except Exception as e:
-                    logging.error(f"Error starting MCP server: {str(e)}", exc_info=True)
-
-            server_thread = threading.Thread(target=run_mcp_server, daemon=True)
-            server_thread.start()
-            self._safe_sleep(0.5)
-
-            try:
-                print("\nKeeping MCP server alive. Press Ctrl+C to stop.")
-                while True:
-                    self._safe_sleep(1)
-            except KeyboardInterrupt:
-                print("\nMCP Server stopped")
+            print("\nTo add MCP capabilities, install: pip install praisonai-mcp")
             return None
-            
-        except ImportError as e:
-            missing_module = str(e).split("No module named '")[-1].rstrip("'")
-            _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for MCP mode.")
-            print(f"\nTo add MCP capabilities, install: pip install {missing_module}")
-            return None 
 
     async def _emit_retry_hook_async(self, tool_name, attempt, delay_ms, error, max_attempts, error_type):
         """Emit ON_RETRY hook event (async version).

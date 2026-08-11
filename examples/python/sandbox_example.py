@@ -132,6 +132,7 @@ if __name__ == "__main__":
     demonstrate_result_handling()
     
     print("To run code in sandbox via CLI:")
-    print("  praisonai sandbox run \"print('Hello, World!')\"")
-    print("  praisonai sandbox run --file script.py")
+    print("  praisonai sandbox run --code \"print('Hello, World!')\"")
+    print("  praisonai sandbox run --file script.py --type docker")
     print("  praisonai sandbox shell")
+    print("  praisonai sandbox backends")

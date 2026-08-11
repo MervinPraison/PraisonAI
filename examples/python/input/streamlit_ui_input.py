@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Streamlit UI Input Example for PraisonAI
 

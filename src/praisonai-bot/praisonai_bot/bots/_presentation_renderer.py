@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         BlockType,
         ActionType,
     )
+    from praisonaiagents.bots.protocols import CallbackPayloadStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +75,19 @@ class TelegramPresentationRenderer:
         return PresentationLimits.telegram()
     
     @staticmethod
-    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+    def render(
+        presentation: "MessagePresentation",
+        callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
+    ) -> Dict[str, Any]:
         """Render a presentation for Telegram.
         
         Args:
             presentation: The presentation to render
+            callback_store: Optional store that persists overflowing
+                ``reply``/``select`` values under a short ``@<ref>`` so long
+                option values round-trip losslessly past Telegram's 64-byte
+                inline-callback cap. Pass the same instance the inbound registry
+                was created with (see ``TelegramBot``).
             
         Returns:
             Dict with 'text' and optional 'reply_markup'
@@ -89,7 +98,11 @@ class TelegramPresentationRenderer:
             adapt_presentation,
         )
         
-        presentation = adapt_presentation(presentation, PresentationLimits.telegram())
+        presentation = adapt_presentation(
+            presentation,
+            PresentationLimits.telegram(),
+            callback_store=callback_store,
+        )
         
         text_parts = []
         inline_keyboard = []
@@ -627,9 +640,12 @@ class WhatsAppPresentationRenderer:
         return {"text": body}
 
 
-# Registry keyed by platform id so adapters resolve their renderer uniformly.
-# New channels plug in by adding an entry here; adapters call ``render_for``.
-_RENDERERS: Dict[str, type] = {
+# The four built-in renderers, registered through the core registration seam
+# (``praisonaiagents.bots.presentation.register_presentation_renderer``) so a
+# pip-installed channel plugin plugs in a native renderer *the same way* — no
+# framework-source edit required. Resolution goes through the core registry, so
+# built-in and plugin renderers are indistinguishable to ``render_for``.
+_BUILTIN_RENDERERS: Dict[str, type] = {
     "telegram": TelegramPresentationRenderer,
     "slack": SlackPresentationRenderer,
     "discord": DiscordPresentationRenderer,
@@ -637,9 +653,57 @@ _RENDERERS: Dict[str, type] = {
 }
 
 
+def _register_builtin_renderers() -> None:
+    """Register the built-in renderers through the core seam.
+
+    Two safeguards keep this non-destructive and backward compatible:
+
+    - **Older cores**: if the installed ``praisonaiagents`` predates the
+      registration seam, the import below fails; we swallow it and return so
+      module import still succeeds. ``get_renderer`` then falls back to the
+      local ``_BUILTIN_RENDERERS`` map, so Telegram/Slack/Discord/WhatsApp
+      presentations keep rendering natively.
+    - **Plugin overrides win**: a channel plugin may register a custom renderer
+      for a built-in platform before this module is first imported. We only fill
+      an *empty* registry slot, so a prior plugin registration is never
+      clobbered by the built-in — honouring the "plugins can supersede
+      built-ins" contract.
+    """
+    try:
+        from praisonaiagents.bots.presentation import (
+            get_presentation_renderer,
+            register_presentation_renderer,
+        )
+    except ImportError:
+        return
+
+    for platform, renderer in _BUILTIN_RENDERERS.items():
+        if get_presentation_renderer(platform) is None:
+            register_presentation_renderer(platform, renderer)
+
+
+_register_builtin_renderers()
+
+
 def get_renderer(platform: str) -> Optional[type]:
-    """Return the registered renderer class for *platform*, or ``None``."""
-    return _RENDERERS.get(platform)
+    """Return the registered renderer class for *platform*, or ``None``.
+
+    Resolves through the core registry so plugin-registered renderers are
+    visible here too, then falls back to the built-in map for resilience if the
+    installed core predates the registration seam.
+    """
+    try:
+        from praisonaiagents.bots.presentation import get_presentation_renderer
+
+        renderer = get_presentation_renderer(platform)
+        if renderer is not None:
+            return renderer
+    except ImportError:
+        pass
+    # Older-core fallback: match the registry's case-insensitive lookup so a
+    # mixed-case built-in id ("Telegram") still resolves natively.
+    key = platform.strip().lower() if isinstance(platform, str) else ""
+    return _BUILTIN_RENDERERS.get(key)
 
 
 def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
@@ -651,6 +715,43 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
     silently dropped.
     """
     from praisonaiagents.bots.presentation import BlockType
+
+    # table_to_markdown / chart_to_text were added to the core in a later
+    # release than this package's minimum praisonaiagents pin. Import them
+    # defensively so text-only presentations still render on older cores; if
+    # they are missing, fall back to a compact inline renderer for those blocks.
+    try:
+        from praisonaiagents.bots.presentation import (
+            chart_to_text,
+            table_to_markdown,
+        )
+    except ImportError:
+        def table_to_markdown(columns: List[str], rows: List[List[str]]) -> str:
+            def _cell(value: Any) -> str:
+                return str(value).replace("|", "\\|").replace("\n", " ")
+
+            header = [_cell(c) for c in columns]
+            ncols = len(header)
+            out = ["| " + " | ".join(header) + " |",
+                   "| " + " | ".join(["---"] * ncols) + " |"]
+            for row in rows:
+                cells = [_cell(c) for c in row][:ncols]
+                cells += [""] * (ncols - len(cells))
+                out.append("| " + " | ".join(cells) + " |")
+            return "\n".join(out)
+
+        def chart_to_text(
+            chart_kind: Optional[str],
+            series: List[Dict[str, Any]],
+            caption: Optional[str] = None,
+        ) -> str:
+            kind = chart_kind or "chart"
+            out = [caption or f"{kind.capitalize()} chart"]
+            for entry in series or []:
+                label = str(entry.get("label", "series"))
+                points = entry.get("points", []) or []
+                out.append(f"{label}: " + ", ".join(str(p) for p in points))
+            return "\n".join(out)
 
     lines: List[str] = []
     for block in presentation.blocks:
@@ -667,18 +768,31 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
         elif btype in (BlockType.SELECT, "select"):
             for o in (block.options or []):
                 lines.append(f"• {o.label}")
+        elif btype == "table":
+            columns = getattr(block, "columns", None)
+            if columns:
+                lines.append(table_to_markdown(columns, getattr(block, "rows", None) or []))
+        elif btype == "chart":
+            lines.append(
+                chart_to_text(
+                    getattr(block, "chart_kind", None),
+                    getattr(block, "series", None) or [],
+                    block.text,
+                )
+            )
     return {"text": "\n".join(lines) if lines else "\u200b"}
 
 
 def render_for(platform: str, presentation: "MessagePresentation") -> Dict[str, Any]:
     """Render *presentation* for *platform* through the renderer registry.
 
-    Resolves the platform's registered :class:`PresentationRenderer` and
-    returns its native payload. Channels with no registered renderer fall back
-    to :func:`fallback_text` so interactive content still degrades gracefully
-    to readable plain text rather than being dropped.
+    Resolves the platform's registered :class:`PresentationRenderer` through the
+    core registry (so plugin-registered renderers resolve identically to
+    built-ins) and returns its native payload. Channels with no registered
+    renderer fall back to :func:`fallback_text` so interactive content still
+    degrades gracefully to readable plain text rather than being dropped.
     """
-    renderer = _RENDERERS.get(platform)
+    renderer = get_renderer(platform)
     if renderer is not None:
         return renderer.render(presentation)
     return fallback_text(presentation)

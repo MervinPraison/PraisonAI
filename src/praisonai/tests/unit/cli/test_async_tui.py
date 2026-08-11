@@ -2,6 +2,8 @@
 Tests for PraisonAI Async TUI Application.
 """
 
+import pytest
+
 
 class TestAsyncTUIConfig:
     """Tests for AsyncTUIConfig dataclass."""
@@ -454,7 +456,9 @@ class TestQueueSystem:
         with patch.object(tui, "_execute_in_background") as mock_execute:
             tui._queue_or_execute("test prompt")
         
-        mock_execute.assert_called_once_with("test prompt")
+        mock_execute.assert_called_once_with(
+            "test prompt", skip_file_mentions=False, read_only=False
+        )
         assert len(tui.messages) == 1
         assert tui.messages[0].role == "user"
         assert tui.messages[0].content == "test prompt"
@@ -700,7 +704,11 @@ class TestPlanningIntegration:
     """Tests for planning integration (/plan command)."""
     
     def test_plan_command_no_args(self):
-        """Test /plan command without arguments shows usage."""
+        """Test /plan with no args toggles the persistent read-only plan mode.
+
+        /plan is now a real read-only enforcement toggle (not a one-shot prompt):
+        the first no-arg /plan enables plan mode; a second one disables it.
+        """
         from praisonai.cli.interactive.async_tui import AsyncTUI
         
         tui = AsyncTUI()
@@ -708,8 +716,13 @@ class TestPlanningIntegration:
         
         assert result is True
         assert len(tui.messages) == 1
-        assert "Usage:" in tui.messages[0].content
-        assert "/plan" in tui.messages[0].content
+        assert "Plan mode enabled" in tui.messages[0].content
+        assert tui.config.plan_mode is True
+        
+        # Toggling again exits plan mode.
+        tui._handle_command("/plan")
+        assert tui.config.plan_mode is False
+        assert "disabled" in tui.messages[1].content.lower()
     
     def test_plan_command_with_task(self):
         """Test /plan command with a task description."""
@@ -795,6 +808,203 @@ class TestHandoffSubagents:
         assert "Unknown agent type" in tui.messages[0].content
 
 
+class TestReviewCommands:
+    """Tests for /code-review and /security-review commands."""
+
+    def _make_tui(self):
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+
+        return AsyncTUI()
+
+    def test_code_review_reads_uncommitted_diff(self, monkeypatch):
+        """/code-review builds a prompt containing the uncommitted diff lines."""
+        tui = self._make_tui()
+        executed = []
+        tui._queue_or_execute = lambda p, **kw: executed.append((p, kw))
+
+        fake_diff = (
+            "diff --git a/foo.py b/foo.py\n"
+            "@@ -1 +1 @@\n"
+            "-x = 1\n"
+            "+x = compute_total(1)\n"
+        )
+        monkeypatch.setattr(
+            tui, "_build_review_prompt",
+            lambda **kw: "REVIEW\n```diff\n" + fake_diff + "\n```",
+        )
+
+        result = tui._handle_command("/code-review")
+
+        assert result is True
+        assert len(executed) == 1
+        prompt, kwargs = executed[0]
+        assert "compute_total(1)" in prompt
+        assert "code review" in tui.messages[0].content.lower()
+        # Generated review prompts must skip @file expansion and run read-only.
+        assert kwargs.get("skip_file_mentions") is True
+        assert kwargs.get("read_only") is True
+
+    def test_review_options_forwarded_to_builder(self, monkeypatch):
+        """--staged and a positional file path are forwarded to the builder."""
+        tui = self._make_tui()
+        tui._queue_or_execute = lambda p, **kw: None
+        captured = {}
+
+        def fake_builder(**kw):
+            captured.update(kw)
+            return "REVIEW\n```diff\n+z = 1\n```"
+
+        monkeypatch.setattr(tui, "_build_review_prompt", fake_builder)
+
+        tui._handle_command("/code-review src/foo.py --staged")
+
+        assert captured.get("staged") is True
+        assert captured.get("file_path") == "src/foo.py"
+        assert captured.get("security") is False
+
+    def test_review_rejects_multiple_paths(self, monkeypatch):
+        """More than one positional file path yields a usage message."""
+        tui = self._make_tui()
+        called = []
+        monkeypatch.setattr(
+            tui, "_build_review_prompt", lambda **kw: called.append(kw)
+        )
+
+        result = tui._handle_command("/code-review a.py b.py")
+
+        assert result is True
+        assert not called  # builder never invoked
+        assert "usage" in tui.messages[0].content.lower()
+
+    def test_review_diff_error_not_clean_tree(self, monkeypatch):
+        """A diff-collection failure surfaces the error, not 'clean tree'."""
+        from praisonai.cli.interactive.async_tui import ReviewDiffError
+
+        tui = self._make_tui()
+        tui._queue_or_execute = lambda p, **kw: None
+
+        def boom(**kw):
+            raise ReviewDiffError("not a git repository")
+
+        monkeypatch.setattr(tui, "_build_review_prompt", boom)
+
+        result = tui._handle_command("/code-review")
+
+        assert result is True
+        msg = tui.messages[0].content.lower()
+        assert "could not collect diff" in msg
+        assert "clean" not in msg
+
+    def test_build_review_prompt_raises_on_collection_failure(self, monkeypatch):
+        """_build_review_prompt raises ReviewDiffError when GitManager fails."""
+        from praisonai.cli.interactive.async_tui import ReviewDiffError
+        import praisonai_code.cli.features.git_integration as gi
+
+        tui = self._make_tui()
+
+        class _BoomGit:
+            def __init__(self, *a, **k):
+                raise OSError("not a git repository")
+
+        orig = gi.GitManager
+        gi.GitManager = _BoomGit
+        try:
+            with pytest.raises(ReviewDiffError):
+                tui._build_review_prompt()
+        finally:
+            gi.GitManager = orig
+
+    def test_review_agent_excludes_write_tools(self, monkeypatch):
+        """The read-only review agent drops write/exec tools."""
+        tui = self._make_tui()
+
+        def read_file():
+            pass
+
+        def write_file():
+            pass
+
+        def execute_command():
+            pass
+
+        monkeypatch.setattr(
+            tui, "_load_tools", lambda: [read_file, write_file, execute_command]
+        )
+
+        captured = {}
+
+        class _FakeAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        import praisonaiagents
+        monkeypatch.setattr(praisonaiagents, "Agent", _FakeAgent)
+
+        agent = tui._get_agent(read_only=True)
+        names = {getattr(t, "__name__", "") for t in (captured.get("tools") or [])}
+        assert "read_file" in names
+        assert "write_file" not in names
+        assert "execute_command" not in names
+
+    def test_security_review_rubric_applied(self):
+        """/security-review builds a prompt with security-specific categories."""
+        tui = self._make_tui()
+
+        # Exercise the real builder with a stubbed diff source.
+        import praisonai_code.cli.features.git_integration as gi
+
+        class _FakeGit:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_diff_content(self, staged=False, file_path=None):
+                return "diff --git a/x b/x\n+password = 'abc'\n"
+
+        orig = gi.GitManager
+        gi.GitManager = _FakeGit
+        try:
+            built = tui._build_review_prompt(security=True)
+        finally:
+            gi.GitManager = orig
+
+        assert built is not None
+        assert "security" in built.lower()
+        assert "injection" in built.lower()
+        assert "```diff" in built
+
+    def test_clean_tree_message(self, monkeypatch):
+        """Empty diff yields a friendly 'working tree clean' message."""
+        tui = self._make_tui()
+        monkeypatch.setattr(tui, "_build_review_prompt", lambda **kw: None)
+
+        result = tui._handle_command("/code-review")
+
+        assert result is True
+        assert "clean" in tui.messages[0].content.lower()
+
+    def test_review_prompt_is_read_only_instruction(self):
+        """The review rubric instructs the agent not to modify files."""
+        tui = self._make_tui()
+        import praisonai_code.cli.features.git_integration as gi
+
+        class _FakeGit:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_diff_content(self, staged=False, file_path=None):
+                return "diff --git a/x b/x\n+y = 2\n"
+
+        orig = gi.GitManager
+        gi.GitManager = _FakeGit
+        try:
+            built = tui._build_review_prompt(security=False)
+        finally:
+            gi.GitManager = orig
+
+        assert built is not None
+        assert "do not modify" in built.lower()
+
+
 class TestInteractiveRuntimeReadOnly:
     """Tests for InteractiveRuntime read_only property."""
     
@@ -851,3 +1061,136 @@ class TestInteractiveRuntimeReadOnly:
         finally:
             if old_val is not None:
                 os.environ["PRAISON_APPROVAL_MODE"] = old_val
+
+
+class TestInterruptibleTurn:
+    """Tests for cooperative Ctrl-C interruption of an in-flight turn."""
+
+    def _make_app(self):
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+        return AsyncTUI(AsyncTUIConfig())
+
+    def test_falls_back_when_no_controller(self):
+        """Without a controller, behaviour matches the blocking path."""
+        app = self._make_app()
+        app._interrupt_controller = None
+        app._get_agent = lambda: None
+        app._execute_prompt = lambda prompt: f"echo:{prompt}"
+
+        assert app._execute_prompt_interruptible("hi") == "echo:hi"
+
+    def test_returns_response_without_interrupt(self):
+        """A normal (uninterrupted) turn returns the full response."""
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+        app._execute_prompt = lambda prompt: f"done:{prompt}"
+
+        assert app._execute_prompt_interruptible("task") == "done:task"
+        assert controller.is_set() is False
+
+    def test_controller_cleared_each_turn(self):
+        """Each turn clears a previously-set interrupt so it starts clean."""
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        controller.request("stale")
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        seen = {}
+
+        def _exec(prompt):
+            seen["was_set"] = controller.is_set()
+            return "ok"
+
+        app._execute_prompt = _exec
+        app._execute_prompt_interruptible("go")
+        assert seen["was_set"] is False
+
+    def test_ctrl_c_requests_cooperative_cancellation(self):
+        """Ctrl-C during a turn requests cancellation and keeps partial output."""
+        import threading
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        started = threading.Event()
+
+        def _exec(prompt):
+            started.set()
+            # Simulate a cooperative worker that yields partial output once the
+            # interrupt has been requested from the main thread.
+            for _ in range(200):
+                if controller.is_set():
+                    return "partial output"
+                threading.Event().wait(0.01)
+            return "full output"
+
+        app._execute_prompt = _exec
+
+        real_join = threading.Thread.join
+        raised = {"done": False}
+
+        def _fake_join(self, timeout=None):
+            # On the first join after the worker has started, raise
+            # KeyboardInterrupt to mimic a Ctrl-C from the user.
+            if started.is_set() and not raised["done"]:
+                raised["done"] = True
+                raise KeyboardInterrupt
+            return real_join(self, timeout)
+
+        threading.Thread.join = _fake_join
+        try:
+            result = app._execute_prompt_interruptible("slow task")
+        finally:
+            threading.Thread.join = real_join
+
+        assert result == "partial output"
+        assert controller.is_set() is True
+        assert any(m.role == "system" and "interrupted" in m.content.lower()
+                   for m in app.messages)
+
+    def test_abandoned_worker_blocks_new_turn(self):
+        """A still-alive prior worker must not have its controller cleared.
+
+        If the user pressed Ctrl-C twice and abandoned a worker that has not yet
+        reached an interrupt check, starting a new turn must NOT clear the shared
+        controller (which would un-cancel the abandoned worker and let it resume
+        against the warm session). Instead the new turn is refused until the old
+        worker exits.
+        """
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        controller.request("user")
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        class _AliveWorker:
+            def is_alive(self):
+                return True
+
+        app._interrupt_worker = _AliveWorker()
+
+        called = {"exec": False}
+
+        def _exec(prompt):
+            called["exec"] = True
+            return "should not run"
+
+        app._execute_prompt = _exec
+        result = app._execute_prompt_interruptible("new turn")
+
+        assert result is None
+        assert called["exec"] is False
+        # Controller must remain set so the abandoned worker still cancels.
+        assert controller.is_set() is True

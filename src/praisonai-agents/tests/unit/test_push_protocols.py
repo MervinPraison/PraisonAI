@@ -171,7 +171,15 @@ class TestDeliveryConfig:
         assert cfg.max_retries == 3
         assert cfg.retry_backoff == 2.0
         assert cfg.message_ttl == 86400
-        assert cfg.store_backend == "memory"
+        assert cfg.store_backend == "sqlite"
+
+    def test_accepts_valid_backends(self):
+        for backend in ("sqlite", "redis", "memory"):
+            assert DeliveryConfig(store_backend=backend).store_backend == backend
+
+    def test_rejects_invalid_backend(self):
+        with pytest.raises(ValueError):
+            DeliveryConfig(store_backend="postgres")
 
 
 class TestPresenceConfigDefaults:

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 PraisonAI Performance Monitoring Demo
 
@@ -26,7 +27,8 @@ from praisonaiagents.tools import duckduckgo
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, performance_monitor,
     analyze_function_flow,
-    visualize_execution_flow, generate_comprehensive_report
+    visualize_execution_flow, generate_comprehensive_report,
+    get_function_stats,
 )
 
 print("=" * 80)
@@ -84,7 +86,7 @@ for _ in range(5):
 
 # Show function performance statistics
 print("\n📈 Function Performance Statistics:")
-function_stats = performance_monitor.get_function_performance()
+function_stats = get_function_stats()
 for func_name, stats in function_stats.items():
     print(f"\n🔧 {func_name}:")
     print(f"  Calls: {stats['call_count']}")

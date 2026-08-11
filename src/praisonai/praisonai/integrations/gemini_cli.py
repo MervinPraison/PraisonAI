@@ -86,12 +86,19 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         """Return the CLI command name."""
         return "gemini"
     
-    def _build_command(self, prompt: str, **options) -> List[str]:
+    def _build_command(
+        self,
+        prompt: str,
+        *,
+        output_format: Optional[str] = None,
+        **options,
+    ) -> List[str]:
         """
         Build the Gemini CLI command.
         
         Args:
             prompt: The prompt to send
+            output_format: Output format override (defaults to self.output_format)
             **options: Additional options
             
         Returns:
@@ -103,7 +110,7 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         cmd.extend(["-m", self.model])
         
         # Add output format
-        cmd.extend(["--output-format", self.output_format])
+        cmd.extend(["--output-format", output_format or self.output_format])
         
         # Add include directories if specified
         if self.include_directories:
@@ -160,23 +167,20 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         Returns:
             Tuple[str, dict]: (result, stats) where stats contains usage information
         """
-        # Ensure JSON format for stats
-        original_format = self.output_format
-        self.output_format = "json"
+        # Ensure JSON format for stats (per-call override, no instance mutation).
+        # Drop any caller-supplied output_format so the forced value wins without
+        # raising a duplicate-keyword TypeError.
+        options.pop("output_format", None)
+        cmd = self._build_command(prompt, output_format="json", **options)
+        output = await self.execute_async(cmd)
         
         try:
-            cmd = self._build_command(prompt, **options)
-            output = await self.execute_async(cmd)
-            
-            try:
-                data = json.loads(output)
-                response = data.get("response", str(data))
-                stats = data.get("stats")
-                return response, stats
-            except json.JSONDecodeError:
-                return output, None
-        finally:
-            self.output_format = original_format
+            data = json.loads(output)
+            response = data.get("response", str(data))
+            stats = data.get("stats")
+            return response, stats
+        except json.JSONDecodeError:
+            return output, None
     
     async def stream(self, prompt: str, **options) -> AsyncIterator[Dict[str, Any]]:
         """
@@ -189,22 +193,18 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Use stream-json format for streaming
-        original_format = self.output_format
-        self.output_format = "stream-json"
+        # Use stream-json format for streaming (per-call override, no instance
+        # mutation); drop caller output_format so the forced value wins.
+        options.pop("output_format", None)
+        cmd = self._build_command(prompt, output_format="stream-json", **options)
         
-        try:
-            cmd = self._build_command(prompt, **options)
-            
-            async for line in self.stream_async(cmd):
-                if line.strip():
-                    try:
-                        event = json.loads(line)
-                        yield event
-                    except json.JSONDecodeError:
-                        yield {"type": "text", "content": line}
-        finally:
-            self.output_format = original_format
+        async for line in self.stream_async(cmd):
+            if line.strip():
+                try:
+                    event = json.loads(line)
+                    yield event
+                except json.JSONDecodeError:
+                    yield {"type": "text", "content": line}
     
     def get_last_stats(self) -> Optional[Dict[str, Any]]:
         """

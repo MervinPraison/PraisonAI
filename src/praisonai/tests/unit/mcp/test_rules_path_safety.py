@@ -20,6 +20,7 @@ import pytest
 def rules_helpers(tmp_path, monkeypatch):
     """Register the rules tools against a sandboxed fake home dir."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     from praisonai.mcp_server.adapters import cli_tools as mod
     from praisonai.mcp_server.registry import get_tool_registry

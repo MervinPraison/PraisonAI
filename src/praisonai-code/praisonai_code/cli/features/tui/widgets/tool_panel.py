@@ -102,9 +102,10 @@ if TEXTUAL_AVAILABLE:
         
         class ApprovalResponse(Message):
             """Event when user responds to approval request."""
-            def __init__(self, call_id: str, approved: bool):
+            def __init__(self, call_id: str, approved: bool, reason: Optional[str] = None):
                 self.call_id = call_id
                 self.approved = approved
+                self.reason = (reason.strip() or None) if reason else None
                 super().__init__()
         
         def __init__(

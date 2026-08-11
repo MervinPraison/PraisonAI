@@ -29,6 +29,15 @@ output
 threads.db
 threads.db-journal
 
+# Example run artifacts (generated at runtime, must not be committed)
+examples/**/knowledge.db
+examples/**/knowledge.db-journal
+examples/python/managed-agents/managed_ids.json
+examples/python/save_output/blog_post.md
+examples/python/save_output/generated/
+examples/python/token-metrics/token_metrics_export.json
+examples/python/usecases/market_research_results.json
+
 .chainlit
 !praisonai/ui/config/.chainlit
 

@@ -113,6 +113,24 @@ def _coerce_bool(value: Any) -> bool:
     return False
 
 
+def _normalize_tools_list(value: Any) -> Optional[List[str]]:
+    """Normalize an allowed-tools frontmatter value to a clean list of names.
+
+    Accepts a YAML list or a comma/space separated string. Returns None when
+    empty so a command without the field is indistinguishable from before.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.replace(",", " ").split()]
+        cleaned = [p for p in parts if p]
+        return cleaned or None
+    if isinstance(value, (list, tuple)):
+        cleaned = [str(v).strip() for v in value if str(v).strip()]
+        return cleaned or None
+    return None
+
+
 # Built-in, zero-config agent presets shipped with the wrapper.
 # Resolved before user/project definitions so they can be overridden by name.
 # Each entry maps a preset name to its CustomAgent field kwargs.
@@ -216,6 +234,9 @@ class CustomCommand:
     template: str = ""
     allow_shell: bool = False  # per-command opt-in for live `!`cmd`` substitution
     source: str = "unknown"  # 'user' or 'project'
+    argument_hint: Optional[str] = None  # e.g. "<pr-number> [reviewer]" for help/preview
+    model: Optional[str] = None  # preferred model when the command runs the agent
+    tools: Optional[List[str]] = None  # allowed-tools hint for the command
 
 
 @dataclass
@@ -389,14 +410,23 @@ class CustomDefinitionsDiscovery:
         
         try:
             frontmatter, body = self._parse_markdown_frontmatter(file_path)
-            
+
+            argument_hint = frontmatter.get("argument-hint") or frontmatter.get("argument_hint")
+            tools = frontmatter.get("tools")
+            if tools is None:
+                tools = frontmatter.get("allowed-tools") or frontmatter.get("allowed_tools")
+            tools = _normalize_tools_list(tools)
+
             return CustomCommand(
                 name=name,
                 path=file_path,
                 description=frontmatter.get("description"),
                 template=body,
                 allow_shell=_coerce_bool(frontmatter.get("allow_shell", False)),
-                source=source
+                source=source,
+                argument_hint=(str(argument_hint).strip() if argument_hint else None),
+                model=(str(frontmatter["model"]).strip() if frontmatter.get("model") else None),
+                tools=tools,
             )
         
         except Exception as e:
@@ -587,10 +617,14 @@ class TemplateInterpolator:
         # Escape literal $(...) from the template.
         result = TemplateInterpolator._escape_shell_substitution(template)
 
-        # Inject untrusted $ARGUMENTS, escaping $(...) it carries so it can never
-        # be executed downstream.
-        safe_arguments = TemplateInterpolator._escape_shell_substitution(arguments)
-        result = result.replace("$ARGUMENTS", safe_arguments)
+        # Inject $ARGUMENTS and positional $1..$n in a SINGLE pass over the
+        # template author's text. Doing both together (rather than sequentially)
+        # guarantees user-injected content is never re-scanned: a token that is
+        # itself literally ``$ARGUMENTS`` or ``$1`` is inserted verbatim and not
+        # reinterpreted. Each injected value is escaped like $ARGUMENTS so it can
+        # never introduce shell substitution. Out-of-range positions are left as
+        # literal text so legacy templates containing ``$100`` etc. survive.
+        result = TemplateInterpolator._interpolate_arguments(result, arguments)
 
         # Replace @file references.
         result = TemplateInterpolator._interpolate_files(result, working_dir)
@@ -600,7 +634,72 @@ class TemplateInterpolator:
             result = TemplateInterpolator._restore_shell(result, shell_outputs)
 
         return result
-    
+
+    # Argument references: ``$ARGUMENTS`` (whole string) or ``$1``, ``$2``, ...
+    # ($0 is not a position). Both are matched in one pass so an injected value
+    # that itself looks like ``$1``/``$ARGUMENTS`` is never re-scanned.
+    ARGUMENT_PATTERN = re.compile(r'\$(ARGUMENTS|[1-9][0-9]*)')
+
+    @staticmethod
+    def _split_positional(arguments: str) -> List[str]:
+        """Split ``arguments`` into positional tokens, quote-aware but
+        platform-safe.
+
+        ``shlex.split`` defaults to POSIX mode, which treats backslashes as
+        escape characters and would corrupt unquoted Windows paths such as
+        ``C:\\Users\\alice`` into ``C:Usersalice``. Parsing with
+        ``posix=False`` keeps backslashes literal while still honouring simple
+        quoting; we then strip a single layer of matching surrounding quotes so
+        ``"hello world"`` yields the token ``hello world``. On any parse error
+        we fall back to a plain whitespace split.
+        """
+        try:
+            import shlex
+
+            lexer = shlex.shlex(arguments, posix=False)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            raw = list(lexer)
+        except ValueError:
+            return arguments.split()
+
+        tokens: List[str] = []
+        for tok in raw:
+            if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+                tok = tok[1:-1]
+            tokens.append(tok)
+        return tokens
+
+    @staticmethod
+    def _interpolate_arguments(text: str, arguments: str) -> str:
+        """Replace ``$ARGUMENTS`` and positional ``$1``..``$n`` in one pass.
+
+        ``$ARGUMENTS`` expands to the full (escaped) argument string; ``$1`` is
+        the first quote-aware token, and so on. Each injected value is escaped
+        exactly like ``$ARGUMENTS`` so untrusted input can never introduce
+        ``$(...)`` shell substitution. Out-of-range positional references (e.g.
+        a legacy template's literal ``$100``) are left untouched so existing
+        command content is preserved.
+        """
+        if "$" not in text:
+            return text
+
+        tokens = TemplateInterpolator._split_positional(arguments)
+        escape = TemplateInterpolator._escape_shell_substitution
+        safe_arguments = escape(arguments)
+
+        def replace(match: "re.Match") -> str:
+            ref = match.group(1)
+            if ref == "ARGUMENTS":
+                return safe_arguments
+            index = int(ref)
+            if 1 <= index <= len(tokens):
+                return escape(tokens[index - 1])
+            # Out-of-range positional: preserve the literal text (e.g. "$100").
+            return match.group(0)
+
+        return TemplateInterpolator.ARGUMENT_PATTERN.sub(replace, text)
+
     @staticmethod
     def _interpolate_files(text: str, working_dir: Optional[Path] = None) -> str:
         """Replace @file references with file contents."""
@@ -1095,3 +1194,77 @@ def interpolate_command_template(
     return interpolator.interpolate(
         command.template, arguments, Path.cwd(), allow_shell=allow_shell
     )
+
+
+def shell_escape_enabled() -> bool:
+    """Return whether the interactive ``!cmd`` shell escape is enabled.
+
+    Reuses the exact gate posture of the command-template ``!`cmd``
+    substitution: enabled when the ``PRAISONAI_ALLOW_SHELL`` env var is truthy
+    or the ``commands.allow_shell`` config flag is set. Default-off, so an
+    unattended surface stays shell-free unless explicitly opted in.
+    """
+    return _env_flag(SHELL_SUBSTITUTION_ENV) or _config_allows_shell()
+
+
+@dataclass
+class ShellEscapeResult:
+    """Result of an interactive ``!cmd`` shell escape.
+
+    ``enabled`` is False when the gate is off (no command was run) and
+    ``output`` then carries the one-line enable hint. When ``enabled`` is True,
+    ``output`` holds the command's captured stdout (or the error text when
+    ``error`` is set).
+    """
+    enabled: bool
+    command: str
+    output: str = ""
+    error: bool = False
+
+
+SHELL_ESCAPE_DISABLED_HINT = (
+    "Shell escape is disabled. Enable it with "
+    f"{SHELL_SUBSTITUTION_ENV}=true or the `commands.allow_shell` config flag."
+)
+
+
+def run_shell_escape(
+    command: str,
+    working_dir: Optional[Path] = None,
+) -> ShellEscapeResult:
+    """Run an interactive ``!cmd`` shell escape through the gated executor.
+
+    Shares the command-template executor's env gate, 30s timeout and 100KB
+    output cap (:func:`TemplateInterpolator._run_shell_command`) so the
+    interactive ``!cmd`` affordance has an identical safety posture. Never runs
+    the command when the gate is off; instead returns a disabled result whose
+    ``output`` is a one-line enable hint.
+
+    Args:
+        command: The command string (already stripped of its leading ``!``).
+        working_dir: Directory to run in; defaults to the current directory.
+
+    Returns:
+        A :class:`ShellEscapeResult`. This function does not raise for command
+        failures — a non-zero exit / timeout / cap is captured as an
+        ``error`` result so callers can render it inline.
+    """
+    command = command.strip()
+    if not command:
+        return ShellEscapeResult(enabled=True, command=command, output="")
+
+    if not shell_escape_enabled():
+        return ShellEscapeResult(
+            enabled=False,
+            command=command,
+            output=SHELL_ESCAPE_DISABLED_HINT,
+        )
+
+    cwd = str(working_dir) if working_dir else str(Path.cwd())
+    try:
+        output = TemplateInterpolator._run_shell_command(command, cwd)
+        return ShellEscapeResult(enabled=True, command=command, output=output)
+    except ShellSubstitutionError as exc:
+        return ShellEscapeResult(
+            enabled=True, command=command, output=str(exc), error=True
+        )

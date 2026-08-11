@@ -348,16 +348,46 @@ def run_python(
     Returns:
         Dictionary with execution result
     """
-    # Create a temporary command to run the code
+    # Pass the code as an argv list so ``subprocess`` never re-parses it through
+    # a shell (and never round-trips through shell-quoting + shlex, which do not
+    # agree on escape semantics). This preserves the caller's exact source —
+    # newlines, backslashes and quotes are handed to the child Python verbatim,
+    # identically on POSIX and Windows.
     import sys
     python_cmd = sys.executable
-    
-    # Escape the code for command line
-    escaped_code = code.replace('\\', '\\\\').replace('"', '\\"')
-    command = f'{python_cmd} -c "{escaped_code}"'
-    
-    return execute_command(
-        command=command,
-        cwd=cwd,
-        timeout=timeout,
-    )
+    work_dir = cwd or os.getcwd()
+
+    try:
+        result = subprocess.run(
+            [python_cmd, "-c", code],
+            cwd=work_dir,
+            capture_output=True,
+            timeout=timeout,
+            text=True,
+        )
+        return {
+            'success': result.returncode == 0,
+            'exit_code': result.returncode,
+            'stdout': result.stdout,
+            'stderr': result.stderr,
+            'command': f"{python_cmd} -c <code>",
+            'cwd': work_dir,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            'success': False,
+            'error': f"Python code timed out after {timeout} seconds",
+            'command': f"{python_cmd} -c <code>",
+            'exit_code': -1,
+            'stdout': '',
+            'stderr': '',
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f"Error executing Python code: {str(e)}",
+            'command': f"{python_cmd} -c <code>",
+            'exit_code': -1,
+            'stdout': '',
+            'stderr': '',
+        }

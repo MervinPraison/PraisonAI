@@ -317,8 +317,17 @@ class SqliteSessionStore(DefaultSessionStore):
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> bool:
-        ok = super().add_message(session_id, role, content, metadata)
+        ok = super().add_message(
+            session_id,
+            role,
+            content,
+            metadata,
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
+        )
         if ok:
             try:
                 self._index_session(self._read_session_fresh(session_id))

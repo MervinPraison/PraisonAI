@@ -5,7 +5,6 @@ Checks the store for due jobs and returns them. Execution of the job
 payload is the caller's responsibility (keeping the runner lightweight).
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from typing import List, Optional

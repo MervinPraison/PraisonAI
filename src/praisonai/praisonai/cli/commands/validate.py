@@ -227,7 +227,20 @@ def check(
 
 
 @app.command()
-def schema():
+def schema(
+    agents: bool = typer.Option(
+        False,
+        "--agents",
+        help="Emit the machine-readable JSON Schema for agents.yaml "
+             "(derived from YAMLConfig) instead of the human-readable summary.",
+    ),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Write the JSON Schema to a file instead of stdout "
+             "(implies --agents; useful for offline/pinned editor setups).",
+    ),
+):
     """
     Display the YAML configuration schema documentation.
     
@@ -236,10 +249,34 @@ def schema():
     - Task configuration  
     - Workflow configuration
     - Global settings
+
+    With --agents (or --output), emit the machine-readable JSON Schema for
+    agents.yaml so you can point your editor's YAML language server at a local
+    file:
+
+        praisonai validate schema --agents            # print to stdout
+        praisonai validate schema -o agents.schema.json  # write to a file
     """
     from praisonai.config.schema import YAMLConfig, AgentConfig, TaskConfig
     import json
-    
+
+    # Emit the machine-readable JSON Schema for offline/pinned editor setups.
+    if agents or output:
+        from praisonai.config.schema import generate_agents_schema
+
+        schema_json = json.dumps(generate_agents_schema(), indent=2)
+        if output:
+            out_path = Path(output)
+            try:
+                out_path.write_text(schema_json + "\n", encoding="utf-8")
+            except OSError as exc:
+                console.print(f"[red]✗ Failed to write {out_path}:[/red] {exc}")
+                sys.exit(1)
+            console.print(f"[green]✓ Wrote agents JSON Schema to[/green] {out_path}")
+        else:
+            sys.stdout.write(schema_json + "\n")
+        return
+
     console.print("[bold cyan]PraisonAI YAML Configuration Schema[/bold cyan]\n")
     
     # Display main sections

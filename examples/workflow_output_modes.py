@@ -13,7 +13,7 @@ Available presets:
 - json: JSONL output for piping
 """
 
-from praisonaiagents import Agent, Workflow
+from praisonaiagents import Agent, AgentFlow, Workflow
 
 
 def main():

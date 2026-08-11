@@ -9,7 +9,14 @@ import os
 import logging
 from typing import Optional
 
-from praisonaiagents.gateway.protocols import AuthMode, is_loopback, resolve_auth_mode
+from praisonaiagents.gateway.protocols import (
+    AuthMode,
+    is_loopback,
+    resolve_auth_mode,
+    is_weak_secret,
+    assert_gateway_secret_strong,
+    WeakGatewaySecretError,
+)
 from praisonaiagents.gateway.config import GatewayConfig
 
 logger = logging.getLogger(__name__)
@@ -41,6 +48,13 @@ def assert_external_bind_safe(config: GatewayConfig) -> None:
                 f"Gateway binding to loopback interface {config.bind_host} without auth token. "
                 f"This is permissive mode - only safe for local development."
             )
+        elif is_weak_secret(auth_token):
+            # Consistent with the permissive-loopback posture: warn only.
+            logger.warning(
+                f"Gateway auth_token is a known-weak/placeholder value on loopback bind "
+                f"{config.bind_host}. This provides no real authentication - rotate before "
+                f"exposing the gateway externally."
+            )
         return
     
     # External bind - require auth token
@@ -48,8 +62,14 @@ def assert_external_bind_safe(config: GatewayConfig) -> None:
         raise GatewayStartupError(
             f"Cannot bind to {config.bind_host} without an auth token.\n"
             f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
-            f"Or:   export GATEWAY_AUTH_TOKEN=$(openssl rand -hex 16)"
+            f'Or:   export GATEWAY_AUTH_TOKEN="$(openssl rand -hex 16)"'
         )
+    
+    # External bind - reject known-weak/placeholder secrets (fail closed).
+    try:
+        assert_gateway_secret_strong(auth_token, field="gateway.auth_token")
+    except WeakGatewaySecretError as exc:
+        raise GatewayStartupError(str(exc)) from exc
     
     logger.info(f"Gateway binding to external interface {config.bind_host} with authentication")
 

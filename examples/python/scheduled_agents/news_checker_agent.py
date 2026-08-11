@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 24/7 News Checker Agent Example
 

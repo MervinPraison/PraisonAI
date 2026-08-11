@@ -316,6 +316,115 @@ class TestCheckpointService:
         assert len(checkpoints) >= 2
     
     @pytest.mark.asyncio
+    async def test_service_rewind_one_turn(self, temp_workspace, temp_storage):
+        """Rewinding one turn restores the state before the last checkpoint."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+
+        with open(test_file, "w") as f:
+            f.write("turn 1")
+        await service.save("Turn 1")
+
+        with open(test_file, "w") as f:
+            f.write("turn 2")
+        await service.save("Turn 2")
+
+        # rewind(1) undoes Turn 2, restoring the Turn 1 state.
+        result = await service.rewind(1)
+
+        assert result.success
+        with open(test_file, "r") as f:
+            assert f.read() == "turn 1"
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_multiple_turns(self, temp_workspace, temp_storage):
+        """Rewinding N turns restores exactly the pre-turn-N working tree."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        for i in range(1, 4):
+            with open(test_file, "w") as f:
+                f.write(f"turn {i}")
+            await service.save(f"Turn {i}")
+
+        # rewind(2) steps back two checkpoints from Turn 3 -> Turn 1 state.
+        result = await service.rewind(2)
+
+        assert result.success
+        with open(test_file, "r") as f:
+            assert f.read() == "turn 1"
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_too_far(self, temp_workspace, temp_storage):
+        """Rewinding beyond available checkpoints fails gracefully."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("only turn")
+        await service.save("Only turn")
+
+        # Only initial + 1 checkpoint exist; rewinding 5 turns is impossible.
+        result = await service.rewind(5)
+
+        assert not result.success
+        assert "Cannot rewind" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_invalid_steps(self, temp_workspace, temp_storage):
+        """Rewinding with steps < 1 is rejected."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        result = await service.rewind(0)
+
+        assert not result.success
+        assert "steps must be >= 1" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_beyond_max_checkpoints(self, temp_workspace, temp_storage):
+        """Rewind can reach commits older than max_checkpoints.
+
+        Pruning only trims the in-memory list; shadow-git retains every commit,
+        so rewind must not cap its lookup at ``max_checkpoints``.
+        """
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage,
+            max_checkpoints=2,
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        for i in range(1, 6):
+            with open(test_file, "w") as f:
+                f.write(f"turn {i}")
+            await service.save(f"Turn {i}")
+
+        # 5 saves > max_checkpoints=2, but the older commits still exist in git.
+        result = await service.rewind(4)
+
+        assert result.success
+        with open(test_file, "r") as f:
+            assert f.read() == "turn 1"
+
+    @pytest.mark.asyncio
     async def test_service_diff(self, temp_workspace, temp_storage):
         """Test getting diff between checkpoints."""
         service = CheckpointService(
@@ -396,6 +505,156 @@ class TestCheckpointService:
         
         assert not service.is_initialized
     
+    @pytest.mark.asyncio
+    async def test_service_save_with_step_tag(self, temp_workspace, temp_storage):
+        """Test that a per-step checkpoint records its step index."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("step one")
+
+        result = await service.save("edit", step=1)
+
+        assert result.success
+        assert result.checkpoint.step == 1
+        assert result.checkpoint.message.startswith("[step-1]")
+
+    @pytest.mark.asyncio
+    async def test_service_restore_by_step(self, temp_workspace, temp_storage):
+        """Rewind to an earlier step returns the file to that step's state.
+
+        Mirrors the issue's agentic scenario: >=3 edits across separate steps,
+        then restore(step=1) restores the step-1 content.
+        """
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        for i in (1, 2, 3):
+            with open(test_file, "w") as f:
+                f.write(f"content-{i}")
+            result = await service.save(f"edit {i}", step=i)
+            assert result.success
+            assert result.checkpoint.step == i
+
+        # Rewind to step 1
+        result = await service.restore(step=1)
+        assert result.success
+
+        with open(test_file, "r") as f:
+            assert f.read() == "content-1"
+
+    @pytest.mark.asyncio
+    async def test_service_restore_unknown_step(self, temp_workspace, temp_storage):
+        """Restoring an unknown step fails gracefully."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        result = await service.restore(step=99)
+        assert not result.success
+        assert "step 99" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_get_checkpoint_by_step(self, temp_workspace, temp_storage):
+        """get_checkpoint_by_step returns the matching step checkpoint."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v")
+        await service.save("edit", step=2)
+
+        cp = await service.get_checkpoint_by_step(2)
+        assert cp is not None
+        assert cp.step == 2
+        assert await service.get_checkpoint_by_step(5) is None
+
+    @pytest.mark.asyncio
+    async def test_service_explicit_step_overrides_message_tag(self, temp_workspace, temp_storage):
+        """An explicit step wins over any step tag already in the message."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v")
+
+        result = await service.save("[step-2] retry", step=1)
+        assert result.success
+        assert result.checkpoint.step == 1
+        assert result.checkpoint.message == "[step-1] retry"
+        assert await service.get_checkpoint_by_step(2) is None
+        assert (await service.get_checkpoint_by_step(1)).step == 1
+
+    @pytest.mark.asyncio
+    async def test_service_save_negative_step_rejected(self, temp_workspace, temp_storage):
+        """Negative steps are rejected rather than silently unrecoverable."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        result = await service.save("edit", step=-1)
+        assert not result.success
+
+    @pytest.mark.asyncio
+    async def test_service_restore_rejects_both_id_and_step(self, temp_workspace, temp_storage):
+        """checkpoint_id and step are mutually exclusive on restore."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v")
+        saved = await service.save("edit", step=1)
+
+        result = await service.restore(checkpoint_id=saved.checkpoint.id, step=1)
+        assert not result.success
+        assert "not both" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_restore_result_carries_step(self, temp_workspace, temp_storage):
+        """restore(step=N) surfaces the step on the returned checkpoint."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v1")
+        await service.save("edit", step=1)
+        with open(test_file, "w") as f:
+            f.write("v2")
+        await service.save("edit", step=2)
+
+        result = await service.restore(step=1)
+        assert result.success
+        assert result.checkpoint.step == 1
+
     @pytest.mark.asyncio
     async def test_service_delete_all(self, temp_workspace, temp_storage):
         """Test deleting all checkpoints."""

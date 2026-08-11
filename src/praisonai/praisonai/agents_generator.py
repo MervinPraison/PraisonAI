@@ -5,8 +5,8 @@ import os
 import inspect
 import logging
 import threading
+import uuid
 import re
-import keyword
 import difflib
 import importlib
 import importlib.util
@@ -34,6 +34,36 @@ def _yaml_safe_load(stream):
     return yaml.safe_load(stream)
 
 
+def _strict_validation_enabled() -> bool:
+    """True when PRAISONAI_VALIDATE_STRICT is set to a truthy value."""
+    return os.getenv("PRAISONAI_VALIDATE_STRICT", "false").lower() == "true"
+
+
+def _list_to_dict(entries: list, prefix: str, kind: str) -> dict:
+    """Convert a list of named entries to a dict, preserving duplicates.
+
+    Duplicate ``name`` keys would otherwise silently clobber each other. Instead
+    we raise under ``PRAISONAI_VALIDATE_STRICT`` or warn loudly and keep both by
+    suffixing the colliding key, so a multi-agent YAML never quietly shrinks.
+    """
+    normalized: dict = {}
+    duplicates: list = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("name") or f"{prefix}_{i}"
+        if key in normalized:
+            duplicates.append(key)
+            key = f"{key}__dup_{i}"
+        normalized[key] = entry
+    if duplicates:
+        msg = f"Duplicate {kind} name(s) in YAML: {sorted(set(duplicates))}"
+        if _strict_validation_enabled():
+            raise ValueError(msg)
+        logger.warning("%s — kept both by suffixing keys; rename to silence.", msg)
+    return normalized
+
+
 def _normalize_yaml_config(config: dict) -> dict:
     """Normalise list-format agents/tasks YAML to dict format expected by merge/run."""
     if not isinstance(config, dict):
@@ -41,11 +71,7 @@ def _normalize_yaml_config(config: dict) -> dict:
 
     agents = config.get("agents")
     if isinstance(agents, list):
-        config["agents"] = {
-            (a.get("name") or f"agent_{i}"): a
-            for i, a in enumerate(agents)
-            if isinstance(a, dict)
-        }
+        config["agents"] = _list_to_dict(agents, "agent", "agent")
 
     for bucket_key in ("agents", "roles"):
         bucket = config.get(bucket_key)
@@ -56,11 +82,7 @@ def _normalize_yaml_config(config: dict) -> dict:
 
     roles = config.get("roles")
     if isinstance(roles, list):
-        config["roles"] = {
-            (r.get("name") or f"role_{i}"): r
-            for i, r in enumerate(roles)
-            if isinstance(r, dict)
-        }
+        config["roles"] = _list_to_dict(roles, "role", "role")
 
     tasks = config.get("tasks")
     if isinstance(tasks, list):
@@ -73,13 +95,25 @@ def _normalize_yaml_config(config: dict) -> dict:
                 continue
             agent_key = task.get("agent")
             if not agent_key or agent_key not in bucket or not isinstance(bucket[agent_key], dict):
-                logger.warning(
-                    "Task %r references unknown agent %r; skipping.",
-                    task.get("name", f"task_{i}"), agent_key,
+                msg = (
+                    f"Task {task.get('name', f'task_{i}')!r} references "
+                    f"unknown agent {agent_key!r}; skipping."
                 )
+                if _strict_validation_enabled():
+                    raise ValueError(msg)
+                logger.warning(msg)
                 continue
             entry = bucket[agent_key].setdefault("tasks", {})
-            entry[task.get("name", f"task_{i}")] = {
+            task_name = task.get("name", f"task_{i}")
+            if task_name in entry:
+                dup_msg = (
+                    f"Duplicate task name {task_name!r} for agent {agent_key!r} in YAML"
+                )
+                if _strict_validation_enabled():
+                    raise ValueError(dup_msg)
+                logger.warning("%s — kept both by suffixing keys; rename to silence.", dup_msg)
+                task_name = f"{task_name}__dup_{i}"
+            entry[task_name] = {
                 k: v for k, v in task.items() if k != "agent"
             }
         if not bucket_from_roles and bucket:
@@ -212,7 +246,95 @@ _TIMEOUT_MARKER = "__praisonai_timeout_wrapped__"
 _TIMEOUT_ORIGINAL = "__praisonai_timeout_original__"
 
 
-def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None):
+class _TimeoutBoundTool:
+    """Per-generator proxy that adds timeout enforcement to a framework tool.
+
+    Framework tool objects (CrewAI/LangChain ``BaseTool``, praisonai ``@tool``)
+    are frequently cached and shared across generators (``ToolResolver``, plugin
+    registries). Mutating their ``_run``/``run`` in place would let generator B's
+    executor leak into generator A's calls; when B's pool is shut down, A's tool
+    call raises ``RuntimeError: cannot schedule new futures after shutdown``.
+
+    Each generator instead installs its own proxy: the underlying object is never
+    mutated, and every framework-visible attribute (``name``/``description``/
+    ``args_schema`` …) is delegated through ``__getattr__`` so the LLM still sees
+    the correct schema. Only ``_run``/``run`` route through this generator's own
+    timeout wrapper.
+
+    The proxy is instantiated as a *dynamic subclass of the wrapped tool's own
+    class* (see :func:`_make_timeout_proxy`) so ``isinstance(proxy, BaseTool)``
+    still holds. Downstream executors (``praisonaiagents`` tool_execution,
+    CrewAI/LangChain) route on ``isinstance(tool, BaseTool)`` to call ``.run``;
+    a plain proxy would fail that check *and* is not ``callable``, so the tool
+    call would silently execute nothing. Keeping the type identity preserves the
+    old in-place behaviour for every consumer while still isolating executors.
+    """
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_inner"), name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_inner"), name, value)
+
+    def run(self, *args, **kwargs):
+        fn = object.__getattribute__(self, "_wrapped_run")
+        if fn is None:
+            return object.__getattribute__(self, "_inner").run(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+    def _run(self, *args, **kwargs):
+        fn = object.__getattribute__(self, "_wrapped__run")
+        if fn is None:
+            return object.__getattribute__(self, "_inner")._run(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+
+# Cache of dynamically-generated ``(_TimeoutBoundTool, type(inner))`` subclasses
+# keyed by the inner class, so we build one proxy type per tool class instead of
+# per tool instance.
+_TIMEOUT_PROXY_TYPES: "Dict[type, type]" = {}
+_TIMEOUT_PROXY_TYPES_LOCK = threading.Lock()
+
+
+def _make_timeout_proxy(inner, wrapped_run=None, wrapped__run=None):
+    """Build a per-generator timeout proxy that keeps ``inner``'s type identity.
+
+    The returned object is an instance of a subclass of both
+    ``_TimeoutBoundTool`` and ``type(inner)`` so ``isinstance(proxy, BaseTool)``
+    (and any other base of the wrapped tool) still passes for downstream
+    executors, while ``_run``/``run`` route through this generator's timeout
+    wrapper and every other attribute is delegated to the shared inner object.
+    The inner object itself is never mutated.
+    """
+    inner_cls = type(inner)
+    proxy_cls = _TIMEOUT_PROXY_TYPES.get(inner_cls)
+    if proxy_cls is None:
+        with _TIMEOUT_PROXY_TYPES_LOCK:
+            proxy_cls = _TIMEOUT_PROXY_TYPES.get(inner_cls)
+            if proxy_cls is None:
+                try:
+                    proxy_cls = type(
+                        f"_TimeoutBound_{getattr(inner_cls, '__name__', 'Tool')}",
+                        (_TimeoutBoundTool, inner_cls),
+                        {},
+                    )
+                except TypeError:
+                    # Some tool classes forbid subclassing (e.g. custom
+                    # metaclass/__slots__ conflicts); fall back to the plain
+                    # proxy. isinstance() will not match, but callability of the
+                    # inner is still exposed via __getattr__ delegation, and the
+                    # generic callable branch is preserved by the caller.
+                    proxy_cls = _TimeoutBoundTool
+                _TIMEOUT_PROXY_TYPES[inner_cls] = proxy_cls
+
+    proxy = proxy_cls.__new__(proxy_cls)
+    object.__setattr__(proxy, "_inner", inner)
+    object.__setattr__(proxy, "_wrapped_run", wrapped_run)
+    object.__setattr__(proxy, "_wrapped__run", wrapped__run)
+    return proxy
+
+
+def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None, owner_key=None):
     """Enforce a per-call timeout on a tool, sync or async.
 
     For async tools the underlying task is cancelled on timeout. For sync tools
@@ -235,14 +357,16 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     import functools
     import inspect
 
-    # Identity of the wrapper's owner so a shared framework-tool object patched
-    # in place by one generator is transparently re-wrapped (not skipped) when a
+    # Identity of the wrapper's owner so a shared framework-tool object wrapped
+    # by one generator is transparently re-wrapped (not skipped) when a
     # *different* generator processes it — otherwise it would keep the first
     # generator's executor/timeout even after that generator's pool is closed.
-    # The executor_factory is a bound method unique per generator instance, so
-    # its identity is a stable per-owner key. (May be None for callers that pass
-    # no factory; those paths never capture a foreign executor.)
-    _owner_key = id(executor_factory) if executor_factory is not None else None
+    # Prefer a caller-supplied stable key (the generator pins a uuid at
+    # construction). Never derive it from ``id(executor_factory)``: each access
+    # to a bound method yields a fresh object, so its id() churns and the guard
+    # would compare against a value that never repeats. Fall back to a per-call
+    # sentinel so an owner-less caller is always treated as its own owner.
+    _owner_key = owner_key if owner_key is not None else object()
 
     def _wrap_callable(fn):
         """Return a timeout-enforcing wrapper around a bare callable."""
@@ -300,36 +424,42 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     # tool_calls. Instead, wrap only the execution method IN PLACE so the object
     # — and its schema — survive.
     if not callable(tool) or _looks_like_framework_tool(tool):
+        # Idempotency guard for shared framework tool objects (cached by
+        # ToolResolver / passed via plugin registries). If this generator already
+        # wrapped the object, its proxy is stamped with our owner key — return it
+        # unchanged so re-wrapping on every generate_crew_and_kickoff() does not
+        # rebuild proxies. A proxy owned by a *different* generator is unwrapped
+        # back to the shared inner object and re-wrapped here, so this generator's
+        # calls always bind to its own executor/timeout (never a foreign pool
+        # that may already be shut down). Compare by value, not identity: a stale
+        # ``is`` check against uuids/ints could silently never match.
+        existing_owner = getattr(tool, _TIMEOUT_MARKER, None)
+        if isinstance(tool, _TimeoutBoundTool) and existing_owner == _owner_key:
+            return tool
+        inner = getattr(tool, _TIMEOUT_ORIGINAL, tool)
+
+        wrapped_methods = {}
         for method_name in ("_run", "run"):
-            method = getattr(tool, method_name, None)
+            method = getattr(inner, method_name, None)
             if callable(method):
-                # Idempotency guard for shared framework tool objects (cached by
-                # ToolResolver / passed via plugin registries). Re-wrapping on
-                # every generate_crew_and_kickoff() would stack wrappers (N×
-                # timeout, monotonic memory growth). But the marker is keyed by
-                # the *owning* executor_factory: if a *different* generator later
-                # patches the same shared object, we must re-wrap in place so the
-                # method binds to that generator's own executor/timeout instead
-                # of retaining the first generator's (whose pool may already be
-                # shut down). Same owner → skip; different owner → re-wrap.
-                if getattr(method, _TIMEOUT_MARKER, None) is _owner_key:
-                    return tool
-                # Re-wrap the *original* method, never a foreign generator's
-                # wrapper, so wrappers never stack across generators.
-                base = getattr(method, _TIMEOUT_ORIGINAL, method)
-                wrapped = _wrap_callable(base)
-                if wrapped is base:
-                    continue
-                try:
-                    setattr(wrapped, _TIMEOUT_MARKER, _owner_key)
-                    setattr(wrapped, _TIMEOUT_ORIGINAL, base)
-                except (AttributeError, TypeError):
-                    pass
-                try:
-                    object.__setattr__(tool, method_name, wrapped)  # bypass pydantic frozen
-                    return tool
-                except (AttributeError, TypeError):
-                    break  # fall through to callable wrapping below
+                wrapped = _wrap_callable(method)
+                if wrapped is not method:
+                    wrapped_methods[method_name] = wrapped
+
+        if wrapped_methods:
+            # Build a fresh per-generator proxy; the shared inner object is never
+            # mutated, so cross-generator contamination is impossible. The proxy
+            # subclasses ``type(inner)`` so ``isinstance(proxy, BaseTool)`` still
+            # holds for downstream executors.
+            proxy = _make_timeout_proxy(
+                inner,
+                wrapped_run=wrapped_methods.get("run"),
+                wrapped__run=wrapped_methods.get("_run"),
+            )
+            object.__setattr__(proxy, _TIMEOUT_MARKER, _owner_key)
+            object.__setattr__(proxy, _TIMEOUT_ORIGINAL, inner)
+            return proxy
+
         # No patchable execution method or non-callable object; return as-is so
         # we never silently drop a tool object we couldn't safely wrap.
         if not callable(tool):
@@ -351,43 +481,6 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     return wrapped
 
 
-def noop(*args, **kwargs):
-    pass
-
-def sanitize_agent_name_for_autogen_v4(name):
-    """
-    Sanitize agent name to be a valid Python identifier for AutoGen v0.4.
-    
-    Args:
-        name (str): The original agent name
-        
-    Returns:
-        str: A valid Python identifier
-    """
-    # Convert to string and replace invalid characters with underscores
-    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
-    
-    # Collapse only very excessive underscores (5 or more) to reduce extreme cases
-    sanitized = re.sub(r'_{5,}', '_', sanitized)
-    
-    # Remove trailing underscores only if not part of a dunder pattern and only if singular
-    if sanitized.endswith('_') and not sanitized.endswith('__') and sanitized != '_':
-        sanitized = sanitized.rstrip('_')
-    
-    # Ensure it starts with a letter or underscore (not a digit)
-    if sanitized and sanitized[0].isdigit():
-        sanitized = 'agent_' + sanitized
-    
-    # Handle empty string or only invalid characters (including single underscore from all invalid chars)
-    if not sanitized or sanitized == '_':
-        sanitized = 'agent'
-    
-    # Check if it's a Python keyword and append underscore if so
-    if keyword.iskeyword(sanitized):
-        sanitized += '_'
-    
-    return sanitized
-
 def _resolve_yaml_cli_backend(cli_backend_config, logger):
     """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance."""
     if cli_backend_config is None:
@@ -401,7 +494,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None, adapter=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -416,6 +509,7 @@ class AgentsGenerator:
             tools (dict, optional): A dictionary containing the tools to be used for the agents. Defaults to None.
             cli_config (dict, optional): CLI configuration to override YAML settings. Defaults to None.
             adapter_registry (FrameworkAdapterRegistry, optional): Registry for framework adapters. Defaults to process default.
+            tool_resolver (ToolResolver, optional): Canonical tool resolver. Defaults to the shared context-local resolver so discovery runs once per run.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -448,13 +542,24 @@ class AgentsGenerator:
         elif os.environ.get('LOGLEVEL'):
             self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
-        # Initialize tool resolver (single source of truth for tool resolution)
-        from .tool_resolver import ToolResolver
-        self.tool_resolver = ToolResolver()
+        # Initialize tool resolver (single source of truth for tool resolution).
+        # DI-friendly: callers (e.g. AutoGenerator hand-off, tests) may pass a
+        # resolver; otherwise share the context-local default so tool discovery
+        # runs once per run instead of once per generator construction.
+        if tool_resolver is None:
+            from .tool_resolver import _get_default_resolver
+            tool_resolver = _get_default_resolver()
+        self.tool_resolver = tool_resolver
         
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
         self._adapter_registry = adapter_registry or _get_default_adapter_registry()
+
+        # Optional pre-resolved adapter handed down from the entry point so the
+        # winning adapter from pick_default() is not constructed (and re-validated)
+        # a second time on the hot path. Reused only when the requested framework
+        # matches; otherwise we fall back to registry.create().
+        self._adapter = adapter
 
         # Instance-owned tool-timeout executor so multi-tenant runtimes can scope
         # it per session (no process-wide singleton). Created lazily on first use
@@ -467,6 +572,11 @@ class AgentsGenerator:
         # is leaked we recycle it so new tool calls aren't starved forever.
         self._leaked_workers = 0
         self._max_leaked_workers = max(1, _resolve_tool_timeout_workers() // 2)
+        # Stable per-generator identity for timeout-wrapper ownership. A bound
+        # method (self._get_tool_timeout_executor) yields a fresh object with a
+        # different id() on every access, so it cannot be used as a reliable
+        # owner key; a uuid pinned at construction can.
+        self._timeout_owner_key = uuid.uuid4()
         
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
@@ -521,6 +631,7 @@ class AgentsGenerator:
             timeout_seconds,
             self._get_tool_timeout_executor,
             on_leaked=self._note_leaked_worker,
+            owner_key=self._timeout_owner_key,
         )
 
     def close(self):
@@ -550,6 +661,12 @@ class AgentsGenerator:
         Raises:
             ValueError: If framework is not supported
         """
+        # Reuse the pre-resolved adapter from the entry point when it matches the
+        # requested framework, avoiding a second construction + protocol
+        # re-validation on the hot path.
+        injected = getattr(self, "_adapter", None)
+        if injected is not None and getattr(injected, "name", None) == framework:
+            return injected
         return self._adapter_registry.create(framework)
 
     def _merge_cli_config(self, config, cli_config):
@@ -578,7 +695,20 @@ class AgentsGenerator:
             if 'lsp' in cli_config:
                 config['config']['lsp'] = cli_config['lsp'] 
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
-        
+
+        # Handle workflow input/topic override. A caller-supplied prompt (e.g.
+        # the Jobs API ``job.prompt`` or the serve HTTP ``query``) is the input
+        # for this run and must drive the workflow topic instead of being
+        # dropped. Only override when a non-empty value is provided so a static
+        # YAML ``input``/``topic`` is preserved when no per-run prompt is given.
+        for _key in ('input', 'topic'):
+            _val = cli_config.get(_key)
+            if _val:
+                config['input'] = _val
+                config.pop('topic', None)
+                self.logger.debug(f"CLI override: {_key} = {_val}")
+                break
+
         # Handle agent-level overrides using unified approach
         agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
@@ -699,30 +829,40 @@ class AgentsGenerator:
         framework_name = self.framework or config.get('framework', 'praisonai')
         adapter = self._select_framework(framework_name, config)
         
-        # Validate framework availability
+        # Validate framework availability through the injected registry so a
+        # scoped/per-tenant adapter registered on this generator's registry is
+        # not rejected just because it is absent from the process default.
         from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(adapter.name)
+        assert_framework_available(adapter.name, registry=self._adapter_registry)
         
         # Validate cli_backend compatibility
         self._validate_cli_backend_compatibility(config, adapter.name, adapter=adapter)
-        
-        # Initialize observability hooks
-        from .observability.hooks import init_observability
-        init_observability(adapter.name)
-        
-        # Run adapter setup hooks
-        adapter.setup(framework_tag=adapter.name)
-        
+
         # Update framework reference if resolution changed it
         self.framework = adapter.name
         self.framework_adapter = adapter
-        
+
+        # NB: adapter setup is intentionally NOT run here. The caller opens the
+        # observability_session (which owns init/finalize for every adapter) and
+        # then invokes _run_adapter_setup INSIDE that session, so setup events —
+        # and any setup/import failure — are recorded and finalized instead of
+        # slipping outside observability. See generate_crew_and_kickoff /
+        # agenerate_crew_and_kickoff.
         return {
             'adapter': adapter,
             'config': config,
             'topic': topic,
             'tools_dict': tools_dict,
         }
+
+    def _run_adapter_setup(self, adapter):
+        """Run an adapter's setup hooks.
+
+        Kept as a tiny seam so both the sync and async run paths execute setup
+        *inside* the observability_session, keeping init/setup/run/finalize
+        bracketed together for every adapter.
+        """
+        adapter.setup(framework_tag=adapter.name)
     
     def _build_tools_dict(self, config):
         """Shared tool resolution logic for sync and async paths."""
@@ -748,22 +888,40 @@ class AgentsGenerator:
     def _resolve_effective_tool_timeout(self, config):
         """Resolve the effective per-tool timeout in seconds.
 
-        Precedence: an explicit CLI ``tool_timeout`` wins; otherwise use the
-        largest ``tool_timeout`` declared on any role/agent (safest default for
-        a shared tool dict). Returns ``None`` when nothing declares a timeout.
+        Precedence: an explicit CLI ``tool_timeout`` wins; otherwise the tightest
+        (smallest) ``tool_timeout`` declared on any role/agent is applied to the
+        shared tool dict. The tightest value is the safe-by-default choice for a
+        multi-agent run: an agent that asked to bail out quickly is never forced
+        to wait for another agent's larger budget. Any agent whose declared value
+        is overridden is warned about so the collapse is never silent. Returns
+        ``None`` when nothing declares a timeout.
         """
         cli_timeout = (self.cli_config or {}).get("tool_timeout")
         if isinstance(cli_timeout, (int, float)) and not isinstance(cli_timeout, bool):
             return float(cli_timeout)
 
-        entities = {**config.get("roles", {}), **config.get("agents", {})}
-        timeouts = [
-            e.get("tool_timeout") for e in entities.values()
-            if isinstance(e, dict)
-            and isinstance(e.get("tool_timeout"), (int, float))
-            and not isinstance(e.get("tool_timeout"), bool)
-        ]
-        return float(max(timeouts)) if timeouts else None
+        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
+
+        def _declared(entity):
+            v = entity.get("tool_timeout") if isinstance(entity, dict) else None
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return v
+            return None
+
+        timeouts = [v for v in (_declared(e) for e in entities.values()) if v is not None]
+        if not timeouts:
+            return None
+
+        tightest = float(min(timeouts))
+        for name, entity in entities.items():
+            v = _declared(entity)
+            if v is not None and float(v) != tightest:
+                self.logger.warning(
+                    "Agent %r declared tool_timeout=%s but a shared tool dict "
+                    "forces the tightest value %ss for the whole run.",
+                    name, v, tightest,
+                )
+        return tightest
     
     def _select_framework(self, framework: str, config: Dict[str, Any]) -> Any:
         """Select and resolve the appropriate framework adapter.
@@ -788,8 +946,8 @@ class AgentsGenerator:
         """Validate that cli_backend and runtime are only used with compatible frameworks."""
         # Check if any agent/role defines cli_backend or runtime
         all_entities = {
-            **config.get('roles', {}),
-            **config.get('agents', {}),
+            **(config.get('roles') or {}),
+            **(config.get('agents') or {}),
         }
         
         has_cli_backend = any(
@@ -822,47 +980,60 @@ class AgentsGenerator:
         
         # Ask the adapter whether it supports runtime features instead of
         # hardcoding a framework-name check. Third-party adapters can opt in by
-        # setting ``SUPPORTS_RUNTIME_FEATURES = True``. Fall back to resolving
-        # the adapter from the registry for callers that pass only a name.
-        if adapter is None:
-            try:
-                adapter = self._get_framework_adapter(framework)
-            except (
-                ImportError,
-                KeyError,
-                LookupError,
-                ValueError,
-                TypeError,
-                AttributeError,
-            ) as exc:
-                # Adapter could not be resolved. This is expected when:
-                #  - an optional adapter dependency is missing (ImportError),
-                #  - the framework is unknown/unavailable in the registry, whose
-                #    create()/is_available() surface (Value|Type|Import)Error, or
-                #  - a minimal/mock generator has no _adapter_registry attribute
-                #    (AttributeError).
-                # In all cases we fall back to native-only behaviour below and
-                # log a warning instead of aborting generator setup or silently
-                # swallowing the failure.
-                logger = getattr(self, "logger", None)
-                if logger is not None:
-                    logger.warning(
-                        "Could not resolve framework adapter for %r: %r",
-                        framework,
-                        exc,
-                    )
-                adapter = None
+        # setting ``SUPPORTS_RUNTIME_FEATURES = True``.
+        supports_runtime_features: Optional[bool]
         if adapter is not None:
+            # A concrete adapter object was supplied: read its flag directly.
             supports_runtime_features = bool(
                 getattr(adapter, "SUPPORTS_RUNTIME_FEATURES", False)
             )
         else:
-            # Adapter could not be resolved (e.g. minimal/mock generator without a
-            # registry): preserve the historical native-only behaviour.
-            supports_runtime_features = str(framework).lower() == "praisonai"
+            # Only a name was supplied: resolve the capability through the
+            # protocol (memoised) rather than voting for "praisonai" by name.
+            from .framework_adapters.registry import (
+                adapter_capability,
+                get_default_registry,
+            )
+            _registry = getattr(self, "_adapter_registry", None) or get_default_registry()
+            supports_runtime_features = adapter_capability(
+                str(framework),
+                "SUPPORTS_RUNTIME_FEATURES",
+                registry=_registry,
+            )
+            if supports_runtime_features is None:
+                # ``None`` means "couldn't construct the adapter". Distinguish a
+                # KNOWN framework whose optional dependency/entry point merely
+                # isn't installed (e.g. ``autogen``/``crewai``) from a genuinely
+                # unknown name. A known built-in that can't be constructed still
+                # cannot support praisonai-specific runtime features, so treat it
+                # as unsupported (historical behaviour); only a name neither
+                # registered nor a known built-in triggers the "cannot verify"
+                # refusal below. ``DEFAULT_PRIORITY`` is the canonical built-in
+                # set and is resolvable even in a source checkout where the
+                # entry-point registrations aren't installed.
+                known = set(getattr(type(_registry), "DEFAULT_PRIORITY", ()))
+                try:
+                    known |= set(_registry.list_names())
+                except Exception:  # noqa: BLE001 -- registry probe must not crash validation
+                    pass
+                if str(framework).lower() in {n.lower() for n in known}:
+                    supports_runtime_features = False
 
-        if (has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime) \
-                and not supports_runtime_features:
+        uses_runtime_features = (
+            has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime
+        )
+
+        if uses_runtime_features and supports_runtime_features is None:
+            # The name is not a registered adapter at all, so we cannot verify the
+            # capability. Refuse instead of silently downgrading an unknown
+            # third-party adapter to unsupported by a hardcoded name check.
+            raise ValueError(
+                f"Cannot verify runtime-feature support for framework='{framework}': "
+                "the adapter is not resolvable. Install its extra or register it via "
+                "the 'praisonai.framework_adapters' entry-point group."
+            )
+
+        if uses_runtime_features and not supports_runtime_features:
             runtime_features = []
             if has_cli_backend:
                 runtime_features.append('cli_backend')
@@ -938,12 +1109,12 @@ class AgentsGenerator:
         else:
             if self.agent_file in ('/app/api:app', 'api:app'):
                 self.agent_file = 'agents.yaml'
-            try:
-                with open(self.agent_file, 'r') as f:
-                    config = _yaml_safe_load(f)
-            except FileNotFoundError:
-                _rich_print(f"File not found: {self.agent_file}")
-                return None
+            # Let FileNotFoundError surface so the Python API, HTTP handlers,
+            # and tests can distinguish "no such file" from "no result".
+            # Downgrading it to a print (returning None) made every public
+            # entry point return a silent None for a missing file.
+            with open(self.agent_file, 'r') as f:
+                config = _yaml_safe_load(f)
 
         config = _normalize_yaml_config(config or {})
 
@@ -982,24 +1153,34 @@ class AgentsGenerator:
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.
         """
         config = self._load_config()
-        if config is None:
-            return
+        from .observability.hooks import observability_session
         if self._is_workflow_yaml(config):
-            return self._run_yaml_workflow(config)
+            # Bracket the workflow run in the same observability session the
+            # sequential/hierarchical path uses so AgentOps init/finalize fires
+            # for workflow YAMLs too. Workflow YAMLs are native-only, so tag
+            # them 'praisonai'.
+            with observability_session("praisonai"):
+                return self._run_yaml_workflow(config)
 
         # Use shared preparation logic
         prep = self._prepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
-        return prep['adapter'].run(
-            prep['config'],
-            self.config_list,
-            prep['topic'],
-            tools_dict=prep['tools_dict'],
-            agent_callback=getattr(self, 'agent_callback', None),
-            task_callback=getattr(self, 'task_callback', None),
-            cli_config=getattr(self, 'cli_config', None),
-        )
+        # Own the observability lifecycle here so init and finalize are always
+        # paired for every adapter (the CM finalizes on success and error alike).
+        with observability_session(prep['adapter'].name):
+            # Run setup INSIDE the session so setup events and any setup/import
+            # failure are recorded and finalized, not dropped outside observability.
+            self._run_adapter_setup(prep['adapter'])
+            return prep['adapter'].run(
+                prep['config'],
+                self.config_list,
+                prep['topic'],
+                tools_dict=prep['tools_dict'],
+                agent_callback=getattr(self, 'agent_callback', None),
+                task_callback=getattr(self, 'task_callback', None),
+                cli_config=getattr(self, 'cli_config', None),
+            )
 
     async def _aload_config(self):
         """Async-safe config loading (blocking file I/O off the event loop)."""
@@ -1007,7 +1188,8 @@ class AgentsGenerator:
         return await asyncio.to_thread(self._load_config)
 
     async def _aprepare_for_run(self, config):
-        """Async-safe run preparation (heavy imports + adapter.setup() off the loop)."""
+        """Async-safe run preparation (heavy imports off the loop). Adapter setup
+        runs later, inside the observability_session (see agenerate_crew_and_kickoff)."""
         import asyncio
         return await asyncio.to_thread(self._prepare_for_run, config)
 
@@ -1017,24 +1199,36 @@ class AgentsGenerator:
         Generates a crew of agents and initiates tasks based on the provided configuration.
         """
         config = await self._aload_config()
-        if config is None:
-            return
+        import asyncio
+        from .observability.hooks import observability_session
         if self._is_workflow_yaml(config):
-            return await self._arun_yaml_workflow(config)
+            # Bracket the async workflow run in the same observability session
+            # the sequential/hierarchical path uses so AgentOps init/finalize
+            # fires for workflow YAMLs too. Workflow YAMLs are native-only, so
+            # tag them 'praisonai'.
+            with observability_session("praisonai"):
+                return await self._arun_yaml_workflow(config)
 
         # Use shared preparation logic (off the event loop to avoid blocking imports)
         prep = await self._aprepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
-        return await prep['adapter'].arun(
-            prep['config'],
-            self.config_list,
-            prep['topic'],
-            tools_dict=prep['tools_dict'],
-            agent_callback=getattr(self, 'agent_callback', None),
-            task_callback=getattr(self, 'task_callback', None),
-            cli_config=getattr(self, 'cli_config', None),
-        )
+        # Own the observability lifecycle here so init and finalize are always
+        # paired for every adapter (the CM finalizes on success and error alike).
+        with observability_session(prep['adapter'].name):
+            # Run setup INSIDE the session (off the event loop, as it may block)
+            # so setup events and any setup/import failure are recorded and
+            # finalized, not dropped outside observability.
+            await asyncio.to_thread(self._run_adapter_setup, prep['adapter'])
+            return await prep['adapter'].arun(
+                prep['config'],
+                self.config_list,
+                prep['topic'],
+                tools_dict=prep['tools_dict'],
+                agent_callback=getattr(self, 'agent_callback', None),
+                task_callback=getattr(self, 'task_callback', None),
+                cli_config=getattr(self, 'cli_config', None),
+            )
 
 
     def _build_yaml_workflow(self, config):
@@ -1070,14 +1264,35 @@ class AgentsGenerator:
         # Validate the YAML-declared framework first so a non-native workflow
         # YAML (e.g. framework: crewai) can't slip through just because the
         # generator instance still holds the default 'praisonai'.
+        workflow_framework = framework_from_config(config)
         validate_workflow_framework(
-            framework_from_config(config),
+            workflow_framework,
             source="agents.yaml workflow section",
         )
         if self.framework:
             validate_workflow_framework(
                 self.framework,
                 source="AgentsGenerator framework",
+            )
+
+        # Parity with the sequential/hierarchical path: reject an incompatible
+        # cli_backend in a workflow YAML at build time instead of accepting it
+        # silently. Workflow YAMLs are native-only, so validate against
+        # 'praisonai'.
+        self._validate_cli_backend_compatibility(config, workflow_framework or 'praisonai')
+
+        # tool_timeout is enforced by _wrap_tool_with_timeout on the
+        # sequential/hierarchical path via tools_dict. The native workflow engine
+        # resolves its own tools by name, so that wrapper hook does not apply
+        # here. Surface the gap explicitly rather than dropping the field
+        # silently, so a user who set a timeout knows it is not enforced on this
+        # path.
+        effective_timeout = self._resolve_effective_tool_timeout(config)
+        if effective_timeout and effective_timeout > 0:
+            self.logger.warning(
+                "tool_timeout=%s is not enforced on the workflow (process: workflow) "
+                "path; per-tool timeouts apply to sequential/hierarchical runs only.",
+                effective_timeout,
             )
 
         # Pass model from config_list to workflow as default_llm

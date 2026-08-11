@@ -49,6 +49,38 @@ if TYPE_CHECKING:  # imported only for type annotations to avoid a runtime cycle
 logger = logging.getLogger(__name__)
 
 
+def extract_functions_from_loaded_module(
+    module: Any,
+    *,
+    functions_only: bool = False,
+    skip_private: bool = False,
+) -> Dict[str, Callable]:
+    """Canonical public-callable extraction walk for an already-loaded module.
+
+    Single owner of the "walk a module and collect its callables into a
+    name->callable registry" rule, shared by ``ToolResolver`` and by callers
+    that have already loaded the module through the safe loader.
+
+    Args:
+        module: A loaded module object to walk.
+        functions_only: If True, only ``inspect.isfunction`` members are
+            accepted (excludes callable class instances). Defaults to False to
+            preserve the broader ``isfunction or callable`` behaviour.
+        skip_private: If True, members whose name starts with ``_`` are skipped.
+    """
+    def _accept(name: str, obj: object) -> bool:
+        if skip_private and name.startswith('_'):
+            return False
+        if functions_only:
+            return inspect.isfunction(obj)
+        return inspect.isfunction(obj) or callable(obj)
+
+    return {
+        name: obj for name, obj in inspect.getmembers(module)
+        if _accept(name, obj)
+    }
+
+
 class _ResolveResult:
     """Internal result wrapper to distinguish cacheable vs non-cacheable failures."""
     __slots__ = ("tool", "cacheable")
@@ -824,7 +856,59 @@ class ToolResolver:
                             missing.append(f"toolset:{toolset_name}")
         
         return list(set(missing))  # Remove duplicates
-    
+
+    def describe_unresolved(self, name: str) -> str:
+        """Explain why a tool name did not resolve, with an actionable fix hint.
+
+        Turns a bare "not found" into a per-name reason a start-time pre-flight
+        can surface instead of a silent skip (#3553): a close-match typo
+        suggestion (via stdlib :mod:`difflib`), or the local-tools-disabled hint
+        when ``PRAISONAI_ALLOW_LOCAL_TOOLS`` gates a project ``tools.py``.
+
+        Args:
+            name: The unresolved tool name.
+
+        Returns:
+            A single-line, human-readable reason + fix hint.
+        """
+        import difflib
+        import os
+
+        clean = (name or "").strip()
+
+        try:
+            available = list(self._discover_available().keys())
+        except Exception:  # pragma: no cover — defensive
+            available = []
+
+        # Exclude the exact name from typo candidates: a built-in mapped tool
+        # can be listed by _discover_available() yet still fail to load (missing
+        # optional dependency), which would otherwise yield a useless
+        # "Did you mean '<same name>'?" instead of an install hint (#3553).
+        candidates = [candidate for candidate in available if candidate != clean]
+        suggestions = difflib.get_close_matches(clean, candidates, n=1, cutoff=0.7)
+        if suggestions:
+            return f"'{name}' not found. Did you mean '{suggestions[0]}'?"
+
+        # A project tools.py that is present but gated behind the opt-in env var
+        # is the other common "silent skip" cause — surface it explicitly.
+        if not os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+            try:
+                if Path(self._tools_py_path).exists():
+                    return (
+                        f"'{name}' not found. A local tools.py exists but local "
+                        f"tools are disabled; set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+                        f"to enable it."
+                    )
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+        return (
+            f"'{name}' not found in any source. Check the spelling, install the "
+            f"package that provides it, or set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+            f"for a local tools.py."
+        )
+
     def clear_cache(self) -> None:
         """Clear both the local tools cache and resolve cache.
         
@@ -1045,7 +1129,52 @@ class ToolResolver:
         elif tools_dir.is_dir():
             _merge_local(self.get_local_tool_classes_from_dir(tools_dir))
             logger.debug("tools folder exists in the root directory")
+
+        # Additively merge project-local .praisonai/tools/*.py @tool functions,
+        # reusing the existing gated discovery convention (walk-up + user-global
+        # + PRAISONAI_ALLOW_LOCAL_TOOLS opt-in). This composes with the cwd
+        # tools.py / tools/ paths above rather than replacing them, so a
+        # @tool-decorated function dropped into .praisonai/tools/ is available
+        # to YAML-defined agents by its tool name.
+        _merge_local(self._discover_praisonai_dir_tools())
         return tools_dict
+
+    def _discover_praisonai_dir_tools(self) -> Dict[str, Any]:
+        """Discover @tool functions from the ``.praisonai/tools/`` convention.
+
+        Keys each discovered callable by its tool name (``@tool`` name or the
+        function ``__name__``) so it can be resolved like any other tool. Errors
+        and the disabled opt-in degrade to an empty dict — this is additive and
+        never breaks the canonical YAML/Python resolution paths.
+        """
+        try:
+            from praisonai_code.cli.features.custom_definitions import (
+                discover_project_tools,
+                local_tools_enabled,
+            )
+        except ImportError:
+            return {}
+
+        # Cheap opt-in gate first: discovery walks up directories and shells out
+        # to ``git rev-parse`` to find the project root, so short-circuit before
+        # that work when local tools are disabled (the default). Loading is gated
+        # anyway and would return nothing, so this avoids adding a git subprocess
+        # to every YAML resolution for no benefit.
+        if not local_tools_enabled():
+            return {}
+
+        try:
+            callables = discover_project_tools()
+        except Exception as e:
+            logger.debug("Project tool discovery failed: %s", e, exc_info=True)
+            return {}
+
+        discovered: Dict[str, Any] = {}
+        for obj in callables:
+            name = getattr(obj, "name", None) or getattr(obj, "__name__", None)
+            if name:
+                discovered[name] = obj
+        return discovered
 
 
     def load_functions_from_module(
@@ -1074,17 +1203,9 @@ class ToolResolver:
         if module is None:
             return {}
 
-        def _accept(name: str, obj: object) -> bool:
-            if skip_private and name.startswith('_'):
-                return False
-            if functions_only:
-                return inspect.isfunction(obj)
-            return inspect.isfunction(obj) or callable(obj)
-
-        return {
-            name: obj for name, obj in inspect.getmembers(module)
-            if _accept(name, obj)
-        }
+        return extract_functions_from_loaded_module(
+            module, functions_only=functions_only, skip_private=skip_private
+        )
 
 
     def load_classes_from_module(self, module_path: str) -> Dict[str, Callable]:
@@ -1244,6 +1365,19 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
         List of missing tool names
     """
     return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
+
+
+def describe_unresolved(name: str, resolver: Optional[ToolResolver] = None) -> str:
+    """Explain why a tool name did not resolve, with an actionable fix hint.
+
+    Args:
+        name: The unresolved tool name.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
+
+    Returns:
+        A single-line, human-readable reason + fix hint.
+    """
+    return (resolver or _get_default_resolver()).describe_unresolved(name)
 
 
 def resolve_toolsets(toolset_names: List[str], resolver: Optional[ToolResolver] = None) -> List[Callable]:

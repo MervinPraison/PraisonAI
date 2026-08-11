@@ -1,0 +1,13 @@
+# Sample agents.yaml for API deployment
+agents:
+  - name: assistant
+    role: General assistant
+    goal: Help users with their tasks
+    backstory: You are a helpful AI assistant.
+
+deploy:
+  type: api
+  api:
+    host: 0.0.0.0
+    port: 8005
+    auth_enabled: true

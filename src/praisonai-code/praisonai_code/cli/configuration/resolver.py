@@ -119,6 +119,10 @@ KNOWN_TOP_LEVEL_KEYS = {
     "managed",
     # Managed model allow-list (enforceable policy key).
     "model_allowlist",
+    # Config-declared instruction/context sources (files, globs, ~ paths, or
+    # http(s):// URLs) loaded alongside AGENTS.md/CLAUDE.md. List-valued, so the
+    # resolver's list-concat merge layers them global -> user -> project.
+    "instructions",
 }
 
 # Reserved keys in the plugins section; any other key is a per-plugin option map.
@@ -388,13 +392,17 @@ class ConfigResolver:
     Implements walk-up discovery and deep-merge semantics.
     """
     
-    # Config file names to search for (in order of preference)
+    # Config file names to search for (in order of preference).
+    # ``praisonai.yaml`` is the canonical project-root name, matching the
+    # agents SDK loader (``praisonaiagents/config/loader.py``). The legacy
+    # ``praison.yaml`` spelling is kept for backward compatibility.
     PROJECT_CONFIG_NAMES = [
         ".praisonai/config.yaml",
         ".praisonai/config.yml",
+        "praisonai.yaml",
+        "praisonai.yml",
         "praison.yaml",
         "praison.yml",
-        ".praison/config.toml",  # Legacy, backward compat
     ]
     
     def __init__(self, cwd: Optional[Path] = None, strict: Optional[bool] = None):
@@ -530,22 +538,46 @@ class ConfigResolver:
         return configs[0] if configs else None
     
     def _load_project_config(self) -> Optional[Dict[str, Any]]:
-        """Load project configuration with walk-up discovery."""
+        """Load project configuration with walk-up discovery.
+
+        Walk-up stops before reaching the user's home directory, so home is
+        never treated as a project directory (its configs, e.g.
+        ``~/praisonai.yaml``, are not discovered here). This prevents a
+        profile-level file from being mislabelled as a ``project:`` source —
+        important on platforms where temporary project directories live under
+        the user's profile. The legacy ``.praison/config.toml`` is
+        intentionally NOT a project config name — it is a global user config
+        loaded exclusively by ``_load_global_config()`` with a ``global:``
+        label. Keeping it out of ``PROJECT_CONFIG_NAMES`` prevents the walk-up
+        from ever discovering a profile-level legacy file (which may be a real
+        ancestor of ``cwd`` on some platforms) and mislabelling it as a
+        ``project:`` source. A discovered git root still short-circuits the
+        walk earlier when present.
+        """
         # Build search paths from current directory up to git root (or filesystem root)
         git_root = get_git_root(str(self.cwd))
         search_paths = []
         
         # Walk up from cwd to root (or git root if found)
         current = self.cwd.resolve()
-        stop_at = Path("/")
+        try:
+            home = Path.home().resolve()
+        except (RuntimeError, OSError):
+            home = None
         
         # Collect paths from current directory upward
         while current != current.parent:
+            # Never treat the user's home directory as a project directory.
+            if home is not None and current == home:
+                break
+
             search_paths.append(current)
+
             if git_root and current == git_root:
-                break  # Stop at git root if found
+                break
+
             current = current.parent
-        
+                
         # Search for config files
         for search_dir in search_paths:
             for config_name in self.PROJECT_CONFIG_NAMES:
@@ -554,13 +586,8 @@ class ConfigResolver:
                     data = self._read_config_file(config_path)
                     if data:
                         data["_source"] = str(config_path)
-                        # Validate before any migration (TOML legacy is skipped).
-                        if not config_name.endswith(".toml"):
-                            self._validate(data, str(config_path))
-                        else:
-                            data = self._migrate_legacy_config(data)
+                        self._validate(data, str(config_path))
                         return data
-        
         return None
     
     def _managed_source_spec(self) -> Dict[str, Any]:

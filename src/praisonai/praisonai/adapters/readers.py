@@ -136,6 +136,23 @@ class MarkItDownReader:
         return ext in self.supported_extensions and _check_markitdown()
 
 
+def _ensure_readers_registered() -> None:
+    """Idempotently wire the default readers into the core registry at call time.
+
+    The composite readers (Directory/Glob/Auto) delegate to the core reader
+    registry. Because this module no longer registers on import (to keep imports
+    side-effect free), we ensure the defaults are present the first time a
+    composite reader actually runs — the wrapper does its heavy wiring at call
+    time, not import time. Safe to call repeatedly (registry.register is a
+    keyed upsert on the process-wide singleton).
+    """
+    from praisonaiagents.knowledge.readers import get_reader_registry
+
+    registry = get_reader_registry()
+    if registry.get("text") is None:
+        register_default_readers()
+
+
 class DirectoryReader:
     """Reader for directories - recursively reads all files."""
     
@@ -157,7 +174,8 @@ class DirectoryReader:
     ) -> List[Dict[str, Any]]:
         """Load all files from a directory."""
         from praisonaiagents.knowledge.readers import get_reader_registry
-        
+
+        _ensure_readers_registered()
         if not os.path.isdir(source):
             logger.error(f"Not a directory: {source}")
             return []
@@ -226,7 +244,8 @@ class GlobReader:
     ) -> List[Dict[str, Any]]:
         """Load files matching a glob pattern."""
         from praisonaiagents.knowledge.readers import get_reader_registry
-        
+
+        _ensure_readers_registered()
         documents = []
         registry = get_reader_registry()
         
@@ -325,7 +344,8 @@ class AutoReader:
     ) -> List[Dict[str, Any]]:
         """Load from any source type."""
         from praisonaiagents.knowledge.readers import get_reader_registry, detect_source_kind
-        
+
+        _ensure_readers_registered()
         registry = get_reader_registry()
         source_kind = detect_source_kind(source)
         
@@ -391,5 +411,11 @@ def register_default_readers():
     logger.debug("Registered default readers")
 
 
-# Auto-register on import
-register_default_readers()
+# NOTE: No auto-registration at import time. Registering into the core-SDK
+# global singleton as an import side effect violates the "core stays
+# lightweight, wrapper does the heavy work at call time" principle and breaks
+# multi-tenant runtimes / tests. Callers wire these into the SDK registry
+# explicitly (see ``praisonai.adapters.register_default_adapters``), e.g.::
+#
+#     from praisonai.adapters.readers import register_default_readers
+#     register_default_readers()

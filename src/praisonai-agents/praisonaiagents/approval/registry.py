@@ -18,9 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import hashlib
-import json
-import logging
 from praisonaiagents._logging import get_logger
 import os
 from typing import Dict, List, Optional, Set
@@ -91,9 +88,18 @@ class ApprovalRegistry:
         self._global_backend = None  # type: ignore[assignment]
         self._agent_backends: Dict[str, object] = {}
 
-        # Tool requirements (mirrors old APPROVAL_REQUIRED_TOOLS / TOOL_RISK_LEVELS)
+        # Tool requirements (mirrors old APPROVAL_REQUIRED_TOOLS / TOOL_RISK_LEVELS).
+        # These hold process-wide defaults (e.g. DEFAULT_DANGEROUS_TOOLS and any
+        # intentional global registration).
         self._required_tools: Set[str] = set()
         self._risk_levels: Dict[str, str] = {}
+
+        # Per-agent tool requirements. A PermissionManager ``ask`` rule belongs
+        # to a single agent, so it must not leak an approval gate onto unrelated
+        # agents sharing the same process. Mirrors the agent-keyed pattern used
+        # by ``_agent_backends`` / ``_agent_tool_auto_approve``.
+        self._agent_required_tools: Dict[str, Set[str]] = {}
+        self._agent_risk_levels: Dict[tuple[str, str], str] = {}
 
         # Per-agent, per-tool auto-approval (G-A fix)
         self._agent_tool_auto_approve: Dict[tuple[str, str], bool] = {}
@@ -153,18 +159,51 @@ class ApprovalRegistry:
 
     # ── Tool requirement management ──────────────────────────────────────
 
-    def add_requirement(self, tool_name: str, risk_level: str = "high") -> None:
-        self._required_tools.add(tool_name)
-        self._risk_levels[tool_name] = risk_level
+    def add_requirement(
+        self,
+        tool_name: str,
+        risk_level: str = "high",
+        agent_name: Optional[str] = None,
+    ) -> None:
+        """Mark *tool_name* as requiring approval.
 
-    def remove_requirement(self, tool_name: str) -> None:
-        self._required_tools.discard(tool_name)
-        self._risk_levels.pop(tool_name, None)
+        When *agent_name* is given the requirement is scoped to that agent only
+        (used for per-agent ``PermissionManager`` ``ask`` rules), so it never
+        forces approval onto other agents in the same process. Omitting
+        *agent_name* keeps the historical process-wide behaviour used for
+        genuinely dangerous tools registered at startup.
+        """
+        if agent_name:
+            self._agent_required_tools.setdefault(agent_name, set()).add(tool_name)
+            self._agent_risk_levels[(agent_name, tool_name)] = risk_level
+        else:
+            self._required_tools.add(tool_name)
+            self._risk_levels[tool_name] = risk_level
 
-    def is_required(self, tool_name: str) -> bool:
+    def remove_requirement(
+        self, tool_name: str, agent_name: Optional[str] = None
+    ) -> None:
+        if agent_name:
+            tools = self._agent_required_tools.get(agent_name)
+            if tools is not None:
+                tools.discard(tool_name)
+            self._agent_risk_levels.pop((agent_name, tool_name), None)
+        else:
+            self._required_tools.discard(tool_name)
+            self._risk_levels.pop(tool_name, None)
+
+    def is_required(self, tool_name: str, agent_name: Optional[str] = None) -> bool:
+        if agent_name and tool_name in self._agent_required_tools.get(agent_name, ()):
+            return True
         return tool_name in self._required_tools
 
-    def get_risk_level(self, tool_name: str) -> Optional[str]:
+    def get_risk_level(
+        self, tool_name: str, agent_name: Optional[str] = None
+    ) -> Optional[str]:
+        if agent_name:
+            level = self._agent_risk_levels.get((agent_name, tool_name))
+            if level is not None:
+                return level
         return self._risk_levels.get(tool_name)
 
     # ── Per-tool auto-approval (G-A fix) ─────────────────────────────────
@@ -184,20 +223,37 @@ class ApprovalRegistry:
     # ── Context helpers ──────────────────────────────────────────────────
 
     @staticmethod
-    def _approval_cache_key(tool_name: str, arguments: Dict) -> str:
-        payload = json.dumps(arguments or {}, sort_keys=True, default=str)
-        digest = hashlib.sha256(payload.encode()).hexdigest()[:16]
-        return f"{tool_name}:{digest}"
+    def _approval_cache_key(
+        tool_name: str, arguments: Dict, agent_name: Optional[str] = None
+    ) -> str:
+        # Scope the key to the requesting agent so one agent's approval never
+        # silently pre-authorizes an identical call from a different, stricter
+        # agent in the same context. ``*`` is the sentinel for calls made
+        # outside any Agent (e.g. bare module-level tool calls).
+        from .utils import hash_tool_args
+        return f"{agent_name or '*'}:{tool_name}:{hash_tool_args(arguments)}"
 
-    def mark_approved(self, tool_name: str, arguments: Optional[Dict] = None) -> None:
+    def mark_approved(
+        self,
+        tool_name: str,
+        arguments: Optional[Dict] = None,
+        agent_name: Optional[str] = None,
+    ) -> None:
         approved = self._approved_context.get(set())
-        approved.add(self._approval_cache_key(tool_name, arguments or {}))
+        approved.add(self._approval_cache_key(tool_name, arguments or {}, agent_name))
         self._approved_context.set(approved)
 
-    def is_already_approved(self, tool_name: str, arguments: Optional[Dict] = None) -> bool:
-        if self.get_risk_level(tool_name) == "critical":
-            return False
-        return self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set())
+    def is_already_approved(
+        self,
+        tool_name: str,
+        arguments: Optional[Dict] = None,
+        agent_name: Optional[str] = None,
+    ) -> bool:
+        # Honour an explicit mark_approved() from the agent approval path even
+        # for critical tools (e.g. execute_command after AutoApproveBackend).
+        if self._approval_cache_key(tool_name, arguments or {}, agent_name) in self._approved_context.get(set()):
+            return True
+        return False
 
     def _is_session_scoped(
         self, agent_name: Optional[str], tool_name: str, arguments: Optional[Dict]
@@ -344,34 +400,41 @@ class ApprovalRegistry:
         agent_name: Optional[str],
         tool_name: str,
         arguments: Dict,
+        force: bool = False,
     ) -> ApprovalDecision:
-        """Synchronous approval — used by ``Agent._execute_tool_impl``."""
-        # Fast-path: not required
-        if not self.is_required(tool_name):
+        """Synchronous approval — used by ``Agent._execute_tool_impl``.
+
+        ``force`` gates this single call even when the tool is not otherwise
+        registered as requiring approval (e.g. a per-agent ``PermissionManager``
+        ``ask`` rule). It applies only to this call and never mutates shared
+        registry state, so it cannot leak an approval gate onto other agents.
+        """
+        # Fast-path: not required (checks both global and this agent's scope)
+        if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
 
         # Already approved in this context
-        if self.is_already_approved(tool_name, arguments):
+        if self.is_already_approved(tool_name, arguments, agent_name):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # "This session" scoped grant covers matching calls for the run
         if self._is_session_scoped(agent_name, tool_name, arguments):
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, agent_name):
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         # Env auto-approve
         if self.is_env_auto_approve():
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (env)", approver="env")
 
         # YAML auto-approve
         if self.is_yaml_approved(tool_name):
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (yaml)", approver="yaml")
 
         # Delegate to backend
@@ -379,7 +442,7 @@ class ApprovalRegistry:
         request = ApprovalRequest(
             tool_name=tool_name,
             arguments=arguments,
-            risk_level=self._risk_levels.get(tool_name, "medium"),
+            risk_level=self.get_risk_level(tool_name, agent_name) or "medium",
             agent_name=agent_name,
         )
 
@@ -395,7 +458,7 @@ class ApprovalRegistry:
             )
 
         if decision.approved:
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
         self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
         return decision
 
@@ -404,38 +467,43 @@ class ApprovalRegistry:
         agent_name: Optional[str],
         tool_name: str,
         arguments: Dict,
+        force: bool = False,
     ) -> ApprovalDecision:
-        """Asynchronous approval — used by async tool execution path."""
-        # Fast-path: not required
-        if not self.is_required(tool_name):
+        """Asynchronous approval — used by async tool execution path.
+
+        See :meth:`approve_sync` for the ``force`` semantics (per-call gate,
+        no shared-state mutation).
+        """
+        # Fast-path: not required (checks both global and this agent's scope)
+        if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
 
-        if self.is_already_approved(tool_name, arguments):
+        if self.is_already_approved(tool_name, arguments, agent_name):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # "This session" scoped grant covers matching calls for the run
         if self._is_session_scoped(agent_name, tool_name, arguments):
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, agent_name):
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         if self.is_env_auto_approve():
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (env)", approver="env")
 
         if self.is_yaml_approved(tool_name):
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (yaml)", approver="yaml")
 
         backend = self.get_backend(agent_name)
         request = ApprovalRequest(
             tool_name=tool_name,
             arguments=arguments,
-            risk_level=self._risk_levels.get(tool_name, "medium"),
+            risk_level=self.get_risk_level(tool_name, agent_name) or "medium",
             agent_name=agent_name,
         )
 
@@ -448,6 +516,6 @@ class ApprovalRegistry:
             decision = ApprovalDecision(approved=False, reason="Approval timed out")
 
         if decision.approved:
-            self.mark_approved(tool_name, arguments)
+            self.mark_approved(tool_name, arguments, agent_name)
         self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
         return decision

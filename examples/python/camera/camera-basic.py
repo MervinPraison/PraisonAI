@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Basic Camera Integration Example
 

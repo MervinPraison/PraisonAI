@@ -54,6 +54,28 @@ def decode_cursor(cursor: str) -> Tuple[int, Optional[str]]:
         raise ValueError(f"Invalid cursor: {e}")
 
 
+def _normalize_input_schema(input_schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Normalize a tool inputSchema for JSON Schema / MCP client compliance.
+
+    The ``required`` keyword must be an array of strings or absent (never
+    ``null``). Strict MCP clients such as Cursor validate ``tools/list`` with
+    Zod and discard the *entire* offerings batch if any tool has
+    ``inputSchema.required: null``. This defensive pass ensures no such value
+    leaks through the export boundary, even for pre-built or legacy schemas.
+    """
+    if not input_schema:
+        return {"type": "object", "properties": {}}
+    schema = dict(input_schema)
+    if "required" in schema:
+        required = schema["required"]
+        if required is None:
+            schema.pop("required", None)
+        elif not isinstance(required, list):
+            schema.pop("required", None)
+    return schema
+
+
 @dataclass
 class MCPToolDefinition:
     """Definition of an MCP tool with MCP 2025-11-25 annotations."""
@@ -78,7 +100,7 @@ class MCPToolDefinition:
         schema = {
             "name": self.name,
             "description": self.description,
-            "inputSchema": self.input_schema,
+            "inputSchema": _normalize_input_schema(self.input_schema),
         }
         if self.output_schema:
             schema["outputSchema"] = self.output_schema
@@ -361,11 +383,16 @@ class MCPToolRegistry:
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
         
-        return {
+        schema: Dict[str, Any] = {
             "type": "object",
             "properties": properties,
-            "required": required if required else None,
         }
+        # Only include "required" when non-empty. JSON Schema requires this
+        # keyword to be an array of strings or absent (never null), and strict
+        # MCP clients (e.g. Cursor's Zod validation) reject `required: null`.
+        if required:
+            schema["required"] = required
+        return schema
     
     def _type_to_json_schema(self, hint: Any) -> Dict[str, Any]:
         """Convert Python type hint to JSON schema."""

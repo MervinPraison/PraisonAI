@@ -51,7 +51,7 @@ class BotConfig:
     thread_threshold: int = 500  # Auto-thread responses longer than this (0 = disabled)
     
     # Group message policy
-    group_policy: str = "mention_only"  # respond_all, mention_only, command_only
+    group_policy: str = "mention_only"  # respond_all, mention_only, command_only, observe
     
     # Default safe tools (auto-injected for bots with no tools configured)
     # With workspace scoping, file operations are now safe by construction

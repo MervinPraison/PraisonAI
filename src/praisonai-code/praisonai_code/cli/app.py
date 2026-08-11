@@ -147,6 +147,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "env": (".commands.environment", "app", "Environment and diagnostics"),
     "auth": (".commands.auth", "app", "Credential management"),
     "session": (".commands.session", "app", "Session management"),
+    "usage": (".commands.usage", "app", "Local token/cost usage reporting"),
     "completion": (".commands.completion", "app", "Shell completion scripts"),
     "version": (".commands.version", "app", "Version information"),
     "upgrade": (".commands.upgrade", "app", "Update the managed PraisonAI CLI install"),
@@ -186,7 +187,6 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "n8n": (".commands.n8n", "app", "n8n visual workflow editor integration"),
     "knowledge": (".commands.knowledge", "app", "Knowledge base management (legacy)"),
     "rag": (".commands.rag", "app", "RAG commands (legacy - use index/query instead)"),
-    "deploy": (".commands.deploy", "app", "Deployment management"),
     "agents": (".commands.agents", "app", "Agent management"),
     "agent": (".commands.agent", "app", "Custom agent definitions management"),
     "command": (".commands.command", "app", "Custom command definitions management"),
@@ -293,6 +293,11 @@ _TRAIN_RESIDENT_COMMANDS = frozenset({
     "train",
 })
 
+# C14: Deploy commands implemented in ``praisonai_deploy.cli.commands.*``.
+_DEPLOY_RESIDENT_COMMANDS = frozenset({
+    "deploy",
+})
+
 # C11: Browser automation commands implemented in ``praisonai_browser.cli.commands.*``.
 # ``get_command()`` loads them via ``praisonai_browser.cli.commands.{name}`` when the
 # browser package is installed; standalone ``praisonai-code`` hides them from ``--help``.
@@ -320,6 +325,7 @@ from praisonai_code._bot_bridge import bot_package_available
 from praisonai_code._train_bridge import train_package_available
 from praisonai_code._browser_bridge import browser_package_available
 from praisonai_code._mcp_bridge import mcp_package_available
+from praisonai_code._deploy_bridge import deploy_package_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -338,6 +344,7 @@ class LazyCommandGroup(TyperGroup):
         train_ok = train_package_available()
         browser_ok = browser_package_available()
         mcp_ok = mcp_package_available()
+        deploy_ok = deploy_package_available()
         commands.update(
             name for name in _LAZY_COMMANDS
             if (wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS)
@@ -345,7 +352,10 @@ class LazyCommandGroup(TyperGroup):
             and (train_ok or name not in _TRAIN_RESIDENT_COMMANDS)
             and (browser_ok or name not in _BROWSER_RESIDENT_COMMANDS)
             and (mcp_ok or name not in _MCP_RESIDENT_COMMANDS)
+            and (deploy_ok or name not in _DEPLOY_RESIDENT_COMMANDS)
         )
+        if deploy_ok:
+            commands.update(_DEPLOY_RESIDENT_COMMANDS)
         commands.update(_SPECIAL_COMMANDS.keys())
         
         # Add retrieval commands (these are registered via register_commands)
@@ -381,6 +391,19 @@ class LazyCommandGroup(TyperGroup):
         existing = super().get_command(ctx, name)
         if existing is not None:
             return existing
+
+        if name in _DEPLOY_RESIDENT_COMMANDS:
+            if not deploy_package_available():
+                return None
+            try:
+                module = importlib.import_module(f"praisonai_deploy.cli.commands.{name}")
+                sub_app = getattr(module, "app")
+                if isinstance(sub_app, click.Command):
+                    return sub_app
+                return typer_get_command(sub_app)
+            except (ImportError, AttributeError) as e:
+                typer.echo(f"Error loading command '{name}': {e}", err=True)
+                return None
         
         # Check regular lazy commands
         if name in _LAZY_COMMANDS:
@@ -852,6 +875,7 @@ def main_callback(
     if ctx.invoked_subcommand is None:
         # Check for credentials before starting TUI
         from praisonai_code.llm.credentials import (
+            detect_local_endpoint,
             inject_credentials_into_env,
             is_configured,
         )
@@ -859,43 +883,57 @@ def main_callback(
         
         inject_credentials_into_env()
         if not is_configured():  # Check for any configured credentials
-            # In non-interactive mode, just show error
-            if not sys.stdin.isatty() or quiet:
+            # Keyless local-first: if a local OpenAI-compatible endpoint is
+            # reachable (e.g. Ollama), use it as the zero-config default so the
+            # first run works before any auth. Detection is timeout-bounded.
+            local = detect_local_endpoint()
+            if local is not None:
                 typer.echo(
-                    "Error: No API key configured. Run: praisonai setup",
+                    f"No cloud key found; using local model {local.model}. "
+                    "Run `praisonai setup` to add a hosted provider.",
+                    err=True,
+                )
+                # Fall through to the TUI; no gate.
+            # In non-interactive mode, just show error
+            elif not sys.stdin.isatty() or quiet:
+                typer.echo(
+                    "Error: No API key configured. Run: praisonai setup\n"
+                    "(a running local endpoint such as Ollama would be used "
+                    "automatically)",
                     err=True
                 )
                 raise typer.Exit(1)
             
-            # In interactive mode, offer to run setup
-            typer.echo("No API key configured.")
-            run_setup = typer.confirm("Would you like to run the setup wizard now?")
-            
-            if run_setup:
-                # Import and run setup
-                from .commands.setup import _run_setup
-                exit_code = _run_setup(
-                    non_interactive=False,
-                    provider=None,
-                    api_key=None,
-                    model=None
-                )
-                if exit_code != 0:
-                    typer.echo("Setup failed. Exiting.", err=True)
-                    raise typer.Exit(exit_code)
-                
-                # Re-check credentials after setup
-                inject_credentials_into_env()
-                if not is_configured():
-                    typer.echo("Setup completed but credentials still not detected.", err=True)
-                    raise typer.Exit(1)
-                
-                # After successful setup, continue to TUI
-                typer.echo("\nSetup complete! Starting interactive mode...\n")
+            # In interactive mode, offer to run setup (non-blocking suggestion)
             else:
-                typer.echo("\nTo configure credentials later, run: praisonai setup")
-                typer.echo("or set environment variables like OPENAI_API_KEY")
-                raise typer.Exit(0)
+                typer.echo("No API key configured.")
+                run_setup = typer.confirm("Would you like to run the setup wizard now?")
+
+                if run_setup:
+                    # Import and run setup
+                    from .commands.setup import _run_setup
+                    exit_code = _run_setup(
+                        non_interactive=False,
+                        provider=None,
+                        api_key=None,
+                        model=None
+                    )
+                    if exit_code != 0:
+                        typer.echo("Setup failed. Exiting.", err=True)
+                        raise typer.Exit(exit_code)
+
+                    # Re-check credentials after setup
+                    inject_credentials_into_env()
+                    if not is_configured():
+                        typer.echo("Setup completed but credentials still not detected.", err=True)
+                        raise typer.Exit(1)
+
+                    # After successful setup, continue to TUI
+                    typer.echo("\nSetup complete! Starting interactive mode...\n")
+                else:
+                    typer.echo("\nTo configure credentials later, run: praisonai setup")
+                    typer.echo("or set environment variables like OPENAI_API_KEY")
+                    raise typer.Exit(0)
         
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
@@ -941,6 +979,7 @@ def get_command_names():
     # the main wrapper at invocation time via ``_WRAPPER_RESIDENT_COMMANDS``).
     # Special commands with custom handling (tui, queue)
     names.update(_SPECIAL_COMMANDS.keys())
+    names.update(_DEPLOY_RESIDENT_COMMANDS)
     # Inline special commands handled outside the registries
     names.update({"app", "standardise", "standardize"})
     # Dynamically registered retrieval commands (no static module entry)

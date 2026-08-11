@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Bot Gateway Example — Run multiple bots from one gateway server.
 

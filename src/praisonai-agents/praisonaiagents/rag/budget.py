@@ -10,54 +10,40 @@ No heavy imports - only stdlib and typing.
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
+from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
 
-# Model context window mapping (tokens)
-# Updated with latest model information
-MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+
+# RAG-specific context windows not present in the canonical budgeter table
+# (extra Anthropic/Google aliases, Mistral, Llama, DeepSeek, Cohere, etc.).
+# Exact values for models shared with the canonical table are sourced from
+# context/budgeter.MODEL_LIMITS below, so a single source of truth is kept.
+_RAG_EXTRA_CONTEXT_WINDOWS: Dict[str, int] = {
     # OpenAI models
-    "gpt-4": 8192,
     "gpt-4-32k": 32768,
-    "gpt-4-turbo": 128000,
     "gpt-4-turbo-preview": 128000,
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "gpt-4.1": 1000000,
-    "gpt-4.1-mini": 1000000,
-    "gpt-4.1-nano": 1000000,
-    "gpt-3.5-turbo": 16385,
-    "gpt-3.5-turbo-16k": 16385,
     "o1": 200000,
     "o1-mini": 128000,
     "o1-preview": 128000,
-    "o3": 200000,
-    "o3-mini": 200000,
-    "o4-mini": 200000,
-    
+
     # Anthropic models
-    "claude-3-opus": 200000,
-    "claude-3-sonnet": 200000,
-    "claude-3-haiku": 200000,
     "claude-3.5-sonnet": 200000,
     "claude-3.5-haiku": 200000,
     "claude-3.7-sonnet": 200000,
     "claude-4-sonnet": 200000,
     "claude-sonnet-4": 200000,
-    
+
     # Google models
     "gemini-pro": 32768,
     "gemini-1.0-pro": 32768,
-    "gemini-1.5-pro": 1000000,
-    "gemini-1.5-flash": 1000000,
-    "gemini-2.0-flash": 1000000,
     "gemini-2.5-pro": 1000000,
     "gemini-2.5-flash": 1000000,
-    
+
     # Mistral models
     "mistral-large": 128000,
     "mistral-medium": 32768,
     "mistral-small": 32768,
     "mixtral-8x7b": 32768,
-    
+
     # Llama models
     "llama-3.1-405b": 128000,
     "llama-3.1-70b": 128000,
@@ -67,15 +53,37 @@ MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
     "llama-3.3-70b": 128000,
     "llama-4-maverick": 1000000,
     "llama-4-scout": 10000000,
-    
+
     # DeepSeek models
     "deepseek-chat": 64000,
     "deepseek-coder": 64000,
     "deepseek-r1": 64000,
-    
+
     # Cohere models
     "command-r": 128000,
     "command-r-plus": 128000,
+}
+
+# Guard the invariant that RAG-only extras never silently shadow canonical
+# entries. If a key is later added to the canonical budgeter table, it should be
+# removed from _RAG_EXTRA_CONTEXT_WINDOWS so the single source of truth stays
+# authoritative (this is exactly the drift that #3567 fixed). Mirrors the same
+# assertion in eval/tokens.py.
+_overlapping_keys = set(_RAG_EXTRA_CONTEXT_WINDOWS) & {
+    k for k in _CANONICAL_LIMITS if k != "default"
+}
+assert not _overlapping_keys, (
+    "_RAG_EXTRA_CONTEXT_WINDOWS keys overlap with canonical MODEL_LIMITS; remove "
+    f"the duplicate(s) from the RAG table: {sorted(_overlapping_keys)}"
+)
+
+# Single source of truth for exact context-window values: canonical budgeter
+# table takes precedence, with RAG-specific extras layered underneath. This
+# mirrors how eval/tokens.py merges eval-specific extras onto the canonical
+# table and removes the previously drifted duplicate copy.
+MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+    **_RAG_EXTRA_CONTEXT_WINDOWS,
+    **{k: v for k, v in _CANONICAL_LIMITS.items() if k != "default"},
 }
 
 # Default fallback for unknown models

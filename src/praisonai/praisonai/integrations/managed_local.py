@@ -457,8 +457,15 @@ class LocalManagedAgent:
             content = args[1] if len(args) > 1 else kwargs.get("content", "")
             if not filepath:
                 return "Error: No filepath specified"
+            import base64
             import shlex
-            command = f'cat > {shlex.quote(filepath)} << "EOF"\n{content}\nEOF'
+            if not isinstance(content, (str, bytes)):
+                content = str(content)
+            payload = content.encode() if isinstance(content, str) else content
+            b64 = base64.b64encode(payload).decode("ascii")
+            command = (
+                f"printf '%s' {shlex.quote(b64)} | base64 -d > {shlex.quote(filepath)}"
+            )
             
         elif tool_name == "list_files":
             directory = args[0] if args else kwargs.get("directory", ".")
@@ -720,11 +727,14 @@ class LocalManagedAgent:
             "tools": tools,
         }
 
-        # Pass API key and base if provided
+        # Pass API key and base directly to the inner agent instead of mutating
+        # the process-global environment. os.environ.setdefault() would let the
+        # first agent's credentials win for the whole process and leak into every
+        # subprocess spawned thereafter, cross-contaminating other tenants.
         if self.api_key:
-            os.environ.setdefault("OPENAI_API_KEY", self.api_key)
+            agent_kwargs["api_key"] = self.api_key
         if self.api_base:
-            os.environ.setdefault("OPENAI_API_BASE", self.api_base)
+            agent_kwargs["base_url"] = self.api_base
 
         self._inner_agent = Agent(**agent_kwargs)
         self.agent_id = self.agent_id or f"agent_{uuid.uuid4().hex[:12]}"
@@ -1077,23 +1087,52 @@ class LocalManagedAgent:
         if self._compute is None:
             raise RuntimeError("No compute provider attached.")
 
-        from praisonaiagents.managed.protocols import ComputeConfig
+        from praisonaiagents.managed.protocols import (
+            ComputeConfig,
+            load_environment_definition,
+        )
+
+        # Opt-in: a repo-committed ``.praisonai/environment.yaml`` supplies the
+        # baseline (image / packages / setup / env / resources). Explicit
+        # kwargs and instance config still win over the file, so callers who
+        # pass nothing and have no file keep today's defaults unchanged.
+        env_cfg = load_environment_definition()
+
+        def _default(key: str, fallback: Any) -> Any:
+            if env_cfg is not None:
+                return getattr(env_cfg, key, fallback)
+            return fallback
 
         config = ComputeConfig(
-            image=kwargs.get("image", "python:3.12-slim"),
-            cpu=kwargs.get("cpu", 1),
-            memory_mb=kwargs.get("memory_mb", 512),
-            env=kwargs.get("env", self._cfg.get("env", {})),
-            packages=kwargs.get("packages", self._cfg.get("packages")),
-            working_dir=kwargs.get("working_dir", self._cfg.get("working_dir", "/workspace")),
+            image=kwargs.get("image", _default("image", "python:3.12-slim")),
+            cpu=kwargs.get("cpu", _default("cpu", 1)),
+            memory_mb=kwargs.get("memory_mb", _default("memory_mb", 512)),
+            env=kwargs.get("env", self._cfg.get("env") or _default("env", {})),
+            packages=kwargs.get(
+                "packages", self._cfg.get("packages") or _default("packages", None)
+            ),
+            setup=kwargs.get("setup", _default("setup", [])),
+            working_dir=kwargs.get(
+                "working_dir",
+                self._cfg.get("working_dir") or _default("working_dir", "/workspace"),
+            ),
             # Forward the networking policy and provider metadata so providers
             # that honour them (e.g. Tenki's allow_outbound / tenki_image) see
-            # the caller's request instead of always getting the defaults.
-            networking=kwargs.get("networking", self._cfg.get("networking", {"type": "unrestricted"})),
-            metadata=kwargs.get("metadata", self._cfg.get("metadata", {})),
+            # the caller's request instead of always getting the defaults. Copy
+            # metadata — it's mutated below with env_cfg.metadata.
+            networking=kwargs.get(
+                "networking",
+                self._cfg.get("networking") or _default("networking", {"type": "unrestricted"}),
+            ),
+            metadata=kwargs.get("metadata", dict(self._cfg.get("metadata") or {})),
             auto_shutdown=kwargs.get("auto_shutdown", True),
             idle_timeout_s=kwargs.get("idle_timeout_s", 300),
         )
+
+        # Carry capture-related metadata (refresh commands, capture opt-in) from
+        # the definition so the backend's capture path can act on it.
+        if env_cfg is not None and getattr(env_cfg, "metadata", None):
+            config.metadata.update(env_cfg.metadata)
 
         info = await self._compute.provision(config)
         self._compute_instance_id = info.instance_id

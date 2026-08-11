@@ -17,6 +17,9 @@ from .schema import (
     RuntimeConfig,
     CliBackendConfig,
     GlobalConfig,
+    AGENTS_SCHEMA_URL,
+    AGENTS_SCHEMA_HEADER,
+    generate_agents_schema,
 )
 
 from .validator import ConfigValidator
@@ -37,4 +40,7 @@ __all__ = [
     'CliBackendConfig',
     'GlobalConfig',
     'ConfigValidator',
+    'AGENTS_SCHEMA_URL',
+    'AGENTS_SCHEMA_HEADER',
+    'generate_agents_schema',
 ]

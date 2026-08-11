@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Langfuse Integration Example (Updated for TraceSinkProtocol)
 

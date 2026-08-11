@@ -150,6 +150,7 @@ class PraisonTUI:
         self._agent = None
         self._total_tokens = 0
         self._total_cost = 0.0
+        self._pending_context: List[str] = []  # `!!cmd` output for next turn
         
         # Get terminal size
         self.term_width, self.term_height = shutil.get_terminal_size((80, 24))
@@ -303,11 +304,61 @@ Available Commands:
             self.messages.append(Message(role="system", content=f"Unknown command: /{cmd}"))
             return True
     
+    def _handle_shell_escape(self, user_input: str) -> bool:
+        """Handle a ``!cmd`` (or ``!!cmd``) shell escape. Returns True.
+
+        Runs the command through the shared gated executor and appends its
+        output as a system message so it renders inline. ``!!cmd`` also stashes
+        the output as context for the next model turn. Never consumes a turn.
+        """
+        attach = user_input.startswith("!!")
+        command = user_input[2:] if attach else user_input[1:]
+
+        try:
+            from ..features.custom_definitions import run_shell_escape
+        except Exception as exc:  # pragma: no cover - defensive
+            self.messages.append(
+                Message(role="system", content=f"Shell escape unavailable: {exc}")
+            )
+            return True
+
+        result = run_shell_escape(command)
+
+        if not result.enabled:
+            self.messages.append(Message(role="system", content=result.output))
+            return True
+
+        if result.output:
+            self.messages.append(Message(role="system", content=result.output))
+
+        if attach:
+            self._pending_context.append(f"$ {result.command}\n{result.output}")
+            self.messages.append(
+                Message(
+                    role="system",
+                    content="Output attached as context for the next message.",
+                )
+            )
+        return True
+
     def _execute_prompt(self, prompt: str) -> Optional[str]:
         """Execute a prompt and return the response."""
         try:
             agent = self._get_agent()
+
+            # Prepend any `!!cmd` shell output stashed for this turn. Retain it
+            # until the model call succeeds so an error does not silently drop
+            # context the user explicitly attached.
+            attached_context = self._pending_context
+            if attached_context:
+                context = "\n\n".join(attached_context)
+                prompt = f"[shell output]\n{context}\n\n{prompt}"
+
             response = agent.start(prompt)
+
+            # Model call succeeded: the attached context has been consumed.
+            if attached_context:
+                self._pending_context = []
             return str(response) if response else None
         except Exception as e:
             return f"Error: {e}"
@@ -382,6 +433,16 @@ Available Commands:
                 user_input = get_input().strip()
                 
                 if not user_input:
+                    continue
+                
+                # Handle `!cmd` shell escape (does not consume a model turn)
+                if user_input.startswith("!"):
+                    self._handle_shell_escape(user_input)
+                    # Print system messages
+                    for msg in self.messages:
+                        if msg.role == "system":
+                            print(self._format_message(msg))
+                    self.messages = [m for m in self.messages if m.role != "system"]
                     continue
                 
                 # Handle commands

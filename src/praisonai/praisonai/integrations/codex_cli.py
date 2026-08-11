@@ -34,6 +34,9 @@ from typing import AsyncIterator, Dict, Any, Optional, List
 from .base import BaseCLIIntegration
 
 
+_UNSET = object()
+
+
 class CodexCLIIntegration(BaseCLIIntegration):
     """
     Integration with OpenAI's Codex CLI.
@@ -100,17 +103,34 @@ class CodexCLIIntegration(BaseCLIIntegration):
         """Return the CLI command name."""
         return "codex"
     
-    def _build_command(self, task: str, **options) -> List[str]:
+    def _build_command(
+        self,
+        task: str,
+        *,
+        json_output: Optional[bool] = None,
+        output_schema: Optional[str] = None,
+        output_file: Any = _UNSET,
+        **options,
+    ) -> List[str]:
         """
         Build the Codex CLI command.
         
         Args:
             task: The task to execute
+            json_output: JSON output override (defaults to self.json_output)
+            output_schema: Output schema override (defaults to self.output_schema)
+            output_file: Output file override. Omit to use self.output_file;
+                pass ``None`` explicitly to disable the instance default and
+                parse stdout instead.
             **options: Additional options
             
         Returns:
             List of command arguments
         """
+        json_output = self.json_output if json_output is None else json_output
+        output_schema = self.output_schema if output_schema is None else output_schema
+        output_file = self.output_file if output_file is _UNSET else output_file
+        
         cmd = ["codex", "exec", "--skip-git-repo-check"]
         
         # Add working directory
@@ -131,16 +151,16 @@ class CodexCLIIntegration(BaseCLIIntegration):
             cmd.extend(["--sandbox", self.sandbox])
         
         # Add JSON output flag if enabled
-        if self.json_output:
+        if json_output:
             cmd.append("--json")
         
         # Add output schema if specified
-        if self.output_schema:
-            cmd.extend(["--output-schema", self.output_schema])
+        if output_schema:
+            cmd.extend(["--output-schema", output_schema])
         
         # Add output file if specified
-        if self.output_file:
-            cmd.extend(["-o", self.output_file])
+        if output_file:
+            cmd.extend(["-o", output_file])
         
         # Add provider if specified
         if self.provider:
@@ -213,22 +233,18 @@ class CodexCLIIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Ensure JSON output is enabled for streaming
-        original_json = self.json_output
-        self.json_output = True
+        # Ensure JSON output is enabled for streaming (per-call override, no
+        # instance mutation); drop caller json_output so the forced value wins.
+        options.pop("json_output", None)
+        cmd = self._build_command(prompt, json_output=True, **options)
         
-        try:
-            cmd = self._build_command(prompt, **options)
-            
-            async for line in self.stream_async(cmd):
-                if line.strip():
-                    try:
-                        event = json.loads(line)
-                        yield event
-                    except json.JSONDecodeError:
-                        yield {"type": "text", "content": line}
-        finally:
-            self.json_output = original_json
+        async for line in self.stream_async(cmd):
+            if line.strip():
+                try:
+                    event = json.loads(line)
+                    yield event
+                except json.JSONDecodeError:
+                    yield {"type": "text", "content": line}
     
     async def execute_with_schema(
         self, 
@@ -247,30 +263,26 @@ class CodexCLIIntegration(BaseCLIIntegration):
         Returns:
             dict: Parsed structured output
         """
-        original_schema = self.output_schema
-        original_output = self.output_file
+        # Per-call overrides threaded through _build_command, no instance mutation.
+        # Pass output_path (or explicit None) so an unset path parses stdout
+        # rather than silently writing to the instance-default output file.
+        cmd = self._build_command(
+            prompt,
+            output_schema=schema_path,
+            output_file=output_path,
+        )
+        output = await self.execute_async(cmd)
         
-        self.output_schema = schema_path
-        if output_path:
-            self.output_file = output_path
+        # If output file was specified, read from it
+        if output_path and os.path.exists(output_path):
+            with open(output_path, 'r') as f:
+                return json.load(f)
         
+        # Otherwise parse the output
         try:
-            cmd = self._build_command(prompt)
-            output = await self.execute_async(cmd)
-            
-            # If output file was specified, read from it
-            if output_path and os.path.exists(output_path):
-                with open(output_path, 'r') as f:
-                    return json.load(f)
-            
-            # Otherwise parse the output
-            try:
-                return json.loads(output)
-            except json.JSONDecodeError:
-                return {"result": output}
-        finally:
-            self.output_schema = original_schema
-            self.output_file = original_output
+            return json.loads(output)
+        except json.JSONDecodeError:
+            return {"result": output}
     
     def get_env(self) -> Dict[str, str]:
         """Get environment variables for CLI execution."""

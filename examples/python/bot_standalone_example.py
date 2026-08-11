@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Standalone gateway example (praisonai-bot first).
 

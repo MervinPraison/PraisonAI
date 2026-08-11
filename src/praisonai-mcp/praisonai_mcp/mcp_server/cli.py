@@ -10,6 +10,7 @@ Provides CLI commands for managing the MCP server:
 import argparse
 import json
 import logging
+import shutil
 import sys
 from typing import List
 
@@ -137,6 +138,9 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
   # Check MCP server health
   praisonai mcp doctor
 
+  # Machine-readable health check (no Unicode symbols)
+  praisonai mcp doctor --json
+
 [bold]Recipe Server Examples:[/bold]
   # Serve a recipe as STDIO MCP server
   praisonai mcp serve-recipe support-reply --transport stdio
@@ -149,6 +153,23 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
 """
         self._print_rich(help_text)
     
+    def _supports_unicode(self) -> bool:
+        """Return True when stdout can encode status symbols.
+
+        On Windows consoles using a legacy code page (e.g. cp1252) writing
+        Unicode symbols like the U+2713 check mark raises UnicodeEncodeError.
+        Detect that up front so callers can fall back to ASCII markers.
+        """
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        if encoding.lower().replace("-", "") in ("utf8", "utf16", "utf32"):
+            return True
+        for symbol in ("\u2713", "\u2717", "\u25cb"):
+            try:
+                symbol.encode(encoding, errors="strict")
+            except (UnicodeEncodeError, LookupError):
+                return False
+        return True
+
     def _print_rich(self, text: str) -> None:
         """Print with rich formatting if available."""
         try:
@@ -169,11 +190,15 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     
     def _print_success(self, message: str) -> None:
         """Print success message."""
+        mark = "\u2713" if self._supports_unicode() else "[OK]"
         try:
             from rich import print as rprint
-            rprint(f"[green]✓ {message}[/green]")
+            from rich.markup import escape
+            # Escape the marker so Rich renders "[OK]" literally instead of
+            # trying to parse it as a (invalid) markup tag.
+            rprint(f"[green]{escape(mark)} {escape(message)}[/green]")
         except ImportError:
-            print(f"✓ {message}")
+            print(f"{mark} {message}")
     
     def cmd_serve(self, args: List[str]) -> int:
         """Start the MCP server."""
@@ -322,11 +347,11 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            # Register all tools
-            register_all_tools()
+            # Register all tools, resources, and prompts (parity with serve/doctor)
+            register_all()
             
             registry = get_tool_registry()
             tools, next_cursor = registry.list_paginated(
@@ -458,10 +483,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            register_all_tools()
+            register_all()
             registry = get_tool_registry()
             
             read_only = True if parsed.read_only else None
@@ -521,10 +546,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            register_all_tools()
+            register_all()
             registry = get_tool_registry()
             
             tool = registry.get(parsed.name)
@@ -585,10 +610,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            register_all_tools()
+            register_all()
             registry = get_tool_registry()
             
             tool = registry.get(parsed.name)
@@ -607,8 +632,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def cmd_list_resources(self, args: List[str]) -> int:
         """List available MCP resources."""
         try:
+            from .adapters import register_all
             from .registry import get_resource_registry
             
+            register_all()
             registry = get_resource_registry()
             resources = registry.list_schemas()
             
@@ -632,8 +659,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def cmd_list_prompts(self, args: List[str]) -> int:
         """List available MCP prompts."""
         try:
+            from .adapters import register_all
             from .registry import get_prompt_registry
             
+            register_all()
             registry = get_prompt_registry()
             prompts = registry.list_schemas()
             
@@ -695,14 +724,26 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         
         return self.EXIT_SUCCESS
     
+    def _stdio_command(self) -> tuple:
+        """Resolve (command, args) for STDIO serve based on install type.
+
+        Standalone installs expose the ``praisonai-mcp`` entry point which
+        accepts ``serve`` directly. Umbrella installs expose ``praisonai``
+        which requires the ``mcp serve`` subcommand.
+        """
+        if shutil.which("praisonai-mcp"):
+            return "praisonai-mcp", ["serve", "--transport", "stdio"]
+        return "praisonai", ["mcp", "serve", "--transport", "stdio"]
+
     def _generate_claude_desktop_config(self, args) -> dict:
         """Generate Claude Desktop config."""
         if args.transport == "stdio":
+            command, cmd_args = self._stdio_command()
             return {
                 "mcpServers": {
                     "praisonai": {
-                        "command": "praisonai",
-                        "args": ["mcp", "serve", "--transport", "stdio"],
+                        "command": command,
+                        "args": cmd_args,
                     }
                 }
             }
@@ -719,11 +760,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def _generate_cursor_config(self, args) -> dict:
         """Generate Cursor config."""
         if args.transport == "stdio":
+            command, cmd_args = self._stdio_command()
             return {
                 "mcpServers": {
                     "praisonai": {
-                        "command": "praisonai",
-                        "args": ["mcp", "serve", "--transport", "stdio"],
+                        "command": command,
+                        "args": cmd_args,
                     }
                 }
             }
@@ -739,11 +781,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def _generate_vscode_config(self, args) -> dict:
         """Generate VSCode MCP config."""
         if args.transport == "stdio":
+            command, cmd_args = self._stdio_command()
             return {
                 "mcp.servers": {
                     "praisonai": {
-                        "command": "praisonai",
-                        "args": ["mcp", "serve", "--transport", "stdio"],
+                        "command": command,
+                        "args": cmd_args,
                     }
                 }
             }
@@ -762,70 +805,86 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     
     def cmd_doctor(self, args: List[str]) -> int:
         """Check MCP server health and configuration."""
+        as_json = "--json" in args
         try:
+            import os
             from .server import PROTOCOL_VERSION, SUPPORTED_VERSIONS
             from .registry import get_tool_registry, get_resource_registry, get_prompt_registry
             from .adapters import register_all
-            
-            print("\n[bold cyan]PraisonAI MCP Server Health Check[/bold cyan]\n")
-            
+
             # Register all components
             register_all()
-            
-            # Check protocol version
-            print(f"[bold]Protocol Version:[/bold] {PROTOCOL_VERSION}")
-            print(f"[bold]Supported Versions:[/bold] {', '.join(SUPPORTED_VERSIONS)}")
-            print()
-            
-            # Check registries
+
             tools = get_tool_registry().list_all()
             resources = get_resource_registry().list_all()
             prompts = get_prompt_registry().list_all()
-            
-            print("[bold]Registered Components:[/bold]")
-            print(f"  • Tools: {len(tools)}")
-            print(f"  • Resources: {len(resources)}")
-            print(f"  • Prompts: {len(prompts)}")
-            print()
-            
-            # Check environment
-            import os
+
             env_checks = {
                 "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY")),
                 "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY")),
                 "GOOGLE_API_KEY": bool(os.environ.get("GOOGLE_API_KEY")),
             }
-            
-            print("[bold]Environment:[/bold]")
-            for key, present in env_checks.items():
-                status = "[green]✓[/green]" if present else "[yellow]○[/yellow]"
-                print(f"  {status} {key}")
-            print()
-            
-            # Check dependencies
+
             deps = {
                 "starlette": False,
                 "uvicorn": False,
                 "praisonaiagents": False,
             }
-            
             for dep in deps:
                 try:
                     __import__(dep)
                     deps[dep] = True
                 except ImportError:
                     pass
-            
-            print("[bold]Dependencies:[/bold]")
-            for dep, available in deps.items():
-                status = "[green]✓[/green]" if available else "[red]✗[/red]"
-                print(f"  {status} {dep}")
-            print()
-            
-            # Overall status
+
             all_deps = all(deps.values())
             any_api_key = any(env_checks.values())
-            
+
+            if as_json:
+                print(json.dumps({
+                    "protocol_version": PROTOCOL_VERSION,
+                    "supported_versions": list(SUPPORTED_VERSIONS),
+                    "components": {
+                        "tools": len(tools),
+                        "resources": len(resources),
+                        "prompts": len(prompts),
+                    },
+                    "environment": env_checks,
+                    "dependencies": deps,
+                    "ready": all_deps and any_api_key,
+                }, indent=2))
+                return self.EXIT_SUCCESS if all_deps else self.EXIT_ERROR
+
+            unicode_ok = self._supports_unicode()
+            bullet = "\u2022" if unicode_ok else "-"
+            ok_mark = "[green]\u2713[/green]" if unicode_ok else "[green][OK][/green]"
+            skip_mark = "[yellow]\u25cb[/yellow]" if unicode_ok else "[yellow][--][/yellow]"
+            fail_mark = "[red]\u2717[/red]" if unicode_ok else "[red][X][/red]"
+
+            print("\n[bold cyan]PraisonAI MCP Server Health Check[/bold cyan]\n")
+
+            print(f"[bold]Protocol Version:[/bold] {PROTOCOL_VERSION}")
+            print(f"[bold]Supported Versions:[/bold] {', '.join(SUPPORTED_VERSIONS)}")
+            print()
+
+            print("[bold]Registered Components:[/bold]")
+            print(f"  {bullet} Tools: {len(tools)}")
+            print(f"  {bullet} Resources: {len(resources)}")
+            print(f"  {bullet} Prompts: {len(prompts)}")
+            print()
+
+            print("[bold]Environment:[/bold]")
+            for key, present in env_checks.items():
+                status = ok_mark if present else skip_mark
+                print(f"  {status} {key}")
+            print()
+
+            print("[bold]Dependencies:[/bold]")
+            for dep, available in deps.items():
+                status = ok_mark if available else fail_mark
+                print(f"  {status} {dep}")
+            print()
+
             if all_deps and any_api_key:
                 self._print_success("MCP server is ready to run")
             elif not all_deps:
@@ -833,11 +892,17 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 return self.EXIT_ERROR
             else:
                 print("[yellow]Warning: No API keys configured. Some tools may not work.[/yellow]")
-            
+
             return self.EXIT_SUCCESS
-            
+
         except Exception as e:
-            self._print_error(str(e))
+            # In --json mode automation parses stdout, so emit a JSON error
+            # object there instead of Rich-formatted text that would corrupt
+            # the machine-readable stream.
+            if as_json:
+                print(json.dumps({"error": str(e), "ready": False}, indent=2))
+            else:
+                self._print_error(str(e))
             return self.EXIT_ERROR
 
 

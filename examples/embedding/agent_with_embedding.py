@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Agent-centric Embedding Example
 

@@ -6,6 +6,8 @@ Commands:
     praisonai browser sessions - List active sessions
 """
 
+import errno
+
 import typer
 from typing import Optional
 from pathlib import Path
@@ -19,6 +21,36 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+def _is_bridge_unreachable(exc: Exception) -> bool:
+    """Return True if the exception indicates the bridge server is not running.
+
+    Matches connection-refused errors across platforms:
+    Windows WinError 1225, Linux ECONNREFUSED (111), macOS (61).
+    """
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    if getattr(exc, "winerror", None) == 1225:
+        return True
+    if getattr(exc, "errno", None) in (111, 61):
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and cause is not exc:
+        return _is_bridge_unreachable(cause)
+    return False
+
+
+def _bridge_unreachable_message(port: int = 8765) -> str:
+    """Actionable message shown when the bridge server is not running."""
+    return (
+        f"Cannot connect to PraisonAI Browser bridge at ws://localhost:{port}/ws\n\n"
+        "The bridge server is not running. In a separate terminal, start it with:\n\n"
+        f"  praisonai browser start --port {port}\n\n"
+        "Then verify it is up:\n"
+        f"  curl http://localhost:{port}/health\n\n"
+        "Note: this is the local bridge server, not your target site (--url)."
+    )
 
 
 @app.command("start")
@@ -51,11 +83,28 @@ def start_server(
         max_steps=max_steps,
         verbose=verbose,
     )
-    
+
+    def _already_running() -> None:
+        health_url = f"http://127.0.0.1:{port}/health"
+        console.print(f"[yellow]Bridge server already running on port {port}[/yellow]")
+        console.print(f"  Health: {health_url}")
+        console.print("  Leave that terminal open; use a second terminal for commands.")
+
+    from praisonai_browser.server import _port_in_use
+    if _port_in_use(server.host, server.port):
+        _already_running()
+        raise typer.Exit(0)
+
     try:
         server.start()
     except KeyboardInterrupt:
         console.print("\n[yellow]Server stopped[/yellow]")
+    except OSError as e:
+        if getattr(e, "winerror", None) == 10048 or e.errno == errno.EADDRINUSE:
+            _already_running()
+            raise typer.Exit(0)
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -226,6 +275,65 @@ def clear_sessions(
     manager.close()
 
 
+def _require_bridge(port: int = 8765) -> None:
+    """Pre-flight check: verify the bridge server is up with an extension connected.
+
+    Fails fast (a few seconds) with an actionable message instead of letting the
+    CLI hang for the full timeout on keepalive PING/PONG frames.
+    """
+    import json
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            data = json.loads(resp.read())
+    except (OSError, ValueError):
+        # OSError: bridge unreachable; ValueError/JSONDecodeError: malformed body.
+        console.print("[red]Cannot reach PraisonAI Browser bridge[/red]")
+        console.print(f"  Expected: ws://127.0.0.1:{port}/ws")
+        console.print("  Start server: praisonai browser start --port 8765 --host 127.0.0.1")
+        console.print(f"  Verify: curl {url}")
+        raise typer.Exit(2)
+
+    # Prefer the explicit extension count; fall back to total connections for
+    # older servers that don't report extension_connections. Guard against
+    # malformed (non-object / non-integer) responses.
+    if not isinstance(data, dict):
+        console.print("[red]Bridge returned an unexpected health response[/red]")
+        console.print(f"  Verify: curl {url}")
+        raise typer.Exit(2)
+
+    ext = data.get("extension_connections")
+    if ext is None:
+        ext = data.get("connections", 0)
+    if not isinstance(ext, int) or isinstance(ext, bool):
+        console.print("[red]Bridge returned an invalid connection count[/red]")
+        console.print(f"  Verify: curl {url}")
+        raise typer.Exit(2)
+    if ext < 1:
+        console.print("[yellow]Bridge is up but no extension is connected[/yellow]")
+        console.print("  1. Open Chrome with the PraisonAI extension and side panel")
+        console.print(f"  2. Verify: curl {url} → extension_connections >= 1")
+        console.print("  3. Use the side panel OR the CLI, not both at once")
+        console.print("  Tip: use --engine cdp for extension-free automation")
+        raise typer.Exit(2)
+
+
+def _exit_for_status(result: Optional[dict]) -> None:
+    """Map a run result status to a CLI exit code (shared by all engine modes).
+
+    Exit codes: 0=success, 2=infra failure, 3=timeout, 1=task failure.
+    """
+    status = (result or {}).get("status")
+    if status in ("error", "no_steps"):
+        raise typer.Exit(2)
+    if status == "timeout":
+        raise typer.Exit(3)
+    if status in ("failed", "stopped"):
+        raise typer.Exit(1)
+
+
 def _run_alternative_engine(
     engine: str,
     goal: str,
@@ -246,7 +354,7 @@ def _run_alternative_engine(
     from pathlib import Path
     from datetime import datetime
     
-    console.print(f"[bold blue]🚀 Starting browser agent ({engine} mode)[/bold blue]")
+    console.print(f"[bold blue]Starting browser agent ({engine} mode)[/bold blue]")
     console.print(f"   Goal: {goal}")
     console.print(f"   URL: {url}")
     console.print(f"   Model: {model}")
@@ -411,13 +519,17 @@ def run_agent(
         )
         return
     
-    console.print(f"[bold blue]🚀 Starting browser agent[/bold blue]")
+    console.print("[bold blue]Starting browser agent[/bold blue]")
     console.print(f"   Goal: {goal}")
     console.print(f"   URL: {url}")
     console.print(f"   Model: {model}")
     if debug:
         console.print(f"   [dim]Debug mode: ON[/dim]")
     console.print()
+    
+    # Pre-flight: fail fast if the bridge is down or no extension is connected,
+    # instead of hanging on keepalive PING/PONG until --timeout.
+    _require_bridge(port=8765)
     
     if debug:
         # Debug mode - connect directly to WebSocket and show all messages
@@ -505,13 +617,18 @@ def run_agent(
                     return {"status": "timeout", "goal": goal}
                     
             except Exception as e:
+                if _is_bridge_unreachable(e):
+                    console.print(f"[red]{_bridge_unreachable_message(port)}[/red]")
+                    return {"status": "error", "error": "bridge_unreachable"}
                 console.print(f"[red]Connection error:[/red] {e}")
                 return {"status": "error", "error": str(e)}
         
         try:
-            asyncio.run(debug_run())
+            debug_result = asyncio.run(debug_run())
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted[/yellow]")
+            raise typer.Exit(0)
+        _exit_for_status(debug_result)
         return
     
     # Normal mode - poll session database for progress
@@ -535,11 +652,18 @@ def run_agent(
                 
                 # Wait for session_id
                 session_id = None
+                automation_sent = None
                 while True:
                     message = await asyncio.wait_for(ws.recv(), timeout=10)
                     data = json.loads(message)
+                    if data.get("type") == "error":
+                        console.print(f"[red]{data.get('error', 'Server error')}[/red]")
+                        if data.get("code") == "EXTENSION_IN_USE":
+                            console.print("  Stop the side panel agent and retry.")
+                        return {"status": "error", "error": data.get("error")}
                     if data.get("type") == "status" and data.get("session_id"):
                         session_id = data["session_id"]
+                        automation_sent = data.get("start_automation_sent")
                         console.print(f"[dim]Session: {session_id[:8]}[/dim]")
                         break
                 
@@ -547,60 +671,95 @@ def run_agent(
                     console.print("[red]Failed to start session[/red]")
                     return {"status": "error"}
                 
+                if verbose:
+                    if automation_sent:
+                        console.print("[dim]start_automation delivered to extension[/dim]")
+                    elif automation_sent is False:
+                        console.print("[yellow]Warning: start_automation not confirmed[/yellow]")
+                
+                # If the server confirmed no extension received the task, fail fast
+                # instead of polling an empty DB until timeout.
+                if automation_sent is False:
+                    console.print("[red]Extension automation did not start.[/red]")
+                    console.print("  Check: extension connected? side panel stopped? sessions=0?")
+                    return {"status": "error", "session_id": session_id,
+                            "error": "start_automation not delivered"}
+                
                 # Poll session database for progress
                 start_time = time.time()
                 displayed_steps = 0
                 last_url = ""
+                first_step_deadline = 30  # seconds to see the first step
                 
+                # Only apply the first-step watchdog when the server could NOT
+                # confirm delivery to an extension. When start_automation_sent is
+                # True, a slow first step (cold browser, slow navigation, slow
+                # initial model call) is legitimate, so we honour --timeout only.
+                apply_watchdog = automation_sent is not True
+
                 console.print()
                 while time.time() - start_time < timeout:
                     await asyncio.sleep(2)  # Poll every 2s
                     
                     session = session_manager.get_session(session_id)
-                    if not session:
-                        continue
+                    if session:
+                        # Show new steps FIRST so a step written near the deadline
+                        # is observed instead of being rejected unseen.
+                        for step in session["steps"][displayed_steps:]:
+                            step_num = step.get("step_number", displayed_steps)
+                            action = step.get("action", {})
+                            thought = step.get("thought", "")[:80] if step.get("thought") else ""
+                            
+                            console.print(f"\n[bold]Step {step_num}:[/bold]")
+                            
+                            if thought:
+                                console.print(f"  [dim]💭 {thought}...[/dim]")
+                            
+                            if action:
+                                action_type = action.get("action", "wait")
+                                console.print(f"  [yellow]▶ {action_type.upper()}[/yellow]", end="")
+                                if action.get("selector"):
+                                    console.print(f" → {action.get('selector')[:40]}", end="")
+                                if action.get("text"):
+                                    console.print(f" \"{action.get('text')}\"", end="")
+                                console.print()
+                            
+                            displayed_steps += 1
+                        
+                        # Show URL changes
+                        current_url = session.get("current_url", "")
+                        if current_url and current_url != last_url:
+                            console.print(f"  [dim]📍 {current_url[:60]}[/dim]")
+                            last_url = current_url
+                        
+                        # Check completion
+                        status = session.get("status")
+                        if status == "completed":
+                            console.print(f"\n[green]✅ Task completed![/green]")
+                            return {"status": "completed", "session_id": session_id}
+                        elif status in ("failed", "stopped"):
+                            console.print(f"\n[yellow]Session {status}[/yellow]")
+                            return {"status": status, "session_id": session_id}
                     
-                    # Show new steps
-                    for step in session["steps"][displayed_steps:]:
-                        step_num = step.get("step_number", displayed_steps)
-                        action = step.get("action", {})
-                        thought = step.get("thought", "")[:80] if step.get("thought") else ""
-                        
-                        console.print(f"\n[bold]Step {step_num}:[/bold]")
-                        
-                        if thought:
-                            console.print(f"  [dim]💭 {thought}...[/dim]")
-                        
-                        if action:
-                            action_type = action.get("action", "wait")
-                            console.print(f"  [yellow]▶ {action_type.upper()}[/yellow]", end="")
-                            if action.get("selector"):
-                                console.print(f" → {action.get('selector')[:40]}", end="")
-                            if action.get("text"):
-                                console.print(f" \"{action.get('text')}\"", end="")
-                            console.print()
-                        
-                        displayed_steps += 1
-                    
-                    # Show URL changes
-                    current_url = session.get("current_url", "")
-                    if current_url and current_url != last_url:
-                        console.print(f"  [dim]📍 {current_url[:60]}[/dim]")
-                        last_url = current_url
-                    
-                    # Check completion
-                    status = session.get("status")
-                    if status == "completed":
-                        console.print(f"\n[green]✅ Task completed![/green]")
-                        return {"status": "completed", "session_id": session_id}
-                    elif status in ("failed", "stopped"):
-                        console.print(f"\n[yellow]Session {status}[/yellow]")
-                        return {"status": status, "session_id": session_id}
+                    # Watchdog: only when delivery was NOT confirmed. If no step
+                    # is observed within the deadline the extension isn't running
+                    # the task — fail fast with guidance (treated as a timeout).
+                    if (
+                        apply_watchdog
+                        and displayed_steps == 0
+                        and (time.time() - start_time) > first_step_deadline
+                    ):
+                        console.print(f"\n[red]No automation steps in {first_step_deadline}s[/red]")
+                        console.print("  Check: extension connected? side panel stopped? sessions=0?")
+                        return {"status": "no_steps", "session_id": session_id}
                 
                 console.print(f"\n[yellow]⏱️ Timeout after {timeout}s[/yellow]")
                 return {"status": "timeout", "session_id": session_id}
                 
         except Exception as e:
+            if _is_bridge_unreachable(e):
+                console.print(f"[red]{_bridge_unreachable_message(port)}[/red]")
+                return {"status": "error", "error": "bridge_unreachable"}
             console.print(f"[red]Error:[/red] {e}")
             return {"status": "error", "error": str(e)}
         finally:
@@ -608,11 +767,12 @@ def run_agent(
     
     try:
         result = asyncio.run(run_with_progress())
-        if result.get("session_id"):
-            console.print(f"   Session: {result['session_id']}")
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
         raise typer.Exit(0)
+    if result.get("session_id"):
+        console.print(f"   Session: {result['session_id']}")
+    _exit_for_status(result)
 
 
 @app.command("tabs")
@@ -1789,32 +1949,62 @@ def doctor_chrome(
 @doctor_app.command("extension")
 def doctor_extension(
     port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    server_port: int = typer.Option(8765, "--server-port", help="Bridge server port"),
 ):
-    """Check PraisonAI extension status."""
+    """Check PraisonAI extension status.
+
+    Reports two independent signals:
+      - Bridge connection (ground truth): the extension's side panel connects to
+        the bridge server via /health, regardless of which Chrome profile it runs in.
+      - CDP :9222 (optional): only relevant when Chrome was launched with
+        --remote-debugging-port. This is empty when using your daily "Work" Chrome,
+        which is normal and NOT a failure.
+    """
     import requests
-    
+
+    # Ground truth: is the extension connected to the bridge server?
+    # Prefer the extension-specific count; fall back to raw connections only
+    # when talking to an older server that doesn't report it.
+    bridge_connected = False
+    try:
+        resp = requests.get(f"http://localhost:{server_port}/health", timeout=5)
+        data = resp.json()
+        ext_connections = data.get("extension_connections")
+        if ext_connections is None:
+            ext_connections = data.get("connections", 0)
+        if ext_connections >= 1:
+            bridge_connected = True
+            console.print(f"[green]✅ Extension connected to bridge ({ext_connections} connection(s))[/green]")
+        else:
+            console.print("[yellow]⚠️ No extension connected to bridge (extension connections: 0)[/yellow]")
+            console.print("   Open the PraisonAI side panel in your daily Chrome, then re-check.")
+    except requests.exceptions.ConnectionError:
+        console.print(f"[yellow]⚠️ Bridge server not running on port {server_port}[/yellow]")
+        console.print("   Start with: praisonai browser start")
+    except Exception as e:
+        console.print(f"[yellow]⚠️ Bridge check error:[/yellow] {e}")
+
+    # Optional: CDP debug-profile check (only meaningful for CDP/launch users).
     try:
         resp = requests.get(f"http://localhost:{port}/json", timeout=5)
         targets = resp.json()
-        
-        # Find extension service worker
-        sw = next((t for t in targets if t.get('type') == 'service_worker' 
-                   and ('praisonai' in t.get('url', '').lower() or 
+
+        sw = next((t for t in targets if t.get('type') == 'service_worker'
+                   and ('praisonai' in t.get('url', '').lower() or
                         'fkmfdklcegbbpipbcimbokpfcfamhpdc' in t.get('url', ''))), None)
-        
+
         if sw:
-            console.print("[green]✅ Extension loaded[/green]")
+            console.print(f"[green]✅ Extension present in CDP Chrome (port {port})[/green]")
             console.print(f"   URL: {sw['url'][:60]}...")
-            console.print(f"   Status: {sw.get('type', 'unknown')}")
         else:
-            console.print("[yellow]⚠️ Extension not found[/yellow]")
-            console.print("   Install from: chrome://extensions (load unpacked)")
-            
+            console.print(f"[dim]ℹ️ Extension not in CDP Chrome on port {port} (normal for daily 'Work' Chrome).[/dim]")
     except requests.exceptions.ConnectionError:
-        console.print(f"[red]❌ Cannot connect to Chrome on port {port}[/red]")
-        raise typer.Exit(1)
+        console.print(f"[dim]ℹ️ No Chrome with --remote-debugging-port={port} (optional).[/dim]")
     except Exception as e:
-        console.print(f"[red]❌ Error checking extension:[/red] {e}")
+        console.print(f"[dim]ℹ️ CDP check skipped:[/dim] {e}")
+
+    # Fail only when the ground-truth bridge connection is absent.
+    if not bridge_connected:
         raise typer.Exit(1)
 
 
@@ -2820,7 +3010,9 @@ def launch_browser(
                                 ) as resp:
                                     if resp.status == 200:
                                         health = await resp.json()
-                                        connections = health.get("connections", 0)
+                                        connections = health.get("extension_connections")
+                                        if connections is None:
+                                            connections = health.get("connections", 0)
                                         sessions = health.get("sessions", 0)
                                         if connections >= 1:
                                             extension_connected = True
@@ -2843,7 +3035,18 @@ def launch_browser(
                     if not extension_connected:
                         elapsed = int(asyncio.get_event_loop().time() - wait_start)
                         console.print(f"[red]✗ Extension did not connect after {elapsed}s[/red]")
-                        console.print("[yellow]Hint: Open Chrome DevTools -> Extensions -> PraisonAI -> Background page to check console[/yellow]")
+                        console.print("[yellow]Auto-load extension failed (common on Chrome 137+ / Windows).[/yellow]")
+                        console.print("[bold]Manual setup — load into your daily Chrome:[/bold]")
+                        console.print("  1. Open your normal Chrome (Work profile)")
+                        console.print("  2. Go to chrome://extensions and enable 'Developer mode'")
+                        console.print(f"  3. Click 'Load unpacked' and select: {extension_path}")
+                        if no_server:
+                            console.print("  4. Start the bridge first: praisonai browser start")
+                            console.print(f"     (you ran with --no-server, so no bridge is listening on port {server_port})")
+                            console.print("  5. Open the side panel, then verify with: praisonai browser doctor extension")
+                        else:
+                            console.print(f"  4. Open the side panel and confirm connection to ws://127.0.0.1:{server_port}/ws")
+                            console.print(f"  5. Verify with: curl http://127.0.0.1:{server_port}/health  (expect extension_connections >= 1)")
                         
                         # Additional debug info
                         if debug:
@@ -2851,7 +3054,7 @@ def launch_browser(
                             console.print("[dim]   [DEBUG] The service worker may terminate before connecting to bridge[/dim]")
                             console.print("[dim]   [DEBUG] Workaround: Use --engine cdp for reliable automation[/dim]")
                         
-                        raise Exception(f"Extension not connected to bridge server after {elapsed}s. Try: 1) Reload the extension 2) Check extension console for errors")
+                        raise Exception(f"Extension not connected to bridge server after {elapsed}s. Manual: Load unpacked from {extension_path}")
                     
                     try:
                         result = await run_with_extension()

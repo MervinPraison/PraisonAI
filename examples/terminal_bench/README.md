@@ -1,18 +1,40 @@
-# Terminal-Bench 2.0 Integration with PraisonAI
+# Terminal-Bench 2.1 Integration with PraisonAI
 
-This directory contains examples for integrating PraisonAI Agents with **Terminal-Bench 2.0** via the **Harbor framework** for AI agent benchmarking.
+This directory contains adapters for benchmarking PraisonAI on **Terminal-Bench 2.1** via the **Harbor framework**. Everything lives in the examples/benchmark layer + CI — there are **zero changes to the `praisonaiagents` / `praisonai` SDK surface**.
 
 ## Overview
 
-[Terminal-Bench 2.0](https://tbench.ai) is a Stanford/Laude Institute benchmark that has become the gold standard for evaluating AI coding agents in real terminal environments. The [Harbor framework](https://harborframework.com) is the official evaluation harness that abstracts container lifecycle, parallelization, and cloud providers.
+[Terminal-Bench 2.1](https://www.tbench.ai/docs/run-terminal-bench-2-1) is the current release of the Laude Institute benchmark for evaluating AI coding agents in real terminal environments. The [Harbor framework](https://github.com/laude-institute/harbor) is the official evaluation harness that abstracts container lifecycle, parallelization, and cloud providers.
+
+## Setup
+
+Install Harbor and PraisonAI into **one venv** and run from the repo root with `PYTHONPATH=.` so the adapter import path resolves:
+
+```bash
+pip install harbor
+pip install -e src/praisonai-agents -e src/praisonai
+export PYTHONPATH=.
+```
 
 ## Integration Types
+
+### 0. Code Agent (headline — benchmarks `praisonai code`)
+- **File**: `praisonai_code_agent.py`
+- **Purpose**: Installs and drives the terminal-native `praisonai code` assistant headlessly inside the container.
+- **Run**:
+  ```bash
+  PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
+    --agent "examples.terminal_bench.praisonai_code_agent:PraisonAICodeAgent" \
+    -m openai/gpt-4o-mini \
+    --ae OPENAI_API_KEY=$OPENAI_API_KEY \
+    -n 4
+  ```
 
 ### 1. External Agent (Direct Agent Class)
 - **File**: `praisonai_external_agent.py`
 - **Purpose**: External agent that uses direct `Agent()` class instantiation
-- **Usage**: Run with `--agent-import-path` flag
-- **Approach**: Uses `praisonaiagents.Agent` directly with `execute_command` tool
+- **Usage**: Run with `--agent "module:Class"`
+- **Approach**: Uses `praisonaiagents.Agent` directly with a bash tool bridged to Harbor's `exec()`
 
 ### 2. Wrapper Agent (CLI-Based)
 - **File**: `praisonai_wrapper_agent.py`
@@ -42,12 +64,12 @@ pip install praisonaiagents[tools]
 
 ```bash
 # Test with oracle agent first
-harbor run -d terminal-bench/terminal-bench-2 -a oracle
+harbor run -d terminal-bench/terminal-bench-2-1 -a oracle
 
 # Run PraisonAI external agent (uses direct Agent() class)
-harbor run -d terminal-bench/terminal-bench-2 \
-  --agent-import-path examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent \
-  --model openai/gpt-4o \
+PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
+  --agent "examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent" \
+  --model openai/gpt-4o-mini \
   --ae OPENAI_API_KEY=$OPENAI_API_KEY \
   -n 4
 ```
@@ -56,9 +78,9 @@ harbor run -d terminal-bench/terminal-bench-2 \
 
 ```bash
 # Run PraisonAI wrapper agent (uses `praisonai "TASK"` CLI pattern)
-harbor run -d terminal-bench/terminal-bench-2 \
-  --agent-import-path examples.terminal_bench.praisonai_wrapper_agent:PraisonAIWrapperAgent \
-  --model openai/gpt-4o \
+PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
+  --agent "examples.terminal_bench.praisonai_wrapper_agent:PraisonAIWrapperAgent" \
+  --model openai/gpt-4o-mini \
   --ae OPENAI_API_KEY=$OPENAI_API_KEY \
   -n 4
 ```
@@ -66,9 +88,9 @@ harbor run -d terminal-bench/terminal-bench-2 \
 ### Running on Cloud (Daytona/E2B/Modal)
 
 ```bash
-harbor run -d terminal-bench/terminal-bench-2 \
-  --agent-import-path examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent \
-  --model openai/gpt-4o \
+PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
+  --agent "examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent" \
+  --model openai/gpt-4o-mini \
   --env daytona -n 32 \
   --ae OPENAI_API_KEY=$OPENAI_API_KEY
 ```
@@ -100,6 +122,9 @@ harbor run -d terminal-bench/terminal-bench-2 \
 ## Files
 
 - `README.md` - This documentation
+- `praisonai_code_agent.py` - **Headline** adapter benchmarking `praisonai code`
+- `job_code_smoke.yaml` - Smoke-test job config for the code agent
+- `RESULTS.md` - Recorded pass-rates
 - `praisonai_external_agent.py` - External agent (direct Agent class)
 - `praisonai_wrapper_agent.py` - Wrapper agent (CLI-based approach)
 - `praisonai_installed_agent.py` - Installed agent implementation  
@@ -127,7 +152,7 @@ Each task provides:
 
 ## Contributing
 
-1. Test changes with oracle agent first: `harbor run -d terminal-bench/terminal-bench-2 -a oracle`
+1. Test changes with oracle agent first: `harbor run -d terminal-bench/terminal-bench-2-1 -a oracle`
 2. Run real agentic tests to ensure end-to-end functionality
 3. Follow PraisonAI's AGENTS.md architecture guidelines
 4. Add both unit tests and integration tests

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: praisonai-agents-api
+description: Helm chart for PraisonAI agents API (/health, /chat) with optional Postgres (pgvector).
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://docs.praison.ai
+sources:
+  - https://github.com/MervinPraison/PraisonAI
+keywords:
+  - praisonai
+  - agents
+  - api
+maintainers:
+  - name: MervinPraison
+    url: https://github.com/MervinPraison/PraisonAI

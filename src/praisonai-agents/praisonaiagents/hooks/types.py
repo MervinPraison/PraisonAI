@@ -32,10 +32,25 @@ class HookEvent(str, Enum):
     # Session lifecycle
     SESSION_START = "session_start"
     SESSION_END = "session_end"
+    # Fired when a durable session write fails (disk-full/corruption/permission).
+    # The already-produced turn is spilled to a fallback file and this hook makes
+    # the otherwise-silent failure observable for metrics/alerting (Issue #3597).
+    SESSION_PERSIST_FAILED = "session_persist_failed"
     
     # LLM lifecycle
     BEFORE_LLM = "before_llm"
     AFTER_LLM = "after_llm"
+    # Primary model became unavailable mid-turn and the runtime transparently
+    # switched to the next entry in the configured ``fallback_models`` chain.
+    # Makes the otherwise silent quality/cost degradation observable so a
+    # gateway/plugin can react (notice, alert, metrics) — Issue #3820.
+    MODEL_FALLBACK = "model_fallback"
+
+    # Prompt-cache stability (advisory): fired when a turn's cached prompt
+    # prefix (model + tool schemas + system-prompt fingerprint) changes from
+    # the previous turn, so a long-lived conversation's provider prompt cache
+    # will miss. Payload carries the old/new signature and a reason.
+    PROMPT_PREFIX_INVALIDATED = "prompt_prefix_invalidated"
     
     # Error handling
     ON_ERROR = "on_error"
@@ -47,6 +62,7 @@ class HookEvent(str, Enum):
     MESSAGE_RECEIVED = "message_received"
     MESSAGE_SENDING = "message_sending"
     MESSAGE_SENT = "message_sent"
+    MESSAGE_UNDELIVERED = "message_undelivered"  # Reply permanently undeliverable
     
     # Gateway lifecycle
     GATEWAY_START = "gateway_start"
@@ -68,6 +84,9 @@ class HookEvent(str, Enum):
     SCHEDULE_ADD = "schedule_add"
     SCHEDULE_REMOVE = "schedule_remove"
     SCHEDULE_TRIGGER = "schedule_trigger"
+
+    # CLI backend delegation (subprocess, not LiteLLM HTTP)
+    CLI_BACKEND_EXECUTE = "cli_backend_execute"
 
     # Background job lifecycle
     JOB_COMPLETED = "job_completed"  # A background job finished (ok or error)

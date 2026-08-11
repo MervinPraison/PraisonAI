@@ -22,16 +22,32 @@ Usage:
     def my_tool(query: str, state: Injected[dict]) -> str:
         '''Tool with injected state.'''
         return f"session={state.get('session_id')}"
+
+    # Requiring human approval (mirrors Agent(approval=...)):
+    @tool(approval=True)
+    def refund_order(order_id: str) -> str:
+        return "refunded"
 """
 
 import inspect
 import functools
 import logging
-import copy
+import warnings
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
-from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
+from .schema import build_parameters_schema
+
+# Valid human-approval risk levels, mirroring approval.RiskLevel. A misspelled
+# level (e.g. "critial") must be rejected rather than silently registered, since
+# critical-only policy checks compare against the exact "critical" string.
+_VALID_RISK_LEVELS = ("critical", "high", "medium", "low")
+
+# Sentinel distinguishing "requires_approval was omitted" from an explicit
+# ``requires_approval=False``. The latter is still use of the deprecated
+# spelling and must emit the ``DeprecationWarning``, so a plain ``False``
+# default cannot tell the two apart.
+_UNSET = object()
 
 # Lazy load injected module functions to reduce import time
 _injected_module = None
@@ -54,6 +70,31 @@ def inject_state_into_kwargs(kwargs, injected_params):
     return _get_injected_module().inject_state_into_kwargs(kwargs, injected_params)
 
 
+def _resolve_approval(approval, requires_approval):
+    """Resolve the canonical ``approval`` value from either spelling.
+
+    ``approval`` mirrors ``Agent(approval=...)`` and is the canonical parameter.
+    ``requires_approval`` is the deprecated alias that shipped in PR #3530; it
+    still works but emits a ``DeprecationWarning`` whenever it is supplied
+    explicitly — including an explicit ``requires_approval=False`` — since any
+    use of the old spelling should nudge callers to migrate. When both are
+    supplied the canonical ``approval`` wins. Both funnel to the same value
+    space (``bool | risk-level str``) and the same ApprovalRegistry registration.
+    """
+    if requires_approval is not _UNSET:
+        warnings.warn(
+            "@tool(requires_approval=...) is deprecated; use "
+            "@tool(approval=...) to match Agent(approval=...).",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+    if approval is not None:
+        return approval
+    if requires_approval is _UNSET:
+        return False
+    return requires_approval
+
+
 class FunctionTool(BaseTool):
     """A BaseTool wrapper for plain functions.
     
@@ -69,15 +110,36 @@ class FunctionTool(BaseTool):
         version: str = "1.0.0",
         availability: Optional[Callable[[], tuple[bool, str]]] = None,
         dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
-        retry_policy: Optional[Any] = None
+        retry_policy: Optional[Any] = None,
+        approval: Optional[Union[bool, str]] = None,
+        requires_approval: Union[bool, str] = _UNSET,
+        to_model_output: Optional[Callable[[Any], Any]] = None
     ):
         self._func = func
+        # Optional compact model-facing view builder: result -> compact view.
+        self._to_model_output = to_model_output
         self.name = name or func.__name__
         self.description = description or func.__doc__ or f"Tool: {self.name}"
         self.version = version
         self._availability = availability
         self._schema_override = dynamic_schema_overrides
         self.retry_policy = retry_policy
+        # ``approval`` is canonical (mirrors Agent(approval=...)); the older
+        # ``requires_approval`` spelling is a deprecated alias that reads through.
+        resolved = _resolve_approval(approval, requires_approval)
+        if isinstance(resolved, str):
+            if resolved not in _VALID_RISK_LEVELS:
+                raise ValueError(
+                    f"Invalid approval risk level {resolved!r} for "
+                    f"tool '{self.name}'. Expected one of {_VALID_RISK_LEVELS} or a bool."
+                )
+            self.risk_level = resolved
+        else:
+            self.risk_level = "high" if resolved else None
+        # Keep both attributes populated so existing readers of either spelling
+        # continue to work; they always agree on the resolved value.
+        self.approval = resolved
+        self.requires_approval = resolved
         
         # Detect injected parameters
         self._injected_params = get_injected_params(func)
@@ -128,6 +190,20 @@ class FunctionTool(BaseTool):
         kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(**kwargs)
     
+    def to_model_output(self, result: Any) -> Optional[Any]:
+        """Build the compact model-facing view via the ``to_model_output`` fn.
+
+        Returns ``None`` when no builder was supplied so the executor falls back
+        to the full output (unchanged behaviour).
+        """
+        if self._to_model_output is None:
+            return None
+        try:
+            return self._to_model_output(result)
+        except Exception as e:
+            logging.warning(f"to_model_output failed for tool '{self.name}': {e}")
+            return None
+
     def __call__(self, *args, **kwargs) -> Any:
         """Allow calling with positional args like the original function.
         
@@ -136,31 +212,6 @@ class FunctionTool(BaseTool):
         # Inject state for any Injected parameters
         kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(*args, **kwargs)
-    
-    def get_schema(self) -> Dict[str, Any]:
-        """Get OpenAI-compatible function schema for this tool.
-        
-        Applies dynamic schema overrides if present.
-        """
-        # Build base schema directly to avoid double override from parent
-        base_schema = {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": copy.deepcopy(self.parameters)
-            }
-        }
-        
-        # Apply dynamic override if present
-        if self._schema_override is not None:
-            try:
-                return self._schema_override(base_schema)
-            except Exception as e:
-                logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
-                return base_schema
-        
-        return base_schema
     
     def check_availability(self) -> tuple[bool, str]:
         """Check if this tool is currently available to run.
@@ -186,7 +237,10 @@ def tool(
     version: str = "1.0.0",
     availability: Optional[Callable[[], tuple[bool, str]]] = None,
     dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
-    retry_policy: Optional[Any] = None
+    retry_policy: Optional[Any] = None,
+    approval: Optional[Union[bool, str]] = None,
+    requires_approval: Union[bool, str] = _UNSET,
+    to_model_output: Optional[Callable[[Any], Any]] = None
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     
@@ -208,7 +262,15 @@ def tool(
         @tool(retry_policy=RetryPolicy(max_attempts=5))
         def my_func(x: str) -> str:
             return x
-    
+
+        @tool(approval=True)
+        def delete_account(user_id: str) -> str:
+            return "deleted"
+
+        @tool(approval="critical")
+        def deploy(env: str) -> str:
+            return "deployed"
+
     Args:
         func: The function to wrap (when used without parentheses)
         name: Override the tool name (default: function name)
@@ -217,11 +279,28 @@ def tool(
         availability: Function that returns (is_available, reason) tuple
         dynamic_schema_overrides: Function to dynamically modify tool schema at runtime
         retry_policy: RetryPolicy for tool execution with exponential backoff
+        approval: Mark this tool as requiring human approval, mirroring
+            ``Agent(approval=...)``. ``True`` uses the default "high" risk level;
+            a string ("critical", "high", "medium", "low") sets the risk level
+            explicitly. Registers the tool with the global ApprovalRegistry at
+            definition time so local, gateway, and served runs all honour it.
+            Defaults to ``None`` (no approval required).
+        requires_approval: Deprecated alias for ``approval`` (kept for the form
+            shipped in an earlier release). Emits a ``DeprecationWarning``;
+            ``approval`` wins when both are set.
+        to_model_output: Optional callable ``result -> compact_view`` producing
+            the terse, model-facing view of the tool's return value. When set,
+            the executor feeds this compact view to the LLM (context economy)
+            while the full result stays available to display, hooks, and
+            downstream consumers. Defaults to ``None`` (model sees full output).
     
     Returns:
         FunctionTool instance that wraps the function
     """
     def decorator(fn: Callable) -> FunctionTool:
+        # Resolve once here so the deprecation warning (if any) fires a single
+        # time and points at the caller's @tool site.
+        resolved_approval = _resolve_approval(approval, requires_approval)
         tool_instance = FunctionTool(
             func=fn,
             name=name,
@@ -229,9 +308,26 @@ def tool(
             version=version,
             availability=availability,
             dynamic_schema_overrides=dynamic_schema_overrides,
-            retry_policy=retry_policy
+            retry_policy=retry_policy,
+            approval=resolved_approval,
+            to_model_output=to_model_output
         )
-        
+
+        # Register approval requirement with the global registry so local,
+        # gateway, and served runs all honour this tool's human sign-off.
+        # This is a security gate, so it MUST fail closed: if registration
+        # cannot be installed we refuse to hand back an executable tool that
+        # would otherwise run without its declared approval requirement.
+        if tool_instance.risk_level is not None:
+            try:
+                from praisonaiagents.approval import add_approval_requirement
+                add_approval_requirement(tool_instance.name, tool_instance.risk_level)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to register approval requirement for "
+                    f"'{tool_instance.name}'; refusing to expose an ungated tool: {e}"
+                ) from e
+
         # Validate the tool at creation time for early error detection
         try:
             tool_instance.validate()

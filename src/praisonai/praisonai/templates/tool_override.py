@@ -9,11 +9,27 @@ import ast
 import importlib
 import logging
 import os
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Memoisation cache for ToolResolver instances built by resolve_tools().
+# Keyed on (id(registry), template_dir, autoload_enabled) so that repeated
+# calls within a single workflow build (once per agent/step, over the same
+# registry object) reuse one resolver and its per-instance caches instead of
+# rebuilding the registry+resolver and re-executing local tools.py per agent.
+# The registry object is also stored to guard against id() reuse after GC.
+#
+# The cache is a bounded LRU (``OrderedDict``): each workflow build passes a
+# fresh registry object, so an unbounded dict would retain every registry,
+# its tool callables/modules and the resolver's internal caches for the
+# process lifetime. Capping it keeps the memoisation win for the current
+# build while ensuring memory does not grow with the number of builds.
+_RESOLVER_CACHE_MAXSIZE = 8
+_resolver_cache: "OrderedDict[Any, Any]" = OrderedDict()
 
 
 def _load_user_module_safe(path: Path, *, name: str):
@@ -326,48 +342,44 @@ def create_tool_registry_with_overrides(
 ) -> Dict[str, Callable]:
     """
     Create a tool registry with custom overrides.
-    
+
+    This builds the wrapper-unique tool sources -- the ones the canonical
+    :class:`praisonai_code.tool_resolver.ToolResolver` does not already own:
+
     Resolution order (highest priority first):
     1. Override files (explicit CLI --tools)
     2. Override directories (explicit CLI --tools-dir)
     3. Template tools_sources (from TEMPLATE.yaml)
-    4. Template-local tools.py
-    4.5. Current working directory tools.py (./tools.py)
+    4. Template-local tools.py / cwd tools.py (security-gated autoload)
     5. Default custom dirs (~/.praison/tools, etc.)
-    6. Package discovery (praisonai-tools if installed)
-    7. Built-in tools
-    
+
+    ``praisonai-tools`` package discovery is intentionally NOT re-implemented
+    here: it is fully owned by :meth:`ToolResolver._resolve_from_praisonai_tools`,
+    which :func:`resolve_tools` consults after this registry. Removing the
+    duplicate keeps a single discovery implementation for external tools while
+    the template/cwd ``tools.py`` autoload stays here because it carries the
+    wrapper-specific ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` gate (distinct from the
+    resolver's ``PRAISONAI_ALLOW_LOCAL_TOOLS`` gate), which must be preserved.
+
     Args:
         override_files: Explicit tool files to load
         override_dirs: Directories to scan for tools
         include_defaults: Whether to include default tool directories
         tools_sources: Template-declared tool sources (modules or paths)
         template_dir: Template directory for local tools.py
-        
+
     Returns:
         Dict mapping tool names to callable functions
     """
     registry = {}
     loader = ToolOverrideLoader()
-    
-    # 7. Start with built-in tools (lowest priority)
-    # Note: We don't copy TOOL_MAPPINGS directly because it contains tuples
-    # (module_path, class_name) that need to be resolved via __getattr__.
-    # The tools will be resolved on-demand in resolve_tools() via getattr().
-    pass
-    
-    # 6. Package discovery - try praisonai-tools if installed
-    try:
-        import praisonai_tools.tools as external_tools
-        # Get all exported tools from praisonai_tools
-        for name in dir(external_tools):
-            if not name.startswith('_'):
-                obj = getattr(external_tools, name, None)
-                if callable(obj) or (hasattr(obj, 'run') and callable(getattr(obj, 'run', None))):
-                    registry[name] = obj
-    except ImportError:
-        pass
-    
+
+    # Note: ``praisonai-tools`` package discovery and the built-in
+    # praisonaiagents tool mappings are owned by the canonical ToolResolver
+    # (see ToolResolver._resolve_from_praisonai_tools /
+    # _resolve_from_praisonaiagents), which resolve_tools() consults after
+    # this registry. We deliberately do not re-implement that discovery here.
+
     # 5. Add default custom dirs
     if include_defaults:
         for dir_path in loader.get_default_tool_dirs():
@@ -377,14 +389,21 @@ def create_tool_registry_with_overrides(
                     registry.update(tools)
                 except Exception:
                     pass
-    
-    # 4.5/4. Implicit ``tools.py`` autoload is only honored when the operator
+
+    # 4. Implicit ``tools.py`` autoload is only honored when the operator
     # explicitly opts in via the ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` environment
     # variable. This prevents arbitrary code execution when recipes are
     # fetched from remote registries (e.g. GitHub) where ``tools.py`` cannot
     # be considered trusted. Explicit ``override_files`` / ``override_dirs``
     # / ``tools_sources`` continue to work and are the supported way to load
     # custom tool modules.
+    #
+    # This autoload is kept in the wrapper (rather than delegated to
+    # ToolResolver._load_local_tools) precisely because it carries the
+    # ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` gate with a skip-on-error contract and
+    # allows an explicit template directory outside CWD -- semantics the
+    # canonical loader's ``PRAISONAI_ALLOW_LOCAL_TOOLS`` + CWD-boundary gate
+    # does not provide.
     if _autoload_tools_enabled():
         # 4.5. Current working directory tools.py (if exists)
         cwd_tools_py = Path.cwd() / "tools.py"
@@ -413,7 +432,7 @@ def create_tool_registry_with_overrides(
                         "failed to autoload template tools.py at %s", tools_py,
                         exc_info=True,
                     )
-    
+
     # 3. Template tools_sources (from TEMPLATE.yaml)
     if tools_sources:
         for source in tools_sources:
@@ -460,6 +479,82 @@ def create_tool_registry_with_overrides(
     return registry
 
 
+def _get_resolver(
+    registry: Optional[Dict[str, Callable]],
+    template_dir: Optional[str],
+):
+    """Build or reuse a ToolResolver for the given registry/template_dir.
+
+    Memoised on ``(id(registry), template_dir, autoload_enabled)`` so that the
+    repeated per-agent/per-step calls a workflow build makes over the *same*
+    registry object share one resolver (and its per-instance caches), instead
+    of rebuilding the registry+resolver and re-executing local ``tools.py``
+    once per agent. Resolution order and results are unchanged.
+    """
+    from ..tool_resolver import ToolResolver
+    from ..tool_registry import ToolRegistry
+
+    # Build registry if not provided (for backward compat with existing
+    # callers). A registry built here is a fresh object on every call, so its
+    # id() is never stable across calls -- caching it would only leak memory
+    # and never produce a hit. We therefore skip the cache entirely in that
+    # case (see ``cacheable`` below).
+    cacheable = registry is not None
+    if registry is None:
+        registry = create_tool_registry_with_overrides(include_defaults=True)
+
+    autoload = _autoload_tools_enabled()
+    cache_key = (id(registry), template_dir, autoload)
+
+    if cacheable:
+        cached = _resolver_cache.get(cache_key)
+        # Guard against id() reuse after GC: verify the stored registry is the
+        # same object we were passed before returning the cached resolver.
+        if cached is not None and cached[0] is registry:
+            _resolver_cache.move_to_end(cache_key)
+            return cached[1]
+
+    # Create a ToolRegistry instance for high-priority overrides
+    tool_registry = ToolRegistry()
+
+    # Don't manually load template tools here; let ToolResolver handle it to
+    # avoid double-execution. Populate tool_registry ONLY with registry
+    # overrides, which have HIGHER priority than template tools in ToolResolver.
+    if registry:
+        # Filter out lazy-loaded tuples from registry and register callables
+        for name, tool in registry.items():
+            if not isinstance(tool, tuple):
+                if callable(tool):
+                    tool_registry.register_function(name, tool)
+                elif hasattr(tool, "run") and callable(getattr(tool, "run", None)):
+                    # Support non-callable tools with a run method
+                    def make_callable(t):
+                        return lambda *args, **kwargs: t.run(*args, **kwargs)
+                    tool_registry.register_function(name, make_callable(tool))
+
+    # Only pass template tools path if autoload is enabled (security gate)
+    template_tools_path = None
+    if template_dir and autoload:
+        template_tools_path = str(Path(template_dir) / "tools.py")
+
+    # Create ToolResolver with the registry having highest priority.
+    # Template tools will only be loaded if autoload is enabled.
+    resolver = ToolResolver(
+        tools_py_path=template_tools_path,
+        registry=tool_registry
+    )
+
+    if cacheable:
+        _resolver_cache[cache_key] = (registry, resolver)
+        _resolver_cache.move_to_end(cache_key)
+        # Bound the cache: evict least-recently-used entries so memory does
+        # not grow with the number of workflow builds over the process life.
+        while len(_resolver_cache) > _RESOLVER_CACHE_MAXSIZE:
+            _resolver_cache.popitem(last=False)
+
+    return resolver
+
+
 def resolve_tools(
     tool_names: List[Any],
     registry: Optional[Dict[str, Callable]] = None,
@@ -488,48 +583,13 @@ def resolve_tools(
     if not tool_names:
         return []
     
-    from ..tool_resolver import ToolResolver
-    from ..tool_registry import ToolRegistry
-    
     resolved = []
     
-    # Build registry if not provided (for backward compat with existing callers)
-    if registry is None:
-        registry = create_tool_registry_with_overrides(include_defaults=True)
-    
-    # Create a ToolRegistry instance for high-priority overrides
-    tool_registry = ToolRegistry()
-    
-    # FIX for Issue 1 & 3: Don't manually load template tools here.
-    # Instead, let ToolResolver handle it to avoid double-execution.
-    # We'll populate tool_registry ONLY with registry overrides.
-    
-    # Add registry overrides to ToolRegistry
-    # These will have HIGHER priority than template tools in ToolResolver
-    if registry:
-        # Filter out lazy-loaded tuples from registry and register callables
-        for name, tool in registry.items():
-            if not isinstance(tool, tuple):
-                if callable(tool):
-                    tool_registry.register_function(name, tool)
-                elif hasattr(tool, "run") and callable(getattr(tool, "run", None)):
-                    # FIX from Gemini: Support non-callable tools with run method
-                    def make_callable(t):
-                        return lambda *args, **kwargs: t.run(*args, **kwargs)
-                    tool_registry.register_function(name, make_callable(tool))
-    
-    # FIX for Issue 2: Only pass template tools path if autoload is enabled
-    # This ensures the security gate is respected
-    template_tools_path = None
-    if template_dir and _autoload_tools_enabled():
-        template_tools_path = str(Path(template_dir) / "tools.py")
-    
-    # Create ToolResolver with the registry having highest priority
-    # Template tools will only be loaded if autoload is enabled
-    resolver = ToolResolver(
-        tools_py_path=template_tools_path,
-        registry=tool_registry
-    )
+    # Build (or reuse) the ToolResolver once per (registry, template_dir).
+    # Callers loop over agents/steps passing the same registry object, so a
+    # memoised resolver preserves its per-instance caches and avoids
+    # re-executing local tools.py once per agent.
+    resolver = _get_resolver(registry, template_dir)
     
     for tool in tool_names:
         if callable(tool):

@@ -66,6 +66,7 @@ class DurableAdapterMixin:
         max_size: int = 50_000,
         ttl_seconds: int = 7 * 86400,
         ordering: Literal["strict", "best_effort"] = "best_effort",
+        mark_recovered: bool = False,
     ) -> None:
         """Set up durable outbound delivery.
         
@@ -81,6 +82,11 @@ class DurableAdapterMixin:
                 FIFO so a later same-conversation message can never overtake an
                 earlier undelivered one. The ``reliability="production"`` preset
                 resolves to ``"strict"`` via ``resolve_reliability``.
+            mark_recovered: When True, a crash-recovered message re-sent without
+                positive reconciliation is prefixed with a visible
+                "possible duplicate after restart" marker instead of being
+                re-delivered silently. Defaults to False for backward
+                compatibility.
         """
         self.outbox: Optional[OutboundQueue] = None
         self.durable_delivery: Optional[DurableDelivery] = None
@@ -100,6 +106,7 @@ class DurableAdapterMixin:
                     adapter=self,  # Adapter must implement MessageSender protocol
                     platform=platform,
                     max_attempts=max_attempts,
+                    mark_recovered=mark_recovered,
                 )
                 
                 logger.info(

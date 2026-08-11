@@ -12,6 +12,7 @@ from praisonai.integration.context_files import (
     file_tool_matcher,
     load_context_files,
     load_context_files_for_path,
+    resolve_instruction_sources,
 )
 
 
@@ -321,3 +322,150 @@ def test_hook_extracts_alternate_path_keys(project):
         result = hook(_tool_event({key: str(nested / "main.py")}))
         assert result is not None, key
         assert "SUBTREE RULES" in result.additional_context, key
+
+
+# --- Config-declared instruction sources ----------------------------------
+
+
+def test_resolve_instruction_sources_empty_returns_blank():
+    assert resolve_instruction_sources(None) == ""
+    assert resolve_instruction_sources([]) == ""
+
+
+def test_resolve_instruction_sources_reads_plain_file(tmp_path):
+    (tmp_path / "rules.md").write_text("ORG RULES")
+    out = resolve_instruction_sources(["rules.md"], cwd=tmp_path)
+    assert out == "ORG RULES"
+
+
+def test_resolve_instruction_sources_expands_glob_sorted(tmp_path):
+    std = tmp_path / "docs" / "standards"
+    std.mkdir(parents=True)
+    (std / "b.md").write_text("SECOND")
+    (std / "a.md").write_text("FIRST")
+
+    out = resolve_instruction_sources(["docs/standards/*.md"], cwd=tmp_path)
+    # Glob matches are sorted for determinism: a.md before b.md.
+    assert out.index("FIRST") < out.index("SECOND")
+
+
+def test_resolve_instruction_sources_layers_in_order(tmp_path):
+    (tmp_path / "org.md").write_text("ORG")
+    (tmp_path / "project.md").write_text("PROJECT")
+
+    out = resolve_instruction_sources(["org.md", "project.md"], cwd=tmp_path)
+    # Entries concatenate in declared order so a project extends the org set.
+    assert out.index("ORG") < out.index("PROJECT")
+
+
+def test_resolve_instruction_sources_expands_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "company").mkdir(parents=True)
+    (home / "company" / "ai-rules.md").write_text("HOME RULES")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+
+    out = resolve_instruction_sources(["~/company/ai-rules.md"], cwd=tmp_path)
+    assert out == "HOME RULES"
+
+
+def test_resolve_instruction_sources_dedups_same_file(tmp_path):
+    (tmp_path / "rules.md").write_text("ONCE")
+    out = resolve_instruction_sources(["rules.md", "rules.md"], cwd=tmp_path)
+    assert out.count("ONCE") == 1
+
+
+def test_resolve_instruction_sources_missing_local_is_skipped(tmp_path):
+    (tmp_path / "present.md").write_text("HERE")
+    out = resolve_instruction_sources(
+        ["missing.md", "present.md"], cwd=tmp_path
+    )
+    assert out == "HERE"
+
+
+def test_resolve_instruction_sources_fetches_remote(monkeypatch):
+    import praisonai_bot.integration.context_files as impl
+
+    monkeypatch.setattr(
+        impl, "_fetch_remote_source", lambda url: "REMOTE RULES"
+    )
+    out = resolve_instruction_sources(["https://example.com/rules.md"])
+    assert out == "REMOTE RULES"
+
+
+def test_resolve_instruction_sources_remote_failure_is_skipped(monkeypatch):
+    import praisonai_bot.integration.context_files as impl
+
+    monkeypatch.setattr(impl, "_fetch_remote_source", lambda url: None)
+    out = resolve_instruction_sources(["https://example.com/rules.md"])
+    assert out == ""
+
+
+def test_fetch_remote_source_bounds_size(monkeypatch):
+    import io
+
+    import praisonai_bot.integration.context_files as impl
+
+    big = b"X" * (impl._REMOTE_MAX_BYTES + 1000)
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n):
+            return big[:n]
+
+    class _Opener:
+        def open(self, url, timeout=0):
+            return _Resp()
+
+    # Bypass the SSRF destination check and stub the opener so no real network
+    # or DNS resolution happens; the assertion is purely about size bounding.
+    monkeypatch.setattr(impl, "_url_is_fetchable", lambda url: True)
+    monkeypatch.setattr(
+        "urllib.request.build_opener", lambda *handlers: _Opener()
+    )
+    text = impl._fetch_remote_source("https://example.com/rules.md")
+    assert text is not None
+    assert "truncated" in text
+    assert len(text) <= impl._REMOTE_MAX_BYTES + len(
+        "\n... [remote instruction source truncated]"
+    )
+
+
+def test_fetch_remote_source_blocks_internal_host(monkeypatch):
+    """SSRF guard: URLs resolving to internal addresses are not fetched."""
+    import praisonai_bot.integration.context_files as impl
+
+    # Loopback host is blocked before any network call is attempted.
+    called = {"opened": False}
+
+    def _explode(*a, **k):  # pragma: no cover - must never run
+        called["opened"] = True
+        raise AssertionError("network fetch should be blocked")
+
+    monkeypatch.delenv(impl._ALLOW_LOCAL_URL_ENV, raising=False)
+    monkeypatch.setattr("urllib.request.build_opener", _explode)
+    assert impl._fetch_remote_source("http://127.0.0.1/rules.md") is None
+    assert impl._fetch_remote_source("http://localhost:8080/x") is None
+    assert called["opened"] is False
+
+
+def test_fetch_remote_source_blocks_non_http_scheme(monkeypatch):
+    """Only http(s) destinations are eligible; file:// and friends are rejected."""
+    import praisonai_bot.integration.context_files as impl
+
+    monkeypatch.delenv(impl._ALLOW_LOCAL_URL_ENV, raising=False)
+    assert impl._url_is_fetchable("file:///etc/passwd") is False
+    assert impl._url_is_fetchable("ftp://example.com/x") is False
+
+
+def test_allow_local_urls_env_bypasses_guard(monkeypatch):
+    """The opt-in env var restores fetching for trusted internal setups."""
+    import praisonai_bot.integration.context_files as impl
+
+    monkeypatch.setenv(impl._ALLOW_LOCAL_URL_ENV, "1")
+    assert impl._url_is_fetchable("http://127.0.0.1/rules.md") is True

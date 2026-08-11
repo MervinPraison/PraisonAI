@@ -15,6 +15,7 @@ Key fixes:
 
 import logging
 import os
+import shlex
 import shutil
 import threading
 import time
@@ -64,6 +65,15 @@ if os.environ.get("PRAISON_DEBUG", "").lower() in ("1", "true", "yes"):
 from praisonai_code.cli.branding import get_logo, get_version
 
 
+class ReviewDiffError(RuntimeError):
+    """Raised when the review diff could not be collected.
+
+    Distinguishes a genuine collection failure (import/repo/Git error) from a
+    successful-but-empty diff so the caller does not mislabel errors as a clean
+    working tree.
+    """
+
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -82,6 +92,7 @@ class AsyncTUIConfig:
     autonomy_mode: bool = True  # Enable autonomous task delegation (aligned with InteractiveConfig)
     debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
     no_rules: bool = False  # Disable auto-injection of project instruction files
+    plan_mode: bool = False  # Read-only PLAN mode: deny writes/edits/shell until confirmed
 
 
 # ============================================================================
@@ -199,12 +210,19 @@ class AsyncTUI:
         self.messages: List[ChatMessage] = []
         self._running = False
         self._agent = None
+        self._review_agent = None  # Cached read-only agent for review commands
+        self._interrupt_controller = None  # Cooperative cancellation for in-flight turns
+        self._interrupt_worker = None  # Tracks an in-flight/abandoned turn worker
         self._processing = False
         self._status_text = ""
         self._last_error: Optional[Exception] = None
         self._app = None
         self._output_buffer = None
         self._prompt_queue: List[str] = []  # Queue for pending prompts
+        # ids of queued prompts whose body is untrusted (skip @file expansion)
+        self._no_mention_prompts: set = set()
+        # ids of queued prompts that must run against the read-only review agent
+        self._read_only_prompts: set = set()
         self._conversation_history: List[dict] = []  # Full conversation history
         self._total_tokens = 0
         self._total_cost = 0.0
@@ -212,6 +230,9 @@ class AsyncTUI:
         self._runtime = None  # InteractiveRuntime for ACP/LSP
         self._runtime_started = False
         self._registry = None  # Unified command registry (lazy)
+        self._prev_permission_mode = None  # Approval mode to restore when leaving PLAN
+        # Sync PLAN indicator/toggle with a backend launched via --approval plan.
+        self._sync_plan_mode_from_backend()
         
         # Terminal size
         self.term_width, self.term_height = shutil.get_terminal_size((80, 24))
@@ -270,15 +291,43 @@ class AsyncTUI:
             return prompt + "\n" + "\n".join(file_contents)
         return prompt
     
-    def _get_agent(self):
-        """Lazy-load the agent with tools."""
+    # Tool names that can mutate the workspace or run commands. Review turns
+    # run with these filtered OUT so a purported read-only review cannot write
+    # files or execute commands even if the model attempts a write tool call.
+    _WRITE_TOOL_NAMES = frozenset({
+        "write_file", "edit_file", "apply_patch", "create_file", "delete_file",
+        "move_file", "execute_command", "run_command", "shell", "bash",
+    })
+
+    def _get_agent(self, read_only: bool = False):
+        """Lazy-load the agent with tools.
+
+        When ``read_only`` is True a separate, cached agent is built whose tool
+        set excludes write/command-execution tools (see ``_WRITE_TOOL_NAMES``),
+        enforcing review commands at the capability level rather than by prompt
+        instruction alone.
+        """
+        if read_only:
+            if self._review_agent is None:
+                self._review_agent = self._build_agent(read_only=True)
+            return self._review_agent
         if self._agent is None:
-            logger.debug("Creating new agent...")
-            try:
+            self._agent = self._build_agent(read_only=False)
+        return self._agent
+
+    def _build_agent(self, read_only: bool = False):
+        """Construct an Agent, optionally with a read-only tool set."""
+        logger.debug("Creating new agent (read_only=%s)...", read_only)
+        try:
                 from praisonaiagents import Agent
                 
                 # Load interactive tools (read_file, write_file, execute_command, etc.)
                 tools = self._load_tools()
+                if read_only and tools:
+                    tools = [
+                        t for t in tools
+                        if getattr(t, "__name__", "") not in self._WRITE_TOOL_NAMES
+                    ]
                 logger.debug(f"Tools for agent: {len(tools) if tools else 0}")
                 
                 # Auto-inject project instruction files unless disabled
@@ -326,14 +375,31 @@ class AsyncTUI:
                     agent_config["autonomy"] = True
                     logger.debug("Autonomy mode enabled")
                 
+                # Wire cooperative cancellation so Ctrl-C during a turn can stop
+                # an in-flight generation / tool call at the next step boundary
+                # while keeping the warm agent and session intact. Only the
+                # primary agent owns the shared interrupt controller; the
+                # read-only review agent reuses it so Ctrl-C still cancels.
+                try:
+                    from praisonaiagents.agent.interrupt import InterruptController
+                    if not read_only or self._interrupt_controller is None:
+                        controller = InterruptController()
+                        if not read_only:
+                            self._interrupt_controller = controller
+                    else:
+                        controller = self._interrupt_controller
+                    agent_config["interrupt_controller"] = controller
+                except ImportError:
+                    if not read_only:
+                        self._interrupt_controller = None
+
                 logger.debug(f"Agent config: model={self.config.model}, tools={len(tools) if tools else 0}")
-                self._agent = Agent(**agent_config)
+                agent = Agent(**agent_config)
                 logger.debug("Agent created successfully")
-            except ImportError as e:
+                return agent
+        except ImportError as e:
                 logger.error(f"Failed to import praisonaiagents: {e}")
                 raise RuntimeError(f"Failed to import praisonaiagents: {e}")
-        
-        return self._agent
     
     async def _start_runtime(self):
         """Start the InteractiveRuntime with ACP/LSP servers."""
@@ -485,7 +551,72 @@ class AsyncTUI:
             )
         if self._app:
             self._app.invalidate()
-    
+
+    def _get_live_backend(self):
+        """Return the live interactive approval backend, or ``None``."""
+        try:
+            from praisonaiagents.approval import get_approval_registry
+            return get_approval_registry().get_backend()
+        except Exception:
+            return None
+
+    def _apply_permission_mode(self, mode) -> bool:
+        """Switch the live approval backend into ``mode`` (e.g. PLAN).
+
+        Reuses the already-shipped enforcement layer: the interactive backend's
+        ``set_permission_mode`` makes PLAN unconditionally deny write/edit/
+        delete/bash/shell. Returns ``True`` when a compatible backend accepted
+        the mode so callers can honestly report enforcement status.
+        """
+        backend = self._get_live_backend()
+        setter = getattr(backend, "set_permission_mode", None)
+        if callable(setter):
+            setter(mode)
+            return True
+        return False
+
+    def _sync_plan_mode_from_backend(self) -> None:
+        """Align ``config.plan_mode`` with the live backend on startup.
+
+        When launched with ``--approval plan`` the backend already enforces
+        PLAN; without this the ``[PLAN]`` indicator would be missing and the
+        first no-arg ``/plan`` would *enable* an already-active mode instead of
+        toggling it off (Greptile P1: startup unsynchronized).
+        """
+        try:
+            from praisonaiagents.permissions import PermissionMode
+        except Exception:
+            return
+        backend = self._get_live_backend()
+        current = getattr(backend, "permission_mode", None)
+        if current is not None:
+            self.config.plan_mode = (current == PermissionMode.PLAN)
+
+    def _set_plan_mode(self, enabled: bool) -> bool:
+        """Enter/exit read-only PLAN mode, returning whether it is enforced.
+
+        On exit we restore the mode the session launched with (e.g.
+        ``accept-edits``/``bypass``) rather than blindly forcing DEFAULT, so a
+        user who selected an approval policy keeps it (Greptile P1: plan exit
+        must not discard the approval mode).
+        """
+        from praisonaiagents.permissions import PermissionMode
+        if enabled:
+            # Remember whatever mode is currently active so we can restore it.
+            backend = self._get_live_backend()
+            current = getattr(backend, "permission_mode", None)
+            if current is not None and current != PermissionMode.PLAN:
+                self._prev_permission_mode = current
+            mode = PermissionMode.PLAN
+        else:
+            mode = getattr(self, "_prev_permission_mode", None) or PermissionMode.DEFAULT
+            self._prev_permission_mode = None
+        enforced = self._apply_permission_mode(mode)
+        self.config.plan_mode = enabled
+        if self._app:
+            self._app.invalidate()
+        return enforced
+
     # Built-in slash commands registered into the unified registry so /help
     # and autocomplete stay in lock-step with the dispatch branches below.
     _BUILTIN_COMMANDS = {
@@ -502,10 +633,13 @@ class AsyncTUI:
         "export": "Export conversation to file",
         "import": "Import conversation from file",
         "cost": "Show token usage and cost",
+        "stats": "Show session statistics (model, tokens, cost)",
         "status": "Show ACP/LSP runtime status",
         "auto": "Toggle autonomy mode (auto-delegate complex tasks)",
         "debug": "Toggle debug logging",
-        "plan": "Create a step-by-step plan for a task",
+        "plan": "Toggle read-only plan mode (/plan off to exit; /plan <task> to plan)",
+        "code-review": "Review the uncommitted diff for bugs (read-only)",
+        "security-review": "Audit the uncommitted diff for security issues (read-only)",
         "handoff": "Delegate to specialized agent (code/research/review/docs)",
         "compact": "Toggle compact output mode",
         "multiline": "Toggle multiline input mode",
@@ -562,10 +696,13 @@ class AsyncTUI:
   /export [file]   Export conversation to file
   /import <file>   Import conversation from file
   /cost            Show token usage and cost
+  /stats           Show session statistics (model, tokens, cost)
   /status          Show ACP/LSP runtime status
   /auto            Toggle autonomy mode (auto-delegate complex tasks)
   /debug           Toggle debug logging to ~/.praisonai/async_tui_debug.log
-  /plan <task>     Create a step-by-step plan for a task
+  /plan [task|off] Toggle read-only plan mode (/plan <task> plans; /plan off exits)
+  /code-review [file|--staged]   Review the uncommitted diff for bugs (read-only)
+  /security-review [file|--staged]  Audit the uncommitted diff for security issues (read-only)
   /handoff <type> <task>  Delegate to specialized agent (code/research/review/docs)
   /compact         Toggle compact output mode
   /multiline       Toggle multiline input mode
@@ -615,6 +752,7 @@ Tips:
             if args:
                 self.config.model = args
                 self._agent = None
+                self._review_agent = None
                 self.messages.append(ChatMessage(role="system", content=f"Model changed to: {args}"))
             else:
                 self.messages.append(ChatMessage(role="system", content=f"Current model: {self.config.model}"))
@@ -652,9 +790,13 @@ Tips:
                 self.messages.append(ChatMessage(role="system", content=f"Export failed: {e}"))
             return True
         
-        elif cmd == "cost":
-            cost_info = f"Total tokens: {self._total_tokens}\nEstimated cost: ${self._total_cost:.4f}"
-            self.messages.append(ChatMessage(role="system", content=cost_info))
+        elif cmd in ("cost", "stats"):
+            stats_info = (
+                f"Model:          {self.config.model}\n"
+                f"Total tokens:   {self._total_tokens}\n"
+                f"Estimated cost: ${self._total_cost:.4f}"
+            )
+            self.messages.append(ChatMessage(role="system", content=stats_info))
             return True
         
         elif cmd == "compact":
@@ -785,6 +927,7 @@ Tips:
             ))
             # Recreate agent with autonomy setting
             self._agent = None
+            self._review_agent = None
             return True
         
         elif cmd == "debug":
@@ -802,18 +945,49 @@ Tips:
             return True
         
         elif cmd == "plan":
-            # Planning mode - create a plan for a complex task
-            if not args:
+            # Real plan mode: a persistent read-only permission mode enforced by
+            # the approval backend (PLAN denies write/edit/delete/bash/shell),
+            # not just a one-shot prompt. Reuses set_permission_mode so the very
+            # next turn is actually blocked from mutating the workspace.
+            sub = args.strip().lower() if args else ""
+            if sub == "off":
+                # Explicit exit — flip enforcement back to normal.
+                self._set_plan_mode(False)
                 self.messages.append(ChatMessage(
-                    role="system", 
-                    content="Usage: /plan <task description>\nCreates a step-by-step plan before execution."
+                    role="system",
+                    content="Plan mode disabled. Writes/edits/commands are allowed again."
                 ))
+            elif not args:
+                # Toggle: /plan with no args flips read-only mode on/off.
+                enabled = not self.config.plan_mode
+                enforced = self._set_plan_mode(enabled)
+                if enabled:
+                    note = (
+                        "Plan mode enabled [PLAN] — read-only exploration. "
+                        "Writes/edits/commands are denied until you /plan off."
+                    )
+                    if not enforced:
+                        note += (
+                            "\n(Note: no interactive approval backend is active, "
+                            "so enforcement is advisory in this session.)"
+                        )
+                    self.messages.append(ChatMessage(role="system", content=note))
+                else:
+                    self.messages.append(ChatMessage(
+                        role="system",
+                        content="Plan mode disabled. Writes/edits/commands are allowed again."
+                    ))
             else:
-                # Execute with planning enabled
-                self.messages.append(ChatMessage(role="system", content=f"📋 Creating plan for: {args}"))
+                # /plan <task>: enter read-only mode first, then ask the agent to
+                # produce a plan. Enforcement means the plan step cannot mutate;
+                # run /plan off (or approve) to execute afterwards.
+                self._set_plan_mode(True)
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content=f"[PLAN] Creating plan (read-only) for: {args}\nRun /plan off to leave plan mode and execute."
+                ))
                 self._update_output()
-                
-                # Use planning agent to create plan
+
                 planning_prompt = f"""Create a detailed step-by-step plan for the following task. 
 Do NOT execute anything yet, just analyze and plan.
 
@@ -824,10 +998,66 @@ Provide:
 2. Step-by-step plan with clear actions
 3. Potential risks or considerations
 4. Estimated complexity (simple/medium/complex)"""
-                
+
                 self._queue_or_execute(planning_prompt)
             return True
-        
+
+        elif cmd in ("code-review", "security-review"):
+            # Review the uncommitted (or staged/per-file) diff using the shipped
+            # read-only "review" agent preset. `security` swaps in a security
+            # rubric; both attach the fenced diff so the reviewer sees the exact
+            # changed lines. No writes are possible during review.
+            security = cmd == "security-review"
+            staged = False
+            file_path = None
+            usage = f"Usage: /{cmd} [file] [--staged] [--security]"
+            try:
+                tokens = shlex.split(args)
+            except ValueError:
+                # Malformed quoting (e.g. an unbalanced quote in a path).
+                self.messages.append(ChatMessage(role="system", content=usage))
+                return True
+            for token in tokens:
+                if token == "--staged":
+                    staged = True
+                elif token == "--security":
+                    security = True
+                elif not token.startswith("-"):
+                    if file_path is not None:
+                        # Only a single positional file path is supported.
+                        self.messages.append(ChatMessage(role="system", content=usage))
+                        return True
+                    file_path = token
+
+            try:
+                prompt = self._build_review_prompt(
+                    security=security, staged=staged, file_path=file_path
+                )
+            except ReviewDiffError as exc:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content=f"Could not collect diff for review: {exc}",
+                ))
+                return True
+            if prompt is None:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content="Working tree clean — no uncommitted changes to review.",
+                ))
+                return True
+
+            label = "security review" if security else "code review"
+            self.messages.append(ChatMessage(
+                role="system", content=f"🔍 Running {label} on the uncommitted diff..."
+            ))
+            self._update_output()
+            # The prompt embeds an untrusted diff; skip @file expansion so a
+            # `@../../secret` token inside the diff cannot exfiltrate files, and
+            # run against the read-only review agent so write/exec tools are
+            # unavailable regardless of what the model attempts.
+            self._queue_or_execute(prompt, skip_file_mentions=True, read_only=True)
+            return True
+
         elif cmd == "handoff":
             # Handoff to a specialized sub-agent
             if not args:
@@ -900,8 +1130,12 @@ Example: /handoff code "refactor the auth module" """
             self.messages.append(ChatMessage(role="system", content=f"Unknown command: /{cmd}. Use /help for available commands."))
             return True
     
-    def _execute_prompt(self, prompt: str) -> Optional[str]:
-        """Execute a prompt and return the response (suppresses agent output)."""
+    def _execute_prompt(self, prompt: str, read_only: bool = False) -> Optional[str]:
+        """Execute a prompt and return the response (suppresses agent output).
+
+        ``read_only`` selects the review agent whose tool set excludes
+        write/command-execution tools.
+        """
         import sys
         import io
         import asyncio
@@ -910,7 +1144,7 @@ Example: /handoff code "refactor the auth module" """
         
         self._last_error = None
         try:
-            agent = self._get_agent()
+            agent = self._get_agent(read_only=read_only)
             logger.debug(f"Agent loaded: {agent.name if hasattr(agent, 'name') else 'unnamed'}")
             logger.debug(f"Agent tools: {[t.__name__ if hasattr(t, '__name__') else str(t) for t in (agent.tools or [])]}")
             
@@ -939,10 +1173,15 @@ Example: /handoff code "refactor the auth module" """
                 # Try async execution first for better non-blocking behavior
                 if hasattr(agent, 'astart'):
                     try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        response = loop.run_until_complete(agent.astart(prompt))
-                        loop.close()
+                        # Share the process-wide async bridge instead of
+                        # spawning a fresh loop per prompt, so LiteLLM/HTTPX/DB
+                        # per-loop connection pools survive across turns and any
+                        # caller-installed scoped_bridge() binding still wins.
+                        from praisonai._async_bridge import run_sync_or_offload
+                        response = run_sync_or_offload(
+                            agent.astart(prompt),
+                            thread_name="praisonai-tui-turn",
+                        )
                         logger.debug("Used async execution (astart)")
                     except Exception as e:
                         logger.debug(f"Async execution failed: {e}, falling back to sync")
@@ -999,8 +1238,87 @@ Example: /handoff code "refactor the auth module" """
             self._last_error = e
             return f"Error: {e}"
     
-    def _execute_in_background(self, prompt: str):
-        """Execute prompt in background thread (non-blocking)."""
+    def _execute_prompt_interruptible(self, prompt: str) -> Optional[str]:
+        """Run a turn while keeping the main thread responsive to Ctrl-C.
+
+        The blocking ``_execute_prompt`` runs in a worker thread so the main
+        thread can catch ``KeyboardInterrupt``. On Ctrl-C we request cooperative
+        cancellation via the agent's ``InterruptController``; the core chat loop
+        honours it at the next step boundary and returns the partial output,
+        leaving the warm agent and session intact. Ensure the agent (and its
+        controller) exist before the turn starts.
+        """
+        import threading
+
+        self._get_agent()
+        controller = self._interrupt_controller
+        if controller is None:
+            # No cooperative-cancellation primitive available: fall back to the
+            # original blocking behaviour.
+            return self._execute_prompt(prompt)
+
+        # Guard against an abandoned prior worker (user pressed Ctrl-C twice and
+        # started a new turn before the old daemon thread reached an interrupt
+        # check). Clearing the shared controller here would un-cancel it and let
+        # it resume concurrently against the warm session. If such a worker is
+        # still alive, keep the cancellation request set and refuse to start a
+        # new turn until it observes the interrupt and exits.
+        prior = getattr(self, "_interrupt_worker", None)
+        if prior is not None and prior.is_alive():
+            print(
+                "\n  ⏹ Previous turn is still cancelling; please wait a moment "
+                "and try again."
+            )
+            return None
+
+        controller.clear()
+        result = {}
+
+        def _worker():
+            try:
+                result["response"] = self._execute_prompt(prompt)
+            except BaseException as exc:  # noqa: BLE001 - surface via _last_error
+                self._last_error = exc
+                result["response"] = None
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        self._interrupt_worker = worker
+        worker.start()
+
+        interrupted = False
+        while worker.is_alive():
+            try:
+                worker.join(timeout=0.1)
+            except KeyboardInterrupt:
+                if not interrupted:
+                    interrupted = True
+                    controller.request("user")
+                    print("\n  ⏹ Interrupting… (finishing current step)")
+                else:
+                    # Second Ctrl-C: stop waiting; worker is daemon and the
+                    # cooperative request has already been sent.
+                    break
+
+        if interrupted:
+            self.messages.append(ChatMessage(
+                role="system", content="Turn interrupted by user."
+            ))
+
+        return result.get("response")
+
+    def _execute_in_background(
+        self, prompt: str, skip_file_mentions: bool = False, read_only: bool = False
+    ):
+        """Execute prompt in background thread (non-blocking).
+
+        ``skip_file_mentions`` bypasses ``@file`` expansion for prompts whose
+        body is generated from untrusted content (e.g. a review diff), so a
+        ``@../../secret`` token inside a diff cannot exfiltrate files.
+
+        ``read_only`` routes the turn through a review agent whose tool set
+        excludes write/command-execution tools, enforcing review commands at the
+        capability level instead of by prompt instruction alone.
+        """
         # Track tool calls for visibility
         tool_calls = []
         
@@ -1030,12 +1348,20 @@ Example: /handoff code "refactor the auth module" """
             pass
         
         def run():
+            # Clear any stale cancellation request from a previous turn so a
+            # fresh turn is not immediately interrupted.
+            if self._interrupt_controller is not None:
+                self._interrupt_controller.clear()
             self._processing = True
             self._status_text = "Praison AI is thinking..."
             self._update_output()
             
-            # Process @file mentions
-            processed_prompt = self._process_file_mentions(prompt)
+            # Process @file mentions (skipped for generated prompts whose body
+            # is untrusted, e.g. a review diff, to prevent @file exfiltration).
+            processed_prompt = (
+                prompt if skip_file_mentions
+                else self._process_file_mentions(prompt)
+            )
             
             # Add to conversation history
             self._conversation_history.append({"role": "user", "content": prompt})
@@ -1051,7 +1377,7 @@ Example: /handoff code "refactor the auth module" """
             
             def execute_llm():
                 try:
-                    result[0] = self._execute_prompt(processed_prompt)
+                    result[0] = self._execute_prompt(processed_prompt, read_only=read_only)
                 except Exception as e:
                     error[0] = str(e)
                 finally:
@@ -1097,26 +1423,101 @@ Example: /handoff code "refactor the auth module" """
             # Process next item in queue if any
             if self._prompt_queue:
                 next_prompt = self._prompt_queue.pop(0)
+                next_skip = id(next_prompt) in self._no_mention_prompts
+                next_ro = id(next_prompt) in self._read_only_prompts
+                self._no_mention_prompts.discard(id(next_prompt))
+                self._read_only_prompts.discard(id(next_prompt))
                 self.messages.append(ChatMessage(role="user", content=next_prompt))
                 self._update_output()
-                self._execute_in_background(next_prompt)
+                self._execute_in_background(
+                    next_prompt, skip_file_mentions=next_skip, read_only=next_ro
+                )
         
         # Run in background thread
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
     
-    def _queue_or_execute(self, prompt: str):
-        """Queue prompt if processing, otherwise execute immediately."""
+    def _build_review_prompt(
+        self,
+        security: bool = False,
+        staged: bool = False,
+        file_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Build a review prompt from the uncommitted diff.
+
+        Collects the working-tree (or staged/per-file) diff via the shipped
+        ``GitManager`` and wraps it in a review rubric fenced as ``diff`` so the
+        read-only ``review`` agent preset can cite exact file:line locations.
+        Returns ``None`` when the diff query succeeds but there is nothing to
+        review, so the caller can report a clean working tree. Raises
+        ``ReviewDiffError`` when the diff could not be collected (import,
+        repository, or Git failure) so the caller can surface the real error
+        instead of masking it as a clean tree.
+        """
+        try:
+            from praisonai_code.cli.features.git_integration import GitManager
+
+            git = GitManager(repo_path=self.config.workspace or None)
+            diff = git.get_diff_content(staged=staged, file_path=file_path)
+        except Exception as exc:
+            logger.debug("Diff collection failed: %s", exc)
+            raise ReviewDiffError(str(exc)) from exc
+
+        if not diff or not diff.strip():
+            return None
+
+        if security:
+            rubric = (
+                "You are a security reviewer. Audit ONLY the diff below for "
+                "security vulnerabilities. Cover these categories: injection "
+                "(SQL/command/template), authentication & authorization flaws, "
+                "secrets or credentials committed, unsafe deserialization, path "
+                "traversal, SSRF, insecure crypto, and unvalidated input. "
+                "Do NOT modify any files."
+            )
+        else:
+            rubric = (
+                "You are a code reviewer. Review ONLY the diff below for bugs, "
+                "logic errors, edge cases, error handling gaps, and "
+                "maintainability issues. Do NOT modify any files."
+            )
+
+        return (
+            f"{rubric}\n\n"
+            "For each finding report: severity (high/medium/low), the "
+            "file:line it applies to, and a short rationale. If you find no "
+            "issues, say so explicitly.\n\n"
+            "```diff\n"
+            f"{diff}\n"
+            "```"
+        )
+
+    def _queue_or_execute(
+        self, prompt: str, skip_file_mentions: bool = False, read_only: bool = False
+    ):
+        """Queue prompt if processing, otherwise execute immediately.
+
+        ``skip_file_mentions`` and ``read_only`` propagate to background
+        execution so generated prompts (e.g. review diffs) skip ``@file``
+        expansion and run against the write-restricted review agent, even when
+        drained from the queue on a later turn.
+        """
         if self._processing:
             # Add to queue
             self._prompt_queue.append(prompt)
+            if skip_file_mentions:
+                self._no_mention_prompts.add(id(prompt))
+            if read_only:
+                self._read_only_prompts.add(id(prompt))
             self.messages.append(ChatMessage(role="system", content=f"Queued: {prompt[:50]}..."))
             self._update_output()
         else:
             # Execute immediately
             self.messages.append(ChatMessage(role="user", content=prompt))
             self._update_output()
-            self._execute_in_background(prompt)
+            self._execute_in_background(
+                prompt, skip_file_mentions=skip_file_mentions, read_only=read_only
+            )
     
     def run(self) -> None:
         """Run the async TUI."""
@@ -1126,10 +1527,13 @@ Example: /handoff code "refactor the auth module" """
         
         # Start runtime (ACP/LSP servers) before TUI
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._start_runtime())
-            loop.close()
+            # Use the shared async bridge instead of a throwaway loop so
+            # per-loop connection pools are preserved for later turns.
+            from praisonai._async_bridge import run_sync_or_offload
+            run_sync_or_offload(
+                self._start_runtime(),
+                thread_name="praisonai-tui-runtime",
+            )
             # Runtime status logged to debug file only (not shown in UI)
             # Tools are available silently when runtime is ready
         except Exception as e:
@@ -1168,8 +1572,8 @@ Example: /handoff code "refactor the auth module" """
                     continue
                 
                 self.messages.append(ChatMessage(role="user", content=user_input))
-                print("  ⏳ Praison AI is thinking...")
-                response = self._execute_prompt(user_input)
+                print("  ⏳ Praison AI is thinking... (Ctrl-C to interrupt)")
+                response = self._execute_prompt_interruptible(user_input)
                 
                 if response:
                     self.messages.append(ChatMessage(role="assistant", content=response))
@@ -1197,10 +1601,10 @@ Example: /handoff code "refactor the auth module" """
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.completion import Completer, Completion
         
-        # Create completer for commands and files
-        commands = ["help", "exit", "quit", "clear", "new", "model", "session", "sessions",
-                    "continue", "history", "export", "import", "cost", "status", "auto",
-                    "debug", "plan", "handoff", "compact", "multiline", "files", "queue"]
+        # Create completer for commands and files. Derive the list from the
+        # single source of truth (_BUILTIN_COMMANDS) so registration and
+        # autocomplete never drift (e.g. code-review/security-review).
+        commands = list(self._BUILTIN_COMMANDS.keys())
         workspace_files = self._workspace_files
         
         class PraisonCompleter(Completer):
@@ -1284,12 +1688,24 @@ Example: /handoff code "refactor the auth module" """
                 self._update_output()
                 return
             
-            # Queue or execute prompt
+            # NOTE: @file mentions are expanded once, canonically, inside
+            # _execute_in_background (which every queued/immediate prompt flows
+            # through). Do NOT expand here as well: _process_file_mentions is not
+            # idempotent, so a second pass would re-interpret @tokens embedded in
+            # already-attached file contents and append unrequested files.
             self._queue_or_execute(user_input)
         
         @kb.add("c-c")
         def handle_ctrl_c(event):
-            input_buffer.reset()
+            # If a turn is in flight, request cooperative cancellation so the
+            # core chat loop stops at its next step boundary while keeping the
+            # warm agent and session intact. Otherwise just clear the input.
+            if self._processing and self._interrupt_controller is not None:
+                self._interrupt_controller.request("user")
+                self._status_text = "⏹ Interrupting… (finishing current step)"
+                self._update_output()
+            else:
+                input_buffer.reset()
         
         @kb.add("c-d")
         def handle_ctrl_d(event):
@@ -1344,7 +1760,8 @@ Example: /handoff code "refactor the auth module" """
             left = "? for help | PageUp/Down to scroll"
             center = self.config.model
             right = f"Session: {self.session_id}"
-            return f" {left}  |  {center}  |  {right} "
+            plan = "[PLAN] " if self.config.plan_mode else ""
+            return f" {plan}{left}  |  {center}  |  {right} "
         
         # Layout: Output (top, scrollable) + Status bar + Input (bottom, fixed)
         # Use FloatContainer to show completion menu as floating overlay

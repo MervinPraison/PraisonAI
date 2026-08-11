@@ -10,7 +10,6 @@ This agent is designed for fast context retrieval using:
 
 import os
 import json
-import logging
 from praisonaiagents._logging import get_logger
 from typing import List, Dict, Any, Optional
 

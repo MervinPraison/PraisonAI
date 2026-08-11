@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """MCP Tools Server with SSE Transport
 
 Expose Python functions as MCP tools via Server-Sent Events (SSE).

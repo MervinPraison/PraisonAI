@@ -31,6 +31,8 @@ class Task:
     tenant: str = "default"
     board: str = "default"
     workspace_kind: str = "default"
+    branch: Optional[str] = None
+    worktree_path: Optional[str] = None
     claim_lock: Optional[str] = None
     claim_expires: Optional[datetime] = None
     worker_pid: Optional[int] = None

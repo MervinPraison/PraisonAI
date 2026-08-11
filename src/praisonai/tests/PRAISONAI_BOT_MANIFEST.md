@@ -39,6 +39,19 @@ praisonaiagents → praisonai-code + praisonai-bot → praisonai (wrapper)
 
 Console script: `praisonai-bot`
 
+## Companion infra (package-adjacent — not PyPI)
+
+Gateway Kubernetes packaging lives under `src/praisonai-bot/infra/`, outside the wheel.
+
+| Path | Notes |
+|------|-------|
+| [`../../praisonai-bot/infra/helm/praisonai-gateway/`](../../praisonai-bot/infra/helm/praisonai-gateway/) | Helm chart for gateway WebSocket + REST (port 8765); uses GHCR `ghcr.io/mervinpraison/praisonai` image |
+| Install | `helm install praisonai-gateway ./src/praisonai-bot/infra/helm/praisonai-gateway` from a git checkout |
+| Runtime | `praisonai gateway start --host 0.0.0.0` (wrapper image) or `praisonai-bot gateway start` (bot-only image) |
+| Python imports | **None** — chart is not imported by `praisonai_bot` code |
+
+Orchestration cross-links: [`PRAISONAI_DEPLOY_MANIFEST.md`](PRAISONAI_DEPLOY_MANIFEST.md) (C14) documents `praisonai deploy helm --chart gateway`.
+
 ## Wrapper shims (backward compat)
 
 | Shim | Target |
@@ -70,7 +83,7 @@ Console script: `praisonai-bot`
 - `cli/features/serve.py` (HTTP agents/mcp/a2a serve — not gateway recipe)
 - `scheduler/run_policy.py` (optional safety gate for unattended runs)
 - `jobs/*` (async runs API — lazy `praisonai` + recipe deps; UI bridge only)
-- Framework adapters, deploy (train extracted to `praisonai-train` in C10)
+- Framework adapters (deploy extracted to `praisonai-deploy` in C14)
 
 ## Install matrix
 
@@ -83,6 +96,6 @@ Console script: `praisonai-bot`
 
 ## Publish order
 
-`praisonaiagents` → `praisonai-code` + `praisonai-bot` → `praisonai`
+`praisonaiagents` → tier-2 packages → `praisonai-sandbox` → `praisonai-deploy` → `praisonai`
 
 See `src/praisonai/scripts/publish_all.py` and `.github/workflows/pypi-release.yml`.

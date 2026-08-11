@@ -60,16 +60,54 @@ OUTPUT_RESERVES: Dict[str, int] = {
 }
 
 
+def _litellm_model_info(model: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up a model's info from litellm's ``model_cost`` registry.
+
+    Lazy-imported so there is zero overhead (and no hard dependency) when
+    litellm is not installed. Returns ``None`` when litellm is absent or the
+    model is unknown.
+    """
+    try:
+        from litellm import model_cost
+    except Exception:
+        return None
+
+    try:
+        model_lower = model.lower()
+        if model_lower in model_cost:
+            return model_cost[model_lower]
+        # Try with provider prefix removed (e.g. "openai/gpt-4o" -> "gpt-4o")
+        if "/" in model:
+            base_model = model.split("/")[-1].lower()
+            if base_model in model_cost:
+                return model_cost[base_model]
+    except Exception:
+        return None
+    return None
+
+
 def get_model_limit(model: str) -> int:
     """
     Get context window limit for a model.
-    
+
+    Resolves against litellm's ``model_cost`` registry first (``max_input_tokens``),
+    so any model the underlying LLM layer knows gets the correct window — then
+    falls back to the static ``MODEL_LIMITS`` table for offline use.
+
     Args:
         model: Model name or identifier
-        
+
     Returns:
         Context window size in tokens
     """
+    # Prefer data-driven lookup via litellm (context window = max_input_tokens)
+    info = _litellm_model_info(model)
+    if info:
+        limit = info.get("max_input_tokens") or info.get("max_tokens")
+        if limit:
+            return limit
+
     # Exact match
     if model in MODEL_LIMITS:
         return MODEL_LIMITS[model]
@@ -86,13 +124,24 @@ def get_model_limit(model: str) -> int:
 def get_output_reserve(model: str) -> int:
     """
     Get recommended output token reserve for a model.
-    
+
+    Resolves against litellm's ``model_cost`` registry first
+    (``max_output_tokens``), then falls back to the static ``OUTPUT_RESERVES``
+    table for offline use.
+
     Args:
         model: Model name
-        
+
     Returns:
         Output reserve in tokens
     """
+    # Prefer data-driven lookup via litellm (output reserve = max_output_tokens)
+    info = _litellm_model_info(model)
+    if info:
+        reserve = info.get("max_output_tokens")
+        if reserve:
+            return reserve
+
     model_lower = model.lower()
     
     for key, reserve in OUTPUT_RESERVES.items():

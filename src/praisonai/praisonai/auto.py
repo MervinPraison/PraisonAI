@@ -25,7 +25,7 @@ T = TypeVar('T')
 # =============================================================================
 
 from ._lazy_cache import lazy_get
-from ._async_bridge import run_sync
+from ._async_bridge import run_sync, run_sync_or_offload
 import inspect as _inspect
 
 
@@ -370,6 +370,52 @@ class BaseAutoGenerator:
         self._core_client = None  # lazy, per-instance core OpenAIClient
         self._client_lock = threading.Lock()
 
+    def _resolve_framework(self, requested: Optional[str], registry,
+                           require_workflow: bool = False):
+        """Resolve and validate a framework via the shared adapter registry.
+
+        Single source of truth for default selection: when ``requested`` is
+        falsy (``None`` or empty string), defer to ``registry.pick_default()``
+        — the same selector ``praisonai.run(...)`` uses — instead of hardcoding
+        a per-class default. Validates the adapter exists and is installed so
+        both auto-generators fail loudly and consistently.
+
+        When ``require_workflow`` is set, the resolved adapter must also
+        advertise ``SUPPORTS_WORKFLOW``. This keeps ``WorkflowAutoGenerator``
+        from silently picking an installed-but-non-workflow default (e.g. when
+        the native ``praisonai`` adapter is absent) and then emitting a
+        workflow YAML that ``AgentsGenerator`` would reject at run time.
+        """
+        if not requested:
+            requested = registry.pick_default()
+        try:
+            adapter = registry.create(requested)
+        except ValueError as e:
+            raise ImportError(
+                f"Unknown framework '{requested}'. Available frameworks: "
+                f"{', '.join(registry.list_registered())}"
+            ) from e
+        if not adapter.is_available():
+            install_hint = getattr(adapter, "install_hint", f"pip install {requested}")
+            raise ImportError(
+                f"{adapter.name} is not installed. Please install with:\n    {install_hint}"
+            )
+        if require_workflow and getattr(adapter, "SUPPORTS_WORKFLOW", False) is not True:
+            from .framework_adapters.registry import adapter_capability
+            supported = [
+                name for name in registry.list_registered()
+                if adapter_capability(name, "SUPPORTS_WORKFLOW", registry=registry) is True
+            ]
+            hint = (
+                f" Frameworks supporting workflow execution: "
+                f"{', '.join(sorted(set(supported)))}." if supported else ""
+            )
+            raise ImportError(
+                f"Framework '{adapter.name}' does not support workflow "
+                f"generation (SUPPORTS_WORKFLOW is not set).{hint}"
+            )
+        return adapter
+
     def _get_core_client(self):
         """Get or create the core-owned ``OpenAIClient`` for this instance.
 
@@ -535,6 +581,13 @@ class BaseAutoGenerator:
         if registered is not None:
             return registered
 
+        # Preserve the original LiteLLM failure so that, if the OpenAI fallback
+        # also fails, the user sees BOTH tracebacks (via ``raise ... from``)
+        # instead of only the second one. Otherwise the real cause (auth/region
+        # error, a provider-only model, malformed response_format) survives only
+        # in a WARNING log line the caller likely never sees.
+        litellm_error: Optional[BaseException] = None
+
         # Try LiteLLM first (preferred - supports 100+ providers)
         if is_available("litellm"):
             try:
@@ -567,6 +620,7 @@ class BaseAutoGenerator:
                     "LiteLLM structured completion failed (%s); "
                     "falling back to OpenAI SDK.", e
                 )
+                litellm_error = e
 
         # Fallback to the core-owned OpenAI client (uses beta.chat.completions.parse).
         # Delegating to praisonaiagents.llm.openai_client.OpenAIClient keeps the
@@ -577,21 +631,28 @@ class BaseAutoGenerator:
             # The async path awaits the core coroutine directly. The sync path
             # offloads the blocking core call via asyncio.to_thread so it never
             # blocks the bridge event loop this coroutine runs on.
-            if is_async:
-                return await client.aparse_structured_output(
-                    messages=messages,
-                    response_format=response_model,
-                    model=model_name,
-                    **kwargs,
+            try:
+                if is_async:
+                    return await client.aparse_structured_output(
+                        messages=messages,
+                        response_format=response_model,
+                        model=model_name,
+                        **kwargs,
+                    )
+                return await asyncio.to_thread(
+                    lambda: client.parse_structured_output(
+                        messages=messages,
+                        response_format=response_model,
+                        model=model_name,
+                        **kwargs,
+                    )
                 )
-            return await asyncio.to_thread(
-                lambda: client.parse_structured_output(
-                    messages=messages,
-                    response_format=response_model,
-                    model=model_name,
-                    **kwargs,
-                )
-            )
+            except Exception as openai_error:
+                # Chain the LiteLLM traceback so users see BOTH provider
+                # failures, not just the OpenAI one that masked the real cause.
+                if litellm_error is not None:
+                    raise openai_error from litellm_error
+                raise
 
         # Neither available - raise helpful error
         raise ImportError(
@@ -620,43 +681,13 @@ class BaseAutoGenerator:
         """
         # Backward compatibility: the historical sync path called the blocking
         # provider clients directly, so it worked even when invoked from inside a
-        # running event loop (FastAPI handler, Jupyter, async test). run_sync()
-        # rejects that case, so when a loop is already running we drive the sync
-        # ladder on a dedicated worker thread (with its own loop) instead of
-        # raising. The provider calls still execute off the caller's loop.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            running_loop = False
-        else:
-            running_loop = True
-
-        if not running_loop:
-            return run_sync(
-                self._completion_impl(response_model, messages, is_async=False, **kwargs)
-            )
-
-        result: List[Any] = []
-        error: List[BaseException] = []
-
-        def _runner() -> None:
-            try:
-                result.append(
-                    asyncio.run(
-                        self._completion_impl(
-                            response_model, messages, is_async=False, **kwargs
-                        )
-                    )
-                )
-            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
-                error.append(e)
-
-        thread = threading.Thread(target=_runner, name="praisonai-sync-completion")
-        thread.start()
-        thread.join()
-        if error:
-            raise error[0]
-        return result[0]
+        # running event loop (FastAPI handler, Jupyter, async test). Delegate the
+        # sync-or-offload handling to the shared async bridge so the correct
+        # running-loop logic lives in one place.
+        return run_sync_or_offload(
+            self._completion_impl(response_model, messages, is_async=False, **kwargs),
+            thread_name="praisonai-sync-completion",
+        )
 
     async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
@@ -701,42 +732,58 @@ class BaseAutoGenerator:
         Single source of truth so the sync ``generate()`` twins can delegate to
         their ``agenerate()`` implementation instead of duplicating the body.
 
-        Mirrors the running-loop handling in ``_structured_completion``: when no
-        event loop is running we use the shared async bridge; when a loop is
-        already running (FastAPI handler, Jupyter, async test) ``run_sync``
-        would raise, so we drive the coroutine on a dedicated worker thread with
-        its own loop instead.
+        Delegates the running-loop handling to the shared async bridge's
+        ``run_sync_or_offload``: when no event loop is running it uses the shared
+        bridge; when a loop is already running (FastAPI handler, Jupyter, async
+        test) it drives the coroutine on a dedicated worker thread that shares
+        the same bridge.
         """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            running_loop = False
-        else:
-            running_loop = True
+        return run_sync_or_offload(coro, thread_name="praisonai-sync-generate")
 
-        if not running_loop:
-            return run_sync(coro)
+    def _get_tool_resolver(self):
+        """Lazily construct the canonical ToolResolver (single source of truth).
 
-        result: List[Any] = []
-        error: List[BaseException] = []
-
-        def _runner() -> None:
+        Uses the shared context-local resolver so every generator in a run
+        (auto phase + AgentsGenerator + workflow/job generators) reuses one
+        warm cache instead of repeating full tool discovery. Kept lazy so
+        importing auto.py stays cheap and so a resolver-construction failure
+        never blocks generation — callers fall back to keyword/legacy hints.
+        """
+        resolver = getattr(self, "_tool_resolver", None)
+        if resolver is None:
             try:
-                result.append(asyncio.run(coro))
-            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
-                error.append(e)
+                from .tool_resolver import _get_default_resolver
+                resolver = _get_default_resolver()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("ToolResolver unavailable (%s); using keyword hints only.", e)
+                resolver = False  # sentinel: attempted, not available
+            self._tool_resolver = resolver
+        return resolver or None
 
-        thread = threading.Thread(target=_runner, name="praisonai-sync-generate")
-        thread.start()
-        thread.join()
-        if error:
-            raise error[0]
-        return result[0]
+    def _available_tools(self) -> List[str]:
+        """Return the real, installed tool names from the canonical ToolResolver.
 
-    @staticmethod
-    def get_available_tools() -> List[str]:
-        """Return list of available tools for agent assignment."""
-        return AVAILABLE_TOOLS.copy()
+        This is the single source of truth shared with AgentsGenerator. Returns
+        an empty list if the resolver is unavailable so callers can fall back.
+        """
+        resolver = self._get_tool_resolver()
+        if resolver is None:
+            return []
+        try:
+            return sorted(resolver.list_available().keys())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("ToolResolver.list_available() failed (%s).", e)
+            return []
+
+    def get_available_tools(self) -> List[str]:
+        """Return list of available tools for agent assignment.
+
+        Routes through the canonical ToolResolver (single source of truth) so
+        the LLM is shown only tools that are actually installed. Falls back to
+        the frozen ``AVAILABLE_TOOLS`` list solely when the resolver is
+        unavailable or returns nothing.
+        """
+        return self._available_tools() or AVAILABLE_TOOLS.copy()
     
     @staticmethod
     def analyze_complexity(topic: str) -> str:
@@ -890,7 +937,7 @@ class AutoGenerator(BaseAutoGenerator):
     """
     
     def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", 
-                 framework="crewai", config_list: Optional[List[Dict]] = None,
+                 framework: Optional[str] = None, config_list: Optional[List[Dict]] = None,
                  pattern: str = "sequential", single_agent: bool = False, 
                  adapter_registry=None):
         """
@@ -899,7 +946,10 @@ class AutoGenerator(BaseAutoGenerator):
         Args:
             topic: The task/topic for agent generation
             agent_file: Output YAML file name
-            framework: Framework to use (crewai, autogen, praisonai)
+            framework: Framework to use (praisonai, crewai, autogen). When
+                omitted, resolves via the shared registry default selector —
+                the same one ``praisonai.run(...)`` uses — so the
+                generate → run round-trip agrees on defaults.
             config_list: Optional LLM configuration
             pattern: Workflow pattern (sequential, parallel, routing, orchestrator-workers, evaluator-optimizer)
             single_agent: If True, generate a single agent instead of a team
@@ -909,28 +959,16 @@ class AutoGenerator(BaseAutoGenerator):
         # Initialize base class first (handles config_list and client)
         super().__init__(config_list=config_list)
         
-        # Validate framework availability using adapter registry
+        # Resolve + validate framework using the shared adapter registry.
         from .framework_adapters.registry import get_default_registry
         
         self._adapter_registry = adapter_registry or get_default_registry()
-        try:
-            adapter = self._adapter_registry.create(framework)
-        except ValueError as e:
-            raise ImportError(
-                f"Unknown framework '{framework}'. Available frameworks: "
-                f"{', '.join(self._adapter_registry.list_registered())}"
-            ) from e
+        adapter = self._resolve_framework(framework, self._adapter_registry)
 
-        # Use safe fallbacks for new adapter attributes
-        install_hint = getattr(adapter, "install_hint", f"pip install {framework}")
-        requires_tools_extra = bool(getattr(adapter, "requires_tools_extra", False))
-        
-        if not adapter.is_available():
-            raise ImportError(f"{adapter.name} is not installed. Please install with:\n    {install_hint}")
-        
         # Check tools availability if required by this framework
-        if requires_tools_extra and not is_available("praisonai_tools"):
-            logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {install_hint}")
+        install_hint = getattr(adapter, "install_hint", f"pip install {adapter.name}")
+        if bool(getattr(adapter, "requires_tools_extra", False)) and not is_available("praisonai_tools"):
+            logger.warning(f"Tools are not available for {adapter.name}. To use tools, install:\n    {install_hint}")
 
         # Retain the resolved adapter as the canonical dispatch object (mirrors
         # AgentsGenerator, which stores self.framework_adapter). Downstream code
@@ -938,8 +976,8 @@ class AutoGenerator(BaseAutoGenerator):
         self._adapter = adapter
         self.topic = topic
         self.agent_file = agent_file
-        # Authoritative framework name comes from the adapter, not the raw arg.
-        self.framework = adapter.name or framework or "praisonai"
+        # Authoritative framework name comes from the resolved adapter.
+        self.framework = adapter.name
         self.pattern = pattern
         self.single_agent = single_agent
     
@@ -1030,11 +1068,26 @@ class AutoGenerator(BaseAutoGenerator):
                 for task_id, task_details in role_details['tasks'].items():
                     yaml_data['roles'][role_id]['tasks'][task_id] = self._format_task(task_details)
 
-        # Save to YAML file atomically, maintaining the order
-        _atomic_write_text(
-            self.agent_file,
-            lambda f: _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False),
-        )
+        # Save to YAML file atomically, maintaining the order. Prepend the
+        # yaml-language-server header so editors give autocomplete / inline
+        # validation for the scaffolded agents.yaml out of the box. A leading
+        # YAML comment is ignored by yaml.safe_load, so execution is unaffected.
+        def _write_with_header(f):
+            try:
+                from .config.schema import AGENTS_SCHEMA_HEADER
+                f.write(AGENTS_SCHEMA_HEADER)
+            except Exception as exc:
+                # Non-fatal: the YAML is still valid/executable without the
+                # editor header, but surface it so a missing schema directive
+                # is diagnosable instead of silently dropped.
+                logger.debug(
+                    "Could not write yaml-language-server schema header to %s: %s",
+                    self.agent_file,
+                    exc,
+                )
+            _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+
+        _atomic_write_text(self.agent_file, _write_with_header)
 
     def merge_with_existing_agents(self, new_json_data):
         """
@@ -1102,38 +1155,6 @@ class AutoGenerator(BaseAutoGenerator):
                 merged_data['roles'][final_role_id]['tasks'][task_id] = self._format_task(task_details)
         
         return merged_data
-
-    def _get_tool_resolver(self):
-        """Lazily construct the canonical ToolResolver (single source of truth).
-
-        Kept lazy so importing auto.py stays cheap and so a resolver-construction
-        failure never blocks generation — callers fall back to keyword hints.
-        """
-        resolver = getattr(self, "_tool_resolver", None)
-        if resolver is None:
-            try:
-                from .tool_resolver import ToolResolver
-                resolver = ToolResolver()
-            except Exception as e:  # pragma: no cover - defensive
-                logger.debug("ToolResolver unavailable (%s); using keyword hints only.", e)
-                resolver = False  # sentinel: attempted, not available
-            self._tool_resolver = resolver
-        return resolver or None
-
-    def _available_tools(self) -> List[str]:
-        """Return the real, installed tool names from the canonical ToolResolver.
-
-        This is the single source of truth shared with AgentsGenerator. Returns
-        an empty list if the resolver is unavailable so callers can fall back.
-        """
-        resolver = self._get_tool_resolver()
-        if resolver is None:
-            return []
-        try:
-            return sorted(resolver.list_available().keys())
-        except Exception as e:  # pragma: no cover - defensive
-            logger.debug("ToolResolver.list_available() failed (%s).", e)
-            return []
 
     def discover_tools_for_topic(self) -> List[str]:
         """
@@ -1206,15 +1227,24 @@ class AutoGenerator(BaseAutoGenerator):
         if available_tools:
             tools_header = "AVAILABLE TOOLS (installed)"
             tools_reference = "\n".join(f"  - {t}" for t in available_tools)
-            legacy_tools = ", ".join(available_tools)
+            # Resolver path already lists the exact installed tools above, so a
+            # separate LEGACY TOOLS block would just duplicate that set to the
+            # LLM at the cost of prompt tokens for zero information gain.
+            legacy_tools = None
         else:
             tools_header = "AVAILABLE TOOLS BY CATEGORY"
             all_tools_by_category = []
             for category, tools in TOOL_CATEGORIES.items():
                 all_tools_by_category.append(f"  {category}: {', '.join(tools)}")
             tools_reference = "\n".join(all_tools_by_category)
-            # Also include legacy tools for backward compatibility
+            # Only when the resolver is unavailable do we fall back to the static
+            # category reference; surface the legacy names for compatibility.
             legacy_tools = ", ".join(AVAILABLE_TOOLS)
+
+        legacy_tools_block = (
+            f"\nLEGACY TOOLS (for backward compatibility):\n{legacy_tools}\n"
+            if legacy_tools else ""
+        )
         
         user_content = f"""Analyze and generate a team structure for: "{self.topic}"
 
@@ -1249,10 +1279,7 @@ Each agent should have:
 
 {tools_header}:
 {tools_reference}
-
-LEGACY TOOLS (for backward compatibility):
-{legacy_tools}
-
+{legacy_tools_block}
 RECOMMENDED TOOLS FOR THIS TASK: {', '.join(recommended_tools)}
 Prioritize using the recommended tools. Only add others if specifically needed.
 
@@ -1396,8 +1423,9 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
     def __init__(self, topic: str = "Research and write about AI", 
                  workflow_file: str = "workflow.yaml",
                  config_list: Optional[List[Dict]] = None,
-                 framework: str = "praisonai",
-                 single_agent: bool = False):
+                 framework: Optional[str] = None,
+                 single_agent: bool = False,
+                 adapter_registry=None):
         """
         Initialize the WorkflowAutoGenerator.
         
@@ -1405,15 +1433,28 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
             topic: The task/topic for the workflow
             workflow_file: Output file name
             config_list: Optional LLM configuration
-            framework: Framework to use (praisonai, crewai, autogen)
+            framework: Framework to use (praisonai, crewai, autogen). When
+                omitted, resolves via the shared registry default selector so
+                the generate → run round-trip agrees on defaults. The adapter
+                is validated here rather than deferring the failure to a later
+                ``praisonai run`` invocation.
             single_agent: If True, generate a single agent workflow
         """
         # Initialize base class (handles config_list and client)
         super().__init__(config_list=config_list)
         
+        # Resolve + validate framework through the same single source of truth
+        # AutoGenerator and praisonai.run() use, instead of hardcoding a
+        # different per-class default and skipping validation.
+        from .framework_adapters.registry import get_default_registry
+        self._adapter_registry = adapter_registry or get_default_registry()
+        adapter = self._resolve_framework(
+            framework, self._adapter_registry, require_workflow=True
+        )
+        self._adapter = adapter
         self.topic = topic
         self.workflow_file = workflow_file
-        self.framework = framework
+        self.framework = adapter.name
         self.single_agent = single_agent
     
     def recommend_pattern_llm(self, topic: Optional[str] = None) -> Any:
@@ -1538,8 +1579,10 @@ Respond with:
                 # Re-raise OS-level errors like PermissionError, OSError, etc.
                 raise
         
-        # Merge agents (avoid duplicates)
+        # Merge agents (avoid duplicates), tracking renames so step
+        # references to the new agents can be rewritten below.
         merged_agents = existing_data.get('agents', {}).copy()
+        rename_map: Dict[str, str] = {}
         for agent_id, agent_data in new_data.get('agents', {}).items():
             # Rename if conflict
             final_id = agent_id
@@ -1547,10 +1590,57 @@ Respond with:
             while final_id in merged_agents:
                 final_id = f"{agent_id}_auto_{counter}"
                 counter += 1
+            if final_id != agent_id:
+                rename_map[agent_id] = final_id
+                logger.info(
+                    "merge: renamed new agent %r to %r to avoid collision with existing entry",
+                    agent_id, final_id,
+                )
             merged_agents[final_id] = agent_data
-        
-        # Merge steps (append new steps)
-        merged_steps = existing_data.get('steps', []) + new_data.get('steps', [])
+
+        def _rewrite_agent_refs(step, *, route_target=False):
+            # Bare agent-id strings appear as route targets
+            # (``route: {label: [agent_id, ...]}``); rewrite them directly.
+            if route_target and isinstance(step, str):
+                return rename_map.get(step, step)
+            if isinstance(step, list):
+                # e.g. a route target list ``["tech_agent"]``.
+                return [_rewrite_agent_refs(s, route_target=route_target) for s in step]
+            if not isinstance(step, dict):
+                return step
+            step = dict(step)
+            # Direct agent references plus loop ``feedback_to`` targets.
+            for key in ("agent", "feedback_to"):
+                ref = step.get(key)
+                if isinstance(ref, str):
+                    step[key] = rename_map.get(ref, ref)
+            # Routing/parallel/loop payloads also carry agent refs — recurse.
+            for key in ("parallel", "route", "loop", "branches"):
+                nested = step.get(key)
+                if nested is None:
+                    continue
+                if key == "route":
+                    # ``route: {label: [agent_id, ...]}`` — values are target
+                    # lists of bare agent-id strings, not nested step dicts.
+                    if isinstance(nested, dict):
+                        step[key] = {
+                            k: _rewrite_agent_refs(v, route_target=True)
+                            for k, v in nested.items()
+                        }
+                    elif isinstance(nested, list):
+                        step[key] = _rewrite_agent_refs(nested, route_target=True)
+                elif isinstance(nested, list):
+                    step[key] = [_rewrite_agent_refs(s) for s in nested]
+                elif isinstance(nested, dict):
+                    # ``loop``/``branches`` payloads are step-shaped dicts that
+                    # themselves carry ``agent``/``feedback_to`` refs.
+                    step[key] = _rewrite_agent_refs(nested)
+            return step
+
+        # Merge steps (append new steps, rewriting renamed agent refs)
+        merged_steps = list(existing_data.get('steps', [])) + [
+            _rewrite_agent_refs(s) for s in new_data.get('steps', [])
+        ]
         
         # Create merged structure
         merged = {

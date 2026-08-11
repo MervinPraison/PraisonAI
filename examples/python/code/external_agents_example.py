@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 External Agents Integration Example
 

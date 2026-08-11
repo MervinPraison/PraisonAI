@@ -1,3 +1,4 @@
+# praisonai: skip=true
 # OCR with Mistral
 # Requires: export MISTRAL_API_KEY=your-key
 # Note: Source must be a URL (https://) or base64

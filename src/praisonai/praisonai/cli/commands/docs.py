@@ -298,7 +298,9 @@ def docs_run(
     if totals['failed'] > 0 or totals['timeout'] > 0:
         raise typer.Exit(1)
     
-    if mode == "strict" and totals['not_run'] > 0:
+    # In dry-run mode, runnable items are intentionally marked not_run,
+    # so a preview should not fail strict mode.
+    if mode == "strict" and not dry_run and totals['not_run'] > 0:
         raise typer.Exit(1)
     
     raise typer.Exit(0)

@@ -5,7 +5,7 @@ Unit tests for SandboxMixin functionality.
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from praisonaiagents.agent.sandbox_mixin import SandboxMixin
-from praisonaiagents.sandbox import SandboxConfig, SandboxResult, SandboxStatus
+from praisonaiagents.sandbox import SandboxConfig, SandboxResult, SandboxStatus, SecurityWarning
 
 
 class MockAgent(SandboxMixin):
@@ -45,7 +45,7 @@ class TestSandboxMixin:
         manager = agent.get_sandbox_manager()
         assert manager is None
 
-    @patch('praisonaiagents.agent.sandbox_mixin.SandboxManager')
+    @patch('praisonaiagents.sandbox.SandboxManager')
     def test_get_sandbox_manager_with_config(self, mock_manager_class):
         """Test get_sandbox_manager with config."""
         config = SandboxConfig.subprocess()
@@ -63,15 +63,21 @@ class TestSandboxMixin:
         with pytest.raises(RuntimeError, match="No sandbox configured"):
             agent.execute_code_sync("print('hello')")
 
-    @patch('praisonaiagents.agent.sandbox_mixin.check_code_safety')
-    @patch('praisonaiagents.agent.sandbox_mixin.SandboxManager')
+    @patch('praisonaiagents.sandbox.check_code_safety')
+    @patch('praisonaiagents.sandbox.SandboxManager')
     async def test_execute_code_with_warnings(self, mock_manager_class, mock_check_safety):
         """Test execute_code with security warnings."""
         # Setup
         config = SandboxConfig.subprocess()
         agent = MockAgent(sandbox=config, verbose=True)
         
-        mock_warnings = ["Potential security issue"]
+        mock_warnings = [
+            SecurityWarning(
+                pattern="test",
+                message="Potential security issue",
+                severity="medium",
+            )
+        ]
         mock_check_safety.return_value = mock_warnings
         
         mock_manager = AsyncMock()
@@ -87,7 +93,7 @@ class TestSandboxMixin:
         mock_manager.run_code.assert_called_once()
         assert result == mock_result
 
-    @patch('praisonaiagents.agent.sandbox_mixin.SandboxManager')
+    @patch('praisonaiagents.sandbox.SandboxManager')
     async def test_run_shell_command(self, mock_manager_class):
         """Test run_shell_command functionality."""
         config = SandboxConfig.subprocess()
@@ -113,21 +119,23 @@ class TestSandboxMixin:
         status = agent.get_sandbox_status()
         assert status == {"configured": False}
 
-    @patch('praisonaiagents.agent.sandbox_mixin.SandboxManager')
+    @patch('praisonaiagents.sandbox.SandboxManager')
     def test_get_sandbox_status_with_config(self, mock_manager_class):
         """Test get_sandbox_status with config."""
         config = SandboxConfig.subprocess()
         agent = MockAgent(sandbox=config)
         
         mock_manager = Mock()
-        mock_manager.get_available_types.return_value = {"subprocess": True}
+        mock_manager.get_available_types.return_value = {
+            "subprocess": {"available": True, "description": "local", "requires": []},
+        }
         mock_manager_class.return_value = mock_manager
         
         status = agent.get_sandbox_status()
         
         assert status["configured"] is True
         assert status["config"] is not None
-        assert status["available_types"] == {"subprocess": True}
+        assert status["available_types"]["subprocess"]["available"] is True
         assert status["current_type"] == "subprocess"
 
     def test_get_code_execution_tools_no_sandbox(self):
@@ -136,7 +144,7 @@ class TestSandboxMixin:
         tools = agent._get_code_execution_tools()
         assert tools == []
 
-    @patch('praisonaiagents.agent.sandbox_mixin.SandboxManager')
+    @patch('praisonaiagents.sandbox.SandboxManager')
     def test_get_code_execution_tools_with_sandbox(self, mock_manager_class):
         """Test _get_code_execution_tools with sandbox."""
         config = SandboxConfig.subprocess()

@@ -1,9 +1,9 @@
 [project]
 name = "praisonai-bot"
-version = "0.0.34"
+version = "0.0.46"
 description = "Bots, gateway, and channel CLI for PraisonAI — messaging platforms and WebSocket control plane extracted from the praisonai wrapper."
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.10,<3.15"
 authors = [
     { name = "Mervin Praison" }
@@ -45,6 +45,12 @@ all = [
     "praisonai-bot[gateway,bot]",
 ]
 
+# Third-party packages contribute bot slash commands via the
+# "praisonai.bot_commands" entry-point group (Issue #3729); each entry point
+# resolves to a {name: template} mapping (or a callable returning one) that the
+# CustomCommandResolver merges into every bot chat surface. The group is
+# discovered dynamically by name, so no declaration is needed here.
+
 [project.urls]
 Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
@@ -65,7 +71,7 @@ agentmail = "praisonai_bot.bots.agentmail:AgentMailBot"
 praisonaiagents = { path = "../praisonai-agents" }
 
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

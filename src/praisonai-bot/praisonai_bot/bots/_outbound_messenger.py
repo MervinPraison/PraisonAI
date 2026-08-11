@@ -85,7 +85,7 @@ class BotOutboundMessenger:
         were delivered, skipped by policy, or unsupported by the transport.
         """
         try:
-            platform, channel_id = self._router.resolve(target, self._origin)
+            platform, channel_id, _thread_id = self._router.resolve(target, self._origin)
         except ValueError as e:
             return DeliveryResult(
                 ok=False,

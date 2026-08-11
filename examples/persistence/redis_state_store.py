@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Redis StateStore — Full Persistence Example
 

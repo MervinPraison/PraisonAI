@@ -356,6 +356,17 @@ class PraisonAI:
             for attr in ('auto_save', 'resume_session', 'cli_project_sessions'):
                 if hasattr(preserved_args, attr):
                     setattr(args, attr, getattr(preserved_args, attr))
+
+        # Preserve permission-gating flags threaded by ``praison run <file>.yaml``.
+        # parse_args() above returns a fresh args object, so approval settings set
+        # on ``praison.args`` before main() would otherwise be dropped and YAML
+        # runs would silently bypass the approval gate. These are independent of
+        # session flags (e.g. ``--allow`` with ``--no-save`` sets approval but not
+        # cli_project_sessions), so preserve them unconditionally when present.
+        if preserved_args:
+            for attr in ('approval', 'approve_all_tools', 'approval_timeout'):
+                if hasattr(preserved_args, attr):
+                    setattr(args, attr, getattr(preserved_args, attr))
         
         # Store args for use in handle_direct_prompt
         self.args = args
@@ -763,8 +774,8 @@ class PraisonAI:
             AgentsGenerator = _get_agents_generator()
             # Extract CLI configuration for YAML CLI parity
             cli_config = self._extract_cli_config_for_yaml()
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config)
-            result = agents_generator.generate_crew_and_kickoff()
+            with AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config) as agents_generator:
+                result = agents_generator.generate_crew_and_kickoff()
             print(result)
             return result
         elif args.init or self.init:
@@ -804,15 +815,15 @@ class PraisonAI:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity
                 cli_config = self._extract_cli_config_for_yaml()
-                agents_generator = AgentsGenerator(
+                with AgentsGenerator(
                     self.agent_file,
                     self.framework,
                     self.config_list,
                     agent_yaml=self.agent_yaml,
                     tools=self.tools,
                     cli_config=cli_config
-                )
-                result = agents_generator.generate_crew_and_kickoff()
+                ) as agents_generator:
+                    result = agents_generator.generate_crew_and_kickoff()
                 print(result)
                 return result
         else:
@@ -878,15 +889,15 @@ class PraisonAI:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity 
                 cli_config = self._extract_cli_config_for_yaml()
-                agents_generator = AgentsGenerator(
+                with AgentsGenerator(
                     self.agent_file,
                     self.framework,
                     self.config_list,
                     agent_yaml=self.agent_yaml,
                     tools=self.tools,
                     cli_config=cli_config
-                )
-                result = agents_generator.generate_crew_and_kickoff()
+                ) as agents_generator:
+                    result = agents_generator.generate_crew_and_kickoff()
                 print(result)
                 
                 # Close trace writer on success
@@ -1582,10 +1593,15 @@ class PraisonAI:
                 sys.exit(exit_code if exit_code is not None else 1)
             
             elif args.command == 'sandbox':
-                # Sandbox command - secure code execution environment
-                from ..features.sandbox_cli import handle_sandbox_command
-                exit_code = handle_sandbox_command(unknown_args)
-                sys.exit(exit_code)
+                from ..app import app as typer_app, register_commands
+                register_commands()
+                import sys as _sys
+                _sys.argv = ['praisonai', 'sandbox'] + unknown_args
+                try:
+                    typer_app()
+                except SystemExit as e:
+                    sys.exit(e.code if e.code else 0)
+                sys.exit(0)
             
             elif args.command == 'wizard':
                 # Wizard command - interactive project setup
@@ -1993,12 +2009,19 @@ class PraisonAI:
 
         if getattr(self.args, 'cli_project_sessions', False):
             from ..state.project_sessions import build_cli_memory_config
-            memory_cfg = build_cli_memory_config(
-                getattr(self.args, 'resume_session', None),
-                getattr(self.args, 'auto_save', None),
-            )
+            resume_session = getattr(self.args, 'resume_session', None)
+            auto_save = getattr(self.args, 'auto_save', None)
+            memory_cfg = build_cli_memory_config(resume_session, auto_save)
             if memory_cfg is not None:
                 cli_config['memory'] = memory_cfg
+            # Thread session ids so the team adapter can rehydrate/persist team
+            # state via AgentTeam.restore_session_state/save_session_state,
+            # giving YAML/team runs the same --continue/--session/--fork/--no-save
+            # continuity as single-agent prompt runs.
+            if resume_session:
+                cli_config['resume_session'] = resume_session
+            if auto_save:
+                cli_config['auto_save'] = auto_save
             
         return cli_config
 
@@ -2289,13 +2312,13 @@ class PraisonAI:
                 agents=agents_list, 
                 tasks=tasks_list,
                 process=process_type,
-                verbose=1 if verbose else 0
+                output="minimal" if verbose else "silent"
             )
         else:
             praison = AgentTeam(
                 agents=agents_list,
                 process=process_type,
-                verbose=1 if verbose else 0
+                output="minimal" if verbose else "silent"
             )
         praison.launch(port=port, host=host)
         
@@ -2328,8 +2351,8 @@ class PraisonAI:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity
                 cli_config = self._extract_cli_config_for_yaml()
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config)
-                result = agents_generator.generate_crew_and_kickoff()
+                with AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config) as agents_generator:
+                    result = agents_generator.generate_crew_and_kickoff()
                 return result
 
             try:

@@ -41,6 +41,7 @@ VALID_PLUGINS_KEYS = {
     "enabled": (bool, list, str),  # bool, list of plugin names, or "true"/"false"
     "auto_discover": (bool,),
     "directories": (list,),
+    "allow_project_plugins": (bool,),  # opt-in trust gate for ./.praisonai/plugins/*.py
 }
 
 VALID_DEFAULTS_KEYS = {
@@ -110,6 +111,10 @@ class PluginsConfig:
     """Configuration for the plugin system."""
     enabled: Union[bool, List[str]] = False  # True, False, or list of plugin names
     auto_discover: bool = True
+    # Opt-in trust gate for executing project-local single-file plugins
+    # (./.praisonai/plugins/*.py). Default False so a cloned repo cannot run
+    # arbitrary plugin code until the user explicitly authorises it.
+    allow_project_plugins: bool = False
     directories: List[str] = field(default_factory=lambda: [
         str(_default_project_plugins_dir()),
         str(_default_global_plugins_dir())
@@ -124,6 +129,7 @@ class PluginsConfig:
         result = {
             "enabled": self.enabled,
             "auto_discover": self.auto_discover,
+            "allow_project_plugins": self.allow_project_plugins,
             "directories": self.directories,
         }
         # Flatten per-plugin option maps back to top level for round-tripping.
@@ -315,7 +321,7 @@ def _dict_to_plugins_config(data: Dict[str, Any]) -> PluginsConfig:
     system; any other key whose value is a mapping is treated as a per-plugin
     option map delivered to that plugin's ``on_config`` hook.
     """
-    reserved = {"enabled", "auto_discover", "directories"}
+    reserved = {"enabled", "auto_discover", "directories", "allow_project_plugins"}
     options = {
         name: value
         for name, value in data.items()
@@ -324,6 +330,7 @@ def _dict_to_plugins_config(data: Dict[str, Any]) -> PluginsConfig:
     return PluginsConfig(
         enabled=data.get("enabled", False),
         auto_discover=data.get("auto_discover", True),
+        allow_project_plugins=data.get("allow_project_plugins", False),
         directories=data.get("directories", [
             str(_default_project_plugins_dir()),
             str(_default_global_plugins_dir())
@@ -581,6 +588,113 @@ def get_plugin_options() -> Dict[str, Dict[str, Any]]:
         plugin block) is preserved so plugins can read it via ``on_config``.
     """
     return dict(get_plugins_config().options)
+
+
+def _config_write_target() -> Path:
+    """Resolve the config file the CLI should write plugin enable/disable to.
+
+    Returns the existing config file if one is already present (so the CLI
+    mutates the *same* file the runtime reads), otherwise the project-local
+    ``.praisonai/config.yaml`` — the unified surface — as the default target.
+    This closes the config split-brain where the CLI wrote a JSON file the
+    runtime never read.
+    """
+    existing = _find_config_file()
+    if existing is not None:
+        return existing
+    return get_project_data_dir() / "config.yaml"
+
+
+def _dump_config_file(path: Path, data: Dict[str, Any]) -> None:
+    """Write ``data`` to ``path`` as YAML or TOML based on its suffix."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() in (".yaml", ".yml"):
+        import yaml
+
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+    else:
+        try:
+            import tomli_w
+        except ImportError:
+            # Do NOT write a YAML sidecar: the runtime keeps reading the
+            # original .toml (higher precedence), so the write would be
+            # silently lost and re-introduce the config split-brain. Fail
+            # fast with a remediation hint instead.
+            raise RuntimeError(
+                f"Cannot write TOML config {path}: no TOML writer available. "
+                "Install tomli-w (pip install tomli-w), or convert the config "
+                "to .praisonai/config.yaml."
+            ) from None
+        with open(path, "wb") as f:
+            tomli_w.dump(data, f)
+
+
+def set_plugin_enabled(name: str, enabled: bool) -> Path:
+    """Persist a plugin's enabled state to the config the runtime reads.
+
+    Mutates the ``plugins.enabled`` allow-list in the project's config file
+    (the same file ``get_enabled_plugins`` reads), creating
+    ``.praisonai/config.yaml`` if no config exists yet. This is the single
+    source of truth the CLI and runtime share — no separate JSON file.
+
+    Args:
+        name: Plugin name to enable/disable.
+        enabled: True to add to the allow-list, False to remove it.
+
+    Returns:
+        The path of the config file that was written.
+    """
+    target = _config_write_target()
+    raw = _load_config() if _find_config_file() is not None else {}
+    if not isinstance(raw, dict):
+        raw = {}
+
+    plugins = raw.get("plugins")
+    if not isinstance(plugins, dict):
+        plugins = {}
+        raw["plugins"] = plugins
+
+    has_enabled_key = "enabled" in plugins
+    current = plugins.get("enabled")
+    # Normalise the enabled flag into a list of names we can mutate.
+    if isinstance(current, list):
+        names = [str(n) for n in current]
+    elif isinstance(current, str) and current.strip():
+        names = [current.strip()]
+    elif current is True:
+        # Explicit "all plugins enabled" mode. Collapsing this to an allow-list
+        # would silently disable every other plugin, so we only touch this
+        # state when the requested change is well-defined:
+        #   - enable: already enabled, no-op (leave "all enabled" intact)
+        #   - disable: cannot be expressed as an allow-list without naming the
+        #     full set, so refuse rather than disable everything.
+        if enabled:
+            clear_config_cache()
+            return target
+        raise ValueError(
+            f"Cannot disable '{name}': plugins.enabled is currently set to "
+            "'all' (true). Set plugins.enabled to an explicit list of plugin "
+            "names first, then disable individual plugins."
+        )
+    elif current is None and not has_enabled_key:
+        # No allow-list configured yet (fresh config): start an empty list so
+        # the first enable produces [name] and the first disable is a no-op.
+        names = []
+    else:
+        # Falsy explicit value (e.g. enabled: false) — start from empty.
+        names = []
+
+    if enabled:
+        if name not in names:
+            names.append(name)
+    else:
+        names = [n for n in names if n != name]
+
+    plugins["enabled"] = names
+    _dump_config_file(target, raw)
+    clear_config_cache()
+    return target
 
 
 def _defaults_has_any_values() -> bool:

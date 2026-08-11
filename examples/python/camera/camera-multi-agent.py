@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Multi-Agent Camera Analysis Example
 

@@ -23,5 +23,5 @@ agent = Agent(
 )
 
 # Run the agent
-result = AgentTeam(agents=[agent], verbose=10).start()
+result = AgentTeam(agents=[agent], output="verbose").start()
 print(result)

@@ -98,7 +98,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
     vector-based memory for enhanced relationship-aware retrieval.
     """
 
-    def __init__(self, config: Dict[str, Any], verbose: int = 0):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, verbose: int = 0):
         self.cfg = config or {}
         self.verbose = verbose
         
@@ -246,6 +246,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if self.use_rag and hasattr(adapter, 'collection'):
             self.chroma_col = adapter.collection
             self.chroma_client = adapter.client
+            self._collection_name = getattr(adapter, 'collection_name', 'memory_store')
             
         if self.use_mongodb:
             if hasattr(adapter, 'client'):
@@ -287,6 +288,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, "short_term.db"))
         config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, "long_term.db"))
         config["rag_db_path"] = self.cfg.get("rag_db_path", os.path.join(project_data, "chroma_db"))
+        config["collection_name"] = self.cfg.get("collection_name", "memory_store")
         config["verbose"] = self.verbose
         
         # Add specific configurations for different adapters
@@ -443,7 +445,8 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 )
             )
 
-            collection_name = "memory_store"
+            collection_name = self.cfg.get("collection_name", "memory_store")
+            self._collection_name = collection_name
             try:
                 self.chroma_col = self.chroma_client.get_collection(name=collection_name)
                 self._log_verbose("Using existing ChromaDB collection")
@@ -587,6 +590,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         
         # Emit trace event for memory store
         self._emit_memory_event("store", "short_term", len(text), metadata=metadata)
+        return ident
 
     def search_short_term(
         self, 
@@ -703,11 +707,13 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 return []
         
         else:
-            # Delegate to the active adapter when provider falls back to
-            # sqlite/in_memory. This avoids the legacy short_mem schema mismatch
-            # where the adapter creates short_term_memory but legacy queries
-            # short_mem (which is never created by the adapter).
-            if getattr(self, "provider", None) in ("sqlite", "in_memory") and getattr(self, "memory_adapter", None):
+            # Delegate to the active adapter whenever one is configured. This
+            # mirrors the adapter-agnostic store path (store_short_term uses any
+            # configured memory_adapter regardless of provider name), so data
+            # stored via a registered adapter (e.g. "dakera") remains findable.
+            # Otherwise the legacy short_mem query — never written to when the
+            # adapter store succeeded — would always return [].
+            if getattr(self, "memory_adapter", None):
                 try:
                     adapter_results = self.memory_adapter.search_short_term(query, limit=limit, **kwargs)
                     if min_quality > 0:
@@ -753,6 +759,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
     def reset_short_term(self):
         """Completely clears short-term memory."""
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_short_term/search_short_term. The adapter creates
+        # short_term_memory; the legacy short_mem table below is never created
+        # by the adapter, so DELETE FROM short_mem would raise.
+        if getattr(self, "memory_adapter", None):
+            if hasattr(self.memory_adapter, "reset_short_term"):
+                self.memory_adapter.reset_short_term()
+            return
         conn = self._get_stm_conn()
         with self._write_lock:  # Serialize write operations
             conn.execute("DELETE FROM short_mem")
@@ -804,15 +818,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
         ident = str(time.time_ns())
         created = time.time()
 
-        # Protocol-driven storage: Try adapter first only when the provider has
-        # fallen back to sqlite/in_memory. This keeps storage consistent with
-        # search (which delegates to the adapter for the same providers) and
-        # avoids the legacy long_mem schema mismatch. Other providers (chroma,
-        # mem0, mongodb) keep their existing dedicated write paths below so the
-        # embedding model and vector space stay consistent with search.
+        # Protocol-driven storage: Try adapter first whenever one is configured.
+        # This mirrors store_short_term (adapter-agnostic) and keeps storage
+        # symmetric with search_long_term, so data stored via a registered
+        # adapter (e.g. "dakera") is written to — and later found in — the same
+        # place. The dedicated chroma/mem0/mongodb write paths below are only
+        # used when no adapter handled the store.
         adapter_success = False
-        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
-                and getattr(self, "memory_adapter", None)):
+        if getattr(self, "memory_adapter", None):
             try:
                 result_id = self.memory_adapter.store_long_term(text, metadata=metadata)
                 logger.info(f"Successfully stored via memory adapter with ID: {result_id}")
@@ -845,14 +858,13 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 # Continue to SQLite fallback
         
         # Store in SQLite (with write lock for concurrency safety).
-        # Skip the legacy long_mem schema for adapter-driven sqlite/in_memory
-        # providers: those use the adapter's long_term_memory table and the
-        # legacy long_mem table is never created, which would silently drop
-        # the write. Surface the adapter failure instead.
-        if not adapter_success and getattr(self, "provider", None) in ("sqlite", "in_memory") \
-                and getattr(self, "memory_adapter", None):
+        # Skip the legacy long_mem schema for adapter-driven providers: those use
+        # the adapter's long_term_memory table and the legacy long_mem table is
+        # never created, which would silently drop the write (and search delegates
+        # to the adapter, not long_mem). Surface the adapter failure instead.
+        if not adapter_success and getattr(self, "memory_adapter", None):
             raise RuntimeError(
-                "Long-term store failed via adapter for sqlite/in_memory provider; "
+                "Long-term store failed via memory adapter; "
                 "the legacy long_mem table is not schema-compatible."
             )
 
@@ -913,6 +925,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         
         # Emit trace event for memory store
         self._emit_memory_event("store", "long_term", len(text), metadata=metadata)
+        return ident
 
     def search_long_term(
         self, 
@@ -1043,10 +1056,12 @@ class Memory(SearchMixin, MemoryCoreMixin):
             except Exception as e:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
 
-        # Delegate to the active adapter when provider falls back to
-        # sqlite/in_memory. This avoids the legacy long_mem schema mismatch
-        # where the adapter creates long_term_memory but legacy queries long_mem.
-        if not found and getattr(self, "provider", None) in ("sqlite", "in_memory") and getattr(self, "memory_adapter", None):
+        # Delegate to the active adapter whenever one is configured. This mirrors
+        # the adapter-agnostic store path (store_long_term uses any configured
+        # memory_adapter regardless of provider name), so data stored via a
+        # registered adapter (e.g. "dakera") remains findable rather than being
+        # lost to the legacy long_mem query that was never written to.
+        if not found and getattr(self, "memory_adapter", None):
             try:
                 adapter_results = self.memory_adapter.search_long_term(query, limit=limit, **kwargs)
                 if min_quality > 0:
@@ -1115,6 +1130,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_long_term/search_long_term. The adapter creates long_term_memory;
+        # the legacy long_mem table below is never created by the adapter, so
+        # DELETE FROM long_mem would raise.
+        if getattr(self, "memory_adapter", None):
+            if hasattr(self.memory_adapter, "reset_long_term"):
+                self.memory_adapter.reset_long_term()
+            return
         conn = self._get_ltm_conn()
         with self._write_lock:  # Serialize write operations
             conn.execute("DELETE FROM long_mem")
@@ -1130,8 +1153,24 @@ class Memory(SearchMixin, MemoryCoreMixin):
             except Exception as e:
                 self._log_verbose(f"Error clearing MongoDB long-term memory: {e}", logging.ERROR)
         if self.use_rag and hasattr(self, "chroma_client"):
-            self.chroma_client.reset()  # entire DB
-            self._init_chroma()         # re-init fresh
+            # Scope the reset to this instance's own collection. A full
+            # ``chroma_client.reset()`` wipes *every* collection in the shared
+            # persistent store, destroying other agents' long-term memory that
+            # happens to live in the same directory.
+            collection_name = getattr(self, "_collection_name", "memory_store")
+            try:
+                self.chroma_client.delete_collection(name=collection_name)
+            except Exception as e:
+                # Surface the failure instead of swallowing it: reopening the
+                # unchanged collection below would otherwise let the caller
+                # believe the reset succeeded while the long-term memories
+                # remain fully available.
+                self._log_verbose(
+                    f"Error deleting ChromaDB collection '{collection_name}': {e}",
+                    logging.ERROR,
+                )
+                raise
+            self._init_chroma()         # recreate only this collection
 
     # -------------------------------------------------------------------------
     #                       Selective Deletion Methods
@@ -1147,6 +1186,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
         Returns:
             True if memory was found and deleted, False otherwise
         """
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_short_term/search_short_term. Data written through the adapter
+        # lives in short_term_memory, not the legacy short_mem table, so a direct
+        # DELETE below would silently match zero rows.
+        if (getattr(self, "memory_adapter", None)
+                and hasattr(self.memory_adapter, "delete_memory")):
+            return self.memory_adapter.delete_memory(memory_id, tier="short")
+
         deleted = False
         
         # Delete from SQLite (with write lock for concurrency safety)
@@ -1188,6 +1235,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
         Returns:
             True if memory was found and deleted, False otherwise
         """
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_long_term/search_long_term. Data written through the adapter
+        # lives in long_term_memory, not the legacy long_mem table, so a direct
+        # DELETE below would silently match zero rows.
+        if (getattr(self, "memory_adapter", None)
+                and hasattr(self.memory_adapter, "delete_memory")):
+            return self.memory_adapter.delete_memory(memory_id, tier="long")
+
         deleted = False
         
         # Delete from SQLite (with write lock for concurrency safety)
@@ -1339,6 +1394,62 @@ class Memory(SearchMixin, MemoryCoreMixin):
             self._log_verbose(f"Deleted {deleted} memories matching '{query}'")
         
         return deleted
+
+    # -------------------------------------------------------------------------
+    #             Convenience API (remember / recall / forget)
+    # -------------------------------------------------------------------------
+    # Thin, intuitive aliases over the existing long-term store/search/delete
+    # methods. They do not replace any backend or add new storage — they simply
+    # provide a friendlier entry point for standalone scripts and agents.
+    def remember(
+        self,
+        content: str,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> str:
+        """Store a fact in long-term memory; returns the memory id.
+
+        Convenience alias over :meth:`store_long_term`.
+        """
+        return self.store_long_term(content, metadata=metadata, **kwargs)
+
+    def recall(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve matching facts from long-term memory.
+
+        Convenience alias over :meth:`search_long_term`.
+        """
+        return self.search_long_term(query, limit=limit, **kwargs)
+
+    def forget(
+        self,
+        *,
+        memory_id: Optional[str] = None,
+        query: Optional[str] = None,
+        **kwargs,
+    ) -> int:
+        """Delete memories by id or matching query; returns count deleted.
+
+        Convenience wrapper over :meth:`delete_memory` /
+        :meth:`delete_memories_matching`. Provide exactly one of
+        ``memory_id`` or ``query``.
+        """
+        if (memory_id is None) == (query is None):
+            raise ValueError("forget() requires exactly one of 'memory_id' or 'query'")
+        if memory_id is not None:
+            return 1 if self.delete_memory(memory_id, **kwargs) else 0
+        if not query.strip():
+            raise ValueError("forget() query must be a non-empty string")
+        # Scope query-based deletion to long-term memory to mirror
+        # remember()/recall(), which operate on long-term storage only.
+        kwargs.setdefault("memory_type", "long_term")
+        return self.delete_memories_matching(query, **kwargs)
 
     # -------------------------------------------------------------------------
     #                       Entity Memory Methods

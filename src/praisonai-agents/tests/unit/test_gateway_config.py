@@ -16,7 +16,7 @@ class TestSessionConfig:
         config = SessionConfig()
         assert config.timeout == 3600
         assert config.max_messages == 1000
-        assert config.persist is False
+        assert config.persist is True
         assert config.persist_path is None
         assert config.metadata == {}
         assert config.mirror_runtime_state is False  # Issue #1943 - Default off
@@ -295,6 +295,22 @@ class TestMultiChannelGatewayConfig:
         assert "telegram" in config.channels
         assert "discord" in config.channels
 
+    def test_from_dict_session_persist_default_and_opt_out(self):
+        """``session_config`` persistence defaults to True; ``persist: false`` opts out (#3593)."""
+        from praisonaiagents.gateway import MultiChannelGatewayConfig
+
+        # Omitted persist defaults to durable-by-default.
+        default_config = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"session_config": {}}}
+        )
+        assert default_config.gateway.session_config.persist is True
+
+        # Explicit opt-out is preserved.
+        ephemeral_config = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"session_config": {"persist": False}}}
+        )
+        assert ephemeral_config.gateway.session_config.persist is False
+
     def test_to_dict(self):
         """Test MultiChannelGatewayConfig serialization."""
         from praisonaiagents.gateway import MultiChannelGatewayConfig
@@ -364,3 +380,181 @@ class TestChatCommandInfo:
             content = f.read()
         for dep in ["chromadb", "fastapi", "uvicorn", "litellm"]:
             assert f"import {dep}" not in content, f"Found heavy dep '{dep}' in protocols.py"
+
+
+class TestClassifyReload:
+    """Tests for the canonical reload-scope classifier (Issue #3440)."""
+
+    def test_hot_appliable_paths_are_hot(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("gateway.logging.level") == ReloadScope.HOT
+        assert classify_reload("gateway.drain_timeout") == ReloadScope.HOT
+        assert classify_reload("gateway.reload_drain_timeout") == ReloadScope.HOT
+        # A leaf under a hot key is still hot.
+        assert classify_reload("gateway.logging.level.extra") == ReloadScope.HOT
+
+    def test_channel_scoped_change(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("channels.telegram.enabled") == ReloadScope.CHANNEL
+        assert classify_reload("channels.discord.routing.default") == ReloadScope.CHANNEL
+
+    def test_bare_channels_section_is_full_restart(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("channels") == ReloadScope.FULL
+
+    def test_channels_with_empty_name_is_full_restart(self):
+        # A malformed path with an empty channel name must not schedule a
+        # restart for channel "" — it falls back to the fail-safe full restart.
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("channels.") == ReloadScope.FULL
+        assert classify_reload("channels..enabled") == ReloadScope.FULL
+
+    def test_agent_affecting_changes(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("agents") == ReloadScope.AGENTS
+        assert classify_reload("agents.support.instructions") == ReloadScope.AGENTS
+        assert classify_reload("provider") == ReloadScope.AGENTS
+        assert classify_reload("guardrails") == ReloadScope.AGENTS
+
+    def test_unknown_and_structural_are_full_restart(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("gateway.some_unknown_knob") == ReloadScope.FULL
+        assert classify_reload("routing") == ReloadScope.FULL
+        assert classify_reload("routes") == ReloadScope.FULL
+        assert classify_reload("scheduler") == ReloadScope.FULL
+        assert classify_reload("totally_unknown") == ReloadScope.FULL
+
+    def test_scope_values_are_plain_strings(self):
+        from praisonaiagents.gateway import ReloadScope
+
+        assert ReloadScope.HOT == "hot"
+        assert ReloadScope.CHANNEL == "channel"
+        assert ReloadScope.AGENTS == "agents"
+        assert ReloadScope.FULL == "full"
+
+
+class TestConfigVersionMigration:
+    """Config version stamp + doctor-driven migration (Issue #3841)."""
+
+    def test_migrate_allowed_users_csv_and_stamp(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            migrate_config_with_doctor,
+        )
+
+        raw = {"channels": {"telegram": {"token": "x", "allowed_users": "alice,bob"}}}
+        migrated, applied = migrate_config_with_doctor(raw)
+
+        assert migrated["channels"]["telegram"]["allowed_users"] == ["alice", "bob"]
+        assert migrated["channels"]["telegram"]["group_policy"] == "mention_only"
+        assert migrated["config_version"] == GATEWAY_CONFIG_VERSION
+        assert len(applied) == 2
+
+    def test_input_is_not_mutated(self):
+        from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+        raw = {"channels": {"telegram": {"allowed_users": "alice,bob"}}}
+        migrate_config_with_doctor(raw)
+        assert raw["channels"]["telegram"]["allowed_users"] == "alice,bob"
+        assert "config_version" not in raw
+
+    def test_migration_is_idempotent(self):
+        from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+        raw = {"channels": {"telegram": {"allowed_users": "alice,bob"}}}
+        migrated, _ = migrate_config_with_doctor(raw)
+        again, applied2 = migrate_config_with_doctor(migrated)
+        assert applied2 == []
+        assert again["channels"]["telegram"]["allowed_users"] == ["alice", "bob"]
+
+    def test_is_config_current(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            is_config_current,
+        )
+
+        assert is_config_current({"config_version": GATEWAY_CONFIG_VERSION})
+        assert not is_config_current({})
+        assert not is_config_current({"config_version": 0})
+
+    def test_empty_allowed_users_becomes_empty_list(self):
+        from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+        raw = {"channels": {"telegram": {"allowed_users": ""}}}
+        migrated, _ = migrate_config_with_doctor(raw)
+        assert migrated["channels"]["telegram"]["allowed_users"] == []
+
+    def test_no_channels_still_stamps_version(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            migrate_config_with_doctor,
+        )
+
+        migrated, applied = migrate_config_with_doctor({"agents": {}})
+        assert migrated["config_version"] == GATEWAY_CONFIG_VERSION
+        assert applied == []
+
+    def test_rules_are_declarative_units(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_RULES,
+            LegacyConfigRule,
+        )
+
+        assert GATEWAY_CONFIG_RULES
+        for rule in GATEWAY_CONFIG_RULES:
+            assert isinstance(rule, LegacyConfigRule)
+            assert callable(rule.detect)
+            assert callable(rule.fix)
+            assert isinstance(rule.reason, str) and rule.reason
+
+    def test_newer_version_is_rejected_not_downgraded(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            ConfigVersionError,
+            migrate_config_with_doctor,
+        )
+
+        raw = {"config_version": GATEWAY_CONFIG_VERSION + 1, "agents": {}}
+        with pytest.raises(ConfigVersionError):
+            migrate_config_with_doctor(raw)
+        # The input must not have been downgraded/mutated.
+        assert raw["config_version"] == GATEWAY_CONFIG_VERSION + 1
+
+    def test_boolean_config_version_is_rejected(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigVersionError,
+            is_config_current,
+            migrate_config_with_doctor,
+        )
+
+        # True == 1 must NOT be treated as version 1.
+        with pytest.raises(ConfigVersionError):
+            is_config_current({"config_version": True})
+        with pytest.raises(ConfigVersionError):
+            migrate_config_with_doctor({"config_version": True, "agents": {}})
+
+    def test_non_integer_config_version_is_rejected(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigVersionError,
+            migrate_config_with_doctor,
+        )
+
+        for bad in ("1", 1.0, [1]):
+            with pytest.raises(ConfigVersionError):
+                migrate_config_with_doctor({"config_version": bad, "agents": {}})
+
+    def test_config_version_error_exported(self):
+        from praisonaiagents.gateway import ConfigVersionError as Exported
+        from praisonaiagents.gateway.config import ConfigVersionError
+
+        assert Exported is ConfigVersionError
+        assert issubclass(ConfigVersionError, ValueError)

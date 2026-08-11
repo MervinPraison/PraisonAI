@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, AgentTeam
 from exa_py import Exa
 import os

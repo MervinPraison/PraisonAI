@@ -14,9 +14,9 @@ from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Li
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
-import logging
 from praisonaiagents._logging import get_logger
 import asyncio
+import contextvars
 import threading
 import time
 import json
@@ -163,33 +163,52 @@ from ..errors import (
     HandoffValidationError
 )
 
-# Thread-local storage for tracking handoff chains
-_handoff_context = threading.local()
+# Per-task/per-thread storage for tracking handoff chains.
+#
+# ``contextvars.ContextVar`` isolates the chain per :class:`asyncio.Task`
+# (and per OS thread), unlike ``threading.local()`` which shares one list
+# across every coroutine running on the same event-loop thread. Concurrent
+# async handoffs (``asyncio.gather``, a server handling parallel requests, or
+# any ``max_concurrent`` workflow) would otherwise push/pop into the same list
+# and corrupt each other's cycle/depth state. Combined with the copy-on-write
+# push/pop below, this fully isolates sibling handoff tasks (e.g. those spawned
+# by ``parallel_handoffs`` via ``asyncio.gather``).
+_handoff_chain_var: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.ContextVar(
+    "handoff_chain", default=None
+)
 
 def _get_handoff_chain() -> List[str]:
-    """Get current handoff chain from thread-local storage."""
-    if not hasattr(_handoff_context, 'chain'):
-        _handoff_context.chain = []
-    return _handoff_context.chain
+    """Get current handoff chain for this task/thread."""
+    chain = _handoff_chain_var.get()
+    if chain is None:
+        chain = []
+        _handoff_chain_var.set(chain)
+    return chain
 
 def _get_handoff_depth() -> int:
     """Get current handoff depth."""
     return len(_get_handoff_chain())
 
 def _push_handoff(agent_name: str) -> None:
-    """Push agent to handoff chain."""
-    chain = _get_handoff_chain()
+    """Push agent to handoff chain.
+
+    Uses copy-on-write so a push made inside a child task does not leak back
+    into the parent task's chain once the child completes.
+    """
+    chain = list(_get_handoff_chain())
     chain.append(agent_name)
+    _handoff_chain_var.set(chain)
 
 def _pop_handoff() -> Optional[str]:
     """Pop agent from handoff chain."""
-    chain = _get_handoff_chain()
-    return chain.pop() if chain else None
+    chain = list(_get_handoff_chain())
+    popped = chain.pop() if chain else None
+    _handoff_chain_var.set(chain)
+    return popped
 
 def _clear_handoff_chain() -> None:
     """Clear the handoff chain."""
-    if hasattr(_handoff_context, 'chain'):
-        _handoff_context.chain = []
+    _handoff_chain_var.set([])
 
 @dataclass
 class HandoffInputData:
@@ -289,12 +308,14 @@ class Handoff:
     - Cycle detection and depth limiting
     - Configurable context policies
     """
-    
-    # Class-level semaphore for concurrency control
-    _semaphore: Optional[asyncio.Semaphore] = None
-    _sync_semaphore: Optional[threading.Semaphore] = None
-    _semaphore_lock: threading.Lock = threading.Lock()  # Lock for semaphore initialization
-    
+
+    # Class-level lock guarding lazy creation of each instance's async
+    # semaphore. The semaphore itself is per-instance (so every Handoff
+    # enforces its own max_concurrent), but the brief init critical section is
+    # only ever touched under this shared threading.Lock, which keeps
+    # double-checked lazy creation thread-safe without a per-instance lock.
+    _semaphore_lock: threading.Lock = threading.Lock()
+
     def __init__(
         self,
         agent: 'Agent',
@@ -325,10 +346,40 @@ class Handoff:
         self.input_type = input_type
         self.input_filter = input_filter
         self.config = config or HandoffConfig()
+
+        # Instance-level concurrency control. Each Handoff enforces its own
+        # max_concurrent instead of sharing one process-wide semaphore, so
+        # different handoffs don't silently override each other's limits based
+        # on execution order. The async semaphore is created lazily (and
+        # recreated if bound to a stale event loop) since it binds to the
+        # running loop on first use.
+        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._semaphore_loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Override config callback if on_handoff provided directly
         if on_handoff and not self.config.on_handoff:
             self.config.on_handoff = on_handoff
+
+    def _get_semaphore(self) -> Optional[asyncio.Semaphore]:
+        """Return this handoff's async semaphore, bound to the current loop.
+
+        Returns None when concurrency limiting is disabled (max_concurrent <= 0).
+        The semaphore is created lazily and recreated if the running event loop
+        differs from the one it was originally bound to, so a process that calls
+        asyncio.run(...) more than once doesn't crash with a "bound to a
+        different event loop" RuntimeError.
+        """
+        if self.config.max_concurrent <= 0:
+            return None
+        try:
+            current_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            current_loop = None
+        with self._semaphore_lock:
+            if self._semaphore is None or self._semaphore_loop is not current_loop:
+                self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+                self._semaphore_loop = current_loop
+            return self._semaphore
         
     @property
     def tool_name(self) -> str:
@@ -597,13 +648,15 @@ class Handoff:
         """
         start_time = time.time()
         kwargs = context or {}
+        pushed = False
         
         try:
-            # Safety checks
+            # Safety checks (may raise before anything is pushed for this call)
             self._check_safety(source_agent)
             
             # Track handoff chain
             _push_handoff(source_agent.name)
+            pushed = True
             
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -679,7 +732,8 @@ class Handoff:
             logger.error(f"Handoff error: {e}")
             return result
         finally:
-            _pop_handoff()
+            if pushed:
+                _pop_handoff()
     
     async def execute_async(
         self,
@@ -698,20 +752,19 @@ class Handoff:
         Returns:
             HandoffResult with response or error
         """
-        # Initialize semaphore if needed (thread-safe)
-        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
-            with Handoff._semaphore_lock:  # Thread-safe initialization
-                if Handoff._semaphore is None:  # Double-check after acquiring lock
-                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        # Per-instance semaphore, bound to the current event loop
+        semaphore = self._get_semaphore()
         
         start_time = time.time()
         kwargs = context or {}
         
         async def _execute():
+            pushed = False
             try:
-                # Safety checks
+                # Safety checks (may raise before anything is pushed for this call)
                 self._check_safety(source_agent)
                 _push_handoff(source_agent.name)
+                pushed = True
                 
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -760,11 +813,12 @@ class Handoff:
                 
                 return result
             finally:
-                _pop_handoff()
+                if pushed:
+                    _pop_handoff()
         
         try:
-            if self.config.max_concurrent > 0 and Handoff._semaphore:
-                async with Handoff._semaphore:
+            if semaphore is not None:
+                async with semaphore:
                     if self.config.timeout_seconds > 0:
                         result = await asyncio.wait_for(
                             _execute(),
@@ -828,13 +882,15 @@ class Handoff:
         def handoff_tool(**kwargs):
             """Execute the handoff to the target agent."""
             start_time = time.time()
+            pushed = False
             
             try:
-                # Safety checks
+                # Safety checks (may raise before anything is pushed for this call)
                 self._check_safety(source_agent)
                 
                 # Track handoff chain
                 _push_handoff(source_agent.name)
+                pushed = True
                 
                 # Execute on_handoff callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -920,7 +976,8 @@ class Handoff:
                 self._execute_callback(self.config.on_error, source_agent, kwargs, result)
                 return f"Error during handoff to {self.agent.name}: {str(e)}"
             finally:
-                _pop_handoff()
+                if pushed:
+                    _pop_handoff()
         
         # Set function metadata for tool definition generation
         handoff_tool.__name__ = self.tool_name
@@ -1171,6 +1228,13 @@ async def parallel_handoffs(
     semaphore = asyncio.Semaphore(effective_max_concurrent) if effective_max_concurrent > 0 else None
     
     async def _run_one(agent, prompt):
+        # Each gathered task shares a copied context, but a copied ContextVar
+        # binding still points at the *same* parent list object. Rebind to a
+        # fresh, per-task copy so sibling handoffs cannot corrupt each other's
+        # cycle/depth tracking when parallel_handoffs runs inside a non-empty
+        # parent handoff chain.
+        _handoff_chain_var.set(list(_handoff_chain_var.get() or []))
+
         async def _do_handoff():
             try:
                 return await source.handoff_to_async(agent, prompt, config=config)
@@ -1391,13 +1455,15 @@ class TypedHandoff(Handoff, Generic[T]):
         
         start_time = time.time()
         kwargs = context or {}
+        pushed = False
         
         try:
-            # Safety checks
+            # Safety checks (may raise before anything is pushed for this call)
             self._check_safety(source_agent)
             
             # Track handoff chain
             _push_handoff(source_agent.name)
+            pushed = True
             
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1470,7 +1536,8 @@ class TypedHandoff(Handoff, Generic[T]):
             logger.error(f"Typed handoff error: {e}")
             return result
         finally:
-            _pop_handoff()
+            if pushed:
+                _pop_handoff()
     
     async def execute_async(
         self,
@@ -1497,20 +1564,19 @@ class TypedHandoff(Handoff, Generic[T]):
         if isinstance(payload, str):
             return await super().execute_async(source_agent, payload, context)
         
-        # Initialize semaphore if needed (thread-safe)
-        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
-            with Handoff._semaphore_lock:
-                if Handoff._semaphore is None:
-                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        # Per-instance semaphore, bound to the current event loop
+        semaphore = self._get_semaphore()
         
         start_time = time.time()
         kwargs = context or {}
         
         async def _execute():
+            pushed = False
             try:
-                # Safety checks
+                # Safety checks (may raise before anything is pushed for this call)
                 self._check_safety(source_agent)
                 _push_handoff(source_agent.name)
+                pushed = True
                 
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1558,11 +1624,12 @@ class TypedHandoff(Handoff, Generic[T]):
                     handoff_depth=_get_handoff_depth(),
                 )
             finally:
-                _pop_handoff()
+                if pushed:
+                    _pop_handoff()
         
         try:
-            if self.config.max_concurrent > 0 and Handoff._semaphore:
-                async with Handoff._semaphore:
+            if semaphore is not None:
+                async with semaphore:
                     if self.config.timeout_seconds > 0:
                         result = await asyncio.wait_for(
                             _execute(),

@@ -141,6 +141,38 @@ class SessionEndInput(HookInput):
 
 
 @dataclass
+class SessionPersistFailedInput(HookInput):
+    """Input for SESSION_PERSIST_FAILED hooks (a durable session write failed).
+
+    Fired by the session store when an ``add_message``/``set_chat_history``
+    write cannot be persisted (disk-full, SQLite/FTS corruption, permission /
+    ``OSError``). Instead of losing the already-produced turn silently, the
+    store spills it to an atomic fallback file and fires this hook so operators
+    can observe/route the failure (metrics, alerting, forensics) — mirroring the
+    ``MESSAGE_UNDELIVERED`` posture on the outbound side (Issue #3597).
+
+    ``spilled`` reports whether the last-resort fallback write itself
+    succeeded; ``spill_path`` is the file the turn was salvaged to (when any).
+    """
+    role: str = ""
+    content: str = ""
+    error: str = ""
+    spilled: bool = False
+    spill_path: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "role": self.role,
+            "content": self.content[:500] if self.content else "",
+            "error": self.error,
+            "spilled": self.spilled,
+            "spill_path": self.spill_path,
+        })
+        return base
+
+
+@dataclass
 class BeforeLLMInput(HookInput):
     """Input for BeforeLLM hooks."""
     messages: List[Dict[str, Any]] = field(default_factory=list)
@@ -176,6 +208,34 @@ class AfterLLMInput(HookInput):
             "model": self.model,
             "tokens_used": self.tokens_used,
             "latency_ms": self.latency_ms
+        })
+        return base
+
+
+@dataclass
+class ModelFallbackInput(HookInput):
+    """Input for MODEL_FALLBACK hooks (primary model unavailable mid-turn).
+
+    Fired by the agent's LLM recovery loop at the exact point it swaps the
+    primary model for the next entry in the configured ``fallback_models``
+    chain, so an otherwise silent quality/cost degradation becomes an
+    observable state transition (Issue #3820). Notification only: the turn
+    continues on ``to_model``. Only the failure class is exposed
+    (``reason_category``) — provider internals stay redacted, mirroring the
+    redaction discipline of the other error-path events.
+    """
+    from_model: str = ""
+    to_model: str = ""
+    reason_category: str = ""
+    fallback_index: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "from_model": self.from_model,
+            "to_model": self.to_model,
+            "reason_category": self.reason_category,
+            "fallback_index": self.fallback_index,
         })
         return base
 
@@ -300,6 +360,35 @@ class MessageSentInput(HookInput):
 
 
 @dataclass
+class MessageUndeliveredInput(HookInput):
+    """Input for MESSAGE_UNDELIVERED hooks (a reply could not be delivered).
+
+    Fired by the gateway when an outbound reply fails *permanently* (the target
+    was confirmed dead, or delivery exhausted its retries) so operators can
+    route the failure — mirror it to a home channel, alert, or re-queue —
+    without patching adapters. It is a notification only: the reply has already
+    been parked in the DLQ (when configured) and, best-effort, a short plain-text
+    notice may have been attempted on the same channel.
+    """
+    platform: str = ""
+    content: str = ""
+    channel_id: str = ""
+    error: str = ""
+    notice_delivered: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platform": self.platform,
+            "content": self.content[:500] if self.content else "",
+            "channel_id": self.channel_id,
+            "error": self.error,
+            "notice_delivered": self.notice_delivered,
+        })
+        return base
+
+
+@dataclass
 class GatewayStartInput(HookInput):
     """Input for GATEWAY_START hooks (gateway/BotOS started)."""
     platforms: List[str] = field(default_factory=list)
@@ -327,6 +416,30 @@ class GatewayStopInput(HookInput):
             "platforms": self.platforms,
             "bot_count": self.bot_count,
             "reason": self.reason,
+        })
+        return base
+
+
+@dataclass
+class CliBackendExecuteInput(HookInput):
+    """Input for CLI_BACKEND_EXECUTE hooks (agent delegated a turn to a CLI backend)."""
+    backend: str = ""
+    command: Optional[List[Any]] = None
+    content: Optional[str] = None
+    error: Optional[str] = None
+    transport: str = "subprocess"
+    praisonai_llm_http: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        from ..cli_backend.debug import redact_command
+        base = super().to_dict()
+        base.update({
+            "backend": self.backend,
+            "command": redact_command(self.command),
+            "content": self.content[:500] if self.content else None,
+            "error": self.error,
+            "transport": self.transport,
+            "praisonai_llm_http": self.praisonai_llm_http,
         })
         return base
 

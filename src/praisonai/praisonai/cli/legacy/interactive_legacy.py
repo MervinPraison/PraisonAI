@@ -45,6 +45,33 @@ def _start_interactive_mode(self, args):
         # Set interactive mode flag
         self._interactive_mode = True
         
+        # Initialize persistent session FIRST so the exact session that drives
+        # the conversation is also the one used for workspace binding below —
+        # resolving it once avoids a second, independent last-session lookup that
+        # could race a concurrent CLI process and bind tools to a different dir.
+        from .session import get_session_store
+        session_store = get_session_store()
+
+        resume_session_id = getattr(args, 'resume_session', None)
+        if resume_session_id == 'last':
+            unified_session = session_store.get_last_session()
+            if not unified_session:
+                unified_session = session_store.get_or_create()
+        elif resume_session_id:
+            unified_session = session_store.get_or_create(resume_session_id)
+        else:
+            unified_session = session_store.get_or_create()
+
+        # Session↔directory binding: when resuming a session, root the tools at
+        # the directory the session started in (persisted UnifiedSession.workspace)
+        # so `--continue`/`--session` resume INTO that directory instead of the
+        # unrelated cwd. Only applies on resume and only when the user has not
+        # already pinned a workspace via --workspace (PRAISONAI_WORKSPACE). If the
+        # recorded directory no longer exists, warn and fall back to cwd. Pass the
+        # already-resolved session so the binder and conversation agree exactly.
+        if not os.environ.get("PRAISONAI_WORKSPACE"):
+            _bind_resume_workspace(args, console, session=unified_session)
+        
         # Load interactive tools
         tools_list = _load_interactive_tools(self)
         
@@ -90,20 +117,8 @@ def _start_interactive_mode(self, args):
         # Check for verbose mode
         verbose_mode = getattr(args, 'verbose', False) if hasattr(args, 'verbose') else False
         
-        # Initialize persistent session
-        from .session import get_session_store
-        session_store = get_session_store()
-        
-        # Check for --resume flag or get/create session
-        resume_session_id = getattr(args, 'resume_session', None)
-        if resume_session_id == 'last':
-            unified_session = session_store.get_last_session()
-            if not unified_session:
-                unified_session = session_store.get_or_create()
-        elif resume_session_id:
-            unified_session = session_store.get_or_create(resume_session_id)
-        else:
-            unified_session = session_store.get_or_create()
+        # (Persistent session already resolved above, before workspace binding,
+        # so the binder and the conversation share the exact same session.)
         
         # Set model from args or session
         current_model = getattr(args, 'llm', None) or unified_session.current_model or os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o-mini')
@@ -464,8 +479,14 @@ def _start_interactive_mode(self, args):
                     elif cmd == "revert":
                         _handle_revert_command(self, console, cmd_args, session_state)
                         continue
+                    elif cmd == "diff":
+                        _handle_diff_command(self, console, cmd_args, session_state)
+                        continue
                     elif cmd == "queue":
                         _handle_queue_command(self, console, cmd_args, session_state)
+                        continue
+                    elif cmd == "tasks":
+                        _handle_tasks_command(self, console, cmd_args, session_state)
                         continue
                     elif cmd == "session":
                         # Show session info
@@ -476,6 +497,19 @@ def _start_interactive_mode(self, args):
                             console.print(f"[cyan]Created:[/cyan] {us.created_at}")
                             console.print(f"[cyan]Updated:[/cyan] {us.updated_at}")
                             console.print(f"[cyan]Total tokens:[/cyan] {us.total_input_tokens + us.total_output_tokens}")
+                            parent_id = getattr(us, 'parent_id', None)
+                            if parent_id:
+                                console.print(f"[cyan]Forked from:[/cyan] {parent_id}")
+                            children = getattr(us, 'children_ids', None) or []
+                            if children:
+                                console.print(f"[cyan]Forks:[/cyan] {', '.join(children)}")
+                        continue
+                    elif cmd == "branch":
+                        _handle_branch_command(
+                            self, console, cmd_args, session_state,
+                            worker_state=worker_state,
+                            execution_queue=execution_queue,
+                        )
                         continue
                     elif cmd == "history":
                         # Show conversation history
@@ -491,6 +525,9 @@ def _start_interactive_mode(self, args):
                                 console.print(f"  [{style}]{role}:[/{style}] {content}")
                         else:
                             console.print("[dim]No conversation history[/dim]")
+                        continue
+                    elif cmd == "export":
+                        _handle_export_command(self, console, cmd_args, session_state)
                         continue
                     elif cmd == "new":
                         # Start a new session
@@ -515,6 +552,57 @@ def _start_interactive_mode(self, args):
                             console.print(f"[cyan]Queued:[/cyan] {queue_size} messages")
                         if not current and queue_size == 0:
                             console.print("[dim]Idle - no messages processing[/dim]")
+                        continue
+                    elif cmd == "plan":
+                        # Real read-only plan mode: flip the live approval
+                        # backend into PermissionMode.PLAN so writes/edits/shell
+                        # are denied until /plan off. Reuses the shipped
+                        # enforcement layer instead of a prompt template.
+                        sub = (cmd_args or "").strip().lower()
+                        # Default toggle (used if the enforcement backend is
+                        # unavailable). Refined below after syncing with a live
+                        # backend that may already be in PLAN mode.
+                        enable = False if sub == "off" else not session_state.get('plan_mode', False)
+                        try:
+                            from praisonaiagents.approval import get_approval_registry
+                            from praisonaiagents.permissions import PermissionMode
+                            backend = get_approval_registry().get_backend()
+                            setter = getattr(backend, 'set_permission_mode', None)
+                            enforced = callable(setter)
+                            # Sync session state with the live backend so a
+                            # session launched with --approval plan reports the
+                            # correct toggle: without this the first no-arg
+                            # /plan would re-enable an already-active PLAN mode
+                            # instead of exiting it (Greptile P1: legacy startup
+                            # unsynchronized).
+                            if 'plan_mode' not in session_state:
+                                current = getattr(backend, 'permission_mode', None)
+                                if current is not None:
+                                    session_state['plan_mode'] = (current == PermissionMode.PLAN)
+                                    enable = False if sub == "off" else not session_state['plan_mode']
+                            if enforced:
+                                if enable:
+                                    # Remember the launch-time policy (e.g.
+                                    # accept-edits/bypass) so exiting PLAN
+                                    # restores it instead of forcing DEFAULT.
+                                    current = getattr(backend, 'permission_mode', None)
+                                    if current is not None and current != PermissionMode.PLAN:
+                                        session_state['prev_permission_mode'] = current
+                                    setter(PermissionMode.PLAN)
+                                else:
+                                    restore = session_state.pop(
+                                        'prev_permission_mode', None
+                                    ) or PermissionMode.DEFAULT
+                                    setter(restore)
+                        except Exception:
+                            enforced = False
+                        session_state['plan_mode'] = enable
+                        if enable:
+                            console.print("[cyan][PLAN] Plan mode enabled — read-only. Writes/edits/commands denied until /plan off.[/cyan]")
+                            if not enforced:
+                                console.print("[dim](No interactive approval backend active; enforcement is advisory.)[/dim]")
+                        else:
+                            console.print("[cyan]Plan mode disabled. Writes/edits/commands allowed again.[/cyan]")
                         continue
                     else:
                         console.print(f"[yellow]Unknown command: /{cmd}. Type /help for available commands.[/yellow]")
@@ -575,6 +663,60 @@ def _start_interactive_mode(self, args):
         traceback.print_exc()
         sys.exit(1)
 
+def _bind_resume_workspace(args, console=None, session=None):
+    """Root a resumed session at the directory it was created in.
+
+    Reads back the persisted ``UnifiedSession.workspace`` for a
+    ``--continue``/``--session`` resume and exports it as ``PRAISONAI_WORKSPACE``
+    so the tool loader (and everything downstream) operates in that directory.
+    No-op when not resuming.
+
+    ``session`` may be passed in when the caller has already resolved the exact
+    ``UnifiedSession`` that will drive the conversation, so the binder and the
+    conversation are guaranteed to agree on the same session (avoids a second,
+    independent last-session lookup that could race a concurrent CLI process).
+    When not provided, it is resolved here as a best-effort fallback.
+
+    If the recorded directory is gone, warn and pin ``PRAISONAI_WORKSPACE`` to
+    cwd. Pinning (rather than leaving it unset) is important: an unset canonical
+    var would let the legacy ``PRAISON_WORKSPACE`` leak through in the tool
+    loader, contradicting the "using current directory" warning.
+    """
+    resume_session_id = getattr(args, 'resume_session', None) if args is not None else None
+    if not resume_session_id:
+        return
+    if session is None:
+        try:
+            try:
+                from .session import get_session_store
+            except ImportError:
+                from praisonai.cli.session import get_session_store
+            store = get_session_store()
+            if resume_session_id == 'last':
+                session = store.get_last_session()
+            else:
+                session = store.get_or_create(resume_session_id)
+        except Exception:
+            return
+    workspace = getattr(session, 'workspace', None) if session else None
+    if not workspace:
+        return
+    if not os.path.isdir(workspace):
+        if console is not None:
+            try:
+                console.print(
+                    f"[yellow]⚠ Session workspace no longer exists: {workspace} — "
+                    f"using current directory instead.[/yellow]"
+                )
+            except Exception:
+                pass
+        # Pin cwd so a stray legacy PRAISON_WORKSPACE cannot override the
+        # advertised current-directory fallback in the tool loader.
+        os.environ["PRAISONAI_WORKSPACE"] = os.getcwd()
+        return
+    os.environ["PRAISONAI_WORKSPACE"] = workspace
+
+
 def _load_interactive_tools(self):
     """
     Load tools for interactive mode using the canonical provider.
@@ -596,15 +738,25 @@ def _load_interactive_tools(self):
         if getattr(self.args, 'no_lsp', False):
             disable_groups.append('lsp')
     
-    # Get workspace
-    workspace = os.getcwd()
+    # Resolve the workspace root the agent's tools operate on.
+    # Order: explicit PRAISONAI_WORKSPACE (set by `code --workspace` or by
+    # resume-into-session-directory) → legacy PRAISON_WORKSPACE → cwd. Previously
+    # this hardcoded os.getcwd() and then overwrote config.workspace with it,
+    # which silently discarded the --workspace flag (the flag was dead).
+    workspace = (
+        os.environ.get("PRAISONAI_WORKSPACE")
+        or os.environ.get("PRAISON_WORKSPACE")
+        or os.getcwd()
+    )
     
     try:
         from ..features.interactive_tools import get_interactive_tools, ToolConfig
         
-        # Create config
+        # Create config. from_env() already honours the workspace env vars; only
+        # override when we resolved a concrete workspace so the two paths agree.
         config = ToolConfig.from_env()
-        config.workspace = workspace
+        if workspace:
+            config.workspace = workspace
         
         # Apply CLI overrides
         if 'acp' in disable_groups:
@@ -680,12 +832,19 @@ def _print_interactive_help(self, console):
     console.print("  /compact       - Compress conversation history")
     console.print("  /undo          - Undo last response (and workspace files if checkpointing on)")
     console.print("  /revert [n]    - Roll workspace back n turns (needs checkpoints.auto)")
+    console.print("  /diff [--turn|<file>] - Show file changes this session (needs checkpoints.auto)")
     console.print("  /queue         - Show queued messages")
     console.print("  /queue clear   - Clear message queue")
+    console.print("  /tasks         - List background tasks (status/progress)")
+    console.print("  /tasks <id>    - Show background task detail")
+    console.print("  /tasks cancel <id> - Cancel a background task")
     console.print("\n[bold]Session Commands:[/bold]")
-    console.print("  /session       - Show current session info")
+    console.print("  /session       - Show current session info (incl. fork lineage)")
     console.print("  /history       - Show conversation history")
+    console.print("  /export [file] - Export conversation to file")
     console.print("  /new           - Start a new session")
+    console.print("  /branch [title]  - Fork the conversation here; switch to the fork")
+    console.print("  /branch --at N   - Fork from N user turns back")
     console.print("\n[bold]@ Mentions:[/bold]")
     console.print("  @file.txt      - Include file content in prompt")
     console.print("  @src/          - Include directory listing")
@@ -780,6 +939,103 @@ def _process_at_mentions(self, user_input, console):
     
     return processed_input
 
+def _handle_branch_command(
+    self, console, args, session_state, worker_state=None, execution_queue=None
+):
+    """Handle /branch command - fork the current conversation mid-session.
+
+    Forks the live session at the current message index, switches the REPL to
+    the fork (announcing both ids), and keeps the parent timeline resumable.
+    ``/branch --at N`` forks from N user turns back; ``/branch <title>`` names
+    the fork.
+    """
+    store = session_state.get('session_store')
+    us = session_state.get('unified_session')
+    if not store or not us:
+        console.print("[yellow]No active session to branch from.[/yellow]")
+        return
+
+    # Refuse to branch while a turn is still executing: the async worker reads
+    # ``session_state['unified_session']`` when it finishes and would otherwise
+    # save the parent's in-flight turn onto the freshly-switched fork,
+    # contaminating the fork and losing the parent's completed turn. Ask the
+    # user to wait until the current work settles.
+    #
+    # Use the shared ``_worker_busy`` helper, which reads ``current_task`` and
+    # the queue size under the worker's ``processing_lock``. Reimplementing the
+    # check inline (unlocked) races the worker's dequeue/publish window
+    # (``with processing_lock: get_nowait(); current_task = task``): between the
+    # item leaving the queue and ``current_task`` being set, both an empty queue
+    # and no active task are observed, so an in-flight turn would slip past.
+    if _worker_busy(self, session_state):
+        console.print(
+            "[yellow]A response is still processing. Wait for it to finish "
+            "before branching (see /status).[/yellow]"
+        )
+        return
+
+    # Parse "--at N" out of the free-form argument; the remainder is the title.
+    title = None
+    from_message_index = None
+    tokens = (args or "").split()
+    remaining = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in ("--at", "-a") and i + 1 < len(tokens):
+            try:
+                turns_back = int(tokens[i + 1])
+            except ValueError:
+                console.print("[yellow]/branch --at expects a number of turns.[/yellow]")
+                return
+            if turns_back <= 0:
+                console.print("[yellow]/branch --at expects a positive number.[/yellow]")
+                return
+            # Fork point is `turns_back` user turns back from the end: find the
+            # index of the corresponding user message and truncate there.
+            user_indices = [
+                idx for idx, m in enumerate(us.messages)
+                if m.get("role") == "user"
+            ]
+            if turns_back > len(user_indices):
+                console.print(
+                    f"[yellow]Only {len(user_indices)} user turns available; "
+                    f"cannot go {turns_back} back.[/yellow]"
+                )
+                return
+            from_message_index = user_indices[-turns_back]
+            i += 2
+        else:
+            remaining.append(tokens[i])
+            i += 1
+    if remaining:
+        title = " ".join(remaining)
+
+    forked = store.fork_session(
+        us.session_id,
+        from_message_index=from_message_index,
+        title=title,
+    )
+    if forked is None:
+        console.print("[yellow]Could not fork the current session.[/yellow]")
+        return
+
+    parent_id = us.session_id
+    # Switch the live REPL onto the fork: rebind the session and reload history
+    # so the next turn continues on the new timeline.
+    session_state['unified_session'] = forked
+    session_state['conversation_history'] = forked.get_chat_history()
+
+    console.print(
+        f"[green]✓ Branched:[/green] {parent_id} → [cyan]{forked.session_id}[/cyan]"
+    )
+    if title:
+        console.print(f"[dim]Title: {title}[/dim]")
+    console.print(
+        f"[dim]Now on fork {forked.session_id} "
+        f"({forked.message_count} messages). Parent {parent_id} kept.[/dim]"
+    )
+
+
 def _handle_model_command(self, console, args, session_state):
     """Handle /model command - show or change current model."""
     if not args:
@@ -823,6 +1079,44 @@ def _handle_stats_command(self, console, session_state):
     history_len = len(session_state['conversation_history'])
     console.print(f"  History turns:  {history_len}")
     console.print("")
+
+def _handle_export_command(self, console, args, session_state):
+    """Handle /export [file] command - export the current conversation.
+
+    Delegates to the canonical session-export path (``praisonai session
+    export``) when a resolvable session id is available, so the surface
+    ``praisonai code`` actually runs stays in parity with the other REPLs.
+    Falls back to writing the in-memory conversation history when no session
+    id is resolvable or the export path is unavailable.
+    """
+    filename = args.strip() if args else "conversation.md"
+
+    us = session_state.get('unified_session')
+    session_id = getattr(us, 'session_id', None) if us else None
+
+    if session_id:
+        try:
+            from praisonai_code.cli.state.session_resolver import export_session
+            fmt = "json" if filename.endswith(".json") else "md"
+            content = export_session(session_id, format=fmt)
+            if content is not None:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(content)
+                console.print(f"[green]✓ Exported session to {filename}[/green]")
+                return
+        except Exception as e:
+            console.print(f"[dim]Session export unavailable ({e}); writing history[/dim]")
+
+    # Fallback: write the in-memory conversation history.
+    history = session_state.get('conversation_history') or []
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            for msg in history:
+                f.write(f"[{msg.get('role', 'unknown')}]\n")
+                f.write(f"{msg.get('content', '')}\n\n")
+        console.print(f"[green]✓ Exported to {filename}[/green]")
+    except Exception as e:
+        console.print(f"[red]Export failed: {e}[/red]")
 
 def _handle_compact_command(self, console, session_state):
     """
@@ -1191,6 +1485,54 @@ def _handle_revert_command(self, console, args, session_state):
     else:
         console.print("[yellow]Failed to revert workspace[/yellow]")
 
+def _handle_diff_command(self, console, args, session_state):
+    """
+    Handle /diff - show file changes made this session (or last turn / one file).
+
+    Usage:
+    - /diff              - all changes since session start
+    - /diff --turn       - only the last turn's changes
+    - /diff <file>       - changes to a single file since session start
+
+    Requires auto-checkpointing (checkpoints.auto in config or
+    PRAISONAI_CHECKPOINTS=on); reports how to enable it when disabled rather
+    than failing silently.
+    """
+    ckpt = session_state.get('session_checkpoints')
+    if ckpt is None or not getattr(ckpt, 'enabled', False):
+        console.print(
+            "[yellow]Workspace checkpointing is disabled, so /diff has no "
+            "session baseline to compare against.[/yellow] Enable it with "
+            "[cyan]checkpoints.auto: true[/cyan] in config or "
+            "[cyan]PRAISONAI_CHECKPOINTS=on[/cyan]."
+        )
+        return
+
+    turn_only = False
+    path = None
+    tokens = (args or "").split()
+    for token in tokens:
+        if token in ("--turn", "-t"):
+            turn_only = True
+        elif not token.startswith("-"):
+            path = token
+
+    scope = "turn" if turn_only else "session"
+    diff = ckpt.diff(turn_only=turn_only, path=path)
+    if diff is None:
+        console.print(f"[dim]No checkpoints yet — nothing to diff this {scope}.[/dim]")
+        return
+    if not diff.files:
+        target = f"'{path}'" if path else f"this {scope}"
+        console.print(f"[dim]No file changes for {target}.[/dim]")
+        return
+
+    try:
+        handler = ckpt._get_handler()
+        handler._print_diff(diff)
+    except Exception:
+        console.print(ckpt.render_diff(diff, scope=scope))
+
 def _handle_queue_command(self, console, args, session_state):
     """
     Handle /queue command - show or manage message queue.
@@ -1239,6 +1581,52 @@ def _handle_queue_command(self, console, args, session_state):
                 display_msg = msg[:60] + "..." if len(msg) > 60 else msg
                 console.print(f"  {i}. ↳ {display_msg}")
             console.print("\n[dim]Use /queue clear to clear, /queue remove N to remove[/dim]")
+
+def _handle_tasks_command(self, console, args, session_state, runner=None):
+    """
+    Handle /tasks command - inspect background tasks without leaving the session.
+
+    Usage:
+    - /tasks             - List background tasks (id, name, status, progress)
+    - /tasks <id>        - Show detail for one task (incl. result/error)
+    - /tasks cancel <id> - Cancel a running background task
+
+    Reuses the CLI ``BackgroundHandler`` renderer over the shared
+    process-wide ``BackgroundRunner`` so it shows the same tasks as
+    ``praisonai background list``.
+
+    ``runner`` is an optional dependency-injection seam: when provided, the
+    handler operates on exactly that ``BackgroundRunner`` instead of resolving
+    the process-wide singleton. This lets tests pin a dedicated runner and
+    stay deterministic under ``pytest -n`` (where a cross-file daemon can
+    otherwise mutate the shared singleton mid-assertion); it is ``None`` in all
+    production call sites, preserving existing behaviour.
+    """
+    import asyncio
+
+    try:
+        from praisonai.cli.features.background import BackgroundHandler
+    except Exception as e:  # pragma: no cover - defensive import guard
+        console.print(f"[yellow]Background tasks unavailable: {e}[/yellow]")
+        return
+
+    handler = BackgroundHandler(runner=runner)
+    args = args.strip() if args else ""
+
+    try:
+        if not args:
+            asyncio.run(handler.list_tasks())
+        elif args.lower().startswith("cancel"):
+            parts = args.split(maxsplit=1)
+            task_id = parts[1].strip() if len(parts) > 1 else ""
+            if not task_id:
+                console.print("[yellow]Usage: /tasks cancel <id>[/yellow]")
+                return
+            asyncio.run(handler.cancel_task(task_id))
+        else:
+            asyncio.run(handler.get_status(args))
+    except Exception as e:
+        console.print(f"[yellow]Error handling /tasks: {e}[/yellow]")
 
 def _run_chat_mode(self, prompt, args):
     """
@@ -1398,6 +1786,20 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         if not getattr(getattr(self, 'args', None), 'no_context', False):
                             _project_context = _load_cli_project_context(self)
 
+                        # Thread the resolved approval config (e.g. `code --plan`
+                        # -> PermissionMode.PLAN) into the REPL worker's agent so
+                        # a session advertised as read-only actually denies every
+                        # mutating tool, instead of silently falling back to the
+                        # legacy interactive approval prompt. Mirrors the
+                        # single-prompt path in _process_interactive_prompt.
+                        agent_extra_kwargs = {}
+                        _agent_approval = (
+                            getattr(self.args, 'agent_approval', None)
+                            if hasattr(self, 'args') else None
+                        )
+                        if _agent_approval is not None:
+                            agent_extra_kwargs['approval'] = _agent_approval
+
                         def _build_agent():
                             # Build the agent from the CURRENT conversation history
                             # so that a post-compaction retry rebuilds with the
@@ -1425,7 +1827,8 @@ def _start_execution_worker(self, tools_list, console, session_state):
                                 backstory=backstory,
                                 tools=tools_list if tools_list else None,
                                 output="minimal",
-                                llm=model
+                                llm=model,
+                                **agent_extra_kwargs,
                             )
 
                         agent = _build_agent()

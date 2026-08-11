@@ -62,8 +62,15 @@ def grep_search(
         if directory is None:
             directory = os.getcwd()
         
-        directory = os.path.abspath(directory)
-        
+        directory = os.path.realpath(directory)
+
+        from .glob_tool import _within_workspace
+        from praisonai.security import is_protected
+
+        if not _within_workspace(directory):
+            result["error"] = "Directory outside workspace"
+            return result
+
         if not os.path.isdir(directory):
             result["error"] = f"Directory not found: {directory}"
             return result
@@ -110,7 +117,11 @@ def grep_search(
                     continue
                 
                 filepath = os.path.join(root, filename)
-                
+
+                # Never read protected files (.env, keys, wallets, SDK internals)
+                if is_protected(filepath):
+                    continue
+
                 # Skip large files
                 try:
                     if os.path.getsize(filepath) > max_file_size:
@@ -169,9 +180,17 @@ def _search_file(
     except (IOError, OSError):
         return matches
     
+    # Cap per-line length to bound catastrophic-backtracking (ReDoS) cost: a
+    # single pathological line ("aaaa…!") can pin a CPU for a crafted regex.
+    # stdlib ``re`` has no timeout, so we simply skip over-long lines.
+    _MAX_LINE = 100_000
+
     for i, line in enumerate(lines):
         line_stripped = line.rstrip('\n\r')
-        
+
+        if len(line_stripped) > _MAX_LINE:
+            continue
+
         # Check for match
         if compiled_pattern:
             match = compiled_pattern.search(line_stripped)

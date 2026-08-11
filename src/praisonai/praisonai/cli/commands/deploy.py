@@ -1,20 +1,11 @@
-"""Backward-compatibility shim for :mod:`praisonai.cli.commands.deploy`.
-
-The implementation moved to :mod:`praisonai_code.cli.commands.deploy` as part
-of the praisonai-code extraction (issue #2516 / parent #2512).
-
-This shim aliases the moved module into ``sys.modules`` under the old dotted
-path so that:
-
-* ``from praisonai.cli.commands.deploy import X`` keeps working, and
-* ``unittest.mock.patch("praisonai.cli.commands.deploy.X")`` patches the very
-  same module object that the implementation executes against.
-"""
+"""C14 shim: implementation moved to ``praisonai_deploy.cli.commands.deploy``."""
 
 import sys as _sys
 
-from praisonai_code.cli.commands import deploy as _impl
+from praisonai._bootstrap import ensure_praisonai_deploy
 
-# Make the old dotted path resolve to the exact same module object so that
-# attribute patching / monkeypatching stays transparent across both paths.
+ensure_praisonai_deploy()
+
+import praisonai_deploy.cli.commands.deploy as _impl
+
 _sys.modules[__name__] = _impl

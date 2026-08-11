@@ -278,8 +278,26 @@ class BasePlatformAdapter(ABC):
     # ------------------------------------------------------------------ #
 
     def format_message(self, text: str) -> str:
-        """Apply per-platform formatting. Default: identity."""
-        return text
+        """Render *text* for the platform's declared ``markdown_dialect``.
+
+        This is the seam that finally *consumes* the ``markdown_dialect``
+        capability every adapter advertises: the default keys off
+        ``capabilities.markdown_dialect`` and returns text rendered in that
+        flavour (e.g. MarkdownV2-escaped for Telegram, Slack ``mrkdwn`` for
+        Slack) so replies render correctly and are never dropped by a transport
+        that rejects unescaped specials. The default dialect ``"markdown"``
+        yields a safe plain-text reduction, so existing adapters are unaffected.
+
+        Adapters that need the transport ``parse_mode`` (e.g. Telegram's
+        ``"MarkdownV2"``) can call :func:`~praisonaiagents.bots.format_for_dialect`
+        directly in their send path; override this method to change formatting.
+        """
+        from .format import format_for_dialect
+
+        rendered, _parse_mode = format_for_dialect(
+            text, self._cap("markdown_dialect", "markdown")
+        )
+        return rendered
 
     def chunk(self, text: str) -> List[str]:
         """Split *text* to respect the platform max length.

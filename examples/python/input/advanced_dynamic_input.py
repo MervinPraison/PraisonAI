@@ -141,7 +141,7 @@ class DynamicAgentSystem:
             agents=agents,
             tasks=tasks,
             process=process,
-            verbose=inputs['depth'] == 'detailed'
+            output="verbose" if inputs['depth'] == 'detailed' else "silent"
         )
         
         result = praison_agents.start()

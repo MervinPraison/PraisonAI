@@ -141,18 +141,13 @@ def session_exists_anywhere(session_id: str, project_path: Optional[str] = None)
     sessions created by the gateway or interactive TUI). This mirrors the
     lookup semantics of ``rehydrate_session`` (Issue #2274).
     """
-    try:
-        if get_project_session_store(project_path).session_exists(session_id):
-            return True
-    except Exception:
-        pass
-
-    try:
-        from praisonaiagents.session.store import get_default_session_store
-
-        return get_default_session_store().session_exists(session_id)
-    except Exception:
-        return False
+    for store in canonical_cli_stores(project_path):
+        try:
+            if store.session_exists(session_id):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _is_root_session(session: Dict[str, Any]) -> bool:
@@ -220,16 +215,7 @@ def list_project_sessions(
     """
     merged: Dict[str, Dict[str, Any]] = {}
 
-    for resolve in (
-        lambda: get_project_session_store(project_path),
-        _get_default_store,
-    ):
-        try:
-            store = resolve()
-        except Exception:
-            continue
-        if store is None:
-            continue
+    for store in canonical_cli_stores(project_path):
         try:
             rows = store.list_sessions(limit=limit) or []
         except Exception:
@@ -246,6 +232,32 @@ def list_project_sessions(
     sessions = list(merged.values())
     sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
     return sessions[:limit]
+
+
+def find_session_model(
+    session_id: str, project_path: Optional[str] = None
+) -> Optional[str]:
+    """Return the model a resumable session was created / last run with.
+
+    Searches the canonical CLI stores (project-scoped first, then global) in the
+    same order as ``rehydrate_session``/``find_last_session`` and returns the
+    first recorded model, so ``--continue``/``--session`` can restore the model
+    the conversation was running instead of re-resolving the current default
+    (Issue #3685). Returns ``None`` when no model was ever recorded, letting the
+    caller fall back to normal default resolution.
+    """
+    if not session_id:
+        return None
+    for store in canonical_cli_stores(project_path):
+        try:
+            if not store.session_exists(session_id):
+                continue
+            model = store.get_session_model(session_id)
+        except Exception:
+            continue
+        if isinstance(model, str) and model:
+            return model
+    return None
 
 
 def build_cli_memory_config(
@@ -345,16 +357,7 @@ def _resolve_usage_store(session_id: str, project_path: Optional[str] = None):
     otherwise. Returns ``None`` if no store has the session.
     """
     candidates = []
-    for resolve in (
-        lambda: get_project_session_store(project_path),
-        _get_default_store,
-    ):
-        try:
-            candidate = resolve()
-        except Exception:
-            continue
-        if candidate is None:
-            continue
+    for candidate in canonical_cli_stores(project_path):
         try:
             if candidate.session_exists(session_id):
                 candidates.append(candidate)
@@ -377,6 +380,30 @@ def _get_default_store():
         return get_default_session_store()
     except Exception:
         return None
+
+
+def canonical_cli_stores(project_path: Optional[str] = None) -> List[Any]:
+    """Return the canonical CLI session stores, project-scoped first then global.
+
+    Single source of truth for "which stores back a CLI session" so that
+    ``list``/``--continue``/``resume`` (via :func:`list_project_sessions` and
+    :func:`find_last_session`) and ``show``/``delete``/``export`` (via
+    ``session_resolver``) enumerate the *same* stores in the *same* order by
+    construction, instead of each maintaining its own copy of that list
+    (Issue #3201). Unresolvable stores are skipped (best-effort).
+    """
+    stores: List[Any] = []
+    for resolve in (
+        lambda: get_project_session_store(project_path),
+        _get_default_store,
+    ):
+        try:
+            store = resolve()
+        except Exception:
+            continue
+        if store is not None:
+            stores.append(store)
+    return stores
 
 
 def read_session_usage(

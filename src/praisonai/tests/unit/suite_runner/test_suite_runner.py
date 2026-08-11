@@ -297,7 +297,7 @@ class TestSuiteReporter:
             
             assert md_path.exists()
             assert md_path.name == "report.md"
-            content = md_path.read_text()
+            content = md_path.read_text(encoding="utf-8")
             assert "Examples Execution Report" in content
     
     def test_generate_csv(self):

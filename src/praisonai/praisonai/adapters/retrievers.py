@@ -8,6 +8,7 @@ Provides concrete implementations of RetrieverProtocol:
 - AutoMergeRetriever: Merges adjacent chunks
 """
 
+import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
@@ -79,8 +80,16 @@ class BasicRetriever:
         filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.retrieve(query, top_k, filter, **kwargs)
+        """Async retrieval — never blocks the caller's event loop.
+
+        The underlying retrieve() makes synchronous blocking calls
+        (embedding + vector-store query), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API should override this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.retrieve, query, top_k, filter, **kwargs
+        )
 
 
 class FusionRetriever:
@@ -158,8 +167,16 @@ class FusionRetriever:
         filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.retrieve(query, top_k, filter, **kwargs)
+        """Async retrieval — never blocks the caller's event loop.
+
+        The underlying retrieve() makes synchronous blocking calls
+        (embedding + vector-store query), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API should override this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.retrieve, query, top_k, filter, **kwargs
+        )
     
     def _generate_query_variations(self, query: str) -> List[str]:
         """Generate query variations."""
@@ -280,8 +297,16 @@ class RecursiveRetriever:
         filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.retrieve(query, top_k, filter, **kwargs)
+        """Async retrieval — never blocks the caller's event loop.
+
+        The underlying retrieve() makes synchronous blocking calls
+        (embedding + vector-store query), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API should override this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.retrieve, query, top_k, filter, **kwargs
+        )
     
     def _generate_follow_up(self, original_query: str, context: str) -> Optional[str]:
         """Generate a follow-up query based on retrieved context."""
@@ -372,8 +397,16 @@ class AutoMergeRetriever:
         filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.retrieve(query, top_k, filter, **kwargs)
+        """Async retrieval — never blocks the caller's event loop.
+
+        The underlying retrieve() makes synchronous blocking calls
+        (embedding + vector-store query), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API should override this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.retrieve, query, top_k, filter, **kwargs
+        )
 
 
 class HybridRetriever:
@@ -545,8 +578,16 @@ class HybridRetriever:
         filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (wraps sync for now)."""
-        return self.retrieve(query, top_k, filter, **kwargs)
+        """Async retrieval — never blocks the caller's event loop.
+
+        The underlying retrieve() makes synchronous blocking calls
+        (embedding + vector-store query), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API should override this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.retrieve, query, top_k, filter, **kwargs
+        )
 
 
 def register_default_retrievers():
@@ -564,5 +605,11 @@ def register_default_retrievers():
     logger.debug("Registered default retrievers")
 
 
-# Auto-register on import
-register_default_retrievers()
+# NOTE: No auto-registration at import time. Registering into the core-SDK
+# global singleton as an import side effect violates the "core stays
+# lightweight, wrapper does the heavy work at call time" principle and breaks
+# multi-tenant runtimes / tests. Callers wire these into the SDK registry
+# explicitly (see ``praisonai.adapters.register_default_adapters``), e.g.::
+#
+#     from praisonai.adapters.retrievers import register_default_retrievers
+#     register_default_retrievers()

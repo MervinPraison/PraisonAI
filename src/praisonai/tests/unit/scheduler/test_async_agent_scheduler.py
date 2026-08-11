@@ -18,6 +18,8 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore", PendingDeprecationWarning)
     from praisonai.async_agent_scheduler import AsyncAgentScheduler, create_async_agent_scheduler
 
+from praisonai.scheduler.shared import ScheduleTicker
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -202,7 +204,7 @@ class TestRunScheduleFinally:
         # Set the stop event immediately so the loop exits on first check
         scheduler._stop_event.set()
 
-        await scheduler._run_schedule(interval=3600, max_retries=1)
+        await scheduler._run_schedule(ScheduleTicker("3600"), max_retries=1)
         assert scheduler.is_running is False
 
     @pytest.mark.asyncio
@@ -217,7 +219,7 @@ class TestRunScheduleFinally:
         scheduler._execute_with_retry = _boom
 
         with pytest.raises(RuntimeError):
-            await scheduler._run_schedule(interval=3600, max_retries=1)
+            await scheduler._run_schedule(ScheduleTicker("3600"), max_retries=1)
 
         assert scheduler.is_running is False
 
@@ -228,7 +230,7 @@ class TestRunScheduleFinally:
         scheduler.is_running = True
 
         async def _run():
-            await scheduler._run_schedule(interval=3600, max_retries=1)
+            await scheduler._run_schedule(ScheduleTicker("3600"), max_retries=1)
 
         task = asyncio.create_task(_run())
         await asyncio.sleep(0)  # Allow task to start

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """Run all examples and collect PASS/SKIP/FAIL results."""
 import subprocess

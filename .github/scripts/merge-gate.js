@@ -44,6 +44,8 @@ const BLOCK_LABELS = new Set([
 const MERGE_READY_LABEL = 'pipeline/merge-ready';
 /** Superseded concurrency runs; must not block merge when real tests passed. */
 const OPTIONAL_CANCELLED_CHECKS = new Set(['detect-and-trigger']);
+/** Cancelled smoke/windows after timeout are non-blocking when core shards passed on HEAD. */
+const OPTIONAL_CANCELLED_WHEN_CORE_GREEN = new Set(['smoke', 'test-windows']);
 const BOT_REVIEWER_PATTERNS = [
   'coderabbit',
   'qodo',
@@ -325,8 +327,70 @@ function listFailedChecksOnSha(runs) {
   });
 }
 
+function isCoreTestRun(run) {
+  const name = run?.name || '';
+  return name === 'test-core' || name.startsWith('test-core ') || name === 'test-core-collect';
+}
+
+function coreTestsGreenOnRuns(runs) {
+  const coreRuns = (runs || []).filter(isCoreTestRun);
+  if (coreRuns.length === 0) return false;
+  return coreRuns.every(
+    (run) =>
+      run.status === 'completed' &&
+      ['success', 'neutral', 'skipped'].includes(run.conclusion)
+  );
+}
+
+function checkConclusionRank(conclusion) {
+  if (conclusion === 'success') return 4;
+  if (conclusion === 'neutral') return 3;
+  if (conclusion === 'skipped') return 2;
+  if (conclusion === 'cancelled') return 1;
+  return 0;
+}
+
+function isPendingRun(run) {
+  return !!(run && run.status && run.status !== 'completed');
+}
+
+function bestRunsByName(runs) {
+  const byName = new Map();
+  for (const run of runs || []) {
+    if (!run) continue;
+    const existing = byName.get(run.name);
+    if (!existing) {
+      byName.set(run.name, run);
+      continue;
+    }
+    const runPending = isPendingRun(run);
+    const existingPending = isPendingRun(existing);
+    if (existingPending) continue;
+    if (
+      runPending ||
+      checkConclusionRank(run.conclusion) > checkConclusionRank(existing.conclusion)
+    ) {
+      byName.set(run.name, run);
+    }
+  }
+  return [...byName.values()];
+}
+
+function isAcceptableCheckConclusion(run, runs) {
+  if (['success', 'neutral', 'skipped'].includes(run.conclusion)) return true;
+  if (run.conclusion === 'cancelled' && OPTIONAL_CANCELLED_CHECKS.has(run.name)) return true;
+  if (
+    run.conclusion === 'cancelled' &&
+    OPTIONAL_CANCELLED_WHEN_CORE_GREEN.has(run.name) &&
+    coreTestsGreenOnRuns(runs)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function allChecksGreenOnSha(github, owner, repo, sha, core) {
-  const runs = await listChecksOnSha(github, owner, repo, sha);
+  const runs = bestRunsByName(await listChecksOnSha(github, owner, repo, sha));
   if (runs.length === 0) {
     core?.info?.(`No check runs on ${sha.slice(0, 7)} — allowing (e.g. docs-only PR)`);
     return true;
@@ -336,12 +400,16 @@ async function allChecksGreenOnSha(github, owner, repo, sha, core) {
       core?.info?.(`Check pending: ${run.name} (${run.status})`);
       return false;
     }
-    const ok =
-      ['success', 'neutral', 'skipped'].includes(run.conclusion) ||
-      (run.conclusion === 'cancelled' && OPTIONAL_CANCELLED_CHECKS.has(run.name));
-    if (!ok) {
+    if (!isAcceptableCheckConclusion(run, runs)) {
       core?.info?.(`Check failed: ${run.name} (${run.conclusion})`);
       return false;
+    }
+    if (
+      run.conclusion === 'cancelled' &&
+      OPTIONAL_CANCELLED_WHEN_CORE_GREEN.has(run.name) &&
+      coreTestsGreenOnRuns(runs)
+    ) {
+      core?.info?.(`Ignoring cancelled ${run.name} — test-core green on HEAD`);
     }
   }
   return true;
@@ -855,6 +923,12 @@ module.exports = {
   finalClaudeCompletedOnSha,
   getMergeState,
   OPTIONAL_CANCELLED_CHECKS,
+  OPTIONAL_CANCELLED_WHEN_CORE_GREEN,
+  isCoreTestRun,
+  coreTestsGreenOnRuns,
+  isPendingRun,
+  bestRunsByName,
+  isAcceptableCheckConclusion,
   listChecksOnSha,
   listFailedChecksOnSha,
   allChecksGreenOnSha,

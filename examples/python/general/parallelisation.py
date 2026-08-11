@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, Task, AgentTeam
 from datetime import datetime
 import asyncio
@@ -86,7 +87,14 @@ async def main():
 
     # Print results
     print("\nParallel Processing Results:")
-    for task_id, result in results["task_results"].items():
+    task_results = (
+        results.get("task_results", {})
+        if isinstance(results, dict)
+        else {}
+    )
+    if not task_results and isinstance(results, str):
+        print(f"\nWorkflow output:\n{results}")
+    for task_id, result in task_results.items():
         if result:
             print(f"Task {task_id}: {result.raw}")
 

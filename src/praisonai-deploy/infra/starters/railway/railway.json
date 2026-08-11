@@ -1,0 +1,9 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "_comment": "Deploy the prebuilt PraisonAI image. In the Railway service settings set the source image to ghcr.io/mervinpraison/praisonai (pin a version tag for production). The image already exposes /health on port 8005 and starts the API server, so no Dockerfile or startCommand is required.",
+  "deploy": {
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE"
+  }
+}

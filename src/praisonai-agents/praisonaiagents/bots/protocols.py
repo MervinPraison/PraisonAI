@@ -302,6 +302,79 @@ class WebhookVerifierProtocol(Protocol):
         ...
 
 
+class GatewayAdapterContractError(TypeError):
+    """Raised when a channel adapter cannot receive the gateway runtime seams.
+
+    The gateway wires four reliability seams into every channel adapter —
+    the cross-platform identity resolver, the delivery router, the admission
+    gate, and the shared per-turn lock map. When the gateway has these seams
+    to inject but the adapter neither implements
+    :class:`SupportsGatewayRuntime` nor exposes a compatible session, the wiring
+    would silently no-op and the adapter would run without admission control,
+    durable delivery routing, or cross-platform turn locking. Failing loudly
+    with this error surfaces the missing contract instead.
+    """
+
+
+@dataclass
+class GatewayRuntimeSeams:
+    """The gateway reliability seams handed to a channel adapter at build time.
+
+    A single, typed carrier for the four runtime seams the gateway injects so
+    an adapter wires them up in one place instead of via four duck-typed
+    private-attribute splices:
+
+    Attributes:
+        identity_resolver: Cross-platform identity resolver; unifies the same
+            human across platforms onto one session key.
+        delivery_router: Backing router for the built-in ``send_message`` tool,
+            so an agent turn can proactively reach the user mid-task.
+        admission_gate: Gateway-wide admission control (concurrency ceiling /
+            fair queue / backpressure) applied to inbound runs.
+        turn_lock_map: Shared per-turn lock map for cross-platform turn
+            serialisation on the resolved session id.
+
+    A seam left ``None`` means the gateway has nothing to inject for it and the
+    adapter should keep whatever it already has.
+    """
+
+    identity_resolver: Optional[Any] = None
+    delivery_router: Optional[Any] = None
+    admission_gate: Optional[Any] = None
+    turn_lock_map: Optional[Any] = None
+
+
+@runtime_checkable
+class SupportsGatewayRuntime(Protocol):
+    """Contract for channel adapters that accept the gateway runtime seams.
+
+    Instead of the gateway reaching into an adapter's private session and
+    splicing ``_identity_resolver`` / ``_delivery_router`` / ``_admission_gate``
+    / ``_locks`` via ``getattr``/``hasattr`` (which silently no-ops on any
+    adapter whose session does not match the built-in shape), an adapter — in
+    tree or ``pip``-installed — implements this one method. The gateway calls it
+    once with a :class:`GatewayRuntimeSeams`, so the same reliability guarantees
+    (admission/backpressure, delivery routing, cross-platform turn locking)
+    hold for *every* adapter.
+
+    Adapters whose ``__init__`` creates a ``BotSessionManager`` get this for
+    free — the session manager implements ``attach_gateway_runtime`` and the
+    adapter can simply delegate to ``self._session.attach_gateway_runtime(...)``.
+    """
+
+    def attach_gateway_runtime(self, runtime: "GatewayRuntimeSeams") -> None:
+        """Wire the gateway runtime seams into this adapter.
+
+        Only seams present (non-``None``) on ``runtime`` should be applied;
+        seams left ``None`` mean the gateway has nothing to inject and the
+        adapter must keep its existing value.
+
+        Args:
+            runtime: The gateway reliability seams to attach.
+        """
+        ...
+
+
 class MessageType(str, Enum):
     """Types of bot messages."""
     
@@ -1112,6 +1185,34 @@ class SupportsPresentation(Protocol):
         ...
 
 
+@runtime_checkable
+class PresentationRendererProtocol(Protocol):
+    """Contract a channel presentation renderer implements.
+
+    A renderer converts a portable :class:`MessagePresentation` into a native,
+    platform-specific payload (Telegram inline keyboard, Slack blocks, …). It
+    should run ``adapt_presentation`` against its own :meth:`get_limits` first
+    so capability-driven degradation is applied uniformly.
+
+    This protocol is the core seam that lets *any* channel — built-in or a
+    pip-installed plugin — register a native renderer via
+    ``register_presentation_renderer``, mirroring how a channel already
+    contributes config via :class:`ChannelDescriptor`. Heavy renderer
+    implementations still live in ``praisonai-bot``; only the contract and the
+    registry live in core.
+    """
+
+    @staticmethod
+    def get_limits() -> "PresentationLimits":
+        """Return this channel's capability limits."""
+        ...
+
+    @staticmethod
+    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+        """Render *presentation* into a native, platform-specific payload."""
+        ...
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # EmailProtocol — email-specific bot capabilities
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1274,3 +1375,77 @@ class BotOSProtocol(Protocol):
             The Bot instance, or None if not found.
         """
         ...
+
+
+@runtime_checkable
+class CallbackPayloadStoreProtocol(Protocol):
+    """Protocol for durable, reference-addressable interactive callback values.
+
+    Some channels hard-cap inline callback payloads (e.g. Telegram's 64-byte
+    inline-callback limit). When an interactive ``reply``/``select`` value is
+    too long to travel inline, the framework persists the canonical value under
+    a short, collision-resistant reference and emits that reference in the
+    callback instead. On click the registry resolves the reference back to the
+    exact value — so long option values (URLs, file paths, free-text choices)
+    round-trip losslessly on every channel.
+
+    This mirrors :class:`ApprovalStoreProtocol`: the contract lives in core so
+    any backend and any channel can interoperate; core ships a bounded
+    in-memory default (:class:`InMemoryCallbackPayloadStore`) and heavier
+    durable backends (e.g. SQLite) live in the ``praisonai-bot`` runtime.
+
+    Behaviour is unchanged when no store is configured — values that fit inline
+    are always sent inline, so this is additive and backward compatible.
+    """
+
+    def put(self, ref: str, value: str, *, expires_at: float) -> None:
+        """Persist ``value`` under ``ref`` until ``expires_at`` (epoch seconds).
+
+        Called from the synchronous render path, so this is a plain method.
+        """
+        ...
+
+    def get(self, ref: str) -> Optional[str]:
+        """Return the value stored for ``ref``, or ``None`` if unknown/expired."""
+        ...
+
+
+class InMemoryCallbackPayloadStore:
+    """Bounded, zero-dependency in-memory :class:`CallbackPayloadStoreProtocol`.
+
+    The default store when a channel does not inject a durable one. Entries are
+    kept until their ``expires_at`` and the store is capped at ``max_entries``
+    (oldest inserted evicted first) so a long-running process cannot grow
+    unbounded. This is per-process only; durable, restart-surviving persistence
+    belongs to a runtime-provided backend (as approvals already do).
+    """
+
+    def __init__(self, *, max_entries: int = 4096) -> None:
+        self._max_entries = max(1, int(max_entries))
+        # ref -> (value, expires_at); insertion-ordered for FIFO eviction.
+        self._entries: "Dict[str, tuple[str, float]]" = {}
+
+    def _purge_expired(self, now: float) -> None:
+        expired = [ref for ref, (_, exp) in self._entries.items() if exp <= now]
+        for ref in expired:
+            self._entries.pop(ref, None)
+
+    def put(self, ref: str, value: str, *, expires_at: float) -> None:
+        now = time.time()
+        self._purge_expired(now)
+        # Refresh insertion order on overwrite so it is treated as most-recent.
+        self._entries.pop(ref, None)
+        self._entries[ref] = (value, expires_at)
+        while len(self._entries) > self._max_entries:
+            oldest = next(iter(self._entries))
+            self._entries.pop(oldest, None)
+
+    def get(self, ref: str) -> Optional[str]:
+        entry = self._entries.get(ref)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if expires_at <= time.time():
+            self._entries.pop(ref, None)
+            return None
+        return value

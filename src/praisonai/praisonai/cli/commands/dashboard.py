@@ -198,20 +198,39 @@ def _auto_start_services(console, host: str) -> bool:
     return success_count == len(services)
 
 
+def _load_bundled_dashboard_app():
+    """Load the ``app`` from the bundled ``ui_dashboard/default_app.py`` preset.
+
+    Makes the bundled 9-page unified dashboard preset the single source of
+    truth for ``praisonai unified`` (aiui mode) rather than a divergent
+    hardcoded page list. Returns ``None`` if the preset cannot be loaded so the
+    caller can fall back to the in-process host defaults.
+    """
+    import importlib
+
+    try:
+        module = importlib.import_module("praisonai.ui_dashboard.default_app")
+    except Exception:
+        return None
+    return getattr(module, "app", None)
+
+
 def _run_aiui_dashboard(port: int, host: str, console) -> bool:
-    """Run the aiui dashboard in-process via ``build_host_app()`` (Pattern B)."""
+    """Run the aiui dashboard in-process via the bundled preset (Pattern B)."""
     console.print("[bold green]🦞 Starting aiui Dashboard (Pattern B host)...[/bold green]")
 
     try:
         import uvicorn
-        from praisonai.integration.host_app import build_host_app
     except ImportError:
         console.print("[red]Error: aiui integration dependencies missing.[/red]")
         console.print('[yellow]Install with: pip install "praisonai[ui]"[/yellow]')
         return False
 
     try:
-        app = build_host_app(pages=["chat", "sessions", "workflows", "hooks", "usage"])
+        app = _load_bundled_dashboard_app()
+        if app is None:
+            from praisonai.integration.host_app import build_host_app
+            app = build_host_app(pages=["chat", "sessions", "workflows", "hooks", "usage"])
         console.print(f"[green]✓ Starting in-process host on {host}:{port}[/green]")
         uvicorn.run(app, host=host, port=port, log_level="info")
         return True

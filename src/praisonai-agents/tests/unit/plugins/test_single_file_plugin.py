@@ -60,7 +60,49 @@ Dependencies: requests, aiohttp
         assert metadata["author"] == "John Doe"
         assert metadata["hooks"] == ["before_tool", "after_tool"]
         assert metadata["dependencies"] == ["requests", "aiohttp"]
-    
+
+    def test_parse_header_capability_manifest_without_import(self):
+        """Static capability fields are read from the header without importing."""
+        from praisonaiagents.plugins.parser import parse_plugin_header
+
+        content = '''"""
+Plugin Name: Telegram Channel
+Version: 1.0.0
+Channels: telegram
+Provides: send_message, get_updates
+Config: api_key, timeout
+Auto Enable When Configured: TELEGRAM_TOKEN
+"""
+
+raise RuntimeError("runtime must not be imported to read the manifest")
+'''
+
+        metadata = parse_plugin_header(content)
+
+        assert metadata["channels"] == ["telegram"]
+        assert metadata["provides"] == ["send_message", "get_updates"]
+        assert metadata["config"] == ["api_key", "timeout"]
+        assert metadata["auto_enable_when_configured"] == ["TELEGRAM_TOKEN"]
+
+    def test_capability_fields_default_empty(self):
+        """Headers without capability fields yield empty lists in metadata."""
+        from praisonaiagents.plugins.parser import (
+            parse_plugin_header,
+            create_plugin_metadata,
+        )
+
+        content = '''"""
+Plugin Name: Minimal
+Version: 1.0.0
+"""
+'''
+        meta = create_plugin_metadata(parse_plugin_header(content))
+        assert meta.channels == []
+        assert meta.provides == []
+        assert meta.config == []
+        assert meta.auto_enable_when_configured == []
+        assert meta.to_dict()["channels"] == []
+
     def test_parse_header_missing_name_raises(self):
         """Test that missing Plugin Name raises error."""
         from praisonaiagents.plugins.parser import parse_plugin_header, PluginParseError

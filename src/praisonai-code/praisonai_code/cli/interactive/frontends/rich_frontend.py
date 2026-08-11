@@ -17,6 +17,7 @@ from ..events import (
     ApprovalRequest,
     ApprovalResponse,
     ApprovalDecision,
+    derive_permission_pattern,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,8 +164,14 @@ class RichFrontend:
     
     def _prompt_approval(self, request: ApprovalRequest) -> ApprovalResponse:
         """Prompt user for approval decision."""
+        # Derive the narrowest reasonable pattern so "always allow" defaults to
+        # a command-scoped grant, not a blanket ``action_type:*`` whitelist.
+        narrow_pattern = derive_permission_pattern(request, scope="command")
+        blanket_pattern = derive_permission_pattern(request, scope="tool")
+        preview = request.change_preview()
         try:
             from rich.console import Console
+            from rich.markup import escape
             from rich.panel import Panel
             console = Console()
             
@@ -176,24 +183,39 @@ class RichFrontend:
                 border_style="yellow"
             ))
             
+            # Show the concrete change so the user approves the actual diff/
+            # content, not just a tool label.
+            if preview:
+                console.print(Panel(
+                    escape(preview),
+                    title="[cyan]Change Preview[/cyan]",
+                    border_style="cyan",
+                ))
+            
             console.print("[1] Allow once")
-            console.print("[2] Always allow this pattern")
-            console.print("[3] Always allow for this session")
-            console.print("[4] Reject")
+            console.print(f"[2] Always allow this command ({narrow_pattern})")
+            console.print(f"[3] Always allow this command for this session ({narrow_pattern})")
+            console.print(f"[4] Always allow ALL uses of {request.tool_name} ({blanket_pattern})")
+            console.print("[5] Reject")
             
         except ImportError:
-            print(f"\n=== Approval Required ===")
+            print("\n=== Approval Required ===")
             print(f"Description: {request.description}")
             print(f"Tool: {request.tool_name}")
             print(f"Action: {request.action_type}")
+            if preview:
+                print("\n--- Change Preview ---")
+                print(preview)
+                print("--- End Preview ---")
             print("[1] Allow once")
-            print("[2] Always allow this pattern")
-            print("[3] Always allow for this session")
-            print("[4] Reject")
+            print(f"[2] Always allow this command ({narrow_pattern})")
+            print(f"[3] Always allow this command for this session ({narrow_pattern})")
+            print(f"[4] Always allow ALL uses of {request.tool_name} ({blanket_pattern})")
+            print("[5] Reject")
         
         while True:
             try:
-                choice = input("\nChoice [1-4]: ").strip()
+                choice = input("\nChoice [1-5]: ").strip()
                 
                 if choice == "1":
                     return ApprovalResponse(
@@ -201,31 +223,49 @@ class RichFrontend:
                         decision=ApprovalDecision.ONCE
                     )
                 elif choice == "2":
-                    pattern = f"{request.action_type}:*"
                     return ApprovalResponse(
                         request_id=request.request_id,
                         decision=ApprovalDecision.ALWAYS,
-                        remember_pattern=pattern
+                        remember_pattern=narrow_pattern
                     )
                 elif choice == "3":
-                    pattern = f"{request.action_type}:*"
                     return ApprovalResponse(
                         request_id=request.request_id,
                         decision=ApprovalDecision.ALWAYS_SESSION,
-                        remember_pattern=pattern
+                        remember_pattern=narrow_pattern
                     )
                 elif choice == "4":
                     return ApprovalResponse(
                         request_id=request.request_id,
-                        decision=ApprovalDecision.REJECT
+                        decision=ApprovalDecision.ALWAYS,
+                        remember_pattern=blanket_pattern
+                    )
+                elif choice == "5":
+                    return ApprovalResponse(
+                        request_id=request.request_id,
+                        decision=ApprovalDecision.REJECT,
+                        reason=self._prompt_deny_reason(),
                     )
                 else:
-                    print("Invalid choice. Please enter 1-4.")
+                    print("Invalid choice. Please enter 1-5.")
             except (EOFError, KeyboardInterrupt):
                 return ApprovalResponse(
                     request_id=request.request_id,
                     decision=ApprovalDecision.REJECT
                 )
+
+    def _prompt_deny_reason(self) -> Optional[str]:
+        """Optionally capture a denial reason to steer the agent.
+
+        Returns the trimmed reason string, or ``None`` when the user provides
+        no feedback (blank input) or input is unavailable — preserving today's
+        plain-denial behaviour.
+        """
+        try:
+            reason = input("Reason for denial (optional, steers the agent): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        return reason or None
     
     async def run(self) -> None:
         """Run the interactive REPL loop."""

@@ -16,8 +16,12 @@ Two guarantees matter:
    executed twice, producing duplicate class/enum objects that break
    ``isinstance`` / equality checks across the old and new import paths.
 
-2. **Laziness** — submodules are only imported on demand (the CLI relies on
-   lazy imports for start-up performance), so nothing is eagerly imported here.
+2. **Laziness** — a package's *own* modules are not force-loaded before the
+   package itself is aliased; the CLI relies on lazy imports for start-up
+   performance. Guarantee #1 wins where the two conflict: when an old dotted
+   path is first aliased, its already-moved subtree is pre-registered (see
+   :func:`_register_submodules`) so a combined ``from old.sub import X`` cannot
+   re-enter the finder mid-import and double-load ``sub``.
 
 The shim package at the old path keeps its *own* ``__path__`` (the now nearly
 empty old directory). Because that directory no longer contains the moved
@@ -79,12 +83,28 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
     create duplicate class/enum objects). Modules that fail to import eagerly
     (e.g. optional heavy dependencies not installed) are skipped and resolved
     lazily by :class:`_AliasFinder` on first successful use.
+
+    Eager pre-registration is required for correctness, not just startup speed:
+    if the alias for ``old_name.sub`` is *absent* when a combined statement such
+    as ``from old_name.sub import Symbol`` runs, CPython imports the parent
+    shim, then resolves ``.sub`` through :class:`_AliasFinder.find_spec`, which
+    calls ``import_module`` re-entrantly *inside* the parent's in-progress
+    import. Under the import lock that re-entrancy loads the moved file twice,
+    producing two distinct module objects (duplicate classes) and breaking
+    module identity (guarantee #1). Pre-stamping ``sys.modules[old_name.sub]``
+    here means ``_find_and_load`` returns the single canonical object directly
+    and never re-enters the finder.
     """
     new_prefix = new_name + "."
-    old_prefix = old_name + "."
 
     # Alias whatever is already imported first (e.g. the package __init__).
     for mod_name, mod in list(sys.modules.items()):
+        # ``sys.modules`` can legitimately hold ``None`` placeholders (failed
+        # optional imports). Aliasing one would poison the old dotted name so
+        # that ``import old_name.sub`` raises "None in sys.modules" even though
+        # ``_AliasFinder`` could still resolve it on demand.
+        if mod is None:
+            continue
         if mod_name == new_name or mod_name.startswith(new_prefix):
             old_equiv = old_name + mod_name[len(new_name):]
             sys.modules.setdefault(old_equiv, mod)

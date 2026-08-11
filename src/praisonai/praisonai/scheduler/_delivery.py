@@ -69,16 +69,176 @@ class SchedulerDelivery:
         deliver: The delivery token (e.g. ``"telegram:123456"``). An empty
             token disables delivery.
         job_id: Optional stable identifier folded into the idempotency key.
+        origin: Optional persisted origin target (``ScheduleJob.origin``) — the
+            concrete ``(channel, channel_id[, thread_id])`` where the job was
+            created. When ``deliver`` is the symbolic ``"origin"`` token this is
+            used to resolve a concrete route without the full gateway, so a
+            scheduled/interval agent can deliver back to its point of origin on
+            the lightweight path.
     """
 
-    def __init__(self, deliver: str = "", *, job_id: str = "") -> None:
+    def __init__(
+        self, deliver: str = "", *, job_id: str = "", origin: Any = None
+    ) -> None:
         self._deliver = deliver or ""
         self._job_id = job_id or ""
+        self._origin = origin
         self._router: Any = None
         self._bot: Any = None
         self._unavailable = False
-        # Resolved once; the target grammar does not change across runs.
-        self._target = self._parse_target(self._deliver)
+        # Resolved once; the target grammar does not change across runs. A
+        # symbolic ``"origin"`` token is rewritten to the persisted concrete
+        # origin target here so the rest of the path treats it like any other
+        # explicit ``channel:channel_id`` target — no live session required.
+        self._target = self._resolve_origin_target(
+            self._parse_target(self._deliver)
+        )
+        # Creation-time pre-flight (Issue #3800): answer "where will this go?"
+        # the moment the send is configured instead of only at fire time. This
+        # is a structural, registry-free check — an unrecognised symbolic token
+        # or a token with no resolvable platform is surfaced now, with the
+        # fire-time self-heal kept as the second line of defence for targets
+        # that go dead *after* creation.
+        v = self.validate()
+        if not v.ok:
+            logger.warning(
+                "Scheduler delivery target %r is not routable: %s %s",
+                self._deliver,
+                v.reason,
+                v.hint,
+            )
+        elif v.preview:
+            logger.info("Scheduled -> %s", v.preview)
+
+    def validate(self) -> "DeliveryValidation":
+        """Pre-flight the configured delivery target at *creation* time.
+
+        Resolves the target's well-formedness without a live channel registry
+        so a typo'd or unroutable token is caught the moment the scheduled /
+        agent-initiated send is created, rather than being silently dropped
+        when the job fires hours later. Symbolic ``origin`` is accepted only
+        when a concrete origin was persisted (otherwise there is nothing to
+        deliver back to); ``all`` requires the full gateway and is flagged on
+        the lightweight path; a bare token with no resolvable platform is
+        rejected with an actionable hint. Returns a
+        :class:`~praisonaiagents.gateway.DeliveryValidation`; never raises.
+        """
+        from praisonaiagents.gateway import DeliveryValidation
+
+        if self._target is None:
+            # No delivery configured is a valid state (delivery disabled).
+            return DeliveryValidation(ok=True, preview="")
+
+        preview = self._target.preview()
+        channel = (self._target.channel or "").strip()
+        if channel:
+            return DeliveryValidation(ok=True, preview=preview)
+
+        symbolic = (self._target.deliver or self._deliver or "").strip().lower()
+        if symbolic == "origin":
+            return DeliveryValidation(
+                ok=False,
+                reason=(
+                    "'origin' target has no persisted origin to resolve "
+                    "(job was not created with an origin channel)"
+                ),
+                hint=(
+                    "Pass the job's origin, use an explicit 'platform' or "
+                    "'platform:channel_id' token, or run under the full "
+                    "BotOS gateway."
+                ),
+                preview=preview,
+            )
+        if symbolic == "all":
+            return DeliveryValidation(
+                ok=False,
+                reason=(
+                    "symbolic target 'all' cannot be resolved by the "
+                    "lightweight scheduler delivery path"
+                ),
+                hint=(
+                    "Use an explicit 'platform' or 'platform:channel_id' "
+                    "token, or run under the full BotOS gateway."
+                ),
+                preview=preview,
+            )
+        return DeliveryValidation(
+            ok=False,
+            reason=f"token '{self._deliver}' has no resolvable platform",
+            hint="Use a 'platform' or 'platform:channel_id' token.",
+            preview=preview,
+        )
+
+    @property
+    def preview(self) -> str:
+        """Dry-run preview of the configured destination (empty if disabled)."""
+        if self._target is None:
+            return ""
+        return self._target.preview()
+
+    @staticmethod
+    def origin_from_config(config: Optional[Dict[str, Any]]) -> Any:
+        """Extract a persisted origin :class:`DeliveryTarget` from job config.
+
+        A scheduled job persists where it was created on ``ScheduleJob.origin``.
+        When that job is materialised into a scheduler the origin is carried in
+        the ``config`` dict — either as a live :class:`DeliveryTarget` or as its
+        serialised ``dict`` form (from ``to_dict`` / persisted state). Normalise
+        both so ``deliver="origin"`` can resolve to the concrete channel on the
+        lightweight path. Returns ``None`` when no usable origin is present.
+        """
+        if not config:
+            return None
+        origin = config.get("origin")
+        if origin is None:
+            return None
+        if getattr(origin, "channel", None) is not None:
+            return origin
+        if isinstance(origin, dict):
+            try:
+                from praisonaiagents.scheduler import DeliveryTarget
+            except Exception:  # pragma: no cover - core always present
+                return None
+            try:
+                return DeliveryTarget.from_dict(origin)
+            except Exception:
+                return None
+        return None
+
+    def _resolve_origin_target(self, target: Any) -> Any:
+        """Rewrite a symbolic ``origin`` target to the persisted concrete one.
+
+        When ``deliver`` is ``"origin"`` the parsed target carries no channel;
+        the job's origin was captured at creation and persisted as a concrete
+        :class:`DeliveryTarget`. Substitute it so the lightweight path can
+        deliver back to the point of origin without the full gateway. Any other
+        target (explicit ``channel:channel_id``, bare platform, or ``all``) is
+        returned unchanged.
+        """
+        if target is None:
+            return None
+        symbolic = (target.deliver or "").strip().lower()
+        if symbolic != "origin":
+            return target
+        origin = self._origin
+        if origin is None or not getattr(origin, "channel", ""):
+            return target
+        try:
+            from praisonaiagents.scheduler import DeliveryTarget
+        except Exception:  # pragma: no cover - core always present
+            return target
+        channel = origin.channel
+        channel_id = origin.channel_id or ""
+        thread_id = origin.thread_id
+        token = f"{channel}:{channel_id}" if channel_id else channel
+        if thread_id:
+            token = f"{token}:{thread_id}"
+        return DeliveryTarget(
+            channel=channel,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            deliver=token,
+        )
 
     @staticmethod
     def _parse_target(deliver: str):
@@ -106,18 +266,28 @@ class SchedulerDelivery:
         channel = (self._target.channel or "").strip()
         if not channel:
             symbolic = (self._target.deliver or self._deliver or "").strip().lower()
-            if symbolic in ("origin", "all"):
-                # 'origin' needs the original request's session context and
-                # 'all' needs every configured bot — neither exists in this
-                # lightweight single-channel path. Delivering these requires
-                # the full BotOS gateway; tell the user how to target instead.
+            if symbolic == "origin":
+                # 'origin' is resolvable on this lightweight path when the job
+                # persisted a concrete origin target (rewritten in
+                # ``_resolve_origin_target``). Reaching here means no origin was
+                # captured, so there is nothing concrete to deliver back to.
                 logger.warning(
-                    "Scheduler delivery: symbolic target '%s' cannot be "
-                    "resolved by the lightweight scheduler delivery path "
-                    "(no origin/session context). Use an explicit "
+                    "Scheduler delivery: 'origin' target has no persisted "
+                    "origin to resolve (job was not created with an origin "
+                    "channel). Pass the job's origin, use an explicit "
                     "'platform' or 'platform:channel_id' token, or run under "
                     "the full BotOS gateway.",
-                    symbolic,
+                )
+            elif symbolic == "all":
+                # 'all' needs every configured bot, which the lightweight
+                # single-channel path cannot enumerate. Delivering it requires
+                # the full BotOS gateway; tell the user how to target instead.
+                logger.warning(
+                    "Scheduler delivery: symbolic target 'all' cannot be "
+                    "resolved by the lightweight scheduler delivery path "
+                    "(cannot enumerate every configured bot). Use an explicit "
+                    "'platform' or 'platform:channel_id' token, or run under "
+                    "the full BotOS gateway.",
                 )
             else:
                 logger.warning(
@@ -171,12 +341,16 @@ class SchedulerDelivery:
         channel = self._target.channel or ""
         channel_id = self._target.channel_id or ""
         thread_id = self._target.thread_id or ""
-        # Prefer an explicit "platform:channel_id" target; fall back to the
-        # bare platform token so the router resolves its home channel. The
-        # router resolves to ``(platform, channel_id)`` and sends to the chat —
-        # it does not (yet) route to a thread, so a ``thread_id`` narrows the
-        # idempotency key (below) but is not part of the route.
-        route = f"{channel}:{channel_id}" if channel_id else channel
+        # Prefer an explicit "platform:channel_id[:thread_id]" target; fall back
+        # to the bare platform token so the router resolves its home channel.
+        # The router now preserves the thread segment end-to-end, so a thread
+        # target is delivered into that thread rather than the parent chat.
+        if channel_id and thread_id:
+            route = f"{channel}:{channel_id}:{thread_id}"
+        elif channel_id:
+            route = f"{channel}:{channel_id}"
+        else:
+            route = channel
         # Fold the thread into the dedup key so two threads in the same chat do
         # not collapse to one idempotency entry (which would drop the second
         # thread's message as a duplicate).

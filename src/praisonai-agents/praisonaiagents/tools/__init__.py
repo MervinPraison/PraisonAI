@@ -13,8 +13,10 @@ from .decorator import tool, FunctionTool
 from .call_executor import (
     ToolProgress, DeferredToolResult, defer,
     ToolTimeoutError, ToolCancelledError,
+    DeferredResolver, get_deferred_resolver, register_deferred, resolve_deferred,
 )
 from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_allowed_filter, list_tools_with_hermes_filter, ToolRegistry
+from .resolver import resolve_tool_name, resolve_tool_names, ToolResolutionError
 from .tools import Tools
 
 # Export Injected type directly for easy access
@@ -202,7 +204,12 @@ TOOL_MAPPINGS = {
 
     # Proactive messaging (agent-facing gateway delivery)
     'send_message': ('.messaging_tools', None),
+    'ask_conversation': ('.messaging_tools', None),
     'messaging_tools': ('.messaging_tools', None),
+
+    # Live gateway status/health (agent-facing read-only introspection - Issue #3688)
+    'gateway_status': ('.gateway_status_tools', None),
+    'gateway_status_tools': ('.gateway_status_tools', None),
     
     # Search Tools (fast, capped content grep + file glob)
     'grep': ('.search_tools', None),
@@ -289,14 +296,26 @@ _PROFILE_EXPORTS = frozenset({
 
 # Code-tools bridge exports (lazy loaded to keep import-time cost off the
 # default path; only resolved when the opt-in code mode is used).
-_TOOL_PROXY_EXPORTS = frozenset({'ToolProxy', 'build_tool_namespace'})
+_TOOL_PROXY_EXPORTS = frozenset({
+    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
+})
 
 def __getattr__(name: str) -> Any:
     """Smart lazy loading of tools and profiles."""
     # Handle code-tools bridge exports
     if name in _TOOL_PROXY_EXPORTS:
-        from .tool_proxy import ToolProxy, build_tool_namespace
-        return {'ToolProxy': ToolProxy, 'build_tool_namespace': build_tool_namespace}[name]
+        from .tool_proxy import (
+            ToolProxy,
+            build_tool_namespace,
+            CodeToolBridge,
+            serve_tool_call,
+        )
+        return {
+            'ToolProxy': ToolProxy,
+            'build_tool_namespace': build_tool_namespace,
+            'CodeToolBridge': CodeToolBridge,
+            'serve_tool_call': serve_tool_call,
+        }[name]
 
     # Handle circuit breaker imports first
     if name in _CIRCUIT_BREAKER_EXPORTS:
@@ -407,9 +426,12 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     # Deferred/progress tool-execution protocol (Issue #2925)
     'ToolProgress', 'DeferredToolResult', 'defer',
     'ToolTimeoutError', 'ToolCancelledError',
+    # Deferred-result resolution (Issue #3716): re-inject long-running results
+    'DeferredResolver', 'get_deferred_resolver', 'register_deferred', 'resolve_deferred',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
-    'ToolProxy', 'build_tool_namespace',
+    'resolve_tool_name', 'resolve_tool_names', 'ToolResolutionError',
+    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
     'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',

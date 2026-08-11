@@ -7,8 +7,13 @@ Pinned versions are cached indefinitely, 'latest' has configurable TTL.
 
 import hashlib
 import json
+import os
 import shutil
+import tempfile
+import threading
 import time
+from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -91,7 +96,19 @@ class TemplateCache:
     DEFAULT_CACHE_DIR = Path.home() / ".praison" / "cache" / "templates"
     DEFAULT_TTL = 86400  # 24 hours
     METADATA_FILE = ".cache_meta.json"
-    
+    # Reserved subdirectory that in-flight put() writes are staged into. Kept
+    # inside cache_dir (same filesystem, so os.replace stays atomic) but skipped
+    # by clear()/list so a concurrent clear() can't rmtree a half-written entry.
+    STAGING_DIR = ".staging"
+
+    # Locks are keyed by the absolute cache path and shared *process-wide* (not
+    # per-instance) so two independent ``TemplateCache`` objects pointing at the
+    # same directory still serialise their destructive mutations against each
+    # other. A per-instance dict would let a concurrent ``clear()`` on a second
+    # instance rmtree a staging directory mid-``put()``.
+    _KEY_LOCKS_GUARD = threading.Lock()
+    _KEY_LOCKS: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+
     def __init__(
         self,
         cache_dir: Optional[Path] = None,
@@ -107,7 +124,33 @@ class TemplateCache:
         self.cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
         self.default_ttl = default_ttl
         self._ensure_cache_dir()
-    
+
+    @classmethod
+    def _lock_for(cls, cache_path: Path) -> threading.Lock:
+        """Return the process-wide lock guarding a single cache key.
+
+        Shared across all instances so separate caches over the same directory
+        coordinate their put/invalidate/clear/get on a given key.
+        """
+        with cls._KEY_LOCKS_GUARD:
+            return cls._KEY_LOCKS[str(cache_path)]
+
+    def _root_lock(self) -> threading.Lock:
+        """Return the lock guarding whole-tree operations (``clear``)."""
+        return self._lock_for(self.cache_dir)
+
+    @contextmanager
+    def _write_locks(self, cache_path: Path):
+        """Hold the root lock then the per-key lock for a destructive write.
+
+        The root lock serialises against ``clear()`` (which can rmtree a whole
+        subtree); the per-key lock serialises against other writers and readers
+        of the same key. Always acquired root-then-key so the ordering is
+        consistent and can't deadlock against ``clear()``.
+        """
+        with self._root_lock(), self._lock_for(cache_path):
+            yield
+
     def _ensure_cache_dir(self) -> None:
         """Ensure the cache directory exists."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -174,17 +217,21 @@ class TemplateCache:
         
         cache_path = self._get_cache_path(resolved)
         meta_path = cache_path / self.METADATA_FILE
-        
-        if not cache_path.exists() or not meta_path.exists():
-            return None
-        
-        # Load metadata
-        try:
-            with open(meta_path, "r") as f:
-                metadata = CacheMetadata.from_dict(json.load(f))
-        except (json.JSONDecodeError, IOError):
-            return None
-        
+
+        # Read under the same per-key lock the writers hold so a reader never
+        # observes the brief window between the two renames in put()/invalidate()
+        # where cache_path is being pivoted out and the replacement installed.
+        with self._lock_for(cache_path):
+            if not cache_path.exists() or not meta_path.exists():
+                return None
+
+            # Load metadata
+            try:
+                with open(meta_path, "r") as f:
+                    metadata = CacheMetadata.from_dict(json.load(f))
+            except (json.JSONDecodeError, IOError):
+                return None
+
         # Check expiration (unless offline mode)
         if not offline and metadata.is_expired():
             return None
@@ -224,25 +271,10 @@ class TemplateCache:
             )
         
         cache_path = self._get_cache_path(resolved)
-        
-        # Remove existing cache entry
-        if cache_path.exists():
-            shutil.rmtree(cache_path)
-        
-        # Copy content to cache
-        cache_path.mkdir(parents=True, exist_ok=True)
-        
-        if content_dir.is_dir():
-            for item in content_dir.iterdir():
-                if item.is_file():
-                    shutil.copy2(item, cache_path / item.name)
-                elif item.is_dir():
-                    shutil.copytree(item, cache_path / item.name)
-        else:
-            # Single file
-            shutil.copy2(content_dir, cache_path / content_dir.name)
-        
-        # Create metadata
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create metadata up front so it can be written into the staging dir
+        # before the atomic install (readers never see a dir without metadata).
         metadata = CacheMetadata(
             fetched_at=time.time(),
             etag=etag,
@@ -252,12 +284,46 @@ class TemplateCache:
             version=resolved.ref,
             is_pinned=resolved.is_pinned
         )
-        
-        # Save metadata
-        meta_path = cache_path / self.METADATA_FILE
-        with open(meta_path, "w") as f:
-            json.dump(metadata.to_dict(), f, indent=2)
-        
+
+        # Stage the write into the reserved staging dir, then atomically swap it
+        # into place. Readers keep seeing the old cache_path until os.replace()
+        # runs, so a concurrent reader never observes a half-populated directory
+        # or a partially written metadata file. Staging lives under cache_dir (so
+        # os.replace is a same-filesystem atomic rename) but in a reserved
+        # subdir that clear() skips, so a concurrent clear() can't delete it.
+        staging_root = self.cache_dir / self.STAGING_DIR
+        staging_root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix="stage_", dir=str(staging_root)))
+        try:
+            if content_dir.is_dir():
+                for item in content_dir.iterdir():
+                    if item.is_file():
+                        shutil.copy2(item, staging / item.name)
+                    elif item.is_dir():
+                        shutil.copytree(item, staging / item.name)
+            else:
+                # Single file
+                shutil.copy2(content_dir, staging / content_dir.name)
+
+            with open(staging / self.METADATA_FILE, "w") as f:
+                json.dump(metadata.to_dict(), f, indent=2)
+
+            with self._write_locks(cache_path):
+                # Re-create the parent under the lock in case a concurrent
+                # clear() removed it after mkdtemp staged the write.
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                if cache_path.exists():
+                    # Pivot the old entry out of the read path atomically, then
+                    # delete it out-of-band so readers never race the rmtree.
+                    trash = cache_path.with_name(cache_path.name + ".old")
+                    shutil.rmtree(trash, ignore_errors=True)
+                    os.replace(cache_path, trash)
+                    shutil.rmtree(trash, ignore_errors=True)
+                os.replace(staging, cache_path)  # atomic install
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
         return CachedTemplate(
             path=cache_path,
             metadata=metadata
@@ -274,9 +340,15 @@ class TemplateCache:
             True if cache was invalidated, False if not found
         """
         cache_path = self._get_cache_path(resolved)
-        if cache_path.exists():
-            shutil.rmtree(cache_path)
-            return True
+        with self._write_locks(cache_path):
+            if cache_path.exists():
+                # Pivot out of the read path before deleting so a concurrent
+                # reader never races the rmtree on the live cache_path.
+                trash = cache_path.with_name(cache_path.name + ".old")
+                shutil.rmtree(trash, ignore_errors=True)
+                os.replace(cache_path, trash)
+                shutil.rmtree(trash, ignore_errors=True)
+                return True
         return False
     
     def clear(self, source: Optional[TemplateSource] = None) -> int:
@@ -290,21 +362,25 @@ class TemplateCache:
             Number of templates cleared
         """
         count = 0
-        
-        if source is None:
-            # Clear everything
-            if self.cache_dir.exists():
-                for item in self.cache_dir.iterdir():
-                    if item.is_dir():
-                        count += sum(1 for _ in item.rglob(self.METADATA_FILE))
-                        shutil.rmtree(item)
-        else:
-            # Clear specific source
-            source_dir = self.cache_dir / source.value
-            if source_dir.exists():
-                count = sum(1 for _ in source_dir.rglob(self.METADATA_FILE))
-                shutil.rmtree(source_dir)
-        
+
+        # Hold the root lock so a whole-tree clear can't rmtree a directory (or
+        # its parent) while a concurrent put() is staging/installing into it.
+        with self._root_lock():
+            if source is None:
+                # Clear everything except the reserved staging dir, which may
+                # hold a put() in flight on another thread.
+                if self.cache_dir.exists():
+                    for item in self.cache_dir.iterdir():
+                        if item.is_dir() and item.name != self.STAGING_DIR:
+                            count += sum(1 for _ in item.rglob(self.METADATA_FILE))
+                            shutil.rmtree(item, ignore_errors=True)
+            else:
+                # Clear specific source
+                source_dir = self.cache_dir / source.value
+                if source_dir.exists():
+                    count = sum(1 for _ in source_dir.rglob(self.METADATA_FILE))
+                    shutil.rmtree(source_dir, ignore_errors=True)
+
         return count
     
     def list_cached(

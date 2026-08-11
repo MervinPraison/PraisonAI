@@ -133,6 +133,7 @@ class CommandRegistry:
         self.register("model", {"description": "Switch LLM model for this session", "builtin": True})
         self.register("usage", {"description": "Show token usage and estimated cost", "builtin": True})
         self.register("compress", {"description": "Compress conversation to free context window", "builtin": True})
+        self.register("recap", {"description": "Show a 'where were we' summary of this session (read-only)", "builtin": True})
         self.register("queue", {"description": "Queue a follow-up message", "builtin": True})
         # Learn a grounded skill from sources (codebase, docs, PDFs, or this chat)
         self.register("learn", {"description": "Learn a reusable skill from sources you describe (e.g. /learn deploy steps from this repo)", "builtin": True})
@@ -142,6 +143,8 @@ class CommandRegistry:
         self.register("resume", {"description": "Resume a saved session: /resume <id>", "builtin": True})
         self.register("retry", {"description": "Retry your last message", "builtin": True})
         self.register("reasoning", {"description": "Toggle whether extended-thinking output is shown", "builtin": True})
+        # Background task visibility from inside the chat session
+        self.register("tasks", {"description": "List background tasks and their status (/tasks <id> for detail)", "builtin": True})
         # Consent-first automation suggestions & blueprints (accept/dismiss in chat)
         self.register("automations", {"description": "List and accept/dismiss suggested automations", "builtin": True})
         self.register("blueprint", {"description": "Create an automation from a template: /blueprint <name> [slot=value ...]", "builtin": True})
@@ -364,6 +367,303 @@ class CommandRegistry:
             lines.append("Role: User (no restrictions)")
         
         return "\n".join(lines)
+
+
+# Entry-point group third-party packages use to contribute bot slash commands
+# without forking or writing Python against a specific adapter (Issue #3729).
+# Each entry point resolves to a mapping ``{name: template}`` /
+# ``{name: {"template": ..., "description": ..., "allow_shell": ...}}`` or a
+# zero-argument callable returning one.
+BOT_COMMANDS_ENTRY_POINT_GROUP = "praisonai.bot_commands"
+
+
+def _discover_entry_point_commands() -> Dict[str, Any]:
+    """Load programmatic bot commands from the ``praisonai.bot_commands`` group.
+
+    Mirrors the code registry's entry-point loader but yields simple
+    ``CustomCommand``-shaped records so installed packages can add bot commands
+    without forking. A broken plugin is logged and skipped so it never takes
+    down command resolution. Returns a ``{name: record}`` map where each record
+    exposes ``name``/``description``/``template``/``allow_shell``/``source``.
+    """
+    commands: Dict[str, Any] = {}
+    try:
+        from importlib.metadata import entry_points
+    except Exception:  # pragma: no cover - very old Pythons
+        return commands
+    try:
+        eps = entry_points()
+        if hasattr(eps, "select"):
+            group = eps.select(group=BOT_COMMANDS_ENTRY_POINT_GROUP)
+        else:  # pragma: no cover - legacy mapping API
+            group = eps.get(BOT_COMMANDS_ENTRY_POINT_GROUP, [])
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Bot command entry-point discovery failed: %s", exc)
+        return commands
+
+    for ep in group:
+        try:
+            obj = ep.load()
+            mapping = obj() if callable(obj) else obj
+            if not isinstance(mapping, dict):
+                continue
+            for name, spec in mapping.items():
+                if isinstance(spec, str):
+                    template, description, allow_shell = spec, None, False
+                elif isinstance(spec, dict):
+                    template = spec.get("template", "")
+                    description = spec.get("description")
+                    allow_shell = bool(spec.get("allow_shell", False))
+                else:
+                    template = getattr(spec, "template", "")
+                    description = getattr(spec, "description", None)
+                    allow_shell = bool(getattr(spec, "allow_shell", False))
+                commands[name] = _EntryPointCommand(
+                    name=name,
+                    template=template or "",
+                    description=description,
+                    allow_shell=allow_shell,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load bot command source %r: %s", ep, exc)
+    return commands
+
+
+class _EntryPointCommand:
+    """Minimal ``CustomCommand``-shaped record for an entry-point command."""
+
+    __slots__ = ("name", "template", "description", "allow_shell", "source")
+
+    def __init__(
+        self,
+        name: str,
+        template: str = "",
+        description: Optional[str] = None,
+        allow_shell: bool = False,
+    ) -> None:
+        self.name = name
+        self.template = template
+        self.description = description
+        self.allow_shell = allow_shell
+        self.source = "entrypoint"
+
+
+class CustomCommandResolver:
+    """Bridges the file-based custom-command convention into bot chats.
+
+    A command authored once in ``.praisonai/commands/{name}.md`` (or shipped by
+    a plugin bundle) should be invokable from any bot chat, not just the code
+    REPL/TUI. This resolver *consumes* the existing loader/interpolator from
+    ``praisonai-code`` (``custom_definitions``) rather than reimplementing them,
+    so there is a single command source across every surface.
+
+    Safety posture is adjusted for the unattended chat surface:
+
+    * ``allow_shell`` — live ``!`cmd``` substitution is **disabled by default**
+      regardless of a command's frontmatter; a chat message must never trigger
+      server-side shell substitution silently. Set it True per deployment to
+      opt in. When off, any ``!`cmd``` in the template is left as literal text
+      (the command still runs) rather than executing.
+    * ``expose`` — an optional allow-list of command names; when set only those
+      commands are visible in chat. When ``None`` (default) all *project*-scope
+      commands are exposed.
+    * ``include_user_scope`` — user-home (``~/.praisonai``) commands are
+      **excluded by default**; the server operator's project defines the
+      surface, not the operator's home dir.
+
+    Discovery is cached and re-scanned when the resolver is asked to (the
+    underlying loader re-discovers on ``force``). All lookups fail open: any
+    error resolving a command returns ``None`` so the adapter falls through to
+    normal chat.
+    """
+
+    def __init__(
+        self,
+        allow_shell: bool = False,
+        expose: Optional[List[str]] = None,
+        include_user_scope: bool = False,
+    ) -> None:
+        self.allow_shell = allow_shell
+        self.expose = set(expose) if expose is not None else None
+        self.include_user_scope = include_user_scope
+        self._discovery: Any = None
+
+    def _get_discovery(self) -> Any:
+        """Lazily construct the shared ``CustomDefinitionsDiscovery``.
+
+        Uses the sanctioned ``_code_bridge`` seam so the bot package never
+        hard-depends on ``praisonai-code``. Returns ``None`` when the optional
+        code package is unavailable so every caller degrades gracefully.
+        """
+        if self._discovery is not None:
+            return self._discovery
+        try:
+            from praisonai_bot._code_bridge import import_code_module
+
+            module = import_code_module(
+                "praisonai_code.cli.features.custom_definitions"
+            )
+            self._discovery = module.CustomDefinitionsDiscovery()
+        except Exception:  # noqa: BLE001 — resolver must never raise
+            return None
+        return self._discovery
+
+    def _is_exposed(self, command: Any) -> bool:
+        """Return whether *command* may be surfaced in chat under the policy."""
+        source = getattr(command, "source", "unknown")
+        if source == "user" and not self.include_user_scope:
+            return False
+        if self.expose is not None and getattr(command, "name", None) not in self.expose:
+            return False
+        return True
+
+    def list_commands(self) -> List[Any]:
+        """Return the exposed custom commands (file + entry-point; may be empty).
+
+        File/project commands take precedence over entry-point commands on a
+        name collision (the operator's project defines the surface).
+        """
+        by_name: Dict[str, Any] = {}
+        # Entry-point commands first (lowest precedence).
+        for name, command in _discover_entry_point_commands().items():
+            if self._is_exposed(command):
+                by_name[name] = command
+        # File-based commands override entry-point ones on collision.
+        discovery = self._get_discovery()
+        if discovery is not None:
+            try:
+                discovery.discover(force=True)
+                for command in discovery.list_commands():
+                    if self._is_exposed(command):
+                        by_name[getattr(command, "name", "")] = command
+            except Exception:  # noqa: BLE001 — never break help/menu building
+                pass
+        by_name.pop("", None)
+        return list(by_name.values())
+
+    def get_command(self, name: str) -> Optional[Any]:
+        """Return the exposed command for *name*, or ``None``.
+
+        File-based commands win over entry-point commands on collision.
+        """
+        discovery = self._get_discovery()
+        if discovery is not None:
+            try:
+                discovery.discover(force=True)
+                command = discovery.get_command(name)
+            except Exception:  # noqa: BLE001
+                command = None
+            if command is not None and self._is_exposed(command):
+                return command
+        ep_command = _discover_entry_point_commands().get(name)
+        if ep_command is not None and self._is_exposed(ep_command):
+            return ep_command
+        return None
+
+    def descriptions(self) -> Dict[str, str]:
+        """Return a ``{name: description}`` map of exposed custom commands."""
+        result: Dict[str, str] = {}
+        for command in self.list_commands():
+            name = getattr(command, "name", None)
+            if not name:
+                continue
+            result[name] = getattr(command, "description", None) or "Custom command"
+        return result
+
+    def render(
+        self,
+        name: str,
+        arguments: str = "",
+        working_dir: Optional[Any] = None,
+    ) -> Optional[str]:
+        """Resolve and interpolate a custom command into a chat turn body.
+
+        Interpolation reuses the code package's ``TemplateInterpolator`` with
+        ``$ARGUMENTS`` / ``@file`` support and shell substitution forced off
+        unless ``allow_shell`` was opted in. ``@file`` references resolve
+        against *working_dir* (the chat's workspace root) with the loader's
+        existing containment checks. Returns ``None`` when the command is
+        unknown/not exposed or when the code package is unavailable.
+        """
+        command = self.get_command(name)
+        if command is None:
+            return None
+        try:
+            from praisonai_bot._code_bridge import import_code_module
+
+            module = import_code_module(
+                "praisonai_code.cli.features.custom_definitions"
+            )
+            interpolator = module.TemplateInterpolator
+            shell_error = module.ShellSubstitutionError
+        except Exception:  # noqa: BLE001
+            return None
+
+        from pathlib import Path
+
+        wd = Path(working_dir) if working_dir else None
+        template = getattr(command, "template", "") or ""
+        # Require BOTH the deployment opt-in and the command's own frontmatter
+        # to enable live shell substitution: a deployment enabling
+        # ``bots.commands.allow_shell`` must not silently upgrade a command that
+        # declared ``allow_shell: false``.
+        effective_allow_shell = self.allow_shell and bool(
+            getattr(command, "allow_shell", False)
+        )
+        try:
+            return interpolator.interpolate(
+                template,
+                arguments=arguments,
+                working_dir=wd,
+                allow_shell=effective_allow_shell,
+            )
+        except shell_error:
+            # Safe-by-default: a command carrying live ``!`cmd``` shell
+            # substitution must NOT execute in the unattended chat surface when
+            # allow_shell is off. Rather than failing the whole command, drop the
+            # ``!`` marker so the segment becomes inert backticks (no longer
+            # matched by SHELL_PATTERN) and interpolate only the safe
+            # $ARGUMENTS/@file parts.
+            inert = interpolator.SHELL_PATTERN.sub(r"`\1`", template)
+            try:
+                return interpolator.interpolate(
+                    inert,
+                    arguments=arguments,
+                    working_dir=wd,
+                    allow_shell=False,
+                )
+            except Exception:  # noqa: BLE001
+                return inert
+        except Exception:  # noqa: BLE001
+            return None
+
+
+def build_custom_command_resolver(config: Any) -> CustomCommandResolver:
+    """Build a :class:`CustomCommandResolver` from a channel/bot config.
+
+    Reads the optional ``commands`` block (``ChannelConfigSchema.commands``):
+
+    * ``allow_shell`` (default False) — opt in to live ``!`cmd``` substitution;
+    * ``expose`` (default None → all project commands) — allow-list of names;
+    * ``include_user_scope`` (default False) — include ``~/.praisonai`` commands.
+
+    Fails open to safe defaults when the config is missing or malformed.
+    """
+    commands_cfg = getattr(config, "commands", None) if config is not None else None
+    allow_shell = False
+    expose: Optional[List[str]] = None
+    include_user_scope = False
+    if commands_cfg is not None:
+        allow_shell = bool(getattr(commands_cfg, "allow_shell", False))
+        raw_expose = getattr(commands_cfg, "expose", None)
+        if raw_expose:
+            expose = [str(n).strip() for n in raw_expose if str(n).strip()]
+        include_user_scope = bool(getattr(commands_cfg, "include_user_scope", False))
+    return CustomCommandResolver(
+        allow_shell=allow_shell,
+        expose=expose,
+        include_user_scope=include_user_scope,
+    )
 
 
 # Global command registry instance
@@ -1017,6 +1317,42 @@ def handle_compress_command(
         return f"❌ Compression failed: {e}"
 
 
+def handle_recap_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /recap — a read-only session summary on demand.
+
+    Unlike /compress this never mutates the conversation or triggers
+    compaction; it only renders a "where were we" block from the user's
+    existing history so returning to a session (``--continue``, bot chats) is
+    quick to re-enter.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+        agent: Current agent instance (unused; kept for dispatch symmetry).
+
+    Returns:
+        A short recap block, or guidance when there is nothing to recap.
+    """
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    history: List[Dict[str, Any]] = []
+    if hasattr(session_manager, "_histories"):
+        history = session_manager._histories.get(storage_key, []) or []
+
+    from praisonaiagents.compaction import build_recap
+
+    return build_recap(history)
+
+
 def handle_queue_command(
     session_manager,
     user_id: str,
@@ -1134,6 +1470,116 @@ def handle_learn_command(
         return str(result) if result else "✅ Skill authored."
     except Exception as e:  # noqa: BLE001 - surface a friendly message
         return f"❌ Could not learn skill: {e}"
+
+
+def handle_tasks_command(
+    user_id: str,
+    args: Optional[str] = None,
+    runner: Optional[Any] = None,
+) -> str:
+    """Handle /tasks to inspect background tasks from inside a chat session.
+
+    Surfaces the already-complete ``BackgroundRunner`` substrate with a
+    chat-friendly compact rendering. Tasks are scoped to the requesting user:
+    only tasks whose ``metadata["user_id"]`` matches (or that carry no owner)
+    are shown, so one user can never enumerate another's background work.
+
+    Usage:
+    - ``/tasks``            list this user's background tasks
+    - ``/tasks <id>``       show detail (incl. result/error tail) for one task
+    - ``/tasks cancel <id>`` cancel a running task
+
+    Args:
+        user_id: The requesting user's identifier (owner scope).
+        args: Optional argument string (an id, or ``cancel <id>``).
+        runner: Optional ``BackgroundRunner`` (defaults to the shared one).
+
+    Returns:
+        A compact, chat-friendly text response.
+    """
+    if runner is None:
+        try:
+            from praisonaiagents.background import get_background_runner
+
+            runner = get_background_runner()
+        except Exception as e:  # noqa: BLE001
+            return f"❌ Background tasks unavailable: {e}"
+
+    def _owned(task: Dict[str, Any]) -> bool:
+        # Fail closed: a task is only visible/actionable to the requesting user
+        # when its owner id matches exactly. Ownerless tasks (e.g. submitted
+        # from the CLI/REPL without a user scope) are NOT exposed to arbitrary
+        # bot users, so one user can never enumerate or cancel another's work.
+        owner = (task.get("metadata") or {}).get("user_id")
+        return owner is not None and str(owner) == str(user_id)
+
+    arg = (args or "").strip()
+
+    # Cancel path.
+    if arg.lower().startswith("cancel"):
+        parts = arg.split(maxsplit=1)
+        task_id = parts[1].strip() if len(parts) > 1 else ""
+        if not task_id:
+            return "ℹ️ Usage: /tasks cancel <id>"
+        try:
+            task = runner.get_task(task_id)
+        except Exception:  # noqa: BLE001
+            task = None
+        if task is None or not _owned(task.to_dict()):
+            return f"❌ Task not found: {task_id}"
+        try:
+            # Cancel through the runner so the underlying future is actually
+            # stopped (not just the record marked cancelled). cancel_task_sync
+            # hops to the background loop where the future lives.
+            cancel = getattr(runner, "cancel_task_sync", None)
+            if callable(cancel):
+                cancelled = cancel(task_id)
+            else:
+                # Fallback for injected runners without the sync helper.
+                cancelled = asyncio.run(runner.cancel_task(task_id))
+        except Exception as e:  # noqa: BLE001
+            return f"❌ Could not cancel task {task_id}: {e}"
+        if not cancelled:
+            return f"❌ Could not cancel task {task_id} (already finished?)."
+        return f"✅ Cancelled task {task_id}."
+
+    # Detail path.
+    if arg:
+        try:
+            task = runner.get_task(arg)
+        except Exception:  # noqa: BLE001
+            task = None
+        if task is None or not _owned(task.to_dict()):
+            return f"❌ Task not found: {arg}"
+        t = task.to_dict()
+        lines = [
+            f"🧩 Task {t.get('id')} — {t.get('name') or 'unnamed'}",
+            f"Status: {t.get('status')}  |  Progress: {t.get('progress', 0) * 100:.0f}%",
+        ]
+        if t.get("error"):
+            lines.append(f"Error: {str(t.get('error'))[:200]}")
+        elif t.get("result") is not None:
+            lines.append(f"Result: {str(t.get('result'))[:200]}")
+        return "\n".join(lines)
+
+    # List path.
+    try:
+        tasks = [t for t in runner.list_tasks() if _owned(t)]
+    except Exception as e:  # noqa: BLE001
+        return f"❌ Could not list tasks: {e}"
+
+    if not tasks:
+        return "💤 No background tasks."
+
+    lines = ["🧩 Background tasks:"]
+    for t in tasks[:20]:
+        progress = f"{t.get('progress', 0) * 100:.0f}%"
+        lines.append(
+            f"• {t.get('id')} {t.get('name') or 'unnamed'} — "
+            f"{t.get('status')} ({progress})"
+        )
+    lines.append("\nUse /tasks <id> for detail or /tasks cancel <id>.")
+    return "\n".join(lines)
 
 
 def handle_undo_command(

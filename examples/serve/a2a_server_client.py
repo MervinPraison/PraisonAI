@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 A2A (Agent-to-Agent) Server and Client Example

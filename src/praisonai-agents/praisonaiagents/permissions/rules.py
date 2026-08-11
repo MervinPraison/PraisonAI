@@ -39,6 +39,55 @@ class PermissionMode(str, Enum):
     BYPASS = "bypass_permissions"
     PLAN = "plan"
 
+    @classmethod
+    def resolve(cls, value: Any) -> Optional["PermissionMode"]:
+        """Resolve a preset name/alias to a canonical ``PermissionMode``.
+
+        This is the single place that maps the many historical spellings for
+        "how much the agent may do" onto one enum, so CLI, YAML and Python all
+        agree. Returns ``None`` for values that are not a permission preset
+        (e.g. the deny-set presets ``safe``/``read_only``/``full``/``off``),
+        letting callers fall through to their existing handling.
+
+        Recognised aliases (case-insensitive, ``-``/``_`` interchangeable):
+        - ``plan`` … PLAN (read-only)
+        - ``bypass``, ``bypass_permissions``, ``yolo``, ``full_auto`` … BYPASS
+        - ``accept_edits``, ``auto_edit`` … ACCEPT_EDITS
+        - ``dont_ask``, ``reject``, ``no_ask`` … DONT_ASK
+        - ``default``, ``ask``, ``suggest``, ``prompt`` … DEFAULT
+
+        Note: the deny-set presets ``safe``/``read_only``/``full``/``off`` are
+        deliberately *not* modes and return ``None`` here — they are handled by
+        their own deny-set machinery in ``Agent``.
+        """
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            return None
+        key = value.strip().lower().replace("-", "_")
+        return _MODE_ALIASES.get(key)
+
+
+# Deprecated/alternate spellings (AutonomyMode / ApprovalMode / CLI flags) that
+# resolve onto the single ``PermissionMode``. Kept as thin aliases so the same
+# preset name means the same thing across every surface (backward-compatible).
+_MODE_ALIASES: Dict[str, PermissionMode] = {
+    "default": PermissionMode.DEFAULT,
+    "ask": PermissionMode.DEFAULT,
+    "suggest": PermissionMode.DEFAULT,
+    "prompt": PermissionMode.DEFAULT,
+    "plan": PermissionMode.PLAN,
+    "accept_edits": PermissionMode.ACCEPT_EDITS,
+    "auto_edit": PermissionMode.ACCEPT_EDITS,
+    "dont_ask": PermissionMode.DONT_ASK,
+    "no_ask": PermissionMode.DONT_ASK,
+    "reject": PermissionMode.DONT_ASK,
+    "bypass": PermissionMode.BYPASS,
+    "bypass_permissions": PermissionMode.BYPASS,
+    "yolo": PermissionMode.BYPASS,
+    "full_auto": PermissionMode.BYPASS,
+}
+
 
 @dataclass
 class PermissionRule:
@@ -227,7 +276,12 @@ class PersistentApproval:
         if not self.is_valid():
             return False
         
-        if self.agent_name and agent_name and self.agent_name != agent_name:
+        # An approval scoped to a specific agent must never match a call that
+        # can't prove it's that agent — including calls with no agent_name at
+        # all. ``agent_name != self.agent_name`` covers both "different name"
+        # and "no name" (None != "trusted-agent" is True), closing the bypass
+        # while leaving unscoped approvals (self.agent_name is None) unaffected.
+        if self.agent_name is not None and agent_name != self.agent_name:
             return False
         
         if fnmatch.fnmatch(target, self.pattern):

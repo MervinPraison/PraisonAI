@@ -1,0 +1,1330 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/src/praisonai/praisonai/config/agents.schema.json",
+  "$defs": {
+    "AgentConfig": {
+      "description": "Configuration for a single agent/role.",
+      "properties": {
+        "role": {
+          "description": "Agent role",
+          "title": "Role",
+          "type": "string"
+        },
+        "goal": {
+          "description": "Agent goal",
+          "title": "Goal",
+          "type": "string"
+        },
+        "backstory": {
+          "description": "Agent backstory",
+          "title": "Backstory",
+          "type": "string"
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Additional instructions (alias for backstory)",
+          "title": "Instructions"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of tools the agent can use",
+          "title": "Tools"
+        },
+        "toolsets": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of toolsets the agent can use",
+          "title": "Toolsets"
+        },
+        "llm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "LLM model to use (string or dict with 'model' key)",
+          "title": "Llm"
+        },
+        "function_calling_llm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "LLM for function calling (string or dict with 'model' key)",
+          "title": "Function Calling Llm"
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "$ref": "#/$defs/TaskConfig"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tasks assigned to this agent",
+          "title": "Tasks"
+        },
+        "allow_delegation": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Allow delegation to other agents",
+          "title": "Allow Delegation"
+        },
+        "max_iter": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 10,
+          "description": "Maximum iterations",
+          "title": "Max Iter"
+        },
+        "max_rpm": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 60,
+          "description": "Maximum requests per minute",
+          "title": "Max Rpm"
+        },
+        "max_execution_time": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum execution time",
+          "title": "Max Execution Time"
+        },
+        "verbose": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Verbose output",
+          "title": "Verbose"
+        },
+        "cache": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Enable caching",
+          "title": "Cache"
+        },
+        "streaming": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable streaming",
+          "title": "Streaming"
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Alias for streaming",
+          "title": "Stream"
+        },
+        "tool_timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tool execution timeout",
+          "title": "Tool Timeout"
+        },
+        "tool_retry_policy": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/ToolRetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tool retry policy",
+          "title": "Tool Retry Policy"
+        },
+        "planning_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Planning tools",
+          "title": "Planning Tools"
+        },
+        "planning": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable planning mode",
+          "title": "Planning"
+        },
+        "autonomy": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0,
+          "description": "Autonomy level (0-10)",
+          "title": "Autonomy"
+        },
+        "guardrails": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Guardrails to apply",
+          "title": "Guardrails"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/ApprovalConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Approval configuration",
+          "title": "Approval"
+        },
+        "skills": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Skills the agent has",
+          "title": "Skills"
+        },
+        "reflection": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable reflection",
+          "title": "Reflection"
+        },
+        "handoff": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/HandoffConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Handoff configuration",
+          "title": "Handoff"
+        },
+        "web": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable web access",
+          "title": "Web"
+        },
+        "web_fetch": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable web fetching",
+          "title": "Web Fetch"
+        },
+        "cli_backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/CliBackendConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CLI backend config",
+          "title": "Cli Backend"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/RuntimeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Runtime configuration",
+          "title": "Runtime"
+        },
+        "system_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "System prompt template",
+          "title": "System Template"
+        },
+        "prompt_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Prompt template",
+          "title": "Prompt Template"
+        },
+        "response_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Response template",
+          "title": "Response Template"
+        }
+      },
+      "title": "AgentConfig",
+      "type": "object"
+    },
+    "ApprovalConfig": {
+      "description": "Configuration for agent approval requirements.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable approval mode",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 300.0,
+          "description": "Approval timeout in seconds",
+          "title": "Timeout"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "tool",
+          "description": "Approval level (tool/step/all)",
+          "title": "Level"
+        },
+        "auto_approve": {
+          "description": "Auto-approved tools",
+          "items": {
+            "type": "string"
+          },
+          "title": "Auto Approve",
+          "type": "array"
+        }
+      },
+      "title": "ApprovalConfig",
+      "type": "object"
+    },
+    "CliBackendConfig": {
+      "description": "Configuration for CLI backend.",
+      "properties": {
+        "type": {
+          "description": "CLI backend type",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Backend-specific config",
+          "title": "Config"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CliBackendConfig",
+      "type": "object"
+    },
+    "GlobalConfig": {
+      "description": "Global configuration settings.",
+      "properties": {
+        "acp": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable ACP mode",
+          "title": "Acp"
+        },
+        "lsp": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable LSP mode",
+          "title": "Lsp"
+        }
+      },
+      "title": "GlobalConfig",
+      "type": "object"
+    },
+    "HandoffConfig": {
+      "description": "Configuration for agent handoff behavior.",
+      "properties": {
+        "to": {
+          "description": "List of agent roles to handoff to",
+          "items": {
+            "type": "string"
+          },
+          "title": "To",
+          "type": "array"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HandoffPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "any",
+          "description": "Handoff policy"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 300.0,
+          "description": "Handoff timeout in seconds",
+          "title": "Timeout"
+        },
+        "max_depth": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 5,
+          "description": "Maximum handoff depth",
+          "title": "Max Depth"
+        },
+        "max_concurrent": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 3,
+          "description": "Maximum concurrent handoffs",
+          "title": "Max Concurrent"
+        },
+        "detect_cycles": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Detect handoff cycles",
+          "title": "Detect Cycles"
+        }
+      },
+      "title": "HandoffConfig",
+      "type": "object"
+    },
+    "HandoffPolicy": {
+      "description": "Handoff policy for agent delegation.",
+      "enum": [
+        "any",
+        "all",
+        "round_robin",
+        "least_busy"
+      ],
+      "title": "HandoffPolicy",
+      "type": "string"
+    },
+    "ProcessType": {
+      "description": "Process type for task execution.",
+      "enum": [
+        "sequential",
+        "hierarchical",
+        "consensual",
+        "workflow"
+      ],
+      "title": "ProcessType",
+      "type": "string"
+    },
+    "RuntimeConfig": {
+      "description": "Configuration for agent runtime environment.",
+      "properties": {
+        "type": {
+          "description": "Runtime type (docker/sandbox/local)",
+          "title": "Type",
+          "type": "string"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Runtime image",
+          "title": "Image"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables",
+          "title": "Env",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "RuntimeConfig",
+      "type": "object"
+    },
+    "TaskConfig": {
+      "description": "Configuration for a single task.",
+      "properties": {
+        "description": {
+          "description": "Task description",
+          "title": "Description",
+          "type": "string"
+        },
+        "agent": {
+          "description": "Agent to execute the task",
+          "title": "Agent",
+          "type": "string"
+        },
+        "expected_output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Expected output format",
+          "title": "Expected Output"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tools to use for this task",
+          "title": "Tools"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Context from other tasks",
+          "title": "Context"
+        },
+        "output_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Output file path",
+          "title": "Output File"
+        },
+        "async_execution": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Execute asynchronously",
+          "title": "Async Execution"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Condition for task execution",
+          "title": "Condition"
+        }
+      },
+      "required": [
+        "description",
+        "agent"
+      ],
+      "title": "TaskConfig",
+      "type": "object"
+    },
+    "ToolRetryPolicy": {
+      "description": "Configuration for tool retry behavior.",
+      "properties": {
+        "max_attempts": {
+          "default": 3,
+          "description": "Maximum retry attempts",
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "delay": {
+          "default": 1.0,
+          "description": "Delay between retries in seconds",
+          "minimum": 0,
+          "title": "Delay",
+          "type": "number"
+        },
+        "backoff_factor": {
+          "default": 2.0,
+          "description": "Exponential backoff factor",
+          "minimum": 1,
+          "title": "Backoff Factor",
+          "type": "number"
+        },
+        "max_delay": {
+          "default": 60.0,
+          "description": "Maximum delay between retries",
+          "minimum": 0,
+          "title": "Max Delay",
+          "type": "number"
+        }
+      },
+      "title": "ToolRetryPolicy",
+      "type": "object"
+    },
+    "WorkflowConfig": {
+      "description": "Configuration for workflow execution.",
+      "properties": {
+        "default_llm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default LLM for workflow",
+          "title": "Default Llm"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Workflow timeout",
+          "title": "Timeout"
+        },
+        "max_parallel": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 3,
+          "description": "Maximum parallel executions",
+          "title": "Max Parallel"
+        },
+        "error_handling": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "stop",
+          "description": "Error handling strategy",
+          "title": "Error Handling"
+        }
+      },
+      "title": "WorkflowConfig",
+      "type": "object"
+    },
+    "WorkflowStep": {
+      "description": "Configuration for a workflow step.",
+      "properties": {
+        "name": {
+          "description": "Step name",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "task",
+          "description": "Step type (task/route/parallel/loop)",
+          "title": "Type"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent for task steps",
+          "title": "Agent"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Task description",
+          "title": "Task"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WorkflowStep"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sub-steps for complex types",
+          "title": "Steps"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Condition for step execution",
+          "title": "Condition"
+        },
+        "routes": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "$ref": "#/$defs/WorkflowStep"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Routes for routing steps",
+          "title": "Routes"
+        },
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Loop count",
+          "title": "Count"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "WorkflowStep",
+      "type": "object"
+    }
+  },
+  "description": "Schema for agents.yaml consumed by the PraisonAI agent runtime (roles/agents, tasks, tools, llm, workflow).",
+  "properties": {
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Configuration name",
+      "title": "Name"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Configuration description",
+      "title": "Description"
+    },
+    "framework": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "praisonai",
+      "description": "Framework to use",
+      "title": "Framework"
+    },
+    "process": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProcessType"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "sequential",
+      "description": "Process type"
+    },
+    "roles": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/AgentConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roles"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentConfig"
+          }
+        }
+      ],
+      "description": "Agent roles (canonical)"
+    },
+    "agents": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/AgentConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentConfig"
+          }
+        }
+      ],
+      "description": "Agents (backward compat)"
+    },
+    "tasks": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/TaskConfig"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Task definitions",
+      "title": "Tasks"
+    },
+    "workflow": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Workflow configuration"
+    },
+    "steps": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Workflow steps",
+      "title": "Steps"
+    },
+    "input": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Input/topic (canonical)",
+      "title": "Input"
+    },
+    "topic": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Topic (backward compat)",
+      "title": "Topic"
+    },
+    "tools": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Global tools",
+      "title": "Tools"
+    },
+    "toolsets": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Global toolsets",
+      "title": "Toolsets"
+    },
+    "config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GlobalConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Global configuration"
+    },
+    "llm": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Default LLM",
+      "title": "Llm"
+    },
+    "models": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Model configurations",
+      "title": "Models"
+    },
+    "providers": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Provider configurations",
+      "title": "Providers"
+    }
+  },
+  "title": "PraisonAI Agents Configuration",
+  "type": "object"
+}

@@ -42,6 +42,11 @@ class KanbanTaskProtocol(TypedDict, total=False):
     board: str
     created_at: float
     updated_at: float
+    # Workspace isolation (optional; default "default" = shared cwd).
+    # "worktree" opts a task into a dedicated per-task git worktree/branch.
+    workspace_kind: str
+    branch: str | None
+    worktree_path: str | None
     # Claim lease / reclamation fields (optional; populated while running).
     # Timestamps are serialized as ISO 8601 strings by Task.to_dict().
     claim_lock: str | None

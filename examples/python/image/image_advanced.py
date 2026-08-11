@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import ImageAgent
 
 agent = ImageAgent(llm="openai/dall-e-3", style="vivid")

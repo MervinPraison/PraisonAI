@@ -9,7 +9,6 @@ These utilities eliminate code duplication between sync and async execution path
 """
 
 import json
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Any, Dict, List, Optional, Callable
 

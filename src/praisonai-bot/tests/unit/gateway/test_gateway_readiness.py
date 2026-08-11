@@ -104,6 +104,34 @@ def test_draining_reset_clears_ready_after_restart():
     assert failing == []
 
 
+def test_health_includes_channel_reason_and_last_inbound():
+    """Per-channel /health rows expose reason, ok, and gateway last_inbound_at."""
+    import time
+
+    gw = _make_gateway()
+    gw._is_running = True
+    gw._started_at = time.time()
+    gw._last_inbound_ts = time.time()
+
+    class _FakeBot:
+        platform = "slack"
+        is_running = True
+        _started_at = time.time()
+        _last_inbound_activity = time.time()
+
+        def _active_run_count(self):
+            return 0
+
+    gw._channel_bots["slack"] = _FakeBot()
+    health = gw.health()
+
+    assert "last_inbound_at" in health
+    ch = health["channels"]["slack"]
+    assert "reason" in ch
+    assert "ok" in ch
+    assert "last_activity" in ch
+
+
 if __name__ == "__main__":
     test_readiness_startup_pending_before_start()
     test_readiness_ready_when_running()

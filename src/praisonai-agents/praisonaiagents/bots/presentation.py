@@ -12,13 +12,49 @@ rendering belongs in ``praisonai-bot`` (``praisonai_bot.bots``).
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+)
+
+if TYPE_CHECKING:
+    from .protocols import CallbackPayloadStoreProtocol
 
 # Most channels (e.g. Telegram) hard-cap inline callback payloads at 64 bytes.
 # Keep degraded select callbacks within this bound while preserving uniqueness.
 _MAX_CALLBACK_LEN = 64
+
+# Marker prefixing a stored-reference payload. When an interactive value does
+# not fit the channel callback byte-cap and a ``CallbackPayloadStoreProtocol``
+# is available, the canonical value is persisted under a short reference and the
+# callback carries ``@<ref>`` instead of the (unrecoverable) hash. The inbound
+# registry resolves the reference back to the exact value on click.
+CALLBACK_REF_MARKER = "@"
+
+# Default lifetime (seconds) for a persisted callback reference. An interactive
+# menu is a short-lived affordance; a bounded TTL keeps the store from growing
+# without cleanup while comfortably covering a user pondering their choice.
+CALLBACK_REF_TTL = 3600.0
+
+
+def _callback_ref(namespace: str, value: str) -> str:
+    """Build a short, collision-resistant reference for a callback ``value``.
+
+    The reference is derived from both the namespace/action scope and the value
+    so distinct choices stay distinct, and is short enough to always fit within
+    ``_MAX_CALLBACK_LEN`` alongside its prefix.
+    """
+    digest = hashlib.sha256(f"{namespace}\x00{value}".encode("utf-8")).hexdigest()
+    return digest[:16]
 
 
 class ActionType(str, Enum):
@@ -49,6 +85,8 @@ class BlockType(str, Enum):
     SELECT = "select"        # Dropdown/select menu
     DIVIDER = "divider"      # Visual separator
     CONTEXT = "context"      # Contextual info (smaller text)
+    TABLE = "table"          # Tabular data (columns + rows)
+    CHART = "chart"          # Chart/visualisation (kind + series)
 
 
 @dataclass
@@ -218,6 +256,12 @@ class PresentationBlock:
     options: Optional[List[SelectOption]] = None
     placeholder: Optional[str] = None
     action_id: Optional[str] = None
+    # Tabular data (TABLE blocks)
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[str]]] = None
+    # Chart data (CHART blocks)
+    chart_kind: Optional[str] = None
+    series: Optional[List[Dict[str, Any]]] = None
     
     @staticmethod
     def make_text(content: str, markdown: bool = True) -> "PresentationBlock":
@@ -252,6 +296,47 @@ class PresentationBlock:
     def make_context(content: str) -> "PresentationBlock":
         """Create a context block (smaller text)."""
         return PresentationBlock(type=BlockType.CONTEXT, text=content)
+
+    @staticmethod
+    def make_table(
+        columns: List[str],
+        rows: List[List[str]],
+    ) -> "PresentationBlock":
+        """Create a table block from *columns* and *rows*.
+
+        Describe tabular data once; channels with a native table widget render
+        it directly, and everywhere else it degrades to a deterministic
+        markdown table (see :func:`adapt_presentation`).
+        """
+        return PresentationBlock(
+            type=BlockType.TABLE,
+            columns=[str(c) for c in columns],
+            rows=[[str(c) for c in row] for row in rows],
+        )
+
+    @staticmethod
+    def make_chart(
+        chart_kind: str,
+        series: List[Dict[str, Any]],
+        text: Optional[str] = None,
+    ) -> "PresentationBlock":
+        """Create a chart block.
+
+        Args:
+            chart_kind: One of ``"bar"``, ``"line"``, ``"pie"``, ``"area"``.
+            series: A list of ``{"label": str, "points": list[float]}`` dicts.
+            text: Optional caption/title for the chart.
+
+        Channels with native visualisation render the series directly; elsewhere
+        the chart degrades to a compact text summary (see
+        :func:`adapt_presentation`).
+        """
+        return PresentationBlock(
+            type=BlockType.CHART,
+            chart_kind=chart_kind,
+            series=series,
+            text=text,
+        )
 
     @staticmethod
     def quick_replies(
@@ -293,6 +378,14 @@ class PresentationBlock:
             data["placeholder"] = self.placeholder
         if self.action_id is not None:
             data["action_id"] = self.action_id
+        if self.columns is not None:
+            data["columns"] = self.columns
+        if self.rows is not None:
+            data["rows"] = self.rows
+        if self.chart_kind is not None:
+            data["chart_kind"] = self.chart_kind
+        if self.series is not None:
+            data["series"] = self.series
         return data
     
     @classmethod
@@ -311,6 +404,10 @@ class PresentationBlock:
             ),
             placeholder=data.get("placeholder"),
             action_id=data.get("action_id"),
+            columns=data.get("columns"),
+            rows=data.get("rows"),
+            chart_kind=data.get("chart_kind"),
+            series=data.get("series"),
         )
 
 
@@ -413,6 +510,35 @@ class MessagePresentation:
         
         return MessagePresentation(blocks=blocks)
 
+    @staticmethod
+    def question(
+        prompt: str,
+        options: List[Any],
+        context: Optional[str] = None,
+    ) -> "MessagePresentation":
+        """Create a structured question presentation with option buttons.
+
+        The symmetric counterpart to :meth:`approval` for non-binary
+        clarifications ("which of these?"). Each option renders as a typed
+        ``reply``-action button (via :meth:`PresentationBlock.quick_replies`),
+        so a tap feeds the chosen value straight back into the next agent turn
+        across any channel, reusing the existing reply routing and byte-safe
+        callback encoding — no new store, protocol, or correlation machinery.
+
+        Args:
+            prompt: The question text.
+            options: Choices as ``(label, value)`` pairs or plain strings.
+            context: Optional context information rendered under the prompt.
+
+        Returns:
+            A presentation with the prompt and one reply button per option.
+        """
+        blocks = [PresentationBlock.make_text(prompt)]
+        if context:
+            blocks.append(PresentationBlock.make_context(context))
+        blocks.append(PresentationBlock.quick_replies(options))
+        return MessagePresentation(blocks=blocks)
+
 
 @dataclass
 class PresentationLimits:
@@ -428,6 +554,10 @@ class PresentationLimits:
         supports_markdown: Whether channel supports markdown
         supports_select: Whether channel supports select menus
         supports_web_apps: Whether channel supports web apps
+        supports_tables: Whether channel has a native table widget
+        supports_charts: Whether channel has native chart/visualisation
+        max_table_rows: Maximum rows in a table block
+        max_table_cols: Maximum columns in a table block
     """
     
     max_buttons: int = 10
@@ -439,6 +569,10 @@ class PresentationLimits:
     supports_markdown: bool = True
     supports_select: bool = True
     supports_web_apps: bool = False
+    supports_tables: bool = False
+    supports_charts: bool = False
+    max_table_rows: int = 50
+    max_table_cols: int = 10
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -452,6 +586,10 @@ class PresentationLimits:
             "supports_markdown": self.supports_markdown,
             "supports_select": self.supports_select,
             "supports_web_apps": self.supports_web_apps,
+            "supports_tables": self.supports_tables,
+            "supports_charts": self.supports_charts,
+            "max_table_rows": self.max_table_rows,
+            "max_table_cols": self.max_table_cols,
         }
     
     @classmethod
@@ -467,6 +605,10 @@ class PresentationLimits:
             supports_markdown=data.get("supports_markdown", True),
             supports_select=data.get("supports_select", True),
             supports_web_apps=data.get("supports_web_apps", False),
+            supports_tables=data.get("supports_tables", False),
+            supports_charts=data.get("supports_charts", False),
+            max_table_rows=data.get("max_table_rows", 50),
+            max_table_cols=data.get("max_table_cols", 10),
         )
     
     @staticmethod
@@ -541,7 +683,11 @@ class PresentationLimits:
         )
 
 
-def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> PresentationButton:
+def _adapt_button(
+    button: PresentationButton,
+    limits: PresentationLimits,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> PresentationButton:
     """Return a copy of a button adapted to the given limits.
 
     Truncates the label and, when the channel does not support web apps,
@@ -562,7 +708,7 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
         if action_type == ActionType.REPLY.value and action.value is not None:
             action = PresentationAction(
                 type=ActionType.CALLBACK,
-                value=_encode_reply_callback(action.value),
+                value=_encode_reply_callback(action.value, store),
             )
         elif (
             not limits.supports_web_apps
@@ -595,7 +741,10 @@ REPLY_CALLBACK_PREFIX = "reply:"
 REPLY_HASH_MARKER = "#"
 
 
-def _encode_reply_callback(value: str) -> str:
+def _encode_reply_callback(
+    value: str,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> str:
     """Build a channel-safe callback payload for a ``reply`` action.
 
     Produces ``reply:<value>`` so the inbound interactive registry can route
@@ -603,33 +752,59 @@ def _encode_reply_callback(value: str) -> str:
     in UTF-8 bytes because channel callback caps (e.g. Telegram's 64-byte cap)
     are byte limits, not character limits.
 
-    When the raw form exceeds ``_MAX_CALLBACK_LEN`` the value is replaced with a
-    short, collision-resistant hash marked with ``#`` (``reply:#<digest>``).
-    Truncating to a prefix was unsafe: two long choices sharing a prefix would
-    collapse to the same payload, and the agent would receive a value it never
-    authored. The hash keeps distinct choices distinct; the marker lets the
-    reply handler recognise that the original value could not be carried inline
-    and avoid routing a lossy value into the turn.
+    When the raw form exceeds ``_MAX_CALLBACK_LEN`` and a *store* is available,
+    the canonical value is persisted under a short reference and the callback
+    carries ``reply:@<ref>``; the inbound handler resolves the reference back to
+    the exact value, so long values round-trip losslessly.
+
+    Without a store the value is replaced with a short, collision-resistant hash
+    marked with ``#`` (``reply:#<digest>``). Truncating to a prefix was unsafe:
+    two long choices sharing a prefix would collapse to the same payload. The
+    marker lets the reply handler recognise that the original value could not be
+    carried and avoid routing a lossy value into the turn.
     """
     raw = f"{REPLY_CALLBACK_PREFIX}{value}"
     if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
+    if store is not None:
+        ref = _callback_ref(REPLY_CALLBACK_PREFIX.rstrip(":"), value)
+        store.put(ref, value, expires_at=time.time() + CALLBACK_REF_TTL)
+        return f"{REPLY_CALLBACK_PREFIX}{CALLBACK_REF_MARKER}{ref}"
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
     return f"{REPLY_CALLBACK_PREFIX}{REPLY_HASH_MARKER}{digest}"
 
 
-def _encode_select_callback(action_id: str, value: str) -> str:
+def _encode_select_callback(
+    action_id: str,
+    value: str,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> str:
     """Build a channel-safe callback payload for a degraded select option.
 
     The raw ``select:<action_id>:<value>`` form can exceed channel callback
-    limits (e.g. Telegram's 64-byte cap) and collide when distinct options
-    share a long prefix. When the raw payload fits within ``_MAX_CALLBACK_LEN``
-    it is returned unchanged; otherwise the value is replaced with a short,
-    collision-resistant hash so distinct options stay distinct after truncation.
+    limits (e.g. Telegram's 64-byte cap). When it fits it is returned unchanged.
+
+    When it overflows and a *store* is available, the canonical value is
+    persisted under a short reference and the callback carries
+    ``select:<action_id>:@<ref>``; the registry resolves the reference back to
+    the exact value on click, so long option values round-trip losslessly.
+
+    Without a store the value is replaced with a short, collision-resistant hash
+    so distinct options stay distinct after truncation (but the value cannot be
+    recovered — see the issue this addresses).
     """
     raw = f"select:{action_id}:{value}"
     if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
+    if store is not None:
+        ref = _callback_ref(f"select:{action_id}", value)
+        store.put(ref, value, expires_at=time.time() + CALLBACK_REF_TTL)
+        prefix = f"select:{action_id}:{CALLBACK_REF_MARKER}"
+        if len(prefix.encode("utf-8")) + len(ref) > _MAX_CALLBACK_LEN:
+            # action_id itself is long; hash it so the ref still fits the bound.
+            aid_digest = hashlib.sha1((action_id or "").encode("utf-8")).hexdigest()[:8]
+            prefix = f"select:{aid_digest}:{CALLBACK_REF_MARKER}"
+        return f"{prefix}{ref}"
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
     prefix = f"select:{action_id}:"
     # Reserve room for the digest; trim the action_id prefix if needed.
@@ -641,7 +816,10 @@ def _encode_select_callback(action_id: str, value: str) -> str:
     return f"{prefix[:_MAX_CALLBACK_LEN - len(digest)]}{digest}"
 
 
-def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
+def _select_to_buttons(
+    block: PresentationBlock,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> PresentationBlock:
     """Convert a SELECT block into an equivalent BUTTONS block.
 
     Used when a channel does not support native select menus. Each option
@@ -659,16 +837,92 @@ def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
                 label=label,
                 action=PresentationAction(
                     type=ActionType.CALLBACK,
-                    value=_encode_select_callback(action_id, option.value),
+                    value=_encode_select_callback(action_id, option.value, store),
                 ),
             )
         )
     return PresentationBlock(type=BlockType.BUTTONS, buttons=buttons)
 
 
+def _clamp_table(
+    block: PresentationBlock,
+    limits: PresentationLimits,
+) -> PresentationBlock:
+    """Return a copy of a TABLE block clamped to the channel's row/column caps."""
+    columns = list(block.columns or [])
+    rows = [list(r) for r in (block.rows or [])]
+    if limits.max_table_cols and len(columns) > limits.max_table_cols:
+        columns = columns[: limits.max_table_cols]
+        rows = [r[: limits.max_table_cols] for r in rows]
+    if limits.max_table_rows and len(rows) > limits.max_table_rows:
+        rows = rows[: limits.max_table_rows]
+    return PresentationBlock(type=BlockType.TABLE, columns=columns, rows=rows)
+
+
+def table_to_markdown(columns: List[str], rows: List[List[str]]) -> str:
+    """Render a table as a deterministic GitHub-flavoured markdown table.
+
+    Cells are coerced to strings and pipes escaped so the table stays valid.
+    Short rows are padded and long rows trimmed to the header width.
+    """
+    def _cell(value: Any) -> str:
+        return str(value).replace("|", "\\|").replace("\n", " ")
+
+    header = [_cell(c) for c in columns]
+    ncols = len(header)
+    lines = ["| " + " | ".join(header) + " |"]
+    lines.append("| " + " | ".join(["---"] * ncols) + " |")
+    for row in rows:
+        cells = [_cell(c) for c in row][:ncols]
+        cells += [""] * (ncols - len(cells))
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def chart_to_text(
+    chart_kind: Optional[str],
+    series: List[Dict[str, Any]],
+    caption: Optional[str] = None,
+) -> str:
+    """Render a chart as a compact, deterministic text summary.
+
+    Produces a caption/kind header followed by one line per series listing its
+    label and points, so the data is never silently dropped on channels without
+    a native visualisation.
+    """
+    lines: List[str] = []
+    kind = chart_kind or "chart"
+    header = caption or f"{kind.capitalize()} chart"
+    lines.append(header)
+    for entry in series or []:
+        label = str(entry.get("label", "series"))
+        points = entry.get("points", []) or []
+        rendered = ", ".join(str(p) for p in points)
+        lines.append(f"{label}: {rendered}")
+    return "\n".join(lines)
+
+
+def _table_to_text_block(block: PresentationBlock) -> PresentationBlock:
+    """Degrade a TABLE block to a markdown-table TEXT block."""
+    return PresentationBlock(
+        type=BlockType.TEXT,
+        text=table_to_markdown(block.columns or [], block.rows or []),
+    )
+
+
+def _chart_to_text_block(block: PresentationBlock) -> PresentationBlock:
+    """Degrade a CHART block to a text-summary TEXT block."""
+    return PresentationBlock(
+        type=BlockType.TEXT,
+        text=chart_to_text(block.chart_kind, block.series or [], block.text),
+    )
+
+
 def adapt_presentation(
     presentation: MessagePresentation,
     limits: PresentationLimits,
+    *,
+    callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
 ) -> MessagePresentation:
     """Return a copy of ``presentation`` guaranteed to satisfy ``limits``.
 
@@ -691,6 +945,12 @@ def adapt_presentation(
     Args:
         presentation: The portable presentation to adapt.
         limits: The target channel's capability limits.
+        callback_store: Optional :class:`CallbackPayloadStoreProtocol`. When a
+            ``reply``/``select`` value overflows the channel callback byte-cap
+            and a store is supplied, the canonical value is persisted under a
+            short reference and the callback carries ``@<ref>`` so the inbound
+            registry can resolve the exact value on click. When omitted the
+            existing (lossy) hash behaviour is preserved for compatibility.
 
     Returns:
         A new ``MessagePresentation`` that is safe to render natively.
@@ -702,7 +962,7 @@ def adapt_presentation(
 
         if block_type == BlockType.SELECT.value and not limits.supports_select:
             # Degrade select -> buttons, then adapt the resulting buttons block
-            block = _select_to_buttons(block)
+            block = _select_to_buttons(block, callback_store)
             block_type = BlockType.BUTTONS.value
 
         if block_type == BlockType.BUTTONS.value and block.buttons:
@@ -725,7 +985,7 @@ def adapt_presentation(
                 kept.sort(key=lambda iv: iv[0])
                 buttons = [b for _, b in kept]
 
-            adapted_buttons = [_adapt_button(b, limits) for b in buttons]
+            adapted_buttons = [_adapt_button(b, limits, callback_store) for b in buttons]
             adapted_blocks.append(
                 PresentationBlock(type=BlockType.BUTTONS, buttons=adapted_buttons)
             )
@@ -768,6 +1028,43 @@ def adapt_presentation(
             )
             continue
 
+        if block_type == BlockType.TABLE.value:
+            clamped = _clamp_table(block, limits)
+            if limits.supports_tables:
+                adapted_blocks.append(clamped)
+            else:
+                # Degrade to a deterministic markdown table (then clamp text).
+                text_block = _table_to_text_block(clamped)
+                if (
+                    limits.max_text_length
+                    and text_block.text
+                    and len(text_block.text) > limits.max_text_length
+                ):
+                    text_block = PresentationBlock(
+                        type=BlockType.TEXT,
+                        text=text_block.text[: limits.max_text_length],
+                    )
+                adapted_blocks.append(text_block)
+            continue
+
+        if block_type == BlockType.CHART.value:
+            if limits.supports_charts:
+                adapted_blocks.append(block)
+            else:
+                # Degrade to a compact text summary (then clamp text).
+                text_block = _chart_to_text_block(block)
+                if (
+                    limits.max_text_length
+                    and text_block.text
+                    and len(text_block.text) > limits.max_text_length
+                ):
+                    text_block = PresentationBlock(
+                        type=BlockType.TEXT,
+                        text=text_block.text[: limits.max_text_length],
+                    )
+                adapted_blocks.append(text_block)
+            continue
+
         adapted_blocks.append(block)
 
     return MessagePresentation(
@@ -776,5 +1073,259 @@ def adapt_presentation(
         ephemeral=presentation.ephemeral,
         replace_message_id=presentation.replace_message_id,
     )
+
+
+# Machine-readable degradation reason codes, mirroring the ``REASON_*`` style in
+# ``admission.py``/``failure.py`` so a dropped control is recorded, not silent.
+DEGRADE_SELECT_UNSUPPORTED = "select_unsupported"
+DEGRADE_WEB_APP_UNAVAILABLE = "web_app_unavailable"
+DEGRADE_BUTTONS_TRUNCATED = "buttons_truncated"
+DEGRADE_OPTIONS_TRUNCATED = "options_truncated"
+DEGRADE_TABLE_AS_TEXT = "table_rendered_as_text"
+DEGRADE_CHART_AS_TEXT = "chart_rendered_as_text"
+DEGRADE_CALLBACK_DATA_TOO_LONG = "callback_data_too_long"
+
+
+@dataclass(frozen=True)
+class DegradedDelivery:
+    """A record of controls a channel could not render natively.
+
+    ``adapt_presentation`` already downgrades charts/tables/buttons/selects to
+    deterministic text/callbacks, but returns *no record* of what it dropped, so
+    the downgrade is silent — the user (and the model) never learns a button
+    vanished or a chart became text. This is the typed report of that
+    degradation, the presentation-path counterpart of
+    :class:`~praisonaiagents.bots.failure.FailureReply`: an adapter appends
+    :attr:`fallback_text` so the loss is *visible*, and records
+    :attr:`reasons` so it is *machine-readable*.
+
+    Attributes:
+        dropped: Human-readable descriptions of each degraded/dropped control
+            (e.g. ``"1 button rendered as text"``).
+        reasons: Machine-readable reason codes (the ``DEGRADE_*`` constants),
+            aligned by intent with ``dropped``.
+        fallback_text: A short, user-facing note the adapter can append so the
+            degradation is never silent (e.g. ``"(Delivered 1 button as text -
+            Telegram callback data exceeded 64 bytes.)"``). Empty when nothing
+            degraded.
+    """
+
+    dropped: Tuple[str, ...]
+    reasons: Tuple[str, ...]
+    fallback_text: str
+
+
+def _callback_is_lossy(value: Optional[str]) -> bool:
+    """True when an *adapted* callback value carries the lossy hash marker.
+
+    :func:`_encode_reply_callback` / :func:`_encode_select_callback` emit a
+    ``#<digest>`` payload only when the original value overflowed the channel
+    byte-cap *and* no store was available to preserve it losslessly. Detecting
+    that marker on the already-adapted value is the single source of truth for
+    "callback data too long" — so the report never disagrees with the
+    adaptation (e.g. no false positive when a store round-trips the value, and
+    no miss for a degraded select option).
+    """
+    if not value:
+        return False
+    if value.startswith(f"{REPLY_CALLBACK_PREFIX}{REPLY_HASH_MARKER}"):
+        return True
+    # Degraded select options: ``select:...:`` with no ``@<ref>`` store marker
+    # means the value was hashed (lossy). A stored ref carries CALLBACK_REF_MARKER.
+    if value.startswith("select:"):
+        tail = value.rsplit(":", 1)[-1]
+        return not tail.startswith(CALLBACK_REF_MARKER)
+    return False
+
+
+def _presentation_degradation(
+    presentation: MessagePresentation,
+    limits: PresentationLimits,
+    callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> Optional[DegradedDelivery]:
+    """Compute the :class:`DegradedDelivery` report for adapting to ``limits``.
+
+    Derives the report from the *same* conversion and selection decisions as
+    :func:`adapt_presentation` (select->buttons, priority/cap button truncation,
+    web_app->url, option truncation, table/chart->text) — inspecting only the
+    controls actually retained and reporting callback shortening only when the
+    adapter genuinely produced a lossy payload. Returns ``None`` when nothing
+    degrades.
+    """
+    dropped: List[str] = []
+    reasons: List[str] = []
+
+    for block in presentation.blocks:
+        block_type = block.type.value if isinstance(block.type, BlockType) else block.type
+
+        if block_type == BlockType.SELECT.value and not limits.supports_select:
+            # Follow the adapter: select -> buttons (encoding option callbacks
+            # exactly as adapt_presentation does), then treat as a buttons block.
+            n = len(block.options or [])
+            dropped.append(f"select menu ({n} options) rendered as buttons")
+            reasons.append(DEGRADE_SELECT_UNSUPPORTED)
+            block = _select_to_buttons(block, callback_store)
+            block_type = BlockType.BUTTONS.value
+
+        if block_type == BlockType.BUTTONS.value and block.buttons:
+            buttons = list(block.buttons)
+            rows = limits.max_button_rows if limits.max_button_rows else 1
+            total_cap = limits.max_buttons * rows if limits.max_buttons else len(buttons)
+            if total_cap <= 0:
+                total_cap = len(buttons)
+            if len(buttons) > total_cap:
+                n = len(buttons) - total_cap
+                dropped.append(f"{n} button(s) dropped (over channel cap)")
+                reasons.append(DEGRADE_BUTTONS_TRUNCATED)
+                # Only the *retained* buttons are actually rendered; mirror the
+                # priority-aware selection so we don't report a dropped
+                # button's web_app/callback degradation.
+                indexed = list(enumerate(buttons))
+                kept = sorted(
+                    indexed, key=lambda iv: (iv[1].priority, -iv[0]), reverse=True
+                )[:total_cap]
+                kept.sort(key=lambda iv: iv[0])
+                buttons = [b for _, b in kept]
+
+            for btn in buttons:
+                if btn.action is None:
+                    continue
+                # Compare against the adapter's actual output for this button.
+                adapted_btn = _adapt_button(btn, limits, callback_store)
+                a_type = (
+                    btn.action.type.value
+                    if isinstance(btn.action.type, ActionType)
+                    else btn.action.type
+                )
+                if (
+                    not limits.supports_web_apps
+                    and a_type == ActionType.WEB_APP.value
+                    and btn.action.web_app_url
+                ):
+                    dropped.append("web-app button rendered as URL")
+                    reasons.append(DEGRADE_WEB_APP_UNAVAILABLE)
+                elif adapted_btn.action is not None and _callback_is_lossy(
+                    adapted_btn.action.value
+                ):
+                    dropped.append("button callback shortened (data exceeded byte cap)")
+                    reasons.append(DEGRADE_CALLBACK_DATA_TOO_LONG)
+
+        elif block_type == BlockType.SELECT.value and block.options:
+            if limits.max_options and len(block.options) > limits.max_options:
+                n = len(block.options) - limits.max_options
+                dropped.append(f"{n} select option(s) dropped (over channel cap)")
+                reasons.append(DEGRADE_OPTIONS_TRUNCATED)
+
+        elif block_type == BlockType.TABLE.value and not limits.supports_tables:
+            dropped.append("table rendered as text")
+            reasons.append(DEGRADE_TABLE_AS_TEXT)
+
+        elif block_type == BlockType.CHART.value and not limits.supports_charts:
+            dropped.append("chart rendered as text")
+            reasons.append(DEGRADE_CHART_AS_TEXT)
+
+    if not dropped:
+        return None
+
+    fallback_text = "(" + "; ".join(dropped) + ".)"
+    return DegradedDelivery(
+        dropped=tuple(dropped),
+        reasons=tuple(reasons),
+        fallback_text=fallback_text,
+    )
+
+
+def adapt_presentation_with_report(
+    presentation: MessagePresentation,
+    limits: PresentationLimits,
+    *,
+    callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> "tuple[MessagePresentation, Optional[DegradedDelivery]]":
+    """Adapt a presentation *and* report what degraded.
+
+    Identical to :func:`adapt_presentation` for the returned presentation, but
+    additionally returns a typed :class:`DegradedDelivery` (or ``None``) so the
+    adapter can append a readable text fallback and record machine-readable
+    reasons instead of downgrading silently. ``adapt_presentation`` is retained
+    unchanged for callers that do not need the report.
+
+    Returns:
+        ``(adapted_presentation, degraded_or_none)``.
+    """
+    adapted = adapt_presentation(presentation, limits, callback_store=callback_store)
+    report = _presentation_degradation(presentation, limits, callback_store)
+    return adapted, report
+
+
+# The renderer contract lives in ``protocols.py`` (alongside the other bot
+# extension-point protocols). Re-exported here for backward-compatible imports
+# (``from praisonaiagents.bots.presentation import PresentationRendererProtocol``).
+from .protocols import PresentationRendererProtocol  # noqa: E402,F401
+
+
+# Registry keyed by a normalized (lowercased, stripped) platform id. Both
+# built-in (registered by the wrapper at import time) and plugin renderers
+# register here identically, so no channel is second-class for interactive UX.
+# Consumers resolve with ``get_presentation_renderer`` and fall back to plain
+# text only when genuinely no renderer exists for a platform.
+_PRESENTATION_RENDERERS: Dict[str, type] = {}
+
+
+def _normalize_platform(platform: str) -> str:
+    """Normalize a platform id the same way the channel registry does.
+
+    Channel identifiers are matched case-insensitively elsewhere, so a
+    mixed-case plugin id (``"Matrix"``) must resolve to the same renderer slot
+    as ``"matrix"``. Without this, a channel could register/resolve as a channel
+    but silently miss its renderer and degrade to plain text.
+    """
+    return platform.strip().lower()
+
+
+def register_presentation_renderer(platform: str, renderer: type) -> None:
+    """Register *renderer* as the presentation renderer for *platform*.
+
+    Any channel — built-in or a pip-installed plugin — calls this (e.g. from its
+    ``setup`` hook or entry point) so its interactive presentations render
+    natively instead of degrading to plain text. Re-registering a platform
+    overrides the previous renderer, letting a plugin intentionally supersede a
+    built-in.
+
+    Args:
+        platform: The channel/platform id (e.g. ``"telegram"``, ``"matrix"``);
+            matched case-insensitively.
+        renderer: A class satisfying :class:`PresentationRendererProtocol`
+            (exposing ``get_limits`` and ``render``).
+
+    Raises:
+        ValueError: If *platform* is empty/blank.
+        TypeError: If *renderer* does not expose callable ``get_limits`` and
+            ``render`` — so a misconfigured renderer fails loudly at
+            registration rather than later inside :func:`render_for`.
+    """
+    key = _normalize_platform(platform) if isinstance(platform, str) else ""
+    if not key:
+        raise ValueError(
+            "register_presentation_renderer: platform id must be a non-empty "
+            "string (e.g. 'telegram', 'matrix')."
+        )
+    if not (callable(getattr(renderer, "get_limits", None))
+            and callable(getattr(renderer, "render", None))):
+        raise TypeError(
+            "register_presentation_renderer: renderer for "
+            f"'{platform}' must satisfy PresentationRendererProtocol — expose "
+            "static/callable 'get_limits()' and 'render(presentation)'."
+        )
+    _PRESENTATION_RENDERERS[key] = renderer
+
+
+def get_presentation_renderer(platform: str) -> Optional[type]:
+    """Return the registered renderer class for *platform*, or ``None``.
+
+    Lookup is case-insensitive to mirror registration.
+    """
+    if not isinstance(platform, str):
+        return None
+    return _PRESENTATION_RENDERERS.get(_normalize_platform(platform))
 
 

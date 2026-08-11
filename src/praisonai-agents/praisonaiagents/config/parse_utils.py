@@ -50,42 +50,6 @@ def detect_url_scheme(value: str) -> Optional[str]:
     return None
 
 
-def parse_url_to_config(
-    url: str,
-    config_class: type,
-    url_schemes: Dict[str, str],
-) -> Any:
-    """
-    Parse a URL string into a config object.
-    
-    Args:
-        url: URL string (e.g., "postgresql://localhost/db")
-        config_class: Config dataclass to instantiate
-        url_schemes: Mapping of URL schemes to backend names
-        
-    Returns:
-        Config instance with backend and url set
-        
-    Raises:
-        ValueError: If URL scheme is not supported
-    """
-    scheme = detect_url_scheme(url)
-    if not scheme:
-        raise ValueError(f"Invalid URL format: {url}")
-    
-    if scheme not in url_schemes:
-        valid_schemes = ", ".join(sorted(url_schemes.keys()))
-        raise ValueError(
-            f"Unsupported URL scheme '{scheme}' in '{url}'. "
-            f"Supported schemes: {valid_schemes}"
-        )
-    
-    backend = url_schemes[scheme]
-    
-    # Create config with backend and URL in config dict
-    return config_class(backend=backend, config={"url": url})
-
-
 def is_path_like(value: str) -> bool:
     """
     Check if a string looks like a file path. O(1) operation.
@@ -134,21 +98,6 @@ def is_path_like(value: str) -> bool:
             return True
     
     return False
-
-
-def is_numeric_string(value: str) -> bool:
-    """
-    Check if a string is numeric. O(1) operation.
-    
-    Args:
-        value: String to check
-        
-    Returns:
-        True if string is numeric
-    """
-    if not isinstance(value, str):
-        return False
-    return value.isdigit()
 
 
 def suggest_similar(value: str, candidates: Iterable[str], max_distance: int = 2) -> Optional[str]:
@@ -244,28 +193,6 @@ def make_preset_error(
         msg_parts.append(f"Or use a URL: {schemes}")
     
     return ValueError(" ".join(msg_parts))
-
-
-def make_array_error(
-    param_name: str,
-    value: list,
-    expected_format: str,
-) -> ValueError:
-    """
-    Create a helpful error message for invalid array format.
-    
-    Args:
-        param_name: Name of the parameter
-        value: Invalid array value
-        expected_format: Description of expected format
-        
-    Returns:
-        ValueError with helpful message
-    """
-    return ValueError(
-        f"Invalid {param_name} array format: {value}. "
-        f"Expected: {expected_format}"
-    )
 
 
 def is_policy_string(value: str) -> bool:

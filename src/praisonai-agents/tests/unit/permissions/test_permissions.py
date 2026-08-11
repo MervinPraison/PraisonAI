@@ -47,6 +47,100 @@ class TestPermissionMode:
         # PLAN - Read-only exploration
         assert PermissionMode.PLAN.value == "plan"
 
+    def test_resolve_canonical_and_aliases(self):
+        """resolve() maps canonical names and historical aliases to one enum."""
+        from praisonaiagents.permissions.rules import PermissionMode as PM
+
+        # Canonical names.
+        assert PM.resolve("plan") is PM.PLAN
+        assert PM.resolve("bypass_permissions") is PM.BYPASS
+        assert PM.resolve("accept_edits") is PM.ACCEPT_EDITS
+        assert PM.resolve("dont_ask") is PM.DONT_ASK
+        assert PM.resolve("default") is PM.DEFAULT
+
+        # AutonomyMode / ApprovalMode / CLI-flag aliases collapse onto the same
+        # canonical presets (the whole point of the unification).
+        assert PM.resolve("suggest") is PM.DEFAULT  # AutonomyMode.SUGGEST
+        assert PM.resolve("prompt") is PM.DEFAULT   # ApprovalMode.PROMPT
+        assert PM.resolve("auto_edit") is PM.ACCEPT_EDITS  # AutonomyMode.AUTO_EDIT
+        assert PM.resolve("full_auto") is PM.BYPASS  # AutonomyMode.FULL_AUTO
+        assert PM.resolve("reject") is PM.DONT_ASK   # ApprovalMode.REJECT
+        assert PM.resolve("yolo") is PM.BYPASS
+        assert PM.resolve("bypass") is PM.BYPASS
+
+        # Case / dash-underscore insensitive.
+        assert PM.resolve("Accept-Edits") is PM.ACCEPT_EDITS
+        assert PM.resolve(PM.PLAN) is PM.PLAN
+
+        # Deny-set presets and unknowns are not modes → None (caller falls back).
+        assert PM.resolve("safe") is None
+        assert PM.resolve("read_only") is None
+        assert PM.resolve("full") is None
+        assert PM.resolve("nonsense") is None
+        assert PM.resolve(None) is None
+
+
+class TestAgentApprovalPresetResolution:
+    """Agent(approval=<preset>) routes onto the single PermissionMode model."""
+
+    def test_mode_presets_set_permission_mode(self):
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions.rules import PermissionMode as PM
+
+        assert Agent(name="a", approval="plan")._permission_mode is PM.PLAN
+        assert Agent(name="a", approval="bypass")._permission_mode is PM.BYPASS
+        assert Agent(name="a", approval="accept_edits")._permission_mode is PM.ACCEPT_EDITS
+        assert Agent(name="a", approval="dont_ask")._permission_mode is PM.DONT_ASK
+
+    def test_aliases_resolve_identically(self):
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions.rules import PermissionMode as PM
+
+        # "plan", "suggest" and "reject" spellings all reach a canonical mode.
+        assert Agent(name="a", approval="full_auto")._permission_mode is PM.BYPASS
+        assert Agent(name="a", approval="auto_edit")._permission_mode is PM.ACCEPT_EDITS
+
+    def test_deny_set_presets_unchanged(self):
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.registry import PERMISSION_PRESETS
+
+        # Existing deny-set presets keep their exact behaviour and set no mode.
+        safe = Agent(name="a", approval="safe")
+        assert safe._permission_mode is None
+        assert safe._perm_deny == PERMISSION_PRESETS["safe"]
+
+        full = Agent(name="a", approval="full")
+        assert full._permission_mode is None
+        assert full._perm_deny == PERMISSION_PRESETS["full"]
+
+
+class TestAcceptEditsModeDecision:
+    """PermissionMode.ACCEPT_EDITS auto-approves edit tools, defers the rest."""
+
+    def test_accept_edits_auto_approves_edit_tools(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="a", approval="accept_edits")
+        for tool in ("write_file", "edit_file", "create_file", "apply_patch"):
+            decision = agent._resolve_permission_mode_decision(tool)
+            assert decision is not None
+            assert decision.approved is True
+
+    def test_accept_edits_defers_non_edit_tools(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="a", approval="accept_edits")
+        # Non-edit tools defer to the normal approval flow (return None).
+        for tool in ("read_file", "execute_command", "delete_file", "list_dir"):
+            assert agent._resolve_permission_mode_decision(tool) is None
+
+    def test_auto_edit_alias_behaves_like_accept_edits(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="a", approval="auto_edit")
+        decision = agent._resolve_permission_mode_decision("write_file")
+        assert decision is not None and decision.approved is True
+
 
 class TestPermissionRule:
     """Tests for PermissionRule."""
@@ -213,6 +307,10 @@ class TestPersistentApproval:
         
         assert approval.matches("anything", agent_name="agent_1") is True
         assert approval.matches("anything", agent_name="agent_2") is False
+        # Regression: an agent-scoped approval must NOT match an unnamed caller
+        # (agent_name=None), otherwise a scoped grant leaks to anonymous callers.
+        assert approval.matches("anything", agent_name=None) is False
+        assert approval.matches("anything") is False
 
 
 class TestDoomLoopDetector:

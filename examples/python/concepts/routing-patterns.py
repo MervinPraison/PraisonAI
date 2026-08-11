@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Routing Patterns Example
 

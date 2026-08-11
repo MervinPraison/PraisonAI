@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Agent with Tools Performance Monitoring - Example 3
 

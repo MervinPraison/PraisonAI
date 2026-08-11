@@ -11,9 +11,14 @@ The ``praisonai`` wrapper provides backward-compatible shims.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    contextmanager,
+)
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -27,6 +32,7 @@ from typing import (
     Literal,
     Optional,
     Protocol,
+    Sequence,
     Set,
     Tuple,
     TypedDict,
@@ -39,6 +45,7 @@ GATEWAY_PROTOCOL_VERSION = 1
 MIN_CLIENT_PROTOCOL_VERSION = 1
 
 if TYPE_CHECKING:
+    import asyncio
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
@@ -187,6 +194,9 @@ class EventType(str, Enum):
     # Streaming events (relayed from agent's StreamEventEmitter)
     TOKEN_STREAM = "token_stream"
     TOOL_CALL_STREAM = "tool_call_stream"
+    REASONING_STREAM = "reasoning_stream"
+    TOOL_PROGRESS_STREAM = "tool_progress_stream"
+    STREAM_ERROR = "stream_error"
     STREAM_END = "stream_end"
     
     # System events
@@ -1685,6 +1695,12 @@ class RouteBinding:
             ``standard`` / ``trusted`` apply no tier deny-list.
         allow_tools: If set, only these tool names are exposed on this route.
         deny_tools: Tool names removed before the run on this route.
+        profile: Optional isolated tenant-profile name (Issue #3189). Names a
+            per-route isolation scope the wrapper enters for the turn (e.g. its
+            own memory namespace / secret scope / home), so one gateway can
+            safely multiplex tenants. ``None`` means the route is unscoped; the
+            wrapper must fail closed (never fall back to another tenant's
+            profile) rather than silently share memory/secrets.
     """
 
     agent: str
@@ -1697,6 +1713,7 @@ class RouteBinding:
     trust: Optional[str] = None
     allow_tools: Optional[List[str]] = None
     deny_tools: Optional[List[str]] = None
+    profile: Optional[str] = None
 
     # Specificity weights — exact peer beats role/channel beats account
     # beats chat-type. Higher means more specific.
@@ -1709,13 +1726,21 @@ class RouteBinding:
     }
 
     def __post_init__(self) -> None:
-        """Normalise ``trust`` so config typos cannot silently fail open.
+        """Normalise ``trust``/``profile`` so config typos cannot fail open.
 
         Whitespace/case variants of a known tier (e.g. ``" Untrusted "``) are
         canonicalised. Any *unknown* non-empty value is treated as the most
         restrictive tier (``untrusted``) rather than as "no policy", so a
         misconfigured route can never accidentally expose the full toolset.
+        A blank ``profile`` is coerced to ``None`` (unscoped) for the same
+        fail-closed reason.
         """
+        # Blank/whitespace-only profile means "unscoped" (None), never an
+        # empty-named scope, so a wrapper checking ``if profile is not None``
+        # fails closed rather than entering an anonymous namespace.
+        if self.profile is not None and not str(self.profile).strip():
+            self.profile = None
+
         if self.trust is None:
             return
         normalized = str(self.trust).strip().lower()
@@ -1792,6 +1817,7 @@ class RouteBinding:
             trust=_as_opt_str(data.get("trust")),
             allow_tools=_as_opt_str_list(data.get("allow_tools")),
             deny_tools=_as_opt_str_list(data.get("deny_tools")),
+            profile=_as_opt_str(data.get("profile")),
         )
 
 
@@ -1822,11 +1848,18 @@ class RouteMatch:
         agent: The resolved agent id.
         binding: The binding that matched, or ``None`` when the fallback was used.
         reason: Short human-readable explanation for logging/debugging.
+        profile: The isolated tenant-profile named by the matched binding, or
+            ``None`` when the route is unscoped / the fallback was used (Issue
+            #3189). Surfaced here so the wrapper can enter the profile's memory
+            namespace / secret scope for the turn without re-resolving, and so
+            an unmatched route fails closed (never inherits another tenant's
+            profile).
     """
 
     agent: str
     binding: Optional[RouteBinding] = None
     reason: str = ""
+    profile: Optional[str] = None
 
 
 def _as_opt_str(value: Any) -> Optional[str]:
@@ -1892,6 +1925,7 @@ def resolve_route(
                 f"matched binding (priority={best.priority}, "
                 f"specificity={best.specificity})"
             ),
+            profile=best.profile,
         )
 
     return RouteMatch(
@@ -1972,6 +2006,71 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
         return configured
     
     return "local" if is_loopback(bind_host) else "token"
+
+
+# ---------------------------------------------------------------------------
+# Weak / placeholder secret guard (Issue #3259)
+# ---------------------------------------------------------------------------
+
+KNOWN_WEAK_SECRETS: frozenset = frozenset({
+    "change-me", "changeme", "change-me-now", "changemenow",
+    "your-token-here", "your_token_here", "your-secret-here",
+    "secret", "password", "passwd", "test", "token", "admin",
+    "default", "example", "placeholder", "none", "null", "todo",
+    # Copy-paste footgun: the literal fix-hint command pasted verbatim.
+    "$(openssl rand -hex 16)", "$(openssl rand -hex 32)",
+})
+"""Well-known placeholder/weak shared secrets that must never protect a gateway.
+
+A gateway bound to an external interface and "protected" by one of these
+publicly-known values is effectively unauthenticated. See Issue #3259.
+"""
+
+
+class WeakGatewaySecretError(Exception):
+    """Raised when a gateway secret matches a known-weak/placeholder value."""
+
+    def __init__(self, field: str = "gateway.auth_token"):
+        self.field = field
+        super().__init__(
+            f"Refusing to start: {field} is a known-weak/placeholder value.\n"
+            f"A publicly-known secret provides no real authentication.\n"
+            f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
+            f"Or:   export GATEWAY_AUTH_TOKEN=\"$(openssl rand -hex 16)\"  "
+            f"(run in a shell so the command is expanded, not pasted literally)"
+        )
+
+
+def is_weak_secret(value: Optional[str]) -> bool:
+    """Return True if ``value`` is empty or a known-weak/placeholder secret.
+
+    Comparison is whitespace-stripped and case-insensitive.
+
+    Examples:
+        >>> is_weak_secret("change-me")
+        True
+        >>> is_weak_secret("$(openssl rand -hex 16)")
+        True
+        >>> is_weak_secret("strong-non-placeholder-token")
+        False
+    """
+    if not value:
+        return True
+    return str(value).strip().lower() in KNOWN_WEAK_SECRETS
+
+
+def assert_gateway_secret_strong(value: Optional[str], *, field: str = "gateway.auth_token") -> None:
+    """Fail closed if ``value`` is a known-weak/placeholder gateway secret.
+
+    Args:
+        value: The resolved secret to validate.
+        field: Name of the credential (used in the error message).
+
+    Raises:
+        WeakGatewaySecretError: If ``value`` matches a known-weak value.
+    """
+    if is_weak_secret(value):
+        raise WeakGatewaySecretError(field=field)
 
 
 # ---------------------------------------------------------------------------
@@ -2166,6 +2265,51 @@ class HomeChannelRegistryProtocol(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class DeliveryValidation:
+    """Result of a creation-time delivery-target pre-flight (Issue #3800).
+
+    A scheduled job or agent-initiated proactive message carries a
+    ``DeliveryTarget`` whose reachability is otherwise only discovered when the
+    job *fires* — potentially hours later, where an unroutable target is
+    silently dropped or dead-target self-healed. This closed shape lets a
+    resolver answer "will this route?" the moment the send is created, so the
+    creator gets an immediate, actionable error instead of a late invisible
+    drop.
+
+    Attributes:
+        ok: Whether the target resolves to a reachable channel/route.
+        reason: On failure, a human-readable explanation of why it is
+            unroutable (empty when ``ok``).
+        hint: On failure, an actionable next step (e.g. the configured
+            channels, or a command to list them); empty when ``ok``.
+        preview: A dry-run preview of the destination (e.g.
+            ``"telegram:@alice (session main)"``) suitable for surfacing to the
+            creator before commit.
+    """
+
+    ok: bool
+    reason: str = ""
+    hint: str = ""
+    preview: str = ""
+
+
+class ScheduleTargetError(ValueError):
+    """Raised when a scheduled/agent-initiated send has an unroutable target.
+
+    Carries the structured :class:`DeliveryValidation` reason/hint so the
+    scheduler/CLI can fail fast at *creation* time with an actionable message
+    (``channel 'telegramm' is not configured. Configured: telegram, slack.``)
+    rather than accepting a target that is only discovered dead at fire time.
+    """
+
+    def __init__(self, reason: str, hint: str = ""):
+        self.reason = reason
+        self.hint = hint
+        message = f"{reason} {hint}".strip() if hint else reason
+        super().__init__(message)
+
+
 @runtime_checkable
 class DeliveryResolverProtocol(Protocol):
     """Protocol for resolving delivery routing tokens.
@@ -2194,6 +2338,46 @@ class DeliveryResolverProtocol(Protocol):
             
         Returns:
             List of concrete delivery targets
+        """
+        ...
+
+
+@runtime_checkable
+class DeliveryPreflightProtocol(Protocol):
+    """Optional creation-time pre-flight extension for delivery resolvers.
+
+    Kept separate from :class:`DeliveryResolverProtocol` so the base contract
+    stays ``resolve()``-only: an existing resolver that implements just
+    ``resolve`` still satisfies ``DeliveryResolverProtocol`` under
+    ``isinstance``/``runtime_checkable``. A resolver that can additionally
+    pre-flight or preview a target against its live registry advertises that by
+    also satisfying this protocol; callers duck-type on it and fall back to a
+    structural, registry-free check (:meth:`DeliveryTarget.preview`) otherwise.
+    """
+
+    def validate_target(
+        self, target: "DeliveryTarget"
+    ) -> "DeliveryValidation":
+        """Pre-flight ``target`` against the live channel/route registry.
+
+        Called at *creation* time (when a scheduled/agent-initiated send is
+        registered) so an unroutable target is rejected or warned on with an
+        actionable message, instead of being silently dropped when the job
+        fires.
+
+        Returns:
+            A :class:`DeliveryValidation` (``ok`` / ``reason`` / ``hint`` /
+            ``preview``).
+        """
+        ...
+
+    def preview_target(
+        self, target: "DeliveryTarget"
+    ) -> str:
+        """Return a dry-run preview of where ``target`` will deliver.
+
+        A short, display-only string (e.g. ``"telegram:@alice (session
+        main)"``) so the creator sees the destination before commit.
         """
         ...
 
@@ -2295,6 +2479,192 @@ class OutboundMessengerProtocol(Protocol):
 
     def list_targets(self) -> List["TargetInfo"]:
         """List the targets currently reachable from this runtime."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Agent-callable cross-conversation request/reply (Issue #3689)
+#
+# ``send_message`` is fire-and-deliver: it returns a delivery receipt, not the
+# target's answer. This adds the missing *ask another conversation and await
+# the reply* capability — an agent can route a question to a symbolic target
+# and get the next correlated inbound reply back into its own turn, bounded by
+# a timeout. It reuses ``send_message``'s target resolution and the outbound
+# send-policy guard; the only new surface is a one-shot reply correlation.
+#
+# Core owns only the *shape*: the typed outcome (:class:`ConversationReply`),
+# the protocol seam (:class:`ConversationRequestProtocol`), the context-var
+# registration slot (in ``session.context``), and the built-in
+# ``ask_conversation`` tool. The correlation-aware reply source is bound by the
+# running gateway/bot exactly as ``register_outbound_messenger`` binds the
+# outbound side — no heavy import lives in core. Every path ends in a recorded
+# outcome (reply | timeout | undelivered | no_route) — never a silent hang.
+# ---------------------------------------------------------------------------
+
+ConversationReplyStatus = Literal["reply", "timeout", "undelivered", "no_route"]
+"""Closed set of outcomes for an :func:`ask_conversation` request.
+
+* ``reply`` — the target replied within the timeout; ``text`` carries it.
+* ``timeout`` — the prompt was delivered but no reply arrived in time.
+* ``undelivered`` — the prompt could not be delivered to the target.
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class ConversationReply:
+    """Outcome of an agent-initiated cross-conversation request (Issue #3689).
+
+    Every request resolves to exactly one of the :data:`ConversationReplyStatus`
+    outcomes, so the agent always gets a typed answer back into its turn rather
+    than a silent hang.
+
+    Attributes:
+        status: The outcome (``reply`` / ``timeout`` / ``undelivered`` /
+            ``no_route``).
+        target: The resolved target the prompt was routed to.
+        text: The reply text, populated only when ``status == "reply"``.
+        detail: Optional extra information (error text, message id, etc.).
+    """
+
+    status: ConversationReplyStatus
+    target: str = ""
+    text: str = ""
+    detail: Optional[str] = None
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["from"] = self.target
+        if self.status == "reply":
+            data["text"] = self.text
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
+@runtime_checkable
+class ConversationRequestProtocol(Protocol):
+    """Protocol for agent-facing cross-conversation request/reply.
+
+    A concrete implementation is provided by the running gateway/bot (in the
+    praisonai wrapper) and registered into the per-turn context so the built-in
+    ``ask_conversation`` tool can resolve it. It sends the prompt via the same
+    delivery stack ``send_message`` uses, then correlates the *next inbound
+    reply* from that target (via the existing ``correlation_id``) with a bounded
+    timeout, returning a typed :class:`ConversationReply`.
+
+    Example usage (implementation in praisonai_bot.gateway)::
+
+        requester = BotConversationRequester(router, origin=origin)
+        token = register_conversation_requester(requester)
+        try:
+            ...  # agent runs; ask_conversation tool resolves the requester
+        finally:
+            clear_conversation_requester(token)
+    """
+
+    async def ask(
+        self,
+        target: str,
+        text: str,
+        *,
+        timeout_s: float = 120.0,
+    ) -> "ConversationReply":
+        """Send ``text`` to ``target`` and await the next correlated reply.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            text: The prompt to send.
+            timeout_s: Maximum seconds to wait for a reply before returning a
+                ``timeout`` outcome.
+
+        Returns:
+            A :class:`ConversationReply` describing the outcome.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Agent-callable live status/health (Issue #3688)
+#
+# The gateway already computes rich live state (per-turn run status, active
+# sessions, delivery/DLQ backlog, degraded owners) but only humans/CLI/HTTP can
+# read it. This read-only protocol lets the running gateway bind a live source
+# into the per-turn context so the built-in ``gateway_status`` tool can report
+# it — mirroring how ``OutboundMessengerProtocol`` backs ``send_message``. Core
+# ships only the protocol + snapshot shape; the concrete binding (reading
+# ``health()`` / ``metrics_snapshot()`` / the session registry) lives in the
+# praisonai-bot wrapper. It is strictly read-only, redaction-aware and
+# visibility-scoped (no secrets, no cross-tenant leakage).
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GatewayStatus:
+    """Read-only snapshot of the gateway's live self-state (Issue #3688).
+
+    A neutral, serializable shape the agent can reason about and report. All
+    fields default to empty so a partial/minimal binding is valid and the tool
+    never dead-ends. The concrete binding populates only the visibility-scoped
+    facts it can safely expose.
+
+    Attributes:
+        run: Current turn/run status (e.g. "idle", "busy", "queued").
+        queued: Number of turns queued behind the current one.
+        active_sessions: Count of active sessions (visibility-scoped).
+        sessions_by_channel: Active-session counts keyed by channel/platform.
+        delivery: Delivery-health facts (e.g. outbox_depth, dlq, dead_targets).
+        degraded: Degraded owners as ``{"owner": ..., "reason": ...}`` entries
+            (channels/capabilities/routes flagged configured-unavailable).
+        detail: Optional free-form extra context for the model.
+    """
+
+    run: str = "idle"
+    queued: int = 0
+    active_sessions: int = 0
+    sessions_by_channel: Dict[str, int] = field(default_factory=dict)
+    delivery: Dict[str, Any] = field(default_factory=dict)
+    degraded: List[Dict[str, Any]] = field(default_factory=list)
+    detail: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {
+            "run": self.run,
+            "queued": self.queued,
+            "active_sessions": self.active_sessions,
+            "sessions_by_channel": dict(self.sessions_by_channel),
+            "delivery": dict(self.delivery),
+            "degraded": list(self.degraded),
+            "detail": self.detail,
+        }
+
+
+@runtime_checkable
+class GatewayStatusProtocol(Protocol):
+    """Protocol for agent-facing, read-only live status/health reporting.
+
+    A concrete implementation is provided by the running gateway/bot (in the
+    praisonai wrapper) and registered into the per-turn context so the built-in
+    ``gateway_status`` tool can resolve it. It reads the same live objects the
+    HTTP endpoints already serve (``health()`` / ``metrics_snapshot()`` / the
+    session registry) and returns a redaction-aware, visibility-scoped
+    :class:`GatewayStatus`.
+
+    Example usage (implementation in praisonai_bot.gateway)::
+
+        status = BotGatewayStatus(gateway)
+        token = register_gateway_status(status)
+        try:
+            ...  # agent runs; gateway_status tool resolves the source
+        finally:
+            clear_gateway_status(token)
+    """
+
+    def snapshot(self) -> "GatewayStatus":
+        """Return a read-only snapshot of the gateway's live self-state."""
         ...
 
 
@@ -2840,6 +3210,265 @@ GatewayConcurrencyPolicy = GatewayConcurrencyPolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Gateway resource-pressure admission (Issue #3445)
+#
+# Admission today is concurrency/CPU-scaled and blind to memory; on a small
+# always-on host a burst of concurrent turns drives RSS up until the OOM
+# killer fires — the failure a $5 box hits first. This adds a pure, import-
+# free decision that maps a resource *sample* (current RSS) onto the existing
+# :class:`AdmissionDecision` so the gate can queue under soft pressure and
+# shed under hard pressure *before* the process is killed. It reuses the
+# admission seam (no new subsystem) and sits beside the concurrency / rate-
+# limit / scale-to-zero policy family. The live sampler (reading
+# ``resource.getrusage`` / optional ``psutil``) and the wiring into the gate
+# live in the wrapper; this contract keeps the decision testable in isolation.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResourceSample:
+    """A point-in-time snapshot of the gateway process's resource usage.
+
+    Attributes:
+        rss_mb: Resident set size in mebibytes, or ``None`` when the platform
+            cannot report it (the policy then admits and self-disables so the
+            monitor never crashes the gateway it protects).
+    """
+
+    rss_mb: Optional[float] = None
+
+
+@runtime_checkable
+class ResourcePressurePolicyProtocol(Protocol):
+    """Protocol for memory/resource-aware admission decisions.
+
+    Pure, import-free decision contract consumed by the wrapper's admission
+    gate. The wrapper samples its own resource usage on a lightweight cadence
+    and hands the policy a :class:`ResourceSample`; the policy returns an
+    :class:`AdmissionDecision` — ``ADMIT`` below the soft threshold, ``QUEUE``
+    to apply backpressure above it, and ``REJECT`` above the hard threshold so
+    the process sheds load before the OOM killer fires. Sampling and
+    enforcement (the ``asyncio.Semaphore`` ceiling and bounded wait queue)
+    live in the wrapper; this keeps the *decision* provable in isolation,
+    symmetric with :class:`GatewayConcurrencyPolicyProtocol`.
+
+    A config-driven default (:class:`MemoryPressurePolicy`) is provided for
+    the common "soft/hard RSS threshold" case.
+    """
+
+    def evaluate(self, sample: ResourceSample) -> AdmissionDecision:
+        """Return an :class:`AdmissionDecision` for the supplied sample."""
+        ...
+
+
+class MemoryPressurePolicy:
+    """Config-driven RSS-threshold resource-pressure policy.
+
+    The default wired by the ``max_rss_mb`` gateway config key
+    (``BotOS(max_rss_mb=...)`` / ``gateway.yaml``) and the
+    ``AdmissionGate(resource_policy=...)`` Python surface. It is intentionally
+    minimal and dependency-free so the decision lives in core and is provable
+    in isolation; the wrapper owns the live sampler and the side effects
+    (queue / shed / busy ack).
+
+    The decision, given a sample's ``rss_mb``:
+
+    * ``ADMIT`` while ``rss_mb < soft_rss_mb`` (or the platform can't report
+      memory, so ``rss_mb is None`` — never block on a missing signal).
+    * ``QUEUE`` (apply backpressure) while ``soft_rss_mb <= rss_mb <
+      hard_rss_mb``.
+    * ``REJECT`` (shed with a busy ack) while ``rss_mb >= hard_rss_mb``.
+
+    A ``hard_rss_mb`` of ``0`` disables pressure-based shedding entirely
+    (every sample admits) — the legacy default when no threshold is set.
+
+    Example::
+
+        MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    """
+
+    def __init__(
+        self,
+        soft_rss_mb: float = 0.0,
+        hard_rss_mb: float = 0.0,
+    ):
+        try:
+            soft = float(soft_rss_mb or 0.0)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"soft_rss_mb must be a number, got {soft_rss_mb!r}"
+            ) from err
+        try:
+            hard = float(hard_rss_mb or 0.0)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"hard_rss_mb must be a number, got {hard_rss_mb!r}"
+            ) from err
+        if soft < 0:
+            raise ValueError(f"soft_rss_mb must be >= 0, got {soft_rss_mb!r}")
+        if hard < 0:
+            raise ValueError(f"hard_rss_mb must be >= 0, got {hard_rss_mb!r}")
+        # A soft threshold above the hard one would queue turns that should be
+        # shed; fail fast rather than silently invert the pressure ladder.
+        if soft and hard and soft > hard:
+            raise ValueError(
+                f"soft_rss_mb ({soft_rss_mb!r}) must be <= "
+                f"hard_rss_mb ({hard_rss_mb!r})"
+            )
+        self.soft_rss_mb = soft
+        self.hard_rss_mb = hard
+
+    @property
+    def enabled(self) -> bool:
+        """Whether pressure-based admission is active (a threshold is set)."""
+        return self.soft_rss_mb > 0 or self.hard_rss_mb > 0
+
+    def evaluate(self, sample: ResourceSample) -> AdmissionDecision:
+        # Disabled, or the platform can't report memory: never block on a
+        # missing/absent signal — admit and let concurrency limits apply.
+        if not self.enabled:
+            return AdmissionDecision.ADMIT
+        rss = getattr(sample, "rss_mb", None)
+        if rss is None:
+            return AdmissionDecision.ADMIT
+        if self.hard_rss_mb and rss >= self.hard_rss_mb:
+            return AdmissionDecision.REJECT
+        if self.soft_rss_mb and rss >= self.soft_rss_mb:
+            return AdmissionDecision.QUEUE
+        return AdmissionDecision.ADMIT
+
+
+# ---------------------------------------------------------------------------
+# Gateway memory-pressure cache eviction (Issue #3804)
+#
+# ``MemoryPressurePolicy`` above sheds *new* inbound turns under RSS pressure,
+# but it never reclaims the memory already held by *idle* warm per-session
+# agent caches. On a memory-limited host (a "$5 VPS", a Fly machine, a k8s pod
+# with a cgroup limit) a busy gateway accumulates dozens of warm caches and,
+# absent eviction, keeps climbing until the kernel OOM-kills the whole process
+# — dropping *every* live session at once. This adds a pure, import-free
+# planner that, given a memory *budget* and the LRU order of warm sessions,
+# names the coldest rebuildable caches to soft-evict *before* the OOM killer
+# fires. Each victim is transparently rebuilt from the persisted session store
+# on its next turn, so eviction is cheap and lossless — as long as we never
+# evict a session with an unflushed transcript or an in-flight turn.
+#
+# The *decision* lives here (provable in isolation, no event loop, no heavy
+# imports), mirroring :class:`MemoryPressurePolicy`; the *mechanism* — the warm
+# registry, the LRU order and the flushed/in-flight signals, plus reading the
+# cgroup limit and anon RSS — lives in the running gateway (the wrapper).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WarmSession:
+    """A warm per-session agent cache eligible for memory-pressure eviction.
+
+    A pure, import-free fact carried from the running gateway to
+    :func:`plan_pressure_evictions`. Attributes:
+
+    * ``session_id``: the cache key to soft-evict.
+    * ``last_activity``: monotonic/epoch seconds of the session's last turn;
+      the planner evicts the coldest (smallest ``last_activity``) first.
+    * ``in_flight``: ``True`` while a turn is executing — never evicted (would
+      abort live work).
+    * ``flushed``: ``True`` when the transcript is durably persisted — only a
+      flushed cache is rebuildable, so an unflushed one is never evicted
+      (would lose data).
+    """
+
+    session_id: str
+    last_activity: float = 0.0
+    in_flight: bool = False
+    flushed: bool = True
+
+
+@runtime_checkable
+class MemoryPressureProtocol(Protocol):
+    """Protocol for reading the memory budget and pressure of a gateway host.
+
+    Pure contract the gateway implements over its own process: report the
+    container's memory limit (from the cgroup v1/v2 memory limit) and the
+    current anonymous (non-reclaimable) RSS, so the eviction budget tracks the
+    *real* container ceiling rather than a hard-coded number. Both return
+    ``None``/``0`` gracefully when the platform can't report them, so the
+    planner degrades to a no-op instead of crashing the gateway it protects.
+    """
+
+    def cgroup_limit_mb(self) -> Optional[float]:
+        """Return the container memory limit in MiB, or ``None`` if unknown."""
+        ...
+
+    def anon_rss_mb(self) -> float:
+        """Return current anonymous (non-reclaimable) RSS in MiB."""
+        ...
+
+
+def plan_pressure_evictions(
+    budget_mb: Optional[float],
+    rss_mb: float,
+    warm_sessions: Sequence[WarmSession],
+    *,
+    headroom_ratio: float = 0.9,
+) -> List[str]:
+    """Return the ``session_id``s to soft-evict, coldest (LRU) first.
+
+    A pure planner: it takes the container memory *budget* (typically the
+    cgroup limit), the current anonymous ``rss_mb`` and the warm-cache
+    registry, and names the coldest rebuildable caches to shed until RSS is
+    back within ``headroom_ratio`` of the budget. It never touches the event
+    loop or the caches themselves — the gateway enacts the returned plan.
+
+    Guards (a victim is *skipped*, never evicted, when):
+
+    * ``in_flight`` is ``True`` — an executing turn must not be aborted, or
+    * ``flushed`` is ``False`` — an unflushed transcript is not yet rebuildable
+      from the store, so evicting it would lose data.
+
+    Returns an empty list when RSS is within budget, the budget is unknown
+    (``None``/``<= 0``), or nothing evictable remains — so a host that can't
+    report a cgroup limit simply never soft-evicts (legacy behaviour).
+    """
+    if budget_mb is None:
+        return []
+    try:
+        budget = float(budget_mb)
+        rss = float(rss_mb)
+    except (TypeError, ValueError):
+        return []
+    # Reject non-finite measurements (NaN/inf): a NaN budget or rss would slip
+    # past the ``rss <= target`` check (every comparison with NaN is False) and
+    # spuriously evict *every* warm cache — the opposite of protecting them.
+    if not math.isfinite(budget) or not math.isfinite(rss) or budget <= 0:
+        return []
+    try:
+        ratio = float(headroom_ratio)
+    except (TypeError, ValueError):
+        ratio = 0.9
+    if not (math.isfinite(ratio) and 0.0 < ratio <= 1.0):
+        ratio = 0.9
+    target = budget * ratio
+    if rss <= target:
+        return []
+
+    # Name the coldest evictable caches, LRU-first. We deliberately do not
+    # track per-cache bytes (guessing sizes would be scope creep) so we cannot
+    # remeasure RSS mid-plan; instead the planner returns every evictable cache
+    # coldest-first and the gateway evicts down that ordered list, re-sampling
+    # its own RSS as it goes and stopping as soon as it is back within target.
+    # Over-shedding is thus avoided by the enactor and under-shedding is caught
+    # on the next pass — keeping this decision pure and byte-agnostic.
+    evictable = [
+        s for s in warm_sessions
+        if not s.in_flight and s.flushed
+    ]
+    if not evictable:
+        return []
+    evictable.sort(key=lambda s: (s.last_activity, s.session_id))
+    return [s.session_id for s in evictable]
+
+
+# ---------------------------------------------------------------------------
 # Gateway rate-limit admission (Issue #2532)
 #
 # Rate limiting completes the gateway's policy-protocol family (send, idle,
@@ -3044,6 +3673,163 @@ class SlidingWindowRateLimitPolicy:
 
 # Backward-compatible alias following the repo's ``*Protocol`` convention.
 RateLimitPolicy = RateLimitPolicyProtocol
+
+
+# ---------------------------------------------------------------------------
+# Durable-queue dead-letter decision (Issue #3519)
+#
+# The gateway's durable inbound journal and outbound queue must decide when a
+# repeatedly-failing entry is a genuine *poison message* (dead-letter it) vs a
+# victim of a *transient channel outage* (keep retrying). Deciding on the
+# attempt counter alone dead-letters deliverable traffic during a routine
+# few-minute API incident, because the exponential backoff burns the default
+# five attempts in well under a minute — a silent-loss failure the durable
+# queue exists to prevent.
+#
+# The fix is a pure, import-free *decision* contract, symmetric with the other
+# gateway policy protocols above (``SendPolicyProtocol``,
+# ``RateLimitPolicyProtocol``): a recoverable/transient failure is only
+# dead-lettered once it is BOTH attempt-exhausted AND genuinely old, while a
+# permanently-classified error (credentials revoked, permanent target) still
+# short-circuits immediately. The durable-queue runtime in ``praisonai-bot``
+# consumes it where it currently tests ``attempts >= max_attempts``.
+# ---------------------------------------------------------------------------
+
+
+# Error classes that are already *known-permanent* and should dead-letter
+# immediately regardless of age — no amount of retrying recovers a revoked
+# credential or a permanently-invalid target.
+PERMANENT_ERROR_CLASSES: Tuple[str, ...] = ("credential", "permanent_target")
+
+
+@dataclass(frozen=True)
+class DeadLetterDecision:
+    """Result of a dead-letter evaluation.
+
+    Attributes:
+        dead_letter: Whether the entry should be routed to the dead-letter
+            queue / marked ``permanent_failure`` now. When ``False`` the
+            caller reschedules the entry under its normal capped backoff.
+        reason: Short machine-readable explanation (``"permanent_error"``,
+            ``"attempts_and_age"``, ``"retry"``) for logging/metrics.
+    """
+
+    dead_letter: bool
+    reason: str = ""
+
+
+@runtime_checkable
+class DeadLetterPolicyProtocol(Protocol):
+    """Protocol for the durable-queue dead-letter decision.
+
+    Pure, import-free decision contract consumed by the outbound queue's
+    ``drain`` and the inbound journal's redelivery/replay paths. The runtime
+    supplies typed facts about a repeatedly-failing entry (its ``attempts``,
+    the ``first_seen_epoch`` it was first received, the current ``now_epoch``,
+    and a coarse ``error_class``) and the policy returns a
+    :class:`DeadLetterDecision`. Concrete queue state and side effects (SQLite
+    rows, DLQ enqueue) stay in the implementation; this keeps the *policy*
+    injectable and testable in isolation, symmetric with
+    :class:`SendPolicyProtocol` / :class:`RateLimitPolicyProtocol`.
+
+    A config-driven default (:class:`AttemptAndAgeDeadLetterPolicy`) is
+    provided for the common "poison vs transient" case.
+    """
+
+    def should_dead_letter(
+        self,
+        *,
+        attempts: int,
+        first_seen_epoch: float,
+        now_epoch: float,
+        error_class: str = "",
+    ) -> DeadLetterDecision:
+        """Return a :class:`DeadLetterDecision` for the supplied facts."""
+        ...
+
+
+class AttemptAndAgeDeadLetterPolicy:
+    """Default dead-letter policy: require BOTH attempt-exhaustion AND age.
+
+    Distinguishes a *poison message* (fails repeatedly over a long time) from
+    a *transient outage* (fails a few times quickly, then recovers). A
+    recoverable/transient failure is dead-lettered only once it satisfies
+    **both**:
+
+    1. ``attempts >= max_attempts``, and
+    2. ``age >= min_age_seconds`` (wall-clock age since first receipt).
+
+    Until an entry is genuinely old it keeps retrying under capped backoff
+    rather than being discarded, so a brief channel incident results in
+    delayed-but-delivered messages rather than a DLQ full of manual-replay
+    work. A truly poisoned entry still dead-letters — it keeps failing past
+    both thresholds.
+
+    An error whose ``error_class`` is known-permanent (see
+    :data:`PERMANENT_ERROR_CLASSES` — a revoked credential or a permanently
+    invalid target) short-circuits to dead-letter immediately regardless of
+    age, since retrying can never recover it.
+
+    ``min_age_seconds=0`` restores the legacy attempt-count-only behaviour,
+    keeping the knob fully backward-compatible for callers that opt in.
+
+    Example::
+
+        AttemptAndAgeDeadLetterPolicy(max_attempts=5, min_age_seconds=6*3600)
+    """
+
+    #: Default minimum age (6 hours) before a transient failure may dead-letter.
+    DEFAULT_MIN_AGE_SECONDS: int = 6 * 3600
+
+    def __init__(
+        self,
+        max_attempts: int = 5,
+        min_age_seconds: int = DEFAULT_MIN_AGE_SECONDS,
+    ) -> None:
+        try:
+            attempts_ceiling = int(max_attempts)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"max_attempts must be an integer, got {max_attempts!r}"
+            ) from err
+        if attempts_ceiling < 1:
+            raise ValueError(
+                f"max_attempts must be >= 1, got {max_attempts!r}"
+            )
+        try:
+            min_age = float(min_age_seconds)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"min_age_seconds must be a number, got {min_age_seconds!r}"
+            ) from err
+        if min_age < 0:
+            raise ValueError(
+                f"min_age_seconds must be >= 0, got {min_age_seconds!r}"
+            )
+        self.max_attempts = attempts_ceiling
+        self.min_age_seconds = min_age
+
+    def should_dead_letter(
+        self,
+        *,
+        attempts: int,
+        first_seen_epoch: float,
+        now_epoch: float,
+        error_class: str = "",
+    ) -> DeadLetterDecision:
+        # Known-permanent conditions can never be recovered by retrying.
+        if error_class in PERMANENT_ERROR_CLASSES:
+            return DeadLetterDecision(dead_letter=True, reason="permanent_error")
+
+        exhausted = attempts >= self.max_attempts
+        # Guard against a missing/zero first-seen stamp: treat it as "just now"
+        # so a malformed row is never prematurely dead-lettered on age.
+        age = now_epoch - first_seen_epoch if first_seen_epoch else 0.0
+        old_enough = age >= self.min_age_seconds
+
+        if exhausted and old_enough:
+            return DeadLetterDecision(dead_letter=True, reason="attempts_and_age")
+        return DeadLetterDecision(dead_letter=False, reason="retry")
 
 
 # ---------------------------------------------------------------------------
@@ -3491,6 +4277,214 @@ def classify_exit_reason(exc: "BaseException | None") -> int:
     if isinstance(exc, FatalConfigError):
         return GATEWAY_FATAL_CONFIG_EXIT_CODE
     return GATEWAY_RESTART_EXIT_CODE
+
+
+class RestartLoopGuard:
+    """Pure rolling-window predicate that trips on a rapid restart loop.
+
+    A companion to :func:`classify_exit_reason` for the crash-loop breaker
+    referenced in Issue #3021. Where ``classify_exit_reason`` maps a *single*
+    exit to a supervisor exit code, this tracks the *rate* of restart-worthy
+    boots so a process that keeps crashing-on-resume can stop auto-resuming the
+    offending work rather than wedging in a tight restart loop.
+
+    It is intentionally side-effect free (records timestamps only, no I/O, no
+    heavy deps) so both gateway runtimes (``BotOS`` and ``WebSocketGateway``)
+    can reuse the same *decision* and prove it in isolation. The caller feeds a
+    monotonic timestamp each time a restart-interrupted boot is observed and
+    asks whether the breaker has tripped.
+
+    A trip means: at least ``max_restarts`` restarts occurred within the last
+    ``window_seconds``. When tripped, the caller should stop auto-resuming the
+    offending session (while still serving real inbound) instead of restarting
+    it again immediately.
+
+    Example::
+
+        guard = RestartLoopGuard(max_restarts=3, window_seconds=60)
+        if guard.record(now=time.monotonic()):
+            # too many restarts too fast — stop auto-resuming this session
+            ...
+    """
+
+    def __init__(self, max_restarts: int = 3, window_seconds: float = 60.0):
+        if max_restarts < 1:
+            raise ValueError(f"max_restarts must be >= 1, got {max_restarts!r}")
+        if window_seconds <= 0:
+            raise ValueError(
+                f"window_seconds must be > 0, got {window_seconds!r}"
+            )
+        self.max_restarts = int(max_restarts)
+        self.window_seconds = float(window_seconds)
+        self._events: "List[float]" = []
+
+    def record(self, now: float) -> bool:
+        """Record a restart at ``now`` and return whether the breaker tripped.
+
+        Args:
+            now: A monotonic timestamp for this restart event.
+
+        Returns:
+            ``True`` when at least ``max_restarts`` restarts have occurred
+            within the trailing ``window_seconds`` (breaker tripped);
+            ``False`` otherwise.
+        """
+        cutoff = now - self.window_seconds
+        # Drop events that have aged out of the trailing window.
+        self._events = [t for t in self._events if t >= cutoff]
+        self._events.append(now)
+        return len(self._events) >= self.max_restarts
+
+    def tripped(self, now: float) -> bool:
+        """Return whether the breaker is currently tripped without recording.
+
+        Prunes aged-out events first so a burst that has since gone quiet is
+        no longer considered a live loop.
+        """
+        cutoff = now - self.window_seconds
+        self._events = [t for t in self._events if t >= cutoff]
+        return len(self._events) >= self.max_restarts
+
+    def reset(self) -> None:
+        """Clear the recorded restart history (e.g. after a clean run)."""
+        self._events = []
+
+
+class FleetSupervisionPolicy:
+    """Pure fleet-level crash-loop breaker for channel supervision (Issue #3840).
+
+    Per-channel restart budgets (``ChannelHealthMonitor`` /
+    ``ChannelRestartHistory`` in ``praisonai-bot``) throttle one misbehaving
+    channel, but they are blind to a *systemic* fault — a bad shared provider,
+    a network partition, an org-wide expired token — that makes *every* channel
+    restart at once. Each channel then independently stays "under budget" while
+    the fleet as a whole thrashes: a reconnect storm that floods logs, burns
+    CPU, and risks an upstream rate-limit ban with no single operator-visible
+    signal.
+
+    This is the aggregate breaker that sits *on top of* the per-channel budgets.
+    Like :class:`RestartLoopGuard` it is intentionally side-effect free (records
+    timestamps only, no I/O, no heavy deps) so the *decision* lives in core and
+    is provable in isolation; the wrapper owns the side effects (halting
+    restarts, recording one ``gateway`` degraded-owner entry).
+
+    The breaker trips when *either* aggregate signal crosses its threshold
+    within the trailing window:
+
+    * the fleet restart rate reaches ``fleet_restarts_per_hour`` restarts across
+      all channels, or
+    * the fraction of channels in a failing/parked state reaches
+      ``failing_channel_fraction``.
+
+    Once tripped it stays tripped for ``breaker_cooldown_s`` so the caller
+    applies backpressure (stops auto-restarting, backs off) instead of feeding
+    the storm; after the cooldown it re-arms automatically.
+
+    Example::
+
+        policy = FleetSupervisionPolicy(fleet_restarts_per_hour=40)
+        if policy.note_restart(now=time.monotonic()):
+            # fleet breaker tripped — stop auto-restarting, surface degraded
+            ...
+    """
+
+    def __init__(
+        self,
+        fleet_restarts_per_hour: int = 40,
+        failing_channel_fraction: float = 0.5,
+        breaker_cooldown_s: float = 120.0,
+    ):
+        if fleet_restarts_per_hour < 1:
+            raise ValueError(
+                f"fleet_restarts_per_hour must be >= 1, got {fleet_restarts_per_hour!r}"
+            )
+        if not 0.0 < failing_channel_fraction <= 1.0:
+            raise ValueError(
+                "failing_channel_fraction must be in (0.0, 1.0], got "
+                f"{failing_channel_fraction!r}"
+            )
+        if breaker_cooldown_s < 0:
+            raise ValueError(
+                f"breaker_cooldown_s must be >= 0, got {breaker_cooldown_s!r}"
+            )
+        self.fleet_restarts_per_hour = int(fleet_restarts_per_hour)
+        self.failing_channel_fraction = float(failing_channel_fraction)
+        self.breaker_cooldown_s = float(breaker_cooldown_s)
+        self._window_seconds = 3600.0  # restart-rate window is per-hour
+        self._events: "List[float]" = []
+        self._tripped_until: Optional[float] = None
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self._window_seconds
+        self._events = [t for t in self._events if t >= cutoff]
+
+    def note_restart(self, now: float) -> bool:
+        """Record a fleet restart at ``now`` and return whether the breaker is tripped.
+
+        Args:
+            now: A monotonic timestamp for this restart event.
+
+        Returns:
+            ``True`` when the aggregate restart rate has reached
+            ``fleet_restarts_per_hour`` within the trailing hour (or the breaker
+            is still within its cooldown); ``False`` otherwise.
+        """
+        # While actively cooling down, do NOT record new events: the caller has
+        # already HELD the restart, so counting held (non-)restarts would keep
+        # renewing the window and leave the breaker stuck until the full hour
+        # expires. Just report that we are still tripped.
+        if self.tripped(now):
+            return True
+        self._prune(now)
+        self._events.append(now)
+        if len(self._events) >= self.fleet_restarts_per_hour:
+            self._tripped_until = now + self.breaker_cooldown_s
+            return True
+        return False
+
+    def note_fleet_state(
+        self, failing_channels: int, total_channels: int, now: float
+    ) -> bool:
+        """Trip the breaker when too large a fraction of the fleet is failing.
+
+        A systemic fault often shows up as many channels simultaneously in a
+        failing/parked state rather than as a raw restart rate. When at least
+        ``failing_channel_fraction`` of the fleet is failing, trip and start the
+        cooldown.
+
+        Args:
+            failing_channels: Number of channels currently failing/parked.
+            total_channels: Total number of supervised channels.
+            now: A monotonic timestamp for this evaluation.
+
+        Returns:
+            ``True`` when the breaker is tripped (now or still cooling down).
+        """
+        if total_channels > 0:
+            fraction = failing_channels / total_channels
+            if fraction >= self.failing_channel_fraction:
+                self._tripped_until = now + self.breaker_cooldown_s
+                return True
+        return self.tripped(now)
+
+    def tripped(self, now: float) -> bool:
+        """Return whether the breaker is currently tripped without recording.
+
+        When the cooldown has elapsed the breaker re-arms cleanly: the accrued
+        event window is cleared so the accumulated pre-trip restarts cannot
+        immediately re-trip on the very next ``note_restart``.
+        """
+        if self._tripped_until is not None:
+            if now < self._tripped_until:
+                return True
+            self._tripped_until = None
+            self._events = []
+        return False
+
+    def reset(self) -> None:
+        """Clear recorded restart history and any active trip (clean recovery)."""
+        self._events = []
+        self._tripped_until = None
 
 
 # ---------------------------------------------------------------------------
@@ -4232,3 +5226,389 @@ class LivenessPolicy:
         if now > self.reap_deadline(last_activity):
             return LivenessDecision.REAP
         return LivenessDecision.KEEP
+
+
+# ---------------------------------------------------------------------------
+# Cluster-wide per-turn serialisation contract (Issue #3643)
+# ---------------------------------------------------------------------------
+#
+# Turn serialisation — "only one turn runs against a given resolved session at
+# a time" — is enforced in-process by an ``asyncio.Lock`` (``LockMap``). That
+# guarantee evaporates the moment a gateway is scaled to ``replicas > 1`` (the
+# sanctioned HA topology behind ``redis_pubsub.py`` + the Helm chart): two
+# messages for one session land on two replicas and run concurrent turns with
+# no serialisation between them, corrupting the shared transcript, tripping
+# provider strict-alternation, duplicating replies and double-billing.
+#
+# This is the pure, dependency-free contract for a *distributed* turn lock,
+# mirroring how every other gateway robustness knob (drain, admission,
+# rate-limit, liveness, dead-letter) is a swappable pure protocol in core. The
+# heavy Redis/network implementation is an optional-dep runtime concern that
+# lives in the wrapper/bot package; core keeps only the protocol, the lease
+# token, and a zero-cost in-process default so single-replica behaviour is
+# unchanged and no new dependency is introduced.
+
+
+@dataclass(frozen=True)
+class TurnLeaseToken:
+    """An opaque handle to a held turn lease (Issue #3643).
+
+    Returned by :meth:`TurnLockProtocol.acquire` and passed back to
+    :meth:`TurnLockProtocol.release`. The ``owner`` token identifies the
+    replica/process that holds the lease so a distributed backend can make
+    ``release`` **identity-checked and idempotent** — a replica can only
+    release the lease it actually owns, and a stale/expired lease that has
+    since been reclaimed by another owner is never clobbered.
+
+    Attributes:
+        key: The resolved session id the lease serialises on.
+        owner: The holder's opaque owner token (e.g. a per-replica id).
+        expires_at: Absolute wall-clock expiry (same clock the backend uses).
+            A dead holder's lease is reclaimable once ``now`` passes this, so a
+            crashed replica cannot wedge a healthy session forever.
+    """
+
+    key: str
+    owner: str
+    expires_at: float
+
+
+@runtime_checkable
+class TurnLockProtocol(Protocol):
+    """Contract for serialising a session's turns — cluster-wide or in-process.
+
+    The gateway holds this lock for the *whole* agent turn keyed on the
+    resolved session id, so only one turn ever runs against one session's
+    transcript at a time. With the default in-process backend
+    (:class:`LocalTurnLock`) this reproduces today's ``asyncio.Lock`` behaviour
+    exactly and adds no dependency. With a distributed backend (a
+    ``RedisTurnLock`` in the wrapper/bot package, reusing the scheduler's proven
+    ``owner``+TTL lease pattern) the same ``async with`` seam serialises turns
+    across every replica.
+
+    Contract:
+        * :meth:`acquire` blocks until the lease for ``key`` is held, then
+          returns a :class:`TurnLeaseToken`. ``ttl`` bounds how long the lease
+          survives without renewal so a crashed holder self-heals.
+        * :meth:`release` is identity-checked against the token's ``owner`` and
+          idempotent: releasing an already-expired/reclaimed lease is a no-op,
+          never an error and never another owner's lease.
+        * :meth:`hold` is the ergonomic async context manager wrapping
+          acquire/release, used at the ``async with self._turn_lock.hold(...)``
+          call site.
+
+    A backend outage must fail *open* (degrade to a loud warning rather than
+    wedging a healthy session), mirroring the fail-safe defaults elsewhere.
+    """
+
+    async def acquire(self, key: str, *, owner: str, ttl: float) -> TurnLeaseToken:
+        """Block until the lease for ``key`` is held; return its token."""
+        ...
+
+    async def release(self, token: TurnLeaseToken) -> None:
+        """Release ``token``'s lease (identity-checked, idempotent)."""
+        ...
+
+    def hold(
+        self, key: str, *, owner: str, ttl: float
+    ) -> "AbstractAsyncContextManager[TurnLeaseToken]":
+        """Return an async context manager holding the lease for the block."""
+        ...
+
+
+class LocalTurnLock:
+    """Default in-process turn lock — today's ``asyncio.Lock`` behaviour.
+
+    Zero-cost, dependency-free implementation of :class:`TurnLockProtocol` for
+    single-replica / no-backend deployments. It serialises turns within one
+    process (per event loop) exactly as the existing ``LockMap`` does, so
+    upgrading is byte-for-byte backward compatible. It provides **no** cross-
+    process guarantee — selecting a distributed backend (e.g. ``redis``) is what
+    extends serialisation across replicas.
+
+    The ``owner``/``ttl`` arguments are accepted for protocol symmetry but are
+    inert here: an in-process ``asyncio.Lock`` is released deterministically
+    when the holding task exits, so there is no crashed-holder lease to expire.
+    """
+
+    def __init__(self) -> None:
+        self._locks: Dict[str, "asyncio.Lock"] = {}
+        # Current lease holder per key, so release() is identity-checked: only
+        # the exact token handed out by the latest acquire() may release, so a
+        # stale token can never clobber a waiter that took the lock after it.
+        self._holders: Dict[str, TurnLeaseToken] = {}
+
+    def _lock_for(self, key: str) -> "asyncio.Lock":
+        lock = self._locks.get(key)
+        if lock is None:
+            import asyncio
+
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        return lock
+
+    async def acquire(self, key: str, *, owner: str, ttl: float) -> TurnLeaseToken:
+        lock = self._lock_for(key)
+        await lock.acquire()
+        token = TurnLeaseToken(key=key, owner=owner, expires_at=0.0)
+        self._holders[key] = token
+        return token
+
+    async def release(self, token: TurnLeaseToken) -> None:
+        # Identity-checked & idempotent: a stale/duplicate token whose lease has
+        # since been reclaimed by a waiter is a harmless no-op, never another
+        # holder's lease. ``is`` (not ``==``) so equal-valued tokens from two
+        # acquires are not conflated (``TurnLeaseToken`` is frozen/value-equal).
+        if self._holders.get(token.key) is not token:
+            return
+        del self._holders[token.key]
+        lock = self._locks.get(token.key)
+        if lock is not None and lock.locked():
+            lock.release()
+
+    def hold(
+        self, key: str, *, owner: str, ttl: float
+    ) -> "AbstractAsyncContextManager[TurnLeaseToken]":
+        return _TurnLeaseHold(self, key, owner=owner, ttl=ttl)
+
+
+class _TurnLeaseHold:
+    """Async context manager wrapping acquire/release for any turn lock.
+
+    Reusable by any :class:`TurnLockProtocol` implementation so the concrete
+    lock only needs ``acquire``/``release``; ``hold`` composes them safely
+    (releasing on every exit path, including exceptions).
+    """
+
+    def __init__(
+        self, lock: "TurnLockProtocol", key: str, *, owner: str, ttl: float
+    ) -> None:
+        self._lock = lock
+        self._key = key
+        self._owner = owner
+        self._ttl = ttl
+        self._token: Optional[TurnLeaseToken] = None
+
+    async def __aenter__(self) -> TurnLeaseToken:
+        self._token = await self._lock.acquire(
+            self._key, owner=self._owner, ttl=self._ttl
+        )
+        return self._token
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self._token is not None:
+            await self._lock.release(self._token)
+            self._token = None
+
+
+# ---------------------------------------------------------------------------
+# Declarative method -> required-scope registry (Issue #3206)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GatewayMethodDescriptor:
+    """Declarative authorisation descriptor for one gateway method.
+
+    A descriptor states — once, next to the protocol it guards — *what scope a
+    caller must hold* to invoke ``name``. The dispatcher resolves the required
+    scope from the registry instead of scattering ``_require_scope`` /
+    ``_client_has_scope`` calls per endpoint, so a newly added method is
+    **closed until explicitly classified** rather than reachable by omission.
+
+    Attributes:
+        name: The method / route / message-type identifier (e.g.
+            ``"agent.message"``, ``"channels.control"``).
+        required_scope: The baseline scope required to invoke the method.
+        owner: Who declared the method (``"core"``, a plugin name, ...). Purely
+            informational; helps auditing a growing control surface.
+        since: Optional version/date the method was classified.
+        escalate_fields: Optional per-payload-field escalation. Maps a param
+            field name to the stricter scope demanded when that field is
+            present. Fields not listed here are treated as *unknown/structural*
+            and escalate to :attr:`escalate_unknown_scope` (fail closed) when
+            :attr:`strict_fields` is True.
+        strict_fields: When True, any payload field not in ``escalate_fields``
+            (and not in ``safe_fields``) escalates to
+            :attr:`escalate_unknown_scope`. Defaults to False so today's
+            behaviour (no field-level derivation) is preserved unless opted in.
+        safe_fields: Field names that never escalate — read-only / benign
+            params. Only consulted when ``strict_fields`` is True.
+        escalate_unknown_scope: Scope demanded for unknown structural fields
+            under ``strict_fields``. Defaults to ``ADMIN`` (fail closed).
+    """
+
+    name: str
+    required_scope: OperatorScope = OperatorScope.ADMIN
+    owner: str = "core"
+    since: Optional[str] = None
+    escalate_fields: Dict[str, OperatorScope] = field(default_factory=dict)
+    strict_fields: bool = False
+    safe_fields: Set[str] = field(default_factory=set)
+    escalate_unknown_scope: OperatorScope = OperatorScope.ADMIN
+
+    def __post_init__(self) -> None:
+        """Defensively copy the mutable collections so the descriptor is a
+        genuinely immutable authorisation record.
+
+        ``@dataclass(frozen=True)`` blocks attribute *reassignment* but not
+        in-place mutation of the referenced dict/set. Direct construction
+        (e.g. a plugin building a descriptor without going through
+        :func:`register_gateway_method`) could otherwise mutate
+        ``escalate_fields`` / ``safe_fields`` after the fact and silently
+        change the resolved scope. Freeze them at construction so the resolved
+        scope can never drift after registration.
+        """
+        object.__setattr__(self, "escalate_fields", dict(self.escalate_fields))
+        object.__setattr__(self, "safe_fields", frozenset(self.safe_fields))
+
+    def resolve(self, params: Optional[Dict[str, Any]] = None) -> OperatorScope:
+        """Resolve the effective required scope for a call with ``params``.
+
+        Starts from :attr:`required_scope` and escalates (never de-escalates)
+        based on the payload:
+
+          * any field listed in :attr:`escalate_fields` raises the requirement
+            to that field's scope;
+          * under :attr:`strict_fields`, any field that is neither a
+            ``safe_field`` nor an ``escalate_field`` is treated as unknown /
+            structural and raises the requirement to
+            :attr:`escalate_unknown_scope` (fail closed on unknown fields).
+        """
+        required = self.required_scope
+        if params:
+            for key in params:
+                escalated = self.escalate_fields.get(key)
+                if escalated is not None:
+                    required = _max_scope(required, escalated)
+                elif self.strict_fields and key not in self.safe_fields:
+                    required = _max_scope(required, self.escalate_unknown_scope)
+        return required
+
+
+# Privilege lattice used to combine (never weaken) scopes.
+#
+# READ < WRITE are a strict linear chain. APPROVALS and PAIRING are *sibling*
+# capabilities at the same tier: each is stricter than WRITE, but they are
+# **incomparable** to each other (holding APPROVALS does not imply PAIRING or
+# vice versa). ADMIN is the top of the lattice.
+#
+# ``_SCOPE_TIER`` gives the linear rank; APPROVALS and PAIRING share a tier only
+# to express "both above WRITE, both below ADMIN". Combining two *distinct*
+# scopes that sit at that same tier is unsound to collapse into one of them, so
+# :func:`_max_scope` escalates such a pair to their common upper bound, ADMIN
+# (fail closed) rather than silently picking whichever was passed first.
+_SCOPE_TIER: Dict[OperatorScope, int] = {
+    OperatorScope.READ: 0,
+    OperatorScope.WRITE: 1,
+    OperatorScope.APPROVALS: 2,
+    OperatorScope.PAIRING: 2,
+    OperatorScope.ADMIN: 3,
+}
+
+# Scopes at a shared tier that are siblings (incomparable), so combining two
+# different ones must escalate rather than pick one.
+_INCOMPARABLE_TIERS = frozenset({2})
+
+
+def _max_scope(a: OperatorScope, b: OperatorScope) -> OperatorScope:
+    """Return the stricter scope, escalating incomparable siblings to ADMIN.
+
+    For the linear part of the lattice (READ < WRITE < ... < ADMIN) this
+    returns the higher-ranked scope. When ``a`` and ``b`` are two *distinct*
+    scopes sharing an incomparable tier (e.g. APPROVALS vs PAIRING), neither
+    implies the other, so the combined requirement is escalated to their common
+    upper bound (``ADMIN``) to stay fail-closed — a single-scope check can then
+    never be satisfied by holding only one of the two required capabilities.
+    """
+    if a == b:
+        return a
+    tier_a = _SCOPE_TIER.get(a, _SCOPE_TIER[OperatorScope.ADMIN])
+    tier_b = _SCOPE_TIER.get(b, _SCOPE_TIER[OperatorScope.ADMIN])
+    if tier_a == tier_b and tier_a in _INCOMPARABLE_TIERS:
+        return OperatorScope.ADMIN
+    return b if tier_b > tier_a else a
+
+
+# Module-level registry. Kept intentionally simple (a dict) so the contract is
+# a pure, dependency-free lookup that clients and the wrapper can share.
+GATEWAY_METHODS: Dict[str, GatewayMethodDescriptor] = {}
+
+
+def register_gateway_method(
+    name: str,
+    *,
+    scope: OperatorScope = OperatorScope.ADMIN,
+    owner: str = "core",
+    since: Optional[str] = None,
+    escalate_fields: Optional[Dict[str, OperatorScope]] = None,
+    strict_fields: bool = False,
+    safe_fields: Optional[Set[str]] = None,
+    escalate_unknown_scope: OperatorScope = OperatorScope.ADMIN,
+    replace: bool = False,
+) -> GatewayMethodDescriptor:
+    """Register (once) the required scope for a gateway method.
+
+    Core methods are registered at import time (see below); plugins that add
+    new gateway surface should register their descriptors through this same
+    function so they inherit default-deny semantics.
+
+    Raises:
+        ValueError: If ``name`` is already registered and ``replace`` is False.
+    """
+    if not replace and name in GATEWAY_METHODS:
+        raise ValueError(
+            f"gateway method {name!r} is already registered "
+            f"(pass replace=True to override)"
+        )
+    desc = GatewayMethodDescriptor(
+        name=name,
+        required_scope=scope,
+        owner=owner,
+        since=since,
+        escalate_fields=dict(escalate_fields or {}),
+        strict_fields=strict_fields,
+        safe_fields=set(safe_fields or ()),
+        escalate_unknown_scope=escalate_unknown_scope,
+    )
+    GATEWAY_METHODS[name] = desc
+    return desc
+
+
+def resolve_required_scope(
+    method: str, params: Optional[Dict[str, Any]] = None
+) -> OperatorScope:
+    """Resolve the scope required to invoke ``method`` with ``params``.
+
+    Default-deny: an unclassified/unknown method requires ``ADMIN`` so new
+    control surface is closed until explicitly classified — the omission fails
+    **closed** rather than open.
+    """
+    desc = GATEWAY_METHODS.get(method)
+    if desc is None:
+        return OperatorScope.ADMIN
+    return desc.resolve(params)
+
+
+# Core method classification. Registered once at import so the dispatcher can
+# consult the registry instead of scattered per-endpoint checks. Structural
+# mutations (channel control) demand ADMIN; sending as the agent needs WRITE;
+# status/read needs READ. Anything unregistered defaults to ADMIN (deny).
+def _register_core_gateway_methods() -> None:
+    core: Dict[str, OperatorScope] = {
+        "agent.message": OperatorScope.WRITE,
+        "message": OperatorScope.WRITE,
+        "session.status": OperatorScope.READ,
+        "session.transcript": OperatorScope.READ,
+        "approvals.resolve": OperatorScope.APPROVALS,
+        "pairing.approve": OperatorScope.PAIRING,
+        "pairing.revoke": OperatorScope.PAIRING,
+        "channels.control": OperatorScope.ADMIN,
+        "channels.pause": OperatorScope.ADMIN,
+        "channels.resume": OperatorScope.ADMIN,
+        "channels.reconnect": OperatorScope.ADMIN,
+    }
+    for name, scope in core.items():
+        register_gateway_method(name, scope=scope, owner="core", replace=True)
+
+
+_register_core_gateway_methods()

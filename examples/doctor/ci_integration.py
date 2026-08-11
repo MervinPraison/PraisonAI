@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 CI Integration Example - Using Doctor in CI/CD pipelines
@@ -19,7 +20,9 @@ def run_doctor_ci():
         [sys.executable, "-m", "praisonai", "doctor", "ci"],
         capture_output=True,
         text=True,
-        timeout=120
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
     )
     
     # Parse JSON output

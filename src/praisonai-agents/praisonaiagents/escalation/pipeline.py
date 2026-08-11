@@ -4,7 +4,6 @@ Escalation Pipeline for PraisonAI Agents.
 Implements progressive escalation from direct response to full autonomous mode.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from typing import Any, Dict, List, Optional, Callable

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent
 from pydantic import BaseModel
 from typing import List, Optional

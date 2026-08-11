@@ -5,7 +5,7 @@ Provides protocols and base classes for building sandbox implementations
 that enable safe code execution in isolated environments.
 
 This module contains only protocols and lightweight utilities.
-Heavy implementations (Docker, etc.) live in the praisonai wrapper package.
+Heavy implementations (Docker, E2B, Modal, etc.) live in the ``praisonai-sandbox`` package.
 """
 
 from .protocols import (

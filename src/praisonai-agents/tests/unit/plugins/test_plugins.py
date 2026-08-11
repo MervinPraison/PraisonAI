@@ -452,3 +452,80 @@ class TestEntryPointsDiscovery:
         assert loaded == 1
         assert "test_plugin" in manager._plugins
         assert manager._plugins["test_plugin"].__class__ == MockPlugin
+
+
+class TestPluginSuppression:
+    """Tests for one-shot plugin suppression (--pure / PRAISONAI_NO_PLUGINS)."""
+
+    def _install_mock_entry_point(self, monkeypatch):
+        """Install a single loadable entry point so discovery would find one."""
+        import importlib.metadata as metadata
+        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+
+        class MockPlugin(Plugin):
+            @property
+            def info(self) -> PluginInfo:
+                return PluginInfo(
+                    name="suppressible_plugin",
+                    version="1.0.0",
+                    description="Test plugin",
+                )
+
+        class MockEntryPoint:
+            def __init__(self, name, plugin_class):
+                self.name = name
+                self._plugin_class = plugin_class
+
+            def load(self):
+                return self._plugin_class
+
+        mock_ep = MockEntryPoint("suppressible_plugin", MockPlugin)
+
+        def mock_entry_points(*args, **kwargs):
+            if kwargs.get("group") == "praisonai.plugins":
+                return [mock_ep]
+            return {"praisonai.plugins": [mock_ep]}
+
+        monkeypatch.setattr(metadata, "entry_points", mock_entry_points)
+
+    def test_env_var_suppresses_discovery(self, monkeypatch):
+        """PRAISONAI_NO_PLUGINS=1 short-circuits entry-point discovery."""
+        self._install_mock_entry_point(monkeypatch)
+        monkeypatch.setenv("PRAISONAI_NO_PLUGINS", "1")
+
+        manager = PluginManager()
+        assert manager.is_discovery_disabled() is True
+        assert manager.discover_entry_points() == 0
+        assert manager._plugins == {}
+
+    def test_constructor_param_suppresses_discovery(self, monkeypatch):
+        """PluginManager(disabled=True) forces suppression (Python parity)."""
+        self._install_mock_entry_point(monkeypatch)
+        monkeypatch.delenv("PRAISONAI_NO_PLUGINS", raising=False)
+
+        manager = PluginManager(disabled=True)
+        assert manager.is_discovery_disabled() is True
+        assert manager.discover_entry_points() == 0
+        assert manager._plugins == {}
+
+    def test_constructor_param_overrides_env(self, monkeypatch):
+        """An explicit disabled=False wins over the env var."""
+        self._install_mock_entry_point(monkeypatch)
+        monkeypatch.setenv("PRAISONAI_NO_PLUGINS", "1")
+
+        manager = PluginManager(disabled=False)
+        assert manager.is_discovery_disabled() is False
+        assert manager.discover_entry_points() == 1
+
+    def test_not_disabled_by_default(self, monkeypatch):
+        """Absent env/param, discovery is not suppressed (backward compatible)."""
+        monkeypatch.delenv("PRAISONAI_NO_PLUGINS", raising=False)
+        manager = PluginManager()
+        assert manager.is_discovery_disabled() is False
+
+    def test_auto_discover_suppressed_leaves_state(self, monkeypatch):
+        """auto_discover_plugins() is a no-op under suppression."""
+        monkeypatch.setenv("PRAISONAI_NO_PLUGINS", "true")
+        manager = PluginManager()
+        assert manager.auto_discover_plugins() == 0
+        assert manager._plugins == {}

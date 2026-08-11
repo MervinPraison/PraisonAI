@@ -1,6 +1,6 @@
 from praisonaiagents.agent import Agent
 from praisonaiagents.task import Task
-from praisonaiagents.agents import Agents
+from praisonaiagents.agents import Agents, AgentTeam
 from typing import List, Dict
 import time
 
@@ -76,6 +76,13 @@ results = workflow.start(return_dict=True)
 
 # Print results
 print("\nWorkflow Results:")
-for task_id, result in results["task_results"].items():
+task_results = (
+    results.get("task_results", {})
+    if isinstance(results, dict)
+    else {}
+)
+if not task_results and isinstance(results, str):
+    print(f"\nWorkflow output:\n{results}")
+for task_id, result in task_results.items():
     if result:
         print(f"Task {task_id}: {result.raw}")

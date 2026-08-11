@@ -91,6 +91,87 @@ class TestCLIDoctorCommand:
         mock_doctor_flow.assert_called_once()
 
 
+class TestCLIDoctorExtension:
+    """Test doctor extension bridge-vs-CDP split (issue #3098)."""
+
+    def test_doctor_extension_help(self):
+        """doctor extension help renders without error."""
+        result = runner.invoke(app, ["doctor", "extension", "--help"])
+        assert result.exit_code == 0
+
+    @patch("requests.get")
+    def test_doctor_extension_passes_when_bridge_connected(self, mock_get):
+        """Passes on bridge connection even when CDP Chrome is empty."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {"status": "ok", "connections": 1, "sessions": 0}
+            else:
+                resp.json.return_value = []  # No CDP targets (daily Work Chrome)
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 0
+        assert "connected to bridge" in result.output
+
+    @patch("requests.get")
+    def test_doctor_extension_fails_when_no_bridge_connection(self, mock_get):
+        """Fails when the extension is not connected to the bridge."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {"status": "ok", "connections": 0, "sessions": 0}
+            else:
+                resp.json.return_value = []
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 1
+
+    @patch("requests.get")
+    def test_doctor_extension_uses_extension_specific_count(self, mock_get):
+        """Prefers extension_connections over raw connections when present."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {
+                    "status": "ok",
+                    "connections": 2,
+                    "extension_connections": 1,
+                    "sessions": 0,
+                }
+            else:
+                resp.json.return_value = []
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 0
+        assert "connected to bridge" in result.output
+
+    @patch("requests.get")
+    def test_doctor_extension_fails_when_only_cli_connected(self, mock_get):
+        """A stray non-extension client must not pass the check (issue #3098 P1)."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {
+                    "status": "ok",
+                    "connections": 1,
+                    "extension_connections": 0,
+                    "sessions": 0,
+                }
+            else:
+                resp.json.return_value = []
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 1
+
+
 class TestCLIMessageParsing:
     """Test that CLI handles various message types correctly."""
     
@@ -138,6 +219,145 @@ class TestCLIRunCommand:
         result = runner.invoke(app, ["run", "--help"])
         assert result.exit_code == 0
         assert "engine" in result.output.lower() or "cdp" in result.output.lower()
+
+
+class TestBridgeUnreachableError:
+    """Test friendly bridge-not-running error handling."""
+
+    def test_detects_connection_refused(self):
+        """ConnectionRefusedError is recognised as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        assert _is_bridge_unreachable(ConnectionRefusedError()) is True
+
+    def test_detects_winerror_1225(self):
+        """Windows WinError 1225 is recognised as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        exc = OSError("refused")
+        exc.winerror = 1225
+        assert _is_bridge_unreachable(exc) is True
+
+    def test_detects_posix_errno(self):
+        """POSIX ECONNREFUSED (111/61) is recognised as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        for errno in (111, 61):
+            exc = OSError()
+            exc.errno = errno
+            assert _is_bridge_unreachable(exc) is True
+
+    def test_detects_wrapped_cause(self):
+        """Detection follows the exception __cause__ chain."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        outer = RuntimeError("wrapper")
+        outer.__cause__ = ConnectionRefusedError()
+        assert _is_bridge_unreachable(outer) is True
+
+    def test_ignores_unrelated_errors(self):
+        """Unrelated errors are not misclassified as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        assert _is_bridge_unreachable(ValueError("boom")) is False
+
+    def test_message_contains_actionable_hints(self):
+        """The message names the bridge URL and the start command."""
+        from praisonai_browser.cli.commands.browser import _bridge_unreachable_message
+        msg = _bridge_unreachable_message(8765)
+        assert "ws://localhost:8765/ws" in msg
+        assert "praisonai browser start" in msg
+        assert "/health" in msg
+
+
+class TestRequireBridge:
+    """Test the pre-flight bridge health check."""
+    
+    def test_require_bridge_no_server(self):
+        """When the bridge is unreachable, exit code 2 is raised."""
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+        
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+    
+    def test_require_bridge_no_extension(self):
+        """When bridge is up but no extension is connected, exit code 2."""
+        import io
+        import json
+        import typer
+        from unittest.mock import patch, MagicMock
+        from praisonai_browser.cli.commands.browser import _require_bridge
+        
+        payload = json.dumps({"status": "ok", "connections": 0, "extension_connections": 0})
+        resp = MagicMock()
+        resp.read.return_value = payload.encode()
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+    
+    def test_require_bridge_ok(self):
+        """When an extension is connected, no exception is raised."""
+        import json
+        from unittest.mock import patch, MagicMock
+        from praisonai_browser.cli.commands.browser import _require_bridge
+        
+        payload = json.dumps({"status": "ok", "connections": 1, "extension_connections": 1})
+        resp = MagicMock()
+        resp.read.return_value = payload.encode()
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        
+        with patch("urllib.request.urlopen", return_value=resp):
+            _require_bridge(port=8765)
+
+    def _bridge_resp(self, body: str):
+        from unittest.mock import MagicMock
+
+        resp = MagicMock()
+        resp.read.return_value = body.encode()
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        return resp
+
+    def test_require_bridge_malformed_json(self):
+        """Invalid JSON from the bridge is treated as an infra failure (exit 2)."""
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+
+        resp = self._bridge_resp("not json {")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+
+    def test_require_bridge_non_object(self):
+        """Valid JSON that isn't an object exits with code 2."""
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+
+        resp = self._bridge_resp("[1, 2, 3]")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+
+    def test_require_bridge_invalid_count_type(self):
+        """A non-integer connection count exits with code 2."""
+        import json
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+
+        resp = self._bridge_resp(json.dumps({"extension_connections": "many"}))
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
 
 
 # Smoke tests - minimal checks that things don't crash

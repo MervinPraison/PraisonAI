@@ -504,3 +504,40 @@ class TestCreateAgentScheduler:
         scheduler = create_agent_scheduler(mock_agent, "Test task", config=config)
         
         assert scheduler.config == config
+
+
+class TestDeliverResultSilence:
+    """Scheduled delivery honours the core intentional-silence contract."""
+
+    def _scheduler_with_stub_delivery(self):
+        scheduler = AgentScheduler(Mock(), "Test task", deliver="telegram:123")
+        scheduler._delivery = Mock()
+        return scheduler
+
+    @pytest.mark.parametrize("marker", ["NO_REPLY", "[SILENT]", "SILENT", " no_reply "])
+    def test_silence_marker_suppresses_delivery(self, marker):
+        """An exact silence marker suppresses delivery entirely."""
+        scheduler = self._scheduler_with_stub_delivery()
+        scheduler._deliver_result(marker)
+        scheduler._delivery.deliver.assert_not_called()
+
+    def test_ordinary_output_delivered(self):
+        """Non-marker output is delivered exactly as before."""
+        scheduler = self._scheduler_with_stub_delivery()
+        scheduler._deliver_result("2 urgent emails from Finance need reply")
+        scheduler._delivery.deliver.assert_called_once_with(
+            "2 urgent emails from Finance need reply"
+        )
+
+    def test_prose_mentioning_marker_delivered(self):
+        """Prose that merely mentions the token is not suppressed (exact-match)."""
+        scheduler = self._scheduler_with_stub_delivery()
+        scheduler._deliver_result("I think NO_REPLY is a good idea")
+        scheduler._delivery.deliver.assert_called_once()
+
+    def test_no_deliver_target_is_noop(self):
+        """No delivery target means nothing is sent even for ordinary output."""
+        scheduler = AgentScheduler(Mock(), "Test task")
+        scheduler._delivery = Mock()
+        scheduler._deliver_result("hello")
+        scheduler._delivery.deliver.assert_not_called()

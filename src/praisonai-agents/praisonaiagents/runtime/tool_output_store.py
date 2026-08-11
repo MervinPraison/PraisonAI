@@ -177,7 +177,12 @@ def get_tool_output_store(run_id: Optional[str] = None) -> ToolOutputStore:
     """
     global _store_instance
     with _store_lock:
-        if _store_instance is None or (run_id and run_id != _store_instance.run_id):
+        if run_id is None:
+            # No run context available - don't silently reuse/adopt whichever
+            # store happens to be live process-wide; scope to a fresh instance
+            # so unrelated runs never share the first run's store directory.
+            return ToolOutputStore(None)
+        if _store_instance is None or run_id != _store_instance.run_id:
             _store_instance = ToolOutputStore(run_id)
         return _store_instance
 

@@ -16,7 +16,6 @@ Usage:
     agent.start("Remind me to check email every morning at 7am")
 """
 
-import logging
 import threading
 from praisonaiagents._logging import get_logger
 
@@ -33,24 +32,36 @@ def set_store(store):
     When PraisonAIUI is running, it calls this at startup to redirect
     all agent schedule_add/list/remove operations to the unified
     ``config.yaml`` instead of the default ``jobs.json``.
+
+    This also repoints the core canonical default store so the gateway
+    tick loop and host bridge read/write the same backend (issue #3264).
     """
     global _store_instance
     with _store_instance_lock:
         _store_instance = store
+    try:
+        from ..scheduler import set_default_store
+        set_default_store(store)
+    except Exception as e:
+        # Repointing the canonical default is best-effort: the local
+        # ``_store_instance`` above is already authoritative for the tools.
+        # Log (don't silently pass) so any reader/writer drift is diagnosable.
+        logger.warning("Could not repoint canonical schedule store: %s", e)
 
 def _get_store():
     """Return (or create) the global schedule store.
 
-    Uses ``ConfigYamlScheduleStore`` (config.yaml) by default.
-    Automatically migrates any existing ``jobs.json`` data on first use.
+    Resolves the canonical default store shared by the gateway tick loop
+    and host bridge (``scheduler.get_default_store()``) so a job authored
+    by the agent is polled by the ticker.  An explicit ``set_store()``
+    override still takes precedence.
     """
     global _store_instance
     with _store_instance_lock:
-        if _store_instance is None:
-            from ..scheduler.config_store import ConfigYamlScheduleStore
-            _store_instance = ConfigYamlScheduleStore()
-            _store_instance.migrate_from_json()
-        return _store_instance
+        if _store_instance is not None:
+            return _store_instance
+    from ..scheduler import get_default_store
+    return get_default_store()
 
 # ── tools ────────────────────────────────────────────────────────────────────
 
@@ -64,6 +75,7 @@ def schedule_add(
     agent_id: str = "",
     session_id: str = "",
     accept_suggestion: str = "",
+    continuable: bool = True,
 ) -> str:
     """Add a new scheduled job.
 
@@ -88,6 +100,10 @@ def schedule_add(
                     If set, the agent will have access to prior chat history.
         accept_suggestion: If set, accept the suggestion with this ID
             after the job is successfully added.
+        continuable: When True (default), a delivered result seeds a resumable
+                    session so the user's reply in the same chat resumes the
+                    job's conversation with full context. Set False for pure
+                    fire-and-forget notifications.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -118,6 +134,7 @@ def schedule_add(
                         channel=channel,
                         channel_id=channel_id,
                         session_id=session_id or None,
+                        continuable=continuable,
                     )
                 else:
                     return (
@@ -129,6 +146,7 @@ def schedule_add(
             delivery = DeliveryTarget(
                 deliver=deliver,
                 session_id=session_id or None,
+                continuable=continuable,
             )
         elif channel or channel_id:
             # Validate both are provided together
@@ -140,6 +158,7 @@ def schedule_add(
                 channel=channel,
                 channel_id=channel_id,
                 session_id=session_id or None,
+                continuable=continuable,
             )
 
         job = ScheduleJob(

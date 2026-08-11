@@ -503,6 +503,21 @@ class TestConvenienceFunctions:
         assert len(policy.rules) >= 2
         assert policy.priority == 100
 
+    def test_read_only_policy_denies_real_tool_names(self):
+        """Regression: read-only preset must deny the SDK's real dangerous tools."""
+        engine = PolicyEngine(PolicyConfig(strict_mode=False))
+        engine.add_policy(create_read_only_policy())
+
+        for resource in ("tool:write_file", "tool:delete_file",
+                         "tool:file_write", "tool:file_delete",
+                         "tool:edit_file", "tool:apply_patch",
+                         "tool:copy_file", "tool:move_file",
+                         "tool:append_file"):
+            assert engine.check(resource, {}).allowed is False, resource
+
+        assert engine.check("tool:read_file", {}).allowed is True
+        assert engine.check("tool:list_files", {}).allowed is True
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

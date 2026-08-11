@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Motion Graphics — single-agent factory (requires praisonaiagents + LLM key).
 
 Creates a single motion-graphics authoring agent that writes HTML/GSAP and

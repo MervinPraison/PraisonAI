@@ -100,6 +100,69 @@ def _load_praisonai_env_file() -> Dict[str, str]:
     return loaded
 
 
+# Runtime start-flag keys that materially change gateway behaviour and only
+# exist on ``start`` (durability, concurrency ceiling, OpenAI-compat surface,
+# lifecycle). Persisting them lets a direct ``restart`` replay the exact
+# posture the process was started with, instead of silently reverting to
+# defaults (#3349).
+_START_FLAG_KEYS = (
+    "agent_file", "config_file", "drain_timeout", "max_concurrent_runs",
+    "queue_depth", "overflow_policy", "reliability", "openai_api", "mcp",
+    "identity_store", "scale_to_zero", "idle_minutes", "drain_marker",
+    "watchdog", "watchdog_timeout",
+)
+
+
+def _start_flags_path(host: str, port: int) -> Path:
+    """Path to the persisted start-flags file, keyed by the bound host+port.
+
+    Keying by host:port lets multiple gateways on one machine each keep their
+    own launch posture, matching how the PID lock is keyed (#3349).
+    """
+    home = Path(os.environ.get("PRAISONAI_HOME") or (Path.home() / ".praisonai"))
+    safe_host = str(host).replace(":", "_")
+    return home / f"gateway.start.{safe_host}.{port}.json"
+
+
+def _persist_start_flags(host: str, port: int, flags: Dict) -> None:
+    """Persist the CLI-only runtime start flags so ``restart`` can replay them.
+
+    Only non-``None`` values are stored (``None`` means "fall back to YAML"),
+    so a restart reproduces the running process faithfully. Best-effort: a
+    write failure never blocks start (#3349).
+    """
+    import json
+
+    path = _start_flags_path(host, port)
+    payload = {k: v for k, v in flags.items() if v is not None}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    except OSError as exc:  # pragma: no cover — advisory only
+        logger.warning("Could not persist gateway start flags to %s: %s", path, exc)
+
+
+def load_start_flags(host: str, port: int) -> Dict:
+    """Load the persisted start flags for a gateway bound to host:port.
+
+    Returns an empty dict when no artefact exists (or it is unreadable), so
+    a first-ever ``restart`` behaves exactly as before (#3349).
+    """
+    import json
+
+    path = _start_flags_path(host, port)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:  # pragma: no cover — advisory only
+        logger.warning("Could not read gateway start flags from %s: %s", path, exc)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k in _START_FLAG_KEYS}
+
+
 class GatewayHandler:
     """Handler for gateway CLI commands."""
     
@@ -119,6 +182,12 @@ class GatewayHandler:
         reliability: Optional[str] = None,
         openai_api: Optional[bool] = None,
         mcp: Optional[bool] = None,
+        identity_store: Optional[str] = None,
+        scale_to_zero: Optional[bool] = None,
+        idle_minutes: Optional[float] = None,
+        drain_marker: Optional[str] = None,
+        watchdog: Optional[bool] = None,
+        watchdog_timeout: Optional[float] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -152,6 +221,10 @@ class GatewayHandler:
                 + inbound admission in one switch. Overrides
                 ``gateway.reliability``; explicit ``--drain-timeout`` /
                 ``--max-concurrent-runs`` still win.
+            identity_store: Optional path to the cross-platform identity
+                link-map JSON (#3020). Enables one continuous session + memory
+                per paired/linked user across channels. Overrides the
+                ``identity:`` block in the YAML; ``None`` falls back to it.
         """
         # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
         # when running under launchd / systemd. Many key lifecycle events
@@ -171,6 +244,37 @@ class GatewayHandler:
         # Load ~/.praisonai/.env BEFORE any config parsing or ${VAR}
         # substitution — daemons don't inherit shell env.
         _load_praisonai_env_file()
+
+        # Snapshot the CLI-only runtime flags this process was launched with so a
+        # later direct ``gateway restart`` can replay the exact posture (durable
+        # delivery, concurrency ceiling, OpenAI-compat surface, lifecycle)
+        # instead of silently reverting to defaults (#3349). The snapshot is only
+        # WRITTEN once startup validation passes and the gateway is about to bind
+        # (``_commit_start_flags`` below): a start attempt that fails import /
+        # config / agent-file validation must NOT clobber the running gateway's
+        # saved posture, or its next restart would replay the rejected attempt.
+        start_flags = {
+            "agent_file": agent_file,
+            "config_file": config_file,
+            "drain_timeout": drain_timeout,
+            "max_concurrent_runs": max_concurrent_runs,
+            "queue_depth": queue_depth,
+            "overflow_policy": overflow_policy,
+            "reliability": reliability,
+            "openai_api": openai_api,
+            "mcp": mcp,
+            "identity_store": identity_store,
+            "scale_to_zero": scale_to_zero,
+            "idle_minutes": idle_minutes,
+            "drain_marker": drain_marker,
+            "watchdog": watchdog,
+            "watchdog_timeout": watchdog_timeout,
+        }
+
+        def _commit_start_flags() -> None:
+            # Best-effort — never blocks start (#3349).
+            _persist_start_flags(host, port, start_flags)
+
         logger.info(
             "Gateway starting (host=%s port=%s config=%s agents=%s)",
             host, port, config_file or "-", agent_file or "-",
@@ -207,7 +311,47 @@ class GatewayHandler:
                 self._gateway._openai_api_override = openai_api
             if mcp is not None:
                 self._gateway._mcp_override = mcp
+            # CLI --identity-store enables cross-platform continuity, overriding
+            # the gateway.yaml ``identity:`` block (#3020). A constructor-set
+            # resolver on the gateway always wins over both.
+            if identity_store is not None:
+                try:
+                    from praisonai_bot.bots import StoreBackedIdentityResolver
+                    self._gateway._identity_resolver = (
+                        StoreBackedIdentityResolver.from_env(
+                            path=os.path.expanduser(identity_store)
+                        )
+                    )
+                    # Mark explicit so the YAML ``identity:`` block (and its
+                    # hot-reload reconciliation) never clobbers the CLI store.
+                    self._gateway._identity_resolver_explicit = True
+                    logger.info(
+                        "Gateway cross-platform identity resolution enabled "
+                        "(store=%s)", identity_store,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not enable identity resolver from "
+                        "--identity-store %s: %s", identity_store, e,
+                    )
+            # CLI lifecycle flags override gateway.lifecycle.* in YAML (#3021)
+            if scale_to_zero is not None:
+                self._gateway._scale_to_zero_override = scale_to_zero
+            if idle_minutes is not None:
+                self._gateway._idle_minutes_override = idle_minutes
+            if drain_marker is not None:
+                self._gateway._drain_marker_override = drain_marker
+            # CLI --watchdog / --watchdog-timeout override gateway.watchdog.*
+            # in YAML (#3410): opt-in event-loop liveness backstop.
+            if watchdog is not None:
+                self._gateway._watchdog_override = watchdog
+            if watchdog_timeout is not None:
+                self._gateway._watchdog_timeout_override = watchdog_timeout
             print(f"Loading gateway config from {config_file}")
+            # Config wiring validated; the gateway is about to bind. Persist the
+            # launch posture now so a restart can replay it, but only after the
+            # attempt has cleared validation (#3349).
+            _commit_start_flags()
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
             except KeyboardInterrupt:
@@ -237,6 +381,15 @@ class GatewayHandler:
         self._gateway = WebSocketGateway(
             config=config, openai_api=openai_api, mcp=mcp
         )
+        # CLI --watchdog also applies in no-config mode (#3410): build the
+        # opt-in liveness watchdog directly since start_with_config's YAML
+        # wiring is skipped here. No-op unless --watchdog is passed.
+        if watchdog:
+            self._gateway._watchdog_override = watchdog
+            self._gateway._watchdog_timeout_override = watchdog_timeout
+            self._gateway._configure_watchdog(
+                self._gateway._merge_watchdog_overrides(None)
+            )
         # Resolved graceful-drain window for this no-config run. Defaults to the
         # explicit ``--drain-timeout`` (``None`` → gateway default) and is
         # replaced below by the ``--reliability`` preset's drain when a preset
@@ -245,34 +398,38 @@ class GatewayHandler:
         # CLI admission-control flags also apply in no-config mode (#2454):
         # build a shared gate directly so `--max-concurrent-runs` is honoured
         # even without a gateway.yaml. A ``--reliability`` preset (#2531) can
-        # supply the admission ceiling too, so build the gate whenever either
-        # is given, letting the preset fill fields the explicit flags omit.
-        if max_concurrent_runs is not None or reliability is not None:
-            try:
-                from praisonai_bot.bots._admission import build_admission_gate
-                from praisonai_bot.bots._reliability import resolve_reliability
+        # supply the admission ceiling too. As of #3438 the *unset* posture is
+        # safe by default (bind-aware admission ceiling + drain), so we always
+        # resolve reliability here — the resolver returns an admission ceiling
+        # unless the operator passes ``--reliability off``.
+        try:
+            from praisonai_bot.bots._admission import build_admission_gate
+            from praisonai_bot.bots._reliability import resolve_reliability
 
-                # Pass the explicit ``--drain-timeout`` through so it still wins
-                # over the preset; capture the resolved window for shutdown so
-                # ``--reliability production`` actually drains (#2531).
-                _resolved = resolve_reliability(
-                    reliability,
-                    drain_timeout=drain_timeout,
-                    max_concurrent_runs=max_concurrent_runs or 0,
-                    queue_depth=queue_depth or 0,
-                    overflow_policy=overflow_policy or "reject",
-                )
-                resolved_drain_timeout = _resolved.drain_timeout
-                self._gateway._admission_gate = build_admission_gate(
-                    max_concurrent_runs=_resolved.max_concurrent_runs,
-                    queue_depth=_resolved.queue_depth,
-                    overflow_policy=_resolved.overflow_policy,
-                )
-            except Exception as e:
-                # Invalid admission-control config is unrecoverable until the
-                # operator fixes it; restarting won't help (#2437).
-                print(f"Error: invalid admission-control config: {e}")
-                return GATEWAY_FATAL_CONFIG_EXIT_CODE
+            # Pass the explicit ``--drain-timeout`` through so it still wins
+            # over the preset; capture the resolved window for shutdown so
+            # ``--reliability production`` actually drains (#2531). ``host``
+            # informs the safe-by-default posture — a non-loopback bind
+            # resolves to the full production window (#3438).
+            _resolved = resolve_reliability(
+                reliability,
+                bind_host=host,
+                drain_timeout=drain_timeout,
+                max_concurrent_runs=max_concurrent_runs or 0,
+                queue_depth=queue_depth or 0,
+                overflow_policy=overflow_policy or "reject",
+            )
+            resolved_drain_timeout = _resolved.drain_timeout
+            self._gateway._admission_gate = build_admission_gate(
+                max_concurrent_runs=_resolved.max_concurrent_runs,
+                queue_depth=_resolved.queue_depth,
+                overflow_policy=_resolved.overflow_policy,
+            )
+        except Exception as e:
+            # Invalid admission-control config is unrecoverable until the
+            # operator fixes it; restarting won't help (#2437).
+            print(f"Error: invalid admission-control config: {e}")
+            return GATEWAY_FATAL_CONFIG_EXIT_CODE
 
 
         if agent_file:
@@ -289,6 +446,10 @@ class GatewayHandler:
         print(f"Starting gateway on ws://{host}:{port}")
         print("Press Ctrl+C to stop")
 
+        # Admission/agent wiring validated; the gateway is about to bind.
+        # Persist the launch posture now so a restart can replay it, but only
+        # after the attempt has cleared validation (#3349).
+        _commit_start_flags()
         try:
             asyncio.run(self._gateway.start())
         except KeyboardInterrupt:
@@ -356,13 +517,24 @@ class GatewayHandler:
             agent_id = self._gateway.register_agent(agent)
             print(f"Registered agent: {agent_id}")
     
-    def stop(self, host: str = "127.0.0.1", port: int = 8765, force: bool = False) -> None:
+    def stop(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        force: bool = False,
+        drain_timeout: Optional[float] = None,
+    ) -> None:
         """Stop a running gateway instance.
         
         Args:
             host: Gateway host
             port: Gateway port 
             force: Force stop (kill process)
+            drain_timeout: Seconds to wait for the process to finish its
+                in-flight drain before force-killing. Defaults to a 10s grace
+                window; ``restart --drain-timeout N`` passes N here so the old
+                process is given the full requested drain window instead of a
+                fixed 10s (#3161).
         """
         try:
             from praisonai_bot.gateway.port_utils import GatewayPIDLock
@@ -388,33 +560,51 @@ class GatewayHandler:
         if force:
             self._force_kill_process(pid)
         else:
-            self._graceful_stop_process(pid)
+            self._graceful_stop_process(pid, drain_timeout=drain_timeout)
         
         # Clean up lock file
         pid_lock.release_lock()
         print(f"Gateway stopped (PID {pid})")
     
-    def _graceful_stop_process(self, pid: int) -> None:
-        """Gracefully stop a process by sending SIGTERM."""
+    def _graceful_stop_process(
+        self, pid: int, drain_timeout: Optional[float] = None
+    ) -> None:
+        """Gracefully stop a process by sending SIGTERM.
+
+        Waits up to ``drain_timeout`` seconds (default 10) for the process to
+        finish its in-flight drain and exit before force-killing. Passing the
+        gateway's configured drain timeout here (e.g. from
+        ``restart --drain-timeout``) ensures a long drain window is respected
+        instead of an unconditional 10s cut-off (#3161).
+        """
         import signal
         import time
         import os
-        
+
+        # Grace window: honour the caller's drain timeout with a small buffer so
+        # the process can flush after finishing turns; never below 10s so the
+        # default behaviour is unchanged.
+        if drain_timeout is not None and drain_timeout > 0:
+            grace_seconds = max(10.0, float(drain_timeout) + 5.0)
+        else:
+            grace_seconds = 10.0
+        iterations = max(1, int(grace_seconds / 0.1))
+
         try:
             print(f"Sending stop signal to PID {pid}...")
             os.kill(pid, signal.SIGTERM)
-            
-            # Wait up to 10 seconds for graceful shutdown
-            for _ in range(100):
+
+            # Wait for graceful shutdown up to the grace window.
+            for _ in range(iterations):
                 try:
                     os.kill(pid, 0)  # Check if process exists
                     time.sleep(0.1)
                 except (OSError, ProcessLookupError):
                     return  # Process has stopped
-            
+
             print(f"Process {pid} did not stop gracefully, forcing...")
             self._force_kill_process(pid)
-            
+
         except (OSError, ProcessLookupError):
             print(f"Process {pid} not found or already stopped")
     
@@ -537,12 +727,13 @@ class GatewayHandler:
         print("Usage: praisonai gateway hooks {add|list|remove} ...")
         return 1
 
-    def status(self, host: str = "127.0.0.1", port: int = 8765) -> None:
+    def status(self, host: str = "127.0.0.1", port: int = 8765, deep: bool = False) -> None:
         """Check gateway status.
         
         Args:
             host: Gateway host
             port: Gateway port
+            deep: Print per-channel health rows from /health
         """
         import urllib.request
         import json
@@ -583,6 +774,8 @@ class GatewayHandler:
         url = f"http://{host}:{port}/health"
         
         try:
+            import time as _time
+
             with urllib.request.urlopen(url, timeout=5) as response:
                 data = json.loads(response.read().decode())
                 print(f"Gateway Status: {data.get('status', 'unknown')}")
@@ -590,10 +783,72 @@ class GatewayHandler:
                 print(f"  Agents: {data.get('agents', 0)}")
                 print(f"  Sessions: {data.get('sessions', 0)}")
                 print(f"  Clients: {data.get('clients', 0)}")
+                if data.get("last_inbound_at"):
+                    age = _time.time() - float(data["last_inbound_at"])
+                    print(
+                        f"  Last inbound: "
+                        f"{_time.strftime('%H:%M:%S', _time.localtime(data['last_inbound_at']))} "
+                        f"({age:.0f}s ago)"
+                    )
+                channels = data.get("channels") or {}
+                if channels and deep:
+                    print("  Channels:")
+                    for name, ch in channels.items():
+                        running = ch.get("running", False)
+                        state = (ch.get("supervision") or {}).get("state", "—")
+                        reason = ch.get("reason", "—")
+                        probe_ok = (ch.get("probe") or {}).get("ok")
+                        last = ch.get("last_activity")
+                        last_s = f"{_time.time() - last:.0f}s ago" if last else "—"
+                        mark = "✓" if running else "✗"
+                        probe_s = f" probe_ok={probe_ok}" if probe_ok is not None else ""
+                        print(
+                            f"    {mark} {name}: running={running} state={state} "
+                            f"reason={reason} last_activity={last_s}{probe_s}"
+                        )
+                if deep:
+                    self._print_version_skew(host, port)
                 self._print_reload_status(data)
         except Exception as e:
             print(f"Gateway not reachable at {url}")
             print(f"Error: {e}")
+
+    @staticmethod
+    def _print_version_skew(host: str, port: int) -> None:
+        """Warn when the running gateway version differs from the installed CLI."""
+        import json
+        import urllib.request
+
+        try:
+            from importlib.metadata import version as pkg_version
+        except ImportError:
+            from importlib_metadata import version as pkg_version  # type: ignore
+
+        try:
+            cli_version = pkg_version("praisonai-bot")
+        except Exception:
+            return
+
+        url = f"http://{host}:{port}/info"
+        try:
+            req = urllib.request.Request(url)
+            token = __import__("os").environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+            # Only attach the bearer token where it cannot leak to a network
+            # observer: over loopback (never on the wire). A remote plaintext
+            # HTTP probe deliberately omits it rather than expose the credential.
+            if token and host in ("127.0.0.1", "localhost", "::1"):
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = json.loads(response.read().decode())
+        except Exception:
+            return
+
+        runtime_version = data.get("version")
+        if runtime_version and runtime_version != cli_version:
+            print(
+                f"  Version skew: running gateway reports {runtime_version}, "
+                f"installed praisonai-bot is {cli_version}"
+            )
 
     @staticmethod
     def _print_reload_status(data: dict) -> None:
@@ -687,7 +942,37 @@ def handle_gateway_command(args) -> int:
             help="Named reliability posture composing drain + admission in one "
                  "switch (#2531)",
         )
-        
+        start_parser.add_argument(
+            "--identity-store", dest="identity_store", default=None,
+            help="Enable cross-platform conversation continuity: path to the "
+                 "identity link-map JSON (default ~/.praisonai/identity.json). "
+                 "Paired/linked users share one session + memory across "
+                 "channels (#3020)",
+        )
+        start_parser.add_argument(
+            "--scale-to-zero", dest="scale_to_zero", action="store_true", default=None,
+            help="Quiesce the gateway when idle for --idle-minutes (scale-to-zero; #3021)",
+        )
+        start_parser.add_argument(
+            "--idle-minutes", dest="idle_minutes", type=float, default=None,
+            help="Minutes of no inbound / in-flight work before quiescing (#3021)",
+        )
+        start_parser.add_argument(
+            "--drain-marker", dest="drain_marker", default=None,
+            help="Path to watch for an epoch-aware external drain marker file (#3021)",
+        )
+        start_parser.add_argument(
+            "--watchdog", dest="watchdog", action="store_true", default=None,
+            help="Enable the event-loop liveness watchdog: an OS-thread backstop "
+                 "that dumps stacks and hard-exits (restart code 75) if the loop "
+                 "freezes, so the supervisor relaunches the process (#3410)",
+        )
+        start_parser.add_argument(
+            "--watchdog-timeout", dest="watchdog_timeout", type=float, default=None,
+            help="Seconds the event loop may stall before the watchdog trips a "
+                 "restart (default ~15s = 5s x 3 strikes; #3410)",
+        )
+
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
         status_parser.add_argument("--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)")
@@ -755,6 +1040,12 @@ def handle_gateway_command(args) -> int:
             queue_depth=getattr(args, "queue_depth", None),
             overflow_policy=getattr(args, "overflow_policy", None),
             reliability=getattr(args, "reliability", None),
+            identity_store=getattr(args, "identity_store", None),
+            scale_to_zero=getattr(args, "scale_to_zero", None),
+            idle_minutes=getattr(args, "idle_minutes", None),
+            drain_marker=getattr(args, "drain_marker", None),
+            watchdog=getattr(args, "watchdog", None),
+            watchdog_timeout=getattr(args, "watchdog_timeout", None),
         )
     elif subcommand == "status":
         handler.status(

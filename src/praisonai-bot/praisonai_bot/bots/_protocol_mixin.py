@@ -88,7 +88,59 @@ class ChatCommandMixin:
                 info for name, info in custom_all.items()
                 if name not in builtin_names
             ]
-        return builtins + custom
+        file_custom = self._file_command_infos(
+            builtin_names | {info.name for info in custom}
+        )
+        return builtins + custom + file_custom
+
+    def _file_command_infos(self, taken_names: Optional[Set[str]] = None) -> list:
+        """Return ``ChatCommandInfo`` for exposed file-based custom commands.
+
+        Bridges ``.praisonai/commands/*.md`` (and plugin-bundle commands) into
+        the merged command list (Issue #3729) via the adapter's
+        ``_custom_command_resolver`` when present. Builtins and adapter-registered
+        commands keep precedence: a file command whose name is already ``taken``
+        is skipped (builtin/registered wins, matching the code registry policy).
+        Best-effort — never raises.
+        """
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is None:
+            return []
+        taken = taken_names or set()
+        infos: list = []
+        try:
+            for name, description in resolver.descriptions().items():
+                if name in taken:
+                    logger.debug(
+                        "Custom command /%s shadowed by a builtin/registered "
+                        "command; keeping precedence.", name
+                    )
+                    continue
+                infos.append(ChatCommandInfo(name=name, description=description))
+        except Exception:  # noqa: BLE001 — help/menu must never raise
+            return []
+        return infos
+
+    def render_custom_command(
+        self, name: str, arguments: str = "", working_dir: Optional[str] = None
+    ) -> Optional[str]:
+        """Resolve a file-based custom command into a chat-turn body.
+
+        Called by an adapter's catch-all ``/name`` handler on a miss against
+        builtins/registered handlers (Issue #3729): renders
+        ``.praisonai/commands/{name}.md`` (``$ARGUMENTS``/``@file``, shell off
+        unless opted in) so it can be submitted as the user turn via the normal
+        session ``chat`` path. Returns ``None`` when no resolver is configured
+        or the command is unknown/not exposed, so the caller falls through to
+        normal chat. Best-effort — never raises.
+        """
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is None:
+            return None
+        try:
+            return resolver.render(name, arguments=arguments, working_dir=working_dir)
+        except Exception:  # noqa: BLE001 — dispatch must never raise
+            return None
 
     def is_command_allowed(self, name: str, platform: Optional[str] = None) -> bool:
         """Check if a command is allowed on the given platform."""
@@ -137,6 +189,26 @@ class ChatCommandMixin:
                 continue
             info = info_map.get(name)
             extra[name] = getattr(info, 'description', '') or "Custom command"
+
+        # File-based / entry-point custom commands (Issue #3729): include them in
+        # the native command menu so typed-``/`` autocomplete lists them too.
+        # Builtins and adapter-registered handlers keep precedence: only add a
+        # file command whose name is not already a builtin (in the registry) or
+        # an adapter-registered handler (already in ``extra``). Best-effort — a
+        # resolver error never breaks native-menu building.
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is not None:
+            try:
+                builtin_names = registry.get_command_names()
+            except Exception:  # noqa: BLE001
+                builtin_names = set()
+            try:
+                for name, description in resolver.descriptions().items():
+                    if name in extra or name in builtin_names:
+                        continue
+                    extra[name] = description or "Custom command"
+            except Exception:  # noqa: BLE001 — menu building must never raise
+                pass
 
         policy = getattr(self, '_command_policy', None)
         try:
@@ -453,7 +525,26 @@ class MessageHookMixin:
                     return {"content": "", "cancel": True, "silent": True}
                 if content and content.strip() == "NO_REPLY":
                     return {"content": "", "cancel": True, "silent": True}
-        
+
+        # Empty-final resolution (Issue #3621): the visible-outcome guarantee.
+        # A blank/whitespace final, or the machine ``[tool_calls: …]`` placeholder,
+        # is NOT deliberate silence — dropping it (Slack), parking an empty send
+        # in the DLQ (Telegram) or shipping the raw placeholder to the user are
+        # all the worst bug class in this subsystem: an inbound action that ends
+        # with no visible outcome. Substitute one recorded, typed fallback here,
+        # at the single delivery decision point, so every adapter that funnels
+        # through ``fire_message_sending`` delivers a real answer instead. An
+        # exact silence token is already handled above, so only genuine "empty,
+        # not silence" reaches here.
+        try:
+            from praisonaiagents.bots.silence import classify_final
+            if classify_final(content) == "empty":
+                content = self._resolve_empty_final()
+        except ImportError:
+            # Core unavailable: still never ship a blank/placeholder body.
+            if not content or not content.strip() or content.strip().startswith("[tool_calls:"):
+                content = self._resolve_empty_final()
+
         result: Dict[str, Any] = {"content": content, "cancel": False}
         runner = self._get_hook_runner()
         if runner is None:
@@ -487,6 +578,35 @@ class MessageHookMixin:
         except Exception as e:
             logger.debug(f"MESSAGE_SENDING hook error (non-fatal): {e}")
         return result
+
+    _DEFAULT_EMPTY_FINAL = "Task completed — no message to show."
+
+    def _resolve_empty_final(self) -> str:
+        """Return the recorded fallback text for an empty, non-silence final.
+
+        Issue #3621: when the agent produces no user-visible text (blank,
+        whitespace, or a raw ``[tool_calls: …]`` placeholder) the gateway must
+        still deliver a visible outcome rather than drop the turn. The fallback
+        is a short, plain sentence; an operator can override it with an optional
+        ``empty_final_message`` key under the existing ``BotConfig.metadata``
+        block (no new typed knob is added — ``metadata`` is the declared seam
+        for platform-specific extras). A direct ``config.empty_final_message``
+        attribute is still honoured for programmatic callers. Emitting it is
+        logged so the recorded non-outcome is operator-visible.
+        """
+        config = getattr(self, "config", None)
+        fallback = getattr(config, "empty_final_message", None)
+        if not fallback:
+            metadata = getattr(config, "metadata", None)
+            if isinstance(metadata, dict):
+                fallback = metadata.get("empty_final_message")
+        text = str(fallback).strip() if fallback and str(fallback).strip() else self._DEFAULT_EMPTY_FINAL
+        logger.info(
+            "Empty-final resolution: substituted fallback for a blank/placeholder "
+            "reply on %s (visible-outcome guarantee)",
+            getattr(self, "platform", "unknown"),
+        )
+        return text
 
     def fire_message_sent(
         self, channel_id: str, content: str, message_id: str = ""
@@ -731,6 +851,38 @@ def fire_session_start(
         _emit(runner, HookEvent.SESSION_START, event_input)
     except Exception as e:
         logger.debug(f"SESSION_START hook error (non-fatal): {e}")
+
+
+def fire_prompt_prefix_invalidated(
+    runner: Any,
+    session_id: str,
+    old_sig: str,
+    new_sig: str,
+    agent_name: str = "bot",
+    reason: str = "",
+) -> None:
+    """Fire PROMPT_PREFIX_INVALIDATED when a turn's cached prefix changes.
+
+    Advisory only (Issue #3352): signals that this turn's model/tool-schema/
+    system-prompt prefix differs from the previous turn on the same session,
+    so the provider prompt cache will miss. Best-effort — never raises.
+    """
+    if runner is None:
+        return
+    try:
+        from praisonaiagents.hooks.types import HookEvent, HookInput
+
+        event_input = HookInput(
+            session_id=session_id,
+            cwd=os.getcwd(),
+            event_name=HookEvent.PROMPT_PREFIX_INVALIDATED,
+            timestamp=str(time.time()),
+            agent_name=agent_name,
+            extra={"old_sig": old_sig, "new_sig": new_sig, "reason": reason},
+        )
+        _emit(runner, HookEvent.PROMPT_PREFIX_INVALIDATED, event_input)
+    except Exception as e:
+        logger.debug(f"PROMPT_PREFIX_INVALIDATED hook error (non-fatal): {e}")
 
 
 def fire_session_end(

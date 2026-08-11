@@ -23,6 +23,21 @@ _console = None
 _rich_available = None
 
 
+def stdout_supports_unicode() -> bool:
+    """Return True when stdout can encode Unicode emoji safely.
+
+    Handles legacy Windows consoles (cp1252/cp850), redirected pipes, and SSH
+    sessions by attempting to encode a representative emoji. Falls back to
+    ASCII-safe labels when encoding is not possible.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        "\U0001f527".encode(encoding)
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
 def _get_rich_available() -> bool:
     """Check if Rich is available."""
     global _rich_available

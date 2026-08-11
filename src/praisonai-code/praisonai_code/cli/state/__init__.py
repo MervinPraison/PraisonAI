@@ -17,6 +17,12 @@ from .sessions import (
     SessionMetadata,
     get_session_manager,
 )
+from .session_resolver import (
+    ResolvedSession,
+    resolve_session,
+    delete_session,
+    export_session,
+)
 
 __all__ = [
     'generate_run_id',
@@ -28,4 +34,8 @@ __all__ = [
     'SessionManager',
     'SessionMetadata',
     'get_session_manager',
+    'ResolvedSession',
+    'resolve_session',
+    'delete_session',
+    'export_session',
 ]

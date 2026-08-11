@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, AgentTeam
 from langchain_agentql.tools import ExtractWebDataTool
 from dotenv import load_dotenv

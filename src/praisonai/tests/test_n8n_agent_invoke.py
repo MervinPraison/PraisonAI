@@ -333,6 +333,141 @@ class TestAgentInvokeFastAPI:
         assert response.status_code == 404
 
 
+class TestSessionIsolation:
+    """Verify session_id yields isolated + continuous conversations (Issue #3105)."""
+
+    def test_resolve_session_agent_falls_back_for_mocks(self):
+        """Non-Agent objects (mocks) stay on the shared instance for back-compat."""
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        mock_agent = Mock(spec=["start", "name"])
+        register_agent("mock-fallback", mock_agent)
+        try:
+            resolved = resolve_session_agent("mock-fallback", "s1")
+            assert resolved is mock_agent
+        finally:
+            unregister_agent("mock-fallback")
+
+    def test_resolve_session_agent_missing_returns_none(self):
+        from praisonai.api.agent_invoke import resolve_session_agent
+
+        assert resolve_session_agent("does-not-exist", "s1") is None
+
+    def test_real_agent_clones_are_isolated(self, tmp_path, monkeypatch):
+        """Two session_ids produce distinct, isolated agent clones."""
+        praisonaiagents = pytest.importorskip("praisonaiagents")
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        agent = praisonaiagents.Agent(
+            name="iso-agent",
+            instructions="test",
+            llm="gpt-4o-mini",
+        )
+        register_agent("iso-agent", agent)
+        try:
+            a = resolve_session_agent("iso-agent", "A")
+            b = resolve_session_agent("iso-agent", "B")
+
+            # Distinct clones, distinct histories, correct session binding.
+            assert a is not b
+            assert a is not agent
+            assert a._session_id == "A"
+            assert b._session_id == "B"
+            assert a.chat_history is not b.chat_history
+
+            # Mutating one clone's history does not affect the other or template.
+            a.chat_history.append({"role": "user", "content": "hi from A"})
+            assert b.chat_history == []
+            assert agent.chat_history == []
+        finally:
+            unregister_agent("iso-agent")
+
+    def test_no_session_id_is_ephemeral(self):
+        """Absent session_id yields an unbound (ephemeral) clone."""
+        praisonaiagents = pytest.importorskip("praisonaiagents")
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        agent = praisonaiagents.Agent(
+            name="ephemeral-agent",
+            instructions="test",
+            llm="gpt-4o-mini",
+        )
+        register_agent("ephemeral-agent", agent)
+        try:
+            clone = resolve_session_agent("ephemeral-agent", None)
+            assert clone is not agent
+            assert clone._session_id is None
+            assert clone.chat_history == []
+        finally:
+            unregister_agent("ephemeral-agent")
+
+    def test_agent_subclass_is_isolated(self):
+        """Application-defined ``Agent`` subclasses are isolated, not shared."""
+        praisonaiagents = pytest.importorskip("praisonaiagents")
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        class MyAgent(praisonaiagents.Agent):
+            pass
+
+        agent = MyAgent(name="sub-agent", instructions="test", llm="gpt-4o-mini")
+        register_agent("sub-agent", agent)
+        try:
+            a = resolve_session_agent("sub-agent", "A")
+            b = resolve_session_agent("sub-agent", "B")
+            # Subclass must be recognised and cloned per session, not shared.
+            assert a is not agent
+            assert isinstance(a, MyAgent)
+            assert a is not b
+            assert a._session_id == "A"
+            assert b._session_id == "B"
+            assert a.chat_history is not b.chat_history
+        finally:
+            unregister_agent("sub-agent")
+
+    def test_clone_failure_raises_instead_of_sharing(self, monkeypatch):
+        """A clone failure must raise, never fall back to the shared template."""
+        praisonaiagents = pytest.importorskip("praisonaiagents")
+        from praisonai.api import agent_invoke
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        agent = praisonaiagents.Agent(
+            name="clonefail-agent",
+            instructions="test",
+            llm="gpt-4o-mini",
+        )
+        register_agent("clonefail-agent", agent)
+
+        def _boom(_agent):
+            raise RuntimeError("clone exploded")
+
+        monkeypatch.setattr(agent_invoke, "_clone_agent", _boom)
+        try:
+            with pytest.raises(RuntimeError):
+                resolve_session_agent("clonefail-agent", "A")
+        finally:
+            unregister_agent("clonefail-agent")
+
+
 def test_agent_invoke_smoke_test():
     """Smoke test to verify agent invoke module can be imported and used."""
     try:

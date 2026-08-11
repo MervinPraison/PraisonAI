@@ -102,7 +102,14 @@ def main():
     # Print results
     print("\nAutonomous Agent Results:")
     print("=" * 50)
-    for task_id, result in results["task_results"].items():
+    task_results = (
+        results.get("task_results", {})
+        if isinstance(results, dict)
+        else {}
+    )
+    if not task_results and isinstance(results, str):
+        print(f"\nWorkflow output:\n{results}")
+    for task_id, result in task_results.items():
         if result:
             task_name = result.description
             print(f"\nTask: {task_name}")

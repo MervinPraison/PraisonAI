@@ -48,6 +48,10 @@ def _email_loader():
 def _agentmail_loader():
     return _load_bot_class("agentmail", "AgentMailBot")
 
+
+def _webhook_loader():
+    return _load_bot_class("webhook", "WebhookBot")
+
 # Built-in bot platforms with lazy loading
 _BUILTIN_PLATFORMS = {
     "telegram": _telegram_loader,
@@ -57,6 +61,7 @@ _BUILTIN_PLATFORMS = {
     "linear": _linear_loader,
     "email": _email_loader,
     "agentmail": _agentmail_loader,
+    "webhook": _webhook_loader,
 }
 
 

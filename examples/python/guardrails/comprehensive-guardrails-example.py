@@ -12,8 +12,7 @@ Features demonstrated:
 - Quality assurance workflows
 """
 
-from praisonaiagents import Agent, Task, AgentTeam
-from praisonaiagents.task import TaskOutput
+from praisonaiagents import Agent, Task, AgentTeam, TaskOutput
 from typing import Tuple, Any
 import re
 

@@ -65,7 +65,7 @@ def __getattr__(name: str):
         "detect_self_harm_instructions",
     }
     _audit_exports = {"AuditLogHook"}
-    _protected_exports = {"is_protected", "get_protection_reason", "PROTECTED_PATHS", "PROTECTED_PATTERNS"}
+    _protected_exports = {"is_protected", "get_protection_reason", "resolve_real_path", "PROTECTED_PATHS", "PROTECTED_PATTERNS"}
 
     if name in _injection_exports:
         from . import injection as _inj

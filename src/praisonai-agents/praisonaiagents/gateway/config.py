@@ -5,7 +5,292 @@ Provides configuration dataclasses for gateway and session settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    runtime_checkable,
+)
+
+
+# ---------------------------------------------------------------------------
+# Canonical config version + doctor-driven migration (Issue #3841)
+# ---------------------------------------------------------------------------
+#
+# The gateway config carries a ``config_version`` stamp so the runtime, the
+# operator, and ``gateway doctor --fix`` can all tell whether a config predates
+# a breaking change. Migration is expressed as an ordered list of *declarative
+# rules* (a detect predicate + a fix mutation as one unit) that ``doctor --fix``
+# applies once to move an out-of-date config forward, then stamps the current
+# version. This keeps migration a one-time repair rather than a permanent
+# load-time heuristic, and gives the canonical config shape a single owner.
+GATEWAY_CONFIG_VERSION = 1
+
+
+class ConfigVersionError(ValueError):
+    """Raised when a config carries a ``config_version`` this build can't handle.
+
+    Two cases, both operator-actionable rather than silently corrupting data:
+      * the stamp is a version *newer* than :data:`GATEWAY_CONFIG_VERSION` — an
+        older binary must not downgrade / migrate a config written by a newer
+        one (that would drop keys the newer schema added), so migration refuses;
+      * the stamp is present but not a non-boolean integer — a malformed stamp
+        (``true``, ``"1"``, ``1.0``) is a mistake, not "current", so it is
+        rejected instead of being treated as version 1 via ``True == 1``.
+    """
+
+
+@dataclass
+class LegacyConfigRule:
+    """A single declarative config-migration rule.
+
+    ``detect`` returns True when the (old) shape this rule fixes is present in
+    the raw config mapping; ``fix`` returns the mutated mapping moving it toward
+    the current version; ``reason`` is an operator-facing description rendered by
+    ``gateway doctor --fix``. Rules are pure functions of the raw mapping so the
+    same set can be reasoned about, tested, and applied identically everywhere.
+    """
+
+    detect: Callable[[Dict[str, Any]], bool]
+    fix: Callable[[Dict[str, Any]], Dict[str, Any]]
+    reason: str
+
+
+def _detect_allowed_users_csv(raw: Dict[str, Any]) -> bool:
+    channels = raw.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    return any(
+        isinstance(ch, dict) and isinstance(ch.get("allowed_users"), str)
+        for ch in channels.values()
+    )
+
+
+def _fix_allowed_users_csv(raw: Dict[str, Any]) -> Dict[str, Any]:
+    for ch in raw.get("channels", {}).values():
+        if isinstance(ch, dict) and isinstance(ch.get("allowed_users"), str):
+            value = ch["allowed_users"]
+            ch["allowed_users"] = (
+                [u.strip() for u in value.split(",") if u.strip()] if value else []
+            )
+    return raw
+
+
+def _detect_missing_group_policy(raw: Dict[str, Any]) -> bool:
+    channels = raw.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    return any(
+        isinstance(ch, dict) and "group_policy" not in ch
+        for ch in channels.values()
+    )
+
+
+def _fix_missing_group_policy(raw: Dict[str, Any]) -> Dict[str, Any]:
+    for ch in raw.get("channels", {}).values():
+        if isinstance(ch, dict) and "group_policy" not in ch:
+            ch["group_policy"] = "mention_only"
+    return raw
+
+
+# Ordered set of migration rules. Each moves an older config shape toward the
+# current canonical form; ``migrate_config_with_doctor`` applies them once and
+# stamps ``config_version``. New breaking renames/retirements append a rule here
+# and bump ``GATEWAY_CONFIG_VERSION`` — the canonical shape has one owner.
+GATEWAY_CONFIG_RULES: "List[LegacyConfigRule]" = [
+    LegacyConfigRule(
+        detect=_detect_allowed_users_csv,
+        fix=_fix_allowed_users_csv,
+        reason="migrating allowed_users (string) -> list [rule: allowed_users_csv_to_list]",
+    ),
+    LegacyConfigRule(
+        detect=_detect_missing_group_policy,
+        fix=_fix_missing_group_policy,
+        reason="setting group_policy secure default 'mention_only' [rule: group_policy_default]",
+    ),
+]
+
+
+def _parse_config_version(raw: Mapping[str, Any]) -> Optional[int]:
+    """Return the config's ``config_version`` as an int, or None if unstamped.
+
+    Rejects a malformed stamp so ``config_version: true`` cannot masquerade as
+    version 1 (``True == 1``) and a string/float stamp cannot slip through.
+    """
+    if "config_version" not in raw:
+        return None
+    value = raw["config_version"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigVersionError(
+            f"Invalid gateway config_version {value!r}: expected an integer "
+            f"(current is {GATEWAY_CONFIG_VERSION}). Fix or remove the stamp."
+        )
+    return value
+
+
+def is_config_current(raw: Mapping[str, Any]) -> bool:
+    """Return whether ``raw`` already carries the current ``config_version``.
+
+    A malformed stamp (non-integer / boolean) is not "current" — it raises
+    :class:`ConfigVersionError` so operators fix it rather than having it
+    silently coerced (``True == 1``).
+    """
+    return _parse_config_version(raw) == GATEWAY_CONFIG_VERSION
+
+
+def migrate_config_with_doctor(
+    raw: Dict[str, Any],
+) -> "Tuple[Dict[str, Any], List[str]]":
+    """Apply the declarative migration rules once and stamp ``config_version``.
+
+    Returns ``(migrated, applied_reasons)``. The input is copied shallowly (and
+    per-channel dicts copied) so the caller's mapping is not mutated in place.
+    Only rules whose ``detect`` fires contribute a reason, so a config already
+    at the current shape migrates cleanly with an empty reason list while still
+    receiving the version stamp. This is the single migration executor behind
+    ``gateway doctor --fix``.
+
+    Raises :class:`ConfigVersionError` when the config was written by a *newer*
+    build (its stamp exceeds :data:`GATEWAY_CONFIG_VERSION`) or the stamp is
+    malformed — an older binary must never downgrade a newer config or drop
+    keys it does not understand.
+    """
+    source_version = _parse_config_version(raw)
+    if source_version is not None and source_version > GATEWAY_CONFIG_VERSION:
+        raise ConfigVersionError(
+            f"gateway config_version {source_version} is newer than this "
+            f"build supports ({GATEWAY_CONFIG_VERSION}). Upgrade praisonai / "
+            "praisonai-bot to a version that understands this config instead "
+            "of migrating it with an older one."
+        )
+
+    migrated: Dict[str, Any] = dict(raw)
+    channels = migrated.get("channels")
+    if isinstance(channels, dict):
+        migrated["channels"] = {
+            name: (dict(ch) if isinstance(ch, dict) else ch)
+            for name, ch in channels.items()
+        }
+
+    applied: List[str] = []
+    for rule in GATEWAY_CONFIG_RULES:
+        if rule.detect(migrated):
+            migrated = rule.fix(migrated)
+            applied.append(rule.reason)
+
+    migrated["config_version"] = GATEWAY_CONFIG_VERSION
+    return migrated, applied
+
+
+# ---------------------------------------------------------------------------
+# Hot-reload registry (Issue #3378)
+# ---------------------------------------------------------------------------
+#
+# Closed set of dotted config paths that are safe to apply *in place* on a
+# running gateway without restarting channels or agents. Anything not listed
+# here keeps falling through to the existing restart plans, so restart stays
+# the safe default for unknown/structural changes (fail-safe).
+#
+# This is a pure protocol/registry with no heavy imports; the authoritative
+# classification lives in core so every runtime reloads identically, while the
+# wrapper/bot gateway server only implements the in-place ``apply_hot_reload``.
+HOT_APPLIABLE_KEYS: "frozenset[str]" = frozenset({
+    "gateway.logging.level",
+    "gateway.drain_timeout",
+    "gateway.reload_drain_timeout",
+})
+
+
+def is_hot_appliable(path: str) -> bool:
+    """Return whether a dotted config ``path`` can be applied without restart.
+
+    A change is hot-appliable when the path itself is registered, or when it is
+    a leaf *under* a registered key (e.g. ``gateway.logging.level.extra``).
+    Callers should treat every other path as requiring a restart plan.
+    """
+    if path in HOT_APPLIABLE_KEYS:
+        return True
+    return any(path.startswith(key + ".") for key in HOT_APPLIABLE_KEYS)
+
+
+# ---------------------------------------------------------------------------
+# Reload scope classification (Issue #3440)
+# ---------------------------------------------------------------------------
+#
+# The wrapper/bot gateway builds a concrete reload plan (which channels to
+# bounce, whether to recreate agents, whether to full-restart). The *rules*
+# for that plan — hot-appliable vs channel-scoped vs full — must stay
+# canonical in core so every runtime reloads identically, rather than being
+# duplicated ad-hoc per runtime. This is a pure string classification with no
+# heavy imports; the wrapper consumes it and only implements the effects.
+class ReloadScope:
+    """Canonical classification of a changed config ``path``'s reload scope.
+
+    Values are plain strings so wrapper/runtime code can compare without
+    importing this class. ``FULL`` is the fail-safe default for unknown or
+    structural changes.
+
+    - ``HOT``: apply in place, no restart (see :func:`is_hot_appliable`).
+    - ``CHANNEL``: a change under ``channels.<name>`` — restart only that one
+      channel; other channels keep their connections and in-flight turns.
+    - ``AGENTS``: an agent/provider/guardrails change — recreate agents only,
+      without bouncing channels.
+    - ``FULL``: unknown or structural change — full restart (fail-safe).
+    """
+
+    HOT = "hot"
+    CHANNEL = "channel"
+    AGENTS = "agents"
+    FULL = "full"
+
+
+def classify_reload(path: str) -> str:
+    """Classify a changed dotted config ``path`` into a :class:`ReloadScope`.
+
+    Canonical, side-effect-free classification shared by every runtime so a
+    hot-reload plan is built identically regardless of who loads the config.
+    Anything not explicitly recognised falls through to ``ReloadScope.FULL``,
+    keeping full restart the fail-safe default for structural changes.
+    """
+    if is_hot_appliable(path):
+        return ReloadScope.HOT
+
+    parts = path.split(".")
+    head = parts[0] if parts else ""
+
+    # A change scoped to a single channel (``channels.<name>...``) only needs
+    # that channel restarted. The bare ``channels`` section (no name) — and a
+    # malformed empty name like ``channels.`` — is a structural change and
+    # stays a full restart (fail-safe).
+    if head == "channels" and len(parts) >= 2 and parts[1]:
+        return ReloadScope.CHANNEL
+
+    # Agent-affecting changes recreate agents without bouncing channels.
+    if head in ("agents", "provider", "guardrails"):
+        return ReloadScope.AGENTS
+
+    return ReloadScope.FULL
+
+
+@runtime_checkable
+class SupportsHotReload(Protocol):
+    """Protocol a gateway implements to apply hot-reloadable config in place.
+
+    The gateway calls :meth:`apply_hot_reload` with the subset of changed paths
+    classified as hot-appliable (see :data:`HOT_APPLIABLE_KEYS`) and the newly
+    loaded config, mutating the relevant live subsystems without a restart.
+    """
+
+    def apply_hot_reload(
+        self, paths: Set[str], new_config: Mapping[str, Any]
+    ) -> None:
+        ...
 
 
 @dataclass
@@ -15,8 +300,15 @@ class SessionConfig:
     Attributes:
         timeout: Session timeout in seconds (0 = no timeout)
         max_messages: Maximum messages to keep in history (0 = unlimited)
-        persist: Whether to persist session state
+        persist: Whether to persist session state. Defaults to True so a
+            gateway started from the out-of-box path remembers conversations
+            across restarts/redeploys via the SQLite transcript store. Set
+            ``persist: false`` in the config to opt into ephemeral, in-memory
+            sessions.
         persist_path: Path for session persistence
+        store: Persistence backend when ``persist`` is set — ``"sqlite"``
+            (default: transcripts in a WAL SQLite DB with concurrent readers
+            and indexed lookups) or ``"file"`` (legacy per-session JSON files)
         resume_window: How long (seconds) a session stays resumable after disconnect
         max_inbox: Maximum queued messages per session (0 = unlimited, default 256)
         metadata: Additional session metadata
@@ -25,8 +317,9 @@ class SessionConfig:
     
     timeout: int = 3600  # 1 hour default
     max_messages: int = 1000
-    persist: bool = False
+    persist: bool = True  # durable by default; set persist=False for ephemeral
     persist_path: Optional[str] = None
+    store: str = "sqlite"  # "sqlite" (concurrent, indexed) | "file" (legacy JSON)
     resume_window: int = 86400  # 24 hours default
     max_inbox: int = 256  # Default bounded queue size
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -44,6 +337,10 @@ class SessionConfig:
             raise ValueError("max_messages must be >= 0")
         if self.resume_window < 0:
             raise ValueError("resume_window must be >= 0")
+        if self.store not in ("sqlite", "file"):
+            raise ValueError(
+                f"Invalid session store {self.store!r}; expected 'sqlite' or 'file'"
+            )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -52,6 +349,7 @@ class SessionConfig:
             "max_messages": self.max_messages,
             "persist": self.persist,
             "persist_path": self.persist_path,
+            "store": self.store,
             "resume_window": self.resume_window,
             "max_inbox": self.max_inbox,
             "metadata": self.metadata,
@@ -134,7 +432,11 @@ class DeliveryConfig:
         max_retries: Maximum retry attempts
         retry_backoff: Exponential backoff multiplier
         message_ttl: How long to retain unacknowledged messages (seconds)
-        store_backend: Message store backend ("memory" or "redis")
+        store_backend: Message store backend — ``"sqlite"`` (default,
+            zero-dependency durable store so the at-least-once guarantee
+            survives a gateway restart/redeploy), ``"redis"`` (durable +
+            multi-process horizontal fan-out) or ``"memory"`` (explicit,
+            ephemeral opt-out for testing/single-process throwaway use).
     """
     
     enabled: bool = True
@@ -142,7 +444,15 @@ class DeliveryConfig:
     max_retries: int = 3
     retry_backoff: float = 2.0
     message_ttl: int = 86400
-    store_backend: str = "memory"
+    store_backend: str = "sqlite"
+    
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.store_backend not in ("sqlite", "redis", "memory"):
+            raise ValueError(
+                f"Invalid delivery store_backend {self.store_backend!r}; "
+                "expected 'sqlite', 'redis' or 'memory'"
+            )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -287,6 +597,73 @@ class LivenessConfig:
 
 
 @dataclass
+class TurnLockConfig:
+    """Configuration for cluster-wide per-turn serialisation (Issue #3643).
+
+    Selects the backend for the gateway's per-turn lock — the guarantee that
+    only one turn runs against a given resolved session at a time. The default
+    ``"local"`` backend reproduces today's in-process ``asyncio.Lock`` /
+    ``LockMap`` behaviour exactly (zero cost, no new dependency), so
+    single-replica deployments are byte-for-byte unchanged. Selecting
+    ``"redis"`` extends serialisation across every replica so a
+    horizontally-scaled gateway (``replicas > 1``) no longer runs concurrent
+    turns on one session — the concrete distributed lock lives in the
+    wrapper/bot package and reuses the existing ``RedisConfig`` connection and
+    the scheduler's proven owner+TTL lease pattern.
+
+    This maps onto the pure core
+    :class:`~praisonaiagents.gateway.protocols.TurnLockProtocol`.
+
+    Attributes:
+        backend: ``"local"`` (default, in-process ``asyncio.Lock``) or
+            ``"redis"`` (distributed lease, cluster-wide serialisation).
+        ttl: Lease time-to-live in seconds for a distributed backend. Bounds
+            how long a crashed holder's lease survives before it is reclaimable,
+            so a dead replica cannot wedge a healthy session (fail-open /
+            self-healing, as the scheduler already does). Inert for ``"local"``.
+        url: Optional Redis URL for the ``"redis"`` backend. When omitted the
+            distributed lock reuses the gateway's configured ``RedisConfig``.
+    """
+
+    backend: str = "local"
+    ttl: float = 60.0
+    url: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.backend not in ("local", "redis"):
+            raise ValueError(
+                f"Invalid turn_lock backend {self.backend!r}; "
+                "expected 'local' or 'redis'"
+            )
+        if not self.ttl > 0:
+            raise ValueError("turn_lock ttl must be > 0")
+
+    @property
+    def enabled(self) -> bool:
+        """Whether a distributed (cross-replica) turn lock is selected."""
+        return self.backend != "local"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary (hides sensitive URL)."""
+        return {
+            "backend": self.backend,
+            "ttl": self.ttl,
+            "url": "***" if self.url else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "TurnLockConfig":
+        """Create from a parsed ``gateway.turn_lock`` mapping (tolerant of None)."""
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            backend=str(data.get("backend") or "local"),
+            ttl=float(data.get("ttl") or 60.0),
+            url=data.get("url"),
+        )
+
+
+@dataclass
 class ApiConfig:
     """Configuration for additive protocol surfaces on the gateway app.
 
@@ -364,6 +741,12 @@ class GatewayConfig:
     session_config: SessionConfig = field(default_factory=SessionConfig)
     heartbeat_interval: int = 30
     reconnect_timeout: int = 60
+    # Issue #3467: per-turn wall-clock ceiling. When > 0, a single agent turn
+    # that runs longer than this many seconds is cancelled (cooperatively via
+    # the agent's interrupt controller and by cancelling the driving task) so a
+    # runaway turn cannot wedge the serial per-session queue. 0 = no timeout
+    # (today's behaviour: a turn runs to completion).
+    per_turn_timeout: float = 0.0
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
     max_buffered_bytes: int = 1024 * 1024  # 1MB default
@@ -390,6 +773,11 @@ class GatewayConfig:
     # Issue #2798: application-level connection liveness (ping/pong heartbeat +
     # half-open reaper). Opt-in; disabled by default so behaviour is unchanged.
     liveness: LivenessConfig = field(default_factory=LivenessConfig)
+    # Issue #3643: cluster-wide per-turn serialisation. Default "local" backend
+    # keeps today's in-process asyncio.Lock behaviour (single-replica); "redis"
+    # serialises turns across replicas so a horizontally-scaled gateway does not
+    # run concurrent turns on one session.
+    turn_lock: "TurnLockConfig" = field(default_factory=lambda: TurnLockConfig())
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -409,6 +797,10 @@ class GatewayConfig:
             raise ValueError("heartbeat_interval must be >= 0")
         if self.reconnect_timeout < 0:
             raise ValueError("reconnect_timeout must be >= 0")
+        if self.per_turn_timeout < 0:
+            raise ValueError(
+                "per_turn_timeout must be >= 0 (use 0 to disable the per-turn timeout)"
+            )
         if self.max_concurrent_runs < 0:
             raise ValueError(
                 "max_concurrent_runs must be >= 0 (use 0 to disable admission control)"
@@ -494,6 +886,7 @@ class GatewayConfig:
             "session_config": self.session_config.to_dict(),
             "heartbeat_interval": self.heartbeat_interval,
             "reconnect_timeout": self.reconnect_timeout,
+            "per_turn_timeout": self.per_turn_timeout,
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
             "max_buffered_bytes": self.max_buffered_bytes,
             "max_queued_frames": self.max_queued_frames,
@@ -506,6 +899,7 @@ class GatewayConfig:
             "scope_policy_enabled": self.has_scope_policy,
             "api": self.api.to_dict(),
             "liveness": self.liveness.to_dict(),
+            "turn_lock": self.turn_lock.to_dict(),
         }
     
     @property
@@ -637,8 +1031,9 @@ class MultiChannelGatewayConfig:
                 session_config = SessionConfig(
                     timeout=sc_data.get("timeout", 3600),
                     max_messages=sc_data.get("max_messages", 1000),
-                    persist=sc_data.get("persist", False),
+                    persist=sc_data.get("persist", True),
                     persist_path=sc_data.get("persist_path"),
+                    store=sc_data.get("store", "sqlite"),
                     resume_window=sc_data.get("resume_window", 86400),
                     max_inbox=sc_data.get("max_inbox", 256),
                     metadata=sc_data.get("metadata", {}),
@@ -678,6 +1073,7 @@ class MultiChannelGatewayConfig:
             session_config=session_config,
             heartbeat_interval=gw_data.get("heartbeat_interval", 30),
             reconnect_timeout=gw_data.get("reconnect_timeout", 60),
+            per_turn_timeout=float(gw_data.get("per_turn_timeout", 0.0) or 0.0),
             ssl_cert=gw_data.get("ssl_cert"),
             ssl_key=gw_data.get("ssl_key"),
             max_buffered_bytes=int(gw_data.get("max_buffered_bytes", 1024 * 1024)),
@@ -694,6 +1090,7 @@ class MultiChannelGatewayConfig:
             auth_scopes=auth_scopes,
             api=ApiConfig.from_dict(gw_data.get("api")),
             liveness=LivenessConfig.from_dict(gw_data.get("liveness")),
+            turn_lock=TurnLockConfig.from_dict(gw_data.get("turn_lock")),
         )
         
         # Parse agents section (pass through as dicts)

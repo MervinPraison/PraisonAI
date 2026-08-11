@@ -7,10 +7,12 @@ knowledge retrieval, and state management.
 
 import asyncio
 import logging
+import os
 import time
 import threading
 import uuid
 import inspect
+from collections import OrderedDict
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -81,7 +83,15 @@ class PersistenceOrchestrator:
             self._config = None
         
         self._current_session: Optional[ConversationSession] = None
-        self._session_cache: Dict[str, ConversationSession] = {}
+        # Bounded LRU cache: prevents unbounded memory growth in long-running
+        # servers/bots where each request may carry a fresh session_id.
+        self._session_cache: "OrderedDict[str, ConversationSession]" = OrderedDict()
+        try:
+            self._cache_maxsize = max(1, int(os.environ.get("PRAISONAI_SESSION_CACHE_MAX", "1024")))
+        except (TypeError, ValueError):
+            # Empty/non-numeric override must not abort persistence init;
+            # fall back to the documented default.
+            self._cache_maxsize = 1024
         self._cache_lock = threading.RLock()  # RLock allows re-entrant access
 
     def _sync(self, value: Any) -> Any:
@@ -95,8 +105,12 @@ class PersistenceOrchestrator:
         we pass the value through unchanged for genuinely sync stores.
         """
         if inspect.iscoroutine(value):
-            from .._async_bridge import run_sync
-            return run_sync(value)
+            from .._async_bridge import run_sync_or_offload
+            # ``run_sync_or_offload`` works from a plain sync caller *and* from
+            # inside a running loop (FastAPI handler, Jupyter, async test); a
+            # bare ``run_sync`` would raise in the latter, silently breaking sync
+            # persistence hooks that ride an async store under a running loop.
+            return run_sync_or_offload(value, thread_name="praisonai-persistence-sync")
         return value
     
     @classmethod
@@ -115,14 +129,19 @@ class PersistenceOrchestrator:
     # =========================================================================
     
     def _cache_put(self, session: ConversationSession) -> None:
-        """Store session in cache with thread safety."""
+        """Store session in cache with thread safety and LRU eviction."""
         with self._cache_lock:
             self._session_cache[session.session_id] = session
+            self._session_cache.move_to_end(session.session_id)
+            while len(self._session_cache) > self._cache_maxsize:
+                self._session_cache.popitem(last=False)
     
     def _cache_get(self, session_id: str) -> Optional[ConversationSession]:
         """Get session from cache with thread safety and defensive copying."""
         with self._cache_lock:
             cached = self._session_cache.get(session_id)
+            if cached is not None:
+                self._session_cache.move_to_end(session_id)
             return deepcopy(cached) if cached is not None else None
     
     def _cache_delete(self, session_id: str) -> Optional[ConversationSession]:
@@ -165,34 +184,54 @@ class PersistenceOrchestrator:
             logger.debug("No conversation store configured, skipping session load")
             return []
         
+        from .conversation._ops import resume_or_create_session
+
         # Try to load existing session
         session = None
         if resume:
             session = self._sync(self.conversation.get_session(session_id))
-        
+
         if session:
             logger.info(f"Resuming session: {session_id}")
             self._current_session = session
             self._cache_put(session)
-            
-            # Load previous messages
-            messages = self._sync(self.conversation.get_messages(session_id))
-            return messages
-        else:
-            # Create new session
+
+        # Build the new session lazily inside the factory so the resume path
+        # never touches the agent's identity or constructs a discarded object.
+        # The factory captures the exact instance the helper persists so the
+        # same object (identical timestamps/identity) is cached below.
+        created: List[ConversationSession] = []
+
+        def _build_session() -> ConversationSession:
             agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
-            session = ConversationSession(
+            new_session = ConversationSession(
                 session_id=session_id,
                 user_id=user_id,
                 agent_id=agent_id,
                 name=f"Session {session_id[:8]}",
                 metadata={"agent_type": type(agent).__name__},
             )
-            self._sync(self.conversation.create_session(session))
+            created.append(new_session)
+            return new_session
+
+        messages = resume_or_create_session(
+            self.conversation,
+            session,
+            session_id,
+            build_session=_build_session,
+            get_messages=lambda: self._sync(self.conversation.get_messages(session_id)),
+            create_session=lambda s: self._sync(self.conversation.create_session(s)),
+        )
+
+        if messages is None:
+            # New session was created inside the helper; capture and cache it.
+            new_session = created[0]
             logger.info(f"Created new session: {session_id}")
-            self._current_session = session
-            self._cache_put(session)
+            self._current_session = new_session
+            self._cache_put(new_session)
             return []
+
+        return messages
     
     def on_message(
         self,
@@ -291,46 +330,72 @@ class PersistenceOrchestrator:
             logger.debug("No conversation store configured, skipping session load")
             return []
         
+        from .conversation._ops import aresume_or_create_session
+
+        is_async = isinstance(self.conversation, AsyncConversationStore)
+
+        async def _get_session():
+            if is_async:
+                return await self.conversation.get_session(session_id)
+            # Run blocking store off the loop so we don't block multi-agent execution
+            return await asyncio.to_thread(self.conversation.get_session, session_id)
+
+        async def _create_session(s):
+            if is_async:
+                return await self.conversation.create_session(s)
+            return await asyncio.to_thread(self.conversation.create_session, s)
+
+        async def _get_messages():
+            if is_async:
+                return await self.conversation.get_messages(session_id)
+            return await asyncio.to_thread(self.conversation.get_messages, session_id)
+
         # Try to load existing session
         session = None
         if resume:
-            if isinstance(self.conversation, AsyncConversationStore):
-                session = await self.conversation.get_session(session_id)
-            else:
-                # Run blocking store off the loop so we don't block multi-agent execution
-                session = await asyncio.to_thread(self.conversation.get_session, session_id)
-        
+            session = await _get_session()
+
         if session:
             logger.info(f"Resuming session: {session_id}")
             self._current_session = session
             self._cache_put(session)
-            
-            # Load previous messages
-            if isinstance(self.conversation, AsyncConversationStore):
-                messages = await self.conversation.get_messages(session_id)
-            else:
-                messages = await asyncio.to_thread(self.conversation.get_messages, session_id)
-            return messages
-        else:
-            # Create new session
+
+        # Build the new session lazily inside the factory so the resume path
+        # never touches the agent's identity or constructs a discarded object.
+        # The factory captures the exact instance the helper persists so the
+        # same object (identical timestamps/identity) is cached below.
+        created: List[ConversationSession] = []
+
+        def _build_session() -> ConversationSession:
             agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
-            session = ConversationSession(
+            new_session = ConversationSession(
                 session_id=session_id,
                 user_id=user_id,
                 agent_id=agent_id,
                 name=f"Session {session_id[:8]}",
                 metadata={"agent_type": type(agent).__name__},
             )
-            
-            if isinstance(self.conversation, AsyncConversationStore):
-                await self.conversation.create_session(session)
-            else:
-                await asyncio.to_thread(self.conversation.create_session, session)
-                
+            created.append(new_session)
+            return new_session
+
+        messages = await aresume_or_create_session(
+            self.conversation,
+            session,
+            session_id,
+            build_session=_build_session,
+            create_session=_create_session,
+            get_messages=_get_messages,
+        )
+
+        if messages is None:
+            # New session was created inside the helper; capture and cache it.
+            new_session = created[0]
             logger.info(f"Created new session: {session_id}")
-            self._current_session = session
-            self._cache_put(session)
+            self._current_session = new_session
+            self._cache_put(new_session)
             return []
+
+        return messages
     
     async def aon_message(
         self,
@@ -467,6 +532,54 @@ class PersistenceOrchestrator:
             raise ValueError("No knowledge store configured")
         
         return self._sync(self.knowledge.upsert(collection, documents))
+    
+    async def aretrieve_knowledge(
+        self,
+        query_embedding: List[float],
+        collection: str = "default",
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[KnowledgeDocument]:
+        """Async-safe RAG retrieval.
+
+        Every real vector backend issues a network round trip on ``search``.
+        Called from an async agent (``arun`` / a FastAPI handler), the sync
+        :meth:`retrieve_knowledge` would block the event loop for the whole
+        round trip, serialising every other concurrent request behind it. This
+        offloads the store call to a worker thread so the loop stays free, in
+        line with the async conversation hooks (``aon_message`` etc.).
+        """
+        if not self.knowledge:
+            logger.debug("No knowledge store configured")
+            return []
+
+        if inspect.iscoroutinefunction(self.knowledge.search):
+            return await self.knowledge.search(
+                collection=collection,
+                query_embedding=query_embedding,
+                limit=limit,
+                filters=filters,
+            )
+        return await asyncio.to_thread(
+            self.knowledge.search,
+            collection=collection,
+            query_embedding=query_embedding,
+            limit=limit,
+            filters=filters,
+        )
+
+    async def aadd_knowledge(
+        self,
+        documents: List[KnowledgeDocument],
+        collection: str = "default",
+    ) -> List[str]:
+        """Async-safe counterpart to :meth:`add_knowledge` (see rationale there)."""
+        if not self.knowledge:
+            raise ValueError("No knowledge store configured")
+
+        if inspect.iscoroutinefunction(self.knowledge.upsert):
+            return await self.knowledge.upsert(collection, documents)
+        return await asyncio.to_thread(self.knowledge.upsert, collection, documents)
     
     # =========================================================================
     # State Management

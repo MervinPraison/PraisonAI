@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 409 | **Rust Features:** 667 | **Parity:** 70.4%
+> **Python Features:** 410 | **Rust Features:** 667 | **Parity:** 70.0%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 409 |
+| Python Core Features | 410 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **121** |
-| Language Limitations (N/A) | 5 |
-| **Parity** | **70.4%** |
+| **Actual Gap Count** | **123** |
+| Language Limitations (N/A) | 4 |
+| **Parity** | **70.0%** |
 
 ## Implemented Features
 
@@ -687,7 +687,6 @@
 These Python features cannot be directly implemented in Rust due to reserved keywords or module naming conflicts. Equivalent functionality exists under different names.
 
 - ⚠️ `config` → Use `parity_config` instead
-- ⚠️ `db` → Use `parity_db` instead
 - ⚠️ `memory` (Rust reserved/module conflict)
 - ⚠️ `tools` (Rust reserved/module conflict)
 - ⚠️ `workflows` (Rust reserved/module conflict)
@@ -757,10 +756,12 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ObservabilityEventType`
 - ❌ `ObservabilityHooks`
 - ❌ `PlatformCapabilities`
+- ❌ `PraisonAIAgents`
 - ❌ `PraisonAIConfigError`
 - ❌ `PraisonAIError`
 - ❌ `RetryBackoffConfig`
 - ❌ `RulesConfig`
+- ❌ `RunOutcome`
 - ❌ `RunStatus`
 - ❌ `SendResult`
 - ❌ `SessionErrorEvent`

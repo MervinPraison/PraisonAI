@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, AgentTeam
 from langchain_community.tools.riza.command import ExecPython
 

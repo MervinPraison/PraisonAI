@@ -279,12 +279,12 @@ class TestSQLiteBackedSessions:
             db = str(Path(tmpdir) / "train.db")
             sid = "train-sqlonly"
 
-            storage = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
-            storage.save_iteration(self._make_iteration())
+            with TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db)) as storage:
+                storage.save_iteration(self._make_iteration())
 
-            reopened = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
-            # Backend-aware existence succeeds even though no JSON sidecar exists
-            assert reopened.exists() is True
+            with TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db)) as reopened:
+                # Backend-aware existence succeeds even though no JSON sidecar exists
+                assert reopened.exists() is True
 
     def test_list_sqlite_only_no_json_sidecar(self):
         """list_sessions_from_backend finds sessions stored only in SQLite."""
@@ -298,10 +298,14 @@ class TestSQLiteBackedSessions:
             db = str(Path(tmpdir) / "train.db")
             sid = "train-sqlonly"
 
-            storage = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
-            storage.save_iteration(self._make_iteration())
+            with TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db)) as storage:
+                storage.save_iteration(self._make_iteration())
 
-            sessions = list_sessions_from_backend(SQLiteBackend(db_path=db))
+            list_backend = SQLiteBackend(db_path=db)
+            try:
+                sessions = list_sessions_from_backend(list_backend)
+            finally:
+                list_backend.close()
 
             assert len(sessions) == 1
             assert sessions[0].session_id == sid
@@ -318,19 +322,19 @@ class TestSQLiteBackedSessions:
             sid = "train-sqlonly"
 
             it = self._make_iteration()
-            storage = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
-            storage.save_iteration(it)
-            storage.save_report(
-                TrainingReport(session_id=sid, iterations=[it], total_iterations=1)
-            )
+            with TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db)) as storage:
+                storage.save_iteration(it)
+                storage.save_report(
+                    TrainingReport(session_id=sid, iterations=[it], total_iterations=1)
+                )
 
-            reopened = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
-            report = reopened.load_report()
+            with TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db)) as reopened:
+                report = reopened.load_report()
 
-            assert report is not None
-            assert report.iterations[0].score == 9.0
-            # No JSON sidecar was created for this session id
-            assert not reopened.storage_path.exists()
+                assert report is not None
+                assert report.iterations[0].score == 9.0
+                # No JSON sidecar was created for this session id
+                assert not reopened.storage_path.exists()
 
 
 class TestCustomFileBackedSessions:

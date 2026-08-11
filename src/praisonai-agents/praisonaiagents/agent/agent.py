@@ -20,7 +20,7 @@ from .async_memory_mixin import AsyncMemoryMixin
 from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
-from .async_safety import AsyncSafeState
+from .async_safety import AsyncSafeState, DualLock
 # NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
 # (Issue #2644). It is kept in the MRO for backward compatibility during the
 # deprecation cycle and will be removed afterwards.
@@ -859,8 +859,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         planning_tools = None
         planning_reasoning = False
         policy = None
-        background = None
-        checkpoints = None
         output_style = None
         thinking_budget = None
         skills_dirs = None
@@ -1273,16 +1271,42 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             session_id = _history_session_id
         elif _history_enabled and session_id is None and _history_session_id is None:
             import hashlib as _hl
-            _agent_hash = _hl.sha256((name or "agent").encode()).hexdigest()[:8]
-            # Backward compat: check if legacy md5-based session exists first
-            _legacy_hash = _hl.md5((name or "agent").encode()).hexdigest()[:8]
-            _legacy_id = f"history_{_legacy_hash}"
-            _new_id = f"history_{_agent_hash}"
-            # Prefer legacy if it exists on disk, else use new SHA-256 ID
             import os as _os
-            _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
-            if _os.path.exists(_os.path.join(_session_dir, f"{_legacy_id}.json")):
-                session_id = _legacy_id  # preserve existing history
+            _name = name or "agent"
+            # Workspace-scoped id so same-named agents in different projects don't
+            # collide (Issue #3154). Opt out with PRAISONAI_GLOBAL_SESSIONS=true for
+            # name-only global continuity.
+            _global_scope = _os.environ.get("PRAISONAI_GLOBAL_SESSIONS", "").lower() in ("1", "true", "yes")
+            if _global_scope:
+                _workspace_id = "global"
+            else:
+                from ..session.workspace import workspace_id as _wid
+                _workspace_id = _wid()
+            _workspace_hash = _hl.sha256(f"{_workspace_id}:{_name}".encode()).hexdigest()[:8]
+            _new_id = f"history_{_workspace_hash}"
+            # Backward-compat ids (resolution order: name-only sha256, then md5)
+            _name_sha_id = f"history_{_hl.sha256(_name.encode()).hexdigest()[:8]}"
+            _name_md5_id = f"history_{_hl.md5(_name.encode()).hexdigest()[:8]}"
+            # Resolve the migration lookup against the SAME directory the session
+            # store uses at runtime, so a custom PRAISONAI_HOME is honoured (the
+            # store reads from get_sessions_dir()). Fall back to the default path
+            # only if that helper is unavailable.
+            try:
+                from ..paths import get_sessions_dir as _get_sessions_dir
+                _session_dir = str(_get_sessions_dir())
+            except Exception:
+                _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
+            # Prefer an existing workspace-scoped session. Legacy (pre-workspace)
+            # name-only files are only adopted in global scope: doing so in a
+            # workspace-scoped run would silently share Project A's history with a
+            # same-named agent in Project B (Issue #3154). Global scope is the
+            # explicit opt-in for that name-only continuity.
+            if _os.path.exists(_os.path.join(_session_dir, f"{_new_id}.json")):
+                session_id = _new_id
+            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_sha_id}.json")):
+                session_id = _name_sha_id  # preserve existing history
+            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_md5_id}.json")):
+                session_id = _name_md5_id  # preserve existing history
             else:
                 session_id = _new_id
             _history_session_id = session_id
@@ -1629,7 +1653,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             else:
                 llm = model  # model= takes precedence
         
-        # Store rate limiter (optional, zero overhead when None)
+        # Store rate limiter (optional, zero overhead when None).
+        # Auto-build a RateLimiter from max_rpm when no explicit limiter is
+        # provided so ExecutionConfig(max_rpm=N) actually throttles requests.
+        if max_rpm is not None and max_rpm <= 0:
+            raise ValueError(f"max_rpm must be a positive int, got {max_rpm!r}")
+        if rate_limiter is None and max_rpm is not None:
+            from praisonaiagents.llm.rate_limiter import RateLimiter
+            rate_limiter = RateLimiter(requests_per_minute=max_rpm)
         self._rate_limiter = rate_limiter
         
         # Store OpenAI client parameters for lazy initialization (kept separate)
@@ -1759,6 +1790,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         if toolsets:
             try:
                 from ..toolsets import resolve_toolsets_for_model
+                from ..tools.resolver import ToolResolutionError
                 # Advertise the model-family's preferred edit primitive first
                 # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
                 # non-string models fall back to the byte-for-byte default order.
@@ -1774,6 +1806,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 toolset_tools = self._resolve_tool_names(unique_tool_names)
                 self.tools.extend(toolset_tools)
                 logging.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
+            except ToolResolutionError:
+                # Preserve the typed error (with .unknown / .suggestions) so
+                # strict-mode callers get the same self-correcting contract as
+                # the direct tools= path instead of a flattened ValueError.
+                raise
             except (ValueError, KeyError) as e:
                 raise ValueError(
                     f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
@@ -1945,21 +1982,27 @@ Your Goal: {self.goal}
         # None = normal rule flow. Consulted at tool-call approval time.
         self._permission_mode = None
         if isinstance(approval, str) and approval not in ('True', 'False'):
-            # Permission preset: "safe", "read_only", "full"
+            # One string entry point for "how much the agent may do":
+            #   • deny-set presets — "safe"/"read_only"/"full"/"off"/"default"
+            #   • PermissionMode presets — "plan"/"bypass"/"accept_edits"/
+            #     "dont_ask" (+ aliases like "yolo", "auto_edit", "reject").
+            # Deny-set presets are matched first so their exact behaviour is
+            # unchanged; anything else falls through to the canonical
+            # PermissionMode resolver, so all spellings share one model.
             from ..approval.registry import PERMISSION_PRESETS
-            preset_deny = PERMISSION_PRESETS.get(approval)
+            preset_deny = PERMISSION_PRESETS.get(approval.strip().lower())
+            self._approval_backend = None
+            self._approve_all_tools = False
+            self._approval_timeout = 0
+            self._approval_permissions = None
             if preset_deny is not None:
                 self._perm_deny = preset_deny
-                self._approval_backend = None
-                self._approve_all_tools = False
-                self._approval_timeout = 0
-                self._approval_permissions = None
             else:
-                # Unknown string — treat as no approval
-                self._approval_backend = None
-                self._approve_all_tools = False
-                self._approval_timeout = 0
-                self._approval_permissions = None
+                # Not a deny-set preset — try the canonical PermissionMode
+                # presets (plan/bypass/accept_edits/dont_ask + aliases).
+                from ..permissions.rules import PermissionMode
+                self._permission_mode = PermissionMode.resolve(approval)
+                # Unknown string with no mode → treat as no approval.
         elif approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
@@ -2084,16 +2127,25 @@ Your Goal: {self.goal}
         
         # Store tool retry policy for tool execution with exponential backoff
         self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
+
+        # Whether undeclared tool names may resolve via the process-global @tool
+        # registry. Default False keeps the agent scoped to its own tools=[...].
+        self._allow_global_tools = (
+            _tool_config.allow_global_tools if _tool_config else False
+        )
         
-        # Retry configuration with jittered exponential backoff
+        # Retry configuration with jittered exponential backoff.
+        # Default (retry is None) applies RetryBackoffConfig() so the native
+        # OpenAI-client path retries transient errors by default, matching the
+        # LiteLLM path (max_retries=3). Only retry=False disables retries.
         if isinstance(retry, RetryBackoffConfig):
             self._retry_config = retry
         elif isinstance(retry, dict):
             self._retry_config = RetryBackoffConfig(**retry)
-        elif retry is True:
-            self._retry_config = RetryBackoffConfig()  # Use defaults
+        elif retry is False:
+            self._retry_config = None  # Explicitly disabled
         else:
-            self._retry_config = None  # No retry configuration
+            self._retry_config = RetryBackoffConfig()  # Use defaults (retry is True or None)
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
@@ -2189,7 +2241,10 @@ Your Goal: {self.goal}
         # Per-turn tool-name buffer feeding the self-improve review policy.
         # Populated in _execute_tool_with_context, reset each chat turn, and
         # read by _trigger_after_agent_hook when tools_used is not passed.
+        # Guarded by a DualLock (like chat_history) so concurrent chat()/achat()
+        # turns on the same Agent instance don't corrupt each other's buffer.
         self._turn_tools_used = []
+        self._turn_tools_lock = DualLock()
 
         # Database persistence (lazy - no imports until used)
         self._db = db
@@ -2213,8 +2268,6 @@ Your Goal: {self.goal}
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory
         self._policy = policy
-        self._background = background
-        self._checkpoints = checkpoints
         self._output_style = output_style
         self._thinking_budget = thinking_budget
         
@@ -2489,24 +2542,6 @@ Your Goal: {self.goal}
         self._policy = value
 
     @property
-    def background(self) -> Optional[bool]:
-        """BackgroundRunner instance for async task execution."""
-        return self._background
-    
-    @background.setter
-    def background(self, value: Optional[bool]) -> None:
-        self._background = value
-
-    @property
-    def checkpoints(self) -> Optional[bool]:
-        """CheckpointService instance for file-level undo/restore."""
-        return self._checkpoints
-    
-    @checkpoints.setter
-    def checkpoints(self, value: Optional[bool]) -> None:
-        self._checkpoints = value
-
-    @property
     def output_style(self) -> Optional[str]:
         """OutputStyle instance for response formatting."""
         return self._output_style
@@ -2668,16 +2703,7 @@ Your Goal: {self.goal}
                 from ..context.models import ContextConfig as _ContextConfig
                 if isinstance(self._context_param, _ContextConfig):
                     # Build ManagerConfig from ContextConfig fields
-                    manager_config = ManagerConfig(
-                        auto_compact=self._context_param.auto_compact,
-                        compact_threshold=self._context_param.compact_threshold,
-                        strategy=self._context_param.strategy,
-                        output_reserve=self._context_param.output_reserve,
-                        default_tool_output_max=self._context_param.tool_output_max,  # Map field name
-                        protected_tools=list(self._context_param.protected_tools),
-                        keep_recent_turns=self._context_param.keep_recent_turns,
-                        monitor_enabled=self._context_param.monitor.enabled if self._context_param.monitor else False,
-                    )
+                    manager_config = self._manager_config_from_context_config(self._context_param)
                     # Check if llm_summarize is enabled in ContextConfig
                     llm_summarize_enabled = getattr(self._context_param, 'llm_summarize', False)
                     if llm_summarize_enabled:
@@ -2706,16 +2732,7 @@ Your Goal: {self.goal}
                 try:
                     from ..context.models import ContextConfig as _ContextConfig
                     context_config = _ContextConfig(**preset_config)
-                    manager_config = ManagerConfig(
-                        auto_compact=context_config.auto_compact,
-                        compact_threshold=context_config.compact_threshold,
-                        strategy=context_config.strategy,
-                        output_reserve=context_config.output_reserve,
-                        default_tool_output_max=context_config.tool_output_max,
-                        protected_tools=list(context_config.protected_tools),
-                        keep_recent_turns=context_config.keep_recent_turns,
-                        monitor_enabled=context_config.monitor.enabled if context_config.monitor else False,
-                    )
+                    manager_config = self._manager_config_from_context_config(context_config)
                     self._context_manager = ContextManager(
                         model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
                         config=manager_config,
@@ -2734,16 +2751,7 @@ Your Goal: {self.goal}
             try:
                 from ..context.models import ContextConfig as _ContextConfig
                 context_config = _ContextConfig(**self._context_param)
-                manager_config = ManagerConfig(
-                    auto_compact=context_config.auto_compact,
-                    compact_threshold=context_config.compact_threshold,
-                    strategy=context_config.strategy,
-                    output_reserve=context_config.output_reserve,
-                    default_tool_output_max=context_config.tool_output_max,
-                    protected_tools=list(context_config.protected_tools),
-                    keep_recent_turns=context_config.keep_recent_turns,
-                    monitor_enabled=context_config.monitor.enabled if context_config.monitor else False,
-                )
+                manager_config = self._manager_config_from_context_config(context_config)
                 llm_summarize_enabled = self._context_param.get('llm_summarize', False)
                 self._context_manager = ContextManager(
                     model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
@@ -2767,6 +2775,20 @@ Your Goal: {self.goal}
         """Set context manager directly."""
         self._context_manager = value
         self._context_manager_initialized = True
+
+    def _manager_config_from_context_config(self, cc: Any) -> Any:
+        """Build a ManagerConfig from a ContextConfig (single source of truth)."""
+        from ..context import ManagerConfig
+        return ManagerConfig(
+            auto_compact=cc.auto_compact,
+            compact_threshold=cc.compact_threshold,
+            strategy=cc.strategy,
+            output_reserve=cc.output_reserve,
+            default_tool_output_max=cc.tool_output_max,  # Map field name
+            protected_tools=list(cc.protected_tools),
+            keep_recent_turns=cc.keep_recent_turns,
+            monitor_enabled=cc.monitor.enabled if cc.monitor else False,
+        )
 
     def _create_llm_summarize_fn(self) -> Optional[Callable]:
         """
@@ -2795,9 +2817,19 @@ Conversation:
 
 Summary:"""
                 
-                # Use agent's LLM to generate summary
+                # Use agent's LLM to generate summary. Route this internal,
+                # non-user-facing call through the configured auxiliary
+                # ``small_model`` when set; otherwise fall back to the primary
+                # model (unchanged behaviour).
                 client = _get_llm_functions()['get_openai_client'](self.llm, self.base_url, self.api_key)
-                model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+                primary_model = self.llm if isinstance(self.llm, str) else None
+                try:
+                    from ..config.loader import get_small_model
+                    model_name = get_small_model(
+                        primary_model=primary_model, fallback="gpt-4o-mini"
+                    ) or "gpt-4o-mini"
+                except Exception:
+                    model_name = primary_model or "gpt-4o-mini"
                 
                 response = client.chat.completions.create(
                     model=model_name,
@@ -3157,7 +3189,44 @@ Summary:"""
     # ================================================================
     # Filesystem tracking convenience methods (powered by FileSnapshot)
     # ================================================================
-    
+
+    def set_snapshot_root(self, project_path: str) -> bool:
+        """Root filesystem change-tracking at ``project_path``.
+
+        Bots/gateway resolve file tools against a per-chat ``Workspace`` and
+        attach it *after* construction, but the FileSnapshot backing
+        :meth:`undo`/:meth:`redo`/:meth:`diff` was created at ``__init__`` time
+        rooted at ``os.getcwd()``. Without this, ``/undo`` tracks the wrong
+        directory (never where the tools actually wrote). Call this once after
+        the workspace is known so change tracking follows the tools.
+
+        Rooting at a new directory clears the undo/redo stacks (they belong to
+        the previous root). A no-op when the root is unchanged. Returns ``True``
+        when a snapshot manager is rooted at ``project_path``.
+        """
+        import os
+        new_root = os.path.abspath(str(project_path))
+        current = self._file_snapshot
+        if current is not None and getattr(current, "project_path", None) == new_root:
+            return True
+        try:
+            from ..snapshot import FileSnapshot
+            snapshot_dir = None
+            cfg = getattr(self, "autonomy_config", None)
+            if isinstance(cfg, dict):
+                snapshot_dir = cfg.get("snapshot_dir")
+            self._file_snapshot = FileSnapshot(
+                project_path=new_root,
+                snapshot_dir=snapshot_dir,
+            )
+            with self._snapshot_lock:
+                self._snapshot_stack = []
+                self._redo_stack = []
+            return True
+        except Exception as e:  # pragma: no cover - git may be unavailable
+            logger.debug(f"Re-rooting FileSnapshot failed: {e}")
+            return False
+
     def undo(self) -> bool:
         """Undo the last set of file changes.
         
@@ -4702,6 +4771,27 @@ Summary:"""
                 logger.warning(f"Runtime MCP server '{name}' cleanup failed: {e}")
         servers.clear()
 
+    def _cleanup_circuit_breakers(self) -> None:
+        """Remove this agent's instance-scoped tool circuit breakers.
+
+        Breakers are keyed on ``id(self)`` in a process-global registry. Since
+        CPython may reuse an object id after this agent is collected, leaving the
+        entries behind could let a future agent inherit a stale OPEN breaker.
+        Removing them on close keeps the registry bounded and correct.
+        """
+        try:
+            from ..tools.circuit_breaker import _get_global_registry
+        except Exception:
+            return
+        try:
+            registry = _get_global_registry()
+            prefix = f"tool_{id(self)}_"
+            for name in registry.list_services():
+                if name.startswith(prefix):
+                    registry.remove(name)
+        except Exception as e:
+            logger.warning(f"Circuit breaker cleanup failed: {e}")
+
     def _model_supports_web_search(self) -> bool:
         """
         Check if the agent's model supports native web search via LiteLLM.
@@ -4867,8 +4957,20 @@ Summary:"""
             self._memory_instance = None
             return
         
-        # Determine user_id
-        mem_user_id = user_id or getattr(self, 'user_id', None) or "default"
+        # Determine user_id. A shared constant default (e.g. "praison") would
+        # silently merge different sessions'/users' private memory onto the same
+        # on-disk path. When memory is enabled and no explicit user_id was given,
+        # fall back to a per-instance, non-shared id so agents are isolated by
+        # default. Pass user_id=... explicitly to persist/share memory across runs.
+        mem_user_id = user_id
+        if not mem_user_id:
+            import uuid
+            mem_user_id = f"agent-{uuid.uuid4().hex[:12]}"
+            logging.warning(
+                "Agent memory enabled without an explicit user_id; using an "
+                "auto-generated, non-shared id (%s). Pass user_id=... explicitly "
+                "to persist/share memory across runs.", mem_user_id,
+            )
         
         if memory is True or memory == "file":
             # Use FileMemory (zero dependencies)
@@ -5507,7 +5609,19 @@ Answer:"""
         elif isinstance(self.guardrail, str):
             # Create LLM-based guardrail
             from ..guardrails import LLMGuardrail
-            llm = getattr(self, 'llm', None) or getattr(self, 'llm_instance', None)
+            # Prefer the configured LLM instance (with api_key/base_url/client
+            # overrides) over the bare model-name string in self.llm.
+            llm = getattr(self, 'llm_instance', None) or getattr(self, 'llm', None)
+            # Guardrail validation is an internal, non-user-facing LLM call.
+            # When it would fall back to the bare primary model-name string
+            # (no explicit LLM instance), route through the auxiliary
+            # ``small_model`` (unset -> primary model, i.e. unchanged behaviour).
+            if isinstance(llm, str):
+                try:
+                    from ..config.loader import get_small_model
+                    llm = get_small_model(primary_model=llm, fallback=llm) or llm
+                except Exception:
+                    pass
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
@@ -6059,6 +6173,12 @@ Answer:"""
                 images=images,
                 system_prompt=system_prompt
             )
+
+            await self._emit_cli_backend_hook(
+                backend=backend,
+                session_id=session_id,
+                result=result,
+            )
             
             # Check for CLI backend errors
             if result is None:
@@ -6087,10 +6207,55 @@ Answer:"""
             return result.content if result else None
             
         except Exception as e:
+            await self._emit_cli_backend_hook(
+                backend=backend,
+                session_id=session_id,
+                result=None,
+                error=str(e),
+            )
             raise RuntimeError(
                 f"CLI backend execution failed for agent={self.display_name!r}: {e}"
             ) from e
-    
+
+    async def _emit_cli_backend_hook(
+        self,
+        *,
+        backend: Any,
+        session_id: Optional[str],
+        result: Any,
+        error: Optional[str] = None,
+    ) -> None:
+        """Emit the CLI_BACKEND_EXECUTE hook (no-op when no listener is registered).
+
+        Fires on both success and failure so subprocess startup errors and
+        timeouts remain observable. Prompt-bearing argv values are redacted at
+        the payload serialization boundary.
+        """
+        from ..hooks.types import HookEvent
+
+        if not self._hook_runner.registry.has_hooks(HookEvent.CLI_BACKEND_EXECUTE):
+            return
+
+        from ..hooks.events import CliBackendExecuteInput
+        from ..cli_backend.debug import backend_label
+
+        metadata = getattr(result, "metadata", None) or {}
+        hook_input = CliBackendExecuteInput(
+            session_id=session_id,
+            cwd=os.getcwd(),
+            event_name=HookEvent.CLI_BACKEND_EXECUTE.value,
+            timestamp=str(time.time()),
+            agent_name=self.display_name,
+            backend=backend_label(backend),
+            command=metadata.get("command"),
+            content=getattr(result, "content", None),
+            error=error if error is not None else getattr(result, "error", None),
+        )
+        await self._hook_runner.execute(
+            HookEvent.CLI_BACKEND_EXECUTE,
+            hook_input,
+        )
+
     # -------------------------------------------------------------------------
     #                       Resource Lifecycle Management
     # -------------------------------------------------------------------------
@@ -6141,18 +6306,25 @@ Answer:"""
         except Exception as e:
             logger.warning(f"LLM client cleanup failed: {e}")
 
-        # MCP cleanup  
+        # MCP cleanup — shut down MCP clients passed via tools=[MCP(...)]
+        # (mirrors remove_mcp_server()'s best-effort shutdown)
         try:
-            if hasattr(self, '_mcp_clients') and self._mcp_clients:
-                for client_name, client in self._mcp_clients.items():
-                    if hasattr(client, 'close'):
-                        client.close()
-                self._mcp_clients.clear()
+            if isinstance(self.tools, list):
+                for t in self.tools:
+                    if hasattr(t, 'shutdown'):
+                        try:
+                            t.shutdown()
+                        except Exception as e:
+                            logger.warning(f"MCP tool cleanup failed: {e}")
         except Exception as e:
             logger.warning(f"MCP cleanup failed: {e}")
 
         # Runtime-attached MCP servers cleanup (each guarded individually)
         self._shutdown_runtime_mcp_servers()
+
+        # Circuit breaker cleanup — remove this agent's instance-scoped breakers
+        # so a reused id(self) can't inherit a stale OPEN breaker.
+        self._cleanup_circuit_breakers()
 
         # Server registry cleanup
         try:
@@ -6194,17 +6366,26 @@ Answer:"""
                 elif hasattr(self.memory, 'close_connections'):
                     self.memory.close_connections()
             
-            # Close MCP sessions asynchronously if supported
-            if hasattr(self, '_mcp_clients') and self._mcp_clients:
-                for client in self._mcp_clients.values():
-                    if hasattr(client, 'aclose'):
-                        await client.aclose()
-                    elif hasattr(client, 'close'):
-                        client.close()
-                self._mcp_clients.clear()
+            # Close MCP clients passed via tools=[MCP(...)]
+            # (mirrors remove_mcp_server()'s best-effort shutdown)
+            if isinstance(self.tools, list):
+                for t in self.tools:
+                    if hasattr(t, 'aclose'):
+                        try:
+                            await t.aclose()
+                        except Exception as e:
+                            logger.warning(f"MCP tool cleanup failed: {e}")
+                    elif hasattr(t, 'shutdown'):
+                        try:
+                            t.shutdown()
+                        except Exception as e:
+                            logger.warning(f"MCP tool cleanup failed: {e}")
 
             # Runtime-attached MCP servers cleanup (each guarded individually)
             self._shutdown_runtime_mcp_servers()
+
+            # Circuit breaker cleanup — remove this agent's instance-scoped breakers
+            self._cleanup_circuit_breakers()
 
             # Clean up server registrations and tasks
             self._cleanup_server_registrations()
@@ -6245,10 +6426,14 @@ Answer:"""
         """Clean up global server registry entries for this agent."""
         if getattr(self, '_agent_id', None) is None:
             return  # No ID generated, nothing registered
-            
+
         try:
-            _get_default_server_registry().cleanup_agent_registrations(self._agent_id)
-                    
+            # Tear down the routes launch() actually registered (module-level
+            # state in execution_mixin.py). ServerRegistry above is a separate,
+            # unpopulated structure and cleaning it up is a no-op.
+            from .execution_mixin import cleanup_launch_registration
+            cleanup_launch_registration(self._agent_id)
+
         except Exception as e:
             import sys
             if sys.meta_path is not None:

@@ -120,9 +120,19 @@ class BotSessionManager:
         timestamps: bool = False,
         timestamp_template: str = "[%a %Y-%m-%d %H:%M %Z] ",
         admission_gate: Optional[Any] = None,
+        turn_lock_map: Optional["LockMap"] = None,
+        surface_completion_reason: bool = False,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
-        self._locks = LockMap()
+        # Issue #3232: the per-turn lock map is keyed on the *resolved* storage
+        # key (unified user id when an identity resolver is configured), so
+        # serialisation already holds within one adapter. When several adapters
+        # resolve the same human to one unified session, BotOS injects a single
+        # shared ``LockMap`` here so those adapters share one lock per resolved
+        # id and turns run serially across platforms — no interleaved transcript.
+        # Absent injection (single-adapter / direct use) each manager keeps its
+        # own map, preserving today's behaviour exactly.
+        self._locks = turn_lock_map if turn_lock_map is not None else LockMap()
         self._agent_locks: "weakref.WeakKeyDictionary[Any, asyncio.Lock]" = weakref.WeakKeyDictionary()
         self._max_history = max_history
         self._store = store
@@ -153,6 +163,12 @@ class BotSessionManager:
         self._last_journal_key = None  # Store key for delayed completion
         # Run control for in-flight message handling
         self._run_control = run_control
+        # Issue #3296: opt-in surfacing of *why* a turn ended. When True, a turn
+        # that stops early (max_steps / cancelled / error) appends a concise,
+        # user-safe note to the reply so a truncated or empty answer is no longer
+        # silent. Off by default so clean completions and existing deployments
+        # are byte-for-byte unchanged.
+        self._surface_completion_reason = surface_completion_reason
         # Run timeout and active run tracking for cancellation support
         self._run_timeout = run_timeout
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
@@ -169,6 +185,17 @@ class BotSessionManager:
         # Agent instance never leaks one user's model to another. Keyed by
         # storage_key (same as _histories).
         self._model_overrides: Dict[str, Any] = {}
+        # Prompt-cache-stability contract (Issue #3352): last prompt-prefix
+        # signature seen per storage_key. The prefix is the cache-relevant
+        # part of every request (model + tool schemas + system-prompt fp); a
+        # signature change turn-over-turn means the provider prompt cache will
+        # miss. Recorded here so the gateway can meter and surface that
+        # invalidation instead of it happening silently. Keyed like _histories.
+        self._prefix_sig: Dict[str, str] = {}
+        # Optional GatewayMetrics registry. When a gateway wires one in, the
+        # ``prompt_cache_invalidations_total`` counter is incremented on each
+        # prefix drift. ``None`` (default) keeps direct/standalone use unchanged.
+        self._metrics: Optional[Any] = None
         # Per-route toolset scope staged by a routing handler that cannot thread
         # ``tool_policy`` through the adapter's own ``chat()`` call (Issue #2298).
         # The gateway's injected on_message handler runs synchronously right
@@ -254,6 +281,33 @@ class BotSessionManager:
         except Exception:
             pass
 
+    def attach_gateway_runtime(self, runtime: Any) -> None:
+        """Wire the gateway reliability seams into this session manager.
+
+        Implements the core ``SupportsGatewayRuntime`` contract so the gateway
+        injects the identity resolver, delivery router, admission gate, and
+        shared per-turn lock map through one typed call instead of four
+        duck-typed private-attribute splices. Only seams present (non-``None``)
+        on ``runtime`` are applied; a ``None`` seam leaves the existing value
+        untouched.
+
+        Args:
+            runtime: A ``GatewayRuntimeSeams`` carrier (or any object exposing
+                the same optional attributes).
+        """
+        identity_resolver = getattr(runtime, "identity_resolver", None)
+        if identity_resolver is not None:
+            self._identity_resolver = identity_resolver
+        delivery_router = getattr(runtime, "delivery_router", None)
+        if delivery_router is not None:
+            self._delivery_router = delivery_router
+        admission_gate = getattr(runtime, "admission_gate", None)
+        if admission_gate is not None:
+            self._admission_gate = admission_gate
+        turn_lock_map = getattr(runtime, "turn_lock_map", None)
+        if turn_lock_map is not None:
+            self._locks = turn_lock_map
+
     @staticmethod
     def _build_compactor(compaction: Optional[Any]) -> Optional[Any]:
         """Lazily construct a ``ContextCompactor`` from a compaction config.
@@ -325,12 +379,35 @@ class BotSessionManager:
         ``{time}`` placeholders; an empty template or missing sender leaves
         the prompt unchanged. Best-effort — any formatting error falls back
         to the original prompt so a malformed template never breaks chat.
+
+        The ``sender`` is a third-party-controlled platform display name /
+        title, so it is neutralised (newlines collapsed, control chars
+        stripped, length-bounded) before interpolation so a hostile name
+        cannot masquerade as a fake system directive in the prompt the model
+        re-reads every turn (Issue #3313). A well-behaved name is unchanged.
         """
         if not self._attribution or not sender:
             return prompt
+        # ``sender`` is a raw, third-party-controlled platform display name /
+        # group title. Neutralise it before interpolation so an embedded
+        # newline can't masquerade as a fake heading / system directive in
+        # the per-turn prompt prefix (prompt-injection defence, on by default).
+        try:
+            from praisonaiagents.session.context import neutralize_untrusted_text
+            safe_sender = neutralize_untrusted_text(sender)
+        except Exception:  # pragma: no cover — never break chat over sanitising
+            # If the core helper is unavailable (older ``praisonaiagents``), the
+            # fallback must still mirror its guarantees so a platform-controlled
+            # name can't recreate the injected prompt structure: collapse every
+            # newline-like separator, strip control chars, bound length.
+            raw = str(sender)
+            for _sep in ("\r\n", "\r", "\n", "\u2028", "\u2029", "\u0085"):
+                raw = raw.replace(_sep, " ")
+            raw = "".join(c if c >= " " or c == "\t" else " " for c in raw)
+            safe_sender = " ".join(raw.split())[:240]
         try:
             prefix = self._attribution.format(
-                sender=sender,
+                sender=safe_sender,
                 time=datetime.now().strftime("%H:%M"),
             )
         except (KeyError, IndexError, ValueError) as e:  # pragma: no cover — defensive
@@ -493,6 +570,50 @@ class BotSessionManager:
             )
         except Exception as e:
             logger.debug("SESSION_START emit error (non-fatal): %s", e)
+
+    def _check_prefix_stability(self, agent: "Agent", storage_key: str) -> None:
+        """Meter prompt-cache prefix drift for this turn (Issue #3352).
+
+        Computes the agent's cache-relevant prefix signature (model + sorted
+        tool names + system-prompt fingerprint) *after* the per-turn tool/model
+        swaps are applied, and compares it to the last signature for this
+        session. On a change — the one auditable point where provider prompt
+        caching is knowingly sacrificed — it increments an optional metric and
+        fires the advisory PROMPT_PREFIX_INVALIDATED hook. Best-effort: any
+        failure is swallowed so metering never breaks a turn.
+        """
+        try:
+            from praisonaiagents.agent.prompt_cache import prompt_prefix_signature
+            sig = prompt_prefix_signature(agent)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("prompt prefix signature error (non-fatal): %s", e)
+            return
+        last = self._prefix_sig.get(storage_key)
+        self._prefix_sig[storage_key] = sig
+        if last is None or last == sig:
+            return
+        if self._metrics is not None:
+            try:
+                self._metrics.inc("prompt_cache_invalidations_total")
+            except Exception:  # pragma: no cover - defensive
+                pass
+        try:
+            from ._protocol_mixin import (
+                fire_prompt_prefix_invalidated,
+                _resolve_runner_from_agent,
+            )
+            runner = _resolve_runner_from_agent(agent)
+            agent_name = getattr(agent, "agent_name", None) or getattr(agent, "name", "bot")
+            fire_prompt_prefix_invalidated(
+                runner,
+                session_id=storage_key,
+                old_sig=last,
+                new_sig=sig,
+                agent_name=agent_name,
+                reason="tools/model",
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("PROMPT_PREFIX_INVALIDATED emit error (non-fatal): %s", e)
 
     def _fire_session_end(self, storage_key: str, reason: str = "clear") -> None:
         """Emit SESSION_END for *storage_key* if a session was open, then forget it.
@@ -1029,6 +1150,11 @@ class BotSessionManager:
                         storage_key = self._storage_key(user_id)
                         if controller:
                             self._active_runs[storage_key] = controller
+                        # Prompt-cache-stability contract (Issue #3352): now that
+                        # the per-turn tool/model swaps are applied, meter whether
+                        # this turn's cached prompt prefix drifted from the last
+                        # turn so silent provider-cache misses become auditable.
+                        self._check_prefix_stability(agent, storage_key)
                         # In-run progress liveness (Issue #2393): mark progress
                         # at run start so a fresh long run is never STUCK on a
                         # stale inbound timestamp; streamed events refresh it
@@ -1205,9 +1331,27 @@ class BotSessionManager:
                     # adapters can render interactive UI; the text is returned as
                     # before so the str contract and text fallback are preserved.
                     try:
-                        from praisonaiagents.bots.agent_reply import extract_presentation
+                        from praisonaiagents.bots.agent_reply import (
+                            extract_presentation,
+                            extract_completion,
+                            append_completion_note,
+                        )
                         storage_key = self._storage_key(user_id)
                         text, presentation = extract_presentation(response)
+                        # Issue #3296: optionally surface *why* the turn ended.
+                        # The completion is read from the agent-emitted result
+                        # first (AgentReply/dict), falling back to the agent's
+                        # own ``last_stop_reason`` so a plain-text turn that
+                        # stopped early (max_steps / cancelled / error) still
+                        # explains itself. Off by default → no change to clean
+                        # completions or existing deployments.
+                        if self._surface_completion_reason:
+                            completion = extract_completion(response)
+                            if completion is None:
+                                completion = extract_completion(agent)
+                            text = append_completion_note(
+                                text, completion, enabled=True
+                            )
                         # Always normalise to plain text so chat() never leaks a
                         # non-str (e.g. AgentReply) past its str contract.
                         response = text
@@ -1452,6 +1596,9 @@ class BotSessionManager:
             # End the session so lifecycle hooks fire and can re-open later.
             self._fire_session_end(storage_key, reason="stale")
             self._histories.pop(storage_key, None)
+            # Drop the prompt-prefix baseline so a reopened session establishes
+            # a fresh one instead of emitting a false invalidation (Issue #3352).
+            self._prefix_sig.pop(storage_key, None)
             self._last_active.pop(storage_key, None)
             self._locks.drop(storage_key)
             if self._store is not None:
@@ -1522,6 +1669,10 @@ class BotSessionManager:
                 scope clears the shared key, not a re-derived per_user one).
         """
         self._histories.pop(storage_key, None)
+        # Reset the prompt-prefix baseline with the history so the next turn on
+        # this key starts a fresh baseline rather than comparing against the
+        # cleared session and firing a false invalidation (Issue #3352).
+        self._prefix_sig.pop(storage_key, None)
         # Don't clear last_active as we still need it for idle tracking
         # Don't drop lock here as it may still be held by caller
         
@@ -1541,6 +1692,65 @@ class BotSessionManager:
         so a later text-only turn never re-renders stale buttons.
         """
         return self._last_presentation.pop(self._storage_key(user_id), None)
+
+    def record_passive(
+        self,
+        user_id: str,
+        content: str,
+        sender: str = "",
+        **route: str,
+    ) -> bool:
+        """Append a group message as passive context without running the agent.
+
+        Issue #3380: under the ``observe`` group policy a message that does not
+        address the bot is recorded into the session transcript as an ordinary
+        ``user`` turn (optionally attributed to its sender for multi-party
+        chats) so that when the bot is next mentioned it can see the preceding
+        conversation. No agent run is dispatched. Appends directly under a
+        per-key threading lock so it is safe to call from any sync/async
+        context (including inline on the inbound handler's own loop thread);
+        errors are swallowed.
+
+        Optional ``chat_id``/``thread_id``/``account``/``chat_type`` route kwargs
+        are threaded through so that with ``session_scope='per_chat'`` the
+        passive entry lands on the same shared group key that a subsequent
+        addressed turn reads from (Issue #2376 routing); without them behaviour
+        is unchanged (per_user, keyed by the sender's session).
+        """
+        if not content:
+            return False
+        text = self._attribute(content, sender) if sender else content
+        entry = {
+            "role": "user",
+            "content": text,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "passive": True,
+        }
+        # A single fire-and-forget append. Unlike the outbound mirror (called
+        # from other threads / cron), ``record_passive`` runs inline on the
+        # inbound handler's own event-loop thread, so the cross-thread
+        # ``run_coroutine_threadsafe`` bridge would dead-lock waiting on the
+        # very loop that is calling it. Append directly under a per-key
+        # threading lock (no asyncio lock touched) so it is safe from any
+        # context and never blocks the loop.
+        try:
+            storage_key = self._storage_key(user_id, **route)
+            sync_locks = getattr(self, "_user_sync_locks", None)
+            if sync_locks is None:
+                self._user_sync_locks = sync_locks = {}
+            lock = sync_locks.get(storage_key)
+            if lock is None:
+                import threading
+                lock = sync_locks[storage_key] = threading.Lock()
+            with lock:
+                history = list(self._load_history(user_id, **route))
+                history.append(entry)
+                self._save_history(user_id, history, **route)
+                self._last_active[storage_key] = time.monotonic()
+            return True
+        except Exception as e:  # pragma: no cover — defensive, never break inbound
+            logger.warning("record_passive failed: %s", e)
+            return False
 
     def reset(self, user_id: str, **route: str) -> bool:
         """Clear a session's history.  Returns True if it existed.
@@ -1702,6 +1912,9 @@ class BotSessionManager:
                     logger.warning("Failed to clear session %s: %s", key, e)
 
         self._histories.clear()
+        # Clear prompt-prefix baselines alongside history so reopened sessions
+        # each establish a fresh baseline (Issue #3352).
+        self._prefix_sig.clear()
         return count
 
     @property

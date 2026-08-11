@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Moderations Capability Example
 

@@ -204,7 +204,12 @@ if TEXTUAL_AVAILABLE:
             
             await self.queue_manager.start(recover=True)
             self.queue_manager.set_session(self.session_id)
-            
+
+            # Capture the session baseline *before* any turn edits the workspace
+            # so /diff and /undo compare against the true session-start state
+            # rather than an already-modified one (lazy init would snapshot late).
+            self._get_session_checkpoints()
+
             # Push main screen
             await self.push_screen("main")
             
@@ -251,7 +256,17 @@ if TEXTUAL_AVAILABLE:
             
             # Add user message to session store for history persistence
             self._session_store.add_user_message(self.session_id, content)
-            
+
+            # Record a pre-turn checkpoint so /undo can roll back this turn's
+            # file edits individually. Best-effort and default-safe: no-ops when
+            # checkpointing is disabled and never breaks the submission path.
+            try:
+                ckpt = self._get_session_checkpoints()
+                if ckpt is not None and getattr(ckpt, "enabled", False):
+                    ckpt.checkpoint_turn(content[:60])
+            except Exception:
+                pass
+
             # Get chat history for context continuity
             chat_history = self._session_store.get_chat_history(self.session_id, max_messages=50)
             
@@ -638,30 +653,87 @@ Available tools:
             if isinstance(main_screen, MainScreen):
                 await main_screen.add_assistant_message(content=msg, agent_name="System")
         
+        def _get_session_checkpoints(self):
+            """
+            Lazily build the shared session-checkpoint manager.
+
+            Reuses the same :class:`SessionCheckpointManager` engine the legacy
+            REPL uses, so the TUI's ``/diff`` / ``/undo`` are backed by the real
+            checkpoint service rather than help-text stubs. Default-safe: when
+            checkpointing is disabled the manager reports how to enable it.
+            """
+            existing = getattr(self, "_session_checkpoints", None)
+            if existing is not None:
+                return existing
+            try:
+                from praisonai_code.cli.features.session_checkpoints import (
+                    SessionCheckpointManager,
+                )
+
+                config = None
+                try:
+                    from praisonai_code.cli.configuration.resolver import (
+                        resolve_config,
+                    )
+
+                    config = resolve_config().extra
+                except Exception:
+                    config = None
+                manager = SessionCheckpointManager.from_config(
+                    workspace_dir=self.workspace,
+                    config=config,
+                )
+                if manager.enabled:
+                    manager.checkpoint_turn("session start")
+                self._session_checkpoints = manager
+            except Exception:
+                self._session_checkpoints = None
+            return self._session_checkpoints
+
         async def _cmd_undo(self, args: str) -> None:
-            """Undo last change."""
-            msg = """
-**Undo:**
-
-The /undo command reverts the last file change.
-Use git commands or the agent to manage file changes.
-
-Tip: Ask the agent to "undo the last change" or use git.
-"""
+            """Undo the last turn's file changes via the checkpoint engine."""
+            ckpt = self._get_session_checkpoints()
+            if ckpt is None or not getattr(ckpt, "enabled", False):
+                msg = (
+                    "**Undo:** Workspace checkpointing is disabled, so there is "
+                    "nothing to roll back.\n\nEnable it with "
+                    "`checkpoints.auto: true` in config or "
+                    "`PRAISONAI_CHECKPOINTS=on`."
+                )
+            elif not ckpt.turns:
+                msg = "**Undo:** No checkpoints yet — nothing to undo."
+            else:
+                restored = ckpt.revert(1)
+                if restored:
+                    msg = f"**Undo:** Workspace restored to `{restored.short_id}` ({restored.message})."
+                else:
+                    msg = "**Undo:** No workspace checkpoint to restore."
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
                 await main_screen.add_assistant_message(content=msg, agent_name="System")
-        
+
         async def _cmd_diff(self, args: str) -> None:
-            """Show diff of changes."""
-            msg = """
-**Diff:**
-
-The /diff command shows changes made to files.
-Use git diff or ask the agent to show changes.
-
-Tip: Ask the agent "show me the diff" or use `git diff`.
-"""
+            """Show file changes made this session via the checkpoint engine."""
+            ckpt = self._get_session_checkpoints()
+            if ckpt is None or not getattr(ckpt, "enabled", False):
+                msg = (
+                    "**Diff:** Workspace checkpointing is disabled, so /diff has "
+                    "no session baseline to compare against.\n\nEnable it with "
+                    "`checkpoints.auto: true` in config or "
+                    "`PRAISONAI_CHECKPOINTS=on`."
+                )
+            else:
+                turn_only = False
+                path = None
+                for token in (args or "").split():
+                    if token in ("--turn", "-t"):
+                        turn_only = True
+                    elif not token.startswith("-"):
+                        path = token
+                scope = "turn" if turn_only else "session"
+                diff = ckpt.diff(turn_only=turn_only, path=path)
+                body = ckpt.render_diff(diff, scope=scope)
+                msg = f"**Diff:**\n\n```\n{body}\n```"
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
                 await main_screen.add_assistant_message(content=msg, agent_name="System")

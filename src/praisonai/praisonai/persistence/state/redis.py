@@ -145,6 +145,23 @@ class RedisStateStore(StateStore):
                     result.append(k)
         return result
     
+    def scan_prefix(self, prefix: str, batch: int = 500) -> List[str]:
+        """Return keys under ``prefix`` using a non-blocking cursor SCAN.
+
+        Unlike ``keys()`` (which maps to Redis ``KEYS`` and is O(N) over the
+        whole keyspace, blocking the single-threaded server), this iterates the
+        keyspace in bounded batches so a "recent runs" read never stalls other
+        clients on the same instance.
+        """
+        match = f"{self.prefix}{prefix}*"
+        prefix_len = len(self.prefix)
+        out: List[str] = []
+        for k in self._client.scan_iter(match=match, count=batch):
+            if isinstance(k, bytes):
+                k = k.decode("utf-8", "replace")
+            out.append(k[prefix_len:] if k.startswith(self.prefix) else k)
+        return out
+
     def ttl(self, key: str) -> Optional[int]:
         """Get remaining TTL in seconds."""
         result = self._client.ttl(self._key(key))

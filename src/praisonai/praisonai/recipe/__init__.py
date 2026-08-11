@@ -23,6 +23,7 @@ __all__ = [
     # Runtime Bridge API
     "resolve",
     "run_background",
+    "arun_background",
     "submit_job",
     "schedule",
     # Data classes
@@ -114,6 +115,10 @@ def __getattr__(name):
         from .operations import run_background
         _module_cache[name] = run_background
         return run_background
+    elif name == "arun_background":
+        from .operations import arun_background
+        _module_cache[name] = arun_background
+        return arun_background
     elif name == "submit_job":
         from .operations import submit_job
         _module_cache[name] = submit_job

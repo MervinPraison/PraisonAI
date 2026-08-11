@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, AgentTeam
 from langchain_community.utilities import SerpAPIWrapper
 

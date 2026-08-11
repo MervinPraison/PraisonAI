@@ -83,6 +83,15 @@ class WarmRuntime:
         self._agents: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._agent_locks: Dict[str, threading.Lock] = {}
+        # Per-session warm agents: keyed by session id, each holds retained
+        # conversation state so `--continue`/`--session` turns reuse a warm,
+        # stateful agent instead of cold-loading history every turn. Distinct
+        # from the per-model cache above, which stays stateless (history cleared
+        # each call) for the anonymous path.
+        self._session_agents: Dict[str, Any] = {}
+        # Model each session agent was built with, so a later run that overrides
+        # the model rebuilds the agent instead of silently reusing the old one.
+        self._session_models: Dict[str, Optional[str]] = {}
         self.last_activity = time.time()
         # Event hub used to fan out live session events to attached clients.
         self.hub = hub or SessionEventHub()
@@ -124,11 +133,76 @@ class WarmRuntime:
         with self._lock:
             self._agents.pop(key, None)
 
+    def _get_session_agent(self, session_id: str, model: Optional[str]):
+        """Return a warm, stateful Agent for ``session_id``.
+
+        On first use the agent is built and its prior conversation is rehydrated
+        once from the project session store; subsequent turns reuse the same
+        agent so history and warm model/tool state are retained across turns.
+        Rehydration reuses the existing CLI store wiring
+        (``apply_cli_session_continuity``), so per-turn deltas are persisted back
+        through the same store the cold path uses — a crash/eviction resumes
+        deterministically.
+        """
+        resolved = model or self._default_model
+        with self._lock:
+            agent = self._session_agents.get(session_id)
+            if agent is not None:
+                # Only reuse when the requested model matches the one the warm
+                # agent was built with; a model override must rebuild the agent
+                # rather than silently run the previous provider/model.
+                if self._session_models.get(session_id) == resolved:
+                    return agent
+                # Model changed: drop the stale agent and rebuild below.
+                self._session_agents.pop(session_id, None)
+                self._session_models.pop(session_id, None)
+
+        from praisonaiagents import Agent
+
+        config: Dict[str, Any] = {
+            "name": "RuntimeAgent",
+            "role": "Assistant",
+            "goal": "Complete the task",
+        }
+        if resolved:
+            config["llm"] = resolved
+        agent = Agent(**config)
+
+        # Rehydrate prior history + wire persistence via the shared CLI helper.
+        # Imported lazily so the runtime module stays importable without the CLI
+        # state package and to keep cold-start cost off the anonymous path.
+        try:
+            from ..cli.state.project_sessions import apply_cli_session_continuity
+
+            apply_cli_session_continuity(agent, session_id, auto_save=session_id)
+        except Exception:
+            # Continuity wiring failed (store lock, filesystem, config, or import
+            # error). Do NOT cache this unwired agent: caching it would silently
+            # run without loading prior history or persisting the new turn, and
+            # keep serving that uncoupled agent after the store recovers. Return
+            # a one-shot agent for this turn and let the next turn retry wiring.
+            return agent
+
+        with self._lock:
+            existing = self._session_agents.get(session_id)
+            if existing is not None and self._session_models.get(session_id) == resolved:
+                return existing
+            self._session_agents[session_id] = agent
+            self._session_models[session_id] = resolved
+            return agent
+
+    def _evict_session_agent(self, session_id: str) -> None:
+        """Drop the warm agent for ``session_id`` (e.g. after a failed turn)."""
+        with self._lock:
+            self._session_agents.pop(session_id, None)
+            self._session_models.pop(session_id, None)
+
     def run(
         self,
         prompt: str,
         model: Optional[str] = None,
         session_id: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> str:
         """Execute a prompt against the warm agent and return the result text.
 
@@ -140,28 +214,71 @@ class WarmRuntime:
         left with partial conversation state (e.g. an unmatched user turn), so
         it is evicted from the cache and the next call rebuilds a clean agent.
 
-        When ``session_id`` is given, live events (start/result/error) are
-        published to the hub so attached clients can observe the session in real
-        time.
+        ``session_id`` is the *persistence/conversation* identity: when given,
+        the run attaches to a warm, *stateful* per-session agent whose history
+        is rehydrated once and then retained across turns, so an iterative
+        ``--continue``/``--session`` loop reuses the warm agent instead of
+        cold-loading history every turn. The anonymous (no-session) path is
+        unchanged: it clears history each call to stay isolated.
+
+        ``event_id`` is the *event-stream* identity used only to fan out live
+        events (start/result/error) to attached clients (``praisonai attach``).
+        It is kept distinct from ``session_id`` so an ``--attach <id>`` label
+        never selects or persists a conversation: a ``--no-save --attach <id>``
+        run streams events to ``<id>`` while still running the isolated,
+        non-persisted anonymous path. Defaults to ``session_id`` so a plain
+        ``--session`` run is observable under its own id.
         """
         self.last_activity = time.time()
-        key = self._agent_key(model)
-        if session_id:
-            self.hub.publish(session_id, {
+        stream_id = event_id or session_id
+        if stream_id:
+            self.hub.publish(stream_id, {
                 "type": "run.start",
-                "session_id": session_id,
+                "session_id": stream_id,
                 "prompt": prompt,
             })
+        if session_id:
+            # Serialize per session id (not per model) so concurrent turns of the
+            # same session queue on one live agent and no cross-session state
+            # leaks between distinct ids.
+            with self._lock_for(f"__session__:{session_id}"):
+                agent = self._get_session_agent(session_id, model)
+                try:
+                    result = agent.start(prompt)
+                except Exception as e:
+                    # A failed turn can leave partial state; drop the warm agent
+                    # so the next turn rehydrates cleanly from the store.
+                    self._evict_session_agent(session_id)
+                    if stream_id:
+                        self.hub.publish(stream_id, {
+                            "type": "run.error",
+                            "session_id": stream_id,
+                            "error": str(e),
+                        })
+                    raise
+                # History is intentionally retained here (stateful session).
+            self.last_activity = time.time()
+            text = str(result) if result is not None else ""
+            if stream_id:
+                self.hub.publish(stream_id, {
+                    "type": "run.result",
+                    "session_id": stream_id,
+                    "ok": True,
+                    "result": text,
+                })
+            return text
+
+        key = self._agent_key(model)
         with self._lock_for(key):
             agent = self._get_agent(key)
             try:
                 result = agent.start(prompt)
             except Exception as e:
                 self._evict_agent(key)
-                if session_id:
-                    self.hub.publish(session_id, {
+                if stream_id:
+                    self.hub.publish(stream_id, {
                         "type": "run.error",
-                        "session_id": session_id,
+                        "session_id": stream_id,
                         "error": str(e),
                     })
                 raise
@@ -174,10 +291,10 @@ class WarmRuntime:
                 agent.chat_history = []
         self.last_activity = time.time()
         text = str(result) if result is not None else ""
-        if session_id:
-            self.hub.publish(session_id, {
+        if stream_id:
+            self.hub.publish(stream_id, {
                 "type": "run.result",
-                "session_id": session_id,
+                "session_id": stream_id,
                 "ok": True,
                 "result": text,
             })
@@ -238,6 +355,7 @@ def _make_handler(token: str, runtime: WarmRuntime):
                         prompt,
                         model=payload.get("model"),
                         session_id=payload.get("session_id"),
+                        event_id=payload.get("event_id"),
                     )
                     self._send_json(200, {"ok": True, "result": result})
                 except Exception as e:  # noqa: BLE001 - surface to client as error

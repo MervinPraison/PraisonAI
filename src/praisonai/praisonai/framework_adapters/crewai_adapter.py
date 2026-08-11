@@ -51,27 +51,23 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        # Observability is initialized upstream (agents_generator._prepare_for_run);
-        # finalize on EVERY exit path with the correct status so sessions are
-        # never orphaned "in progress" on errors / cancellation. The guard starts
-        # before the lazy imports so an import failure still finalizes the session.
-        import sys as _sys
-        from ..observability.hooks import finalize_observability
+        # Observability init/finalize is owned by the generator via the
+        # observability_session context manager, so the adapter no longer
+        # finalizes here — this keeps the lifecycle symmetric across every
+        # adapter and prevents double-finalize.
+        # Import CrewAI only when needed (availability already validated at CLI entry)
+        import os
+        from crewai import Agent, Task, Crew
+        from crewai.telemetry import Telemetry
+        from .._framework_availability import is_available
 
-        try:
-            # Import CrewAI only when needed (availability already validated at CLI entry)
-            import os
-            from crewai import Agent, Task, Crew
-            from crewai.telemetry import Telemetry
-            from .._framework_availability import is_available
+        # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
+        logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
 
-            # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
-            logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
-
-            # Disable CrewAI telemetry while constructing agents/tasks/crew. The
-            # class-level fallback is locked + reference counted, so concurrent
-            # runs cannot corrupt the Telemetry class during this window.
-            with scoped_telemetry_disable(Telemetry):
+        # Disable CrewAI telemetry while constructing agents/tasks/crew. The
+        # class-level fallback is locked + reference counted, so concurrent
+        # runs cannot corrupt the Telemetry class during this window.
+        with scoped_telemetry_disable(Telemetry):
                 from ._config_builder import build_agent_specs
 
                 agents = {}
@@ -179,11 +175,4 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 result = f"### Task Output ###\n{response}"
 
                 return result
-        finally:
-            # Close observability session with status derived from exc state
-            status = "Failure" if _sys.exc_info()[0] is not None else "Success"
-            try:
-                finalize_observability(self.name, status=status)
-            except Exception as e:  # noqa: BLE001 -- telemetry must not crash the run
-                logger.error(f"Error finalizing observability: {e}")
     

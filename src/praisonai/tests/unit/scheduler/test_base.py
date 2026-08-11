@@ -7,6 +7,7 @@ Tests for:
 - PraisonAgentExecutor
 """
 
+import os
 import pytest
 from unittest.mock import Mock, patch
 from praisonai.scheduler.base import ScheduleParser, ExecutorInterface, PraisonAgentExecutor
@@ -96,6 +97,123 @@ class TestScheduleParser:
     def test_parse_cron_fallback(self):
         """Complex cron patterns (ranges/lists) fall back to 60 seconds."""
         assert ScheduleParser.parse("cron:0 8,12 * * *") == 60
+
+
+class TestTickerWithoutCroniter:
+    """Ticker degrades *loudly* to a coarse interval when croniter is absent.
+
+    These tests run regardless of whether croniter is installed (the import is
+    patched to fail), covering the default-install path that Greptile flagged
+    as silently reverting to the pre-#3526 process-relative behaviour.
+    """
+
+    def _no_croniter(self):
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "croniter":
+                raise ImportError("croniter not installed")
+            return real_import(name, *args, **kwargs)
+
+        return patch("builtins.__import__", side_effect=fake_import)
+
+    def test_missing_croniter_falls_back_to_interval_and_warns(self, caplog):
+        import praisonai.scheduler.shared as shared
+        from praisonai.scheduler.shared import ScheduleTicker
+
+        shared._CRON_WARNING_EMITTED = False
+        t = ScheduleTicker("cron:0 9 * * *")
+        with self._no_croniter():
+            with caplog.at_level("WARNING"):
+                # Daily cron collapses to the best-effort 86400s interval.
+                assert t.seconds_until_next() == 86400.0
+                # is_due degrades to False (no wall-clock catch-up possible).
+                assert t.is_due() is False
+        assert any("croniter" in r.message for r in caplog.records)
+
+    def test_missing_croniter_warns_only_once(self, caplog):
+        import praisonai.scheduler.shared as shared
+        from praisonai.scheduler.shared import ScheduleTicker
+
+        shared._CRON_WARNING_EMITTED = False
+        t = ScheduleTicker("cron:0 9 * * *")
+        with self._no_croniter():
+            with caplog.at_level("WARNING"):
+                t.seconds_until_next()
+                t.seconds_until_next()
+                t.is_due()
+        warnings = [r for r in caplog.records if "croniter" in r.message]
+        assert len(warnings) == 1
+
+
+try:  # Only the wall-clock cron ticker tests below need the optional engine;
+    import croniter  # noqa: F401  # the default-install tests above must still run.
+    _HAS_CRONITER = True
+except ImportError:
+    _HAS_CRONITER = False
+
+
+def _epoch(y, mo, d, h, mi):
+    from datetime import datetime, timezone
+    return datetime(y, mo, d, h, mi, tzinfo=timezone.utc).timestamp()
+
+
+@pytest.mark.skipif(not _HAS_CRONITER, reason="cron ticker needs croniter")
+class TestScheduleTicker:
+    """Wall-clock cron scheduling via ScheduleTicker (issue #3526)."""
+
+    def test_interval_is_not_cron_and_keeps_fixed_seconds(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("hourly")
+        assert t.is_cron is False
+        assert t.seconds_until_next() == 3600.0
+        # Interval schedules are always "due" on the first tick.
+        assert t.is_due() is True
+
+    def test_interval_various_forms(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        assert ScheduleTicker("*/30m").seconds_until_next() == 1800.0
+        assert ScheduleTicker("60").seconds_until_next() == 60.0
+
+    def test_cron_honours_wall_clock_time_of_day(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=None)
+        t.created_at = _epoch(2026, 1, 1, 7, 0)
+        assert t.is_cron is True
+        now = _epoch(2026, 1, 1, 8, 0)
+        assert t.is_due(now) is False  # 09:00 slot not yet reached
+        assert abs(t.seconds_until_next(now) - 3600) < 2  # fires in ~1h
+
+    def test_cron_not_due_immediately_after_run(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        last = _epoch(2026, 1, 1, 9, 0)
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=last)
+        now = _epoch(2026, 1, 1, 9, 30)
+        assert t.is_due(now) is False
+        # Next occurrence is tomorrow 09:00 (~23.5h away).
+        assert abs(t.seconds_until_next(now) - (23.5 * 3600)) < 2
+
+    def test_cron_catches_up_missed_slot_across_downtime(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        # Last run yesterday 09:00, process resumes today 10:00 → slot missed.
+        last = _epoch(2025, 12, 31, 9, 0)
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=last)
+        assert t.is_due(_epoch(2026, 1, 1, 10, 0)) is True
+
+    def test_cron_startup_after_slot_catches_up_once(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=None)
+        t.created_at = _epoch(2026, 1, 1, 8, 0)
+        # Started 08:00, now 10:00 → today's 09:00 slot passed → due once.
+        assert t.is_due(_epoch(2026, 1, 1, 10, 0)) is True
+
+    def test_mark_ran_advances_anchor(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=None)
+        assert t.last_run_at is None
+        t.mark_ran(now=_epoch(2026, 1, 1, 9, 0))
+        assert t.last_run_at == _epoch(2026, 1, 1, 9, 0)
 
 
 class TestExecutorInterface:
@@ -245,3 +363,52 @@ class TestComputeRunCost:
         assert cost == 0.0
         assert in_tok == 100
         assert out_tok == 100
+
+
+class TestDaemonLastRunPersistence:
+    """State-file persistence of the wall-clock anchor (issue #3526 review).
+
+    Greptile flagged that the loop advanced ``_last_run_at`` *after* the state
+    write, so a restart restored the previous slot and replayed a completed
+    run. The loops now mark the anchor *before* executing; these tests assert
+    the persisted value is the current slot and that it round-trips on restart.
+    """
+
+    def _scheduler(self):
+        from praisonai.scheduler._base_scheduler import _BaseAgentScheduler
+        s = _BaseAgentScheduler()
+        s._execution_count = 1
+        s._total_cost = 0.0
+        return s
+
+    def _state_file(self, tmp_path):
+        import json
+        state_dir = tmp_path / ".praisonai" / "schedulers"
+        state_dir.mkdir(parents=True)
+        path = state_dir / "job.json"
+        path.write_text(json.dumps({"pid": os.getpid(), "last_run_at": 100.0}))
+        return state_dir, path
+
+    def test_update_persists_current_anchor(self, tmp_path, monkeypatch):
+        import json
+        state_dir, path = self._state_file(tmp_path)
+        monkeypatch.setattr(
+            os.path, "expanduser", lambda p: str(state_dir) if "schedulers" in p else p
+        )
+        s = self._scheduler()
+        # The loop sets the anchor for the *current* slot before executing.
+        s._last_run_at = 555.0
+        s._update_state_if_daemon()
+        assert json.loads(path.read_text())["last_run_at"] == 555.0
+
+    def test_persisted_anchor_round_trips_on_restart(self, tmp_path, monkeypatch):
+        state_dir, path = self._state_file(tmp_path)
+        path.write_text(
+            path.read_text().replace('"last_run_at": 100.0', '"last_run_at": 777.0')
+        )
+        monkeypatch.setattr(
+            os.path, "expanduser", lambda p: str(state_dir) if "schedulers" in p else p
+        )
+        s = self._scheduler()
+        s._load_persisted_last_run()
+        assert s._last_run_at == 777.0

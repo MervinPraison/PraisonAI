@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-07-16
+> **Version:** 1.5.87 | **Last Updated:** 2026-08-10
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 409 |
+| Python Core Features | 410 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **115** |
+| **Gap Count** | **116** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 102 |
+| P3 (Low) | 103 |
 
 ## Gap Matrix
 
@@ -77,7 +77,7 @@
 | `tool` | ✅ | ✅ | low | ✅ DONE |
 | `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 
-### P1_Persistence (21 done, 5 todo)
+### P1_Persistence (20 done, 5 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -101,7 +101,6 @@
 | `Workflow` | ✅ | ✅ | high | ✅ DONE |
 | `WorkflowContext` | ✅ | ✅ | high | ✅ DONE |
 | `WorkflowHooksConfig` | ✅ | ✅ | low | ✅ DONE |
-| `db` | ✅ | ✅ | low | ✅ DONE |
 | `loop` | ✅ | ✅ | low | ✅ DONE |
 | `parallel` | ✅ | ✅ | low | ✅ DONE |
 | `repeat` | ✅ | ✅ | low | ✅ DONE |
@@ -160,7 +159,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 102 todo)
+### P3_Advanced (181 done, 103 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -225,6 +224,7 @@
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RulesConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `RunOutcome` | ✅ | ❌ | high | ⏳ TODO |
 | `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `ScopeRequiredError` | ✅ | ❌ | low | ⏳ TODO |
 | `SendResult` | ✅ | ❌ | low | ⏳ TODO |
@@ -360,6 +360,7 @@
 | `PluginParseError` | ✅ | ✅ | low | ✅ DONE |
 | `PluginProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `PluginsConfig` | ✅ | ✅ | low | ✅ DONE |
+| `PraisonAIAgents` | ✅ | ✅ | high | ✅ DONE |
 | `PraisonConfig` | ✅ | ✅ | low | ✅ DONE |
 | `ProviderStatus` | ✅ | ✅ | high | ✅ DONE |
 | `REFLECTION\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
@@ -461,10 +462,10 @@ from praisonaiagents import Agent, AudioAgent, AudioConfig, CodeAgent, CodeConfi
 </details>
 
 <details>
-<summary><strong>agents</strong> (6 exports)</summary>
+<summary><strong>agents</strong> (7 exports)</summary>
 
 ```python
-from praisonaiagents import AgentManager, AgentTeam, AutoAgents, AutoRagAgent, AutoRagConfig, RagRetrievalPolicy
+from praisonaiagents import AgentManager, AgentTeam, AutoAgents, AutoRagAgent, AutoRagConfig, PraisonAIAgents, RagRetrievalPolicy
 ```
 
 </details>
@@ -510,15 +511,6 @@ from praisonaiagents import AUTONOMY_PRESETS, ArrayMode, AutonomyLevel, CACHING_
 
 ```python
 from praisonaiagents import ContextConfig, ContextManager, FastContext, FastContextResult, FileMatch, LineRange, ManagerConfig, OptimizerStrategy
-```
-
-</details>
-
-<details>
-<summary><strong>db</strong> (1 exports)</summary>
-
-```python
-from praisonaiagents import db
 ```
 
 </details>
@@ -605,7 +597,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (105 exports)</summary>
+<summary><strong>other</strong> (106 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...

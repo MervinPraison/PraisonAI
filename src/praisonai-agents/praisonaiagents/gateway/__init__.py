@@ -21,6 +21,11 @@ from .protocols import (
     EventType,
     OperatorScope,
     GatewayCloseCode,
+    # Declarative method -> required-scope registry (Issue #3206)
+    GatewayMethodDescriptor,
+    GATEWAY_METHODS,
+    register_gateway_method,
+    resolve_required_scope,
     # Config hot-reload observability (Issue #3049)
     ReloadStatus,
     compute_config_revision,
@@ -34,10 +39,21 @@ from .protocols import (
     # Home channel and delivery protocols
     HomeChannelRegistryProtocol,
     DeliveryResolverProtocol,
+    # Creation-time delivery-target pre-flight (Issue #3800)
+    DeliveryPreflightProtocol,
+    DeliveryValidation,
+    ScheduleTargetError,
     # Agent-facing outbound messaging
     OutboundMessengerProtocol,
     DeliveryResult,
     TargetInfo,
+    # Agent-callable cross-conversation request/reply (Issue #3689)
+    ConversationReply,
+    ConversationReplyStatus,
+    ConversationRequestProtocol,
+    # Agent-facing live status/health (Issue #3688)
+    GatewayStatusProtocol,
+    GatewayStatus,
     # Inbound route binding (Issue #2225)
     RouteBinding,
     RouteFacts,
@@ -65,11 +81,24 @@ from .protocols import (
     GatewayConcurrencyPolicyProtocol,
     GatewayConcurrencyPolicy,  # backward-compat alias
     ConcurrencyLimitPolicy,
+    # Gateway resource-pressure admission (Issue #3445)
+    ResourceSample,
+    ResourcePressurePolicyProtocol,
+    MemoryPressurePolicy,
+    # Gateway memory-pressure cache eviction (Issue #3804)
+    WarmSession,
+    MemoryPressureProtocol,
+    plan_pressure_evictions,
     # Gateway rate-limit admission (Issue #2532)
     RateLimitDecision,
     RateLimitPolicyProtocol,
     RateLimitPolicy,  # backward-compat alias
     SlidingWindowRateLimitPolicy,
+    # Durable-queue dead-letter decision (Issue #3519)
+    PERMANENT_ERROR_CLASSES,
+    DeadLetterDecision,
+    DeadLetterPolicyProtocol,
+    AttemptAndAgeDeadLetterPolicy,
     # Port-less, restart-safe external drain trigger (Issue #2390)
     current_epoch,
     DrainMarkerPolicy,
@@ -86,6 +115,9 @@ from .protocols import (
     GATEWAY_FATAL_CONFIG_EXIT_CODE,
     FatalConfigError,
     classify_exit_reason,
+    RestartLoopGuard,
+    # Fleet-level crash-loop breaker for channel supervision (Issue #3840)
+    FleetSupervisionPolicy,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -112,6 +144,10 @@ from .protocols import (
     LivenessDecision,
     LivenessPolicyProtocol,
     LivenessPolicy,
+    # Cluster-wide per-turn serialisation (Issue #3643)
+    TurnLeaseToken,
+    TurnLockProtocol,
+    LocalTurnLock,
     # Schema-validated inbound frame codec (Issue #2831)
     HelloParams,
     HelloResult,
@@ -125,6 +161,28 @@ from .protocols import (
     FrameDecodeError,
     ClientFrame,
     decode_client_frame,
+    # Weak / placeholder secret guard (Issue #3259)
+    KNOWN_WEAK_SECRETS,
+    WeakGatewaySecretError,
+    is_weak_secret,
+    assert_gateway_secret_strong,
+)
+from .liveness import (
+    # Event-loop liveness watchdog (Issue #3385)
+    LoopWatchdogPolicy,
+    LoopWatchdog,
+)
+from .degraded_state import (
+    # Unified degraded-capability registry (Issue #3518)
+    DegradedOwner,
+    DegradedCapabilityProtocol,
+    DegradedCapabilityRegistry,
+    OWNER_KINDS,
+    DEGRADED_STATES,
+    # Fail-closed read of the degraded-owner contract (Issue #3640)
+    DegradedCapabilityLookupProtocol,
+    OwnerUnavailable,
+    assert_owner_available,
 )
 from .hooks import (
     HookAction,
@@ -132,6 +190,7 @@ from .hooks import (
     InboundTriggerProtocol,
     render_template,
     compute_idempotency_key,
+    verify_webhook_signature,
 )
 from .config import (
     GatewayConfig,
@@ -139,6 +198,13 @@ from .config import (
     ApiConfig,
     ChannelRouteConfig,
     MultiChannelGatewayConfig,
+    # Config version stamp + doctor-driven migration (Issue #3841)
+    GATEWAY_CONFIG_VERSION,
+    ConfigVersionError,
+    LegacyConfigRule,
+    GATEWAY_CONFIG_RULES,
+    is_config_current,
+    migrate_config_with_doctor,
     # Push config
     PushConfig,
     RedisConfig,
@@ -146,6 +212,14 @@ from .config import (
     DeliveryConfig,
     PollingConfig,
     LivenessConfig,
+    TurnLockConfig,
+    # Hot-reload registry (Issue #3378)
+    HOT_APPLIABLE_KEYS,
+    SupportsHotReload,
+    is_hot_appliable,
+    # Reload scope classification (Issue #3440)
+    ReloadScope,
+    classify_reload,
 )
 
 # Lazy loading cache
@@ -208,6 +282,11 @@ __all__ = [
     "EventType",
     "OperatorScope",
     "GatewayCloseCode",
+    # Declarative method -> required-scope registry (Issue #3206)
+    "GatewayMethodDescriptor",
+    "GATEWAY_METHODS",
+    "register_gateway_method",
+    "resolve_required_scope",
     # Config hot-reload observability (Issue #3049)
     "ReloadStatus",
     "compute_config_revision",
@@ -221,10 +300,20 @@ __all__ = [
     # Home channel and delivery protocols
     "HomeChannelRegistryProtocol",
     "DeliveryResolverProtocol",
+    "DeliveryPreflightProtocol",
+    "DeliveryValidation",
+    "ScheduleTargetError",
     # Agent-facing outbound messaging
     "OutboundMessengerProtocol",
     "DeliveryResult",
     "TargetInfo",
+    # Agent-callable cross-conversation request/reply (Issue #3689)
+    "ConversationReply",
+    "ConversationReplyStatus",
+    "ConversationRequestProtocol",
+    # Agent-facing live status/health (Issue #3688)
+    "GatewayStatusProtocol",
+    "GatewayStatus",
     # Inbound route binding (Issue #2225)
     "RouteBinding",
     "RouteFacts",
@@ -251,11 +340,24 @@ __all__ = [
     "GatewayConcurrencyPolicyProtocol",
     "GatewayConcurrencyPolicy",
     "ConcurrencyLimitPolicy",
+    # Gateway resource-pressure admission (Issue #3445)
+    "ResourceSample",
+    "ResourcePressurePolicyProtocol",
+    "MemoryPressurePolicy",
+    # Gateway memory-pressure cache eviction (Issue #3804)
+    "WarmSession",
+    "MemoryPressureProtocol",
+    "plan_pressure_evictions",
     # Gateway rate-limit admission (Issue #2532)
     "RateLimitDecision",
     "RateLimitPolicyProtocol",
     "RateLimitPolicy",
     "SlidingWindowRateLimitPolicy",
+    # Durable-queue dead-letter decision (Issue #3519)
+    "PERMANENT_ERROR_CLASSES",
+    "DeadLetterDecision",
+    "DeadLetterPolicyProtocol",
+    "AttemptAndAgeDeadLetterPolicy",
     # Port-less, restart-safe external drain trigger (Issue #2390)
     "current_epoch",
     "DrainMarkerPolicy",
@@ -272,6 +374,9 @@ __all__ = [
     "GATEWAY_FATAL_CONFIG_EXIT_CODE",
     "FatalConfigError",
     "classify_exit_reason",
+    "RestartLoopGuard",
+    # Fleet-level crash-loop breaker for channel supervision (Issue #3840)
+    "FleetSupervisionPolicy",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",
@@ -298,6 +403,10 @@ __all__ = [
     "LivenessDecision",
     "LivenessPolicyProtocol",
     "LivenessPolicy",
+    # Cluster-wide per-turn serialisation (Issue #3643)
+    "TurnLeaseToken",
+    "TurnLockProtocol",
+    "LocalTurnLock",
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams",
     "HelloResult",
@@ -311,24 +420,57 @@ __all__ = [
     "FrameDecodeError",
     "ClientFrame",
     "decode_client_frame",
+    # Weak / placeholder secret guard (Issue #3259)
+    "KNOWN_WEAK_SECRETS",
+    "WeakGatewaySecretError",
+    "is_weak_secret",
+    "assert_gateway_secret_strong",
+    # Event-loop liveness watchdog (Issue #3385)
+    "LoopWatchdogPolicy",
+    "LoopWatchdog",
+    # Unified degraded-capability registry (Issue #3518)
+    "DegradedOwner",
+    "DegradedCapabilityProtocol",
+    "DegradedCapabilityRegistry",
+    "OWNER_KINDS",
+    "DEGRADED_STATES",
+    # Fail-closed read of the degraded-owner contract (Issue #3640)
+    "DegradedCapabilityLookupProtocol",
+    "OwnerUnavailable",
+    "assert_owner_available",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
     "InboundTriggerProtocol",
     "render_template",
     "compute_idempotency_key",
+    "verify_webhook_signature",
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",
     "ApiConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
+    # Config version stamp + doctor-driven migration (Issue #3841)
+    "GATEWAY_CONFIG_VERSION",
+    "ConfigVersionError",
+    "LegacyConfigRule",
+    "GATEWAY_CONFIG_RULES",
+    "is_config_current",
+    "migrate_config_with_doctor",
     "PushConfig",
     "RedisConfig",
     "PresenceConfig",
     "DeliveryConfig",
     "PollingConfig",
     "LivenessConfig",
+    "TurnLockConfig",
+    # Hot-reload registry (Issue #3378)
+    "HOT_APPLIABLE_KEYS",
+    "SupportsHotReload",
+    "is_hot_appliable",
+    "ReloadScope",
+    "classify_reload",
     # Implementations (lazy loaded from praisonai wrapper)
     "WebSocketGateway",
     "GatewaySession",

@@ -78,12 +78,14 @@ class MCPToolRunner(threading.Thread):
                                 response_queue, kind, name, arguments = item
                                 try:
                                     if kind == "resource":
-                                        result = await session.read_resource(name)
+                                        result = await asyncio.wait_for(session.read_resource(name), timeout=self.timeout)
                                     elif kind == "prompt":
-                                        result = await session.get_prompt(name, arguments or None)
+                                        result = await asyncio.wait_for(session.get_prompt(name, arguments or None), timeout=self.timeout)
                                     else:
-                                        result = await session.call_tool(name, arguments)
+                                        result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=self.timeout)
                                     response_queue.put((True, result))
+                                except asyncio.TimeoutError:
+                                    response_queue.put((False, f"MCP {kind} call timed out after {self.timeout} seconds (server side)"))
                                 except Exception as e:
                                     response_queue.put((False, str(e)))
                             except queue.Empty:
@@ -282,7 +284,20 @@ class MCP:
         agent.start("What is the stock price of Tesla?")
         ```
     """
-    
+
+    # Process-level registry of sanitized MCP server names that have been
+    # namespaced via with_tool_prefix(), mirroring how tools/registry.py tracks
+    # tool names. Lets skills' CapabilityValidator discover connected servers
+    # instead of always failing closed (issue #3307).
+    _active_server_names: set = set()
+    _active_server_names_lock = threading.Lock()
+
+    @classmethod
+    def list_active_server_names(cls) -> set:
+        """Return the set of sanitized names of MCP servers namespaced this run."""
+        with cls._active_server_names_lock:
+            return set(cls._active_server_names)
+
     def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, 
                  allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
         """
@@ -372,8 +387,11 @@ class MCP:
         
         # Check if this is an HTTP URL
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
-            # Determine transport type based on URL or kwargs
-            if command_or_string.endswith('/sse') and 'transport_type' not in kwargs:
+            # Determine transport type based on URL or kwargs. Delegate the
+            # URL->transport classification to the shared helper so there is a
+            # single source of truth (see mcp_transport.get_transport_type).
+            from .mcp_transport import get_transport_type
+            if get_transport_type(command_or_string) == "sse" and 'transport_type' not in kwargs:
                 # Legacy SSE URL - use SSE transport for backward compatibility
                 from .mcp_sse import SSEMCPClient
                 self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
@@ -834,6 +852,15 @@ class MCP:
 
         self._tool_prefix = sanitized
 
+        # Record this server in the process-level registry so skills'
+        # CapabilityValidator can discover it (issue #3307). Store both the
+        # original name and its sanitized form so a skill requirement matches
+        # regardless of which spelling it declares.
+        with type(self)._active_server_names_lock:
+            if prefix:
+                type(self)._active_server_names.add(prefix)
+            type(self)._active_server_names.add(sanitized)
+
         # Rename already-generated callable tools. Dispatch inside each
         # wrapper closes over the original tool name, so only the public
         # __name__/__qualname__ needs updating for schema construction.
@@ -1092,18 +1119,24 @@ class MCP:
                 pass
         
         # Shutdown HTTP stream client if present
+        # (HTTPStreamMCPClient exposes close(), not shutdown())
         if hasattr(self, 'http_stream_client') and self.http_stream_client is not None:
             try:
                 if hasattr(self.http_stream_client, 'shutdown'):
                     self.http_stream_client.shutdown()
+                elif hasattr(self.http_stream_client, 'close'):
+                    self.http_stream_client.close()
             except Exception:
                 pass
         
         # Shutdown WebSocket client if present
+        # (WebSocketMCPClient exposes close(), not shutdown())
         if hasattr(self, 'websocket_client') and self.websocket_client is not None:
             try:
                 if hasattr(self.websocket_client, 'shutdown'):
                     self.websocket_client.shutdown()
+                elif hasattr(self.websocket_client, 'close'):
+                    self.websocket_client.close()
             except Exception:
                 pass
     

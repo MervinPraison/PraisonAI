@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """E2B compute provider — run agent tools inside an E2B cloud sandbox.
 
 Requires: E2B_API_KEY environment variable set.

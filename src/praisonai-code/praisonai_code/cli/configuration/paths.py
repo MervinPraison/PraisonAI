@@ -71,14 +71,77 @@ def find_project_root(start: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
+def home_root() -> Path:
+    """Return the single canonical PraisonAI home root.
+
+    Delegates to the core ``praisonaiagents.paths.get_data_dir`` so the wrapper
+    CLI and the SDK never diverge: honours the ``PRAISONAI_HOME`` override,
+    defaults to ``~/.praisonai``, and falls back to a legacy ``~/.praison`` only
+    when that is the sole directory present. Falling back to a bare
+    ``~/.praisonai`` keeps the CLI working even if the core package is
+    unavailable for any reason.
+    """
+    try:
+        from praisonaiagents.paths import get_data_dir
+
+        return get_data_dir()
+    except Exception:
+        env_path = os.environ.get("PRAISONAI_HOME")
+        if env_path:
+            return Path(env_path).expanduser()
+        return Path.home() / ".praisonai"
+
+
 def get_user_config_dir() -> Path:
-    """Get user configuration directory (~/.praison/)."""
+    """Get user configuration directory (canonical home root, e.g. ~/.praisonai/)."""
+    return home_root()
+
+
+def _legacy_user_config_dir() -> Path:
+    """Legacy user configuration directory (~/.praison/), read-only fallback."""
     return Path.home() / ".praison"
 
 
 def get_user_config_path() -> Path:
-    """Get user configuration file path (~/.praison/config.toml)."""
-    return get_user_config_dir() / "config.toml"
+    """Get user configuration file path (config.toml under the home root).
+
+    Prefers the canonical home root. For backward compatibility, when no config
+    exists there but a legacy ``~/.praison/config.toml`` does, the legacy path is
+    returned so existing installs keep resolving until migrated.
+    """
+    primary = get_user_config_write_path()
+    if primary.exists():
+        return primary
+    legacy = _legacy_user_config_dir() / "config.toml"
+    if legacy.exists():
+        return legacy
+    return primary
+
+
+def _canonical_home_root() -> Path:
+    """Canonical home root for *writes*, ignoring the legacy fallback.
+
+    Honours ``PRAISONAI_HOME`` (with ``~`` expansion, matching the core SDK and
+    ``setup``) but, unlike :func:`home_root`, never resolves to the legacy
+    ``~/.praison`` directory even when it is the only one present — writes must
+    always land on the canonical location.
+    """
+    env_path = os.environ.get("PRAISONAI_HOME")
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path.home() / ".praisonai"
+
+
+def get_user_config_write_path() -> Path:
+    """Get the canonical user config file path for *writing*.
+
+    Always resolves to ``config.toml`` under the canonical ``~/.praisonai`` home
+    (or ``PRAISONAI_HOME``) and never the legacy ``~/.praison`` location — even
+    when only the legacy directory currently exists. Writers (e.g. ``config
+    set``/``reset``) must use this so an update never mutates the legacy
+    read-only fallback; new values are always persisted to the canonical file.
+    """
+    return _canonical_home_root() / "config.toml"
 
 
 def get_project_config_dir(project_root: Optional[Path] = None) -> Path:
@@ -99,22 +162,22 @@ def get_project_config_path(project_root: Optional[Path] = None) -> Path:
 
 
 def get_sessions_dir() -> Path:
-    """Get sessions directory (~/.praison/sessions/)."""
+    """Get sessions directory under the canonical home root (e.g. ~/.praisonai/sessions/)."""
     return get_user_config_dir() / "sessions"
 
 
 def get_traces_dir() -> Path:
-    """Get traces directory (~/.praison/traces/)."""
+    """Get traces directory under the canonical home root (e.g. ~/.praisonai/traces/)."""
     return get_user_config_dir() / "traces"
 
 
 def get_logs_dir() -> Path:
-    """Get logs directory (~/.praison/logs/)."""
+    """Get logs directory under the canonical home root (e.g. ~/.praisonai/logs/)."""
     return get_user_config_dir() / "logs"
 
 
 def get_cache_dir() -> Path:
-    """Get cache directory (~/.praison/cache/)."""
+    """Get cache directory under the canonical home root (e.g. ~/.praisonai/cache/)."""
     return get_user_config_dir() / "cache"
 
 
@@ -125,7 +188,8 @@ def get_config_paths(project_root: Optional[Path] = None) -> List[Path]:
     Precedence (highest first):
     1. Project configs along the ancestor chain (nearest cwd wins, then
        farther ancestors up to the project root): .praison/config.toml
-    2. User config: ~/.praison/config.toml
+    2. User config under the canonical home root (config.toml), with a
+       read-only fallback to the legacy ~/.praison/config.toml.
 
     When no ``project_root`` is supplied, the chain is collected by walking
     up from cwd to the detected project root so the CLI behaves identically

@@ -1,155 +1,155 @@
 {
-  "timestamp": "2026-01-16T05:23:04.919943Z",
+  "timestamp": "2026-07-23T09:50:16.823511+00:00",
   "metadata": {
-    "python_version": "3.12.11",
-    "platform": "macOS-26.3-arm64-arm-64bit",
-    "praisonai_version": "3.9.2",
-    "timestamp": "2026-01-16T05:23:04.932474Z"
+    "python_version": "3.11.15",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "praisonai_version": "0.0.55",
+    "timestamp": "2026-07-23T09:50:16.948678+00:00"
   },
   "startup": {
-    "cold_ms": 27.866583000104583,
-    "warm_ms": 27.75670800019725
+    "cold_ms": 151.51940000032482,
+    "warm_ms": 148.62270000048738
   },
   "import_analysis": [
     {
+      "module": "site",
+      "self_us": 8676,
+      "cumulative_us": 90392,
+      "self_ms": 8.676,
+      "cumulative_ms": 90.392
+    },
+    {
+      "module": "__editable___hermes_agent_0_17_0_finder",
+      "self_us": 3088,
+      "cumulative_us": 57774,
+      "self_ms": 3.088,
+      "cumulative_ms": 57.774
+    },
+    {
       "module": "praisonaiagents",
-      "self_us": 403,
-      "cumulative_us": 188329,
-      "self_ms": 0.403,
-      "cumulative_ms": 188.329
+      "self_us": 1631,
+      "cumulative_us": 41733,
+      "self_ms": 1.631,
+      "cumulative_ms": 41.733
     },
     {
-      "module": "praisonaiagents.workflows",
-      "self_us": 106,
-      "cumulative_us": 112180,
-      "self_ms": 0.106,
-      "cumulative_ms": 112.18
+      "module": "praisonaiagents._logging",
+      "self_us": 1441,
+      "cumulative_us": 34581,
+      "self_ms": 1.441,
+      "cumulative_ms": 34.581
     },
     {
-      "module": "praisonaiagents.workflows.yaml_parser",
-      "self_us": 217,
-      "cumulative_us": 107210,
-      "self_ms": 0.217,
-      "cumulative_ms": 107.21
+      "module": "pathlib",
+      "self_us": 2796,
+      "cumulative_us": 26345,
+      "self_ms": 2.796,
+      "cumulative_ms": 26.345
     },
     {
-      "module": "praisonaiagents.agent.agent",
-      "self_us": 15,
-      "cumulative_us": 98811,
-      "self_ms": 0.015,
-      "cumulative_ms": 98.811
+      "module": "importlib.util",
+      "self_us": 256,
+      "cumulative_us": 22091,
+      "self_ms": 0.256,
+      "cumulative_ms": 22.091
     },
     {
-      "module": "praisonaiagents.agent",
-      "self_us": 146,
-      "cumulative_us": 98796,
-      "self_ms": 0.146,
-      "cumulative_ms": 98.796
+      "module": "logging",
+      "self_us": 3831,
+      "cumulative_us": 21380,
+      "self_ms": 3.831,
+      "cumulative_ms": 21.38
     },
     {
-      "module": "praisonaiagents.agent.agent",
-      "self_us": 1027,
-      "cumulative_us": 86223,
-      "self_ms": 1.027,
-      "cumulative_ms": 86.223
+      "module": "fnmatch",
+      "self_us": 1727,
+      "cumulative_us": 15762,
+      "self_ms": 1.727,
+      "cumulative_ms": 15.762
     },
     {
-      "module": "rich.logging",
-      "self_us": 282,
-      "cumulative_us": 53009,
-      "self_ms": 0.282,
-      "cumulative_ms": 53.009
+      "module": "contextlib",
+      "self_us": 2034,
+      "cumulative_us": 15694,
+      "self_ms": 2.034,
+      "cumulative_ms": 15.694
     },
     {
-      "module": "praisonaiagents.main",
-      "self_us": 18784,
-      "cumulative_us": 45759,
-      "self_ms": 18.784,
-      "cumulative_ms": 45.759
+      "module": "traceback",
+      "self_us": 2278,
+      "cumulative_us": 13217,
+      "self_ms": 2.278,
+      "cumulative_ms": 13.217
     },
     {
-      "module": "praisonaiagents.llm.openai_client",
-      "self_us": 2470,
-      "cumulative_us": 28251,
-      "self_ms": 2.47,
-      "cumulative_ms": 28.251
+      "module": "re",
+      "self_us": 3279,
+      "cumulative_us": 12833,
+      "self_ms": 3.279,
+      "cumulative_ms": 12.833
     },
     {
-      "module": "rich.traceback",
-      "self_us": 1478,
-      "cumulative_us": 18788,
-      "self_ms": 1.478,
-      "cumulative_ms": 18.788
+      "module": "encodings",
+      "self_us": 7287,
+      "cumulative_us": 9382,
+      "self_ms": 7.287,
+      "cumulative_ms": 9.382
     },
     {
-      "module": "rich.console",
-      "self_us": 1737,
-      "cumulative_us": 18587,
-      "self_ms": 1.737,
-      "cumulative_ms": 18.587
+      "module": "collections",
+      "self_us": 2515,
+      "cumulative_us": 8180,
+      "self_ms": 2.515,
+      "cumulative_ms": 8.18
     },
     {
-      "module": "pygments.lexers",
-      "self_us": 242,
-      "cumulative_us": 15427,
-      "self_ms": 0.242,
-      "cumulative_ms": 15.427
+      "module": "urllib.parse",
+      "self_us": 2158,
+      "cumulative_us": 7698,
+      "self_ms": 2.158,
+      "cumulative_ms": 7.698
     },
     {
-      "module": "rich.markdown",
-      "self_us": 409,
-      "cumulative_us": 13987,
-      "self_ms": 0.409,
-      "cumulative_ms": 13.987
+      "module": "linecache",
+      "self_us": 2965,
+      "cumulative_us": 7165,
+      "self_ms": 2.965,
+      "cumulative_ms": 7.165
     },
     {
-      "module": "pygments.plugin",
-      "self_us": 85,
-      "cumulative_us": 13503,
-      "self_ms": 0.085,
-      "cumulative_ms": 13.503
+      "module": "json",
+      "self_us": 1946,
+      "cumulative_us": 6067,
+      "self_ms": 1.946,
+      "cumulative_ms": 6.067
     },
     {
-      "module": "importlib.metadata",
-      "self_us": 637,
-      "cumulative_us": 13419,
-      "self_ms": 0.637,
-      "cumulative_ms": 13.419
+      "module": "typing",
+      "self_us": 5595,
+      "cumulative_us": 5695,
+      "self_ms": 5.595,
+      "cumulative_ms": 5.695
     },
     {
-      "module": "rich._log_render",
-      "self_us": 145,
-      "cumulative_us": 13380,
-      "self_ms": 0.145,
-      "cumulative_ms": 13.38
+      "module": "functools",
+      "self_us": 3478,
+      "cumulative_us": 5481,
+      "self_ms": 3.478,
+      "cumulative_ms": 5.481
     },
     {
-      "module": "markdown_it",
-      "self_us": 172,
-      "cumulative_us": 13339,
-      "self_ms": 0.172,
-      "cumulative_ms": 13.339
+      "module": "threading",
+      "self_us": 2321,
+      "cumulative_us": 4951,
+      "self_ms": 2.321,
+      "cumulative_ms": 4.951
     },
     {
-      "module": "rich.text",
-      "self_us": 582,
-      "cumulative_us": 13236,
-      "self_ms": 0.582,
-      "cumulative_ms": 13.236
-    },
-    {
-      "module": "markdown_it.main",
-      "self_us": 298,
-      "cumulative_us": 13168,
-      "self_ms": 0.298,
-      "cumulative_ms": 13.168
-    },
-    {
-      "module": "pydantic",
-      "self_us": 223,
-      "cumulative_us": 11119,
-      "self_ms": 0.223,
-      "cumulative_ms": 11.119
+      "module": "re._compiler",
+      "self_us": 1418,
+      "cumulative_us": 4922,
+      "self_ms": 1.418,
+      "cumulative_ms": 4.922
     }
   ],
   "scenarios": [

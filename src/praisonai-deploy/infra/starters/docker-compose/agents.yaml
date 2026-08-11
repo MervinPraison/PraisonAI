@@ -1,0 +1,15 @@
+# Copy agents.yaml and run: praisonai deploy compose up
+# Or use the monorepo stack: src/praisonai-deploy/infra/compose/agents-stack/
+
+agents:
+  - name: assistant
+    role: General assistant
+    goal: Help users with their tasks
+    backstory: You are a helpful AI assistant.
+
+deploy:
+  type: api
+  api:
+    host: 0.0.0.0
+    port: 8005
+    auth_enabled: true

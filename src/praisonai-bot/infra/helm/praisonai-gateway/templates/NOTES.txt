@@ -1,0 +1,20 @@
+PraisonAI gateway "{{ .Release.Name }}" has been deployed.
+
+Service: {{ include "praisonai-gateway.fullname" . }} (port {{ .Values.service.port }})
+
+{{- if .Values.ingress.enabled }}
+Ingress hosts:
+{{- range .Values.ingress.hosts }}
+  - https://{{ .host }}  (WebSocket: wss://{{ .host }})
+{{- end }}
+{{- else }}
+No ingress enabled. Port-forward to test locally:
+  kubectl port-forward svc/{{ include "praisonai-gateway.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl http://127.0.0.1:{{ .Values.service.port }}/health
+{{- end }}
+
+{{- if .Values.auth.enabled }}
+Auth: enabled ({{ .Values.auth.secretKey }} from secret "{{ include "praisonai-gateway.authSecretName" . }}").
+{{- else }}
+Auth: DISABLED. Do not expose this gateway publicly without a GATEWAY_AUTH_TOKEN.
+{{- end }}

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "praisonai-agents-api.fullname" . }}
+  labels:
+    {{- include "praisonai-agents-api.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "praisonai-agents-api.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api

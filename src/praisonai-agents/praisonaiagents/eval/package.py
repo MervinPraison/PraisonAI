@@ -1,6 +1,6 @@
 """Evaluation package and case definitions."""
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 
 @dataclass
@@ -21,6 +21,7 @@ class EvalCase:
     criteria: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float = 30.0
+    verify: Optional[Callable[[Any, Any], Any]] = None
     
     def __post_init__(self):
         if not self.name:
@@ -29,7 +30,11 @@ class EvalCase:
             raise ValueError("EvalCase must have an input")
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
+        """Convert to dictionary.
+
+        The ``verify`` callable is not serialisable and is intentionally omitted;
+        it is a live-only scorer supplied in Python.
+        """
         return {
             "name": self.name,
             "input": self.input,
@@ -62,6 +67,7 @@ class EvalResult:
     error: Optional[str] = None
     latency_ms: float = 0.0
     criteria_scores: Dict[str, float] = field(default_factory=dict)
+    record: Optional[Dict[str, Any]] = None  # Optional trajectory (messages, tool calls)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -72,6 +78,7 @@ class EvalResult:
             "error": self.error,
             "latency_ms": self.latency_ms,
             "criteria_scores": self.criteria_scores,
+            "record": self.record,
         }
     
     @classmethod
@@ -85,6 +92,7 @@ class EvalResult:
             error=data.get("error"),
             latency_ms=data.get("latency_ms", 0.0),
             criteria_scores=data.get("criteria_scores", {}),
+            record=data.get("record"),
         )
 
 

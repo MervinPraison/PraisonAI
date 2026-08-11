@@ -441,32 +441,35 @@ def register_cli_tools() -> None:
     
     # Deploy tools
     @register_tool("praisonai.deploy.validate")
-    def deploy_validate(config_path: str = "deploy.yaml") -> str:
+    def deploy_validate(config_path: str = "agents.yaml") -> str:
         """Validate deployment configuration."""
         try:
-            import yaml
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+
+            validate = wrapper_callable("praisonai.deploy", "validate_agents_yaml")
             yaml_path = _resolve_cwd_yaml_path(config_path)
-            with open(yaml_path, 'r') as f:
-                config = yaml.safe_load(f)
-            
-            required = ["name", "type"]
-            missing = [k for k in required if k not in config]
-            if missing:
-                return f"Invalid config: missing {missing}"
-            
-            return f"Deployment config valid: {config_path}"
+            config = validate(str(yaml_path))
+            if config is None:
+                return f"No deploy section in: {config_path}"
+            return f"Deployment config valid: {config_path} (type={getattr(config, 'type', 'unknown')})"
         except FileNotFoundError:
             return f"Config not found: {config_path}"
+        except ValueError as e:
+            return f"Invalid config: {e}"
         except Exception as e:
             return f"Error: {e}"
     
     @register_tool("praisonai.deploy.status")
-    def deploy_status(deployment_name: Optional[str] = None) -> str:
+    def deploy_status(
+        deployment_name: Optional[str] = None,
+        config_path: str = "agents.yaml",
+    ) -> str:
         """Get deployment status."""
         try:
             from praisonai_mcp._wrapper_bridge import wrapper_callable
             get_deployment_status = wrapper_callable("praisonai.deploy", "get_deployment_status")
-            status = get_deployment_status(deployment_name)
+            yaml_path = _resolve_cwd_yaml_path(config_path)
+            status = get_deployment_status(deployment_name, agents_file=str(yaml_path))
             return str(status)
         except ImportError:
             return "Error: Deploy module not available"

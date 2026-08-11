@@ -115,6 +115,7 @@ class BotOS:
         queue_depth: int = 0,
         overflow_policy: str = "reject",
         admission_policy: Optional[Any] = None,
+        max_rss_mb: float = 0.0,
         reliability: Optional[str] = None,
     ):
         self._bots: Dict[str, Bot] = {}
@@ -174,18 +175,34 @@ class BotOS:
         # users/channels, with a bounded fair wait queue and a declared
         # overflow policy, and is wired into every bot's session manager so
         # enforcement happens in the run-dispatch path itself.
-        from ._admission import build_admission_gate
+        from ._admission import build_admission_gate, build_memory_pressure_policy
 
+        # Issue #3445: opt-in memory-aware admission. When a hard RSS ceiling is
+        # configured the gate queues under soft pressure (90% of the ceiling by
+        # default) and sheds under hard pressure before the OOM killer fires.
+        # Default off (``max_rss_mb <= 0``) preserves legacy behaviour.
         self._admission_gate = build_admission_gate(
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
             policy=admission_policy,
+            resource_policy=build_memory_pressure_policy(max_rss_mb),
         )
         self._on_quiesce = None  # optional callable(): host-suspend driver
         # W1: shared identity resolver applied to every managed bot —
         # gives cross-platform unified-user sessions out of the box.
         self._identity_resolver = identity_resolver
+        # Issue #3232: a single per-turn ``LockMap`` shared across every managed
+        # bot's session manager. Because each ``BotSessionManager`` keys its lock
+        # on the *resolved* session id (unified user id under an identity
+        # resolver), sharing one map means two adapters that resolve to the same
+        # unified session hold the *same* lock and their turns run serially — no
+        # interleaved read-modify-write on one persisted transcript. Wired only
+        # when a resolver is configured (the sole case where distinct adapters
+        # unify to one session), so single-adapter behaviour is untouched.
+        from .._lockmap import LockMap
+
+        self._turn_lock_map = LockMap()
         self._tasks: List[asyncio.Task] = []
         
         # Initialize delivery router for proactive outbound messaging
@@ -312,6 +329,12 @@ class BotOS:
         # overflow policy is enforced in the inbound run-dispatch path. No-op
         # when admission control is not configured.
         self._wire_admission_gate()
+
+        # Issue #3232: share one per-turn ``LockMap`` across every bot's session
+        # manager so turns are serialised on the *resolved* session id across
+        # adapters. Closes the cross-platform concurrent-turn hole exposed by the
+        # identity resolver. No-op without a resolver (single-adapter behaviour).
+        self._wire_turn_locks()
 
         # Start health monitoring if enabled
         if self._enable_supervision and self._supervisor:
@@ -986,6 +1009,45 @@ class BotOS:
                     "Failed to wire admission gate for %s: %s", platform, e
                 )
 
+    def _wire_turn_locks(self) -> None:
+        """Share one per-turn ``LockMap`` across every bot's session (#3232).
+
+        Each ``BotSessionManager`` keys its per-turn lock on the *resolved*
+        session id (the unified user id when an identity resolver is
+        configured). By default every adapter owns a separate ``LockMap``, so
+        two adapters that resolve the same human to one unified session hold two
+        distinct locks and their turns run concurrently against one persisted
+        transcript. Injecting a single shared map makes those turns serialise on
+        the resolved id — regardless of which platform a message arrives on.
+
+        Wired only when an identity resolver is present (BotOS-level or on any
+        managed bot): that is the sole case where distinct adapters unify to one
+        session, so single-adapter deployments keep their own map and today's
+        behaviour is preserved exactly. Mirrors :meth:`_wire_admission_gate`:
+        pre-start it is stamped onto the ``Bot`` (spliced into the lazily-built
+        session by ``Bot._build_adapter``) and any already-built session is
+        wired in place.
+        """
+        has_resolver = self._identity_resolver is not None or any(
+            getattr(bot, "_identity_resolver", None) is not None
+            for bot in self._bots.values()
+        )
+        if not has_resolver:
+            return
+        for platform, bot in self._bots.items():
+            try:
+                # Pre-start: applied when the adapter is lazily built.
+                if hasattr(bot, "_turn_lock_map"):
+                    bot._turn_lock_map = self._turn_lock_map
+                # Post-start / direct adapter: wire any existing session now.
+                session = self._find_session_manager(bot)
+                if session is not None and hasattr(session, "_locks"):
+                    session._locks = self._turn_lock_map
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(
+                    "Failed to wire turn locks for %s: %s", platform, e
+                )
+
     @property
     def admission_stats(self) -> Optional[Dict[str, Any]]:
         """Live admission counters for health/metrics, or ``None`` when off.
@@ -1440,6 +1502,11 @@ class BotOS:
             raw.get("overflow_policy", gateway_cfg.get("overflow_policy", "reject"))
             or "reject"
         )
+        # Issue #3445: opt-in memory-aware admission (hard RSS ceiling in MiB).
+        # Default 0 disables it, preserving concurrency-only admission.
+        max_rss_mb = float(
+            raw.get("max_rss_mb", gateway_cfg.get("max_rss_mb", 0)) or 0
+        )
 
         # Issue #2531: single reliability posture. Accept a top-level
         # ``reliability`` or ``gateway.reliability``; the preset composes drain
@@ -1454,6 +1521,7 @@ class BotOS:
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
+            max_rss_mb=max_rss_mb,
             reliability=reliability,
         )
 

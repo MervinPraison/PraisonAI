@@ -47,8 +47,13 @@ def schedule_add_cmd(
     channel: str = typer.Option("", "--channel", help="[Legacy] Delivery platform: telegram, discord, slack, whatsapp"),
     channel_id: str = typer.Option("", "--channel-id", help="[Legacy] Target chat/channel ID on the platform"),
     session_id: str = typer.Option("", "--session-id", help="Session ID to preserve conversation context"),
+    continuable: bool = typer.Option(True, "--continuable/--no-continuable", help="Seed a resumable session on delivery so a reply resumes the job with context (default); --no-continuable for fire-and-forget notices"),
     pre_run: str = typer.Option("", "--pre-run", help="Cheap pre-run gate command: exit 0 + output => run (output seeds the prompt); non-zero => skip (no model tokens, no delivery)"),
     condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
+    command: str = typer.Option("", "--command", "--script", help="No-LLM action: run this shell command on schedule and deliver its stdout verbatim (no agent, no model turn)"),
+    command_timeout: float = typer.Option(60.0, "--command-timeout", help="Max seconds the --command may run before it is killed (default 60)"),
+    model: str = typer.Option("", "--model", help="Pin this job to a specific model (e.g. 'openai/gpt-4o-mini'). Snapshotted so unattended runs stay stable and drift fails closed. Pass an explicit model to capture a snapshot"),
+    pin: bool = typer.Option(True, "--pin/--no-pin", help="Enforce the model snapshot so drift fails closed (default; only takes effect once a snapshot exists via --model). --no-pin follows whatever the default becomes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """Add a job to the schedule store (with optional delivery target).
@@ -59,6 +64,7 @@ def schedule_add_cmd(
         praisonai schedule add "report" -s hourly -m "status report" --deliver all
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
         praisonai schedule add "inbox-watch" -s "*/5m" -m "Summarise new emails" --pre-run "scripts/new_mail.sh" --deliver telegram
+        praisonai schedule add "disk-watch" -s hourly --command "df -h /" --deliver telegram:-100123
     """
     output = get_output_controller()
     try:
@@ -76,7 +82,12 @@ def schedule_add_cmd(
         
         if session_id:
             delivery_kwargs["session_id"] = session_id
-        
+
+        # Opt-out only: True is the default, so pass it through solely when a
+        # delivery target exists and the user asked for fire-and-forget.
+        if delivery_kwargs and not continuable:
+            delivery_kwargs["continuable"] = False
+
         result = _schedule_add(
             name=name,
             schedule=schedule,
@@ -85,10 +96,16 @@ def schedule_add_cmd(
             **delivery_kwargs
         )
 
-        # ``pre_run``/``condition`` run an arbitrary host shell command, so they
-        # are NOT part of the LLM-callable schedule_add surface. The CLI is a
-        # trusted, human-driven surface, so set them on the stored job here.
-        if (pre_run or condition) and "Error" not in result:
+        # ``pre_run``/``condition``/``command`` run an arbitrary host shell
+        # command, so they are NOT part of the LLM-callable schedule_add
+        # surface. The CLI is a trusted, human-driven surface, so set them on
+        # the stored job here. A ``--command`` job runs verbatim with no agent
+        # and no model turn, delivering its stdout to the delivery target.
+        # ``--model``/``--no-pin`` snapshot the model/pin policy onto the job so
+        # an unattended run stays pinned and drift fails closed. A model-free
+        # ``--command`` job takes no model turn, so pinning is skipped for it.
+        want_pin_update = bool(model) or (not pin and not command)
+        if (pre_run or condition or command or want_pin_update) and "Error" not in result:
             try:
                 from praisonaiagents.tools.schedule_tools import _get_store
                 store = _get_store()
@@ -96,9 +113,16 @@ def schedule_add_cmd(
                 if job is not None:
                     job.pre_run = pre_run or None
                     job.condition = condition or None
+                    job.command = command or None
+                    if command:
+                        job.command_timeout = command_timeout
+                    if not command:
+                        if model:
+                            job.model = model
+                        job.pin_model = pin
                     store.update(job)
             except Exception as e:
-                output.print_error(f"Failed to set pre-run gate: {e}")
+                output.print_error(f"Failed to set command/pre-run gate: {e}")
                 raise typer.Exit(1)
 
         if json_output:

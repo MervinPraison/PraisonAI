@@ -245,6 +245,175 @@ def skills_install(
     typer.echo(f"Installed: {installed}")
 
 
+@app.command("add")
+def skills_add(
+    source: str = typer.Argument(..., help="Skill source (local path or https:// git URL)"),
+    dest: str = typer.Option(None, "--dest", "-d", help="Install destination (defaults to ~/.praisonai/skills)"),
+):
+    """Add a skill from a URL or local path (alias of ``install``).
+
+    Mirrors the familiar ``skills add <url>`` verb:
+
+        praisonai skills add https://github.com/org/repo
+        praisonai skills add ./my-skill
+    """
+    skills_install(source=source, dest=dest)
+
+
+@app.command("sync")
+def skills_sync(
+    url: str = typer.Argument(
+        None,
+        help="Remote skill source git URL. If omitted, uses skills.urls from config.",
+    ),
+    ref: str = typer.Option(None, "--ref", "-r", help="Pin a branch/tag/commit"),
+):
+    """Force-refresh declarative remote skill sources into the local cache.
+
+    Syncs remote skills into a versioned cache under ~/.praisonai/cache so that
+    ``discover_skills`` (and every agent) picks up the latest without a manual
+    ``skills install``. Offline-safe: keeps the last-good cache on failure.
+
+    Examples:
+        praisonai skills sync https://github.com/org/skills-repo
+        praisonai skills sync           # uses skills.urls from config
+    """
+    try:
+        from praisonaiagents.skills import (
+            fetch_remote_skill_dirs,
+            discover_skills,
+            validate as validate_skill,
+        )
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    sources = []
+    if url:
+        sources = [{"url": url, "ref": ref} if ref else url]
+    else:
+        sources = _load_configured_skill_sources()
+
+    if not sources:
+        typer.echo(
+            "No remote skill sources. Pass a URL or set 'skills.urls' in config.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    dirs = fetch_remote_skill_dirs(sources)
+    if not dirs:
+        typer.echo("Sync produced no skills (offline or empty source).", err=True)
+        raise typer.Exit(1)
+
+    # Re-use the canonical scanner so both layouts (skill-per-subdir and a
+    # single root-level skill) are handled and de-duplicated identically to
+    # normal discovery, instead of re-implementing the scan and double-counting.
+    skills = discover_skills([str(d) for d in dirs], include_defaults=False)
+
+    count = 0
+    for skill in skills:
+        errors = validate_skill(skill.path) if skill.path else ["missing path"]
+        if errors:
+            typer.echo(f"  ! {skill.name}: {'; '.join(errors)}", err=True)
+        else:
+            count += 1
+            typer.echo(f"  ✓ {skill.name}")
+    typer.echo(f"Synced {count} skill(s) into the local cache.")
+
+
+def _load_configured_skill_sources():
+    """Read skills.urls / skills.sources from PraisonAI config, if present.
+
+    Looks in both the project-level ``praisonai.yaml``/``praisonai.yml`` (so a
+    repo can declare shared skill sources) and the user-global
+    ``~/.praisonai/config.yaml``. Project entries take precedence and are
+    listed first; duplicates are removed while preserving order.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return []
+
+    from pathlib import Path
+
+    def _extract(path: Path):
+        if not path.exists():
+            return []
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except Exception:
+            return []
+        skills_cfg = data.get("skills") or {}
+        if not isinstance(skills_cfg, dict):
+            return []
+        srcs = skills_cfg.get("urls") or skills_cfg.get("sources") or []
+        if isinstance(srcs, str):
+            srcs = [srcs]
+        return list(srcs)
+
+    candidates = []
+    cwd = Path.cwd()
+    for name in ("praisonai.yaml", "praisonai.yml"):
+        candidates.append(cwd / name)
+    try:
+        from praisonaiagents.paths import get_config_path
+
+        candidates.append(get_config_path())
+    except ImportError:
+        pass
+
+    ordered = []
+    seen = set()
+    for path in candidates:
+        for src in _extract(path):
+            key = src if isinstance(src, str) else repr(src)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(src)
+    return ordered
+
+
+@app.command("reload")
+def skills_reload(
+    skill_dirs: str = typer.Option(
+        None, "--dirs", "-d", help="Comma-separated skill directories"
+    ),
+):
+    """Re-scan skill directories and report the skills now available.
+
+    ``SkillManager.reload()`` is the live-session primitive: a running session
+    calls it to pick up newly installed or edited skills on the *next* turn
+    without a restart. This standalone CLI command is a convenience scan that
+    lists the skills currently discoverable on disk (there is no live session
+    to refresh from a separate process), so run it to confirm a
+    ``praisonai skills install <url>`` or a SKILL.md edit landed on disk.
+
+    Examples:
+        praisonai skills reload
+        praisonai skills reload --dirs ./skills
+    """
+    try:
+        from praisonaiagents.skills import SkillManager
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    dirs = skill_dirs.split(",") if skill_dirs else None
+
+    manager = SkillManager()
+    manager.discover(dirs, include_defaults=dirs is None)
+
+    from rich.console import Console
+
+    console = Console()
+    names = sorted(manager.skill_names)
+    for name in names:
+        console.print(f"[green]• {name}[/green]")
+
+    console.print(f"Skills available: [green]{len(names)}[/green]")
+
+
 @app.command("search")
 def skills_search(
     query: str = typer.Argument(..., help="Search query"),

@@ -25,6 +25,7 @@ import json
 import copy
 import time
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -40,6 +41,16 @@ logger = get_logger(__name__)
 
 # Default maximum parallel workers to prevent rate limiting issues
 DEFAULT_MAX_PARALLEL_WORKERS = 3
+
+# Minimum number of parallel branches before an extra LLM summarisation call is
+# worth its cost. Below this, the cheaper truncation fallback is used since the
+# summarisation request consumes roughly as many tokens as it saves.
+MIN_BRANCHES_FOR_LLM_SUMMARY = 3
+
+# Guards lazy creation of each Workflow's per-instance _run_lock so two threads
+# entering run()/astart() concurrently on a fresh instance cannot each create
+# and acquire a *different* lock object (which would defeat the run guard).
+_RUN_LOCK_INIT_GUARD = threading.Lock()
 
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
@@ -648,7 +659,27 @@ class AgentFlow:
     _execution_history: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     # Gap 3c: Cross-step handoff cycle detection
     _handoff_chain: List[str] = field(default_factory=list, repr=False)
-    
+    # Guards per-run mutable state (status/step_statuses/_handoff_chain) so a
+    # shared Workflow instance cannot be corrupted by concurrent run() calls.
+    _run_lock: Optional[Any] = field(default=None, repr=False, compare=False)
+
+    @property
+    def _execution_lock(self):
+        """Lazily-created re-entrancy lock for run()/astart() (zero overhead until used).
+
+        Creation is serialized through a module-level guard so two threads that
+        first reach run()/astart() concurrently observe the *same* lock object
+        (double-checked locking) rather than each minting and acquiring its own.
+        """
+        lock = self._run_lock
+        if lock is None:
+            with _RUN_LOCK_INIT_GUARD:
+                lock = self._run_lock
+                if lock is None:
+                    lock = threading.Lock()
+                    self._run_lock = lock
+        return lock
+
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
         from .workflow_configs import (
@@ -1063,6 +1094,29 @@ class AgentFlow:
         Returns:
             Dict with 'output' (final result) and 'steps' (all step results)
         """
+        # Gap 3: refuse concurrent re-entrancy on the same instance. Per-run
+        # mutable state (status/step_statuses/_handoff_chain) is not safe to
+        # share across concurrent run()/astart() calls, so acquire a lock for
+        # the whole run and raise a clear error instead of silently corrupting.
+        if not self._execution_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "This Workflow instance is already running; a Workflow is not "
+                "safe to run() concurrently on the same object. Create a "
+                "separate Workflow instance per concurrent run."
+            )
+        try:
+            return self._run_impl(input, llm, verbose, stream)
+        finally:
+            self._execution_lock.release()
+
+    def _run_impl(
+        self,
+        input: str = "",
+        llm: Optional[str] = None,
+        verbose: bool = False,
+        stream: bool = None
+    ) -> Dict[str, Any]:
+        """Internal run implementation (see run() for the concurrency guard)."""
         # Gap 3c: Clear handoff chain at start of new workflow run  
         self._handoff_chain.clear()
         
@@ -1254,6 +1308,7 @@ class AgentFlow:
             max_retries = getattr(step, 'max_retries', 3)
             retry_count = 0
             validation_feedback = None
+            guardrail_failed = False
             
             while retry_count <= max_retries:
                 step_error = None
@@ -1439,18 +1494,31 @@ class AgentFlow:
                         is_valid, feedback = guardrail(StepResult(output=output))
                         if not is_valid:
                             validation_feedback = str(feedback)
+                            guardrail_failed = True
                             retry_count += 1
                             if verbose:
                                 print(f"⚠️ {step.name} failed validation (attempt {retry_count}/{max_retries}): {feedback}")
                             continue  # Retry
+                        guardrail_failed = False
                     except Exception as e:
                         logger.error(f"Guardrail failed for {step.name}: {e}")
                 
                 # Success - break out of retry loop
                 break
             
+            # A step whose guardrail never validated after exhausting retries is
+            # a failure too, even though no exception was raised. Treat it like
+            # step_error so on_error flow control and the final status are honored
+            # instead of silently reporting the step "completed".
+            step_failed = bool(step_error) or guardrail_failed
+            failure_reason = (
+                str(step_error) if step_error
+                else (f"guardrail validation failed: {validation_feedback}"
+                      if guardrail_failed else None)
+            )
+
             # Update step status
-            if step_error:
+            if step_failed:
                 if hasattr(step, 'status'):
                     step.status = "failed"
                 self.step_statuses[step.name] = "failed"
@@ -1458,7 +1526,35 @@ class AgentFlow:
                 if hasattr(step, 'status'):
                     step.status = "completed"
                 self.step_statuses[step.name] = "completed"
-            
+
+            # Honor the step's on_error flow-control setting. When a step
+            # exhausts its retries (error or unresolved guardrail) and
+            # on_error == "stop" (the Task default), abort the workflow and mark
+            # it failed instead of feeding the error string forward into the next
+            # step and falsely reporting overall success.
+            if step_failed and getattr(step, 'on_error', 'stop') == 'stop':
+                self.status = "failed"
+                results.append({
+                    "step": step.name,
+                    "output": output,
+                    "status": "failed",
+                    "retries": retry_count,
+                    "error": failure_reason,
+                })
+                # Still notify the step-complete callback so lifecycle observers
+                # see the (failed) terminal step before the workflow aborts.
+                if self.on_step_complete:
+                    try:
+                        self.on_step_complete(
+                            step.name,
+                            StepResult(output=output or "", stop_workflow=True),
+                        )
+                    except Exception as e:
+                        logger.error(f"on_step_complete callback failed: {e}")
+                if verbose:
+                    print(f"🛑 Workflow stopped: step '{step.name}' failed (on_error='stop')")
+                break
+
             # Create step result for callback
             step_result = StepResult(output=output or "", stop_workflow=stop)
             
@@ -1530,8 +1626,16 @@ class AgentFlow:
             
             i += 1
         
-        # Update workflow status
-        self.status = "completed"
+        # Update workflow status. Reflect any unresolved step failure (e.g. a
+        # step with on_error="continue" that still failed) instead of always
+        # reporting "completed". A prior on_error="stop" break already set
+        # self.status = "failed".
+        if self.status != "failed" and any(
+            r.get("status") == "failed" for r in results
+        ):
+            self.status = "failed"
+        elif self.status != "failed":
+            self.status = "completed"
         
         # Reset YAML-approved tools context if it was set
         if _approval_token is not None:
@@ -2196,31 +2300,29 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             }
         
         normalized = self._normalize_single_step(step, index)
-        
-        context = WorkflowContext(
-            input=input,
-            previous_result=str(previous_output) if previous_output else None,
-            current_step=normalized.name,
-            variables=all_variables.copy()
-        )
-        
-        output = None
-        stop = False
-        
-        if normalized.handler:
-            try:
+
+        state = {"stop": False}
+
+        def _run_body(validation_feedback: Optional[str]) -> Any:
+            """Execute the step body once; used by the shared policy wrapper."""
+            context = WorkflowContext(
+                input=input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=normalized.name,
+                variables=all_variables.copy()
+            )
+            if validation_feedback:
+                context.variables["validation_feedback"] = validation_feedback
+
+            if normalized.handler:
                 result = normalized.handler(context)
                 if isinstance(result, StepResult):
-                    output = result.output
-                    stop = result.stop_workflow
                     if result.variables:
                         all_variables.update(result.variables)
-                else:
-                    output = str(result)
-            except Exception as e:
-                output = f"Error: {e}"
-        elif normalized.agent:
-            try:
+                    state["stop"] = result.stop_workflow
+                    return result.output
+                return str(result)
+            elif normalized.agent:
                 # Propagate context management to existing agent if workflow has it enabled
                 if self.context and hasattr(normalized.agent, '_context_manager_initialized'):
                     if not normalized.agent._context_manager_initialized:
@@ -2231,25 +2333,24 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                         # Also set on existing context manager if already initialized
                         if normalized.agent._context_manager and hasattr(normalized.agent._context_manager, '_session_cache'):
                             normalized.agent._context_manager._session_cache = self._session_dedup_cache
-                
+
                 action = normalized.action or input
                 # Substitute variables
                 action = _substitute_action_variables(action, all_variables, previous_output, input)
-                
+                if validation_feedback:
+                    action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
+
                 # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
                 agent_class_name = normalized.agent.__class__.__name__
-                output = self._execute_specialized_agent(
+                out = self._execute_specialized_agent(
                     normalized.agent, agent_class_name, action, normalized, all_variables, stream
                 )
-                
                 # Parse JSON output if output_json was requested
                 step_output_json = getattr(normalized, '_output_json', None)
-                if step_output_json and output and isinstance(output, str):
-                    output = _parse_json_output(output, normalized.name)
-            except Exception as e:
-                output = f"Error: {e}"
-        elif normalized.action:
-            try:
+                if step_output_json and out and isinstance(out, str):
+                    out = _parse_json_output(out, normalized.name)
+                return out
+            elif normalized.action:
                 from ..agent.agent import Agent
                 config = normalized.agent_config or self.default_agent_config or {}
                 temp_agent = Agent(
@@ -2270,25 +2371,102 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 )
                 action = normalized.action
                 action = _substitute_action_variables(action, all_variables, previous_output, input)
-                
-                output = temp_agent.chat(action, stream=stream)
-                
-                # Parse JSON output if output_json was requested
+                if validation_feedback:
+                    action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
+
+                out = temp_agent.chat(action, stream=stream)
                 step_output_json = getattr(normalized, '_output_json', None)
-                if step_output_json and output and isinstance(output, str):
-                    output = _parse_json_output(output, normalized.name)
-            except Exception as e:
-                output = f"Error: {e}"
-        
+                if step_output_json and out and isinstance(out, str):
+                    out = _parse_json_output(out, normalized.name)
+                return out
+            return None
+
+        # Apply the same retry / guardrail / output_file policies used by the
+        # top-level run() loop so nested patterns (Parallel/Loop/Route/If/Repeat)
+        # and hierarchical mode don't silently drop these guarantees (Gap 2).
+        output = self._apply_step_policies(
+            normalized, _run_body, all_variables, verbose
+        )
+
         if verbose:
             print(f"✅ {normalized.name}: {str(output)}")
-        
+
         return {
             "step": normalized.name,
             "output": output,
-            "stop": stop,
+            "stop": state["stop"],
             "variables": all_variables
         }
+
+    def _apply_step_policies(self, step, run_body, all_variables, verbose):
+        """Run a step body with retry, guardrail-retry and output_file handling.
+
+        Shared by the top-level loop and nested-pattern execution so guarded /
+        retrying / file-writing steps behave identically wherever they appear.
+
+        Args:
+            step: The normalized step (provides max_retries/guardrails/output_file).
+            run_body: Callable(validation_feedback) -> output. Raises on error.
+            all_variables: Current workflow variables (for output_file substitution).
+            verbose: Whether to print progress.
+        """
+        max_retries = getattr(step, 'max_retries', 3)
+        retry_count = 0
+        validation_feedback = None
+        output = None
+        step_error = None
+
+        while retry_count <= max_retries:
+            step_error = None
+            try:
+                output = run_body(validation_feedback)
+            except Exception as e:
+                step_error = e
+                output = f"Error: {e}"
+                is_retryable = getattr(e, 'is_retryable', True)
+                if not is_retryable:
+                    break
+                retry_count += 1
+                if retry_count <= max_retries:
+                    backoff_seconds = 2 ** (retry_count - 1)
+                    if verbose:
+                        print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {e}")
+                    time.sleep(backoff_seconds)
+                    continue
+
+            # Guardrail check (guardrails canonical, guardrail deprecated)
+            guardrail = getattr(step, 'guardrails', None) or getattr(step, 'guardrail', None)
+            if guardrail and output and not step_error:
+                try:
+                    is_valid, feedback = guardrail(StepResult(output=output))
+                    if not is_valid:
+                        validation_feedback = str(feedback)
+                        retry_count += 1
+                        if verbose:
+                            print(f"⚠️ {step.name} failed validation (attempt {retry_count}/{max_retries}): {feedback}")
+                        if retry_count <= max_retries:
+                            continue
+                        break
+                except Exception as e:
+                    logger.error(f"Guardrail failed for {step.name}: {e}")
+
+            break
+
+        # Handle output_file - save output to file
+        if hasattr(step, 'output_file') and step.output_file and output and not step_error:
+            try:
+                output_path = step.output_file
+                for key, value in all_variables.items():
+                    output_path = output_path.replace(f"{{{{{key}}}}}", str(value))
+                os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+                with open(output_path, "w") as f:
+                    f.write(str(output))
+                if verbose:
+                    print(f"📁 Saved output to: {output_path}")
+            except Exception as e:
+                logger.error(f"Failed to save output to file: {e}")
+
+        return output
     
     def _execute_route(
         self,
@@ -2448,11 +2626,19 @@ CONCISE SUMMARY:"""
             from ..context.tokens import estimate_tokens_heuristic
             tokens = estimate_tokens_heuristic(previous_output)
             if tokens > 1000:
-                # Try LLM-based summarization first, fall back to truncation
-                try:
-                    optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
-                except Exception:
-                    # Fallback to truncation-based summarization
+                # LLM summarisation only pays off for larger fan-outs; for small
+                # branch counts the extra call costs roughly what it saves, so use
+                # the cheaper truncation fallback instead.
+                if num_branches >= MIN_BRANCHES_FOR_LLM_SUMMARY:
+                    # Try LLM-based summarization first, fall back to truncation
+                    try:
+                        optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
+                    except Exception:
+                        # Fallback to truncation-based summarization
+                        optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
+                elif tokens >= 1500:
+                    # Only truncate above the same threshold the LLM summariser uses;
+                    # below it, previous behaviour passed context through unchanged.
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
                 
                 if verbose and optimized_previous != previous_output:
@@ -2635,21 +2821,24 @@ CONCISE SUMMARY:"""
                     emitter.clear_branch()
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(copy_context_to_callable(lambda pair=(idx, item): execute_item(pair)))
-                    for idx, item in enumerate(items)
-                ]
+                # Map each future back to its original index so error attribution
+                # survives even if execute_item raises before returning its index.
+                future_to_idx = {}
+                for idx, item in enumerate(items):
+                    fut = executor.submit(copy_context_to_callable(lambda pair=(idx, item): execute_item(pair)))
+                    future_to_idx[fut] = idx
                 
                 # Collect results in order
                 indexed_results = []
-                for future in concurrent.futures.as_completed(futures):
+                for future in concurrent.futures.as_completed(future_to_idx):
+                    idx = future_to_idx[future]
                     try:
-                        idx, step_result = future.result()
+                        _, step_result = future.result()
                         indexed_results.append((idx, step_result))
                         if verbose:
                             print(f"  ✓ Item {idx + 1}/{num_items} complete")
                     except Exception as e:
-                        logger.error(f"Parallel loop iteration failed: {e}")
+                        logger.error(f"Parallel loop iteration {idx} failed: {e}")
                         indexed_results.append((idx, {"step": f"loop_{idx}", "output": f"Error: {e}"}))
                 
                 # Sort by index to maintain order
@@ -3811,34 +4000,91 @@ class WorkflowManager:
         Returns:
             Execution results with step outputs and status
         """
+        loop = self._prepare_workflow_loop(
+            workflow_name=workflow_name,
+            variables=variables,
+            default_llm=default_llm,
+            planning=planning,
+            resume=resume,
+        )
+        if "error" in loop:
+            return loop["error"]
+
+        state = loop["state"]
+        # Drive the shared step-loop generator with a synchronous step-runner.
+        step_iter = self._run_workflow_loop(
+            workflow=loop["workflow"],
+            workflow_name=workflow_name,
+            state=state,
+            checkpoint=checkpoint,
+            on_step=on_step,
+        )
+        request = next(step_iter, None)
+        while request is not None:
+            step, step_idx = request
+            step_result = self._execute_single_step(
+                step=step,
+                step_idx=step_idx,
+                results=state["results"],
+                all_variables=state["all_variables"],
+                executor=executor,
+                default_agent=default_agent,
+                default_llm=loop["default_llm"],
+                memory=memory,
+                planning=loop["planning"],
+                on_step=None,  # loop handles the on_step callback
+                on_result=on_result,
+            )
+            try:
+                request = step_iter.send(step_result)
+            except StopIteration:
+                break
+
+        return self._workflow_loop_result(loop["workflow"], state)
+
+    def _prepare_workflow_loop(
+        self,
+        workflow_name: str,
+        variables: Optional[Dict[str, Any]],
+        default_llm: Optional[str],
+        planning: bool,
+        resume: Optional[str],
+    ) -> Dict[str, Any]:
+        """Resolve the workflow and build the initial loop state.
+
+        Shared by the sync ``execute`` and async ``aexecute`` drivers so the
+        setup (framework validation, variable merge, checkpoint resume) lives
+        in a single place. Returns ``{"error": <result dict>}`` on failure.
+        """
         workflow = self.get_workflow(workflow_name)
         if not workflow:
             return {
-                "success": False,
-                "error": f"Workflow '{workflow_name}' not found",
-                "results": []
+                "error": {
+                    "success": False,
+                    "error": f"Workflow '{workflow_name}' not found",
+                    "results": []
+                }
             }
-        
+
         # Fail fast on unsupported frameworks. This path iterates steps
         # directly instead of calling Workflow.run(), so re-apply the same
         # guard here to avoid silently ignoring framework: <non-praisonai>.
         workflow._validate_framework()
-        
+
         # Merge variables
         all_variables = {**workflow.variables}
         if variables:
             all_variables.update(variables)
-        
+
         # Use workflow-level defaults if not provided
         if default_llm is None:
             default_llm = workflow.llm
         if planning is False and workflow.planning:
             planning = workflow.planning
-        
-        results = []
-        success = True
+
+        results: List[Dict[str, Any]] = []
         start_step = 0
-        
+
         # Resume from checkpoint if specified
         if resume:
             checkpoint_data = self._load_checkpoint(resume)
@@ -3847,19 +4093,62 @@ class WorkflowManager:
                 all_variables = checkpoint_data.get("variables", all_variables)
                 start_step = checkpoint_data.get("completed_steps", 0)
                 self._log(f"Resuming workflow from step {start_step + 1}")
-        
+
+        return {
+            "workflow": workflow,
+            "default_llm": default_llm,
+            "planning": planning,
+            "state": {
+                "results": results,
+                "all_variables": all_variables,
+                "success": True,
+                "start_step": start_step,
+            },
+        }
+
+    def _workflow_loop_result(self, workflow: Workflow, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Assemble the return dict shared by ``execute`` and ``aexecute``."""
+        return {
+            "success": state["success"],
+            "workflow": workflow.name,
+            "results": state["results"],
+            "variables": state["all_variables"],
+        }
+
+    def _run_workflow_loop(
+        self,
+        workflow: Workflow,
+        workflow_name: str,
+        state: Dict[str, Any],
+        checkpoint: Optional[str] = None,
+        on_step: Optional[Callable[[Task, int], None]] = None,
+    ):
+        """Single source of truth for the workflow step-loop semantics.
+
+        This is a *sans-io* generator: it owns all orchestration (condition
+        skip, ``loop_over`` iteration, checkpoint save, ``branch_condition`` /
+        ``next_steps`` routing, early-stop and ``on_error`` handling) but never
+        runs a step itself. For each step invocation it yields ``(step, idx)``
+        and expects the driver to ``send`` back the step-result dict produced by
+        the sync or async step-runner. This keeps the loop identical for both
+        ``execute`` and ``aexecute`` while the only sync/async seam is how a
+        single step is run.
+        """
+        results = state["results"]
+        all_variables = state["all_variables"]
+
         # Build step lookup for branching
         step_lookup = {step.name: (i, step) for i, step in enumerate(workflow.steps)}
-        
-        current_step_idx = start_step
+
+        current_step_idx = state["start_step"]
         max_iterations = len(workflow.steps) * 10  # Prevent infinite loops
         iteration = 0
-        
+
         while current_step_idx < len(workflow.steps) and iteration < max_iterations:
             iteration += 1
             step = workflow.steps[current_step_idx]
             i = current_step_idx
-            
+
             # Check condition
             if step.condition:
                 condition = self._substitute_variables(step.condition, all_variables)
@@ -3872,38 +4161,31 @@ class WorkflowManager:
                     })
                     current_step_idx += 1
                     continue
-            
+
             # Handle loop_over - iterate over a variable
             if step.loop_over and step.loop_over in all_variables:
                 loop_items = all_variables[step.loop_over]
+                loop_stopped = False
                 if isinstance(loop_items, (list, tuple)):
                     loop_results = []
                     for item_idx, item in enumerate(loop_items):
                         # Set loop variable
                         all_variables[step.loop_var] = item
                         all_variables["_loop_index"] = item_idx
-                        
-                        # Execute step for this item
-                        step_result = self._execute_single_step(
-                            step=step,
-                            step_idx=i,
-                            results=results,
-                            all_variables=all_variables,
-                            executor=executor,
-                            default_agent=default_agent,
-                            default_llm=default_llm,
-                            memory=memory,
-                            planning=planning,
-                            # verbose parameter removed - Agent no longer accepts it
-                            on_step=on_step,
-                            on_result=on_result
-                        )
+
+                        # Callback before step
+                        if on_step:
+                            on_step(step, i)
+
+                        # Execute step for this item via the driver-provided runner
+                        step_result = yield (step, i)
                         loop_results.append(step_result)
-                        
+
                         if not step_result["success"] and step.on_error == "stop":
-                            success = False
+                            state["success"] = False
+                            loop_stopped = True
                             break
-                    
+
                     # Store all loop results
                     results.append({
                         "step": step.name,
@@ -3911,36 +4193,39 @@ class WorkflowManager:
                         "output": [r["output"] for r in loop_results],
                         "loop_results": loop_results
                     })
-                    
+
                     # Clean up loop variables
                     all_variables.pop(step.loop_var, None)
                     all_variables.pop("_loop_index", None)
                 else:
                     self._log(f"loop_over variable '{step.loop_over}' is not iterable")
-                
+
+                # A stop-on-error inside the loop aborts the whole workflow,
+                # not just the inner item iteration.
+                if loop_stopped:
+                    break
+
+                # Persist checkpoint after a completed loop step so resume does
+                # not re-run every loop item (parity with single-step saves).
+                if checkpoint:
+                    self._save_checkpoint(
+                        name=checkpoint,
+                        workflow_name=workflow_name,
+                        completed_steps=i + 1,
+                        results=results,
+                        variables=all_variables
+                    )
+
                 current_step_idx += 1
                 continue
-            
+
             # Callback before step
             if on_step:
                 on_step(step, i)
-            
-            # Execute single step
-            step_result = self._execute_single_step(
-                step=step,
-                step_idx=i,
-                results=results,
-                all_variables=all_variables,
-                executor=executor,
-                default_agent=default_agent,
-                default_llm=default_llm,
-                memory=memory,
-                planning=planning,
-                # verbose parameter removed - Agent no longer accepts it
-                on_step=None,  # Already called above
-                on_result=on_result
-            )
-            
+
+            # Execute single step via the driver-provided runner
+            step_result = yield (step, i)
+
             # Handle skipped steps
             if step_result.get("skipped"):
                 results.append({
@@ -3950,19 +4235,19 @@ class WorkflowManager:
                 })
                 current_step_idx += 1
                 continue
-            
+
             results.append({
                 "step": step.name,
                 "status": "success" if step_result["success"] else "failed",
                 "output": step_result["output"],
                 "error": step_result.get("error")
             })
-            
-            # Handle early stop 
+
+            # Handle early stop
             if step_result.get("stop"):
                 self._log(f"Workflow stopped early at step '{step.name}'")
                 break
-            
+
             # Save checkpoint after each step if enabled
             if checkpoint:
                 self._save_checkpoint(
@@ -3972,16 +4257,16 @@ class WorkflowManager:
                     results=results,
                     variables=all_variables
                 )
-            
+
             # Handle failure
             if not step_result["success"]:
                 if step.on_error == "stop":
-                    success = False
+                    state["success"] = False
                     break
                 elif step.on_error == "continue":
                     current_step_idx += 1
                     continue
-            
+
             # Handle branching
             next_step_idx = None
             # Use getattr with defaults for workflow-specific attributes that may not exist on Task
@@ -3999,20 +4284,13 @@ class WorkflowManager:
                 # Use explicit next_steps
                 if next_steps[0] in step_lookup:
                     next_step_idx, _ = step_lookup[next_steps[0]]
-            
+
             # Move to next step
             if next_step_idx is not None:
                 current_step_idx = next_step_idx
             else:
                 current_step_idx += 1
-        
-        return {
-            "success": success,
-            "workflow": workflow.name,
-            "results": results,
-            "variables": all_variables
-        }
-    
+
     def _execute_single_step(
         self,
         step: Task,
@@ -4172,7 +4450,9 @@ class WorkflowManager:
         memory: Optional[Any] = None,
         planning: bool = False,
         stream: bool = False,
-        verbose: int = 0
+        verbose: int = 0,
+        checkpoint: Optional[str] = None,
+        resume: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Async version of execute() for workflow execution.
@@ -4189,142 +4469,216 @@ class WorkflowManager:
             planning: Enable planning mode
             stream: Enable streaming output
             verbose: Verbosity level
+            checkpoint: Save checkpoint after each step with this name
+            resume: Resume from checkpoint with this name
             
         Returns:
             Execution results with step outputs and status
         """
+        loop = self._prepare_workflow_loop(
+            workflow_name=workflow_name,
+            variables=variables,
+            default_llm=default_llm,
+            planning=planning,
+            resume=resume,
+        )
+        if "error" in loop:
+            return loop["error"]
+
+        state = loop["state"]
+        # Drive the same shared step-loop generator as execute(), but run each
+        # step with a genuinely async step-runner so async executors / agent.achat
+        # are awaited in-loop (true-async parity, not sync-in-a-thread).
+        step_iter = self._run_workflow_loop(
+            workflow=loop["workflow"],
+            workflow_name=workflow_name,
+            state=state,
+            checkpoint=checkpoint,
+            on_step=on_step,
+        )
+        request = next(step_iter, None)
+        while request is not None:
+            step, step_idx = request
+            step_result = await self._aexecute_single_step(
+                step=step,
+                step_idx=step_idx,
+                results=state["results"],
+                all_variables=state["all_variables"],
+                executor=executor,
+                default_agent=default_agent,
+                default_llm=loop["default_llm"],
+                memory=memory,
+                planning=loop["planning"],
+                on_result=on_result,
+            )
+            try:
+                request = step_iter.send(step_result)
+            except StopIteration:
+                break
+
+        return self._workflow_loop_result(loop["workflow"], state)
+
+    async def _aexecute_single_step(
+        self,
+        step: Task,
+        step_idx: int,
+        results: List[Dict[str, Any]],
+        all_variables: Dict[str, Any],
+        executor: Optional[Callable[[str], str]] = None,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        planning: bool = False,
+        on_result: Optional[Callable[[Task, str], None]] = None,
+        original_input: str = ""
+    ) -> Dict[str, Any]:
+        """Async mirror of ``_execute_single_step``.
+
+        Structurally identical to the sync helper, but this is the only
+        sync/async seam: it ``await``s async executors, ``agent.achat`` and
+        async handlers so ``aexecute`` keeps genuine async execution while
+        sharing the loop skeleton in ``_run_workflow_loop``.
+        """
         import asyncio
-        
-        workflow = self.get_workflow(workflow_name)
-        if not workflow:
-            return {
-                "success": False,
-                "error": f"Workflow '{workflow_name}' not found",
-                "results": []
-            }
-        
-        # Fail fast on unsupported frameworks. This path iterates steps
-        # directly instead of calling Workflow.run(), so re-apply the same
-        # guard here to avoid silently ignoring framework: <non-praisonai>.
-        workflow._validate_framework()
-        
-        # Merge variables
-        all_variables = {**workflow.variables}
-        if variables:
-            all_variables.update(variables)
-        
-        # Use workflow-level defaults if not provided
-        if default_llm is None:
-            default_llm = workflow.llm
-        if planning is False and workflow.planning:
-            planning = workflow.planning
-        
-        results = []
-        success = True
-        
-        for i, step in enumerate(workflow.steps):
-            # Check condition
-            if step.condition:
-                condition = self._substitute_variables(step.condition, all_variables)
-                if condition.lower() in ("false", "no", "skip", "0"):
-                    results.append({
-                        "step": step.name,
-                        "status": "skipped",
-                        "output": None
-                    })
-                    continue
-            
-            # Callback before step
-            if on_step:
-                on_step(step, i)
-            
-            # Build context from previous steps
-            context = self._build_step_context(step, i, results, all_variables)
-            
-            # Substitute variables in action
-            action = self._substitute_variables(step.action, all_variables)
-            
-            # Prepend context to action if available
-            if context:
-                action = f"{context}# Current Task:\n{action}"
-            
-            # Get or create executor for this step
-            step_executor = executor
-            if step_executor is None:
-                # Create agent for this step
+
+        # Get previous step output
+        previous_output = results[-1].get("output") if results else None
+
+        # Create context for step handlers
+        context = WorkflowContext(
+            input=original_input,
+            previous_result=str(previous_output) if previous_output else None,
+            current_step=step.name,
+            variables=all_variables.copy()
+        )
+
+        # Check should_run condition if provided
+        if step.should_run:
+            try:
+                if not step.should_run(context):
+                    return {
+                        "success": True,
+                        "output": None,
+                        "skipped": True,
+                        "stop": False
+                    }
+            except Exception as e:
+                self._log(f"should_run check for step '{step.name}' failed: {e}")
+
+        # If step has a custom handler function
+        if step.handler:
+            try:
+                result = step.handler(context)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                # Handle StepResult
+                if isinstance(result, StepResult):
+                    if result.variables:
+                        all_variables.update(result.variables)
+                    return {
+                        "success": True,
+                        "output": result.output,
+                        "stop": result.stop_workflow,
+                        "error": None
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "output": str(result),
+                        "stop": False,
+                        "error": None
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "output": None,
+                    "stop": False,
+                    "error": str(e)
+                }
+
+        # Build context from previous steps
+        context = self._build_step_context(step, step_idx, results, all_variables)
+
+        # Substitute variables in action
+        action = self._substitute_variables(step.action, all_variables)
+
+        # Prepend context to action if available
+        if context:
+            action = f"{context}# Current Task:\n{action}"
+
+        # Get or create executor for this step
+        step_executor = executor
+        if step_executor is None:
+            # Use step's direct agent if provided
+            step_agent = step.agent
+
+            # Otherwise create agent from config
+            if step_agent is None:
                 step_agent = self._create_step_agent(
                     step=step,
                     default_agent=default_agent,
                     default_llm=default_llm,
                     memory=memory,
-                    verbose=verbose
+                    planning=planning,
                 )
-                if step_agent:
-                    # Check if agent has async chat method (and it's actually async)
-                    if hasattr(step_agent, 'achat') and asyncio.iscoroutinefunction(getattr(step_agent, 'achat', None)):
-                        async def async_agent_executor(prompt, agent=step_agent):
-                            return await agent.achat(prompt)
-                        step_executor = async_agent_executor
-                    else:
-                        def sync_agent_executor(prompt, agent=step_agent):
-                            return agent.chat(prompt)
-                        step_executor = sync_agent_executor
-            
-            if step_executor is None:
-                return {
-                    "success": False,
-                    "error": f"No executor available for step '{step.name}'. Provide executor or default_agent.",
-                    "results": results
-                }
-            
-            # Execute step
-            retries = 0
-            step_success = False
-            output = None
-            error = None
-            
-            while retries <= step.max_retries and not step_success:
-                try:
-                    # Check if executor is async
-                    if asyncio.iscoroutinefunction(step_executor):
-                        output = await step_executor(action)
-                    else:
-                        output = step_executor(action)
-                    step_success = True
-                except Exception as e:
-                    error = str(e)
-                    retries += 1
-                    if retries <= step.max_retries:
-                        self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
-            
-            # Update variables with step output for next steps
-            if output and step_success:
-                self._update_variables_with_output(step, output, all_variables, results)
-            
-            # Callback after step
-            if on_result and output:
-                on_result(step, output)
-            
-            results.append({
-                "step": step.name,
-                "status": "success" if step_success else "failed",
-                "output": output,
-                "error": error
-            })
-            
-            # Handle failure
-            if not step_success:
-                if step.on_error == "stop":
-                    success = False
-                    break
-                elif step.on_error == "continue":
-                    continue
-        
+
+            if step_agent:
+                # Prefer a genuinely async chat method when available
+                if hasattr(step_agent, 'achat') and asyncio.iscoroutinefunction(getattr(step_agent, 'achat', None)):
+                    async def async_agent_executor(prompt, agent=step_agent):
+                        return await agent.achat(prompt)
+                    step_executor = async_agent_executor
+                elif planning and hasattr(step_agent, 'start'):
+                    def agent_executor(prompt, agent=step_agent):
+                        return agent.start(prompt)
+                    step_executor = agent_executor
+                else:
+                    def agent_executor(prompt, agent=step_agent):
+                        return agent.chat(prompt)
+                    step_executor = agent_executor
+
+        if step_executor is None:
+            return {
+                "success": False,
+                "output": None,
+                "stop": False,
+                "error": f"No executor available for step '{step.name}'"
+            }
+
+        # Execute step with retries
+        retries = 0
+        step_success = False
+        output = None
+        error = None
+
+        while retries <= step.max_retries and not step_success:
+            try:
+                if asyncio.iscoroutinefunction(step_executor):
+                    output = await step_executor(action)
+                else:
+                    output = step_executor(action)
+                    if asyncio.iscoroutine(output):
+                        output = await output
+                step_success = True
+            except Exception as e:
+                error = str(e)
+                retries += 1
+                if retries <= step.max_retries:
+                    self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
+
+        # Update variables with step output
+        if output and step_success:
+            self._update_variables_with_output(step, output, all_variables, results)
+
+        # Callback after step
+        if on_result and output:
+            on_result(step, output)
+
         return {
-            "success": success,
-            "workflow": workflow.name,
-            "results": results,
-            "variables": all_variables
+            "success": step_success,
+            "output": output,
+            "stop": False,
+            "error": error
         }
     
     def _create_step_agent(

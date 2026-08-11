@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, Task, AgentTeam
 from typing import List, Dict, Union
 from duckduckgo_search import DDGS

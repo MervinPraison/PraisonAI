@@ -15,7 +15,10 @@ from praisonaiagents.bots import (
     ActionType,
     BlockType,
     AgentReply,
+    TurnCompletion,
     extract_presentation,
+    extract_completion,
+    append_completion_note,
     adapt_presentation,
     encode_action,
     decode_callback,
@@ -46,6 +49,44 @@ def test_quick_replies_builds_reply_buttons():
     # Plain string choice uses itself as both label and value.
     assert block.buttons[1].label == "Prod"
     assert block.buttons[1].action.value == "Prod"
+
+
+def test_question_builds_prompt_and_reply_options():
+    pres = MessagePresentation.question(
+        "Which environment should I deploy to?",
+        options=[("Staging", "staging"), "production", "cancel"],
+    )
+    # First block is the prompt text.
+    assert pres.blocks[0].type == BlockType.TEXT
+    assert "environment" in pres.blocks[0].text
+    # Last block is the reply-action option buttons.
+    buttons = pres.blocks[-1].buttons
+    assert pres.blocks[-1].type == BlockType.BUTTONS
+    assert buttons[0].action.type == ActionType.REPLY
+    assert buttons[0].action.value == "staging"
+    assert buttons[1].action.value == "production"
+    assert buttons[2].label == "cancel"
+
+
+def test_question_includes_optional_context():
+    pres = MessagePresentation.question(
+        "Pick a plan",
+        options=["basic", "pro"],
+        context="Billing applies immediately.",
+    )
+    assert pres.blocks[0].type == BlockType.TEXT
+    assert pres.blocks[1].type == BlockType.CONTEXT
+    assert pres.blocks[1].text == "Billing applies immediately."
+    assert pres.blocks[2].type == BlockType.BUTTONS
+
+
+def test_question_options_render_as_native_buttons_per_channel():
+    pres = MessagePresentation.question("Pick", options=["a", "b"])
+    adapted = adapt_presentation(pres, PresentationLimits.telegram())
+    btn = adapted.blocks[-1].buttons[0]
+    # Reply degrades to a channel-safe callback so native renderers can carry it.
+    assert btn.action.type == ActionType.CALLBACK
+    assert btn.action.value == "reply:a"
 
 
 def test_encode_reply_action():
@@ -183,6 +224,91 @@ def test_agent_reply_roundtrip():
     restored = AgentReply.from_dict(reply.to_dict())
     assert restored.text == "hi"
     assert restored.presentation.blocks[0].buttons[0].action.value == "a"
+
+
+def test_turn_completion_completed_is_clean():
+    c = TurnCompletion()  # defaults to "completed"
+    assert c.reason == "completed"
+    assert c.truncated is False
+    assert c.note() == ""
+
+
+def test_turn_completion_max_steps_surfaces_note():
+    c = TurnCompletion(reason="max_steps")
+    assert c.truncated is True
+    assert "step limit" in c.note()
+
+
+def test_turn_completion_detail_overrides_default_note():
+    c = TurnCompletion(reason="error", detail="custom message")
+    assert c.note() == "custom message"
+
+
+def test_turn_completion_unknown_reason_degrades_gracefully():
+    c = TurnCompletion(reason="something_new")
+    assert c.truncated is True
+    assert c.note() != ""
+
+
+def test_turn_completion_roundtrip():
+    c = TurnCompletion(reason="max_steps", detail="d")
+    restored = TurnCompletion.from_dict(c.to_dict())
+    assert restored.reason == "max_steps"
+    assert restored.detail == "d"
+
+
+def test_agent_reply_completion_roundtrip():
+    reply = AgentReply(text="hi", completion=TurnCompletion(reason="cancelled"))
+    restored = AgentReply.from_dict(reply.to_dict())
+    assert restored.completion.reason == "cancelled"
+
+
+def test_agent_reply_completion_defaults_none():
+    reply = AgentReply(text="hi")
+    assert reply.completion is None
+    assert "completion" not in reply.to_dict()
+
+
+def test_extract_completion_from_reply():
+    reply = AgentReply(text="hi", completion=TurnCompletion(reason="max_steps"))
+    c = extract_completion(reply)
+    assert c is not None and c.reason == "max_steps"
+
+
+def test_extract_completion_from_stop_reason_attr():
+    class FakeAgent:
+        last_stop_reason = "cancelled"
+
+    c = extract_completion(FakeAgent())
+    assert c is not None and c.reason == "cancelled"
+
+
+def test_extract_completion_plain_str_and_none():
+    assert extract_completion("hello") is None
+    assert extract_completion(None) is None
+
+
+def test_append_completion_note_disabled_by_default():
+    c = TurnCompletion(reason="max_steps")
+    assert append_completion_note("answer", c) == "answer"
+
+
+def test_append_completion_note_enabled_appends():
+    c = TurnCompletion(reason="max_steps")
+    out = append_completion_note("answer", c, enabled=True)
+    assert out.startswith("answer")
+    assert "step limit" in out
+
+
+def test_append_completion_note_completed_is_noop():
+    c = TurnCompletion(reason="completed")
+    assert append_completion_note("answer", c, enabled=True) == "answer"
+
+
+def test_append_completion_note_empty_text_uses_note_only():
+    c = TurnCompletion(reason="max_steps")
+    out = append_completion_note("", c, enabled=True)
+    assert "step limit" in out
 
 
 def test_reply_handler_routes_value_back_into_turn():

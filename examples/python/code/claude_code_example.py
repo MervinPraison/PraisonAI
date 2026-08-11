@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Claude Code CLI Integration Example
 

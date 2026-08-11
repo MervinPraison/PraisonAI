@@ -153,15 +153,47 @@ class HierarchicalSessionStore(DefaultSessionStore):
 
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
-        """Load extended session JSON from disk (caller must hold FileLock)."""
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return ExtendedSessionData.from_dict(data)
-            except (json.JSONDecodeError, IOError):
-                pass
-        return ExtendedSessionData(session_id=session_id)
+        """Load extended session JSON from disk (caller must hold FileLock).
+
+        Mirrors the base :meth:`DefaultSessionStore._load_session_from_disk`
+        contract so the write-abort protection is honoured here too:
+
+        * File does not exist → fresh empty session.
+        * Malformed JSON → quarantine the corrupt file aside and surface the
+          event before starting fresh, so its raw bytes are not silently
+          overwritten by the next write (Issue #3715).
+        * Transient ``OSError`` on an existing file → re-raise so the write
+          paths (``_modify_session_locked``) abort instead of overwriting real
+          history with an empty session. Previously this override swallowed
+          ``IOError`` (an alias of ``OSError``) and returned an empty session,
+          silently bypassing the base-class read-error safeguard.
+        """
+        if not os.path.exists(filepath):
+            return ExtendedSessionData(session_id=session_id)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return ExtendedSessionData.from_dict(data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Invalid UTF-8 (``UnicodeDecodeError``) is handled alongside
+            # malformed JSON so a corrupt binary file is quarantined here too
+            # rather than propagating and matching the base-store contract.
+            quarantine_path = self._quarantine_corrupt(filepath)
+            logger.error(
+                "Session file %s contains invalid JSON; quarantined to %s and "
+                "starting fresh: %s",
+                filepath,
+                quarantine_path or "<quarantine failed>",
+                e,
+            )
+            self._fire_corruption_hook(session_id, str(e), quarantine_path)
+            return ExtendedSessionData(session_id=session_id)
+        except OSError as e:
+            logger.error(
+                f"Transient read error loading session {filepath}; "
+                f"refusing to overwrite existing data: {e}"
+            )
+            raise
 
     def _modify_session_locked(
         self,
@@ -224,11 +256,16 @@ class HierarchicalSessionStore(DefaultSessionStore):
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> bool:
         """
         Add a message to a session, preserving extended fields.
         
-        Overrides parent to preserve extended session data.
+        Overrides parent to preserve extended session data. Accepts the
+        optional ``tool_calls`` / ``tool_call_id`` fields (Issue #3089) so a
+        tool-using session resumed from a hierarchical store replays the same
+        transcript the model saw before.
         """
 
         message = SessionMessage(
@@ -236,6 +273,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             content=content,
             timestamp=time.time(),
             metadata=metadata or {},
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
         )
 
         def _apply(session: SessionData) -> None:

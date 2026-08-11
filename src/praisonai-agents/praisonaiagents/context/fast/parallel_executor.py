@@ -11,7 +11,6 @@ Provides async parallel execution of search tools with:
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
-import logging
 from praisonaiagents._logging import get_logger
 import time
 

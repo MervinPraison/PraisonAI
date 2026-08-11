@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import AudioAgent
 
 agent = AudioAgent(llm="openai/tts-1-hd")

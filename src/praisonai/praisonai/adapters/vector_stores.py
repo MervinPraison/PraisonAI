@@ -23,6 +23,46 @@ class ChromaVectorStore:
     """ChromaDB vector store adapter."""
     
     name: str = "chroma"
+    _COLLECTION_METADATA = {"hnsw:space": "cosine"}
+    
+    def _get_collection(self, namespace: Optional[str] = None):
+        """Single source of truth for namespace -> collection resolution.
+
+        Ad-hoc namespaces are materialised with the same distance metric as the
+        primary collection so cross-namespace scores stay comparable.
+        """
+        if not namespace or namespace == self.namespace:
+            return self._collection
+        collection = self._client.get_or_create_collection(
+            name=namespace,
+            metadata=self._COLLECTION_METADATA,
+        )
+        self._warn_on_metric_mismatch(collection)
+        return collection
+
+    def _warn_on_metric_mismatch(self, collection) -> None:
+        """Warn once per collection if a legacy collection is not on cosine.
+
+        ``get_or_create_collection`` never changes the distance metric of a
+        collection that already exists, so a namespace created by an older
+        build can persist on L2 while new ones use cosine — making
+        ``score = 1 - distance`` incomparable. We surface this instead of
+        silently returning drifting scores. Migration is left to the caller
+        because it requires a destructive rebuild of stored vectors.
+        """
+        try:
+            stored = (collection.metadata or {}).get("hnsw:space")
+        except Exception:
+            return
+        expected = self._COLLECTION_METADATA["hnsw:space"]
+        if stored and stored != expected and collection.name not in self._metric_warned:
+            self._metric_warned.add(collection.name)
+            logger.warning(
+                "Chroma collection %r uses distance metric %r, expected %r. "
+                "Scores from this namespace are not comparable to cosine "
+                "namespaces; recreate it to migrate.",
+                collection.name, stored, expected,
+            )
     
     def __init__(
         self,
@@ -42,6 +82,7 @@ class ChromaVectorStore:
         self.config = config or {}
         self.namespace = namespace or "default"
         self.persist_directory = persist_directory or self.config.get("path", ".praison/chroma")
+        self._metric_warned: set = set()
         
         # REMOVED: os.environ['ANONYMIZED_TELEMETRY'] = 'False'
         # Per-instance Settings(anonymized_telemetry=False) already covers this safely.
@@ -55,8 +96,9 @@ class ChromaVectorStore:
         # Get or create collection
         self._collection = self._client.get_or_create_collection(
             name=self.namespace,
-            metadata={"hnsw:space": "cosine"}
+            metadata=self._COLLECTION_METADATA
         )
+        self._warn_on_metric_mismatch(self._collection)
     
     def add(
         self,
@@ -80,11 +122,7 @@ class ChromaVectorStore:
                 for m in metadatas
             ]
         
-        # Use different collection if namespace specified
-        if namespace and namespace != self.namespace:
-            collection = self._client.get_or_create_collection(name=namespace)
-        else:
-            collection = self._collection
+        collection = self._get_collection(namespace)
         
         collection.add(
             ids=ids,
@@ -105,24 +143,23 @@ class ChromaVectorStore:
         """Query ChromaDB by similarity."""
         from praisonaiagents.knowledge.vector_store import VectorRecord
         
-        if namespace and namespace != self.namespace:
-            collection = self._client.get_or_create_collection(name=namespace)
-        else:
-            collection = self._collection
+        collection = self._get_collection(namespace)
         
         results = collection.query(
             query_embeddings=[embedding],
             n_results=top_k,
-            where=filter
+            where=filter,
+            include=["documents", "metadatas", "distances", "embeddings"]
         )
         
         records = []
         if results and results['ids'] and results['ids'][0]:
+            embeddings = (results.get('embeddings') or [[]])[0]
             for i, id_ in enumerate(results['ids'][0]):
                 records.append(VectorRecord(
                     id=id_,
                     text=results['documents'][0][i] if results.get('documents') else "",
-                    embedding=embedding,  # We don't get embeddings back from query
+                    embedding=embeddings[i] if i < len(embeddings) else [],  # stored, not query
                     metadata=results['metadatas'][0][i] if results.get('metadatas') else {},
                     score=1 - results['distances'][0][i] if results.get('distances') else 1.0
                 ))
@@ -137,19 +174,21 @@ class ChromaVectorStore:
         delete_all: bool = False
     ) -> int:
         """Delete vectors from ChromaDB."""
-        if namespace and namespace != self.namespace:
-            collection = self._client.get_or_create_collection(name=namespace)
-        else:
-            collection = self._collection
+        collection = self._get_collection(namespace)
         
         if delete_all:
             count = collection.count()
-            # Delete collection and recreate
-            self._client.delete_collection(collection.name)
-            self._collection = self._client.get_or_create_collection(
-                name=self.namespace,
-                metadata={"hnsw:space": "cosine"}
+            name = collection.name
+            # Delete and recreate the SAME namespace the caller targeted,
+            # preserving the distance metric.
+            self._client.delete_collection(name)
+            recreated = self._client.get_or_create_collection(
+                name=name,
+                metadata=self._COLLECTION_METADATA
             )
+            # Refresh the cached handle only if we rebuilt the default one.
+            if name == self.namespace:
+                self._collection = recreated
             return count
         
         if ids:
@@ -167,11 +206,7 @@ class ChromaVectorStore:
     
     def count(self, namespace: Optional[str] = None) -> int:
         """Get count of vectors."""
-        if namespace and namespace != self.namespace:
-            collection = self._client.get_or_create_collection(name=namespace)
-        else:
-            collection = self._collection
-        return collection.count()
+        return self._get_collection(namespace).count()
     
     def get(
         self,
@@ -181,10 +216,7 @@ class ChromaVectorStore:
         """Get vectors by ID."""
         from praisonaiagents.knowledge.vector_store import VectorRecord
         
-        if namespace and namespace != self.namespace:
-            collection = self._client.get_or_create_collection(name=namespace)
-        else:
-            collection = self._collection
+        collection = self._get_collection(namespace)
         
         results = collection.get(ids=ids, include=["documents", "metadatas", "embeddings"])
         

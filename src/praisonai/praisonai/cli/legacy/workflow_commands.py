@@ -333,9 +333,14 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
                 tools_module = load_user_module(str(tools_file), name="recipe_tools", allow_outside_cwd=True)
                 if tools_module is not None:
                     import inspect
-                    # Build registry from public functions only
-                    for name, obj in vars(tools_module).items():
-                        if inspect.isfunction(obj) and not name.startswith('_') and inspect.getmodule(obj) is tools_module:
+                    # Delegate the public-function extraction walk to the canonical
+                    # owner (praisonai_code.tool_resolver), keeping the recipe path's
+                    # own-module-origin filter to preserve existing behaviour.
+                    from praisonai_code.tool_resolver import extract_functions_from_loaded_module
+                    for name, obj in extract_functions_from_loaded_module(
+                        tools_module, functions_only=True, skip_private=True
+                    ).items():
+                        if inspect.getmodule(obj) is tools_module:
                             tool_registry[name] = obj
                 else:
                     logging.getLogger(__name__).warning("Recipe tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")

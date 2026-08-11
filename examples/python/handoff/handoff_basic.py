@@ -31,7 +31,6 @@ billing_agent = Agent(
     role="Billing Specialist",
     goal="Handle all billing-related inquiries and tasks using structured data",
     backstory="I am an expert in billing systems, payment processing, and invoice management.",
-    input_payload_schema=BillingPayload  # hypothetical but consistent with design
 )
 
 refund_agent = Agent(
@@ -39,7 +38,6 @@ refund_agent = Agent(
     role="Refund Specialist",
     goal="Process refund requests and handle refund-related issues with validated data",
     backstory="I specialize in processing refunds, evaluating refund eligibility, and ensuring customer satisfaction.",
-    input_payload_schema=RefundPayload
 )
 
 technical_support_agent = Agent(
@@ -47,7 +45,6 @@ technical_support_agent = Agent(
     role="Technical Support Specialist",
     goal="Resolve technical issues and provide technical assistance with structured context",
     backstory="I am skilled in troubleshooting technical problems and providing solutions.",
-    input_payload_schema=TechnicalPayload
 )
 
 # Create a triage agent with typed handoffs

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 Minimal Example: Latency Tracking for MCP Server

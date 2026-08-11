@@ -31,6 +31,14 @@ class ObservabilityRun:
     prev_emitter: Any = None
     own_emitter: Any = None
     _emitter_swapped: bool = False
+    agentops_session: Any = None
+    # Which AgentOps teardown this run owns:
+    #   "session" -> end THIS run's ``agentops_session`` handle only;
+    #   "global"  -> legacy singleton path, end the package-global session;
+    #   None      -> AgentOps was never initialised for this run (nothing to end).
+    # Prevents a run whose per-session ``start_session`` failed from falling back
+    # to the global ``end_session`` and cross-finalizing an unrelated live run.
+    _agentops_mode: Optional[str] = None
 
 
 # Thread-local LIFO stack of the runs started on the current thread. ``init``
@@ -54,6 +62,12 @@ _emitter_lock = threading.Lock()
 # only to repair the ``prev_emitter`` chain when a middle run finalizes out of
 # order. Guarded by ``_emitter_lock``.
 _swapped_runs: List["ObservabilityRun"] = []
+
+# Serialises AgentOps init/end so overlapping runs on different threads don't
+# race on the package-global session. Runs that use the newer per-session API
+# get a run-scoped handle on ``ObservabilityRun.agentops_session``; the legacy
+# singleton path is at least protected from concurrent init/end interleaving.
+_agentops_lock = threading.Lock()
 
 
 def _get_run_stack() -> List[ObservabilityRun]:
@@ -149,14 +163,16 @@ def init_observability(
         framework_tag: Primary framework tag (e.g., "crewai", "autogen_v4")
         tags: Additional tags to include
     """
-    # Try to initialize AgentOps if available
-    _init_agentops(framework_tag, tags or [])
-
     # Honour the documented "praisonai.observability_sinks" entry-point group so
     # third-party TraceSinkProtocol implementations are actually loaded — but
     # scope the sinks and the emitter swap to THIS run only.
     sinks = _instantiate_discovered_sinks(framework_tag)
     run = ObservabilityRun(sinks=sinks)
+
+    # Start a per-run AgentOps session so overlapping runs don't stomp each
+    # other's tags/context or cross-finalize each other's status. The handle is
+    # stored on ``run`` and torn down in ``finalize_observability``.
+    _init_agentops(framework_tag, tags or [], run)
 
     if sinks:
         try:
@@ -209,8 +225,6 @@ def finalize_observability(
             run started on this thread is popped and torn down, preserving the
             legacy void-returning call pattern while staying concurrency-safe.
     """
-    _end_agentops(status)
-
     if run is None:
         stack = _get_run_stack()
         run = stack.pop() if stack else None
@@ -222,6 +236,11 @@ def finalize_observability(
             stack.remove(run)
         except ValueError:
             pass
+
+    # End AgentOps against THIS run's session (resolved above) so overlapping
+    # runs never finalize each other's session. Done before the sink teardown
+    # so a legacy void-call with no run still ends the singleton once.
+    _end_agentops(status, run)
 
     if run is None:
         return
@@ -284,29 +303,97 @@ def finalize_observability(
     # _end_wandb(status)
 
 
-def _init_agentops(framework_tag: str, additional_tags: List[str]) -> None:
-    """Initialize AgentOps if available."""
+def _init_agentops(
+    framework_tag: str,
+    additional_tags: List[str],
+    run: Optional[ObservabilityRun] = None,
+) -> None:
+    """Initialize AgentOps if available, scoped to ``run`` when possible.
+
+    AgentOps' ``init`` mutates package-global session state, so two overlapping
+    runs would otherwise share (and cross-finalize) one session. When the
+    installed SDK exposes the newer per-session ``start_session`` API we start a
+    dedicated session and stash its handle on ``run`` so ``_end_agentops`` can
+    end exactly this run's session. Otherwise we fall back to the legacy
+    singleton under ``_agentops_lock`` so at least the single-session cases don't
+    interleave.
+    """
     try:
         import agentops
-        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-        if agentops_api_key:
-            all_tags = [framework_tag] + additional_tags
-            agentops.init(agentops_api_key, default_tags=all_tags)
-            logger.debug("Initialized AgentOps with tags: %s", all_tags)
     except ImportError:
         logger.debug("AgentOps not available, skipping initialization")
+        return
+    try:
+        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+        if not agentops_api_key:
+            return
+        all_tags = [framework_tag] + additional_tags
+        with _agentops_lock:
+            start_session = getattr(agentops, "start_session", None)
+            if callable(start_session):
+                # Per-session mode: this run owns exactly the handle returned
+                # here. Record the mode BEFORE the call so that even if
+                # ``start_session`` returns None/an unusable handle, teardown
+                # stays scoped to this run and never falls back to the global
+                # ``end_session`` (which would truncate a concurrent run).
+                if run is not None:
+                    run._agentops_mode = "session"
+                    run.agentops_session = start_session(tags=all_tags)
+                else:
+                    start_session(tags=all_tags)
+            else:
+                agentops.init(agentops_api_key, default_tags=all_tags)
+                if run is not None:
+                    run._agentops_mode = "global"
+        logger.debug("Initialized AgentOps with tags: %s", all_tags)
     except Exception as e:
         logger.warning("Failed to initialize AgentOps: %s", e)
 
 
-def _end_agentops(status: str) -> None:
-    """End AgentOps session if available."""
+def _end_agentops(status: str, run: Optional[ObservabilityRun] = None) -> None:
+    """End the AgentOps session for ``run`` if available.
+
+    Teardown is scoped to what ``_init_agentops`` actually started for this run:
+
+    * ``_agentops_mode == "session"`` — end THIS run's own handle. If the handle
+      is missing/unusable (``start_session`` returned None or raised) we end
+      NOTHING rather than falling back to the package-global ``end_session``,
+      because that global call would truncate a *different* run's live session.
+    * ``_agentops_mode == "global"`` — legacy singleton path: end the
+      package-global session.
+    * ``run is None`` (legacy void-call with no handle) — preserve the historical
+      contract and end the package-global session once.
+    * ``_agentops_mode is None`` on a real run — AgentOps was never initialised
+      for this run; do nothing.
+    """
     try:
         import agentops
     except ImportError:
         return
+
+    if run is None:
+        mode = "global"
+    else:
+        mode = run._agentops_mode
+    if mode is None:
+        return
+
+    session = getattr(run, "agentops_session", None) if run is not None else None
     try:
-        agentops.end_session(status)
+        with _agentops_lock:
+            if mode == "session":
+                if session is not None and hasattr(session, "end_session"):
+                    session.end_session(status)
+                else:
+                    # Per-session start failed; do NOT cross-finalize the
+                    # package-global session that may belong to another run.
+                    logger.debug(
+                        "AgentOps per-session handle unavailable; skipping "
+                        "global end_session to avoid cross-finalizing another run"
+                    )
+                    return
+            else:
+                agentops.end_session(status)
         logger.debug("Ended AgentOps session: %s", status)
     except Exception as e:  # noqa: BLE001 -- telemetry must not crash the caller
         logger.warning("agentops.end_session failed: %s", e)
