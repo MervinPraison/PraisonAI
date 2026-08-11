@@ -142,32 +142,70 @@ else:
 
 
 # Agent Registry
-_agent_registry: Dict[str, Any] = {}
+import threading
 
 
-def register_agent(agent_id: str, agent: Any) -> None:
+class AgentRegistry:
+    """Thread-safe registry of agents scoped to an embedding/tenant.
+
+    Encapsulates the previously module-global dict so multiple ``AgentOS`` /
+    ``praisonai serve`` gateways sharing one interpreter can each hold an
+    isolated registry, and so concurrent unregisters are race-free.
+    """
+
+    def __init__(self) -> None:
+        self._agents: Dict[str, Any] = {}
+        self._lock = threading.RLock()
+
+    def register(self, agent_id: str, agent: Any) -> None:
+        with self._lock:
+            self._agents[agent_id] = agent
+        logger.debug(f"Registered agent: {agent_id}")
+
+    def unregister(self, agent_id: str) -> bool:
+        # Atomic under the lock: test membership and pop together so a concurrent
+        # unregister can't race between the check and the delete, while still
+        # reporting removal correctly even when the stored value is falsy/None.
+        _MISSING = object()
+        with self._lock:
+            removed = self._agents.pop(agent_id, _MISSING) is not _MISSING
+        if removed:
+            logger.debug(f"Unregistered agent: {agent_id}")
+        return removed
+
+    def get(self, agent_id: str) -> Optional[Any]:
+        with self._lock:
+            return self._agents.get(agent_id)
+
+    def list(self) -> list:
+        with self._lock:
+            return list(self._agents.keys())
+
+
+_default_registry = AgentRegistry()
+
+
+def register_agent(agent_id: str, agent: Any,
+                   *, registry: Optional[AgentRegistry] = None) -> None:
     """Register an agent for invocation via API."""
-    _agent_registry[agent_id] = agent
-    logger.debug(f"Registered agent: {agent_id}")
+    (registry or _default_registry).register(agent_id, agent)
 
 
-def unregister_agent(agent_id: str) -> bool:
+def unregister_agent(agent_id: str,
+                     *, registry: Optional[AgentRegistry] = None) -> bool:
     """Unregister an agent."""
-    if agent_id in _agent_registry:
-        del _agent_registry[agent_id]
-        logger.debug(f"Unregistered agent: {agent_id}")
-        return True
-    return False
+    return (registry or _default_registry).unregister(agent_id)
 
 
-def get_agent(agent_id: str) -> Optional[Any]:
+def get_agent(agent_id: str,
+              *, registry: Optional[AgentRegistry] = None) -> Optional[Any]:
     """Get a registered agent by ID."""
-    return _agent_registry.get(agent_id)
+    return (registry or _default_registry).get(agent_id)
 
 
-def list_registered_agents() -> list:
+def list_registered_agents(*, registry: Optional[AgentRegistry] = None) -> list:
     """List all registered agent IDs."""
-    return list(_agent_registry.keys())
+    return (registry or _default_registry).list()
 
 
 def _is_real_agent(agent: Any) -> bool:

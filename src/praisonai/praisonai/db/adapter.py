@@ -302,18 +302,25 @@ class PraisonAIDB:
         from ..persistence.conversation._ops import resume_or_create_session
         
         store = self._conversation_store
-        messages = resume_or_create_session(
-            store,
-            store.get_session(session_id),
-            session_id,
-            build_session=lambda: ConversationSession(
-                session_id=session_id,
-                user_id=user_id or "default",
-                agent_id=agent_name,
-                name=f"Session {session_id}",
-                metadata=metadata or {},
-            ),
-            get_messages=lambda: store.get_messages(session_id),
+        existing = self._resolve_sync(store.get_session(session_id))
+        messages = self._resolve_sync(
+            resume_or_create_session(
+                store,
+                existing,
+                session_id,
+                build_session=lambda: ConversationSession(
+                    session_id=session_id,
+                    user_id=user_id or "default",
+                    agent_id=agent_name,
+                    name=f"Session {session_id}",
+                    metadata=metadata or {},
+                ),
+                # An async-mode store returns a coroutine from create_session;
+                # resolve it here so a new session is actually persisted instead
+                # of being silently dropped as an un-awaited coroutine.
+                create_session=lambda s: self._resolve_sync(store.create_session(s)),
+                get_messages=lambda: self._resolve_sync(store.get_messages(session_id)),
+            )
         )
         
         if messages is None:
@@ -718,6 +725,34 @@ class PraisonAIDB:
     # ========================================================================
 
     @staticmethod
+    def _resolve_sync(value):
+        """Resolve a possibly-awaitable store result on the sync code path.
+
+        A store opened in ``mode="async"`` returns coroutines from its
+        ``get_session`` / ``get_messages`` methods. On the sync hooks that would
+        otherwise be handed straight into ``resume_or_create_session`` and later
+        crash with ``TypeError: 'coroutine' object is not iterable``. Here we run
+        the coroutine to completion when no event loop is active; if we are
+        already inside a running loop we cannot block, so we close the coroutine
+        and raise a clear, actionable error instead of a cryptic ``TypeError``.
+        """
+        if not inspect.isawaitable(value):
+            return value
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(value)
+        # Inside a running loop: cannot block. Close the coroutine to avoid a
+        # "coroutine was never awaited" warning and surface a clear message.
+        if inspect.iscoroutine(value):
+            value.close()
+        raise RuntimeError(
+            "PraisonAIDB sync hook called against an async-mode store from a "
+            "running event loop. Use the async surface (e.g. aon_agent_start) "
+            "or initialise the store with mode='sync'."
+        )
+
+    @staticmethod
     async def _dispatch_async(store, sync_name, async_name, *args, **kwargs):
         """Dispatch a store call in an async-safe way.
 
@@ -734,13 +769,17 @@ class PraisonAIDB:
         return await asyncio.to_thread(fn, *args, **kwargs)
 
     async def aon_agent_start(
-        self, 
-        session_id: str, 
-        name: str, 
-        agent_id: str = "", 
-        metadata: Optional[Dict[str, Any]] = None
+        self,
+        agent_name: str,
+        session_id: str,
+        user_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> List:
-        """Async version of on_agent_start - returns previous messages for resume."""
+        """Async version of on_agent_start - returns previous messages for resume.
+
+        Signature matches ``AsyncDbAdapter.on_agent_start`` so the async surface
+        stays protocol-aligned and ``user_id`` is persisted rather than dropped.
+        """
         await self._ainit_stores()
 
         messages: List = []
@@ -760,7 +799,8 @@ class PraisonAIDB:
                 session_id,
                 build_session=lambda: ConversationSession(
                     session_id=session_id,
-                    agent_id=agent_id or name,
+                    user_id=user_id or "default",
+                    agent_id=agent_name,
                     name=f"Session {session_id}",
                     metadata=metadata or {},
                 ),
@@ -787,12 +827,19 @@ class PraisonAIDB:
                 ]
 
         if self._state_store:
+            # Keyed by session only (not agent_name) so aon_agent_end — whose
+            # protocol signature carries just session_id — updates the SAME
+            # lifecycle record instead of leaving this one stuck at "started".
             await self._dispatch_async(
                 self._state_store,
                 "set",
                 "aset",
-                f"agent:{session_id}:{agent_id or name}",
-                {"status": "started", "metadata": metadata or {}},
+                f"agent:{session_id}",
+                {
+                    "agent_name": agent_name,
+                    "status": "started",
+                    "metadata": metadata or {},
+                },
             )
 
         return messages
@@ -906,11 +953,12 @@ class PraisonAIDB:
     async def aon_agent_end(
         self,
         session_id: str,
-        name: str,
-        agent_id: str = "",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Async version of on_agent_end."""
+        """Async version of on_agent_end.
+
+        Signature matches ``AsyncDbAdapter.on_agent_end``.
+        """
         await self._ainit_stores()
 
         if self._conversation_store:
@@ -930,12 +978,20 @@ class PraisonAIDB:
                 )
 
         if self._state_store:
+            # Update the record aon_agent_start wrote under the same key so the
+            # completion transition preserves agent_name/started_at context
+            # instead of overwriting it with a disconnected "ended" record.
+            agent_key = f"agent:{session_id}"
+            agent_data = await self._dispatch_async(
+                self._state_store, "get", "aget", agent_key
+            ) or {}
+            agent_data.update({
+                "status": "ended",
+                "ended_at": time.time(),
+                "metadata": {**agent_data.get("metadata", {}), **(metadata or {})},
+            })
             await self._dispatch_async(
-                self._state_store,
-                "set",
-                "aset",
-                f"agent:{session_id}:{agent_id or name}",
-                {"status": "ended", "metadata": metadata or {}},
+                self._state_store, "set", "aset", agent_key, agent_data
             )
 
     async def aon_run_start(
