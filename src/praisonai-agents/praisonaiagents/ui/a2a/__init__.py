@@ -21,7 +21,6 @@ Usage:
 """
 
 from praisonaiagents.ui.a2a.a2a import A2A
-from praisonaiagents.ui.a2a.client import A2AClient
 from praisonaiagents.ui.a2a.types import (
     # Enums
     TaskState,
@@ -56,6 +55,15 @@ from praisonaiagents.ui.a2a.types import (
     TaskStatusUpdateEvent,
     TaskArtifactUpdateEvent,
 )
+
+
+def __getattr__(name):
+    """Lazy load A2AClient to avoid importing aiohttp for server-only usage."""
+    if name == "A2AClient":
+        from praisonaiagents.ui.a2a.client import A2AClient
+        return A2AClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Main class
