@@ -77,13 +77,35 @@ class TrafilaturaTools:
             except ValueError:
                 # Not an IP address, continue with domain validation
                 pass
-            
+
             # Block common internal domains
             if any(hostname.endswith(domain) for domain in ['.local', '.internal', '.localdomain']):
                 return False
-            
+
             # Block metadata service endpoints
-            return hostname not in ['169.254.169.254', 'metadata.google.internal']
+            if hostname in ['169.254.169.254', 'metadata.google.internal']:
+                return False
+
+            # Resolve the hostname and reject if any address is internal. The
+            # checks above only inspect IP *literals*, so a plain domain (or an
+            # encoded form like a decimal IP or "<internal-ip>.nip.io") still
+            # passes even though it resolves to an internal address. Resolving
+            # here closes that SSRF bypass, mirroring the resolve-and-check
+            # approach already used in praisonaiagents/tools/file_tools.py.
+            import socket
+            default_port = 443 if parsed.scheme == 'https' else 80
+            try:
+                addrinfos = socket.getaddrinfo(hostname, parsed.port or default_port)
+            except socket.gaierror:
+                # Hostname does not resolve; treat it as unsafe.
+                return False
+            for addrinfo in addrinfos:
+                resolved = ipaddress.ip_address(addrinfo[4][0])
+                if (resolved.is_private or resolved.is_reserved
+                        or resolved.is_loopback or resolved.is_link_local):
+                    return False
+
+            return True
             
         except Exception:
             return False
