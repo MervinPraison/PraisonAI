@@ -22,10 +22,16 @@ from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
-from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker
+from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
+
+
+def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
+    if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
+        return {"_durable_iteration_index": index}
+    return {}
 # Display functions - lazy loaded to avoid importing rich at startup
 # These are only needed when output=verbose
 _display_module = None
@@ -2576,7 +2582,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     )
 
             # Sequential tool calling loop - similar to agent.py
-            max_iterations = self.max_iter  # Use configurable iteration limit
+            max_iterations = kwargs.pop("max_iterations", self.max_iter)
             iteration_count = 0
             tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
@@ -3530,7 +3536,16 @@ Respond with ONLY a valid JSON tool call in this format:
                             # instead of aborting the whole run (safe-by-default,
                             # matching the async path in execution_mixin.py).
                             try:
-                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                                tool_result = execute_tool_fn(
+                                    function_name,
+                                    arguments,
+                                    tool_call_id=tool_call_id,
+                                    **_durable_iteration_kwargs(
+                                        execute_tool_fn, iteration_count
+                                    ),
+                                )
+                            except ToolExecutionError:
+                                raise
                             except Exception as tool_error:
                                 logging.warning(f"Tool '{function_name}' failed: {tool_error}")
                                 tool_result = {"error": str(tool_error)}
@@ -4515,7 +4530,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             formatted_tools = self._format_tools_for_litellm(tools)
 
             # Initialize variables for iteration loop
-            max_iterations = self.max_iter  # Use configurable iteration limit
+            max_iterations = kwargs.pop("max_iterations", self.max_iter)
             iteration_count = 0
             tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
@@ -4628,9 +4643,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
                             logging.debug(f"[RESPONSES_API_ASYNC] Executing tool {function_name}")
                             if asyncio.iscoroutinefunction(execute_tool_fn):
-                                tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                                tool_result = await execute_tool_fn(
+                                    function_name,
+                                    arguments,
+                                    tool_call_id=tool_call_id,
+                                    **_durable_iteration_kwargs(
+                                        execute_tool_fn, iteration_count
+                                    ),
+                                )
                             else:
-                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                                tool_result = execute_tool_fn(
+                                    function_name,
+                                    arguments,
+                                    tool_call_id=tool_call_id,
+                                    **_durable_iteration_kwargs(
+                                        execute_tool_fn, iteration_count
+                                    ),
+                                )
                             tool_call_count += 1  # Increment tool call counter for guardrails
                             accumulated_tool_results.append(tool_result)
 
@@ -4876,7 +4905,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if is_ollama and tools:
                             arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
-                        tool_result = await execute_tool_fn(function_name, arguments)
+                        tool_result = await execute_tool_fn(
+                            function_name,
+                            arguments,
+                            tool_call_id=tool_call_id,
+                            **_durable_iteration_kwargs(
+                                execute_tool_fn, iteration_count
+                            ),
+                        )
                         tool_call_count += 1  # Increment tool call counter for guardrails
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations

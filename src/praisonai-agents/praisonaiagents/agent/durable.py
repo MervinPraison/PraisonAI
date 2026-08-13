@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import inspect
 import json
@@ -9,6 +10,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+from ..errors import ToolExecutionError
 from ..runtime.journal import (
     JournalEvent,
     KIND_ITERATION,
@@ -21,6 +23,9 @@ from ..runtime.journal import (
 
 _active_durable_run: contextvars.ContextVar[Optional["DurableRunContext"]] = (
     contextvars.ContextVar("praisonai_active_durable_run", default=None)
+)
+_active_idempotency_key: contextvars.ContextVar[Optional[str]] = (
+    contextvars.ContextVar("praisonai_idempotency_key", default=None)
 )
 
 
@@ -38,6 +43,19 @@ def _tool_result_content(result: Any) -> str:
         return json.dumps(result)
     except (TypeError, ValueError):
         return json.dumps({"result": str(result)})
+
+
+def _accepts_idempotency_key(execute_tool_fn: Callable) -> bool:
+    """Return whether an executor accepts the optional durable key contract."""
+    try:
+        parameters = inspect.signature(execute_tool_fn).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.name == "idempotency_key"
+        or parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 class DurableRunContext:
@@ -60,22 +78,46 @@ class DurableRunContext:
         self._restored = False
         self._closed = False
         self._results_by_tool_call_id: Dict[str, Any] = {}
+        self._pending_by_call_id: Dict[str, Tuple[int, str, Dict[str, Any], str]] = {}
+        self._pending_by_fingerprint: Dict[str, Tuple[int, str, Dict[str, Any], str]] = {}
+        self._recorded_iterations = set()
         for event in events:
-            if event.kind != KIND_TOOL_RESULT:
-                continue
-            tool_call_id = event.payload.get("tool_call_id")
-            if tool_call_id:
-                self._results_by_tool_call_id[str(tool_call_id)] = event.payload.get(
-                    "result"
+            if event.kind == KIND_TOOL_RESULT:
+                tool_call_id = event.payload.get("tool_call_id")
+                if tool_call_id:
+                    self._results_by_tool_call_id[str(tool_call_id)] = event.payload.get(
+                        "result"
+                    )
+            elif event.kind == KIND_ITERATION:
+                self._recorded_iterations.add(
+                    int(event.payload.get("index", event.seq))
                 )
+
+        for event in events:
+            if event.kind != KIND_TOOL_CALL:
+                continue
+            call_id = str(event.payload.get("tool_call_id") or "")
+            if not call_id or call_id in self._results_by_tool_call_id:
+                continue
+            name = str(event.payload.get("name") or "")
+            args = event.payload.get("args") or {}
+            key = str(
+                event.payload.get("idempotency_key")
+                or f"{self.run_id}:{event.seq}:{name}"
+            )
+            pending = (event.seq, call_id, args, key)
+            self._pending_by_call_id[call_id] = pending
+            self._pending_by_fingerprint[self._fingerprint(name, args)] = pending
+
+        self._resume_completed_steps = len(self._recorded_iterations)
 
     @property
     def completed_steps(self) -> int:
-        return sum(
-            1
-            for (seq, kind) in self._replay
-            if kind == KIND_TOOL_RESULT
-        )
+        return len(self._recorded_iterations)
+
+    @staticmethod
+    def _fingerprint(function_name: str, arguments: Dict[str, Any]) -> str:
+        return f"{function_name}:{json.dumps(_json_safe(arguments), sort_keys=True)}"
 
     def restore_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Append completed decision/result pairs once, before the next model call."""
@@ -117,69 +159,96 @@ class DurableRunContext:
         function_name: str,
         arguments: Dict[str, Any],
         tool_call_id: Optional[str],
-    ) -> Tuple[int, str]:
+    ) -> Tuple[int, str, str]:
         with self._lock:
+            requested_call_id = str(tool_call_id) if tool_call_id is not None else None
+            pending = (
+                self._pending_by_call_id.pop(requested_call_id, None)
+                if requested_call_id
+                else None
+            )
+            fingerprint = self._fingerprint(function_name, arguments)
+            if pending is None and self.replaying:
+                pending = self._pending_by_fingerprint.pop(fingerprint, None)
+            if pending is not None:
+                seq, call_id, _args, idempotency_key = pending
+                self._pending_by_call_id.pop(call_id, None)
+                self._pending_by_fingerprint.pop(fingerprint, None)
+                return seq, call_id, idempotency_key
+
             seq = self._next_seq
             self._next_seq += 1
-        call_id = str(tool_call_id or f"{self.run_id}-tool-{seq}")
-        idempotency_key = f"{self.run_id}:{seq}:{function_name}"
-        safe_arguments = _json_safe(arguments)
-        message = {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
+            call_id = str(tool_call_id or f"{self.run_id}-tool-{seq}")
+            idempotency_key = f"{self.run_id}:{seq}:{function_name}"
+            safe_arguments = _json_safe(arguments)
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": function_name,
+                            "arguments": json.dumps(safe_arguments),
+                        },
+                    }
+                ],
+            }
+            self.journal.append(
+                JournalEvent(
+                    self.run_id,
+                    seq,
+                    KIND_MODEL_DECISION,
+                    {"message": message},
+                )
+            )
+            self.journal.append(
+                JournalEvent(
+                    self.run_id,
+                    seq,
+                    KIND_TOOL_CALL,
+                    {
                         "name": function_name,
-                        "arguments": json.dumps(safe_arguments),
+                        "args": safe_arguments,
+                        "tool_call_id": call_id,
+                        "idempotency_key": idempotency_key,
                     },
-                }
-            ],
-        }
-        self.journal.append(
-            JournalEvent(
-                self.run_id,
-                seq,
-                KIND_MODEL_DECISION,
-                {"message": message},
+                )
             )
-        )
-        self.journal.append(
-            JournalEvent(
-                self.run_id,
-                seq,
-                KIND_TOOL_CALL,
-                {
-                    "name": function_name,
-                    "args": safe_arguments,
-                    "tool_call_id": call_id,
-                    "idempotency_key": idempotency_key,
-                },
-            )
-        )
-        return seq, call_id
+            return seq, call_id, idempotency_key
 
-    def _record_result(self, seq: int, tool_call_id: str, result: Any) -> Any:
+    def _record_result(
+        self,
+        seq: int,
+        tool_call_id: str,
+        result: Any,
+        iteration_index: Optional[int],
+    ) -> Any:
         safe_result = _json_safe(result)
-        self.journal.append(
-            JournalEvent(
-                self.run_id,
-                seq,
-                KIND_TOOL_RESULT,
-                {"tool_call_id": tool_call_id, "result": safe_result},
-            )
-        )
-        self.journal.append(
-            JournalEvent(
-                self.run_id,
-                seq,
-                KIND_ITERATION,
-                {"index": seq},
-            )
-        )
         with self._lock:
+            self.journal.append(
+                JournalEvent(
+                    self.run_id,
+                    seq,
+                    KIND_TOOL_RESULT,
+                    {"tool_call_id": tool_call_id, "result": safe_result},
+                )
+            )
+            if iteration_index is None:
+                global_iteration = max(self._recorded_iterations, default=-1) + 1
+            else:
+                global_iteration = self._resume_completed_steps + int(iteration_index)
+            if global_iteration not in self._recorded_iterations:
+                self.journal.append(
+                    JournalEvent(
+                        self.run_id,
+                        global_iteration,
+                        KIND_ITERATION,
+                        {"index": global_iteration},
+                    )
+                )
+                self._recorded_iterations.add(global_iteration)
             self._results_by_tool_call_id[tool_call_id] = safe_result
             self._replay[(seq, KIND_TOOL_RESULT)] = {
                 "tool_call_id": tool_call_id,
@@ -192,22 +261,27 @@ class DurableRunContext:
             return None
 
         def execute(function_name, arguments, tool_call_id=None, **kwargs):
+            iteration_index = kwargs.pop("_durable_iteration_index", None)
             call_id = str(tool_call_id) if tool_call_id is not None else None
             if call_id and call_id in self._results_by_tool_call_id:
                 return self._results_by_tool_call_id[call_id]
-            seq, call_id = self._allocate_step(
+            seq, call_id, idempotency_key = self._allocate_step(
                 function_name, arguments, tool_call_id
             )
+            token = _active_idempotency_key.set(idempotency_key)
             try:
-                result = execute_tool_fn(
-                    function_name,
-                    arguments,
-                    tool_call_id=tool_call_id,
-                    **kwargs,
-                )
+                call_kwargs = dict(kwargs)
+                call_kwargs["tool_call_id"] = tool_call_id
+                if _accepts_idempotency_key(execute_tool_fn):
+                    call_kwargs["idempotency_key"] = idempotency_key
+                result = execute_tool_fn(function_name, arguments, **call_kwargs)
+            except ToolExecutionError:
+                raise
             except Exception as exc:
                 result = {"error": str(exc)}
-            return self._record_result(seq, call_id, result)
+            finally:
+                _active_idempotency_key.reset(token)
+            return self._record_result(seq, call_id, result, iteration_index)
 
         return execute
 
@@ -216,24 +290,31 @@ class DurableRunContext:
             return None
 
         async def execute(function_name, arguments, tool_call_id=None, **kwargs):
+            iteration_index = kwargs.pop("_durable_iteration_index", None)
             call_id = str(tool_call_id) if tool_call_id is not None else None
             if call_id and call_id in self._results_by_tool_call_id:
                 return self._results_by_tool_call_id[call_id]
-            seq, call_id = self._allocate_step(
-                function_name, arguments, tool_call_id
+            seq, call_id, idempotency_key = await asyncio.to_thread(
+                self._allocate_step, function_name, arguments, tool_call_id
             )
+            token = _active_idempotency_key.set(idempotency_key)
             try:
-                result = execute_tool_fn(
-                    function_name,
-                    arguments,
-                    tool_call_id=tool_call_id,
-                    **kwargs,
-                )
+                call_kwargs = dict(kwargs)
+                call_kwargs["tool_call_id"] = tool_call_id
+                if _accepts_idempotency_key(execute_tool_fn):
+                    call_kwargs["idempotency_key"] = idempotency_key
+                result = execute_tool_fn(function_name, arguments, **call_kwargs)
                 if inspect.isawaitable(result):
                     result = await result
+            except ToolExecutionError:
+                raise
             except Exception as exc:
                 result = {"error": str(exc)}
-            return self._record_result(seq, call_id, result)
+            finally:
+                _active_idempotency_key.reset(token)
+            return await asyncio.to_thread(
+                self._record_result, seq, call_id, result, iteration_index
+            )
 
         return execute
 
@@ -245,12 +326,34 @@ class DurableRunContext:
     def close(self) -> None:
         self.journal.close()
 
+    async def arestore_messages(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self.restore_messages, messages)
+
+    async def afinalize(self, outcome: str = "succeeded") -> None:
+        await asyncio.to_thread(self.finalize, outcome)
+
+    async def aclose(self) -> None:
+        await asyncio.to_thread(self.close)
+
 
 def begin_durable_run(agent: Any, prompt: str):
     """Create and activate a context, or return ``(None, None)`` when disabled."""
     execution = getattr(agent, "execution", None)
     if execution is None or not getattr(execution, "durable", False):
         return None, None
+    if _active_durable_run.get() is not None:
+        return None, None
+
+    context = _open_durable_run(agent, prompt)
+    token = _active_durable_run.set(context)
+    return context, token
+
+
+def _open_durable_run(agent: Any, prompt: str) -> DurableRunContext:
+    """Open journal state without mutating the caller's ContextVar."""
+    execution = agent.execution
 
     journal = RunJournal(getattr(execution, "journal_path", None))
     resume_run_id = getattr(execution, "resume_run_id", None)
@@ -282,8 +385,19 @@ def begin_durable_run(agent: Any, prompt: str):
         metadata={"version": 1, "explicit_resume": replaying},
     )
     context = DurableRunContext(journal, run_id, replaying=replaying)
-    token = _active_durable_run.set(context)
     agent._last_durable_run_id = run_id
+    return context
+
+
+async def abegin_durable_run(agent: Any, prompt: str):
+    """Async durable-run creation with all SQLite I/O off the event loop."""
+    execution = getattr(agent, "execution", None)
+    if execution is None or not getattr(execution, "durable", False):
+        return None, None
+    if _active_durable_run.get() is not None:
+        return None, None
+    context = await asyncio.to_thread(_open_durable_run, agent, prompt)
+    token = _active_durable_run.set(context)
     return context, token
 
 
@@ -294,3 +408,8 @@ def end_durable_run(token) -> None:
 
 def get_durable_run() -> Optional[DurableRunContext]:
     return _active_durable_run.get()
+
+
+def get_durable_idempotency_key() -> Optional[str]:
+    """Return the stable key for the currently executing durable tool call."""
+    return _active_idempotency_key.get()

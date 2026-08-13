@@ -5,13 +5,14 @@ Contains all methods for chat completion, streaming, message building,
 and response processing. Extracted from agent.py for maintainability.
 """
 
+import asyncio
 import os
 import re
 import time
 import json
 import logging
 from praisonaiagents._logging import get_logger
-from ..errors import BudgetExceededError
+from ..errors import BudgetExceededError, ToolExecutionError
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -45,12 +46,22 @@ class ChatMixin:
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
         context = self._get_durable_run_context()
-        return context.wrap_sync(execute_tool_fn) if context else execute_tool_fn
+        if context:
+            execute = context.wrap_sync(execute_tool_fn)
+            if execute is not None:
+                execute._accepts_durable_iteration = True
+            return execute
+        return execute_tool_fn
 
     def _durable_async_tool_executor(self, execute_tool_fn):
         """Async counterpart of :meth:`_durable_sync_tool_executor`."""
         context = self._get_durable_run_context()
-        return context.wrap_async(execute_tool_fn) if context else execute_tool_fn
+        if context:
+            execute = context.wrap_async(execute_tool_fn)
+            if execute is not None:
+                execute._accepts_durable_iteration = True
+            return execute
+        return execute_tool_fn
 
     def _resolve_max_steps(self, default: int = 10) -> int:
         """Resolve the unified multi-step tool budget shared by both loops.
@@ -59,21 +70,30 @@ class ChatMixin:
         OpenAI-native and LiteLLM tool-execution loops); otherwise falls back to
         ``max_iter`` and finally ``default`` for backward compatibility.
         """
+        resolved = default
         execution = getattr(self, "execution", None)
         if execution is not None:
             resolver = getattr(execution, "resolved_max_steps", None)
+            used_resolver = False
             if callable(resolver):
                 try:
-                    return int(resolver())
+                    resolved = int(resolver())
+                    used_resolver = True
                 except Exception:
                     pass
-            max_steps = getattr(execution, "max_steps", None)
-            if max_steps is not None:
-                return int(max_steps)
-            max_iter = getattr(execution, "max_iter", None)
-            if max_iter is not None:
-                return int(max_iter)
-        return default
+            if not used_resolver:
+                max_steps = getattr(execution, "max_steps", None)
+                if max_steps is not None:
+                    resolved = int(max_steps)
+                else:
+                    max_iter = getattr(execution, "max_iter", None)
+                    if max_iter is not None:
+                        resolved = int(max_iter)
+
+        durable_context = self._get_durable_run_context()
+        if durable_context is not None and durable_context.replaying:
+            resolved -= durable_context.completed_steps
+        return max(0, resolved)
 
     def _resolve_max_tool_calls(self, default: int = 10) -> int:
         """Resolve the per-turn tool-call guardrail (independent of ``max_steps``)."""
@@ -512,7 +532,7 @@ Your Goal: {self.goal}"""
             )
             return False
 
-    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False):
+    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False, restore_durable=True):
         """Build messages list for chat completion.
         
         Args:
@@ -596,7 +616,7 @@ Your Goal: {self.goal}"""
                     messages[-1]["content"] += json_instruction
         
         durable_context = self._get_durable_run_context()
-        if durable_context is not None:
+        if durable_context is not None and restore_durable:
             durable_context.restore_messages(messages)
 
         return messages, original_prompt
@@ -2655,6 +2675,11 @@ Your Goal: {self.goal}"""
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
             return result
+        except InterruptedError:
+            if durable_context is not None:
+                durable_context.finalize("cancelled")
+                self.execution.resume_run_id = None
+            raise
         finally:
             if durable_context is not None:
                 from .durable import end_durable_run
@@ -2911,6 +2936,7 @@ Your Goal: {self.goal}"""
                             self.execute_tool
                         ),
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                        max_iterations=self._resolve_max_steps(),
                         max_tool_calls_per_turn=self._resolve_max_tool_calls(),
                         reasoning_steps=reasoning_steps,
                         stream=stream
@@ -3298,9 +3324,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         durable_token = None
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
-                from .durable import begin_durable_run
+                from .durable import abegin_durable_run
 
-                durable_context, durable_token = begin_durable_run(
+                durable_context, durable_token = await abegin_durable_run(
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
             result = await self._achat_impl(
@@ -3318,15 +3344,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if getattr(self, "last_stop_reason", None) == "cancelled"
                     else "succeeded"
                 )
-                durable_context.finalize(outcome)
+                await durable_context.afinalize(outcome)
                 self.execution.resume_run_id = None
             return result
+        except (InterruptedError, asyncio.CancelledError):
+            if durable_context is not None:
+                await durable_context.afinalize("cancelled")
+                self.execution.resume_run_id = None
+            raise
         finally:
             if durable_context is not None:
                 from .durable import end_durable_run
 
                 end_durable_run(durable_token)
-                durable_context.close()
+                await durable_context.aclose()
             _trace_emitter.agent_end(self.name)
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
@@ -3465,7 +3496,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 durable_context = self._get_durable_run_context()
                 if durable_context is not None:
-                    effective_history = durable_context.restore_messages(
+                    effective_history = await durable_context.arestore_messages(
                         list(effective_history)
                     )
 
@@ -3495,6 +3526,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self.execute_tool_async
                         ),
                         'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                        'max_iterations': self._resolve_max_steps(),
                         'max_tool_calls_per_turn': self._resolve_max_tool_calls(),
                         'reasoning_steps': reasoning_steps,
                         'stream': stream
@@ -3553,7 +3585,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             # For OpenAI client
             # Use the new _build_messages helper method
-            messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            messages, original_prompt = self._build_messages(
+                prompt,
+                temperature,
+                output_json,
+                output_pydantic,
+                restore_durable=False,
+            )
+            durable_context = self._get_durable_run_context()
+            if durable_context is not None:
+                messages = await durable_context.arestore_messages(messages)
             
             # Store chat history length for potential rollback
             chat_history_length = len(self.chat_history)
@@ -4146,6 +4187,36 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self._auto_save_session()
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
+        """Own the durable context for the complete streaming generator."""
+        durable_context = None
+        durable_token = None
+        try:
+            if getattr(getattr(self, "execution", None), "durable", False):
+                from .durable import begin_durable_run
+
+                durable_context, durable_token = begin_durable_run(self, prompt)
+            yield from self._start_stream_impl(prompt, **kwargs)
+            if durable_context is not None:
+                outcome = (
+                    "cancelled"
+                    if getattr(self, "last_stop_reason", None) == "cancelled"
+                    else "succeeded"
+                )
+                durable_context.finalize(outcome)
+                self.execution.resume_run_id = None
+        except (GeneratorExit, InterruptedError):
+            if durable_context is not None:
+                durable_context.finalize("cancelled")
+                self.execution.resume_run_id = None
+            raise
+        finally:
+            if durable_context is not None:
+                from .durable import end_durable_run
+
+                end_durable_run(durable_token)
+                durable_context.close()
+
+    def _start_stream_impl(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Stream generator for real-time response chunks."""
         # Warn if an output guardrail is configured: token-level streaming
         # yields chunks before a full response exists to validate, so the
@@ -4221,10 +4292,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Use the new streaming generator from LLM class
                     response_content = ""
+                    stream_history = self.chat_history
+                    durable_context = self._get_durable_run_context()
+                    if durable_context is not None:
+                        stream_history = durable_context.restore_messages(
+                            list(stream_history)
+                        )
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=self._build_system_prompt(tool_param),
-                        chat_history=self.chat_history,
+                        chat_history=stream_history,
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
                         output_json=kwargs.get('output_json'),
@@ -4250,6 +4327,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if response_content:
                         self._append_to_chat_history({"role": "assistant", "content": response_content})
                         
+                except ToolExecutionError:
+                    self._rollback_chat_history_to(chat_history_length)
+                    raise
                 except Exception as e:
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
@@ -4431,10 +4511,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                                         parsed_args = {}
                                     
-                                    tool_result = self.execute_tool(
-                                        tool_call['function']['name'], 
+                                    tool_result = self._durable_sync_tool_executor(
+                                        self.execute_tool
+                                    )(
+                                        tool_call['function']['name'],
                                         parsed_args,
-                                        tool_call_id=tool_call.get('id')
+                                        tool_call_id=tool_call.get('id'),
+                                        _durable_iteration_index=0,
                                     )
                                     # Add tool result to chat history (multimodal-aware)
                                     from .tool_execution import build_tool_result_message_pair
@@ -4458,6 +4541,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         str(tool_result),
                                         tool_call_id=tool_call['id'],
                                     )
+                                except ToolExecutionError:
+                                    raise
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history
@@ -4480,6 +4565,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if response_text:
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
                         
+                except ToolExecutionError:
+                    self._rollback_chat_history_to(chat_history_length)
+                    raise
                 except Exception as e:
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
@@ -4499,6 +4587,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Restore original verbose mode
             self.verbose = original_verbose
                     
+        except ToolExecutionError:
+            self.verbose = original_verbose
+            raise
         except Exception as e:
             # Restore verbose mode on any error
             self.verbose = original_verbose

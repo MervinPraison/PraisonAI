@@ -447,6 +447,15 @@ class ToolExecutionMixin:
         
         # Set up injection context for tools with Injected parameters
         from ..tools.injected import AgentState
+        try:
+            from .durable import get_durable_idempotency_key
+
+            idempotency_key = get_durable_idempotency_key()
+        except ImportError:
+            idempotency_key = None
+        state_metadata = {'agent_name': self.name}
+        if idempotency_key:
+            state_metadata['idempotency_key'] = idempotency_key
         state = AgentState(
             agent_id=self.name,
             run_id=getattr(self, '_current_run_id', 'unknown'),
@@ -454,7 +463,7 @@ class ToolExecutionMixin:
             last_user_message=self.chat_history[-1].get('content') if self.chat_history else None,
             memory=getattr(self, '_memory_instance', None),
             learn_manager=getattr(getattr(self, '_memory_instance', None), 'learn', None),
-            metadata={'agent_name': self.name}
+            metadata=state_metadata,
         )
         
         # Route through user-supplied tool middleware (Agent(hooks=[...])) when
@@ -2426,11 +2435,36 @@ class ToolExecutionMixin:
             bind_target = func
             bind_arguments = arguments
             try:
+                try:
+                    from .durable import get_durable_idempotency_key
+
+                    durable_key = get_durable_idempotency_key()
+                except ImportError:
+                    durable_key = None
+
+                def _with_durable_key(target, values):
+                    if not durable_key:
+                        return values
+                    try:
+                        parameters = inspect.signature(target).parameters.values()
+                    except (TypeError, ValueError):
+                        return values
+                    if not any(
+                        parameter.name == "idempotency_key"
+                        or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                        for parameter in parameters
+                    ):
+                        return values
+                    scoped = dict(values)
+                    scoped["idempotency_key"] = durable_key
+                    return scoped
+
                 # BaseTool instances (plugin system) - call run() method
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
                     bind_target = func.run
-                    casted_arguments = self._cast_arguments(func.run, arguments)
+                    keyed_arguments = _with_durable_key(func.run, arguments)
+                    casted_arguments = self._cast_arguments(func.run, keyed_arguments)
                     bind_arguments = casted_arguments
                     return func.run(**casted_arguments)
                 
@@ -2438,7 +2472,8 @@ class ToolExecutionMixin:
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
                     instance = func()
                     bind_target = instance.run
-                    run_params = {k: v for k, v in arguments.items() 
+                    keyed_arguments = _with_durable_key(instance.run, arguments)
+                    run_params = {k: v for k, v in keyed_arguments.items()
                                   if k in inspect.signature(instance.run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance.run, run_params)
@@ -2449,7 +2484,8 @@ class ToolExecutionMixin:
                 elif inspect.isclass(func) and hasattr(func, '_run'):
                     instance = func()
                     bind_target = instance._run
-                    run_params = {k: v for k, v in arguments.items() 
+                    keyed_arguments = _with_durable_key(instance._run, arguments)
+                    run_params = {k: v for k, v in keyed_arguments.items()
                                   if k in inspect.signature(instance._run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance._run, run_params)
@@ -2459,7 +2495,8 @@ class ToolExecutionMixin:
                 # Otherwise treat as regular function
                 elif callable(func):
                     bind_target = func
-                    casted_arguments = self._cast_arguments(func, arguments)
+                    keyed_arguments = _with_durable_key(func, arguments)
+                    casted_arguments = self._cast_arguments(func, keyed_arguments)
                     bind_arguments = casted_arguments
                     return func(**casted_arguments)
             except Exception as e:
