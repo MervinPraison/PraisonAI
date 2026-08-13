@@ -197,7 +197,13 @@ class RunRecord:
     Attributes:
         job_id: ID of the job that was executed.
         job_name: Human-readable name of the job.
-        status: Execution status (``"succeeded"``, ``"failed"``, ``"skipped"``).
+        status: Execution status. One of ``"succeeded"``, ``"failed"``,
+                ``"skipped"``, or ``"no_change"``. ``"no_change"`` is the
+                stateful "monitor mode" outcome — a watched source was
+                unchanged since the last tick, so the model turn was suppressed
+                silently (no tokens, no delivery). It is distinct from
+                ``"skipped"`` (a generic gate go/no-go) so an operator can tell
+                "nothing changed" apart from "the gate said don't run".
         result: Agent response text (truncated if very long).
         error: Error message if status is ``"failed"``.
         duration: Wall-clock seconds for execution.
@@ -207,7 +213,7 @@ class RunRecord:
 
     job_id: str
     job_name: str = ""
-    status: Literal["succeeded", "failed", "skipped"] = "succeeded"
+    status: Literal["succeeded", "failed", "skipped", "no_change"] = "succeeded"
     result: Optional[str] = None
     error: Optional[str] = None
     duration: float = 0.0
@@ -309,6 +315,21 @@ class ScheduleJob:
                  the run is pinned and drift fails closed. Set ``False`` to opt
                  into following whatever the default becomes. Only meaningful
                  when ``model`` is set; a job with no snapshot never enforces.
+        monitor: Optional *change-detection source* spec that turns the job
+                 into a stateful monitor. A small mapping naming a cheap source
+                 to probe each tick — ``{"command": "..."}`` (shell) or
+                 ``{"url": "..."}`` (a bounded fetch). The wrapper's monitor
+                 gate hashes the source's output and compares it to the last
+                 seen hash held in per-job state: **unchanged** suppresses the
+                 model turn (recorded as ``no_change`` — no tokens, no
+                 delivery); **changed / first run** seeds a bounded diff into
+                 ``message`` and runs once. The core owns only the shape (a
+                 declarable spec round-tripped through storage) — the probe,
+                 hashing, diffing and state persistence live in the wrapper.
+                 ``None`` (default) keeps the existing stateless behaviour, so
+                 jobs that set neither ``monitor`` nor state behave exactly as
+                 today. Distinct from ``pre_run`` (a stateless go/no-go gate)
+                 and ``command`` (a model-free delivery action).
     """
 
     name: str = ""
@@ -331,6 +352,7 @@ class ScheduleJob:
     provider: Optional[str] = None
     model: Optional[str] = None
     pin_model: bool = True
+    monitor: Optional[Dict[str, Any]] = None
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -372,6 +394,12 @@ class ScheduleJob:
             d["model"] = self.model
             if not self.pin_model:
                 d["pin_model"] = False
+        # Monitor source spec. Only persist when configured so stateless jobs
+        # stay byte-for-byte unchanged; the shape is opaque to the core. Use an
+        # ``is not None`` check so an explicitly configured empty mapping
+        # round-trips faithfully instead of silently reverting to stateless.
+        if self.monitor is not None:
+            d["monitor"] = self.monitor
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -407,6 +435,7 @@ class ScheduleJob:
             provider=d.get("provider"),
             model=d.get("model"),
             pin_model=d.get("pin_model", True),
+            monitor=d.get("monitor"),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0

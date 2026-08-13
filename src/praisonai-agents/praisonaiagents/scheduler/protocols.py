@@ -8,7 +8,7 @@ Any object implementing these methods can be used as a schedule store.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 
 @dataclass
@@ -24,11 +24,68 @@ class GateResult:
                  with context (e.g. the new emails the agent should summarise).
         reason: Optional human-readable note recorded with the run
                 (e.g. ``"pre-run gate: nothing to do"``).
+        no_change: When ``True`` the gate observed a *watched source that has
+                 not changed since the last tick* — a distinct "monitor mode"
+                 outcome from a generic ``run=False`` skip. The tick is
+                 suppressed silently (no tokens, no delivery) and recorded as
+                 ``no_change`` rather than ``skipped``, so an operator can tell
+                 "a watched source was unchanged" apart from "the gate said
+                 don't run". Implies ``run=False``. Backward-compatible: gates
+                 that never set it behave exactly as before.
+        state_updates: Optional bounded key/value the gate wants persisted for
+                 the *next* tick (e.g. the last-seen hash, a cursor / watermark)
+                 via a :class:`JobStateStoreProtocol`. ``None`` means "write
+                 nothing" — an error probe leaves prior state untouched so a
+                 later recovery to the prior output still suppresses. The core
+                 owns only the shape; the wrapper decides where to persist it.
     """
 
     run: bool = True
     context: Optional[str] = None
     reason: Optional[str] = None
+    no_change: bool = False
+    state_updates: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self) -> None:
+        # ``no_change`` is a silent-suppress outcome and, per the field's
+        # contract, *implies* ``run=False``. Enforce the invariant so a gate
+        # that sets only ``no_change=True`` (leaving ``run`` at its default)
+        # can never let a runner fire a tick the contract defines as
+        # suppressed.
+        if self.no_change:
+            self.run = False
+
+
+@runtime_checkable
+class JobStateStoreProtocol(Protocol):
+    """Protocol for a small, bounded per-job durable scratchpad.
+
+    Gives a scheduled automation *memory* across wake-ups so it can hold
+    cursors, watermarks, or a last-seen hash and do incremental work
+    ("summarise items new since last run", "alert only on newly failing
+    checks"). Keyed by job id; the store is expected to bound the persisted
+    size so a runaway write cannot grow unbounded, and to clear a job's state
+    when that job is removed.
+
+    Complements :class:`ScheduleStoreProtocol` (which owns *jobs*): this owns a
+    job's *state*. The core owns only the contract; a concrete store (JSON
+    file, config-yaml section, DB) lives in the wrapper alongside the heavy
+    monitor gate that reads and writes it. All methods are OPTIONAL for a
+    store to provide — callers should use ``hasattr()`` to detect support and
+    treat absence as "no per-job state" (today's stateless behaviour).
+    """
+
+    def get_state(self, job_id: str) -> Dict[str, Any]:
+        """Return the persisted state dict for ``job_id`` (``{}`` if none)."""
+        ...
+
+    def set_state(self, job_id: str, state: Dict[str, Any]) -> None:
+        """Persist ``state`` for ``job_id`` (size-capped by the implementation)."""
+        ...
+
+    def clear_state(self, job_id: str) -> None:
+        """Drop any persisted state for ``job_id`` (called when a job is removed)."""
+        ...
 
 
 @runtime_checkable
@@ -43,10 +100,33 @@ class JobConditionProtocol(Protocol):
     deployment (a Python callable, an MCP/tool probe). The core only owns this
     contract so every front-end (Python ``ScheduleJob``, YAML loader,
     agent-callable schedule tools) shares one shape.
+
+    A gate may be *stateless* (sees only ``job``) or *stateful*: a stateful
+    "monitor" gate accepts the job's prior persisted ``state`` and returns a
+    :class:`GateResult` whose ``no_change`` / ``state_updates`` fields let it
+    suppress an unchanged source and carry a last-seen hash / watermark to the
+    next tick. The ``state`` parameter is optional and keyword-only so existing
+    stateless gates (``should_run(self, job)``) satisfy the protocol unchanged
+    under ``runtime_checkable`` (which matches on method *name*).
+
+    Caller contract: because a legacy stateless gate accepts only ``job``,
+    callers MUST NOT unconditionally pass ``state=``. Detect capability first —
+    e.g. call ``should_run(job, state=prior)`` only when the gate opts into
+    state, otherwise fall back to ``should_run(job)`` — so stateless gates keep
+    working unchanged and never raise ``TypeError``.
     """
 
-    def should_run(self, job: Any) -> "GateResult":
-        """Return a :class:`GateResult` deciding whether ``job`` should run."""
+    def should_run(
+        self, job: Any, *, state: Optional[Dict[str, Any]] = None
+    ) -> "GateResult":
+        """Return a :class:`GateResult` deciding whether ``job`` should run.
+
+        Args:
+            job: The scheduled job under evaluation.
+            state: Optional prior per-job state (from a
+                :class:`JobStateStoreProtocol`) for a stateful monitor gate to
+                compare against. Stateless gates ignore it.
+        """
         ...
 
 
