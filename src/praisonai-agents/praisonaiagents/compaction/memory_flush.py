@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, replace
 import logging
 import os
+import threading
 from typing import Any, Dict, List, Optional, Union
 
 from ..config.feature_configs import PreCompactionMemoryFlushConfig
@@ -218,26 +218,44 @@ def run_pre_compaction_flush_sync(
     messages_to_flush: List[Dict[str, Any]],
     config: Union[bool, Dict[str, Any], PreCompactionMemoryFlushConfig] = True,
 ) -> MemoryFlushResult:
-    """Run a bounded sync flush in a worker without blocking past its timeout."""
+    """Run a bounded sync flush in a worker without blocking past its timeout.
+
+    The worker runs in a *daemon* thread: on timeout the caller stops waiting
+    and lets compaction proceed, and a stuck worker can never delay interpreter
+    shutdown (a non-daemon pool would be joined at exit). Any durable memory the
+    worker writes after the timeout is additive and independent of the compacted
+    transcript, so it cannot corrupt the surviving history.
+    """
     resolved, transcript, count, skipped = _prepare_flush(
         parent_agent, messages_to_flush, config
     )
     if skipped is not None:
         return skipped
 
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="memory-flush")
-    try:
-        child = create_memory_flush_agent(parent_agent, resolved)
-        future = executor.submit(child.start, _flush_prompt(transcript))
-        future.result(timeout=resolved.timeout_seconds)
-        return MemoryFlushResult(True, True, "completed", count)
-    except FutureTimeout:
+    outcome: Dict[str, Any] = {}
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            child = create_memory_flush_agent(parent_agent, resolved)
+            child.start(_flush_prompt(transcript))
+            outcome["ok"] = True
+        except Exception as exc:  # noqa: BLE001 - never propagate to compaction
+            outcome["error"] = exc
+        finally:
+            done.set()
+
+    worker = threading.Thread(
+        target=_worker, name="memory-flush", daemon=True
+    )
+    worker.start()
+    if not done.wait(timeout=resolved.timeout_seconds):
         logger.warning("Pre-compaction memory flush timed out; continuing compaction")
         return MemoryFlushResult(True, False, "timeout", count)
-    except Exception as exc:
+    if "error" in outcome:
         logger.warning(
-            "Pre-compaction memory flush failed; continuing compaction: %s", exc
+            "Pre-compaction memory flush failed; continuing compaction: %s",
+            outcome["error"],
         )
         return MemoryFlushResult(True, False, "error", count)
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    return MemoryFlushResult(True, True, "completed", count)

@@ -514,11 +514,16 @@ class ContextCompactor:
     def preview_older_slice(
         self, messages: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Return the non-system prefix at the compaction boundary.
+        """Return the non-system prefix that compaction may discard.
 
-        This uses the same recent-message count and tool-call pair snapping as
-        the compaction strategies, allowing pre-compaction consumers to inspect
-        exactly the older conversation region without mutating the transcript.
+        The recent-count boundary (``preserve_recent``) is the *minimum* region
+        every strategy drops. Budget-driven strategies (SLIDING, and TRUNCATE's
+        second pass) can drop **more** older messages to reach ``target_tokens``.
+        To ensure a pre-compaction consumer is offered every message that could
+        be discarded — so durable facts are never silently lost — this returns a
+        safe *superset*: whichever boundary (count- or token-budget-based) covers
+        the larger older region, with tool-call pairs kept intact. It never
+        mutates the transcript.
         """
         other_messages = [
             message
@@ -527,8 +532,32 @@ class ContextCompactor:
         ]
         if len(other_messages) <= self.preserve_recent:
             return []
+
+        count_cut = len(other_messages) - self.preserve_recent
+
+        # Token-budget boundary: mirror the sliding window's kept-from-the-end
+        # accounting (system messages count toward the budget) so we also cover
+        # older messages that budget-constrained truncation would drop.
+        system_tokens = (
+            self.count_total_tokens(
+                [m for m in messages if m.get("role") == "system"]
+            )
+            if self.preserve_system
+            else 0
+        )
+        budget_kept = 0
+        running = system_tokens
+        for message in reversed(other_messages):
+            running += self.count_message_tokens(message)
+            if running <= self.target_tokens:
+                budget_kept += 1
+            else:
+                break
+        budget_cut = len(other_messages) - budget_kept
+
+        # Superset: the larger cut discards (and thus previews) more history.
         cut = self._snap_to_pair_boundary(
-            other_messages, len(other_messages) - self.preserve_recent
+            other_messages, max(count_cut, budget_cut)
         )
         return list(other_messages[:cut])
 

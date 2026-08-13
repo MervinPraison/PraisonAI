@@ -97,6 +97,61 @@ def test_preview_boundary_never_splits_tool_call_pair():
     assert compactor.preview_older_slice(messages) == [messages[0]]
 
 
+def test_preview_covers_token_budget_removals_not_just_recent_count():
+    # A tiny target_tokens forces budget-driven strategies (SLIDING / TRUNCATE
+    # second pass) to drop more than preserve_recent older messages. The preview
+    # must be a superset covering those extra removals so their durable facts
+    # are still offered to the flush.
+    messages = [
+        {"role": "user", "content": "fact one " * 50},
+        {"role": "assistant", "content": "ack one " * 50},
+        {"role": "user", "content": "fact two " * 50},
+        {"role": "assistant", "content": "ack two " * 50},
+        {"role": "user", "content": "recent"},
+    ]
+    compactor = ContextCompactor(
+        max_tokens=10, target_tokens=5, preserve_recent=1
+    )
+
+    older = compactor.preview_older_slice(messages)
+
+    # preserve_recent=1 alone would preview only the first 4; the token budget
+    # discards every older message, so the preview must include all 4 of them.
+    assert [m["content"] for m in older] == [m["content"] for m in messages[:4]]
+
+
+def test_sync_flush_worker_is_daemon_and_timeout_is_non_fatal():
+    import threading
+
+    started = threading.Event()
+
+    class _SlowChild:
+        def start(self, _prompt):
+            started.set()
+            # Outlive the timeout; a non-daemon worker would block shutdown.
+            threading.Event().wait(5)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        return_value=_SlowChild(),
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=0.05
+            ),
+        )
+
+    assert result.reason == "timeout"
+    assert result.completed is False
+    assert started.wait(1)
+    worker = next(
+        (t for t in threading.enumerate() if t.name == "memory-flush"), None
+    )
+    assert worker is not None and worker.daemon is True
+
+
 def test_transcript_excludes_system_and_tool_payloads_and_is_bounded():
     transcript = format_messages_to_flush(_messages(), max_tokens=12)
 
