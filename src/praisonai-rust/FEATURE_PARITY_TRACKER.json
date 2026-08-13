@@ -1,6 +1,6 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-08-11",
+  "lastUpdated": "2026-08-13",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
@@ -1801,7 +1801,6 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
-        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1826,6 +1825,7 @@
       "tools": [
         "FunctionTool",
         "Tool",
+        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
