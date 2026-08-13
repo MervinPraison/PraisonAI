@@ -63,6 +63,19 @@ class ChatMixin:
             return execute
         return execute_tool_fn
 
+    def _memory_prefetch_scope(self) -> Dict[str, Any]:
+        """Return explicit identity filters for a shared memory backend."""
+        config = getattr(self, "_memory_config", None)
+        scope: Dict[str, Any] = {}
+        user_id = getattr(config, "user_id", None)
+        session_id = getattr(config, "session_id", None)
+        if user_id:
+            scope["user_id"] = user_id
+        if session_id:
+            scope["session_id"] = session_id
+            scope["metadata_filter"] = {"session_id": session_id}
+        return scope
+
     @staticmethod
     def _memory_prefetch_query(prompt: Any) -> str:
         """Return the user-authored text used for turn-start memory lookup."""
@@ -157,10 +170,11 @@ class ChatMixin:
             budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
             if not limit or not budget:
                 return ""
+            scope = self._memory_prefetch_scope()
             if hasattr(memory, "search_long_term"):
-                results = memory.search_long_term(query, limit=limit)
+                results = memory.search_long_term(query, limit=limit, **scope)
             elif hasattr(memory, "search"):
-                results = memory.search(query, limit=limit)
+                results = memory.search(query, limit=limit, **scope)
             else:
                 return ""
             return self._format_memory_prefetch(results, limit, budget)

@@ -49,7 +49,12 @@ def test_prefetch_disabled_does_not_touch_backend():
 
 
 def test_prefetch_injects_deduplicated_system_context_before_user_message():
-    agent = _agent(MemoryConfig(prefetch=True, prefetch_limit=2))
+    agent = _agent(MemoryConfig(
+        prefetch=True,
+        prefetch_limit=2,
+        user_id="user-7",
+        session_id="session-9",
+    ))
     backend = MagicMock()
     backend.search_long_term.return_value = [
         {"memory": "Timezone: Asia/Kolkata"},
@@ -65,7 +70,11 @@ def test_prefetch_injects_deduplicated_system_context_before_user_message():
     )
 
     backend.search_long_term.assert_called_once_with(
-        "What timezone should I use?", limit=2
+        "What timezone should I use?",
+        limit=2,
+        user_id="user-7",
+        session_id="session-9",
+        metadata_filter={"session_id": "session-9"},
     )
     assert messages[0]["role"] == "system"
     assert "## Recalled memories" in messages[0]["content"]
@@ -144,7 +153,12 @@ def test_prefetch_invalid_numeric_config_is_non_fatal(field, value):
 
 @pytest.mark.asyncio
 async def test_async_prefetch_uses_async_memory_search():
-    agent = _agent(MemoryConfig(prefetch=True, prefetch_limit=1))
+    agent = _agent(MemoryConfig(
+        prefetch=True,
+        prefetch_limit=1,
+        user_id="user-7",
+        session_id="session-9",
+    ))
     agent.asearch_memory = AsyncMock(return_value=[{"text": "async memory"}])
 
     recalled = await agent._aprefetch_memory("async question")
@@ -152,6 +166,28 @@ async def test_async_prefetch_uses_async_memory_search():
     assert recalled == "- async memory"
     agent.asearch_memory.assert_awaited_once_with(
         "async question", memory_type="long_term", limit=1
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_memory_search_enforces_configured_identity_scope():
+    agent = _agent(MemoryConfig(
+        prefetch=True,
+        user_id="user-7",
+        session_id="session-9",
+    ))
+    backend = MagicMock()
+    backend.search_long_term.return_value = []
+    agent._memory_instance = backend
+
+    await agent.asearch_memory("question", memory_type="long_term", limit=2)
+
+    backend.search_long_term.assert_called_once_with(
+        "question",
+        2,
+        user_id="user-7",
+        session_id="session-9",
+        metadata_filter={"session_id": "session-9"},
     )
 
 
