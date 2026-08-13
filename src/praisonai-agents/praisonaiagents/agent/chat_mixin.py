@@ -63,6 +63,129 @@ class ChatMixin:
             return execute
         return execute_tool_fn
 
+    @staticmethod
+    def _memory_prefetch_query(prompt: Any) -> str:
+        """Return the user-authored text used for turn-start memory lookup."""
+        if isinstance(prompt, str):
+            return prompt.strip()
+        if isinstance(prompt, list):
+            parts = []
+            for item in prompt:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text")
+                    if text:
+                        parts.append(str(text))
+            return "\n".join(parts).strip()
+        return str(prompt).strip() if prompt is not None else ""
+
+    @staticmethod
+    def _memory_prefetch_text(item: Any) -> str:
+        """Extract display text from the common memory-adapter result shapes."""
+        if isinstance(item, str):
+            return item.strip()
+        if isinstance(item, dict):
+            for key in ("memory", "text", "content", "value"):
+                value = item.get(key)
+                if value is not None:
+                    return str(value).strip()
+        for attr in ("memory", "text", "content", "value"):
+            value = getattr(item, attr, None)
+            if value is not None:
+                return str(value).strip()
+        return ""
+
+    def _format_memory_prefetch(self, results: Any, limit: int, token_budget: int) -> str:
+        """Format deduplicated memory hits inside a strict estimated-token budget."""
+        if not isinstance(results, (list, tuple)):
+            return ""
+
+        try:
+            from ..context.tokens import estimate_tokens_heuristic
+        except ImportError:  # pragma: no cover - core module is always present
+            estimate_tokens_heuristic = lambda text: max(1, len(text) // 4)
+
+        lines = []
+        seen = set()
+        for item in results:
+            text = self._memory_prefetch_text(item)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            lines.append(f"- {text}")
+            if len(lines) >= limit:
+                break
+
+        if not lines or token_budget <= 0:
+            return ""
+
+        rendered = "\n".join(lines)
+        if estimate_tokens_heuristic(rendered) <= token_budget:
+            return rendered
+
+        # Token estimation is monotonic for prefixes, so binary search keeps
+        # the largest safe prefix and makes truncation explicit to the model.
+        suffix = "…"
+        low, high = 0, len(rendered)
+        while low < high:
+            mid = (low + high + 1) // 2
+            candidate = rendered[:mid].rstrip() + suffix
+            if estimate_tokens_heuristic(candidate) <= token_budget:
+                low = mid
+            else:
+                high = mid - 1
+        return (rendered[:low].rstrip() + suffix) if low else ""
+
+    def _prefetch_memory(self, prompt: Any) -> str:
+        """Best-effort synchronous turn-start retrieval (default-off)."""
+        config = getattr(self, "_memory_config", None)
+        memory = getattr(self, "_memory_instance", None)
+        if not config or not getattr(config, "prefetch", False) or memory is None:
+            return ""
+
+        query = self._memory_prefetch_query(prompt)
+        if not query:
+            return ""
+        limit = max(0, int(getattr(config, "prefetch_limit", 5)))
+        budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
+        if not limit or not budget:
+            return ""
+
+        try:
+            if hasattr(memory, "search_long_term"):
+                results = memory.search_long_term(query, limit=limit)
+            elif hasattr(memory, "search"):
+                results = memory.search(query, limit=limit)
+            else:
+                return ""
+            return self._format_memory_prefetch(results, limit, budget)
+        except Exception as exc:
+            logging.debug("Memory prefetch failed; continuing without recalled context: %s", exc)
+            return ""
+
+    async def _aprefetch_memory(self, prompt: Any) -> str:
+        """Best-effort asynchronous turn-start retrieval (default-off)."""
+        config = getattr(self, "_memory_config", None)
+        memory = getattr(self, "_memory_instance", None)
+        if not config or not getattr(config, "prefetch", False) or memory is None:
+            return ""
+
+        query = self._memory_prefetch_query(prompt)
+        if not query:
+            return ""
+        limit = max(0, int(getattr(config, "prefetch_limit", 5)))
+        budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
+        if not limit or not budget:
+            return ""
+
+        try:
+            results = await self.asearch_memory(
+                query, memory_type="long_term", limit=limit
+            )
+            return self._format_memory_prefetch(results, limit, budget)
+        except Exception as exc:
+            logging.debug("Async memory prefetch failed; continuing without recalled context: %s", exc)
+            return ""
+
     def _resolve_max_steps(self, default: int = 10) -> int:
         """Resolve the unified multi-step tool budget shared by both loops.
 
@@ -130,7 +253,7 @@ class ChatMixin:
         except Exception:
             return ""
 
-    def _build_system_prompt(self, tools=None):
+    def _build_system_prompt(self, tools=None, memory_prefetch_context: str = ""):
         """Build the system prompt with tool information.
         
         Args:
@@ -221,6 +344,9 @@ Your Goal: {self.goal}"""
             learn_context = self.get_learn_context()
             if learn_context:
                 system_prompt += f"\n\n## Learned Context (Patterns and insights from past interactions)\n{learn_context}"
+
+        if memory_prefetch_context:
+            system_prompt += f"\n\n## Recalled memories\n{memory_prefetch_context}"
         
         # Add skills prompt if skills are configured
         if self._skills or self._skills_dirs:
@@ -532,7 +658,7 @@ Your Goal: {self.goal}"""
             )
             return False
 
-    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False, restore_durable=True):
+    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False, restore_durable=True, memory_prefetch_context: str = ""):
         """Build messages list for chat completion.
         
         Args:
@@ -555,6 +681,7 @@ Your Goal: {self.goal}"""
                 prompt=prompt,
                 system_prompt=self._build_system_prompt(
                     tools=tools,
+                    memory_prefetch_context=memory_prefetch_context,
                 ),
                 chat_history=self.chat_history,
                 output_json=None if use_native_format else output_json,
@@ -564,6 +691,7 @@ Your Goal: {self.goal}"""
             # Build messages manually
             system_prompt = self._build_system_prompt(
                 tools=tools,
+                memory_prefetch_context=memory_prefetch_context,
             )
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
@@ -2778,6 +2906,10 @@ Your Goal: {self.goal}"""
         # Use agent's stream setting if not explicitly provided
         if stream is None:
             stream = self.stream
+
+        # Query long-term memory exactly once for this turn. The default-off
+        # guard returns before touching the backend.
+        memory_prefetch_context = self._prefetch_memory(prompt)
         
         # Unified retrieval handling with policy-based decision
         # Uses token-aware context building (DRY - same path as RAG pipeline)
@@ -2883,7 +3015,9 @@ Your Goal: {self.goal}"""
                 
                 try:
                     # --- Proactive Context Budget Management (sync custom LLM path) ---
-                    system_prompt_for_llm = self._build_system_prompt(tools)
+                    system_prompt_for_llm = self._build_system_prompt(
+                        tools, memory_prefetch_context=memory_prefetch_context
+                    )
                     
                     # Apply proactive context budget analysis before any other processing
                     try:
@@ -3025,7 +3159,8 @@ Your Goal: {self.goal}"""
             # Pass llm_prompt (which includes multimodal content if attachments present)
             messages, original_prompt = self._build_messages(
                 llm_prompt, temperature, output_json, output_pydantic,
-                use_native_format=use_native_format
+                use_native_format=use_native_format,
+                memory_prefetch_context=memory_prefetch_context,
             )
             
 
@@ -3451,6 +3586,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
         try:
+            # Async adapters are awaited (sync adapters are offloaded by
+            # AsyncMemoryMixin), so turn-start retrieval never blocks the loop.
+            memory_prefetch_context = await self._aprefetch_memory(prompt)
+
             # Default to self.tools if tools argument is None
             if tools is None:
                 tools = self.tools
@@ -3520,7 +3659,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # C1 - per-call seed forwarding (async path)  
                     llm_kwargs = {
                         'prompt': prompt,
-                        'system_prompt': self._build_system_prompt(tools),
+                        'system_prompt': self._build_system_prompt(
+                            tools,
+                            memory_prefetch_context=memory_prefetch_context,
+                        ),
                         'chat_history': effective_history,
                         'temperature': temperature,
                         'tools': tools,
@@ -3609,6 +3751,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 output_json,
                 output_pydantic,
                 restore_durable=False,
+                memory_prefetch_context=memory_prefetch_context,
             )
             durable_context = self._get_durable_run_context()
             if durable_context is not None:
@@ -4263,6 +4406,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Temporarily disable verbose mode to prevent console output conflicts during streaming
             original_verbose = self.verbose
             self.verbose = False
+            memory_prefetch_context = self._prefetch_memory(prompt)
             
             # For custom LLM path, use the new get_response_stream generator
             if self._using_custom_llm:
@@ -4327,7 +4471,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
-                        system_prompt=self._build_system_prompt(tool_param),
+                        system_prompt=self._build_system_prompt(
+                            tool_param,
+                            memory_prefetch_context=memory_prefetch_context,
+                        ),
                         chat_history=stream_history,
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
@@ -4388,7 +4535,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Build messages using the helper method
                 messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
-                                                               kwargs.get('output_json'), kwargs.get('output_pydantic'))
+                                                               kwargs.get('output_json'), kwargs.get('output_pydantic'),
+                                                               memory_prefetch_context=memory_prefetch_context)
                 
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)
