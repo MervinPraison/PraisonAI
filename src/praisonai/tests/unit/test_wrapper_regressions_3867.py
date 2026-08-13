@@ -243,3 +243,109 @@ def test_native_adapter_declares_cli_runtime_capabilities():
     assert BaseFrameworkAdapter.SUPPORTS_STREAM_BRIDGE is False
     assert PraisonAIAdapter.SUPPORTS_SESSION_CONTINUITY is True
     assert PraisonAIAdapter.SUPPORTS_STREAM_BRIDGE is True
+
+
+def test_sync_entrypoints_run_capability_gates_before_execution():
+    from praisonai.agents_generator import AgentsGenerator
+
+    generator = object.__new__(AgentsGenerator)
+    generator._load_config = lambda: {"process": "workflow"}
+    generator._is_workflow_yaml = lambda config: config["process"] == "workflow"
+
+    def reject_workflow():
+        raise ValueError("workflow gate")
+
+    generator._validate_workflow_cli_capabilities = reject_workflow
+    with pytest.raises(ValueError, match="workflow gate"):
+        generator.generate_crew_and_kickoff()
+
+    adapter = object()
+    generator._load_config = lambda: {"process": "sequential"}
+    generator._prepare_for_run = lambda config: {"adapter": adapter}
+
+    def reject_adapter(candidate):
+        assert candidate is adapter
+        raise ValueError("adapter gate")
+
+    generator._validate_adapter_cli_capabilities = reject_adapter
+    with pytest.raises(ValueError, match="adapter gate"):
+        generator.generate_crew_and_kickoff()
+
+
+async def test_async_entrypoints_run_capability_gates_before_execution():
+    from praisonai.agents_generator import AgentsGenerator
+
+    generator = object.__new__(AgentsGenerator)
+    config = {"process": "workflow"}
+
+    async def load_config():
+        return config
+
+    generator._aload_config = load_config
+    generator._is_workflow_yaml = lambda candidate: candidate["process"] == "workflow"
+
+    def reject_workflow():
+        raise ValueError("workflow gate")
+
+    generator._validate_workflow_cli_capabilities = reject_workflow
+    with pytest.raises(ValueError, match="workflow gate"):
+        await generator.agenerate_crew_and_kickoff()
+
+    config["process"] = "sequential"
+    adapter = object()
+
+    async def prepare_for_run(candidate):
+        assert candidate is config
+        return {"adapter": adapter}
+
+    generator._aprepare_for_run = prepare_for_run
+
+    def reject_adapter(candidate):
+        assert candidate is adapter
+        raise ValueError("adapter gate")
+
+    generator._validate_adapter_cli_capabilities = reject_adapter
+    with pytest.raises(ValueError, match="adapter gate"):
+        await generator.agenerate_crew_and_kickoff()
+
+
+async def test_store_dispatch_helpers_cover_sync_async_and_missing_methods():
+    from praisonai.db.adapter import PraisonAIDB
+
+    class MixedStore:
+        def sync_value(self):
+            return "sync"
+
+        async def async_value(self):
+            return "async"
+
+    store = MixedStore()
+
+    assert (
+        PraisonAIDB._store_callable(store, "sync_value", "async_value")
+        == store.async_value
+    )
+    assert PraisonAIDB._call_store(store, "sync_value", "missing") == "sync"
+    assert PraisonAIDB._call_store(store, "missing", "also_missing") is None
+    assert (
+        await PraisonAIDB._dispatch_async(store, "sync_value", "async_value")
+        == "async"
+    )
+
+
+def test_import_profiler_defensive_and_idempotent_paths(monkeypatch):
+    from praisonai import profiler as profiler_module
+    from praisonai.profiler import ImportProfiler
+
+    monkeypatch.setattr(profiler_module, "_IMPORT_HOOK_ORIGINAL", None)
+    with pytest.raises(RuntimeError, match="no original import hook"):
+        profiler_module._profiled_import("json")
+
+    profiler = ImportProfiler()
+    try:
+        assert profiler.__enter__() is profiler
+        installed_hook = builtins.__import__
+        assert profiler.__enter__() is profiler
+        assert builtins.__import__ is installed_hook
+    finally:
+        profiler.__exit__(None, None, None)
