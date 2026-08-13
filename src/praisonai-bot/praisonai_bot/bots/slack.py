@@ -519,7 +519,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     await say(text=response, thread_ts=event.get("ts"))
                 except Exception as e:  # noqa: BLE001 - surface a friendly message
                     logger.warning("retry failed: %s", e)
-                    await say(text=f"❌ Retry failed: {e}", thread_ts=event.get("ts"))
+                    await say(text=failure_reply_text(e), thread_ts=event.get("ts"))
                 return
             elif text == "/reasoning":
                 user_id = event.get("user", "unknown")

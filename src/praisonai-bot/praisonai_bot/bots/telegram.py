@@ -1223,7 +1223,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 await update.message.reply_text(response)
             except Exception as e:  # noqa: BLE001 - surface a friendly message
                 logger.warning("retry failed: %s", e)
-                await update.message.reply_text(f"❌ Retry failed: {e}")
+                await update.message.reply_text(failure_reply_text(e))
 
         async def handle_reasoning(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:

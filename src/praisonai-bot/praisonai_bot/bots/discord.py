@@ -363,7 +363,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         await message.reply(response)
                     except Exception as e:  # noqa: BLE001 - surface a friendly message
                         logger.warning("retry failed: %s", e)
-                        await message.reply(f"❌ Retry failed: {e}")
+                        await message.reply(failure_reply_text(e))
                     return
                 elif command == "reasoning":
                     user_id = str(message.author.id)
