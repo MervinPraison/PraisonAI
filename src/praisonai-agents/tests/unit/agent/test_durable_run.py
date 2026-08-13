@@ -408,7 +408,7 @@ def test_agent_chat_none_result_finalizes_run(tmp_path):
     assert agent.execution.resume_run_id is None
 
 
-def test_agent_chat_cancelled_none_result_stays_cancelled(tmp_path):
+def test_agent_chat_resets_stale_cancellation_before_none_result(tmp_path):
     from praisonaiagents import Agent
 
     path = str(tmp_path / "journal.db")
@@ -418,12 +418,25 @@ def test_agent_chat_cancelled_none_result_stays_cancelled(tmp_path):
         execution=ExecutionConfig(durable=True, journal_path=path),
     )
 
-    agent.llm_instance = SimpleNamespace(_last_stop_reason="cancelled")
-    with patch.object(agent, "_chat_impl", return_value=None):
+    backend = SimpleNamespace(_last_stop_reason="completed")
+    agent.llm_instance = backend
+
+    def cancelled_result(*args, **kwargs):
+        backend._last_stop_reason = "cancelled"
+        return None
+
+    with patch.object(agent, "_chat_impl", side_effect=cancelled_result):
         assert agent.chat("task") is None
 
     journal = RunJournal(path)
     assert journal.run_meta(agent.last_durable_run_id).status == "cancelled"
+    journal.close()
+
+    with patch.object(agent, "_chat_impl", return_value=None):
+        assert agent.chat("later task") is None
+
+    journal = RunJournal(path)
+    assert journal.run_meta(agent.last_durable_run_id).status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None
@@ -451,7 +464,7 @@ async def test_agent_achat_none_result_finalizes_run(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_agent_achat_cancelled_none_result_stays_cancelled(tmp_path):
+async def test_agent_achat_resets_stale_cancellation_before_none_result(tmp_path):
     from praisonaiagents import Agent
 
     path = str(tmp_path / "journal.db")
@@ -461,12 +474,25 @@ async def test_agent_achat_cancelled_none_result_stays_cancelled(tmp_path):
         execution=ExecutionConfig(durable=True, journal_path=path),
     )
 
-    agent.llm_instance = SimpleNamespace(_last_stop_reason="cancelled")
-    with patch.object(agent, "_achat_impl", AsyncMock(return_value=None)):
+    backend = SimpleNamespace(_last_stop_reason="completed")
+    agent.llm_instance = backend
+
+    async def cancelled_result(*args, **kwargs):
+        backend._last_stop_reason = "cancelled"
+        return None
+
+    with patch.object(agent, "_achat_impl", side_effect=cancelled_result):
         assert await agent.achat("task") is None
 
     journal = RunJournal(path)
     assert journal.run_meta(agent.last_durable_run_id).status == "cancelled"
+    journal.close()
+
+    with patch.object(agent, "_achat_impl", AsyncMock(return_value=None)):
+        assert await agent.achat("later task") is None
+
+    journal = RunJournal(path)
+    assert journal.run_meta(agent.last_durable_run_id).status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None

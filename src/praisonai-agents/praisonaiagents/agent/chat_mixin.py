@@ -43,6 +43,15 @@ class ChatMixin:
 
         return get_durable_run()
 
+    def _reset_last_stop_reason(self) -> None:
+        """Clear backend stop state before starting a new agent turn."""
+        for backend in (
+            getattr(self, "llm_instance", None),
+            getattr(self, "_Agent__openai_client", None),
+        ):
+            if backend is not None and hasattr(backend, "_last_stop_reason"):
+                backend._last_stop_reason = "completed"
+
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
         context = self._get_durable_run_context()
@@ -2688,6 +2697,7 @@ Your Goal: {self.goal}"""
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        self._reset_last_stop_reason()
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -3369,6 +3379,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        self._reset_last_stop_reason()
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import abegin_durable_run
@@ -4248,6 +4259,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Own the durable context for the complete streaming generator."""
         durable_context = None
         durable_token = None
+        self._reset_last_stop_reason()
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import begin_durable_run
