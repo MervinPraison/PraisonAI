@@ -2109,6 +2109,15 @@ class WebSocketGateway:
         except Exception:
             logger.exception("Failed to resume interrupted turns on boot")
 
+        # Issue #3881: drive recovery from the durable run ledger too. The
+        # session-blob scan above is heuristic; the ledger is the source of
+        # truth for runs that a crashed process left in flight. Reconcile them
+        # to LOST and wake their origin channels. No-op without a core ledger.
+        try:
+            await self._recover_orphaned_runs()
+        except Exception:
+            logger.exception("Failed to recover orphaned runs on boot")
+
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
 
         # Issue #3410: arm the opt-in event-loop liveness watchdog around the
@@ -5433,6 +5442,106 @@ class WebSocketGateway:
         except Exception as e:  # noqa: BLE001
             logger.error("Restart notice to %s:%s failed: %s", channel, target, e)
             return False
+
+    async def _recover_orphaned_runs(self) -> int:
+        """Reconcile durable-ledger runs left in flight by a crashed process.
+
+        Issue #3881: the core :class:`~praisonaiagents.runs.SQLiteRunLedger`
+        ships ``recover_orphans`` but nothing wired it into the gateway, so a
+        run left ``running`` when the process died was lost silently. On boot we
+        now open the ledger, mark every still-active run ``LOST`` with a terminal
+        outcome, and wake its origin channel/thread through the same durable,
+        exactly-once delivery path the restart notice uses — so an interrupted
+        run ends in a *recorded* outcome and a *visible* user-facing message,
+        not silence.
+
+        Best-effort and default-safe: a no-op when core lacks the ledger or the
+        ledger DB does not exist yet, so gateways that never used the ledger are
+        unaffected. Idempotency is keyed on the ``run_id`` so a crash loop
+        notifies at most once per interrupted run.
+        """
+        ledger = self._open_run_ledger()
+        if ledger is None:
+            return 0
+        try:
+            try:
+                lost = ledger.recover_orphans()
+            except Exception:
+                logger.exception("run ledger recover_orphans failed on boot")
+                return 0
+            recovered = 0
+            for record in lost or []:
+                channel_target = self._channel_target_for_run(record)
+                if not channel_target:
+                    continue
+                outcome = record.terminal_outcome or "run interrupted by restart"
+                notice = (
+                    "A background run was interrupted by a restart and could "
+                    f"not be recovered ({outcome}). Please resend your request."
+                )
+                try:
+                    await self._deliver_restart_notice(
+                        channel_target, notice, f"run:{record.run_id}", 0,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to notify origin for lost run %s", record.run_id,
+                    )
+                recovered += 1
+            if recovered:
+                logger.info(
+                    "Recovered %d orphaned ledger run(s) on boot", recovered,
+                )
+            return recovered
+        finally:
+            close = getattr(ledger, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+    def _open_run_ledger(self) -> Optional[Any]:
+        """Open the durable run ledger, or ``None`` when it is unavailable.
+
+        Lazy-imported so the SQLite/core cost is only paid on boot recovery and
+        so an older core without the ledger degrades to a no-op. When no ledger
+        DB exists yet (no run was ever recorded) there is nothing to recover, so
+        this returns ``None`` rather than creating an empty database.
+        """
+        try:
+            from praisonaiagents.runs import SQLiteRunLedger
+            from praisonaiagents.paths import get_runs_dir
+        except Exception as exc:  # pragma: no cover - old/absent core
+            logger.debug("run ledger unavailable for boot recovery: %s", exc)
+            return None
+        try:
+            db_path = get_runs_dir() / "ledger.db"
+            if not db_path.exists():
+                return None
+            return SQLiteRunLedger(str(db_path))
+        except Exception:
+            logger.exception("Failed to open run ledger for boot recovery")
+            return None
+
+    @staticmethod
+    def _channel_target_for_run(record: Any) -> Optional[str]:
+        """Resolve the ``"channel:target"`` origin for a ledger ``RunRecord``.
+
+        Mirrors :meth:`_channel_target_for` for persisted sessions: prefer the
+        recorded ``channel`` (routing to ``thread_id`` when present), else fall
+        back to a ``channel`` that itself already encodes ``"channel:target"``.
+        Returns ``None`` for runs with no channel origin to notify.
+        """
+        channel = getattr(record, "channel", "") or ""
+        thread_id = getattr(record, "thread_id", None)
+        if channel and thread_id:
+            return f"{channel}:{thread_id}"
+        if channel and ":" in channel:
+            head, tail = (p.strip() for p in channel.split(":", 1))
+            if head and tail:
+                return f"{head}:{tail}"
+        return None
 
     # ── Multi-bot lifecycle ───────────────────────────────────────────
 
