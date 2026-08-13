@@ -1497,6 +1497,7 @@ def run_main(
                 approval=approval,
                 approve_all_tools=approve_all_tools,
                 approval_timeout=approval_timeout,
+                output_mode=output_mode,
             )
         else:
             # Profiling for direct prompt
@@ -2107,6 +2108,7 @@ def _run_from_file_profiled(
     approval: Optional[str] = None,
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
+    output_mode: Optional[str] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2174,7 +2176,7 @@ def _run_from_file_profiled(
     # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
     # permission-gated identically to the non-profiled path instead of silently
     # dropping the deny policy.
-    if session_id or auto_save_name or approval or approve_all_tools:
+    if session_id or auto_save_name or approval or approve_all_tools or output_mode:
         class Args:
             pass
         
@@ -2182,6 +2184,7 @@ def _run_from_file_profiled(
         args.auto_save = auto_save_name
         args.resume_session = session_id
         args.cli_project_sessions = bool(session_id or auto_save_name)
+        args.output = output_mode
         if approval:
             args.approval = approval
         if approve_all_tools:

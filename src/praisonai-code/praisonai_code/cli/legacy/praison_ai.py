@@ -364,7 +364,12 @@ class PraisonAI:
         # session flags (e.g. ``--allow`` with ``--no-save`` sets approval but not
         # cli_project_sessions), so preserve them unconditionally when present.
         if preserved_args:
-            for attr in ('approval', 'approve_all_tools', 'approval_timeout'):
+            for attr in (
+                'approval',
+                'approve_all_tools',
+                'approval_timeout',
+                'output',
+            ):
                 if hasattr(preserved_args, attr):
                     setattr(args, attr, getattr(preserved_args, attr))
         

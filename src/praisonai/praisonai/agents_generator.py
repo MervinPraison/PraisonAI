@@ -1140,9 +1140,9 @@ class AgentsGenerator:
         cli_config = getattr(self, "cli_config", None) or {}
         adapter_name = getattr(adapter, "name", type(adapter).__name__)
 
-        if (
-            cli_config.get("resume_session") or cli_config.get("auto_save")
-        ) and not getattr(adapter, "SUPPORTS_SESSION_CONTINUITY", False):
+        if cli_config.get("resume_session") and not getattr(
+            adapter, "SUPPORTS_SESSION_CONTINUITY", False
+        ):
             raise ValueError(
                 "--resume / --session / --continue / --fork are not supported "
                 f"by framework {adapter_name!r}. Use --framework praisonai or "
@@ -1169,7 +1169,7 @@ class AgentsGenerator:
         """
         cli_config = getattr(self, "cli_config", None) or {}
 
-        if cli_config.get("resume_session") or cli_config.get("auto_save"):
+        if cli_config.get("resume_session"):
             raise ValueError(
                 "--resume / --session / --continue / --fork are not supported "
                 "for workflow YAMLs. Session continuity is only available on "

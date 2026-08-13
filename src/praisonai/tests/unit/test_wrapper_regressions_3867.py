@@ -146,7 +146,6 @@ def test_import_profiler_survives_overlapping_out_of_order_scopes():
     "cli_config, capability, message",
     [
         ({"resume_session": "session"}, "SUPPORTS_SESSION_CONTINUITY", "--resume"),
-        ({"auto_save": "session"}, "SUPPORTS_SESSION_CONTINUITY", "--session"),
         ({"output": "stream-json"}, "SUPPORTS_STREAM_BRIDGE", "stream-json"),
     ],
 )
@@ -171,7 +170,6 @@ def test_adapter_capability_gate_rejects_unsupported_cli_modes(
     "cli_config, message",
     [
         ({"resume_session": "session"}, "--resume"),
-        ({"auto_save": "session"}, "workflow YAMLs"),
         ({"output": "stream-json"}, "stream-json"),
     ],
 )
@@ -189,7 +187,7 @@ def test_workflow_path_allows_supported_cli_modes():
     from praisonai.agents_generator import AgentsGenerator
 
     generator = object.__new__(AgentsGenerator)
-    generator.cli_config = {"output": "json"}
+    generator.cli_config = {"output": "json", "auto_save": "implicit-session"}
 
     generator._validate_workflow_cli_capabilities()
 
