@@ -11,6 +11,7 @@ from praisonaiagents.agent.durable import (
     begin_durable_run,
     end_durable_run,
 )
+from praisonaiagents.errors import ToolExecutionError
 from praisonaiagents.runtime import JournalEvent, RunJournal
 from praisonaiagents.runtime.journal import (
     KIND_ITERATION,
@@ -68,6 +69,66 @@ def test_sync_wrapper_records_completed_tool_step():
         KIND_ITERATION,
     ]
     assert journal.last_iteration("run-1") == 0
+    journal.close()
+
+
+def test_sync_wrapper_records_ordinary_tool_failure_as_result():
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    context = DurableRunContext(journal, "run-1", replaying=False)
+    tool = MagicMock(side_effect=RuntimeError("boom"))
+
+    result = context.wrap_sync(tool)(
+        "flaky", {}, tool_call_id="call-1"
+    )
+
+    assert result == {"error": "boom"}
+    assert [event.kind for event in journal.events("run-1")] == [
+        KIND_MODEL_DECISION,
+        KIND_TOOL_CALL,
+        KIND_TOOL_RESULT,
+        KIND_ITERATION,
+    ]
+    journal.close()
+
+
+def test_sync_wrapper_propagates_fatal_tool_execution_error():
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    context = DurableRunContext(journal, "run-1", replaying=False)
+    halt = ToolExecutionError(
+        "[loop-guard] halt", tool_name="charge_card", is_retryable=False
+    )
+    tool = MagicMock(side_effect=halt)
+
+    with pytest.raises(ToolExecutionError):
+        context.wrap_sync(tool)("charge_card", {}, tool_call_id="call-1")
+
+    # No tool result/iteration is journaled for a halted step, so the run stays
+    # resumable and is not later mistaken for a completed success.
+    assert KIND_TOOL_RESULT not in {
+        event.kind for event in journal.events("run-1")
+    }
+    assert journal.interrupted_runs() == ["run-1"]
+    journal.close()
+
+
+@pytest.mark.asyncio
+async def test_async_wrapper_propagates_fatal_tool_execution_error():
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    context = DurableRunContext(journal, "run-1", replaying=False)
+    halt = ToolExecutionError(
+        "[loop-guard] halt", tool_name="charge_card", is_retryable=False
+    )
+    tool = AsyncMock(side_effect=halt)
+
+    with pytest.raises(ToolExecutionError):
+        await context.wrap_async(tool)("charge_card", {}, tool_call_id="call-1")
+
+    assert KIND_TOOL_RESULT not in {
+        event.kind for event in journal.events("run-1")
+    }
     journal.close()
 
 

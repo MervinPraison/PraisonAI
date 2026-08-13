@@ -9,6 +9,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+from ..errors import ToolExecutionError
 from ..runtime.journal import (
     JournalEvent,
     KIND_ITERATION,
@@ -17,6 +18,20 @@ from ..runtime.journal import (
     KIND_TOOL_RESULT,
     RunJournal,
 )
+
+
+def _is_fatal_tool_exception(exc: BaseException) -> bool:
+    """Distinguish loop-terminating signals from ordinary tool failures.
+
+    ``ToolExecutionError`` with ``is_retryable=False`` (e.g. the loop-guard
+    HALT and exhausted-failure paths) is a control-flow signal intended to stop
+    the tool loop. Those must propagate so the run is finalized correctly rather
+    than being swallowed into a journaled result. Non-``Exception`` base
+    exceptions (cancellation, interrupts) always propagate.
+    """
+    if isinstance(exc, ToolExecutionError):
+        return not getattr(exc, "is_retryable", True)
+    return not isinstance(exc, Exception)
 
 
 _active_durable_run: contextvars.ContextVar[Optional["DurableRunContext"]] = (
@@ -205,7 +220,9 @@ class DurableRunContext:
                     tool_call_id=tool_call_id,
                     **kwargs,
                 )
-            except Exception as exc:
+            except BaseException as exc:
+                if _is_fatal_tool_exception(exc):
+                    raise
                 result = {"error": str(exc)}
             return self._record_result(seq, call_id, result)
 
@@ -231,7 +248,9 @@ class DurableRunContext:
                 )
                 if inspect.isawaitable(result):
                     result = await result
-            except Exception as exc:
+            except BaseException as exc:
+                if _is_fatal_tool_exception(exc):
+                    raise
                 result = {"error": str(exc)}
             return self._record_result(seq, call_id, result)
 
