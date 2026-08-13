@@ -10,7 +10,7 @@ duplicated across mcp.py, mcp_sse.py, mcp_http_stream.py, and mcp_websocket.py.
 """
 
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 def fix_array_schemas(schema: Any) -> Any:
@@ -144,44 +144,3 @@ def get_thread_local_event_loop():
         asyncio.AbstractEventLoop: Event loop for current thread
     """
     return _default_event_loop_manager.get_loop()
-
-
-def json_type_to_python_type(json_type: str) -> type:
-    """
-    Convert JSON Schema type to Python type annotation.
-    
-    Args:
-        json_type: JSON Schema type string
-        
-    Returns:
-        Python type corresponding to the JSON type
-    """
-    type_map = {
-        'string': str,
-        'integer': int,
-        'number': float,
-        'boolean': bool,
-        'array': list,
-        'object': dict,
-        'null': type(None),
-    }
-    return type_map.get(json_type, str)
-
-
-def extract_schema_properties(input_schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Extract properties and required fields from an input schema.
-    
-    Args:
-        input_schema: JSON Schema for tool input
-        
-    Returns:
-        Dictionary with 'properties' and 'required' keys
-    """
-    if not input_schema:
-        return {'properties': {}, 'required': []}
-    
-    return {
-        'properties': input_schema.get('properties', {}),
-        'required': input_schema.get('required', [])
-    }
