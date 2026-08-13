@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
+import inspect
 import logging
 import math
 import os
@@ -132,6 +133,7 @@ class _StagedMemory:
         self._backend = backend
         self._writes: List[tuple[str, tuple[Any, ...], Dict[str, Any]]] = []
         self._lock = threading.Lock()
+        self._cancelled = False
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._backend, name)
@@ -140,16 +142,58 @@ class _StagedMemory:
 
         def _stage(*args: Any, **kwargs: Any) -> None:
             with self._lock:
-                self._writes.append((name, args, kwargs))
+                if not self._cancelled:
+                    self._writes.append((name, args, kwargs))
 
         return _stage
 
     def commit(self) -> None:
         with self._lock:
+            if self._cancelled:
+                self._writes.clear()
+                return
             writes = list(self._writes)
             self._writes.clear()
         for name, args, kwargs in writes:
             getattr(self._backend, name)(*args, **kwargs)
+
+    async def acommit(self) -> None:
+        """Commit staged writes without performing sync I/O on the event loop."""
+        with self._lock:
+            if self._cancelled:
+                self._writes.clear()
+                return
+            writes = list(self._writes)
+            self._writes.clear()
+        async_names = {
+            "store_short_term": ("astore_short_term", "store_short_term_async"),
+            "store_long_term": ("astore_long_term", "store_long_term_async"),
+            "add_short_term": ("aadd_short_term",),
+            "add_long_term": ("aadd_long_term",),
+        }
+        for name, args, kwargs in writes:
+            async_method = next(
+                (
+                    getattr(self._backend, candidate)
+                    for candidate in async_names.get(name, ())
+                    if inspect.iscoroutinefunction(
+                        getattr(self._backend, candidate, None)
+                    )
+                ),
+                None,
+            )
+            if async_method is not None:
+                await async_method(*args, **kwargs)
+            else:
+                await asyncio.to_thread(
+                    getattr(self._backend, name), *args, **kwargs
+                )
+
+    def cancel(self) -> None:
+        """Discard staged and future writes after the shared deadline expires."""
+        with self._lock:
+            self._cancelled = True
+            self._writes.clear()
 
 
 def create_memory_flush_agent(
@@ -242,13 +286,17 @@ async def run_pre_compaction_flush(
         child = create_memory_flush_agent(
             parent_agent, resolved, memory_override=staged_memory
         )
+        async def _flush_and_commit() -> None:
+            await child.astart(_flush_prompt(transcript))
+            await staged_memory.acommit()
+
+        # The provider call and every staged memory write share one deadline.
         await asyncio.wait_for(
-            child.astart(_flush_prompt(transcript)),
-            timeout=resolved.timeout_seconds,
+            _flush_and_commit(), timeout=resolved.timeout_seconds
         )
-        staged_memory.commit()
         return MemoryFlushResult(True, True, "completed", count)
     except asyncio.TimeoutError:
+        staged_memory.cancel()
         logger.warning("Pre-compaction memory flush timed out; continuing compaction")
         return MemoryFlushResult(True, False, "timeout", count)
     except Exception as exc:
@@ -285,6 +333,7 @@ def run_pre_compaction_flush_sync(
                 parent_agent, resolved, memory_override=staged_memory
             )
             child.start(_flush_prompt(transcript))
+            staged_memory.commit()
             outcome["ok"] = True
         except Exception as exc:  # noqa: BLE001 - never propagate to compaction
             outcome["error"] = exc
@@ -296,20 +345,13 @@ def run_pre_compaction_flush_sync(
     )
     worker.start()
     if not done.wait(timeout=resolved.timeout_seconds):
+        staged_memory.cancel()
         logger.warning("Pre-compaction memory flush timed out; continuing compaction")
         return MemoryFlushResult(True, False, "timeout", count)
     if "error" in outcome:
         logger.warning(
             "Pre-compaction memory flush failed; continuing compaction: %s",
             outcome["error"],
-        )
-        return MemoryFlushResult(True, False, "error", count)
-    try:
-        staged_memory.commit()
-    except Exception as exc:
-        logger.warning(
-            "Pre-compaction memory flush commit failed; continuing compaction: %s",
-            exc,
         )
         return MemoryFlushResult(True, False, "error", count)
     return MemoryFlushResult(True, True, "completed", count)

@@ -232,6 +232,47 @@ def test_sync_timeout_discards_late_memory_writes():
     backend.store_long_term.assert_not_called()
 
 
+def test_sync_timeout_includes_staged_memory_commit():
+    import threading
+
+    backend = MagicMock()
+    commit_started = threading.Event()
+    release = threading.Event()
+
+    def _slow_store(_content):
+        commit_started.set()
+        release.wait(1)
+
+    backend.store_long_term.side_effect = _slow_store
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            self.memory.store_long_term("durable fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(backend),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=0.01
+            ),
+        )
+        release.set()
+
+    assert commit_started.wait(1)
+    assert result.reason == "timeout"
+    assert result.completed is False
+
+
 def test_transcript_excludes_system_and_tool_payloads_and_is_bounded():
     transcript = format_messages_to_flush(_messages(), max_tokens=12)
 
@@ -300,6 +341,40 @@ async def test_async_flush_awaits_child_and_completes():
     prompt = child.astart.await_args.args[0]
     assert "NEBULA-7" in prompt
     assert "secret tool payload" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_async_flush_uses_async_memory_commit_with_shared_deadline():
+    backend = SimpleNamespace(
+        store_long_term=MagicMock(),
+        astore_long_term=AsyncMock(return_value="memory-id"),
+    )
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        async def astart(self, _prompt):
+            self.memory.store_long_term("durable fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = await run_pre_compaction_flush(
+            _parent(backend),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=1
+            ),
+        )
+
+    assert result.completed is True
+    backend.astore_long_term.assert_awaited_once_with("durable fact")
+    backend.store_long_term.assert_not_called()
 
 
 @pytest.mark.asyncio
