@@ -736,6 +736,40 @@ class ExecutionPreset(str, Enum):
 
 
 @dataclass
+class PreCompactionMemoryFlushConfig:
+    """Bounded policy for extracting durable memories before compaction.
+
+    The feature is enabled only when this config (or ``True``) is assigned to
+    ``ExecutionConfig.pre_compaction_memory_flush``. The nested config defaults
+    to enabled so ``PreCompactionMemoryFlushConfig(...)`` is ergonomic while
+    the containing execution feature remains default-off.
+    """
+
+    enabled: bool = True
+    timeout_seconds: float = 20.0
+    min_turns_to_flush: int = 2
+    max_flush_tokens: int = 8000
+    llm: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if self.min_turns_to_flush < 1:
+            raise ValueError("min_turns_to_flush must be >= 1")
+        if self.max_flush_tokens < 1:
+            raise ValueError("max_flush_tokens must be >= 1")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "timeout_seconds": self.timeout_seconds,
+            "min_turns_to_flush": self.min_turns_to_flush,
+            "max_flush_tokens": self.max_flush_tokens,
+            "llm": self.llm,
+        }
+
+
+@dataclass
 class ExecutionConfig:
     """
     Configuration for agent execution limits.
@@ -822,6 +856,10 @@ class ExecutionConfig:
     # Or: Agent(execution=ExecutionConfig(context_compaction=my_policy))  # custom policy
     context_compaction: Union[bool, "ContextCompactionPolicy"] = False  # Keep False during deprecation period
 
+    # Optional best-effort memory extraction immediately before compaction.
+    # False preserves existing latency/cost and performs no extra LLM call.
+    pre_compaction_memory_flush: Union[bool, PreCompactionMemoryFlushConfig] = False
+
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
     
@@ -852,6 +890,10 @@ class ExecutionConfig:
             from ..context.policy import ContextCompactionPolicy
             self.context_compaction = ContextCompactionPolicy.from_dict(
                 self.context_compaction
+            )
+        if isinstance(self.pre_compaction_memory_flush, dict):
+            self.pre_compaction_memory_flush = PreCompactionMemoryFlushConfig(
+                **self.pre_compaction_memory_flush
             )
         
         # Emit deprecation warning once per process for default behavior change.
@@ -939,6 +981,11 @@ class ExecutionConfig:
                 if hasattr(self.context_compaction, 'to_dict') 
                 else self.context_compaction
             ),
+            "pre_compaction_memory_flush": (
+                self.pre_compaction_memory_flush.to_dict()
+                if hasattr(self.pre_compaction_memory_flush, "to_dict")
+                else self.pre_compaction_memory_flush
+            ),
             "max_context_tokens": self.max_context_tokens,
             "compaction_strategy": self.compaction_strategy.value if self.compaction_strategy and hasattr(self.compaction_strategy, 'value') else (str(self.compaction_strategy) if self.compaction_strategy else None),
             "max_budget": self.max_budget,
@@ -979,6 +1026,9 @@ class ExecutionConfig:
             code_tools=data.get("code_tools", False),
             code_tools_allow=data.get("code_tools_allow", None),
             context_compaction=context_compaction,
+            pre_compaction_memory_flush=data.get(
+                "pre_compaction_memory_flush", False
+            ),
             max_context_tokens=data.get("max_context_tokens", None),
             compaction_strategy=compaction_strategy,
             max_budget=data.get("max_budget", None),

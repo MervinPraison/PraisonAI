@@ -511,6 +511,27 @@ class ContextCompactor:
 
         return cut_index
 
+    def preview_older_slice(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Return the non-system prefix at the compaction boundary.
+
+        This uses the same recent-message count and tool-call pair snapping as
+        the compaction strategies, allowing pre-compaction consumers to inspect
+        exactly the older conversation region without mutating the transcript.
+        """
+        other_messages = [
+            message
+            for message in messages
+            if not (self.preserve_system and message.get("role") == "system")
+        ]
+        if len(other_messages) <= self.preserve_recent:
+            return []
+        cut = self._snap_to_pair_boundary(
+            other_messages, len(other_messages) - self.preserve_recent
+        )
+        return list(other_messages[:cut])
+
     def _truncate(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Truncate oldest messages."""
         result = []

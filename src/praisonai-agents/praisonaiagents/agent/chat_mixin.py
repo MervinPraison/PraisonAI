@@ -1118,6 +1118,8 @@ Your Goal: {self.goal}"""
             logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
                 raise
+
+        self._run_pre_compaction_memory_flush(messages, compactor)
         
         # Perform compaction
         compacted_msgs, result = compactor.compact(messages)
@@ -1175,6 +1177,38 @@ Your Goal: {self.goal}"""
             )
         except Exception as e:
             logging.debug(f"Failed to persist compaction checkpoint: {e}")
+
+    def _run_pre_compaction_memory_flush(self, messages, compactor):
+        """Run the default-off sync flush at the compactor's older boundary."""
+        try:
+            execution = getattr(self, "execution", None)
+            setting = getattr(execution, "pre_compaction_memory_flush", False)
+            older_slice = compactor.preview_older_slice(messages)
+            from ..compaction.memory_flush import run_pre_compaction_flush_sync
+
+            return run_pre_compaction_flush_sync(self, older_slice, setting)
+        except Exception as exc:
+            logging.warning(
+                "Pre-compaction memory flush failed; continuing compaction: %s",
+                exc,
+            )
+            return None
+
+    async def _arun_pre_compaction_memory_flush(self, messages, compactor):
+        """Await the default-off async flush at the compactor's older boundary."""
+        try:
+            execution = getattr(self, "execution", None)
+            setting = getattr(execution, "pre_compaction_memory_flush", False)
+            older_slice = compactor.preview_older_slice(messages)
+            from ..compaction.memory_flush import run_pre_compaction_flush
+
+            return await run_pre_compaction_flush(self, older_slice, setting)
+        except Exception as exc:
+            logging.warning(
+                "Async pre-compaction memory flush failed; continuing compaction: %s",
+                exc,
+            )
+            return None
 
     def _apply_tool_truncation(self, messages, compactor, policy, log_tag="tool-truncation"):
         """Apply targeted tool output truncation."""
@@ -1277,6 +1311,8 @@ Your Goal: {self.goal}"""
             logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
                 raise
+
+        await self._arun_pre_compaction_memory_flush(messages, compactor)
         
         # Perform compaction
         compacted_msgs, result = compactor.compact(messages)
@@ -4496,6 +4532,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
                     raise
+
+            self._run_pre_compaction_memory_flush(messages, _compactor)
             
             # Perform compaction
             if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
@@ -4581,6 +4619,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
                     raise
+
+            await self._arun_pre_compaction_memory_flush(messages, _compactor)
             
             # Perform compaction (use async version when available)
             if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
