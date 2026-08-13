@@ -29,6 +29,29 @@ if TYPE_CHECKING:
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
 
+    @property
+    def last_durable_run_id(self) -> Optional[str]:
+        """Identifier of the most recently started durable turn, if any."""
+        return getattr(self, "_last_durable_run_id", None)
+
+    def _get_durable_run_context(self):
+        execution = getattr(self, "execution", None)
+        if execution is None or not getattr(execution, "durable", False):
+            return None
+        from .durable import get_durable_run
+
+        return get_durable_run()
+
+    def _durable_sync_tool_executor(self, execute_tool_fn):
+        """Wrap tool execution only while an opt-in durable run is active."""
+        context = self._get_durable_run_context()
+        return context.wrap_sync(execute_tool_fn) if context else execute_tool_fn
+
+    def _durable_async_tool_executor(self, execute_tool_fn):
+        """Async counterpart of :meth:`_durable_sync_tool_executor`."""
+        context = self._get_durable_run_context()
+        return context.wrap_async(execute_tool_fn) if context else execute_tool_fn
+
     def _resolve_max_steps(self, default: int = 10) -> int:
         """Resolve the unified multi-step tool budget shared by both loops.
 
@@ -572,6 +595,10 @@ Your Goal: {self.goal}"""
                     json_instruction = f"\nPlease respond with valid JSON matching this schema: {json.dumps(schema_model)}"
                     messages[-1]["content"] += json_instruction
         
+        durable_context = self._get_durable_run_context()
+        if durable_context is not None:
+            durable_context.restore_messages(messages)
+
         return messages, original_prompt
 
     def _format_tools_for_completion(self, tools=None):
@@ -2072,7 +2099,9 @@ Your Goal: {self.goal}"""
                     max_tokens=getattr(self, 'max_tokens', None),
                     stream=True,  # Try streaming first
                     response_format=response_format,
-                    execute_tool_fn=getattr(self, 'execute_tool', None),
+                    execute_tool_fn=self._durable_sync_tool_executor(
+                        getattr(self, 'execute_tool', None)
+                    ),
                     console=self.console if (self.verbose or True) else None,  # Enable console for streaming
                     display_fn=self._display_generating if self.verbose else None,
                     stream_callback=stream_callback,
@@ -2111,7 +2140,9 @@ Your Goal: {self.goal}"""
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
                 response_format=response_format,
-                execute_tool_fn=getattr(self, 'execute_tool', None),
+                execute_tool_fn=self._durable_sync_tool_executor(
+                    getattr(self, 'execute_tool', None)
+                ),
                 console=self.console if (self.verbose or stream) else None,
                 display_fn=self._display_generating if self.verbose else None,
                 stream_callback=stream_callback,
@@ -2214,7 +2245,9 @@ Your Goal: {self.goal}"""
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
                 response_format=response_format,
-                execute_tool_fn=getattr(self, 'execute_tool_async', None),
+                execute_tool_fn=self._durable_async_tool_executor(
+                    getattr(self, 'execute_tool_async', None)
+                ),
                 console=self.console if (self.verbose or stream) else None,
                 display_fn=self._display_generating if self.verbose else None,
                 stream_callback=stream_callback,
@@ -2597,7 +2630,8 @@ Your Goal: {self.goal}"""
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
-        
+        durable_context = None
+        durable_token = None
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -2605,8 +2639,28 @@ Your Goal: {self.goal}"""
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
 
-            return self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            if getattr(getattr(self, "execution", None), "durable", False):
+                from .durable import begin_durable_run
+
+                durable_context, durable_token = begin_durable_run(
+                    self, prompt if isinstance(prompt, str) else str(prompt)
+                )
+            result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            if durable_context is not None and result is not None:
+                outcome = (
+                    "cancelled"
+                    if getattr(self, "last_stop_reason", None) == "cancelled"
+                    else "succeeded"
+                )
+                durable_context.finalize(outcome)
+                self.execution.resume_run_id = None
+            return result
         finally:
+            if durable_context is not None:
+                from .durable import end_durable_run
+
+                end_durable_run(durable_token)
+                durable_context.close()
             _trace_emitter.agent_end(self.name)
 
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
@@ -2824,6 +2878,11 @@ Your Goal: {self.goal}"""
                         system_prompt=system_prompt_for_llm,
                         tools=tool_param,
                     )
+                    durable_context = self._get_durable_run_context()
+                    if durable_context is not None:
+                        processed_history = durable_context.restore_messages(
+                            list(processed_history)
+                        )
                     
                     # Pass everything to LLM class
                     # Use llm_prompt (which includes multimodal content if attachments present)
@@ -2848,7 +2907,9 @@ Your Goal: {self.goal}"""
                         task_name=task_name,
                         task_description=task_description,
                         task_id=task_id,
-                        execute_tool_fn=self.execute_tool,
+                        execute_tool_fn=self._durable_sync_tool_executor(
+                            self.execute_tool
+                        ),
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         max_tool_calls_per_turn=self._resolve_max_tool_calls(),
                         reasoning_steps=reasoning_steps,
@@ -3233,9 +3294,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
-        
+        durable_context = None
+        durable_token = None
         try:
-            return await self._achat_impl(
+            if getattr(getattr(self, "execution", None), "durable", False):
+                from .durable import begin_durable_run
+
+                durable_context, durable_token = begin_durable_run(
+                    self, prompt if isinstance(prompt, str) else str(prompt)
+                )
+            result = await self._achat_impl(
                 prompt=prompt, temperature=temperature, tools=tools,
                 output_json=output_json, output_pydantic=output_pydantic,
                 reasoning_steps=reasoning_steps, stream=stream,
@@ -3244,7 +3312,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
                 seed=seed, cancel_token=cancel_token
             )
+            if durable_context is not None and result is not None:
+                outcome = (
+                    "cancelled"
+                    if getattr(self, "last_stop_reason", None) == "cancelled"
+                    else "succeeded"
+                )
+                durable_context.finalize(outcome)
+                self.execution.resume_run_id = None
+            return result
         finally:
+            if durable_context is not None:
+                from .durable import end_durable_run
+
+                end_durable_run(durable_token)
+                durable_context.close()
             _trace_emitter.agent_end(self.name)
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
@@ -3381,6 +3463,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Use the modified chat_history after compaction
                     pass
 
+                durable_context = self._get_durable_run_context()
+                if durable_context is not None:
+                    effective_history = durable_context.restore_messages(
+                        list(effective_history)
+                    )
+
                 try:
                     # C1 - per-call seed forwarding (async path)  
                     llm_kwargs = {
@@ -3403,7 +3491,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'task_name': task_name,
                         'task_description': task_description,
                         'task_id': task_id,
-                        'execute_tool_fn': self.execute_tool_async,
+                        'execute_tool_fn': self._durable_async_tool_executor(
+                            self.execute_tool_async
+                        ),
                         'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         'max_tool_calls_per_turn': self._resolve_max_tool_calls(),
                         'reasoning_steps': reasoning_steps,
@@ -4147,7 +4237,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_name=kwargs.get('task_name'),
                         task_description=kwargs.get('task_description'),
                         task_id=kwargs.get('task_id'),
-                        execute_tool_fn=self.execute_tool,
+                        execute_tool_fn=self._durable_sync_tool_executor(
+                            self.execute_tool
+                        ),
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         max_tool_calls_per_turn=self._resolve_max_tool_calls()
                     ):
