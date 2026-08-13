@@ -1484,17 +1484,27 @@ class AgentTeam(SpawnAnnounceProtocol):
             # in the return path would surface the Manager's own generic answer
             # instead of the final delegated task's result.
             self._last_real_task_id = self._last_hierarchical_task_id()
-            async for task_id in process.ahierarchical():
-                if isinstance(task_id, Task):
-                    task_id = self.add_task(task_id)
-                if self.tasks[task_id].async_execution:
-                    await self.arun_task(task_id)
-                else:
-                    # Run sync task in an executor to avoid blocking the event loop
-                    # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
-                    from ..trace.context_events import copy_context_to_callable
-                    loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
+            # Drive the generator manually so the real id assigned to the yielded
+            # synthetic manager_task is sent back via .asend(). A plain `async for`
+            # only calls __anext__() (i.e. asend(None)), leaving manager_task_id
+            # permanently None and defeating the generator's self-delegation guard.
+            gen = process.ahierarchical()
+            try:
+                task_id = await gen.__anext__()
+                while True:
+                    if isinstance(task_id, Task):
+                        task_id = self.add_task(task_id)
+                    if self.tasks[task_id].async_execution:
+                        await self.arun_task(task_id)
+                    else:
+                        # Run sync task in an executor to avoid blocking the event loop
+                        # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
+                        from ..trace.context_events import copy_context_to_callable
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
+                    task_id = await gen.asend(task_id)
+            except StopAsyncIteration:
+                pass
 
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
@@ -1685,10 +1695,20 @@ class AgentTeam(SpawnAnnounceProtocol):
             # synthetic manager_task is injected so the return path doesn't
             # surface the Manager's own generic output.
             self._last_real_task_id = self._last_hierarchical_task_id()
-            for task_id in process.hierarchical():
-                if isinstance(task_id, Task):
-                    task_id = self.add_task(task_id)
-                self.run_task(task_id)
+            # Drive the generator manually so the real id assigned to the yielded
+            # synthetic manager_task is sent back via .send(). A plain `for` only
+            # calls __next__() (i.e. send(None)), leaving manager_task_id
+            # permanently None and defeating the generator's self-delegation guard.
+            gen = process.hierarchical()
+            try:
+                task_id = next(gen)
+                while True:
+                    if isinstance(task_id, Task):
+                        task_id = self.add_task(task_id)
+                    self.run_task(task_id)
+                    task_id = gen.send(task_id)
+            except StopIteration:
+                pass
 
     def get_task_status(self, task_id):
         if task_id in self.tasks:

@@ -504,10 +504,10 @@ class GuardrailConfig:
         
         # With string preset
         Agent(guardrails="strict")  # Uses strict preset
-        
-        # With policy strings
-        Agent(guardrails=["policy:strict", "pii:redact"])
-        
+
+        # For tool policy enforcement, use the dedicated `policy` param instead:
+        Agent(policy=PolicyEngine(...))  # policy strings on guardrails are NOT enforced
+
         # With config
         Agent(guardrails=GuardrailConfig(
             validator=my_validator_fn,
