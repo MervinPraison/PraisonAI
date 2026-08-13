@@ -19,7 +19,7 @@ For long-running or potentially blocking sub-agent work, use the background sub-
 
 ```python
 job = spawn_subagent(..., background=True)
-result = subagent_result(job['job_id'])
+result = subagent_result(job['job_id'], wait=True)
 ```
 
 This avoids blocking the parent turn, but it is not a full HITL resume flow. Background polling does not yet provide durable approval routing or continuation of a paused child.
