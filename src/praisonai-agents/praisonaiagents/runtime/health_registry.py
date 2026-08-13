@@ -20,19 +20,39 @@ class HealthCheckRegistry:
 
     def __init__(self) -> None:
         self._checks: Dict[str, HealthCheckProtocol] = {}
+        self._protected: set = set()
         self._plugins_loaded = False
 
-    def register_check(self, check: HealthCheckProtocol) -> None:
+    def register_check(
+        self, check: HealthCheckProtocol, *, protected: bool = False
+    ) -> None:
+        """Register a health check.
+
+        ``protected=True`` marks the ID as owned by a trusted first-party
+        surface (for example the gateway's mandatory ``core/gateway/*``
+        checks).  A later registration — including a discovered
+        ``praisonai.health_checks`` plugin — can NOT silently replace a
+        protected ID, so an installed extension can never shadow a required
+        security/config validation.
+        """
         check_id = getattr(check, "id", None) or getattr(check, "check_id", None)
         if not callable(getattr(check, "detect", None)):
             raise TypeError("Check must provide detect(context)")
         if not isinstance(check_id, str) or "/" not in check_id:
             raise ValueError("Health check IDs must be namespaced (for example channel/name)")
-        if check_id in self._checks:
+        if check_id in self._protected and not protected:
+            warnings.warn(
+                f"Ignoring health check {check_id!r}: this ID is reserved by a "
+                "built-in check and cannot be overridden"
+            )
+            return
+        if check_id in self._checks and check_id not in self._protected:
             warnings.warn(
                 f"Duplicate health check ID {check_id!r} - replacing existing check"
             )
         self._checks[check_id] = check
+        if protected:
+            self._protected.add(check_id)
 
     def get_checks(self) -> List[HealthCheckProtocol]:
         if not self._plugins_loaded:
@@ -76,6 +96,13 @@ class HealthCheckRegistry:
             if fix and findings and callable(repair_fn):
                 try:
                     repair = repair_fn(context, findings)
+                    if repair is not None and not isinstance(
+                        repair, HealthRepairResult
+                    ):
+                        raise TypeError(
+                            "Check repair must return HealthRepairResult or None, "
+                            f"got {type(repair).__name__}"
+                        )
                     residual = list(check.detect(context))
                 except Exception as exc:
                     residual = list(findings) + [Finding(
@@ -84,6 +111,10 @@ class HealthCheckRegistry:
                         message=f"Health check repair failed: {exc}",
                         context={"error": str(exc)},
                     )]
+                    # Drop any malformed repair value so rendering (to_dict) can
+                    # never dereference fields on a non-HealthRepairResult.
+                    if not isinstance(repair, HealthRepairResult):
+                        repair = None
                     results.append(HealthCheckResult(
                         check_id=check_id,
                         findings=findings,

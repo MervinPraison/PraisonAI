@@ -895,18 +895,40 @@ class _GatewayConfigVersionHealthCheck:
 
 
 def _run_gateway_health_checks(config_path: str, *, fix: bool, dry_run: bool):
-    """Run built-in and third-party checks through one shared lifecycle."""
+    """Run built-in and third-party checks through one shared lifecycle.
+
+    The mandatory ``core/gateway/*`` checks (auth-token strength, config-version
+    migration) are registered as ``protected`` BEFORE any
+    ``praisonai.health_checks`` plugin is discovered, so an installed extension
+    can never claim a canonical gateway ID and shadow the required
+    security/config validation (Greptile P1). ``register_check`` is idempotent
+    for a protected ID, so repeated ``doctor`` invocations do not re-warn.
+    """
+    import warnings
+
     from praisonaiagents.runtime.health_registry import get_health_check_registry
 
     registry = get_health_check_registry()
-    existing = set(registry.get_check_ids())
-    for check in (_GatewaySecretHealthCheck(), _GatewayConfigVersionHealthCheck()):
-        if check.check_id not in existing:
-            registry.register_check(check)
-    return registry.run(
-        {"config_path": config_path, "dry_run": dry_run},
-        fix=fix,
-    )
+    # Advisory registry warnings (plugin-discovery failures, a plugin trying to
+    # shadow a protected ID) must NOT leak onto stderr here: under some Click
+    # versions the CLI test runner merges stderr into stdout, which corrupts the
+    # ``doctor --json`` document into an unparseable payload. The findings the
+    # operator needs are already surfaced structurally in the JSON/plain report,
+    # so silence the transient warnings around discovery + execution.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        # Register the mandatory built-ins as protected FIRST. Plugin discovery
+        # runs lazily inside registry.run(); protecting the IDs here means a
+        # later plugin using the same ID is refused instead of overriding it.
+        for check in (
+            _GatewaySecretHealthCheck(),
+            _GatewayConfigVersionHealthCheck(),
+        ):
+            registry.register_check(check, protected=True)
+        return registry.run(
+            {"config_path": config_path, "dry_run": dry_run},
+            fix=fix,
+        )
 
 
 def _health_result(results, check_id):
