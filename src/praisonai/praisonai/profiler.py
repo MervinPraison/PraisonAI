@@ -1073,6 +1073,7 @@ class ImportProfiler:
     def __init__(self):
         self._imports: List[ImportRecord] = []
         self._active = False
+        self._entry_depth = 0
     
     def __enter__(self):
         import builtins
@@ -1080,12 +1081,14 @@ class ImportProfiler:
 
         with _IMPORT_HOOK_LOCK:
             if self._active:
+                self._entry_depth += 1
                 return self
             if not _IMPORT_HOOK_CONTEXTS:
                 _IMPORT_HOOK_ORIGINAL = builtins.__import__
                 builtins.__import__ = _profiled_import
             _IMPORT_HOOK_CONTEXTS.append(self)
             self._active = True
+            self._entry_depth = 1
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1093,6 +1096,11 @@ class ImportProfiler:
         global _IMPORT_HOOK_ORIGINAL
 
         with _IMPORT_HOOK_LOCK:
+            if not self._active:
+                return False
+            self._entry_depth -= 1
+            if self._entry_depth > 0:
+                return False
             if self in _IMPORT_HOOK_CONTEXTS:
                 _IMPORT_HOOK_CONTEXTS.remove(self)
             self._active = False

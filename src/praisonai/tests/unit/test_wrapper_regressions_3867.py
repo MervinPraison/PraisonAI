@@ -343,10 +343,20 @@ def test_import_profiler_defensive_and_idempotent_paths(monkeypatch):
 
     profiler = ImportProfiler()
     try:
+        original_hook = builtins.__import__
         assert profiler.__enter__() is profiler
         installed_hook = builtins.__import__
         assert profiler.__enter__() is profiler
         assert builtins.__import__ is installed_hook
+        assert profiler in profiler_module._IMPORT_HOOK_CONTEXTS
+        profiler.__exit__(None, None, None)
+        assert profiler._active is True
+        assert builtins.__import__ is installed_hook
+        assert profiler in profiler_module._IMPORT_HOOK_CONTEXTS
+        profiler.__exit__(None, None, None)
+        assert profiler._active is False
+        assert profiler not in profiler_module._IMPORT_HOOK_CONTEXTS
+        assert builtins.__import__ is original_hook
     finally:
         profiler.__exit__(None, None, None)
 
