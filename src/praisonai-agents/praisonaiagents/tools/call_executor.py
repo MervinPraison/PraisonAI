@@ -13,7 +13,6 @@ Design principles:
 
 import asyncio
 import concurrent.futures
-import contextvars
 import inspect
 import logging
 import threading
@@ -21,6 +20,7 @@ import uuid
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Protocol
 from dataclasses import dataclass, field
+from ..errors import ToolExecutionError
 from ..trace.context_events import copy_context_to_callable
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,7 @@ class ToolCall:
     arguments: Dict[str, Any]
     tool_call_id: str
     is_ollama: bool = False
+    iteration_index: Optional[int] = None
 
 
 @dataclass 
@@ -324,19 +325,20 @@ def _run_tool_body(
         # Memoised so the signature probe runs once per callable, not per call.
         supports_progress = _accepts_on_progress(execute_tool_fn)
 
+        call_kwargs = {}
         if supports_progress:
-            raw = execute_tool_fn(
-                tool_call.function_name,
-                tool_call.arguments,
-                tool_call.tool_call_id,
-                on_progress=_emit,
-            )
-        else:
-            raw = execute_tool_fn(
-                tool_call.function_name,
-                tool_call.arguments,
-                tool_call.tool_call_id,
-            )
+            call_kwargs["on_progress"] = _emit
+        if (
+            tool_call.iteration_index is not None
+            and getattr(execute_tool_fn, "_accepts_durable_iteration", False)
+        ):
+            call_kwargs["_durable_iteration_index"] = tool_call.iteration_index
+        raw = execute_tool_fn(
+            tool_call.function_name,
+            tool_call.arguments,
+            tool_call.tool_call_id,
+            **call_kwargs,
+        )
 
         result = _resolve_value(raw)
 
@@ -350,6 +352,8 @@ def _run_tool_body(
             progress=collected,
             deferred=deferred,
         )
+    except ToolExecutionError:
+        raise
     except Exception as e:
         logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
         return ToolResult(

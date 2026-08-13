@@ -11,6 +11,7 @@ from praisonaiagents import ExecutionConfig
 from praisonaiagents.errors import ToolExecutionError
 from praisonaiagents.agent.durable import (
     DurableRunContext,
+    _accepts_idempotency_key,
     begin_durable_run,
 )
 from praisonaiagents.runtime import JournalEvent, RunJournal
@@ -118,6 +119,29 @@ def test_fatal_tool_execution_error_is_recorded_and_terminal():
     assert journal.run_meta("run-1").status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
+
+
+def test_retryable_tool_execution_error_remains_resumable():
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    context = DurableRunContext(journal, "run-1", replaying=False)
+    error = ToolExecutionError("retry later", tool_name="api", is_retryable=True)
+
+    with pytest.raises(ToolExecutionError, match="retry later"):
+        context.wrap_sync(MagicMock(side_effect=error))(
+            "api", {}, tool_call_id="call-1"
+        )
+
+    kinds = [event.kind for event in journal.events("run-1")]
+    assert KIND_TOOL_RESULT not in kinds
+    assert journal.run_meta("run-1").status == "running"
+    assert journal.interrupted_runs() == ["run-1"]
+    journal.close()
+
+
+def test_idempotency_signature_probe_fails_closed():
+    with patch("inspect.signature", side_effect=ValueError("opaque callable")):
+        assert _accepts_idempotency_key(MagicMock()) is False
 
 
 @pytest.mark.asyncio

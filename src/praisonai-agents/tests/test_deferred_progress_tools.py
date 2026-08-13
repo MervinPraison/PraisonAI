@@ -15,7 +15,6 @@ from praisonaiagents.tools.call_executor import (
     ToolCall,
     ToolProgress,
     DeferredToolResult,
-    ToolResult,
     SequentialToolCallExecutor,
     ParallelToolCallExecutor,
     create_tool_call_executor,
@@ -26,10 +25,37 @@ from praisonaiagents.tools.call_executor import (
     register_deferred,
     resolve_deferred,
 )
+from praisonaiagents.errors import ToolExecutionError
 
 
 def _call(name="t", args=None, cid="id-1"):
     return ToolCall(function_name=name, arguments=args or {}, tool_call_id=cid)
+
+
+def test_executor_forwards_durable_iteration_only_to_marked_callback():
+    captured = []
+
+    def execute(name, arguments, tool_call_id, **kwargs):
+        captured.append(kwargs)
+        return "ok"
+
+    execute._accepts_durable_iteration = True
+    call = ToolCall("t", {}, "id-1", iteration_index=7)
+
+    result = SequentialToolCallExecutor().execute_batch([call], execute)[0]
+
+    assert result.result == "ok"
+    assert captured == [{"_durable_iteration_index": 7}]
+
+
+def test_executor_propagates_terminal_tool_error():
+    error = ToolExecutionError("halt", tool_name="t", is_retryable=False)
+
+    def execute(_name, _arguments, _tool_call_id):
+        raise error
+
+    with pytest.raises(ToolExecutionError, match="halt"):
+        SequentialToolCallExecutor().execute_batch([_call()], execute)
 
 
 # --- Protocol surface --------------------------------------------------------

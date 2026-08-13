@@ -50,7 +50,7 @@ def _accepts_idempotency_key(execute_tool_fn: Callable) -> bool:
     try:
         parameters = inspect.signature(execute_tool_fn).parameters.values()
     except (TypeError, ValueError):
-        return True
+        return False
     return any(
         parameter.name == "idempotency_key"
         or parameter.kind == inspect.Parameter.VAR_KEYWORD
@@ -297,9 +297,10 @@ class DurableRunContext:
                     call_kwargs["idempotency_key"] = idempotency_key
                 result = execute_tool_fn(function_name, arguments, **call_kwargs)
             except ToolExecutionError as exc:
-                self._record_terminal_failure(
-                    seq, call_id, exc, iteration_index
-                )
+                if not exc.is_retryable:
+                    self._record_terminal_failure(
+                        seq, call_id, exc, iteration_index
+                    )
                 raise
             except Exception as exc:
                 result = {"error": str(exc)}
@@ -331,13 +332,14 @@ class DurableRunContext:
                 if inspect.isawaitable(result):
                     result = await result
             except ToolExecutionError as exc:
-                await asyncio.to_thread(
-                    self._record_terminal_failure,
-                    seq,
-                    call_id,
-                    exc,
-                    iteration_index,
-                )
+                if not exc.is_retryable:
+                    await asyncio.to_thread(
+                        self._record_terminal_failure,
+                        seq,
+                        call_id,
+                        exc,
+                        iteration_index,
+                    )
                 raise
             except Exception as exc:
                 result = {"error": str(exc)}

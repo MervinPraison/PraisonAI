@@ -2277,6 +2277,8 @@ class OpenAIClient:
                     # No tool calls, we're done
                     break
                     
+            except ToolExecutionError:
+                raise
             except Exception as e:
                 yield f"Error: {str(e)}"
                 break

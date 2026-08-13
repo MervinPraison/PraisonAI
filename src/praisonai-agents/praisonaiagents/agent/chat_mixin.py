@@ -2675,8 +2675,8 @@ Your Goal: {self.goal}"""
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
             return result
-        except ToolExecutionError:
-            if durable_context is not None:
+        except ToolExecutionError as exc:
+            if durable_context is not None and not exc.is_retryable:
                 durable_context.finalize("failed")
                 self.execution.resume_run_id = None
             raise
@@ -3352,8 +3352,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 await durable_context.afinalize(outcome)
                 self.execution.resume_run_id = None
             return result
-        except ToolExecutionError:
-            if durable_context is not None:
+        except ToolExecutionError as exc:
+            if durable_context is not None and not exc.is_retryable:
                 await durable_context.afinalize("failed")
                 self.execution.resume_run_id = None
             raise
@@ -4214,8 +4214,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
-        except ToolExecutionError:
-            if durable_context is not None:
+        except ToolExecutionError as exc:
+            if durable_context is not None and not exc.is_retryable:
                 durable_context.finalize("failed")
                 self.execution.resume_run_id = None
             raise
@@ -4526,13 +4526,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                                         parsed_args = {}
                                     
-                                    tool_result = self._durable_sync_tool_executor(
+                                    executor = self._durable_sync_tool_executor(
                                         self.execute_tool
-                                    )(
+                                    )
+                                    iteration_kwargs = (
+                                        {"_durable_iteration_index": 0}
+                                        if getattr(
+                                            executor,
+                                            "_accepts_durable_iteration",
+                                            False,
+                                        )
+                                        else {}
+                                    )
+                                    tool_result = executor(
                                         tool_call['function']['name'],
                                         parsed_args,
                                         tool_call_id=tool_call.get('id'),
-                                        _durable_iteration_index=0,
+                                        **iteration_kwargs,
                                     )
                                     # Add tool result to chat history (multimodal-aware)
                                     from .tool_execution import build_tool_result_message_pair
