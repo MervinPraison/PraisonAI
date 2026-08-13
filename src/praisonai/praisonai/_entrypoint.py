@@ -42,16 +42,39 @@ def _resolve_run_inputs(framework: str | None) -> tuple[Any, list[dict[str, Any]
     return adapter, _build_config_list()
 
 
+def _merge_cli_config(cli_config: dict | None, extra: dict) -> dict | None:
+    """Merge loose ``run()``/``arun()`` kwargs into the ``cli_config`` escape
+    hatch the CLI already forwards to ``AgentsGenerator``.
+
+    This gives Python callers the same pass-through the CLI uses for advanced
+    options (e.g. ``model``, ``session``) without inventing a parallel option
+    surface. Explicit ``cli_config`` keys win over loose kwargs.
+    """
+    if not extra:
+        return cli_config
+    merged = dict(cli_config or {})
+    for key, value in extra.items():
+        merged.setdefault(key, value)
+    return merged
+
+
 def run(agent_file: str,
         framework: str | None = None,
         *,
         tools: list | None = None,
         agent_yaml: str | None = None,
-        cli_config: dict | None = None) -> str:
-    """One-line Python entry point. Equivalent to `praisonai <agent_file>`."""
+        cli_config: dict | None = None,
+        **kwargs: Any) -> str:
+    """One-line Python entry point. Equivalent to `praisonai <agent_file>`.
+
+    Advanced ``praisonai run`` options (e.g. ``model=``, ``session=``) can be
+    passed as loose keyword arguments; they are forwarded through ``cli_config``
+    to the generator, mirroring the CLI's own pass-through.
+    """
     from .agents_generator import AgentsGenerator
 
     adapter, config_list = _resolve_run_inputs(framework)
+    cli_config = _merge_cli_config(cli_config, kwargs)
 
     # Own the generator's lifecycle so its lazily-allocated tool-timeout
     # executor is released once the single run completes, instead of leaking
@@ -73,8 +96,12 @@ async def arun(agent_file: str,
                *,
                tools: list | None = None,
                agent_yaml: str | None = None,
-               cli_config: dict | None = None) -> str:
-    """Async equivalent of `run()` using native async framework adapters."""
+               cli_config: dict | None = None,
+               **kwargs: Any) -> str:
+    """Async equivalent of `run()` using native async framework adapters.
+
+    Accepts the same loose keyword arguments as :func:`run`.
+    """
     import asyncio
 
     from .agents_generator import AgentsGenerator
@@ -83,6 +110,7 @@ async def arun(agent_file: str,
     # synchronous credential/config-file I/O does not block it. This is the
     # reason arun exists: a FastAPI handler awaiting arun must not stall the loop.
     adapter, config_list = await asyncio.to_thread(_resolve_run_inputs, framework)
+    cli_config = _merge_cli_config(cli_config, kwargs)
 
     # Own the generator's lifecycle so its lazily-allocated tool-timeout
     # executor is released once the single run completes, instead of leaking

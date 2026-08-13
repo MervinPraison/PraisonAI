@@ -78,6 +78,11 @@ class GatewayProvider:
         for key in ["provider", "gateway"]:
             completion_kwargs.pop(key, None)
         
+        # Enforce a default timeout + bounded retries so an unresponsive
+        # gateway cannot pin a request coroutine / worker thread forever.
+        from .registry import _apply_default_timeout
+        _apply_default_timeout(completion_kwargs)
+        
         messages = [{"role": "user", "content": prompt}]
         return litellm, self.model_id, messages, completion_kwargs
     
