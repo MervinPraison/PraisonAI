@@ -1620,6 +1620,26 @@ Write the complete compiled report:"""
                 # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
                 # directly callable — dispatch to their .run() method like the sync path.
                 call_target = func.run if isinstance(func, BaseTool) else func
+                try:
+                    from .durable import get_durable_idempotency_key
+
+                    durable_key = get_durable_idempotency_key()
+                except ImportError:
+                    durable_key = None
+                call_arguments = arguments
+                if durable_key:
+                    try:
+                        parameters = inspect.signature(call_target).parameters.values()
+                    except (TypeError, ValueError):
+                        parameters = ()
+                    if any(
+                        parameter.name == "idempotency_key"
+                        or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                        for parameter in parameters
+                    ):
+                        call_arguments = dict(arguments)
+                        call_arguments["idempotency_key"] = durable_key
+
                 async def _invoke():
                     # Set the tool-progress channel BEFORE dispatch so the sink
                     # propagates into the executor thread via contextvars, mirroring
@@ -1627,13 +1647,13 @@ Write the complete compiled report:"""
                     if inspect.iscoroutinefunction(call_target):
                         logging.debug(f"Executing async function: {function_name}")
                         with tool_progress_channel(_progress_sink):
-                            return await call_target(**arguments)
+                            return await call_target(**call_arguments)
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
                     with tool_progress_channel(_progress_sink):
                         return await loop.run_in_executor(
-                            None, copy_context_to_callable(lambda: call_target(**arguments))
+                            None, copy_context_to_callable(lambda: call_target(**call_arguments))
                         )
 
                 # Apply the per-agent tool timeout (ToolConfig.timeout) so the async

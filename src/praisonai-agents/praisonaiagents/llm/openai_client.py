@@ -17,6 +17,8 @@ from pydantic import BaseModel
 from dataclasses import dataclass
 import inspect
 
+from ..errors import ToolExecutionError
+
 # Graceful "wrap-up" instruction injected when the step budget is nearly
 # exhausted, so the model produces a coherent final answer instead of being
 # hard-cut. Shared by both tool-execution loops for consistent behaviour.
@@ -25,6 +27,12 @@ _MAX_STEPS_WRAPUP_PROMPT = (
     "Stop calling tools now and provide your best final answer, summarising the "
     "work completed so far and clearly noting anything left incomplete."
 )
+
+
+def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
+    if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
+        return {"_durable_iteration_index": index}
+    return {}
 
 # Lazy imports for optional dependencies
 _openai_module = None
@@ -1702,7 +1710,16 @@ class OpenAIClient:
                     # path chat_completion_with_tools_stream).
                     _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
                     try:
-                        tool_result = execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
+                        tool_result = execute_tool_fn(
+                            function_name,
+                            arguments,
+                            tool_call_id=_tool_call_id,
+                            **_durable_iteration_kwargs(
+                                execute_tool_fn, iteration_count
+                            ),
+                        )
+                    except ToolExecutionError:
+                        raise
                     except Exception as tool_error:
                         logging.warning(f"Tool '{function_name}' failed: {tool_error}")
                         tool_result = {"error": str(tool_error)}
@@ -1984,7 +2001,14 @@ class OpenAIClient:
                     _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
                     try:
                         if asyncio.iscoroutinefunction(execute_tool_fn):
-                            tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
+                            tool_result = await execute_tool_fn(
+                                function_name,
+                                arguments,
+                                tool_call_id=_tool_call_id,
+                                **_durable_iteration_kwargs(
+                                    execute_tool_fn, iteration_count
+                                ),
+                            )
                         else:
                             # Run sync function in executor (preserve ContextVars e.g. SessionContext)
                             loop = asyncio.get_running_loop()
@@ -1993,10 +2017,17 @@ class OpenAIClient:
                                 None,
                                 copy_context_to_callable(
                                     lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(
-                                        fn, args, tool_call_id=tcid
+                                        fn,
+                                        args,
+                                        tool_call_id=tcid,
+                                        **_durable_iteration_kwargs(
+                                            execute_tool_fn, iteration_count
+                                        ),
                                     )
                                 ),
                             )
+                    except ToolExecutionError:
+                        raise
                     except Exception as tool_error:
                         logging.warning(f"Tool '{function_name}' failed: {tool_error}")
                         tool_result = {"error": str(tool_error)}
@@ -2202,8 +2233,17 @@ class OpenAIClient:
                         # Execute the tool with error handling (pass tool_call_id for event correlation)
                         _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
                         try:
-                            tool_result = execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
+                            tool_result = execute_tool_fn(
+                                function_name,
+                                arguments,
+                                tool_call_id=_tool_call_id,
+                                **_durable_iteration_kwargs(
+                                    execute_tool_fn, iteration_count
+                                ),
+                            )
                             results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        except ToolExecutionError:
+                            raise
                         except Exception as e:
                             results_str = f"Error executing function: {str(e)}"
                             if verbose:
@@ -2237,6 +2277,8 @@ class OpenAIClient:
                     # No tool calls, we're done
                     break
                     
+            except ToolExecutionError:
+                raise
             except Exception as e:
                 yield f"Error: {str(e)}"
                 break

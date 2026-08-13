@@ -842,6 +842,12 @@ class ExecutionConfig:
     # Default False preserves existing behavior for backward compatibility
     parallel_tool_calls: bool = False
 
+    # Durable tool-loop replay. Default-off keeps the execution hot path free
+    # of journal construction and SQLite writes.
+    durable: bool = False
+    journal_path: Optional[str] = None
+    resume_run_id: Optional[str] = None
+
     def __post_init__(self) -> None:
         """Post-initialization processing with deprecation warnings and validation."""
         # Validate the unified step budget early (before any early returns below).
@@ -943,6 +949,9 @@ class ExecutionConfig:
             "compaction_strategy": self.compaction_strategy.value if self.compaction_strategy and hasattr(self.compaction_strategy, 'value') else (str(self.compaction_strategy) if self.compaction_strategy else None),
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
+            "durable": self.durable,
+            "journal_path": self.journal_path,
+            "resume_run_id": self.resume_run_id,
         }
     
     @classmethod
@@ -983,6 +992,9 @@ class ExecutionConfig:
             compaction_strategy=compaction_strategy,
             max_budget=data.get("max_budget", None),
             parallel_tool_calls=data.get("parallel_tool_calls", False),
+            durable=data.get("durable", False),
+            journal_path=data.get("journal_path", None),
+            resume_run_id=data.get("resume_run_id", None),
         )
 
 
