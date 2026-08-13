@@ -91,10 +91,15 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
     
     # Set defaults for schedule if not provided. ``every`` is accepted as an
     # alias for ``interval`` so the terser scheduler-block form validates too.
+    cron_expr = schedule_section.get('cron')
     schedule_config = {
         'interval': schedule_section.get(
-            'interval', schedule_section.get('every', 'hourly')
+            'interval',
+            schedule_section.get(
+                'every', f"cron:{cron_expr}" if cron_expr else 'hourly'
+            ),
         ),
+        'tz': schedule_section.get('tz', schedule_section.get('timezone')),
         'max_retries': schedule_section.get('max_retries', 3),
         'run_immediately': schedule_section.get('run_immediately', False),
         'timeout': schedule_section.get('timeout'),  # Optional timeout in seconds

@@ -180,7 +180,8 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self,
         schedule_expr: str,
         max_retries: int = 3,
-        run_immediately: bool = False
+        run_immediately: bool = False,
+        timezone: Optional[str] = None,
     ) -> bool:
         """
         Start scheduled agent execution.
@@ -202,7 +203,9 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             # once-only catch-up across downtime); plain intervals are unchanged.
             self._load_persisted_last_run()
             ticker = ScheduleTicker(
-                schedule_expr, last_run_at=getattr(self, "_last_run_at", None)
+                schedule_expr,
+                last_run_at=getattr(self, "_last_run_at", None),
+                timezone=timezone,
             )
             self.is_running = True
             self._start_time = datetime.now()
@@ -590,7 +593,12 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         max_retries = schedule_config.get('max_retries', 3)
         run_immediately = schedule_config.get('run_immediately', False)
         
-        return await self.start(interval, max_retries, run_immediately)
+        return await self.start(
+            interval,
+            max_retries,
+            run_immediately,
+            timezone=schedule_config.get('tz'),
+        )
 
     @classmethod
     def from_recipe(
