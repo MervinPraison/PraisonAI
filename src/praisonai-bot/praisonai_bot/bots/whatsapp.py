@@ -65,6 +65,16 @@ def _jid_bare(jid_str: str) -> str:
     return jid_str.split("@")[0].split(":")[0] if jid_str else ""
 
 
+# WhatsApp JID server domains (exact-match, never substring — see #3886).
+_LID_DOMAIN = "lid"
+_PHONE_DOMAIN = "s.whatsapp.net"
+
+
+def _jid_domain(jid_str: str) -> str:
+    """Return the server domain of a JID (the part after the last ``@``)."""
+    return jid_str.rsplit("@", 1)[-1] if jid_str and "@" in jid_str else ""
+
+
 class WhatsAppIdentityCanonicalizer:
     """Reconcile WhatsApp LID and phone JID forms to one stable identity.
 
@@ -96,22 +106,28 @@ class WhatsAppIdentityCanonicalizer:
         """
         if not sender_jid or not sender_alt_jid:
             return
+        sender_dom = _jid_domain(sender_jid)
+        alt_dom = _jid_domain(sender_alt_jid)
         lid_bare = phone_bare = ""
-        if "@lid" in sender_jid and "@lid" not in sender_alt_jid:
+        # Only learn an exact LID<->phone pairing; reject any other domain
+        # (e.g. group ``@g.us``) so we never store a bogus identity (#3886).
+        if sender_dom == _LID_DOMAIN and alt_dom == _PHONE_DOMAIN:
             lid_bare, phone_bare = _jid_bare(sender_jid), _jid_bare(sender_alt_jid)
-        elif "@lid" in sender_alt_jid and "@lid" not in sender_jid:
+        elif sender_dom == _PHONE_DOMAIN and alt_dom == _LID_DOMAIN:
             lid_bare, phone_bare = _jid_bare(sender_alt_jid), _jid_bare(sender_jid)
         if lid_bare and phone_bare:
             self._lid_to_phone[lid_bare] = phone_bare
 
     def canonicalize(self, platform: str, raw_user_id: str) -> str:
         """Return the phone-form JID for a known LID, else ``raw_user_id``."""
-        if not raw_user_id or "@lid" not in raw_user_id:
+        # Exact-domain match only: a malformed suffix like ``@lid-extra`` must
+        # never be treated as a LID and canonicalized (#3886).
+        if not raw_user_id or _jid_domain(raw_user_id) != _LID_DOMAIN:
             return raw_user_id
         phone_bare = self._lid_to_phone.get(_jid_bare(raw_user_id))
         if not phone_bare:
             return raw_user_id
-        return f"{phone_bare}@s.whatsapp.net"
+        return f"{phone_bare}@{_PHONE_DOMAIN}"
 
 
 class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
@@ -443,10 +459,17 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 # but self-messaging means sender and chat are the same JID.
                 _jid_user = _jid_bare
 
+                # Compare on a canonicalized chat form so an LID-addressed
+                # self-chat (sender canonicalized to phone, Chat still raw LID)
+                # is not mistaken for an outgoing message and dropped (#3886).
+                # chat_jid itself stays raw for reply routing.
+                canonical_chat_jid = self._identity_canonicalizer.canonicalize(
+                    "whatsapp", chat_jid
+                )
                 is_self_chat = (
                     is_from_me
                     and not is_group
-                    and _jid_user(sender_jid) == _jid_user(chat_jid)
+                    and _jid_user(sender_jid) == _jid_user(canonical_chat_jid)
                 )
 
                 if not self._respond_to_all:

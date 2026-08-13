@@ -78,5 +78,31 @@ def test_canonicalize_handles_empty_input():
     assert c.canonicalize("whatsapp", "") == ""
 
 
+def test_learn_rejects_non_phone_alternate_domain():
+    # A group/broadcast alt-JID must never be learned as a phone identity.
+    c = WhatsAppIdentityCanonicalizer()
+    c.learn("999123@lid", "120363000000000000@g.us")
+    assert c.canonicalize("whatsapp", "999123@lid") == "999123@lid"
+
+
+def test_learn_rejects_unknown_alternate_domain():
+    c = WhatsAppIdentityCanonicalizer()
+    c.learn("999123@lid", "15551234567@hostile.example")
+    assert c.canonicalize("whatsapp", "999123@lid") == "999123@lid"
+
+
+def test_canonicalize_ignores_malformed_lid_suffix():
+    # ``@lid-extra`` is a different (malformed) domain and must pass through.
+    c = WhatsAppIdentityCanonicalizer()
+    c.learn("999123@lid", "15551234567@s.whatsapp.net")
+    assert c.canonicalize("whatsapp", "999123@lid-extra") == "999123@lid-extra"
+
+
+def test_learn_rejects_lid_to_lid_pairing():
+    c = WhatsAppIdentityCanonicalizer()
+    c.learn("999123@lid", "888777@lid")
+    assert c.canonicalize("whatsapp", "999123@lid") == "999123@lid"
+
+
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-q"])
