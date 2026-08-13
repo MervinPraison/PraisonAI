@@ -383,6 +383,7 @@ class FileMemory:
                 ):
                     raise TimeoutError("Memory batch was cancelled")
                 tmp_path = None
+                persisted_ids = {item.id for item in items}
                 if memory_type == "short_term":
                     self._short_term = items
                 else:
@@ -395,6 +396,8 @@ class FileMemory:
                     pass
 
         for item in committed_items:
+            if item.id not in persisted_ids:
+                continue
             self._emit_memory_event(
                 "store",
                 memory_type,
