@@ -45,7 +45,7 @@ _UNIT_MULTIPLIER = {
 }
 
 
-def parse_schedule(expr: str) -> Schedule:
+def parse_schedule(expr: str, tz: str | None = None) -> Schedule:
     """Parse a schedule expression string into a ``Schedule`` object.
 
     Raises ``ValueError`` for unrecognised expressions.
@@ -54,25 +54,28 @@ def parse_schedule(expr: str) -> Schedule:
         raise ValueError("Schedule expression cannot be empty")
 
     expr = expr.strip()
+    if tz:
+        from .due import resolve_schedule_timezone
+        resolve_schedule_timezone(tz)
 
     # Keyword shortcuts
     lower = expr.lower()
     if lower in _KEYWORD_MAP:
-        return Schedule(kind="every", every_seconds=_KEYWORD_MAP[lower])
+        return Schedule(kind="every", every_seconds=_KEYWORD_MAP[lower], tz=tz)
 
     # Cron prefix
     if lower.startswith("cron:"):
         cron_expr = expr[5:].strip()
         if not cron_expr:
             raise ValueError("Empty cron expression after 'cron:' prefix")
-        return Schedule(kind="cron", cron_expr=cron_expr)
+        return Schedule(kind="cron", cron_expr=cron_expr, tz=tz)
 
     # At prefix (ISO timestamp)
     if lower.startswith("at:"):
         at_str = expr[3:].strip()
         if not at_str:
             raise ValueError("Empty timestamp after 'at:' prefix")
-        return Schedule(kind="at", at=at_str)
+        return Schedule(kind="at", at=at_str, tz=tz)
 
     # Interval pattern: */30m, */6h, */10s
     m = _INTERVAL_RE.match(expr)
@@ -80,7 +83,7 @@ def parse_schedule(expr: str) -> Schedule:
         value = int(m.group(1))
         unit = m.group(2).lower()
         seconds = value * _UNIT_MULTIPLIER[unit]
-        return Schedule(kind="every", every_seconds=seconds)
+        return Schedule(kind="every", every_seconds=seconds, tz=tz)
 
     # Relative pattern: "in 20 minutes"
     m = _RELATIVE_RE.match(expr)
@@ -89,13 +92,13 @@ def parse_schedule(expr: str) -> Schedule:
         unit = m.group(2).lower()
         delta_seconds = value * _UNIT_MULTIPLIER[unit]
         target = datetime.now(timezone.utc) + timedelta(seconds=delta_seconds)
-        return Schedule(kind="at", at=target.isoformat())
+        return Schedule(kind="at", at=target.isoformat(), tz=tz)
 
     # Raw numeric seconds
     try:
         seconds = int(expr)
         if seconds > 0:
-            return Schedule(kind="every", every_seconds=seconds)
+            return Schedule(kind="every", every_seconds=seconds, tz=tz)
     except ValueError:
         pass
 

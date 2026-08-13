@@ -50,14 +50,24 @@ class ScheduleTicker:
     mirroring core ``ScheduleJob.last_run_at``.
     """
 
-    def __init__(self, schedule_expr: str, last_run_at: Optional[float] = None):
+    def __init__(
+        self,
+        schedule_expr: str,
+        last_run_at: Optional[float] = None,
+        timezone: Optional[str] = None,
+    ):
         self.schedule_expr = schedule_expr.strip()
         self.last_run_at: Optional[float] = last_run_at
+        self.timezone = timezone
         # Anchor for a never-run cron job, mirroring core ``ScheduleJob``'s use
         # of ``created_at``: the schedule is measured from here so a slot that
         # falls between this anchor and "now" is treated as missed → caught up.
         self.created_at: float = time.time()
         self._is_cron = self.schedule_expr.lower().startswith("cron:")
+        if self._is_cron:
+            from praisonaiagents.scheduler.due import resolve_schedule_timezone
+
+            resolve_schedule_timezone(self.timezone)
         # For plain intervals we reuse the existing integer-interval parse so
         # behaviour is byte-for-byte identical to the fixed-interval loop.
         self._interval: Optional[int] = None
@@ -91,7 +101,7 @@ class ScheduleTicker:
         # (mirrors core ``is_due`` using ``last_run_at or created_at``).
         base = self.last_run_at if self.last_run_at is not None else self.created_at
         try:
-            next_run = next_fire_time(self._cron_expr(), base)
+            next_run = next_fire_time(self._cron_expr(), base, self.timezone)
         except ImportError:
             # ``croniter`` engine absent — degrade like the missing-import path.
             _warn_cron_unavailable()
@@ -113,14 +123,13 @@ class ScheduleTicker:
         if now is None:
             now = time.time()
         try:
-            from croniter import croniter  # type: ignore[import-untyped]
+            from praisonaiagents.scheduler.due import next_fire_time
+            next_run = next_fire_time(self._cron_expr(), now, self.timezone)
         except ImportError:
             # Degrade gracefully to the coarse interval rather than busy-loop,
             # but surface a one-time warning so the degrade isn't silent.
             _warn_cron_unavailable()
             return float(ScheduleParser._parse_cron_to_interval(self._cron_expr()))
-        try:
-            next_run = croniter(self._cron_expr(), now).get_next(float)
         except (ValueError, KeyError, TypeError):
             return float(ScheduleParser._parse_cron_to_interval(self._cron_expr()))
         return max(0.0, next_run - now)

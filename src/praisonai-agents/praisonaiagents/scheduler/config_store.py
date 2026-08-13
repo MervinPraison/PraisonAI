@@ -14,7 +14,7 @@ import time
 from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
-from .due import is_due as _is_due
+from .due import is_due as _is_due, resolve_schedule_timezone
 
 logger = get_logger(__name__)
 
@@ -46,6 +46,7 @@ class ConfigYamlScheduleStore:
         # release them. Cross-process leases live in the persisted job
         # (``lease_until`` / ``lease_owner``) which is the source of truth.
         self._held_leases: Dict[str, str] = {}
+        self._default_timezone: Optional[str] = None
         self._load()
         self._load_history()
 
@@ -186,7 +187,7 @@ class ConfigYamlScheduleStore:
                 # An unexpired lease held by another owner blocks the claim.
                 if lease_until > now and lease_owner != owner_id:
                     continue
-                if not _is_due(job, now):
+                if not _is_due(job, now, self._default_timezone):
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
@@ -336,6 +337,15 @@ class ConfigYamlScheduleStore:
             import yaml
             with open(self._path, "r") as f:
                 data = yaml.safe_load(f) or {}
+            self._default_timezone = None
+            scheduler_config = data.get("scheduler", {})
+            if isinstance(scheduler_config, dict):
+                configured_timezone = (
+                    scheduler_config.get("timezone") or scheduler_config.get("tz")
+                )
+                if configured_timezone:
+                    resolve_schedule_timezone(configured_timezone)
+                    self._default_timezone = configured_timezone
             schedules = data.get("schedules", {})
             if isinstance(schedules, dict):
                 for job_id, job_data in schedules.items():
@@ -343,6 +353,8 @@ class ConfigYamlScheduleStore:
                         job_data.setdefault("id", job_id)
                         job = ScheduleJob.from_dict(job_data)
                         self._jobs[job.id] = job
+        except ValueError:
+            raise
         except Exception as e:
             logger.warning("Failed to load schedules from %s: %s", self._path, e)
 

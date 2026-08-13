@@ -9,15 +9,34 @@ definition of "is this job due now?" rather than duplicating it.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
+import os
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def next_fire_time(cron_expr: str, base: float) -> float:
+def resolve_schedule_timezone(tz: str | None = None) -> ZoneInfo:
+    """Resolve an explicit or instance-default IANA timezone.
+
+    ``PRAISONAI_SCHEDULE_TIMEZONE`` supplies the process-wide default; UTC is
+    retained when neither the schedule nor the instance selects a timezone.
+    """
+    name = tz or os.environ.get("PRAISONAI_SCHEDULE_TIMEZONE") or "UTC"
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise ValueError(f"Unknown IANA timezone: {name!r}") from exc
+
+
+def next_fire_time(
+    cron_expr: str,
+    base: float,
+    tz: str | None = None,
+) -> float:
     """Return the next cron fire time (epoch) strictly after ``base``.
 
     Pure helper owning the "compute next fire from a base" step so wrapper
@@ -27,10 +46,15 @@ def next_fire_time(cron_expr: str, base: float) -> float:
     """
     from croniter import croniter  # type: ignore[import-untyped]
 
-    return croniter(cron_expr, base).get_next(float)
+    base_datetime = datetime.fromtimestamp(base, resolve_schedule_timezone(tz))
+    return croniter(cron_expr, base_datetime).get_next(datetime).timestamp()
 
 
-def is_due(job: Any, now: float) -> bool:
+def is_due(
+    job: Any,
+    now: float,
+    default_timezone: str | None = None,
+) -> bool:
     """Return ``True`` if ``job`` is due to run at epoch ``now``.
 
     Supports the three schedule kinds: ``every`` (interval), ``at`` (one-shot
@@ -55,7 +79,11 @@ def is_due(job: Any, now: float) -> bool:
         try:
             target = datetime.fromisoformat(sched.at)
             if target.tzinfo is None:
-                target = target.replace(tzinfo=timezone.utc)
+                target = target.replace(
+                    tzinfo=resolve_schedule_timezone(
+                        sched.tz or default_timezone
+                    )
+                )
             # Evaluate against the caller-supplied ``now`` (not wall-clock) so
             # one-shot jobs are deterministic and consistent with every/cron.
             return now >= target.timestamp()
@@ -76,7 +104,11 @@ def is_due(job: Any, now: float) -> bool:
             return False
         base_time = job.last_run_at or job.created_at
         try:
-            next_run = next_fire_time(sched.cron_expr, base_time)
+            next_run = next_fire_time(
+                sched.cron_expr,
+                base_time,
+                sched.tz or default_timezone,
+            )
         except (ValueError, KeyError, TypeError) as e:
             # A malformed cron expression must not abort the whole tick loop
             # (which iterates all jobs) — treat this job as not-due instead.

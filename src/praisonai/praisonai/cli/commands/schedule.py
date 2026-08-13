@@ -41,6 +41,7 @@ def _run_schedule(args: list) -> int:
 def schedule_add_cmd(
     name: str = typer.Argument(..., help="Schedule name (e.g. 'morning-hello')"),
     schedule: str = typer.Option(..., "--schedule", "-s", help="When to run: 'hourly', 'daily', '*/30m', 'cron:0 9 * * *', 'at:2026-03-01T09:00', 'in 20 minutes'"),
+    tz: str = typer.Option("", "--tz", help="IANA timezone for cron or naive one-shot times (e.g. America/New_York)"),
     message: str = typer.Option("", "--message", "-m", help="Prompt / reminder text"),
     agent: str = typer.Option("", "--agent", "-a", help="Agent ID to execute this job (default: first registered agent)"),
     deliver: str = typer.Option("", "--deliver", "-d", help="Delivery token: 'origin', 'telegram', 'all', or 'platform:chat_id[:thread_id]'"),
@@ -60,6 +61,7 @@ def schedule_add_cmd(
 
     Examples:
         praisonai schedule add "morning-hello" -s "cron:0 9 * * *" -m "say hello"
+        praisonai schedule add "morning-brief" -s "cron:0 8 * * *" --tz America/New_York -m "summarise activity"
         praisonai schedule add "news" -s daily -m "news summary" --deliver telegram
         praisonai schedule add "report" -s hourly -m "status report" --deliver all
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
@@ -91,6 +93,7 @@ def schedule_add_cmd(
         result = _schedule_add(
             name=name,
             schedule=schedule,
+            tz=tz,
             message=message,
             agent_id=agent,
             **delivery_kwargs

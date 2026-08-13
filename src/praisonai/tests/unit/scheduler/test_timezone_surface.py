@@ -1,0 +1,175 @@
+"""Wrapper CLI/YAML timezone wiring."""
+
+from datetime import datetime, timezone
+
+
+def _epoch(year, month, day, hour, minute=0):
+    return datetime(
+        year, month, day, hour, minute, tzinfo=timezone.utc
+    ).timestamp()
+
+
+def test_schedule_ticker_uses_timezone_across_dst():
+    import pytest
+
+    pytest.importorskip("croniter")
+    from praisonai.scheduler.shared import ScheduleTicker
+
+    ticker = ScheduleTicker(
+        "cron:0 8 * * *",
+        last_run_at=_epoch(2026, 3, 7, 13),
+        timezone="America/New_York",
+    )
+
+    assert ticker.is_due(_epoch(2026, 3, 8, 11, 59)) is False
+    assert ticker.is_due(_epoch(2026, 3, 8, 12, 0)) is True
+
+    wait = ticker.seconds_until_next(_epoch(2026, 3, 8, 11, 0))
+    assert wait == 60 * 60
+
+
+def test_schedule_ticker_rejects_invalid_timezone():
+    import pytest
+
+    from praisonai.scheduler.shared import ScheduleTicker
+
+    with pytest.raises(ValueError, match="Mars/Base"):
+        ScheduleTicker("cron:0 8 * * *", timezone="Mars/Base")
+
+
+def test_yaml_cron_and_timezone_are_preserved(tmp_path):
+    from praisonai.scheduler.yaml_loader import (
+        load_agent_yaml_with_schedule,
+        validate_schedule_config,
+    )
+
+    config = tmp_path / "agents.yaml"
+    config.write_text(
+        "agents:\n"
+        "  - name: reporter\n"
+        "    instructions: report\n"
+        "task: send report\n"
+        "schedule:\n"
+        "  cron: '0 8 * * *'\n"
+        "  tz: America/New_York\n",
+        encoding="utf-8",
+    )
+
+    _, schedule = load_agent_yaml_with_schedule(str(config))
+    validate_schedule_config(schedule)
+
+    assert schedule["interval"] == "cron:0 8 * * *"
+    assert schedule["tz"] == "America/New_York"
+
+
+def test_yaml_validator_rejects_empty_cron():
+    import pytest
+
+    from praisonai.scheduler.yaml_loader import validate_schedule_config
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        validate_schedule_config({"interval": "cron:"})
+
+
+def test_yaml_validator_rejects_unknown_interval():
+    import pytest
+
+    from praisonai.scheduler.yaml_loader import validate_schedule_config
+
+    with pytest.raises(ValueError, match="Invalid interval format"):
+        validate_schedule_config({"interval": "sometimes"})
+
+
+def test_sync_yaml_scheduler_forwards_timezone():
+    from praisonai.scheduler.agent_scheduler import AgentScheduler
+
+    scheduler = object.__new__(AgentScheduler)
+    scheduler._yaml_schedule_config = {
+        "interval": "cron:0 8 * * *",
+        "max_retries": 5,
+        "run_immediately": True,
+        "tz": "America/New_York",
+    }
+    captured = {}
+
+    def fake_start(schedule_expr, max_retries, run_immediately, *, timezone=None):
+        captured.update(
+            schedule_expr=schedule_expr,
+            max_retries=max_retries,
+            run_immediately=run_immediately,
+            timezone=timezone,
+        )
+        return True
+
+    scheduler.start = fake_start
+
+    assert scheduler.start_from_yaml_config() is True
+    assert captured == {
+        "schedule_expr": "cron:0 8 * * *",
+        "max_retries": 5,
+        "run_immediately": True,
+        "timezone": "America/New_York",
+    }
+
+
+async def test_async_yaml_scheduler_forwards_timezone():
+    from praisonai.scheduler.async_agent_scheduler import AsyncAgentScheduler
+
+    scheduler = object.__new__(AsyncAgentScheduler)
+    scheduler._yaml_schedule_config = {
+        "interval": "cron:0 8 * * *",
+        "max_retries": 4,
+        "run_immediately": False,
+        "tz": "Asia/Singapore",
+    }
+    captured = {}
+
+    async def fake_start(
+        schedule_expr, max_retries, run_immediately, *, timezone=None
+    ):
+        captured.update(
+            schedule_expr=schedule_expr,
+            max_retries=max_retries,
+            run_immediately=run_immediately,
+            timezone=timezone,
+        )
+        return True
+
+    scheduler.start = fake_start
+
+    assert await scheduler.start_from_yaml_config() is True
+    assert captured == {
+        "schedule_expr": "cron:0 8 * * *",
+        "max_retries": 4,
+        "run_immediately": False,
+        "timezone": "Asia/Singapore",
+    }
+
+
+def test_schedule_add_cli_passes_timezone(monkeypatch):
+    from typer.testing import CliRunner
+
+    import praisonaiagents.tools.schedule_tools as tools
+    from praisonai.cli.commands.schedule import app
+
+    captured = {}
+
+    def fake_add(**kwargs):
+        captured.update(kwargs)
+        return "Schedule added"
+
+    monkeypatch.setattr(tools, "schedule_add", fake_add)
+    result = CliRunner().invoke(
+        app,
+        [
+            "add",
+            "morning-brief",
+            "--schedule",
+            "cron:0 8 * * *",
+            "--tz",
+            "America/New_York",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert captured["tz"] == "America/New_York"

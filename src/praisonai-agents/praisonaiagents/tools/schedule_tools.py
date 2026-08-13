@@ -106,6 +106,7 @@ def schedule_add(
     accept_suggestion: str = "",
     continuable: bool = True,
     principal: str = "",
+    tz: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -139,6 +140,9 @@ def schedule_add(
                     (``SessionContext.unified_user_id``) so a multi-user
                     gateway isolates each user's jobs. Empty ⇒ no identity ⇒
                     global (single-tenant) behaviour, unchanged for CLI.
+        tz: Optional IANA timezone for cron and naive one-shot timestamps
+            (for example ``America/New_York``). If omitted, the instance
+            default ``PRAISONAI_SCHEDULE_TIMEZONE`` is used, then UTC.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -155,7 +159,7 @@ def schedule_add(
         from ..scheduler.parser import parse_schedule
         from ..scheduler.models import ScheduleJob, DeliveryTarget
 
-        sched = parse_schedule(schedule)
+        sched = parse_schedule(schedule, tz=tz or None)
 
         delivery = None
         origin = None
@@ -223,7 +227,8 @@ def schedule_add(
         else:
             delivery_note = ""
         agent_note = f" agent={agent_id}" if agent_id else ""
-        confirmation = f"Schedule '{name}' added (id: {job.id}, {schedule}{agent_note}{delivery_note})."
+        timezone_note = f" tz={tz}" if tz else ""
+        confirmation = f"Schedule '{name}' added (id: {job.id}, {schedule}{timezone_note}{agent_note}{delivery_note})."
 
         # ── Suggestion acceptance integration ─────────────────────
         if accept_suggestion:

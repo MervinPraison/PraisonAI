@@ -91,10 +91,15 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
     
     # Set defaults for schedule if not provided. ``every`` is accepted as an
     # alias for ``interval`` so the terser scheduler-block form validates too.
+    cron_expr = schedule_section.get('cron')
     schedule_config = {
         'interval': schedule_section.get(
-            'interval', schedule_section.get('every', 'hourly')
+            'interval',
+            schedule_section.get(
+                'every', f"cron:{cron_expr}" if cron_expr else 'hourly'
+            ),
         ),
+        'tz': schedule_section.get('tz', schedule_section.get('timezone')),
         'max_retries': schedule_section.get('max_retries', 3),
         'run_immediately': schedule_section.get('run_immediately', False),
         'timeout': schedule_section.get('timeout'),  # Optional timeout in seconds
@@ -195,12 +200,22 @@ def validate_schedule_config(schedule_config: Dict[str, Any]) -> None:
     valid_intervals = ['hourly', 'daily']
     
     if interval not in valid_intervals:
+        if interval.startswith('cron:'):
+            if not interval[len('cron:'):].strip():
+                raise ValueError("Cron expression must not be empty")
         # Check if it's a custom format (*/Nm, */Nh, */Ns, or plain number)
-        if not (interval.startswith('*/') or interval.isdigit()):
+        elif not (interval.startswith('*/') or interval.isdigit()):
             raise ValueError(
                 f"Invalid interval format: {interval}. "
-                f"Use 'hourly', 'daily', '*/30m', '*/6h', or seconds as number"
+                f"Use 'hourly', 'daily', 'cron:0 8 * * *', '*/30m', "
+                f"'*/6h', or seconds as number"
             )
+
+    tz = schedule_config.get('tz')
+    if tz:
+        from praisonaiagents.scheduler.due import resolve_schedule_timezone
+
+        resolve_schedule_timezone(tz)
     
     # Validate max_retries
     max_retries = schedule_config.get('max_retries', 3)
