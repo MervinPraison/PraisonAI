@@ -77,13 +77,35 @@ class TrafilaturaTools:
             except ValueError:
                 # Not an IP address, continue with domain validation
                 pass
-            
+
             # Block common internal domains
             if any(hostname.endswith(domain) for domain in ['.local', '.internal', '.localdomain']):
                 return False
-            
+
             # Block metadata service endpoints
-            return hostname not in ['169.254.169.254', 'metadata.google.internal']
+            if hostname in ['169.254.169.254', 'metadata.google.internal']:
+                return False
+
+            # Resolve the hostname and reject if any address is internal. The
+            # checks above only inspect IP *literals*, so a plain domain (or an
+            # encoded form like a decimal IP or "<internal-ip>.nip.io") still
+            # passes even though it resolves to an internal address. Resolving
+            # here closes that SSRF bypass, mirroring the resolve-and-check
+            # approach already used in praisonaiagents/tools/file_tools.py.
+            import socket
+            default_port = 443 if parsed.scheme == 'https' else 80
+            try:
+                addrinfos = socket.getaddrinfo(hostname, parsed.port or default_port)
+            except socket.gaierror:
+                # Hostname does not resolve; treat it as unsafe.
+                return False
+            for addrinfo in addrinfos:
+                resolved = ipaddress.ip_address(addrinfo[4][0])
+                if (resolved.is_private or resolved.is_reserved
+                        or resolved.is_loopback or resolved.is_link_local):
+                    return False
+
+            return True
             
         except Exception:
             return False
@@ -257,7 +279,17 @@ class TrafilaturaTools:
             "newspaper": None,
             "spider": None
         }
-        
+
+        # Validate the URL once before any fetcher runs so the newspaper and
+        # requests paths below are protected against SSRF, just like the
+        # trafilatura path (which validates inside extract_content).
+        if not self._validate_url(url):
+            error = {"error": f"Invalid or unsafe URL: {url}"}
+            comparison["trafilatura"] = error
+            comparison["newspaper"] = error
+            comparison["spider"] = error
+            return comparison
+
         # Get Trafilatura extraction
         try:
             comparison["trafilatura"] = self.extract_content(url)
