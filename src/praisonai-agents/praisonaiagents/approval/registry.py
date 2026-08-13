@@ -47,6 +47,20 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
     "scrape_page": "medium",
 }
 
+# Internal, namespaced synthetic approval target for the runaway-safety gate.
+# A detected doom/repeat loop routes through the approval pipeline as this
+# target instead of unconditionally blocking. The double-underscore name can
+# never collide with a real agent tool (tool names are identifiers the model
+# emits), so registering it does NOT force approval onto — or block — an
+# ordinary user tool, and it is intentionally kept OUT of
+# ``DEFAULT_DANGEROUS_TOOLS`` so the ``safe``/``read_only`` presets are
+# unaffected. It is registered at ``critical`` risk (see ``__init__``) so the
+# default posture (no explicit allow) still stops, preserving the historical
+# hard-block; an explicit allow (``__doom_loop__``/``doom_loop`` policy,
+# env/YAML auto-approve, or a human continue) lets a legitimate repeat
+# (e.g. polling a build status) proceed.
+DOOM_LOOP_TARGET = "__doom_loop__"
+
 # Permission presets — resolved to deny frozensets at Agent.__init__ time.
 # Usage: Agent(approval="safe") — or set PRAISONAI_TOOL_SAFETY=<preset>
 # which applies as the default when no ``approval=`` kwarg is passed.
@@ -125,6 +139,13 @@ class ApprovalRegistry:
         for tool_name, risk in DEFAULT_DANGEROUS_TOOLS.items():
             self._required_tools.add(tool_name)
             self._risk_levels[tool_name] = risk
+
+        # Register the internal runaway-safety gate at ``critical`` risk so a
+        # detected doom-loop stops by default (backward compatible) while still
+        # routing through the approval pipeline. Kept separate from the public
+        # dangerous-tool set so it can never gate a real user tool.
+        self._required_tools.add(DOOM_LOOP_TARGET)
+        self._risk_levels[DOOM_LOOP_TARGET] = "critical"
 
     # ── Backend management ───────────────────────────────────────────────
 
