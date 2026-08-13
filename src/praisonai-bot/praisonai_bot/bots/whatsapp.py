@@ -60,6 +60,60 @@ GRAPH_API_VERSION = "v21.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 
+def _jid_bare(jid_str: str) -> str:
+    """Extract the bare user part from a JID string (drops server + device)."""
+    return jid_str.split("@")[0].split(":")[0] if jid_str else ""
+
+
+class WhatsAppIdentityCanonicalizer:
+    """Reconcile WhatsApp LID and phone JID forms to one stable identity.
+
+    WhatsApp addresses the *same* person with two interchangeable JID forms —
+    the privacy LID form ``<lid>@lid`` and the phone form
+    ``<phone>@s.whatsapp.net`` — and the web bridge can surface either one for
+    the same person across messages. Keying identity on the raw form splits one
+    user into two principals (Issue #3886), breaking session/memory continuity,
+    the DM allowlist match and pairing.
+
+    This canonicalizes any known LID to its phone form using the bridge's own
+    LID<->phone mapping (learned from whatsmeow's ``SenderAlt`` alternate-JID
+    field). It is deterministic and fail-open: an unknown address is returned
+    unchanged, so behaviour is never worse than today.
+
+    Implements :class:`praisonaiagents.gateway.IdentityCanonicalizerProtocol`.
+    """
+
+    def __init__(self) -> None:
+        # bare LID number -> bare phone number
+        self._lid_to_phone: Dict[str, str] = {}
+
+    def learn(self, sender_jid: str, sender_alt_jid: str) -> None:
+        """Record a LID<->phone mapping from a message's alternate-JID field.
+
+        whatsmeow supplies the alternate address form (the phone JID when the
+        sender arrives as LID, and vice versa) alongside each message. We only
+        need the LID->phone direction to canonicalize toward the phone form.
+        """
+        if not sender_jid or not sender_alt_jid:
+            return
+        lid_bare = phone_bare = ""
+        if "@lid" in sender_jid and "@lid" not in sender_alt_jid:
+            lid_bare, phone_bare = _jid_bare(sender_jid), _jid_bare(sender_alt_jid)
+        elif "@lid" in sender_alt_jid and "@lid" not in sender_jid:
+            lid_bare, phone_bare = _jid_bare(sender_alt_jid), _jid_bare(sender_jid)
+        if lid_bare and phone_bare:
+            self._lid_to_phone[lid_bare] = phone_bare
+
+    def canonicalize(self, platform: str, raw_user_id: str) -> str:
+        """Return the phone-form JID for a known LID, else ``raw_user_id``."""
+        if not raw_user_id or "@lid" not in raw_user_id:
+            return raw_user_id
+        phone_bare = self._lid_to_phone.get(_jid_bare(raw_user_id))
+        if not phone_bare:
+            return raw_user_id
+        return f"{phone_bare}@s.whatsapp.net"
+
+
 class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """WhatsApp bot runtime for PraisonAI agents.
 
@@ -160,6 +214,12 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
         # Web mode adapter (lazy initialized)
         self._web_adapter: Any = None
+
+        # LID<->phone identity reconciliation for the web bridge (Issue #3886).
+        # WhatsApp surfaces the same person as both "<lid>@lid" and
+        # "<phone>@s.whatsapp.net"; canonicalize toward the phone form so
+        # session/memory/pairing and the DM allowlist all key on one identity.
+        self._identity_canonicalizer = WhatsAppIdentityCanonicalizer()
 
         # Audio capabilities — inbound speech-to-text (Issue #2721).
         self._stt_enabled: bool = False
@@ -326,6 +386,21 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 # Extract message source fields
                 msg_source = getattr(info, 'MessageSource', None) or info
                 sender_jid = str(getattr(msg_source, 'Sender', '') or getattr(info, 'sender', ''))
+                # ── Identity canonicalization (Issue #3886) ────────────
+                # WhatsApp delivers the same person as either "<lid>@lid" or
+                # "<phone>@s.whatsapp.net". whatsmeow supplies the alternate
+                # form via SenderAlt; learn the LID<->phone mapping and
+                # reconcile toward the phone form BEFORE the JID is used for
+                # the allowlist, session, memory or pairing keys — otherwise
+                # one user splits into two principals.
+                sender_alt_jid = str(
+                    getattr(msg_source, 'SenderAlt', '')
+                    or getattr(info, 'sender_alt', '')
+                )
+                self._identity_canonicalizer.learn(sender_jid, sender_alt_jid)
+                sender_jid = self._identity_canonicalizer.canonicalize(
+                    "whatsapp", sender_jid
+                )
                 # Keep the original neonize JID protobuf for Chat — this
                 # preserves LID routing info needed by send_message.
                 chat_jid_obj = getattr(msg_source, 'Chat', None) or getattr(info, 'chat', None)
@@ -366,9 +441,7 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 # Determine if this is a true self-chat (user→own number).
                 # IsFromMe is True for ANY message the user sent in any chat,
                 # but self-messaging means sender and chat are the same JID.
-                def _jid_user(jid_str: str) -> str:
-                    """Extract bare user part from a JID string."""
-                    return jid_str.split("@")[0].split(":")[0] if jid_str else ""
+                _jid_user = _jid_bare
 
                 is_self_chat = (
                     is_from_me

@@ -166,6 +166,8 @@ from .protocols import (
     WeakGatewaySecretError,
     is_weak_secret,
     assert_gateway_secret_strong,
+    # Per-platform identity canonicalization (Issue #3886)
+    IdentityCanonicalizerProtocol,
 )
 from .liveness import (
     # Event-loop liveness watchdog (Issue #3385)
@@ -425,6 +427,8 @@ __all__ = [
     "WeakGatewaySecretError",
     "is_weak_secret",
     "assert_gateway_secret_strong",
+    # Per-platform identity canonicalization (Issue #3886)
+    "IdentityCanonicalizerProtocol",
     # Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy",
     "LoopWatchdog",

@@ -2074,6 +2074,54 @@ def assert_gateway_secret_strong(value: Optional[str], *, field: str = "gateway.
 
 
 # ---------------------------------------------------------------------------
+# Per-platform identity canonicalization (Issue #3886)
+#
+# The gateway keys a user's session/memory/pairing/allowlist on the raw
+# platform address it receives on the wire. On some platforms one human is
+# addressed by *two interchangeable forms* — most notably WhatsApp, which now
+# surfaces both a privacy LID (``<lid>@lid``) and a phone JID
+# (``<phone>@s.whatsapp.net``) for the same person. Propagating the raw address
+# straight through splits one user into two principals: divergent session /
+# memory, a broken DM allowlist match, and spurious re-pairing.
+#
+# This is the dependency-free *contract* for reconciling alternate address
+# forms to one stable canonical id, consulted as the first step of identity
+# resolution. The concrete, platform-specific implementation (which needs the
+# bridge's own LID<->phone mapping — platform I/O) lives in the adapter, not in
+# core; core owns only the protocol so any adapter with multiple address forms
+# can plug in uniformly.
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class IdentityCanonicalizerProtocol(Protocol):
+    """Reconcile a raw platform address to one stable canonical id.
+
+    Consulted as the *first* step of identity resolution (before the session /
+    memory / pairing / allowlist keys are derived) so that alternate address
+    forms of the same person — e.g. WhatsApp's ``<lid>@lid`` vs
+    ``<phone>@s.whatsapp.net`` — resolve to a single principal.
+
+    Implementations MUST be deterministic and safe: return ``raw_user_id``
+    unchanged whenever no reconciliation is known, so an adapter that cannot
+    map a given address never corrupts identity (fail-open to today's
+    behaviour). With no canonicalizer registered, resolution is unchanged.
+    """
+
+    def canonicalize(self, platform: str, raw_user_id: str) -> str:
+        """Return the stable canonical id for a raw platform address.
+
+        Args:
+            platform: The platform name (e.g. ``"whatsapp"``).
+            raw_user_id: The raw address as delivered on the wire.
+
+        Returns:
+            The reconciled canonical id, or ``raw_user_id`` unchanged when no
+            reconciliation is known.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Auth, Pairing, and Session Binding Protocols (Issue #1588 Gap 3)
 # ---------------------------------------------------------------------------
 
