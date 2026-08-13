@@ -12,35 +12,37 @@ import pytest
 def test_real_agent_flushes_old_fact_before_compaction(tmp_path, monkeypatch):
     from praisonaiagents import (
         Agent,
+        ContextCompactionPolicy,
         ExecutionConfig,
         MemoryConfig,
         PreCompactionMemoryFlushConfig,
     )
-    from praisonaiagents.compaction import ContextCompactor
-
     monkeypatch.setenv("PRAISONAI_MEMORY_DIR", str(tmp_path))
     agent = Agent(
         name="flush-real-smoke",
         instructions="Be concise.",
         memory=MemoryConfig(backend="file", user_id="flush-real-smoke"),
         execution=ExecutionConfig(
-            context_compaction=True,
+            context_compaction=ContextCompactionPolicy(
+                trigger_at=0.11,
+                target_utilization=0.10,
+                strategy="truncate",
+                preserve_last_n_turns=1,
+            ),
+            max_context_tokens=64,
             pre_compaction_memory_flush=PreCompactionMemoryFlushConfig(
                 timeout_seconds=30,
                 min_turns_to_flush=1,
             ),
         ),
     )
-    messages = [
+    agent.chat_history = [
         {"role": "user", "content": "My project codename is NEBULA-7."},
-        {"role": "assistant", "content": "Understood."},
-        {"role": "user", "content": "A recent turn."},
+        {"role": "assistant", "content": "Filler context. " * 5000},
     ]
 
-    agent._run_pre_compaction_memory_flush(
-        messages, ContextCompactor(preserve_recent=1)
-    )
+    output = agent.start("Reply only with: done")
     hits = agent._memory_instance.search_long_term("NEBULA-7", limit=5)
 
-    print(hits)
+    print(output)
     assert hits

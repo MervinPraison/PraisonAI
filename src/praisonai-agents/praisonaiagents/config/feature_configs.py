@@ -32,6 +32,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
+import math
 from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet
 from enum import Enum
 
@@ -752,8 +753,12 @@ class PreCompactionMemoryFlushConfig:
     llm: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        try:
+            self.timeout_seconds = float(self.timeout_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("timeout_seconds must be finite and positive") from exc
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be finite and positive")
         if self.min_turns_to_flush < 1:
             raise ValueError("min_turns_to_flush must be >= 1")
         if self.max_flush_tokens < 1:

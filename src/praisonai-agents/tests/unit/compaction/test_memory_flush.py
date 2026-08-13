@@ -69,6 +69,18 @@ def test_env_can_force_disable_or_enable(monkeypatch):
     assert resolve_memory_flush_config(False).enabled is True
 
 
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_config_rejects_non_finite_timeout(value):
+    with pytest.raises(ValueError, match="finite and positive"):
+        PreCompactionMemoryFlushConfig(timeout_seconds=value)
+
+
+def test_env_ignores_non_finite_timeout(monkeypatch):
+    monkeypatch.setenv("PRAISONAI_PRE_COMPACTION_FLUSH_TIMEOUT", "inf")
+
+    assert resolve_memory_flush_config(True).timeout_seconds == 20.0
+
+
 def test_preview_older_slice_uses_compactor_boundary():
     compactor = ContextCompactor(preserve_recent=2)
 
@@ -120,6 +132,39 @@ def test_preview_covers_token_budget_removals_not_just_recent_count():
     assert [m["content"] for m in older] == [m["content"] for m in messages[:4]]
 
 
+def test_preview_checks_budget_even_when_recent_count_keeps_every_message():
+    messages = [
+        {"role": "user", "content": "durable fact " * 50},
+        {"role": "assistant", "content": "recent"},
+    ]
+    compactor = ContextCompactor(
+        max_tokens=10,
+        target_tokens=5,
+        preserve_recent=5,
+    )
+
+    assert compactor.preview_older_slice(messages) == [messages[0]]
+
+
+def test_preview_matches_truncate_second_pass_tool_pair_removal():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-1", "type": "function"}],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "result " * 50},
+        {"role": "user", "content": "recent"},
+    ]
+    compactor = ContextCompactor(
+        max_tokens=10,
+        target_tokens=5,
+        preserve_recent=5,
+    )
+
+    assert compactor.preview_older_slice(messages) == messages[:2]
+
+
 def test_sync_flush_worker_is_daemon_and_timeout_is_non_fatal():
     import threading
 
@@ -150,6 +195,41 @@ def test_sync_flush_worker_is_daemon_and_timeout_is_non_fatal():
         (t for t in threading.enumerate() if t.name == "memory-flush"), None
     )
     assert worker is not None and worker.daemon is True
+
+
+def test_sync_timeout_discards_late_memory_writes():
+    backend = MagicMock()
+    release = __import__("threading").Event()
+    finished = __import__("threading").Event()
+
+    class _SlowChild:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            release.wait(1)
+            self.memory.store_long_term("late fact")
+            finished.set()
+
+    def _child(_parent, _config, memory_override=None):
+        return _SlowChild(memory_override)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(backend),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=0.01
+            ),
+        )
+        release.set()
+
+    assert result.reason == "timeout"
+    assert finished.wait(1)
+    backend.store_long_term.assert_not_called()
 
 
 def test_transcript_excludes_system_and_tool_payloads_and_is_bounded():
@@ -224,13 +304,18 @@ async def test_async_flush_awaits_child_and_completes():
 
 @pytest.mark.asyncio
 async def test_async_timeout_is_non_fatal():
-    async def slow_start(_prompt):
-        await asyncio.sleep(0.05)
+    child = SimpleNamespace(astart=AsyncMock(return_value="unused"))
 
-    child = SimpleNamespace(astart=slow_start)
-    with patch(
-        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
-        return_value=child,
+    async def raise_timeout(awaitable, *, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    with (
+        patch(
+            "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+            return_value=child,
+        ),
+        patch("asyncio.wait_for", side_effect=raise_timeout),
     ):
         result = await run_pre_compaction_flush(
             _parent(),

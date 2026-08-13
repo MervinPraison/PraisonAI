@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, replace
 import logging
+import math
 import os
 import threading
 from typing import Any, Dict, List, Optional, Union
@@ -56,7 +57,7 @@ def resolve_memory_flush_config(
     if timeout_value:
         try:
             timeout = float(timeout_value)
-            if timeout > 0:
+            if math.isfinite(timeout) and timeout > 0:
                 config.timeout_seconds = timeout
             else:
                 raise ValueError
@@ -117,8 +118,44 @@ def format_messages_to_flush(
     return transcript[:low].rstrip() + suffix if low else ""
 
 
+class _StagedMemory:
+    """Buffer child-agent memory writes until a flush completes in time."""
+
+    _WRITE_METHODS = {
+        "add_long_term",
+        "add_short_term",
+        "store_long_term",
+        "store_short_term",
+    }
+
+    def __init__(self, backend: Any) -> None:
+        self._backend = backend
+        self._writes: List[tuple[str, tuple[Any, ...], Dict[str, Any]]] = []
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._backend, name)
+        if name not in self._WRITE_METHODS or not callable(attribute):
+            return attribute
+
+        def _stage(*args: Any, **kwargs: Any) -> None:
+            with self._lock:
+                self._writes.append((name, args, kwargs))
+
+        return _stage
+
+    def commit(self) -> None:
+        with self._lock:
+            writes = list(self._writes)
+            self._writes.clear()
+        for name, args, kwargs in writes:
+            getattr(self._backend, name)(*args, **kwargs)
+
+
 def create_memory_flush_agent(
-    parent_agent: Any, config: PreCompactionMemoryFlushConfig
+    parent_agent: Any,
+    config: PreCompactionMemoryFlushConfig,
+    memory_override: Any = None,
 ) -> Any:
     """Create a restricted child agent sharing only the parent's memory store."""
     from ..agent.agent import Agent
@@ -137,7 +174,11 @@ def create_memory_flush_agent(
         ),
         llm=llm,
         tools=[search_memory, store_memory],
-        memory=getattr(parent_agent, "_memory_instance", None),
+        memory=(
+            memory_override
+            if memory_override is not None
+            else getattr(parent_agent, "_memory_instance", None)
+        ),
         execution=ExecutionConfig(context_compaction=False, max_steps=3),
         verbose=False,
         stream=False,
@@ -197,11 +238,15 @@ async def run_pre_compaction_flush(
         return skipped
 
     try:
-        child = create_memory_flush_agent(parent_agent, resolved)
+        staged_memory = _StagedMemory(parent_agent._memory_instance)
+        child = create_memory_flush_agent(
+            parent_agent, resolved, memory_override=staged_memory
+        )
         await asyncio.wait_for(
             child.astart(_flush_prompt(transcript)),
             timeout=resolved.timeout_seconds,
         )
+        staged_memory.commit()
         return MemoryFlushResult(True, True, "completed", count)
     except asyncio.TimeoutError:
         logger.warning("Pre-compaction memory flush timed out; continuing compaction")
@@ -220,11 +265,9 @@ def run_pre_compaction_flush_sync(
 ) -> MemoryFlushResult:
     """Run a bounded sync flush in a worker without blocking past its timeout.
 
-    The worker runs in a *daemon* thread: on timeout the caller stops waiting
-    and lets compaction proceed, and a stuck worker can never delay interpreter
-    shutdown (a non-daemon pool would be joined at exit). Any durable memory the
-    worker writes after the timeout is additive and independent of the compacted
-    transcript, so it cannot corrupt the surviving history.
+    The worker runs in a daemon thread so a stuck provider cannot delay process
+    shutdown. Its memory writes are staged and committed only after successful,
+    in-time completion, so a timed-out worker cannot mutate the parent store.
     """
     resolved, transcript, count, skipped = _prepare_flush(
         parent_agent, messages_to_flush, config
@@ -234,10 +277,13 @@ def run_pre_compaction_flush_sync(
 
     outcome: Dict[str, Any] = {}
     done = threading.Event()
+    staged_memory = _StagedMemory(parent_agent._memory_instance)
 
     def _worker() -> None:
         try:
-            child = create_memory_flush_agent(parent_agent, resolved)
+            child = create_memory_flush_agent(
+                parent_agent, resolved, memory_override=staged_memory
+            )
             child.start(_flush_prompt(transcript))
             outcome["ok"] = True
         except Exception as exc:  # noqa: BLE001 - never propagate to compaction
@@ -256,6 +302,14 @@ def run_pre_compaction_flush_sync(
         logger.warning(
             "Pre-compaction memory flush failed; continuing compaction: %s",
             outcome["error"],
+        )
+        return MemoryFlushResult(True, False, "error", count)
+    try:
+        staged_memory.commit()
+    except Exception as exc:
+        logger.warning(
+            "Pre-compaction memory flush commit failed; continuing compaction: %s",
+            exc,
         )
         return MemoryFlushResult(True, False, "error", count)
     return MemoryFlushResult(True, True, "completed", count)
