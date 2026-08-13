@@ -32,6 +32,7 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
+from ._failure import failure_reply_text
 from ._commands import (
     format_status, 
     format_help, 
@@ -67,7 +68,7 @@ from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
 from ._rate_limit import RateLimiter
 from ._resilience import deliver_with_retry, BackoffPolicy, TELEGRAM_BACKOFF
 from ._dlq import OutboundDLQ
-from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
+from ..gateway.unicode_utils import safe_log_message
 from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
@@ -892,8 +893,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
                 except Exception as e:
                     logger.error(f"Agent error: {safe_log_message(e)}")
-                    user_error = extract_root_cause_from_error(str(e))
-                    await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
+                    await update.message.reply_text(failure_reply_text(e))
                 finally:
                     # Inbound media is cached to temp files for this turn only;
                     # remove them so media-heavy bots don't fill the temp volume.
@@ -985,10 +985,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             command,
                             safe_log_message(e),
                         )
-                        user_error = extract_root_cause_from_error(str(e))
-                        await update.message.reply_text(
-                            f"❌ /{command} failed: {safe_error_message(user_error)}"
-                        )
+                        await update.message.reply_text(failure_reply_text(e))
         
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
@@ -1223,7 +1220,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 await update.message.reply_text(response)
             except Exception as e:  # noqa: BLE001 - surface a friendly message
                 logger.warning("retry failed: %s", e)
-                await update.message.reply_text(f"❌ Retry failed: {e}")
+                await update.message.reply_text(failure_reply_text(e))
 
         async def handle_reasoning(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:

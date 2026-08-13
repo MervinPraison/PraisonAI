@@ -52,6 +52,7 @@ def _is_missing_metadata_scope(err: BaseException) -> bool:
     )
 
 from .media import split_media_from_output, is_audio_file
+from ._failure import failure_reply_text
 from ._commands import (
     format_status, 
     format_help, 
@@ -518,7 +519,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     await say(text=response, thread_ts=event.get("ts"))
                 except Exception as e:  # noqa: BLE001 - surface a friendly message
                     logger.warning("retry failed: %s", e)
-                    await say(text=f"❌ Retry failed: {e}", thread_ts=event.get("ts"))
+                    await say(text=failure_reply_text(e), thread_ts=event.get("ts"))
                 return
             elif text == "/reasoning":
                 user_id = event.get("user", "unknown")
@@ -622,9 +623,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         await self._ack.done(ack_ctx, react_fn=_slack_react, unreact_fn=_slack_unreact)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
-                    error_msg = str(e)
-                    if error_msg:
-                        await say(text=f"Error: {error_msg}", thread_ts=event.get("ts"))
+                    await say(text=failure_reply_text(e), thread_ts=event.get("ts"))
         
         @self._app.event("app_mention")
         async def handle_mention(event, say):
@@ -703,9 +702,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     )
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
-                    error_msg = str(e)
-                    if error_msg:
-                        await say(text=f"Error: {error_msg}", thread_ts=event.get("ts"))
+                    await say(text=failure_reply_text(e), thread_ts=event.get("ts"))
         
         for command, handler in self._command_handlers.items():
             @self._app.command(f"/{command}")

@@ -48,6 +48,7 @@ from praisonaiagents.bots import (
 )
 
 from ._commands import format_status, format_help, handle_stop_command
+from ._failure import failure_reply_text
 from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
@@ -590,7 +591,7 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                                 self.fire_message_sent(chat_jid, send_result["content"])
                     except Exception as e:
                         logger.error(f"Agent chat error: {e}")
-                        await self._web_send(chat_jid, "Sorry, I encountered an error.")
+                        await self._web_send(chat_jid, failure_reply_text(e))
 
             except Exception as e:
                 logger.error(f"Web mode message processing error: {e}")
@@ -935,7 +936,7 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                             await self._ack.done(ack_ctx, react_fn=_wa_react, unreact_fn=_wa_unreact)
             except Exception as e:
                 logger.error(f"Agent chat error: {e}")
-                await self.send_message(sender_id, "Sorry, I encountered an error processing your message.")
+                await self.send_message(sender_id, failure_reply_text(e))
             finally:
                 # Inbound media is cached to temp files for this turn only;
                 # remove them so media-heavy bots don't fill the temp volume.
