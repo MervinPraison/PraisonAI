@@ -14,6 +14,113 @@ app = typer.Typer(
 )
 
 
+def _resolve_gateway_config_path(explicit: Optional[str]) -> Optional[str]:
+    """Resolve one canonical gateway config path across all gateway commands.
+
+    Precedence (mirrors ``bot start`` so ``onboard``/``start``/``doctor`` cannot
+    drift apart, #3880):
+
+    1. An explicit ``--config`` value the operator passed (any non-sentinel).
+    2. ``./bot.yaml`` in the working dir (back-compat for checked-in configs).
+    3. ``~/.praisonai/bot.yaml`` (or ``PRAISONAI_BOT_CONFIG``) — where
+       ``praisonai onboard`` writes.
+    4. ``./gateway.yaml`` — accepted alias for backward compatibility.
+
+    Returns the resolved path, or ``None`` when nothing was passed and no
+    onboarded/legacy config exists (callers turn this into a next-step hint
+    rather than silently starting channel-less).
+    """
+    import os
+
+    if explicit:
+        return explicit
+
+    # Prefer the canonical ``praisonai_code`` resolver when co-installed so the
+    # gateway CLI agrees with ``bot start``/``onboard`` on every override path.
+    try:
+        from praisonai_bot._code_bridge import import_code_module
+
+        resolve_bot_config_path = import_code_module(
+            "praisonai_code.cli._paths"
+        ).resolve_bot_config_path
+        resolved = resolve_bot_config_path("bot.yaml")
+        if resolved and os.path.exists(resolved):
+            return resolved
+    except Exception:  # pragma: no cover — praisonai-code not installed
+        # ``praisonai-code`` is an OPTIONAL dependency of praisonai-bot, so its
+        # absence must NOT hide an onboarded ``~/.praisonai/bot.yaml`` (which is
+        # a plain filesystem convention, not owned by praisonai-code). Fall
+        # through to the inlined home discovery below (#3880, Greptile P1).
+        pass
+
+    # Inlined equivalent of ``resolve_bot_config_path`` so home discovery works
+    # even without praisonai-code: cwd ``./bot.yaml`` → ``PRAISONAI_BOT_CONFIG``
+    # / ``~/.praisonai/bot.yaml``.
+    if os.path.exists("bot.yaml"):
+        return "bot.yaml"
+
+    home_cfg = os.environ.get("PRAISONAI_BOT_CONFIG")
+    if not home_cfg:
+        home = os.environ.get("PRAISONAI_HOME")
+        home_dir = (
+            os.path.expanduser(home) if home
+            else os.path.join(os.path.expanduser("~"), ".praisonai")
+        )
+        home_cfg = os.path.join(home_dir, "bot.yaml")
+    else:
+        home_cfg = os.path.expanduser(home_cfg)
+    if os.path.exists(home_cfg):
+        return home_cfg
+
+    if os.path.exists("gateway.yaml"):
+        return "gateway.yaml"
+
+    return None
+
+
+def _resolve_doctor_config(config: str) -> str:
+    """Resolve the config for doctor/test/status/send/channels (#3880).
+
+    These commands default ``--config`` to the ``"gateway.yaml"`` sentinel. When
+    the operator did not override it, discover the onboarded config the same way
+    ``start`` does (``./bot.yaml`` → ``~/.praisonai/bot.yaml`` → ``gateway.yaml``
+    alias) so they agree with ``onboard``/``start`` instead of looking at a file
+    onboarding never wrote. An explicit ``--config`` always wins; when nothing
+    is discovered the ``"gateway.yaml"`` default is preserved so the existing
+    "config not found" message keeps working.
+    """
+    if config and config != "gateway.yaml":
+        return config
+    resolved = _resolve_gateway_config_path(None)
+    return resolved if resolved else config
+
+
+def _ensure_config_current(config_path: str) -> None:
+    """Validate + forward-migrate a gateway config at start time (#3880).
+
+    ``gateway start`` previously applied an unversioned config without ever
+    running the version check/migration that ``doctor`` does, so an out-of-date
+    config ran silently until the operator happened to run ``doctor``. This
+    runs the SAME canonical check ``doctor`` uses so ``start`` and ``doctor``
+    never disagree: an out-of-date config is migrated forward in place; a config
+    written by a newer build (or with a malformed stamp) refuses to start with
+    an actionable hint rather than being downgraded.
+    """
+    result = _check_config_version(config_path)
+    if result is None:
+        return
+    # A ``str`` means the config is newer than this build / malformed: refuse to
+    # start rather than downgrade it silently.
+    if isinstance(result, str):
+        print(f"config: {result}")
+        raise typer.Exit(78)
+    reasons, from_version, to_version = result
+    applied = _repair_config_version(config_path)
+    for reason in applied:
+        print(f"config: {reason}")
+    print(f"config: migrated config_version {from_version} -> {to_version}")
+
+
 @app.command("start")
 def gateway_start(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
@@ -98,6 +205,13 @@ def gateway_start(
 ):
     """Start the gateway server.
 
+    When ``--config`` is omitted, the onboarded config is auto-discovered
+    (``./bot.yaml`` → ``~/.praisonai/bot.yaml`` → ``gateway.yaml`` alias) so the
+    happy path after ``praisonai onboard`` starts WITH channels instead of a
+    silent channel-less no-op. Its ``config_version`` is validated and migrated
+    forward the same way ``gateway doctor`` does before binding. Pass
+    ``--agents <path>`` for single-agent mode (no channel config).
+
     Examples:
         praisonai gateway start
         praisonai gateway start --config gateway.yaml
@@ -117,6 +231,25 @@ def gateway_start(
             port = int(os.environ.get("GATEWAY_PORT", "8765"))
         except ValueError:
             port = 8765
+
+    # Resolve one canonical gateway config shared with onboard/doctor (#3880).
+    # Without this, no --config silently started WebSocket-only with NO channels
+    # while doctor looked at a different file. Only auto-discover when the
+    # operator did not pass --agents (single-agent mode has no channel config).
+    if config is None and agents is None:
+        config = _resolve_gateway_config_path(None)
+        if config is None:
+            print(
+                "No gateway config found. Run 'praisonai onboard' to create one, "
+                "or pass --config <path> (or --agents <path> for single-agent mode)."
+            )
+            raise typer.Exit(78)
+        print(f"Using gateway config: {config}")
+
+    # Validate + forward-migrate the config version BEFORE binding so start and
+    # doctor never disagree about whether a config is current (#3880).
+    if config and os.path.exists(config):
+        _ensure_config_current(config)
 
     # Pre-flight: validate channel credentials before launch so bad/expired
     # tokens fail fast with a precise per-channel reason instead of entering a
@@ -365,7 +498,12 @@ def gateway_status(
             port = int(os.environ.get("GATEWAY_PORT", "8765"))
         except ValueError:
             port = 8765
-    
+
+    # Discover the same onboarded config start/doctor use so --deep/--probe read
+    # the file onboarding wrote instead of nothing (#3880).
+    if config is None:
+        config = _resolve_gateway_config_path(None)
+
     output = get_output_controller()
     
     # Show daemon status
@@ -936,6 +1074,8 @@ def gateway_doctor(
     import asyncio
     import json
 
+    config = _resolve_doctor_config(config)
+
     gateway_secret_error = _check_gateway_secret_strength(config)
 
     fix_report = None
@@ -1147,6 +1287,8 @@ def gateway_test(
     import asyncio
     import json
 
+    config = _resolve_doctor_config(config)
+
     gateway_secret_error = _check_gateway_secret_strength(config)
     channels = _load_channels(config)
     payload: dict = {}
@@ -1331,6 +1473,8 @@ def gateway_channels(
             for platform in platforms:
                 print(f"  - {platform}")
         raise typer.Exit(0)
+
+    config = _resolve_doctor_config(config)
 
     if not os.path.exists(config):
         print(f"Error: Config file not found: {config}")
@@ -1728,6 +1872,8 @@ def gateway_send(
     import os
     import asyncio
     import yaml
+
+    config = _resolve_doctor_config(config)
 
     if not os.path.exists(config):
         print(f"Error: Config file not found: {config}")
