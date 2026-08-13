@@ -3175,6 +3175,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # sync chat() path). Without this the configured backend is silently
         # ignored on the async path and execution falls through to direct-LLM.
         if hasattr(self, 'backend') and self.backend is not None:
+            # Honour configured throttling and cooperative cancellation before
+            # handing off to the managed backend, so backend requests obey the
+            # same request limits and cancel token as direct-LLM calls instead
+            # of bypassing both guards.
+            if self._rate_limiter is not None:
+                await self._rate_limiter.acquire_async()
+            _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+            if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+                reason = getattr(_cancel, "reason", None) or "cancelled before backend call"
+                raise InterruptedError(f"Agent chat cancelled: {reason}")
             delegation_kwargs = {
                 'temperature': temperature,
                 'tools': tools,

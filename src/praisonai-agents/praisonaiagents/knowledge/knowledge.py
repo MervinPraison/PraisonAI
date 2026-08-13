@@ -690,11 +690,15 @@ class Knowledge:
                 # Remove the previous version's chunks before re-adding a changed
                 # file, otherwise the vector store grows unbounded and stale,
                 # now-incorrect chunks stay retrievable alongside current content.
+                # IDs whose deletion fails are carried forward so the next
+                # re-index retries their cleanup instead of orphaning them.
+                undeleted_ids = []
                 if incremental:
                     for old_id in tracker.get_memory_ids(filepath):
                         try:
                             self.delete(old_id)
                         except Exception as e:
+                            undeleted_ids.append(old_id)
                             logger.warning(f"Failed to delete stale chunk {old_id} for {filepath}: {e}")
 
                 # Index the file
@@ -717,9 +721,11 @@ class Knowledge:
                         elif isinstance(entry, str):
                             new_memory_ids.append(entry)
                 
-                # Mark as indexed (with memory IDs for future stale-chunk cleanup)
+                # Mark as indexed (with memory IDs for future stale-chunk
+                # cleanup). Any old IDs that failed to delete are retained so the
+                # next re-index retries them rather than leaving orphaned chunks.
                 file_info = tracker.get_file_info(filepath)
-                tracker.mark_indexed(filepath, file_info, memory_ids=new_memory_ids)
+                tracker.mark_indexed(filepath, file_info, memory_ids=undeleted_ids + new_memory_ids)
                 
                 result.files_indexed += 1
                 

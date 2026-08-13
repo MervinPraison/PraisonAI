@@ -1319,10 +1319,12 @@ Write the complete compiled report:"""
         # that repeatedly calls the same tool with the same args gets no
         # stuck-loop detection, while the identical sync agent would be caught.
         # Zero overhead when the detector is disabled.
+        _ld_enabled = False
         if hasattr(self, '_ensure_loop_detector'):
             from . import loop_detection as _loop_detection
             _ld_history, _ld_config = self._ensure_loop_detector()
             if _ld_config.enabled:
+                _ld_enabled = True
                 _loop_detection.record_tool_call(
                     _ld_history, function_name, arguments, _ld_config
                 )
@@ -1341,6 +1343,19 @@ Write the complete compiled report:"""
                             f"[System: repeated {_verdict.get('detector')} detected. "
                             f"Try a different approach. {_verdict.get('message', '')}]"
                         )
+
+        def _record_async_loop_outcome(_result):
+            # Back-fill the result hash so the result-aware detector can tell a
+            # genuine stall (identical output) from legitimate polling (changing
+            # output) on the async path too. Without this, records keep
+            # result_hash=None and no-progress detection never accumulates a
+            # streak, so async poll-loops go undetected. Mirrors the sync
+            # back-fill in tool_execution.py.
+            if _ld_enabled:
+                _loop_detection.record_tool_outcome(
+                    _ld_history, function_name, arguments, _result, _ld_config
+                )
+            return _result
 
         # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,
         # mirroring the sync execute_tool path in tool_execution.py. Without
@@ -1396,10 +1411,12 @@ Write the complete compiled report:"""
                         result = f"{result}\n\n{extra_context}"
                     elif isinstance(result, dict):
                         result.setdefault("_additional_context", extra_context)
-            return result
+            return _record_async_loop_outcome(result)
 
-        return await self._execute_tool_async_dispatch(
-            function_name, arguments, tool_call_id, tools_override
+        return _record_async_loop_outcome(
+            await self._execute_tool_async_dispatch(
+                function_name, arguments, tool_call_id, tools_override
+            )
         )
 
     async def _execute_tool_async_dispatch(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
