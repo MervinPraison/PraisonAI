@@ -6,7 +6,7 @@ operations. Follows protocol-driven design with zero overhead when not used.
 """
 
 import threading
-from typing import Optional, Protocol
+from typing import Optional, Protocol, Set
 from dataclasses import dataclass, field
 
 __all__ = ["InterruptControllerProtocol", "InterruptController"]
@@ -57,6 +57,10 @@ class InterruptController:
     
     _flag: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     _reason: Optional[str] = field(default=None, init=False)
+    _active_turns: Set[int] = field(default_factory=set, init=False, repr=False)
+    _cancelled_turns: Set[int] = field(default_factory=set, init=False, repr=False)
+    _next_turn_id: int = field(default=0, init=False, repr=False)
+    _pending_turn_cancel: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def request(self, reason: str = "user") -> None:
@@ -69,12 +73,40 @@ class InterruptController:
             if not self._flag.is_set():
                 self._reason = reason
                 self._flag.set()
+            if self._active_turns:
+                self._cancelled_turns.update(self._active_turns)
+            else:
+                self._pending_turn_cancel = True
+
+    def _begin_turn(self) -> int:
+        """Register an Agent turn and consume any request made while idle."""
+        with self._lock:
+            self._next_turn_id += 1
+            turn_id = self._next_turn_id
+            self._active_turns.add(turn_id)
+            if self._pending_turn_cancel:
+                self._cancelled_turns.add(turn_id)
+                self._pending_turn_cancel = False
+            return turn_id
+
+    def _turn_is_cancelled(self, turn_id: int) -> bool:
+        """Return whether a registered turn was targeted by a request."""
+        with self._lock:
+            return turn_id in self._cancelled_turns
+
+    def _end_turn(self, turn_id: int) -> None:
+        """Unregister a turn so its request cannot affect a future turn."""
+        with self._lock:
+            self._active_turns.discard(turn_id)
+            self._cancelled_turns.discard(turn_id)
 
     def clear(self) -> None:
         """Clear the cancellation request."""
         with self._lock:
             self._reason = None
             self._flag.clear()
+            self._pending_turn_cancel = False
+            self._cancelled_turns.clear()
 
     def is_set(self) -> bool:
         """Check if cancellation has been requested.

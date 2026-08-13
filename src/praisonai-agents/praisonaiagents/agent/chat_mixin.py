@@ -27,6 +27,49 @@ if TYPE_CHECKING:
     pass
 
 
+class _TurnCancelToken:
+    """Track cancellation observed by one call without shared backend state."""
+
+    def __init__(
+        self,
+        source: Any,
+        *,
+        turn_id: Optional[int] = None,
+    ):
+        self._source = source
+        self._observed = False
+        self._turn_id = turn_id
+
+    def is_set(self) -> bool:
+        turn_checker = getattr(self._source, "_turn_is_cancelled", None)
+        if self._turn_id is not None and callable(turn_checker):
+            is_set = bool(turn_checker(self._turn_id))
+        else:
+            is_set = bool(getattr(self._source, "is_set", lambda: False)())
+        self._observed = self._observed or is_set
+        return is_set
+
+    @property
+    def reason(self):
+        return getattr(self._source, "reason", None)
+
+    def check(self) -> None:
+        if self.is_set():
+            raise InterruptedError(f"Operation cancelled: {self.reason or 'unknown'}")
+
+    def was_cancelled(self) -> bool:
+        return self._observed or self.is_set()
+
+    def close(self) -> None:
+        end_turn = getattr(self._source, "_end_turn", None)
+        if self._turn_id is not None and callable(end_turn):
+            end_turn(self._turn_id)
+            self._turn_id = None
+
+    def __getattr__(self, name: str):
+        return getattr(self._source, name)
+
+
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
 
@@ -42,6 +85,15 @@ class ChatMixin:
         from .durable import get_durable_run
 
         return get_durable_run()
+
+    def _turn_cancel_token(self, source: Any, *, explicit: bool):
+        """Create per-turn cancellation state while consuming default requests once."""
+        if source is None:
+            return None
+        begin_turn = getattr(source, "_begin_turn", None)
+        if explicit or not callable(begin_turn):
+            return _TurnCancelToken(source)
+        return _TurnCancelToken(source, turn_id=begin_turn())
 
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
@@ -2690,7 +2742,10 @@ Your Goal: {self.goal}"""
         durable_token = None
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
-            _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+            cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+            _cancel = self._turn_cancel_token(
+                cancel_source, explicit=cancel_token is not None
+            )
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -2705,8 +2760,8 @@ Your Goal: {self.goal}"""
             if durable_context is not None:
                 outcome = (
                     "cancelled"
-                    if getattr(self, "last_stop_reason", None) == "cancelled"
-                    else "succeeded"
+                    if _cancel is not None and _cancel.was_cancelled()
+                    else ("failed" if result is None else "succeeded")
                 )
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
@@ -2727,7 +2782,11 @@ Your Goal: {self.goal}"""
 
                 end_durable_run(durable_token)
                 durable_context.close()
-            _trace_emitter.agent_end(self.name)
+            try:
+                _trace_emitter.agent_end(self.name)
+            finally:
+                if _cancel is not None:
+                    _cancel.close()
 
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal chat implementation (extracted for trace wrapping)."""
@@ -3359,6 +3418,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+        _cancel = self._turn_cancel_token(
+            cancel_source, explicit=cancel_token is not None
+        )
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import abegin_durable_run
@@ -3373,13 +3436,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 task_name=task_name, task_description=task_description, task_id=task_id,
                 config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
                 attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
-                seed=seed, cancel_token=cancel_token
+                seed=seed, cancel_token=_cancel
             )
             if durable_context is not None:
                 outcome = (
                     "cancelled"
-                    if getattr(self, "last_stop_reason", None) == "cancelled"
-                    else "succeeded"
+                    if _cancel is not None and _cancel.was_cancelled()
+                    else ("failed" if result is None else "succeeded")
                 )
                 await durable_context.afinalize(outcome)
                 self.execution.resume_run_id = None
@@ -3400,7 +3463,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 end_durable_run(durable_token)
                 await durable_context.aclose()
-            _trace_emitter.agent_end(self.name)
+            try:
+                _trace_emitter.agent_end(self.name)
+            finally:
+                if _cancel is not None:
+                    _cancel.close()
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
@@ -4245,12 +4312,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 durable_context, durable_token = begin_durable_run(self, prompt)
             yield from self._start_stream_impl(prompt, **kwargs)
             if durable_context is not None:
-                outcome = (
-                    "cancelled"
-                    if getattr(self, "last_stop_reason", None) == "cancelled"
-                    else "succeeded"
-                )
-                durable_context.finalize(outcome)
+                durable_context.finalize("succeeded")
                 self.execution.resume_run_id = None
         except ToolExecutionError as exc:
             if durable_context is not None and not exc.is_retryable:
