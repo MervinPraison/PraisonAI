@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 
 def _epoch(year, month, day, hour, minute=0):
     return datetime(
@@ -10,6 +12,10 @@ def _epoch(year, month, day, hour, minute=0):
 
 
 def test_schedule_ticker_uses_timezone_across_dst():
+    # Wall-clock cron timing needs the optional ``croniter`` engine; without it
+    # the ticker degrades to a coarse interval (is_due → False), so guard this
+    # DST assertion on the engine being installed rather than the wiring path.
+    pytest.importorskip("croniter")
     from praisonai.scheduler.shared import ScheduleTicker
 
     ticker = ScheduleTicker(
