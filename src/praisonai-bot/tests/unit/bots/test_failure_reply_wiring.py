@@ -23,7 +23,7 @@ def test_failure_reply_uses_core_taxonomy_and_hides_raw_exception():
 def test_terminal_agent_paths_use_the_canonical_renderer():
     bots_dir = Path(__file__).parents[3] / "praisonai_bot" / "bots"
     expected_calls = {
-        "telegram.py": 2,
+        "telegram.py": 3,
         "discord.py": 3,
         "slack.py": 3,
         "whatsapp.py": 2,

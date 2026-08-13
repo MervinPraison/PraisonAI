@@ -68,7 +68,7 @@ from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
 from ._rate_limit import RateLimiter
 from ._resilience import deliver_with_retry, BackoffPolicy, TELEGRAM_BACKOFF
 from ._dlq import OutboundDLQ
-from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
+from ..gateway.unicode_utils import safe_log_message
 from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
@@ -985,10 +985,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             command,
                             safe_log_message(e),
                         )
-                        user_error = extract_root_cause_from_error(str(e))
-                        await update.message.reply_text(
-                            f"❌ /{command} failed: {safe_error_message(user_error)}"
-                        )
+                        await update.message.reply_text(failure_reply_text(e))
         
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
