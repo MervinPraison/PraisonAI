@@ -18,19 +18,19 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 50 | 15629 |
+| ✅ Agent | 22 | 50 | 15804 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 684 |
-| ✅ Approval | 1 | 5 | 2500 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
+| ✅ Approval | 1 | 5 | 2537 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 10 | 3005 |
-| ✅ Autonomy | 3 | 7 | 2736 |
-| ✅ Bots | 7 | 31 | 13274 |
+| ✅ Auto Generation | 5 | 10 | 3049 |
+| ✅ Autonomy | 3 | 7 | 2744 |
+| ✅ Bots | 7 | 31 | 13314 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35729 |
+| ✅ CLI | 5 | 121 | 35960 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4549 |
+| ✅ Code Execution | 2 | 14 | 4583 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3047 |
 | ✅ Context Management | 16 | 34 | 13388 |
@@ -43,39 +43,39 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2273 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 67 | 24887 |
-| ✅ Guardrails | 4 | 4 | 1833 |
+| ✅ Gateway | 7 | 69 | 25485 |
+| ✅ Guardrails | 4 | 4 | 1950 |
 | ✅ Handoffs | 11 | 6 | 2563 |
-| ✅ Hooks | 2 | 9 | 4281 |
+| ✅ Hooks | 2 | 9 | 4309 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 13 | 4233 |
-| ✅ LLM | 3 | 14 | 5015 |
+| ✅ Knowledge | 4 | 13 | 4245 |
+| ✅ LLM | 3 | 15 | 5140 |
 | ✅ Loops | 4 | 5 | 1422 |
-| ✅ MCP | 1 | 60 | 13728 |
-| ✅ Memory | 6 | 17 | 6766 |
+| ✅ MCP | 1 | 60 | 13732 |
+| ✅ Memory | 6 | 17 | 6797 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1158 |
+| ✅ Output | 3 | 5 | 1201 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1549 |
-| ✅ Plugins | 8 | 4 | 2703 |
+| ✅ Plugins | 8 | 4 | 2850 |
 | ✅ Prompts | 2 | 9 | 1965 |
-| ✅ Providers | 1 | 56 | 7723 |
+| ✅ Providers | 1 | 56 | 7735 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 680 |
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 6 | 2806 |
-| ✅ Security | 1 | 3 | 3135 |
+| ✅ Sandbox | 5 | 6 | 2918 |
+| ✅ Security | 1 | 3 | 3206 |
 | ✅ Sessions | 4 | 17 | 6960 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 138 | 40224 |
+| ✅ Tools | 12 | 141 | 41237 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1207 |
 | ✅ Video | 2 | 6 | 649 |

@@ -18,8 +18,8 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
-| ✅ AI SDK | 38 | 8 | 1112 |
-| ✅ Agent | 66 | 7 | 2084 |
+| ✅ AI SDK | 38 | 8 | 1121 |
+| ✅ Agent | 66 | 7 | 2103 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 9 | 1 | 165 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -54,18 +54,18 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Knowledge | 3 | 2 | 312 |
 | ✅ LLM | 6 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 180 |
-| ✅ MCP | 17 | 4 | 828 |
+| ✅ MCP | 17 | 4 | 870 |
 | ✅ Memory | 17 | 4 | 779 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 2 | 1 | 162 |
 | ✅ Observability | 6 | 28 | 2277 |
 | ✅ Optimizer | 1 | 1 | 162 |
-| ✅ Output | 3 | 1 | 153 |
+| ✅ Output | 3 | 1 | 220 |
 | ✅ Parallel Execution | 3 | 2 | 256 |
 | ✅ Planning | 11 | 2 | 525 |
 | ✅ Plugins | 9 | 2 | 710 |
 | ✅ Prompts | 4 | 2 | 262 |
-| ✅ Providers | 24 | 116 | 8067 |
+| ✅ Providers | 24 | 116 | 8071 |
 | ✅ PubSub | 1 | 1 | 149 |
 | ✅ Query | 3 | 2 | 246 |
 | ✅ RAG | 6 | 2 | 386 |
@@ -84,7 +84,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 34 | 15 | 3200 |
+| ✅ Tools | 34 | 15 | 3218 |
 | ✅ Tracing | 8 | 3 | 477 |
 | ✅ Vector Store | 6 | 2 | 530 |
 | ✅ Video | 2 | 1 | 150 |
