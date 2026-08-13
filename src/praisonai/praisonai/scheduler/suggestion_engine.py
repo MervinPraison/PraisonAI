@@ -64,6 +64,7 @@ class SuggestionEngine:
         deliver: str = "",
         reason: str = "",
         ttl_seconds: float = DEFAULT_TTL_SEC,
+        principal: Optional[str] = None,
     ) -> Optional[str]:
         """Propose a blueprint-based automation to the user.
 
@@ -78,6 +79,11 @@ class SuggestionEngine:
             reason: Human-readable explanation of why this is proposed.
             ttl_seconds: How long before the suggestion auto-expires
                 (default: 3 days).  Use ``0`` for no expiry.
+            principal: Resolved canonical identity of the owning end-user
+                on a multi-user gateway. Stamped on the suggestion so
+                :meth:`pending`/:meth:`accept`/:meth:`dismiss` isolate it
+                per user. ``None`` (the default) keeps the global,
+                single-tenant pool used by CLI / single-user deployments.
 
         Returns:
             The suggestion ID if the proposal was accepted by the store,
@@ -91,6 +97,7 @@ class SuggestionEngine:
             reason=reason,
             created_at=time.time(),
             expires_at=(time.time() + ttl_seconds) if ttl_seconds > 0 else 0.0,
+            principal=principal,
         )
         ok = self._store.add(sug)
         if ok:
@@ -101,22 +108,42 @@ class SuggestionEngine:
         )
         return None
 
-    def pending(self) -> List[Suggestion]:
-        """Return the list of pending (undismissed, unaccepted) suggestions."""
-        return self._store.list_pending()
+    def pending(self, principal: Optional[str] = None) -> List[Suggestion]:
+        """Return the list of pending (undismissed, unaccepted) suggestions.
 
-    def accept(self, suggestion_id: str) -> bool:
+        Args:
+            principal: When given, only suggestions owned by this resolved
+                identity are returned (multi-user gateway isolation).
+                ``None`` returns the global pool (single-tenant behaviour).
+        """
+        return self._store.list_pending(principal)
+
+    def accept(self, suggestion_id: str, principal: Optional[str] = None) -> bool:
         """Mark a suggestion as accepted.
+
+        Args:
+            suggestion_id: The suggestion to accept.
+            principal: When given, the accept is refused unless the
+                suggestion is owned by this identity, preventing one
+                gateway user from accepting another's. ``None`` skips the
+                ownership check (single-tenant behaviour).
 
         Note:
             This only updates the suggestion's status.  The caller is
             responsible for materializing the corresponding schedule job.
         """
-        return self._store.accept(suggestion_id)
+        return self._store.accept(suggestion_id, principal)
 
-    def dismiss(self, suggestion_id: str) -> bool:
-        """Mark a suggestion as dismissed (user declined)."""
-        return self._store.dismiss(suggestion_id)
+    def dismiss(self, suggestion_id: str, principal: Optional[str] = None) -> bool:
+        """Mark a suggestion as dismissed (user declined).
+
+        Args:
+            suggestion_id: The suggestion to dismiss.
+            principal: When given, the dismiss is refused unless the
+                suggestion is owned by this identity. ``None`` skips the
+                ownership check (single-tenant behaviour).
+        """
+        return self._store.dismiss(suggestion_id, principal)
 
     def get_suggestion(self, suggestion_id: str) -> Optional[Suggestion]:
         """Return a single suggestion by ID, or ``None``."""
