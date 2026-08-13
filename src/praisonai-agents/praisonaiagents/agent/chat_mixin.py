@@ -2704,13 +2704,9 @@ Your Goal: {self.goal}"""
             result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
             if durable_context is not None:
                 outcome = (
-                    "failed"
-                    if result is None
-                    else (
-                        "cancelled"
-                        if getattr(self, "last_stop_reason", None) == "cancelled"
-                        else "succeeded"
-                    )
+                    "cancelled"
+                    if getattr(self, "last_stop_reason", None) == "cancelled"
+                    else ("failed" if result is None else "succeeded")
                 )
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
@@ -3391,13 +3387,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             if durable_context is not None:
                 outcome = (
-                    "failed"
-                    if result is None
-                    else (
-                        "cancelled"
-                        if getattr(self, "last_stop_reason", None) == "cancelled"
-                        else "succeeded"
-                    )
+                    "cancelled"
+                    if getattr(self, "last_stop_reason", None) == "cancelled"
+                    else ("failed" if result is None else "succeeded")
                 )
                 await durable_context.afinalize(outcome)
                 self.execution.resume_run_id = None
