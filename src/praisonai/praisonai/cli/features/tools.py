@@ -24,7 +24,6 @@ class ToolsHandler(CommandHandler):
     
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
-        self._registry = None
         self._resolver = None
         self._resolver_loaded = False
 
@@ -70,20 +69,6 @@ Add Examples:
 
 Built-in tools include: internet_search, calculator, file operations, etc.
 """
-    
-    def _get_registry(self):
-        """Get tool registry lazily."""
-        if self._registry is None:
-            try:
-                from praisonaiagents.tools import get_registry
-                self._registry = get_registry()
-            except ImportError:
-                self.print_status(
-                    "Tools require praisonaiagents. Install with: pip install praisonaiagents",
-                    "error"
-                )
-                return None
-        return self._registry
     
     def _get_builtin_tools(self) -> Dict[str, Any]:
         """Get dictionary of available tools.
