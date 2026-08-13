@@ -32,6 +32,7 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
+from ._failure import failure_reply_text
 from ._commands import (
     format_status, 
     format_help, 
@@ -892,8 +893,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
                 except Exception as e:
                     logger.error(f"Agent error: {safe_log_message(e)}")
-                    user_error = extract_root_cause_from_error(str(e))
-                    await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
+                    await update.message.reply_text(failure_reply_text(e))
                 finally:
                     # Inbound media is cached to temp files for this turn only;
                     # remove them so media-heavy bots don't fill the temp volume.

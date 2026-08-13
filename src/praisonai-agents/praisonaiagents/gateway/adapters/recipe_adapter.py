@@ -53,4 +53,6 @@ class RecipeBotAdapter:
             
         except Exception as e:
             logger.error(f"Recipe execution failed: {e}")
-            return f"Error executing recipe: {e}"
+            from ...bots.failure import render_failure_reply
+
+            return render_failure_reply(e).text

@@ -43,6 +43,7 @@ from ._commands import (
     get_last_user_message,
     build_command_access_policy,
 )
+from ._failure import failure_reply_text
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -447,13 +448,13 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                                 await _send_agent_response()
                             except Exception as e:
                                 logger.error(f"Agent error: {e}")
-                                await message.reply(f"Error: {str(e)}")
+                                await message.reply(failure_reply_text(e))
                     else:
                         try:
                             await _send_agent_response()
                         except Exception as e:
                             logger.error(f"Agent error: {e}")
-                            await message.reply(f"Error: {str(e)}")
+                            await message.reply(failure_reply_text(e))
         
         await self._client.start(self._token)
     
