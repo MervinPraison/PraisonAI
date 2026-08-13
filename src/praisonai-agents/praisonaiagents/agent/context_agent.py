@@ -22,7 +22,6 @@ from typing import Optional, Any, Dict, Union, List, TYPE_CHECKING
 # Lazy imports for performance - these are only loaded when needed
 _subprocess = None
 _glob = None
-_ast = None
 _asyncio = None
 
 def _get_subprocess():
@@ -40,14 +39,6 @@ def _get_glob():
         import glob
         _glob = glob
     return _glob
-
-def _get_ast():
-    """Lazy import ast to avoid import-time overhead."""
-    global _ast
-    if _ast is None:
-        import ast
-        _ast = ast
-    return _ast
 
 def _get_asyncio():
     """Lazy import asyncio to avoid import-time overhead."""
