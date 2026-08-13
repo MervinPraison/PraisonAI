@@ -1050,11 +1050,13 @@ def _profiled_import(name, globals=None, locals=None, fromlist=(), level=0):
     finally:
         duration_ms = (time.time() - start) * 1000
         if duration_ms > 1:
-            records = [ImportRecord(module=name, duration_ms=duration_ms) for _ in profilers]
+            records = [
+                ImportRecord(module=name, duration_ms=duration_ms) for _ in profilers
+            ]
             with _IMPORT_HOOK_LOCK:
                 for profiler, record in zip(profilers, records):
                     profiler._imports.append(record)
-            for _ in profilers:
+            if profilers:
                 Profiler.record_import(name, duration_ms)
 
 class ImportProfiler:

@@ -165,6 +165,74 @@ def test_adapter_capability_gate_rejects_unsupported_cli_modes(
         generator._validate_adapter_cli_capabilities(adapter)
 
 
+@pytest.mark.parametrize(
+    "cli_config, message",
+    [
+        ({"resume_session": "session"}, "--resume"),
+        ({"auto_save": "session"}, "workflow YAMLs"),
+        ({"output": "stream-json"}, "stream-json"),
+    ],
+)
+def test_workflow_path_rejects_unsupported_cli_modes(cli_config, message):
+    from praisonai.agents_generator import AgentsGenerator
+
+    generator = object.__new__(AgentsGenerator)
+    generator.cli_config = cli_config
+
+    with pytest.raises(ValueError, match=message):
+        generator._validate_workflow_cli_capabilities()
+
+
+def test_workflow_path_allows_supported_cli_modes():
+    from praisonai.agents_generator import AgentsGenerator
+
+    generator = object.__new__(AgentsGenerator)
+    generator.cli_config = {"output": "json"}
+
+    generator._validate_workflow_cli_capabilities()
+
+
+def test_import_profiler_records_default_once_across_overlapping_scopes():
+    import time
+
+    from praisonai import profiler as profiler_module
+    from praisonai.profiler import ImportProfiler, Profiler, get_profiler
+
+    Profiler.clear()
+    Profiler.enable()
+
+    original = builtins.__import__
+    first = ImportProfiler()
+    second = ImportProfiler()
+    try:
+        first.__enter__()
+        second.__enter__()
+
+        def _slow_original(name, *args, **kwargs):
+            time.sleep(0.005)
+            return original(name, *args, **kwargs)
+
+        profiler_module._IMPORT_HOOK_ORIGINAL = _slow_original
+        builtins.__import__("json")
+
+        first.__exit__(None, None, None)
+        second.__exit__(None, None, None)
+
+        default_json = [
+            record for record in get_profiler()._imports if record.module == "json"
+        ]
+        first_json = [r for r in first._imports if r.module == "json"]
+        second_json = [r for r in second._imports if r.module == "json"]
+
+        assert len(default_json) == 1
+        assert len(first_json) == 1
+        assert len(second_json) == 1
+    finally:
+        builtins.__import__ = original
+        Profiler.disable()
+        Profiler.clear()
+
+
 def test_native_adapter_declares_cli_runtime_capabilities():
     from praisonai.framework_adapters.base import BaseFrameworkAdapter
     from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter

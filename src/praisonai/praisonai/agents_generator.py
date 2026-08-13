@@ -1159,6 +1159,31 @@ class AgentsGenerator:
                 "that declares SUPPORTS_STREAM_BRIDGE = True."
             )
 
+    def _validate_workflow_cli_capabilities(self) -> None:
+        """Reject CLI modes the native workflow path would silently ignore.
+
+        Workflow YAMLs run through the native ``YAMLWorkflowParser`` rather than
+        ``PraisonAIAdapter.run``/``arun``, so session continuity and the
+        ``stream-json`` bridge are not wired up. Fail fast instead of accepting
+        the flags and ignoring them.
+        """
+        cli_config = getattr(self, "cli_config", None) or {}
+
+        if cli_config.get("resume_session") or cli_config.get("auto_save"):
+            raise ValueError(
+                "--resume / --session / --continue / --fork are not supported "
+                "for workflow YAMLs. Session continuity is only available on "
+                "the sequential/hierarchical praisonai path."
+            )
+
+        output_mode = cli_config.get("output") or cli_config.get("output_format")
+        if output_mode == "stream-json":
+            raise ValueError(
+                "--output stream-json is not supported for workflow YAMLs. "
+                "Use the sequential/hierarchical praisonai path for the "
+                "stream-json bridge."
+            )
+
     def generate_crew_and_kickoff(self):
         """
         Generates a crew of agents and initiates tasks based on the provided configuration.
@@ -1183,6 +1208,7 @@ class AgentsGenerator:
             # sequential/hierarchical path uses so AgentOps init/finalize fires
             # for workflow YAMLs too. Workflow YAMLs are native-only, so tag
             # them 'praisonai'.
+            self._validate_workflow_cli_capabilities()
             with observability_session("praisonai"):
                 return self._run_yaml_workflow(config)
 
@@ -1231,6 +1257,7 @@ class AgentsGenerator:
             # the sequential/hierarchical path uses so AgentOps init/finalize
             # fires for workflow YAMLs too. Workflow YAMLs are native-only, so
             # tag them 'praisonai'.
+            self._validate_workflow_cli_capabilities()
             with observability_session("praisonai"):
                 return await self._arun_yaml_workflow(config)
 
