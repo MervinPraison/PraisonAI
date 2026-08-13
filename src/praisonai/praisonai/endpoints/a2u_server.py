@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import uuid
 import weakref
 from dataclasses import dataclass, field
@@ -93,6 +94,9 @@ class A2UEventBus:
     
     def __init__(self):
         """Initialize the event bus."""
+        # publish_sync runs from *any* thread (see run_sync bridge), so guard the
+        # shared dicts with a reentrant lock rather than an asyncio.Lock.
+        self._lock = threading.RLock()
         self._subscriptions: Dict[str, A2USubscription] = {}
         self._queues: Dict[str, asyncio.Queue] = {}
         self._streams: Dict[str, Set[str]] = {}  # stream_name -> subscription_ids
@@ -112,23 +116,21 @@ class A2UEventBus:
         Returns:
             A2USubscription object
         """
-        if len(self._subscriptions) >= _MAX_SUBS:
-            raise RuntimeError("A2U subscription limit reached")
-
         subscription_id = f"sub-{uuid.uuid4().hex[:12]}"
         subscription = A2USubscription(
             subscription_id=subscription_id,
             stream_name=stream_name,
             filters=filters or [],
         )
-        
-        self._subscriptions[subscription_id] = subscription
-        # Queue is created lazily via _get_queue() for Python 3.9 compatibility
-        # where asyncio.Queue() requires an event loop at creation time.
-        
-        if stream_name not in self._streams:
-            self._streams[stream_name] = set()
-        self._streams[stream_name].add(subscription_id)
+
+        with self._lock:
+            if len(self._subscriptions) >= _MAX_SUBS:
+                raise RuntimeError("A2U subscription limit reached")
+
+            self._subscriptions[subscription_id] = subscription
+            # Queue is created lazily via _get_queue() for Python 3.9 compatibility
+            # where asyncio.Queue() requires an event loop at creation time.
+            self._streams.setdefault(stream_name, set()).add(subscription_id)
         
         logger.debug(f"Created subscription {subscription_id} for stream {stream_name}")
         return subscription
@@ -138,9 +140,10 @@ class A2UEventBus:
         
         Deferred creation for Python 3.9 compatibility.
         """
-        if subscription_id not in self._queues:
-            self._queues[subscription_id] = asyncio.Queue(maxsize=_QUEUE_MAX)
-        return self._queues[subscription_id]
+        with self._lock:
+            if subscription_id not in self._queues:
+                self._queues[subscription_id] = asyncio.Queue(maxsize=_QUEUE_MAX)
+            return self._queues[subscription_id]
     
     def unsubscribe(self, subscription_id: str) -> bool:
         """
@@ -152,18 +155,14 @@ class A2UEventBus:
         Returns:
             True if unsubscribed, False if not found
         """
-        if subscription_id not in self._subscriptions:
-            return False
-        
-        subscription = self._subscriptions[subscription_id]
-        
-        # Remove from stream set
-        if subscription.stream_name in self._streams:
-            self._streams[subscription.stream_name].discard(subscription_id)
-        
-        # Clean up
-        del self._subscriptions[subscription_id]
-        self._queues.pop(subscription_id, None)  # May not exist due to lazy creation
+        with self._lock:
+            subscription = self._subscriptions.pop(subscription_id, None)
+            if subscription is None:
+                return False
+
+            # Remove from stream set
+            self._streams.get(subscription.stream_name, set()).discard(subscription_id)
+            self._queues.pop(subscription_id, None)  # May not exist due to lazy creation
         
         logger.debug(f"Removed subscription {subscription_id}")
         return True
@@ -179,12 +178,14 @@ class A2UEventBus:
         Returns:
             Number of subscribers that received the event
         """
-        if stream_name not in self._streams:
-            return 0
-        
+        # Snapshot the target subscriptions under the lock, then deliver outside
+        # it so put_nowait / _get_queue cannot race against subscribe/unsubscribe.
+        with self._lock:
+            sub_ids = list(self._streams.get(stream_name, ()))
+            snapshot = {sid: self._subscriptions.get(sid) for sid in sub_ids}
+
         count = 0
-        for sub_id in list(self._streams[stream_name]):
-            subscription = self._subscriptions.get(sub_id)
+        for sub_id, subscription in snapshot.items():
             if subscription and subscription.matches_event(event):
                 queue = self._get_queue(sub_id)
                 try:
@@ -244,7 +245,8 @@ class A2UEventBus:
 
         task.add_done_callback(_report)
         self._last_publish_task = task
-        return len(self._streams.get(stream_name, set()))
+        with self._lock:
+            return len(self._streams.get(stream_name, set()))
 
     def last_publish_task(self) -> Optional["asyncio.Task"]:
         """Return the task from the most recent running-loop publish_sync call."""
@@ -280,6 +282,7 @@ class A2UEventBus:
 
 
 # Global event bus instance
+_event_bus_lock = threading.Lock()
 _event_bus: Optional[A2UEventBus] = None
 
 
@@ -287,7 +290,9 @@ def get_event_bus() -> A2UEventBus:
     """Get or create the global event bus."""
     global _event_bus
     if _event_bus is None:
-        _event_bus = A2UEventBus()
+        with _event_bus_lock:
+            if _event_bus is None:
+                _event_bus = A2UEventBus()
     return _event_bus
 
 
@@ -473,6 +478,9 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
     
     async def a2u_health(request):
         """GET /a2u/health - A2U health check."""
+        auth_error = _authenticate_request(request)
+        if auth_error:
+            return auth_error
         return JSONResponse({
             "status": "healthy",
             "active_subscriptions": len(bus._subscriptions),
