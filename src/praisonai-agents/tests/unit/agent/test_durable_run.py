@@ -429,6 +429,53 @@ async def test_agent_achat_none_result_finalizes_run(tmp_path):
     assert agent.execution.resume_run_id is None
 
 
+def test_agent_chat_cancelled_none_result_finalizes_run(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+
+    agent.llm_instance = SimpleNamespace(_last_stop_reason="cancelled")
+
+    with patch.object(agent, "_chat_impl", return_value=None):
+        assert agent.chat("task") is None
+
+    run_id = agent.last_durable_run_id
+    journal = RunJournal(path)
+    assert journal.run_meta(run_id).status == "cancelled"
+    assert journal.interrupted_runs() == []
+    journal.close()
+    assert agent.execution.resume_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_agent_achat_cancelled_none_result_finalizes_run(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+
+    agent.llm_instance = SimpleNamespace(_last_stop_reason="cancelled")
+
+    with patch.object(agent, "_achat_impl", AsyncMock(return_value=None)):
+        assert await agent.achat("task") is None
+
+    run_id = agent.last_durable_run_id
+    journal = RunJournal(path)
+    assert journal.run_meta(run_id).status == "cancelled"
+    assert journal.interrupted_runs() == []
+    journal.close()
+    assert agent.execution.resume_run_id is None
+
+
 def test_custom_llm_fatal_tool_error_reaches_durable_lifecycle(tmp_path):
     from praisonaiagents import Agent
 
