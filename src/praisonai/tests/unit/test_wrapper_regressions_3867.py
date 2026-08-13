@@ -1,6 +1,8 @@
 """Regression coverage for wrapper issues reported in #3867."""
 
 import builtins
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -349,3 +351,52 @@ def test_import_profiler_defensive_and_idempotent_paths(monkeypatch):
         assert builtins.__import__ is installed_hook
     finally:
         profiler.__exit__(None, None, None)
+
+
+def test_yaml_cli_config_extracts_output_mode():
+    from praisonai_code.cli.legacy.praison_ai import PraisonAI
+
+    cli = object.__new__(PraisonAI)
+    cli.args = SimpleNamespace(
+        output="stream-json",
+        tool_retry_attempts=1,
+    )
+
+    config = cli._extract_cli_config_for_yaml()
+
+    assert config["output"] == "stream-json"
+
+
+def test_typer_yaml_path_forwards_output_mode(monkeypatch):
+    import importlib
+
+    monkeypatch.setitem(sys.modules, "toml", SimpleNamespace())
+    main_module = importlib.import_module("praisonai_code.cli.main")
+    run_module = importlib.import_module("praisonai_code.cli.commands.run")
+    captured = {}
+
+    class FakePraisonAI:
+        def __init__(self, **kwargs):
+            self.config_list = [{}]
+
+        def run(self):
+            captured["output"] = self.args.output
+            return "ok"
+
+    output = SimpleNamespace(
+        emit_result=lambda **kwargs: None,
+        is_json_mode=True,
+        print_error=lambda message: None,
+        print_success=lambda message: None,
+    )
+    monkeypatch.setattr(main_module, "PraisonAI", FakePraisonAI)
+    monkeypatch.setattr(run_module, "get_output_controller", lambda: output)
+    monkeypatch.setattr(run_module, "_record_session_usage", lambda *args: None)
+
+    run_module._run_from_file(
+        "workflow.yaml",
+        output_mode="stream-json",
+        no_save=True,
+    )
+
+    assert captured["output"] == "stream-json"

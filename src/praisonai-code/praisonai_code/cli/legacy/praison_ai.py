@@ -1982,6 +1982,12 @@ class PraisonAI:
             if stream_metrics:
                 cli_config['stream_metrics'] = True
 
+        output_mode = getattr(
+            self.args, 'output', getattr(self.args, 'output_format', None)
+        )
+        if output_mode is not None:
+            cli_config['output'] = output_mode
+
         # Extract handoff configuration for YAML CLI parity
         handoff = getattr(self.args, 'handoff', None)
         if handoff:
