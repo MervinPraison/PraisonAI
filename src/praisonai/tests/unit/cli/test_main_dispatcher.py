@@ -185,6 +185,53 @@ class TestLooksLikeBarePrompt(unittest.TestCase):
     def test_no_positional_is_not_bare(self):
         self.assertFalse(dispatcher._looks_like_bare_prompt([], None))
 
+    def test_legacy_colliding_short_opts_stay_on_legacy(self):
+        # Greptile P1 (valid): ``-s``/``-f`` mean different things in legacy
+        # (``--save``/``--file``) vs modern (``--session``/``--framework``).
+        # Even though the *name* is in the modern option set, their presence must
+        # keep a previously-legacy prompt on legacy to avoid silent semantic
+        # reinterpretation. Long forms remain unaffected (tested elsewhere).
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--session", "-s", "--framework", "-f"},
+                {"--session", "-s", "--framework", "-f"},
+            ),
+        ):
+            for argv in (
+                ["do research", "-s"],
+                ["read this", "-f", "input.txt"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertFalse(
+                    dispatcher._looks_like_bare_prompt(argv, first),
+                    f"{argv!r} carries a legacy-colliding short option and must "
+                    f"stay on legacy",
+                )
+
+    def test_long_form_of_colliding_opts_still_modern(self):
+        # The long forms are unambiguous, so ``--session``/``--framework`` still
+        # reach the modern engine even though their short forms are quarantined.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--session", "-s", "--framework", "-f"},
+                {"--session", "-s", "--framework", "-f"},
+            ),
+        ):
+            for argv in (
+                ["resume it", "--session", "abc"],
+                ["build it", "--framework", "crewai"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_bare_prompt(argv, first),
+                    f"{argv!r} uses unambiguous long forms and should reach the "
+                    f"modern engine",
+                )
+
     def test_value_taking_flag_with_dash_prefixed_value_is_bare(self):
         # Regression guard for the Greptile P1: a value-taking run option whose
         # separated value begins with ``-`` (e.g. ``--session -abc``,
@@ -198,10 +245,14 @@ class TestLooksLikeBarePrompt(unittest.TestCase):
                 {"--session", "-s", "--output", "-o"},
             ),
         ):
+            # ``-o`` is used for the short-form case (not ``-s``): ``-s`` is a
+            # legacy-colliding short option quarantined to legacy, so it would
+            # not reach the modern engine regardless of its value — a separate
+            # concern from the dash-prefixed-value handling under test here.
             for argv in (
                 ["fix the bug", "--session", "-abc"],
                 ["diagnose", "--output", "-json"],
-                ["summarise", "-s", "-weird-id"],
+                ["summarise", "-o", "-weird-id"],
             ):
                 first = dispatcher._find_first_command(argv)
                 self.assertTrue(
@@ -221,6 +272,123 @@ class TestLooksLikeBarePrompt(unittest.TestCase):
             argv = ["fix the bug", "--session", "-abc", "--serve"]
             first = dispatcher._find_first_command(argv)
             self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+
+class TestLooksLikeYamlRunTarget(unittest.TestCase):
+    """``_looks_like_yaml_run_target`` gates the modern `run` YAML forwarder.
+
+    True for a ``.yaml``/``.yml`` first positional whose flags (if any) are all
+    accepted by the modern ``run`` command — so ``praisonai agents.yaml`` and
+    ``praisonai agents.yaml --continue --output json`` reach Typer `run`, while
+    a YAML invocation bearing a legacy-only flag stays on legacy (#3793).
+    """
+
+    def setUp(self):
+        dispatcher._run_option_names_cache = None
+
+    def tearDown(self):
+        dispatcher._run_option_names_cache = None
+
+    def test_flagless_yaml_is_run_target(self):
+        for token in ("agents.yaml", "agents.yml", "AGENTS.YAML"):
+            argv = [token]
+            first = dispatcher._find_first_command(argv)
+            self.assertTrue(
+                dispatcher._looks_like_yaml_run_target(argv, first),
+                f"{token!r} should route to the modern run engine",
+            )
+
+    def test_non_yaml_token_is_not_run_target(self):
+        argv = ["Build a weather agent"]
+        first = dispatcher._find_first_command(argv)
+        self.assertFalse(dispatcher._looks_like_yaml_run_target(argv, first))
+
+    def test_yaml_with_run_supported_flags_is_run_target(self):
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--continue", "-c", "--output", "-o", "--session", "-s"},
+                {"--output", "-o", "--session", "-s"},
+            ),
+        ):
+            for argv in (
+                ["agents.yaml", "--continue"],
+                ["agents.yaml", "--output", "json"],
+                ["agents.yaml", "--session", "abc123"],
+                ["agents.yaml", "--continue", "--output=json"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_yaml_run_target(argv, first),
+                    f"{argv!r} should route to the modern run engine",
+                )
+
+    def test_yaml_with_legacy_only_flag_is_not_run_target(self):
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ):
+            argv = ["agents.yaml", "--serve"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_yaml_run_target(argv, first))
+
+    def test_yaml_with_failed_discovery_and_flag_is_not_run_target(self):
+        with mock.patch.object(
+            dispatcher, "_get_run_option_names", return_value=None
+        ):
+            argv = ["agents.yaml", "--model", "x"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_yaml_run_target(argv, first))
+
+    def test_yaml_with_legacy_colliding_short_opt_stays_on_legacy(self):
+        # Greptile P1 (valid): ``praisonai agents.yaml -s`` (legacy ``--save``)
+        # and ``agents.yaml -f input.txt`` (legacy ``--file``) must NOT be
+        # reinterpreted as modern ``--session``/``--framework``. Their presence
+        # keeps the YAML workflow on legacy.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--session", "-s", "--framework", "-f"},
+                {"--session", "-s", "--framework", "-f"},
+            ),
+        ):
+            for argv in (
+                ["agents.yaml", "-s"],
+                ["agents.yaml", "-f", "input.txt"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertFalse(
+                    dispatcher._looks_like_yaml_run_target(argv, first),
+                    f"{argv!r} carries a legacy-colliding short option and must "
+                    f"stay on legacy",
+                )
+
+    def test_yaml_with_long_form_of_colliding_opt_is_run_target(self):
+        # Unambiguous long forms still reach the modern engine.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--session", "-s", "--framework", "-f"},
+                {"--session", "-s", "--framework", "-f"},
+            ),
+        ):
+            for argv in (
+                ["agents.yaml", "--session", "abc"],
+                ["agents.yaml", "--framework", "crewai"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_yaml_run_target(argv, first),
+                    f"{argv!r} uses unambiguous long forms and should reach the "
+                    f"modern engine",
+                )
+
+    def test_no_positional_is_not_run_target(self):
+        self.assertFalse(dispatcher._looks_like_yaml_run_target([], None))
 
 
 class TestFlagNames(unittest.TestCase):
@@ -548,18 +716,98 @@ class TestMainRouting(unittest.TestCase):
         self.assertIn("legacy engine", printed)
         self.assertIn("praisonai run", printed)
 
-    def test_yaml_path_routes_to_legacy(self):
-        # Routing decision is by command-set membership, NOT by file
-        # existence — the original auto-discovery dispatcher does not
-        # touch the filesystem.
+    def test_yaml_path_routes_to_typer_run(self):
+        # A workflow YAML file now reaches the modern Typer `run` engine
+        # (session continuity, --output modes, credential gate, permissions)
+        # instead of the legacy path — forwarded as ``run agents.yaml`` (#3793).
         sys.argv = ["praisonai", "agents.yaml"]
         with mock.patch.object(
             dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
         ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
              mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
             dispatcher.main()
+        run_typer.assert_called_once_with(["run", "agents.yaml"])
+        run_legacy.assert_not_called()
+
+    def test_yaml_path_with_run_flags_routes_to_typer_run(self):
+        # A YAML workflow combined with run-supported flags (session
+        # continuity + output mode) reaches the modern engine intact (#3793).
+        sys.argv = ["praisonai", "agents.yaml", "--continue", "--output", "json"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--continue", "-c", "--output", "-o"},
+                {"--output", "-o"},
+            ),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "agents.yaml", "--continue", "--output", "json"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_yaml_path_with_legacy_flag_routes_to_legacy_with_notice(self):
+        # A YAML workflow carrying a legacy-only flag stays on legacy, with the
+        # one-line fallback notice so the divert is never silent (#3793).
+        sys.argv = ["praisonai", "agents.yaml", "--serve"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy, \
+             mock.patch("builtins.print") as mock_print:
+            dispatcher.main()
         run_legacy.assert_called_once()
         run_typer.assert_not_called()
+        printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("legacy engine", printed)
+
+    def test_leading_value_option_before_yaml_routes_to_typer_run(self):
+        # Regression guard (CodeRabbit / Greptile P1): a leading value-taking
+        # run option (``--session abc123``) must consume its value so the YAML
+        # target after it is correctly identified as the first positional and
+        # routed to the modern engine — not mistaken for the command token.
+        sys.argv = ["praisonai", "--session", "abc123", "agents.yaml"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--session", "-s"}, {"--session", "-s"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "--session", "abc123", "agents.yaml"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_leading_value_option_before_prompt_routes_to_typer_run(self):
+        # Regression guard (CodeRabbit): a leading value-taking run option
+        # (``--session abc123``) followed by an unquoted multi-token prompt must
+        # consume its value, then the remaining positionals join into one
+        # ``target`` — reaching the modern engine, not misrouted as free text.
+        sys.argv = ["praisonai", "--session", "abc123", "build", "an", "agent"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--session", "-s"}, {"--session", "-s"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "build an agent", "--session", "abc123"]
+        )
+        run_legacy.assert_not_called()
 
     def test_unknown_single_token_routes_to_typer_run(self):
         # A lone unknown token (no flags, not a YAML path) is treated as a bare
