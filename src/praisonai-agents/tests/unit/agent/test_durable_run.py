@@ -388,6 +388,100 @@ def test_agent_chat_exception_leaves_run_resumable(tmp_path):
     journal.close()
 
 
+def test_agent_chat_none_result_finalizes_run(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+    with patch.object(agent, "_chat_impl", return_value=None):
+        assert agent.chat("task") is None
+
+    run_id = agent.last_durable_run_id
+    journal = RunJournal(path)
+    assert journal.run_meta(run_id).status == "succeeded"
+    assert journal.interrupted_runs() == []
+    journal.close()
+    assert agent.execution.resume_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_agent_achat_none_result_finalizes_run(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+    with patch.object(agent, "_achat_impl", AsyncMock(return_value=None)):
+        assert await agent.achat("task") is None
+
+    run_id = agent.last_durable_run_id
+    journal = RunJournal(path)
+    assert journal.run_meta(run_id).status == "succeeded"
+    assert journal.interrupted_runs() == []
+    journal.close()
+    assert agent.execution.resume_run_id is None
+
+
+def test_custom_llm_fatal_tool_error_reaches_durable_lifecycle(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        llm={"model": "custom/test"},
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+    error = ToolExecutionError(
+        "terminal tool failure", tool_name="danger", is_retryable=False
+    )
+    agent.llm_instance = SimpleNamespace(
+        get_response=MagicMock(side_effect=error)
+    )
+
+    with pytest.raises(ToolExecutionError, match="terminal tool failure"):
+        agent.chat("task")
+
+    journal = RunJournal(path)
+    assert journal.run_meta(agent.last_durable_run_id).status == "failed"
+    journal.close()
+    assert agent.execution.resume_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_async_custom_llm_fatal_error_reaches_durable_lifecycle(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        llm={"model": "custom/test"},
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+    error = ToolExecutionError(
+        "terminal tool failure", tool_name="danger", is_retryable=False
+    )
+    agent.llm_instance = SimpleNamespace(
+        get_response_async=AsyncMock(side_effect=error)
+    )
+
+    with pytest.raises(ToolExecutionError, match="terminal tool failure"):
+        await agent.achat("task")
+
+    journal = RunJournal(path)
+    assert journal.run_meta(agent.last_durable_run_id).status == "failed"
+    journal.close()
+    assert agent.execution.resume_run_id is None
+
+
 def test_agent_chat_tool_failure_finalizes_run_and_rejects_resume(tmp_path):
     from praisonaiagents import Agent
 

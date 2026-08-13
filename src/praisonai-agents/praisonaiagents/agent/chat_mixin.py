@@ -2666,7 +2666,7 @@ Your Goal: {self.goal}"""
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
             result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
-            if durable_context is not None and result is not None:
+            if durable_context is not None:
                 outcome = (
                     "cancelled"
                     if getattr(self, "last_stop_reason", None) == "cancelled"
@@ -2994,11 +2994,15 @@ Your Goal: {self.goal}"""
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return None
+                except ToolExecutionError:
+                    raise
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     return None
+            except ToolExecutionError:
+                raise
             except Exception as e:
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                 return None
@@ -3245,6 +3249,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
+            except ToolExecutionError:
+                raise
             except Exception as e:
                 # Catch any exceptions that escape the while loop
                 _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
@@ -3343,7 +3349,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
                 seed=seed, cancel_token=cancel_token
             )
-            if durable_context is not None and result is not None:
+            if durable_context is not None:
                 outcome = (
                     "cancelled"
                     if getattr(self, "last_stop_reason", None) == "cancelled"
@@ -3584,6 +3590,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return None
+                except ToolExecutionError:
+                    raise
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
@@ -4043,12 +4051,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Rollback chat history on guardrail failure
                             self._rollback_chat_history_to(chat_history_length)
                             return None
+                except ToolExecutionError:
+                    raise
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in chat completion: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
+        except ToolExecutionError:
+            raise
         except Exception as e:
             _get_display_functions()['display_error'](f"Error in achat: {e}")
             if get_logger().getEffectiveLevel() == logging.DEBUG:
