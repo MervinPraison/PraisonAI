@@ -24,6 +24,9 @@ def test_schedule_ticker_uses_timezone_across_dst():
     assert ticker.is_due(_epoch(2026, 3, 8, 11, 59)) is False
     assert ticker.is_due(_epoch(2026, 3, 8, 12, 0)) is True
 
+    wait = ticker.seconds_until_next(_epoch(2026, 3, 8, 11, 0))
+    assert wait == 60 * 60
+
 
 def test_schedule_ticker_rejects_invalid_timezone():
     import pytest
@@ -66,6 +69,81 @@ def test_yaml_validator_rejects_empty_cron():
 
     with pytest.raises(ValueError, match="must not be empty"):
         validate_schedule_config({"interval": "cron:"})
+
+
+def test_yaml_validator_rejects_unknown_interval():
+    import pytest
+
+    from praisonai.scheduler.yaml_loader import validate_schedule_config
+
+    with pytest.raises(ValueError, match="Invalid interval format"):
+        validate_schedule_config({"interval": "sometimes"})
+
+
+def test_sync_yaml_scheduler_forwards_timezone():
+    from praisonai.scheduler.agent_scheduler import AgentScheduler
+
+    scheduler = object.__new__(AgentScheduler)
+    scheduler._yaml_schedule_config = {
+        "interval": "cron:0 8 * * *",
+        "max_retries": 5,
+        "run_immediately": True,
+        "tz": "America/New_York",
+    }
+    captured = {}
+
+    def fake_start(schedule_expr, max_retries, run_immediately, *, timezone=None):
+        captured.update(
+            schedule_expr=schedule_expr,
+            max_retries=max_retries,
+            run_immediately=run_immediately,
+            timezone=timezone,
+        )
+        return True
+
+    scheduler.start = fake_start
+
+    assert scheduler.start_from_yaml_config() is True
+    assert captured == {
+        "schedule_expr": "cron:0 8 * * *",
+        "max_retries": 5,
+        "run_immediately": True,
+        "timezone": "America/New_York",
+    }
+
+
+async def test_async_yaml_scheduler_forwards_timezone():
+    from praisonai.scheduler.async_agent_scheduler import AsyncAgentScheduler
+
+    scheduler = object.__new__(AsyncAgentScheduler)
+    scheduler._yaml_schedule_config = {
+        "interval": "cron:0 8 * * *",
+        "max_retries": 4,
+        "run_immediately": False,
+        "tz": "Asia/Singapore",
+    }
+    captured = {}
+
+    async def fake_start(
+        schedule_expr, max_retries, run_immediately, *, timezone=None
+    ):
+        captured.update(
+            schedule_expr=schedule_expr,
+            max_retries=max_retries,
+            run_immediately=run_immediately,
+            timezone=timezone,
+        )
+        return True
+
+    scheduler.start = fake_start
+
+    assert await scheduler.start_from_yaml_config() is True
+    assert captured == {
+        "schedule_expr": "cron:0 8 * * *",
+        "max_retries": 4,
+        "run_immediately": False,
+        "timezone": "Asia/Singapore",
+    }
 
 
 def test_schedule_add_cli_passes_timezone(monkeypatch):
