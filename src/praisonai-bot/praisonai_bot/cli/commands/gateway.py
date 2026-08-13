@@ -800,6 +800,128 @@ def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):
     return "repaired"
 
 
+class _GatewaySecretHealthCheck:
+    """Adapter that exposes the gateway auth-token check to the registry."""
+
+    check_id = "core/gateway/auth-token"
+
+    def detect(self, context):
+        from praisonaiagents.runtime.doctor_protocol import Finding
+
+        message = _check_gateway_secret_strength(str(context["config_path"]))
+        if not message:
+            return []
+        return [Finding(
+            rule_id=self.check_id,
+            severity="error",
+            message=message,
+            fix_description="Mint and persist a strong gateway auth token",
+        )]
+
+    def repair(self, context, findings):
+        from praisonaiagents.runtime.health_check import HealthRepairResult
+
+        action = _repair_gateway_secret(
+            dry_run=bool(context.get("dry_run")),
+            config_path=str(context["config_path"]),
+        )
+        if action == "would-repair":
+            return HealthRepairResult(
+                changed=False,
+                message=(
+                    "gateway_auth_token: weak -> would mint a strong token "
+                    "(--dry-run)"
+                ),
+            )
+        return HealthRepairResult(changed=True, message="gateway auth token repaired")
+
+
+class _GatewayConfigVersionHealthCheck:
+    """Adapter that exposes config migration through the health registry."""
+
+    check_id = "core/gateway/config-version"
+
+    def detect(self, context):
+        from praisonaiagents.runtime.doctor_protocol import Finding
+
+        migration = _check_config_version(str(context["config_path"]))
+        if migration is None:
+            return []
+        if isinstance(migration, str):
+            return [Finding(
+                rule_id=self.check_id,
+                severity="error",
+                message=migration,
+                fix_description=None,
+                context={"unsupported": True},
+            )]
+        reasons, from_version, to_version = migration
+        return [Finding(
+            rule_id=self.check_id,
+            severity="warning",
+            message=(
+                "gateway config is out of date "
+                f"(config_version {from_version} -> {to_version})"
+            ),
+            fix_description="Apply safe migrations and stamp config_version",
+            context={
+                "reasons": list(reasons),
+                "from_version": from_version,
+                "to_version": to_version,
+            },
+        )]
+
+    def repair(self, context, findings):
+        from praisonaiagents.runtime.health_check import HealthRepairResult
+
+        details = findings[0].context or {}
+        if details.get("unsupported"):
+            return HealthRepairResult(changed=False)
+        reasons = list(details.get("reasons", []))
+        from_version = details.get("from_version", "unstamped")
+        to_version = details.get("to_version", "current")
+        if context.get("dry_run"):
+            lines = [f"config: would {reason}" for reason in reasons]
+            lines.append(
+                "config: would stamp config_version "
+                f"{from_version} -> {to_version} (--dry-run)"
+            )
+            return HealthRepairResult(changed=False, message="\n".join(lines))
+
+        applied = _repair_config_version(str(context["config_path"]))
+        lines = [f"config: {reason}" for reason in applied]
+        lines.append(f"config: config_version {from_version} -> {to_version}")
+        return HealthRepairResult(changed=True, message="\n".join(lines))
+
+
+def _run_gateway_health_checks(config_path: str, *, fix: bool, dry_run: bool):
+    """Run built-in and third-party checks through one shared lifecycle."""
+    from praisonaiagents.runtime.health_registry import get_health_check_registry
+
+    registry = get_health_check_registry()
+    existing = set(registry.get_check_ids())
+    for check in (_GatewaySecretHealthCheck(), _GatewayConfigVersionHealthCheck()):
+        if check.check_id not in existing:
+            registry.register_check(check)
+    return registry.run(
+        {"config_path": config_path, "dry_run": dry_run},
+        fix=fix,
+    )
+
+
+def _health_result(results, check_id):
+    return next((result for result in results if result.check_id == check_id), None)
+
+
+def _health_payload(results):
+    return {
+        "checksRun": len(results),
+        "repaired": sum(result.repaired for result in results),
+        "validated": sum(not result.residual_findings for result in results),
+        "results": [result.to_dict() for result in results],
+    }
+
+
 from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
     apply_probe_ca_bundle as _apply_probe_ca_bundle,
     check_duplicates as _check_duplicates,
@@ -1076,58 +1198,79 @@ def gateway_doctor(
 
     config = _resolve_doctor_config(config)
 
-    gateway_secret_error = _check_gateway_secret_strength(config)
+    health_results = _run_gateway_health_checks(config, fix=fix, dry_run=dry_run)
+    auth_health = _health_result(health_results, "core/gateway/auth-token")
+    config_health = _health_result(health_results, "core/gateway/config-version")
 
+    gateway_secret_error = None
     fix_report = None
-    if fix and gateway_secret_error:
-        action = _repair_gateway_secret(dry_run=dry_run, config_path=config)
-        if action == "would-repair":
-            fix_report = "gateway_auth_token: weak → would mint a strong token (--dry-run)"
-        elif action == "repaired":
-            gateway_secret_error = _check_gateway_secret_strength(config)
-            if gateway_secret_error is None:
+    if auth_health:
+        if auth_health.residual_findings:
+            gateway_secret_error = auth_health.residual_findings[0].message
+        if auth_health.repair:
+            if auth_health.repaired:
                 fix_report = (
                     "gateway_auth_token: weak → generated a strong token… done\n"
                     "re-validated: gateway_auth_token now strong"
                 )
-            else:
+            elif auth_health.repair.changed:
                 fix_report = "gateway_auth_token: repair attempted but still weak"
-        if fix_report and not json_output:
-            print(fix_report)
+            else:
+                fix_report = auth_health.repair.message
 
-    # Config version stamp + declarative migration (#3841). Detect an
-    # out-of-date config (missing/stale ``config_version`` or a rule that fires)
-    # and, with ``--fix``, migrate it forward once and stamp the new version.
-    config_migration = _check_config_version(config)
+    config_migration = None
+    config_version_error = None
     config_fix_report = None
-    # A ``str`` means the config is newer than this build / malformed: warn and
-    # refuse to migrate (never downgrade a newer config with an older binary).
-    config_version_error = config_migration if isinstance(config_migration, str) else None
-    if config_version_error:
-        config_migration = None
-        if not json_output:
-            print(f"config: {config_version_error}")
-    if config_migration:
-        reasons, from_version, to_version = config_migration
-        if fix and not dry_run:
-            applied = _repair_config_version(config)
-            lines = [f"config: {r}" for r in applied]
-            lines.append(f"config: config_version {from_version} -> {to_version}")
-            config_fix_report = "\n".join(lines)
-            config_migration = None
-        elif fix and dry_run:
-            lines = [f"config: would {r}" for r in reasons]
-            lines.append(
-                f"config: would stamp config_version {from_version} -> {to_version} (--dry-run)"
+    if config_health and config_health.findings:
+        finding = config_health.findings[0]
+        details = finding.context or {}
+        if details.get("unsupported"):
+            config_version_error = finding.message
+        elif config_health.residual_findings:
+            config_migration = (
+                list(details.get("reasons", [])),
+                details.get("from_version", "unstamped"),
+                details.get("to_version", "current"),
             )
-            config_fix_report = "\n".join(lines)
-        if config_fix_report and not json_output:
+        if config_health.repair and config_health.repair.message:
+            config_fix_report = config_health.repair.message
+
+    extension_results = [
+        result for result in health_results
+        if not result.check_id.startswith("core/gateway/")
+    ]
+    health_failed = any(
+        finding.severity == "error"
+        for result in health_results
+        for finding in result.residual_findings
+    )
+
+    if not json_output:
+        if fix_report:
+            print(fix_report)
+        if config_version_error:
+            print(f"config: {config_version_error}")
+        if config_fix_report:
             print(config_fix_report)
+        summary = _health_payload(health_results)
+        print(
+            "health checks: "
+            f"{summary['checksRun']} run, {summary['repaired']} repaired, "
+            f"{summary['validated']} validated"
+        )
+        for result in extension_results:
+            for finding in result.residual_findings:
+                hint = f"; fix: {finding.fix_description}" if finding.fix_description else ""
+                print(
+                    f"{result.check_id}: {finding.severity}: "
+                    f"{finding.message}{hint}"
+                )
 
     channels = _load_channels(config)
 
     if not channels:
         payload: dict = {"probes": {}}
+        payload["health"] = _health_payload(health_results)
         if gateway_secret_error:
             payload["gateway_auth_token"] = "weak"
         if config_migration:
@@ -1145,7 +1288,7 @@ def gateway_doctor(
             print("No channels configured.")
             if gateway_secret_error:
                 print(gateway_secret_error)
-        if gateway_secret_error:
+        if health_failed:
             raise typer.Exit(1)
         raise typer.Exit(0)
 
@@ -1156,7 +1299,10 @@ def gateway_doctor(
     if channel and channel in results:
         turn_gate_ok = getattr(results[channel], "ok", False)
 
-    payload: dict = {"probes": _probe_results_to_dict(results)}
+    payload: dict = {
+        "probes": _probe_results_to_dict(results),
+        "health": _health_payload(health_results),
+    }
     if availability:
         payload["secrets"] = availability
     if gateway_secret_error:
@@ -1183,7 +1329,7 @@ def gateway_doctor(
                 "run 'gateway doctor --fix'"
             )
 
-    if gateway_secret_error:
+    if health_failed:
         if json_output:
             print(json.dumps(payload, indent=2))
         raise typer.Exit(1)
