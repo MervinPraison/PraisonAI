@@ -256,6 +256,27 @@ class DurableRunContext:
             }
         return safe_result
 
+    def _record_terminal_failure(
+        self,
+        seq: int,
+        tool_call_id: str,
+        error: ToolExecutionError,
+        iteration_index: Optional[int],
+    ) -> None:
+        """Persist a fatal tool outcome and make the run non-resumable."""
+        self._record_result(
+            seq,
+            tool_call_id,
+            {
+                "error": str(error),
+                "error_type": type(error).__name__,
+                "is_retryable": bool(error.is_retryable),
+                "terminal": True,
+            },
+            iteration_index,
+        )
+        self.finalize("failed")
+
     def wrap_sync(self, execute_tool_fn: Optional[Callable]) -> Optional[Callable]:
         if execute_tool_fn is None:
             return None
@@ -275,7 +296,10 @@ class DurableRunContext:
                 if _accepts_idempotency_key(execute_tool_fn):
                     call_kwargs["idempotency_key"] = idempotency_key
                 result = execute_tool_fn(function_name, arguments, **call_kwargs)
-            except ToolExecutionError:
+            except ToolExecutionError as exc:
+                self._record_terminal_failure(
+                    seq, call_id, exc, iteration_index
+                )
                 raise
             except Exception as exc:
                 result = {"error": str(exc)}
@@ -306,7 +330,14 @@ class DurableRunContext:
                 result = execute_tool_fn(function_name, arguments, **call_kwargs)
                 if inspect.isawaitable(result):
                     result = await result
-            except ToolExecutionError:
+            except ToolExecutionError as exc:
+                await asyncio.to_thread(
+                    self._record_terminal_failure,
+                    seq,
+                    call_id,
+                    exc,
+                    iteration_index,
+                )
                 raise
             except Exception as exc:
                 result = {"error": str(exc)}

@@ -94,7 +94,7 @@ def test_parallel_tool_results_count_as_one_model_iteration():
     journal.close()
 
 
-def test_fatal_tool_execution_error_is_not_recorded_as_a_result():
+def test_fatal_tool_execution_error_is_recorded_and_terminal():
     journal = RunJournal(":memory:")
     journal.open_run("run-1", task="task")
     context = DurableRunContext(journal, "run-1", replaying=False)
@@ -106,8 +106,34 @@ def test_fatal_tool_execution_error_is_not_recorded_as_a_result():
         )
 
     kinds = [event.kind for event in journal.events("run-1")]
-    assert KIND_TOOL_RESULT not in kinds
-    assert KIND_ITERATION not in kinds
+    assert KIND_TOOL_RESULT in kinds
+    assert KIND_ITERATION in kinds
+    result = next(
+        event.payload["result"]
+        for event in journal.events("run-1")
+        if event.kind == KIND_TOOL_RESULT
+    )
+    assert result["terminal"] is True
+    assert result["is_retryable"] is False
+    assert journal.run_meta("run-1").status == "failed"
+    assert journal.interrupted_runs() == []
+    journal.close()
+
+
+@pytest.mark.asyncio
+async def test_async_fatal_tool_execution_error_is_terminal():
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    context = DurableRunContext(journal, "run-1", replaying=False)
+    error = ToolExecutionError("halt", tool_name="danger", is_retryable=False)
+
+    with pytest.raises(ToolExecutionError, match="halt"):
+        await context.wrap_async(AsyncMock(side_effect=error))(
+            "danger", {}, tool_call_id="call-1"
+        )
+
+    assert journal.run_meta("run-1").status == "failed"
+    assert journal.interrupted_runs() == []
     journal.close()
 
 
@@ -336,6 +362,33 @@ def test_agent_chat_exception_leaves_run_resumable(tmp_path):
     journal = RunJournal(path)
     assert journal.interrupted_runs() == [agent.last_durable_run_id]
     journal.close()
+
+
+def test_agent_chat_tool_failure_finalizes_run_and_rejects_resume(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+    error = ToolExecutionError(
+        "terminal tool failure", tool_name="danger", is_retryable=False
+    )
+    with patch.object(agent, "_chat_impl", side_effect=error):
+        with pytest.raises(ToolExecutionError, match="terminal tool failure"):
+            agent.chat("task")
+
+    run_id = agent.last_durable_run_id
+    journal = RunJournal(path)
+    assert journal.run_meta(run_id).status == "failed"
+    assert journal.interrupted_runs() == []
+    journal.close()
+
+    agent.execution.resume_run_id = run_id
+    with pytest.raises(ValueError, match="Cannot resume terminal durable run"):
+        agent.chat("task")
 
 
 def test_agent_chat_interruption_finalizes_run_as_cancelled(tmp_path):

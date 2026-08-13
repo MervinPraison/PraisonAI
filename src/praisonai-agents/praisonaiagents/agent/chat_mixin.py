@@ -2675,6 +2675,11 @@ Your Goal: {self.goal}"""
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
             return result
+        except ToolExecutionError:
+            if durable_context is not None:
+                durable_context.finalize("failed")
+                self.execution.resume_run_id = None
+            raise
         except InterruptedError:
             if durable_context is not None:
                 durable_context.finalize("cancelled")
@@ -3347,6 +3352,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 await durable_context.afinalize(outcome)
                 self.execution.resume_run_id = None
             return result
+        except ToolExecutionError:
+            if durable_context is not None:
+                await durable_context.afinalize("failed")
+                self.execution.resume_run_id = None
+            raise
         except (InterruptedError, asyncio.CancelledError):
             if durable_context is not None:
                 await durable_context.afinalize("cancelled")
@@ -4204,6 +4214,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
+        except ToolExecutionError:
+            if durable_context is not None:
+                durable_context.finalize("failed")
+                self.execution.resume_run_id = None
+            raise
         except (GeneratorExit, InterruptedError):
             if durable_context is not None:
                 durable_context.finalize("cancelled")
