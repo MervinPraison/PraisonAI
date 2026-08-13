@@ -41,6 +41,38 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # requires OpenAI Realtime API Acc
 PORT = int(os.getenv('PORT', 8090))
 NGROK_AUTH_TOKEN = os.getenv('NGROK_AUTH_TOKEN')
 PUBLIC = os.getenv('PUBLIC', 'false').lower() == 'true'
+
+
+def _resolve_realtime_endpoint():
+    """Resolve the realtime WebSocket URL + auth headers.
+
+    Defaults to OpenAI so existing users with only ``OPENAI_API_KEY`` set keep
+    working unchanged. Operators running Azure / a self-hosted realtime-capable
+    gateway can point the voice path elsewhere without editing this module via:
+      - ``PRAISONAI_REALTIME_URL``    full ``wss://...`` URL (takes precedence)
+      - ``PRAISONAI_REALTIME_MODEL``  model for the default OpenAI URL
+      - ``PRAISONAI_REALTIME_API_KEY`` bearer key (falls back to OPENAI_API_KEY)
+    """
+    explicit_url = os.getenv('PRAISONAI_REALTIME_URL')
+    api_key = os.getenv('PRAISONAI_REALTIME_API_KEY') or OPENAI_API_KEY
+    if explicit_url:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        if "openai.com" in explicit_url:
+            headers["OpenAI-Beta"] = "realtime=v1"
+        return explicit_url, headers
+
+    model = os.getenv(
+        'PRAISONAI_REALTIME_MODEL', 'gpt-4o-realtime-preview-2024-10-01'
+    )
+    return (
+        f"wss://api.openai.com/v1/realtime?model={model}",
+        {
+            "Authorization": f"Bearer {api_key}",
+            "OpenAI-Beta": "realtime=v1",
+        },
+    )
+
+
 SYSTEM_MESSAGE = (
     "You are a helpful and bubbly AI assistant who loves to chat about "
     "anything the user is interested in and is prepared to offer them facts. "
@@ -313,12 +345,17 @@ async def handle_media_stream(websocket: WebSocket):
         print("Client connected")
         await websocket.accept()
 
+        realtime_url, realtime_headers = _resolve_realtime_endpoint()
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
-            extra_headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "OpenAI-Beta": "realtime=v1"
-            }
+            realtime_url,
+            extra_headers=realtime_headers,
+            # Bounded connect / heartbeat / close so a dead upstream cannot
+            # hold a live Twilio media leg (and phone number) indefinitely.
+            open_timeout=10,
+            ping_interval=20,
+            ping_timeout=20,
+            close_timeout=5,
+            max_size=2 ** 20,  # 1 MiB frame cap
         ) as openai_ws:
             await send_session_update(openai_ws)
             stream_sid = None

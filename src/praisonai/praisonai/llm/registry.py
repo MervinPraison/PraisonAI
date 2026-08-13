@@ -31,6 +31,37 @@ ProviderFactory = Callable[[str, Optional[Dict[str, Any]]], Any]
 ProviderType = Union[ProviderClass, ProviderFactory]
 
 
+# Default ceilings so an unresponsive provider cannot pin a request coroutine
+# (or a bridge worker thread) indefinitely. Both are overridable per-call via
+# kwargs, and the timeout is tunable for operators via PRAISONAI_LLM_TIMEOUT.
+_DEFAULT_LLM_TIMEOUT_SECONDS = 60.0
+_DEFAULT_LLM_NUM_RETRIES = 2
+
+
+def default_llm_timeout() -> float:
+    """Resolve the default LLM call timeout, tolerating a bad env value."""
+    import os  # lazy: keep module top-level imports to stdlib typing/threading only
+    raw = os.getenv("PRAISONAI_LLM_TIMEOUT")
+    if not raw:
+        return _DEFAULT_LLM_TIMEOUT_SECONDS
+    try:
+        return float(raw)
+    except ValueError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Invalid PRAISONAI_LLM_TIMEOUT=%r; falling back to %.0fs",
+            raw, _DEFAULT_LLM_TIMEOUT_SECONDS,
+        )
+        return _DEFAULT_LLM_TIMEOUT_SECONDS
+
+
+def _apply_default_timeout(completion_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Seed a default timeout + bounded retries. An explicit caller value wins."""
+    completion_kwargs.setdefault("timeout", default_llm_timeout())
+    completion_kwargs.setdefault("num_retries", _DEFAULT_LLM_NUM_RETRIES)
+    return completion_kwargs
+
+
 class LLMProviderRegistry(PluginRegistry[ProviderType]):
     """
     Registry for LLM providers.
@@ -255,6 +286,7 @@ def _get_builtin_provider_loaders() -> Dict[str, Callable[[], ProviderType]]:
             completion_kwargs = {
                 k: v for k, v in {**self.config, **kwargs}.items() if k != "provider"
             }
+            _apply_default_timeout(completion_kwargs)
             messages = [{"role": "user", "content": prompt}]
             return litellm, full_model, messages, completion_kwargs
 
