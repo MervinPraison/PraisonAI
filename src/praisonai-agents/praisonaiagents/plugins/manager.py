@@ -847,11 +847,27 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             return HookResult.allow()
         yield HookEvent.BEFORE_TOOL_DEFINITIONS, before_tool_definitions_hook
 
+    _MISSING = object()
+
+    def _message_payload(data):
+        # Project only the identity fields the concrete input actually carries.
+        # Inbound (MessageReceivedInput) exposes the full sender/channel/message
+        # identity; outbound inputs (MessageSending/Sent/Undelivered) expose a
+        # subset. Emitting fabricated empty strings for absent fields would make
+        # per-user policy/observability plugins silently lose their scope, so we
+        # skip any field the event does not provide instead.
+        payload = {"content": getattr(data, "content", "")}
+        for key in ("platform", "sender_id", "channel_id",
+                    "channel_type", "message_id", "session_id"):
+            value = getattr(data, key, _MISSING)
+            if value is not _MISSING and value is not None:
+                payload[key] = value
+        return payload
+
     if _overrides("before_message"):
         def before_message_hook(data, _p=plugin):
-            content = getattr(data, "content", "")
             try:
-                new = _p.before_message({"content": content})
+                new = _p.before_message(_message_payload(data))
             except GuardrailBlocked as e:
                 return HookResult.block(e.reason)
             decision = _as_decision(new)
@@ -864,12 +880,27 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("after_message"):
         def after_message_hook(data, _p=plugin):
-            content = getattr(data, "content", "")
-            new = _p.after_message({"content": content})
+            new = _p.after_message(_message_payload(data))
             if isinstance(new, dict) and "content" in new and hasattr(data, "content"):
                 data.content = new["content"]
             return HookResult.allow()
         yield HookEvent.MESSAGE_SENDING, after_message_hook
+
+    if _overrides("message_sent"):
+        def message_sent_hook(data, _p=plugin):
+            payload = _message_payload(data)
+            _p.message_sent(payload)
+            return HookResult.allow()
+        yield HookEvent.MESSAGE_SENT, message_sent_hook
+
+    if _overrides("message_undelivered"):
+        def message_undelivered_hook(data, _p=plugin):
+            payload = _message_payload(data)
+            payload["error"] = getattr(data, "error", "")
+            payload["notice_delivered"] = getattr(data, "notice_delivered", False)
+            _p.message_undelivered(payload)
+            return HookResult.allow()
+        yield HookEvent.MESSAGE_UNDELIVERED, message_undelivered_hook
 
     if _overrides("on_permission_ask"):
         def on_permission_ask_hook(data, _p=plugin):
