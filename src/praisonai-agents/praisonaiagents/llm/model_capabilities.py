@@ -372,6 +372,44 @@ def supports_web_fetch(model_name: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=256)
+def is_reasoning_model(model_name: str) -> bool:
+    """
+    Check if a model is a reasoning model (OpenAI o1/o3/gpt-5.x class).
+
+    Reasoning models require ``max_completion_tokens`` instead of ``max_tokens``
+    and reject several sampling params (temperature, top_p, etc.).
+
+    Uses LiteLLM's ``supports_reasoning()`` as the primary check, with a
+    prefix-based fallback for models LiteLLM doesn't know about yet.
+
+    Args:
+        model_name: The name of the model to check (with or without provider prefix)
+
+    Returns:
+        bool: True if the model is a reasoning model, False otherwise
+    """
+    if not model_name:
+        return False
+
+    try:
+        litellm = _get_litellm()
+        if litellm is not None and hasattr(litellm, 'supports_reasoning'):
+            if litellm.supports_reasoning(model=model_name):
+                return True
+    except Exception:
+        pass
+
+    # Fallback prefix match for reasoning-class models (strip provider prefix)
+    model = model_name.split('/')[-1].lower()
+    return (
+        model.startswith('o1')
+        or model.startswith('o3')
+        or model.startswith('o4')
+        or model.startswith('gpt-5')
+    )
+
+
 def is_gemini_internal_tool(tool) -> bool:
     """
     Check if a tool is a Gemini internal tool and should be included in formatted tools.
