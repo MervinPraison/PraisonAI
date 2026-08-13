@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 410 | **Rust Features:** 667 | **Parity:** 70.0%
+> **Python Features:** 411 | **Rust Features:** 667 | **Parity:** 69.8%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 410 |
+| Python Core Features | 411 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **123** |
+| **Actual Gap Count** | **124** |
 | Language Limitations (N/A) | 4 |
-| **Parity** | **70.0%** |
+| **Parity** | **69.8%** |
 
 ## Implemented Features
 
@@ -759,6 +759,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `PraisonAIAgents`
 - ❌ `PraisonAIConfigError`
 - ❌ `PraisonAIError`
+- ❌ `PreCompactionMemoryFlushConfig`
 - ❌ `RetryBackoffConfig`
 - ❌ `RulesConfig`
 - ❌ `RunOutcome`

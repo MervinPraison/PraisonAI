@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 410,
+    "pythonCoreFeatures": 411,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
-    "gapCount": 116,
+    "gapCount": 117,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 103
+    "priorityP3": 104
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -228,6 +228,7 @@
       "PraisonAIConfigError",
       "PraisonAIError",
       "PraisonConfig",
+      "PreCompactionMemoryFlushConfig",
       "PromptExpanderAgent",
       "Provider",
       "ProviderStatus",
@@ -549,6 +550,7 @@
         "PlanningConfig",
         "PluginsConfig",
         "PraisonConfig",
+        "PreCompactionMemoryFlushConfig",
         "REFLECTION_PRESETS",
         "ReflectionConfig",
         "RulesConfig",
@@ -5471,6 +5473,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "config"
+      },
+      {
+        "feature": "PreCompactionMemoryFlushConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "config"
       },
       {

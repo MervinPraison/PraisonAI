@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 410,
+    "pythonCoreFeatures": 411,
     "rustFeatures": 667,
-    "gapCount": 128,
-    "parityPercentage": 162.7
+    "gapCount": 129,
+    "parityPercentage": 162.3
   },
   "pythonCoreSDK": {
     "exports": [
@@ -224,6 +224,7 @@
       "PraisonAIConfigError",
       "PraisonAIError",
       "PraisonConfig",
+      "PreCompactionMemoryFlushConfig",
       "PromptExpanderAgent",
       "Provider",
       "ProviderStatus",
@@ -4389,6 +4390,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "config"
+      },
+      {
+        "feature": "PreCompactionMemoryFlushConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "config"
       },
       {
