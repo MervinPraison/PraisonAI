@@ -15,6 +15,24 @@ from .config import BackgroundConfig
 
 logger = get_logger(__name__)
 
+
+def _safe_on_complete(
+    on_complete: Optional[Callable[["BackgroundTask"], None]],
+    task: "BackgroundTask",
+) -> None:
+    """Invoke ``on_complete`` for a terminal task, swallowing callback errors.
+
+    Shared by every terminal branch (success, failure, timeout, cancellation)
+    so the completion contract holds regardless of how the task ended.
+    """
+    if on_complete is None:
+        return
+    try:
+        on_complete(task)
+    except Exception as cb_error:
+        logger.warning(f"on_complete callback error: {cb_error}")
+
+
 class BackgroundRunner:
     """
     Manages background task execution.
@@ -119,11 +137,15 @@ class BackgroundRunner:
         
         # Create the execution coroutine
         async def execute():
-            async with self._get_semaphore():
-                task.start()
-                logger.info(f"Background task started: {task.name} ({task.id})")
-                
-                try:
+            # The semaphore acquisition is inside the ``try`` so cancellation
+            # while queued (waiting for a slot) still routes through the
+            # ``CancelledError`` handler and fires ``on_complete`` — matching
+            # the terminal-notification contract for every other outcome.
+            try:
+                async with self._get_semaphore():
+                    task.start()
+                    logger.info(f"Background task started: {task.name} ({task.id})")
+
                     # Check if function is async
                     if asyncio.iscoroutinefunction(func):
                         result = await asyncio.wait_for(
@@ -137,36 +159,33 @@ class BackgroundRunner:
                             loop.run_in_executor(None, lambda: func(*args, **kwargs)),
                             timeout=timeout or self.config.default_timeout
                         )
-                    
+
                     task.complete(result)
                     logger.info(f"Background task completed: {task.name} ({task.id})")
-                    
-                    if on_complete:
-                        try:
-                            on_complete(task)
-                        except Exception as e:
-                            logger.warning(f"on_complete callback error: {e}")
-                    
+
+                    _safe_on_complete(on_complete, task)
+
                     return result
-                    
-                except asyncio.TimeoutError:
-                    task.fail(f"Task timed out after {timeout}s")
-                    logger.warning(f"Background task timed out: {task.name}")
-                    
-                except asyncio.CancelledError:
-                    task.cancel()
-                    logger.info(f"Background task cancelled: {task.name}")
-                    raise
-                    
-                except Exception as e:
-                    task.fail(str(e))
-                    logger.error(f"Background task failed: {task.name} - {e}")
-                    
-                    if on_complete:
-                        try:
-                            on_complete(task)
-                        except Exception as cb_error:
-                            logger.warning(f"on_complete callback error: {cb_error}")
+
+            except asyncio.TimeoutError:
+                task.fail(f"Task timed out after {timeout}s")
+                logger.warning(f"Background task timed out: {task.name}")
+
+                _safe_on_complete(on_complete, task)
+
+            except asyncio.CancelledError:
+                task.cancel()
+                logger.info(f"Background task cancelled: {task.name}")
+
+                _safe_on_complete(on_complete, task)
+
+                raise
+
+            except Exception as e:
+                task.fail(str(e))
+                logger.error(f"Background task failed: {task.name} - {e}")
+
+                _safe_on_complete(on_complete, task)
         
         # Create and store the future
         task._future = asyncio.create_task(execute())
