@@ -20,7 +20,6 @@ Example:
     provider = create_llm_provider("cloudflare/workers-ai")
 """
 
-import os
 import threading
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from .._registry import PluginRegistry
@@ -41,6 +40,7 @@ _DEFAULT_LLM_NUM_RETRIES = 2
 
 def default_llm_timeout() -> float:
     """Resolve the default LLM call timeout, tolerating a bad env value."""
+    import os  # lazy: keep module top-level imports to stdlib typing/threading only
     raw = os.getenv("PRAISONAI_LLM_TIMEOUT")
     if not raw:
         return _DEFAULT_LLM_TIMEOUT_SECONDS
