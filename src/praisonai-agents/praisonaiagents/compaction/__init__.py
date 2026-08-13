@@ -39,6 +39,9 @@ __all__ = [
     "SummaryBuilderProtocol",
     # Read-only recap
     "build_recap",
+    "MemoryFlushResult",
+    "run_pre_compaction_flush",
+    "run_pre_compaction_flush_sync",
 ]
 
 
@@ -75,5 +78,21 @@ def __getattr__(name: str):
     if name == "build_recap":
         from .recap import build_recap
         return build_recap
+
+    if name in {
+        "MemoryFlushResult",
+        "run_pre_compaction_flush",
+        "run_pre_compaction_flush_sync",
+    }:
+        from .memory_flush import (
+            MemoryFlushResult,
+            run_pre_compaction_flush,
+            run_pre_compaction_flush_sync,
+        )
+        return {
+            "MemoryFlushResult": MemoryFlushResult,
+            "run_pre_compaction_flush": run_pre_compaction_flush,
+            "run_pre_compaction_flush_sync": run_pre_compaction_flush_sync,
+        }[name]
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

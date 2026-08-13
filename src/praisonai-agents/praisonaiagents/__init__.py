@@ -426,6 +426,7 @@ _LAZY_IMPORTS = {
     'WebConfig': ('praisonaiagents.config.feature_configs', 'WebConfig'),
     'OutputConfig': ('praisonaiagents.config.feature_configs', 'OutputConfig'),
     'ExecutionConfig': ('praisonaiagents.config.feature_configs', 'ExecutionConfig'),
+    'PreCompactionMemoryFlushConfig': ('praisonaiagents.config.feature_configs', 'PreCompactionMemoryFlushConfig'),
     'TemplateConfig': ('praisonaiagents.config.feature_configs', 'TemplateConfig'),
     'CachingConfig': ('praisonaiagents.config.feature_configs', 'CachingConfig'),
     'HooksConfig': ('praisonaiagents.config.feature_configs', 'HooksConfig'),

@@ -272,6 +272,136 @@ class FileMemory:
                 pass
             return False
 
+    def commit_memory_batch(
+        self,
+        writes: List[tuple[str, tuple[Any, ...], Dict[str, Any]]],
+        *,
+        deadline: float,
+        commit_guard: Any,
+    ) -> None:
+        """Atomically persist a staged batch before ``deadline``.
+
+        A batch may target short- or long-term memory, but not both because they
+        live in separate files. The complete JSON payload is prepared in a
+        temporary file; the cancellation guard protects the single
+        ``os.replace`` that makes the batch visible. A short-term overflow that
+        would require cross-file auto-promotion is rejected before either file
+        changes; batch commits never silently skip configured promotion.
+        """
+        import tempfile
+
+        kinds = {
+            "store_short_term": "short_term",
+            "add_short_term": "short_term",
+            "store_long_term": "long_term",
+            "add_long_term": "long_term",
+        }
+        normalized = []
+        for name, args, kwargs in writes:
+            memory_type = kinds.get(name)
+            if memory_type is None or not args:
+                raise ValueError(f"Unsupported staged memory write {name!r}")
+            metadata = kwargs.get(
+                "metadata", args[1] if len(args) > 1 else None
+            )
+            default_importance = 0.5 if memory_type == "short_term" else 0.8
+            importance = kwargs.get(
+                "importance", args[2] if len(args) > 2 else default_importance
+            )
+            normalized.append(
+                (memory_type, str(args[0]), metadata or {}, float(importance))
+            )
+
+        memory_types = {item[0] for item in normalized}
+        if len(memory_types) != 1:
+            raise ValueError(
+                "Atomic memory batches cannot span short- and long-term files"
+            )
+        if time.monotonic() >= deadline or commit_guard.cancelled:
+            raise TimeoutError("Memory batch deadline expired before preparation")
+
+        memory_type = normalized[0][0]
+        filepath = (
+            self.short_term_file
+            if memory_type == "short_term"
+            else self.long_term_file
+        )
+        tmp_path = None
+        committed_items = []
+        try:
+            with self._lock:
+                items = [
+                    MemoryItem.from_dict(item)
+                    for item in self._read_json(filepath, [])
+                ]
+                for _, content, metadata, importance in normalized:
+                    item = MemoryItem(
+                        id=self._generate_id(content),
+                        content=content,
+                        metadata=metadata,
+                        importance=importance,
+                    )
+                    items.append(item)
+                    committed_items.append(item)
+
+                limit_key = f"{memory_type}_limit"
+                limit = self.config[limit_key]
+                if len(items) > limit:
+                    if memory_type == "short_term":
+                        if self.config["auto_promote"]:
+                            raise ValueError(
+                                "Atomic short-term batch would require "
+                                "cross-file auto-promotion"
+                            )
+                        items = items[-limit:]
+                    else:
+                        items.sort(key=lambda item: item.importance, reverse=True)
+                        items = items[:limit]
+
+                tmp_fd, tmp_name = tempfile.mkstemp(
+                    dir=str(filepath.parent),
+                    prefix=f".{filepath.name}.",
+                    suffix=".tmp",
+                )
+                tmp_path = Path(tmp_name)
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+                    json.dump(
+                        [item.to_dict() for item in items],
+                        handle,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                    handle.flush()
+                    os.fsync(handle.fileno())
+
+                if time.monotonic() >= deadline or commit_guard.cancelled:
+                    raise TimeoutError(
+                        "Memory batch deadline expired before atomic commit"
+                    )
+                if not commit_guard.commit(
+                    lambda: os.replace(tmp_path, filepath)
+                ):
+                    raise TimeoutError("Memory batch was cancelled")
+                tmp_path = None
+                if memory_type == "short_term":
+                    self._short_term = items
+                else:
+                    self._long_term = items
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+
+        for item in committed_items:
+            self._emit_memory_event(
+                "store",
+                memory_type,
+                len(item.content),
+                metadata=item.metadata,
+            )
+
     
     def _load_config(self, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Load or create configuration."""

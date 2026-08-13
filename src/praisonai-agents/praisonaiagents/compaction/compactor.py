@@ -511,6 +511,76 @@ class ContextCompactor:
 
         return cut_index
 
+    def preview_older_slice(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Return the non-system prefix that compaction may discard.
+
+        The recent-count boundary (``preserve_recent``) is the *minimum* region
+        every strategy drops. Budget-driven strategies (SLIDING, and TRUNCATE's
+        second pass) can drop **more** older messages to reach ``target_tokens``.
+        To ensure a pre-compaction consumer is offered every message that could
+        be discarded — so durable facts are never silently lost — this returns a
+        safe *superset*: whichever boundary (count- or token-budget-based) covers
+        the larger older region, with tool-call pairs kept intact. It never
+        mutates the transcript.
+        """
+        other_messages = [
+            message
+            for message in messages
+            if not (self.preserve_system and message.get("role") == "system")
+        ]
+        count_cut = max(0, len(other_messages) - self.preserve_recent)
+
+        # TRUNCATE and sliding strategies can discard additional messages to
+        # satisfy the token budget. Simulate their pure list transforms so the
+        # preview uses the same second-pass tool-pair behavior as compaction.
+        if self.strategy == CompactionStrategy.TRUNCATE:
+            compacted = self._truncate(messages)
+        elif self.strategy in {CompactionStrategy.SLIDING, CompactionStrategy.SMART}:
+            compacted = self._sliding_window(messages)
+        else:
+            compacted = None
+        if compacted is not None:
+            kept_ids = {id(message) for message in compacted}
+            strategy_cut = next(
+                (
+                    index
+                    for index, message in enumerate(other_messages)
+                    if id(message) in kept_ids
+                ),
+                len(other_messages),
+            )
+            return list(other_messages[:strategy_cut])
+
+        # Token-budget boundary: mirror the sliding window's kept-from-the-end
+        # accounting (system messages count toward the budget) so we also cover
+        # older messages that budget-constrained truncation would drop.
+        system_tokens = (
+            self.count_total_tokens(
+                [m for m in messages if m.get("role") == "system"]
+            )
+            if self.preserve_system
+            else 0
+        )
+        budget_kept = 0
+        running = system_tokens
+        for message in reversed(other_messages):
+            running += self.count_message_tokens(message)
+            if running <= self.target_tokens:
+                budget_kept += 1
+            else:
+                break
+        budget_cut = len(other_messages) - budget_kept
+
+        # For summarization/pruning, the count boundary is the destructive
+        # region. Keep the budget boundary as a conservative fallback for
+        # custom strategies using this compactor.
+        cut = self._snap_to_pair_boundary(
+            other_messages, max(count_cut, budget_cut)
+        )
+        return list(other_messages[:cut])
+
     def _truncate(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Truncate oldest messages."""
         result = []
