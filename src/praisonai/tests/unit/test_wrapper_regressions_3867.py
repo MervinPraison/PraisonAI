@@ -228,6 +228,8 @@ def test_import_profiler_records_default_once_across_overlapping_scopes():
         assert len(first_json) == 1
         assert len(second_json) == 1
     finally:
+        second.__exit__(None, None, None)
+        first.__exit__(None, None, None)
         builtins.__import__ = original
         Profiler.disable()
         Profiler.clear()
