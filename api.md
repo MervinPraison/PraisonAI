@@ -949,10 +949,6 @@ Methods:
 * <code title="cli">praisonai schedule suggestion-dismiss <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule suggestion-propose <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule suggestions <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
-* <code title="cli">praisonai standardise check <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
-* <code title="cli">praisonai standardise fix <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
-* <code title="cli">praisonai standardise init <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
-* <code title="cli">praisonai standardise report <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
 * <code title="cli">praisonai validate check <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
 * <code title="cli">praisonai validate schema <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
 * <code title="cli">praisonai validate validate <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
