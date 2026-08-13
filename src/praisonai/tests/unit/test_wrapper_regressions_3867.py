@@ -351,12 +351,13 @@ def test_import_profiler_defensive_and_idempotent_paths(monkeypatch):
         profiler.__exit__(None, None, None)
 
 
-def test_yaml_cli_config_extracts_output_mode():
+def test_yaml_cli_config_falls_back_to_legacy_output_format():
     from praisonai_code.cli.legacy.praison_ai import PraisonAI
 
     cli = object.__new__(PraisonAI)
     cli.args = SimpleNamespace(
-        output="stream-json",
+        output=None,
+        output_format="stream-json",
         tool_retry_attempts=1,
     )
 

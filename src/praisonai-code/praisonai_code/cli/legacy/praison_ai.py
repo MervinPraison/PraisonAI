@@ -1987,9 +1987,9 @@ class PraisonAI:
             if stream_metrics:
                 cli_config['stream_metrics'] = True
 
-        output_mode = getattr(
-            self.args, 'output', getattr(self.args, 'output_format', None)
-        )
+        output_mode = getattr(self.args, 'output', None)
+        if output_mode is None:
+            output_mode = getattr(self.args, 'output_format', None)
         if output_mode is not None:
             cli_config['output'] = output_mode
 
