@@ -84,21 +84,36 @@ class AsyncMemoryMixin:
         if not hasattr(self, '_memory_instance') or self._memory_instance is None:
             logger.debug("No memory configured for async search")
             return []
+
+        # Shared adapters must receive the configured identity explicitly.
+        # FileMemory is already bound to a user-specific path and accepts these
+        # as harmless protocol kwargs.
+        scoped_kwargs = dict(kwargs)
+        config = getattr(self, "_memory_config", None)
+        user_id = getattr(config, "user_id", None)
+        session_id = getattr(config, "session_id", None)
+        if user_id:
+            scoped_kwargs["user_id"] = user_id
+        if session_id:
+            scoped_kwargs["session_id"] = session_id
+            metadata_filter = dict(scoped_kwargs.get("metadata_filter") or {})
+            metadata_filter["session_id"] = session_id
+            scoped_kwargs["metadata_filter"] = metadata_filter
             
         # Check if memory adapter supports async operations
         if isinstance(self._memory_instance, AsyncMemoryProtocol):
             try:
                 if memory_type == "long_term":
-                    return await self._memory_instance.asearch_long_term(query, limit, **kwargs)
+                    return await self._memory_instance.asearch_long_term(query, limit, **scoped_kwargs)
                 else:
-                    return await self._memory_instance.asearch_short_term(query, limit, **kwargs)
+                    return await self._memory_instance.asearch_short_term(query, limit, **scoped_kwargs)
             except Exception as e:
                 logger.error(f"Error in async memory search: {e}")
                 return []
         else:
             # Fallback: run sync memory operations in thread pool
             return await self._run_memory_in_thread(
-                "search", query, memory_type, limit=limit, **kwargs
+                "search", query, memory_type, limit=limit, **scoped_kwargs
             )
     
     async def _run_memory_in_thread(

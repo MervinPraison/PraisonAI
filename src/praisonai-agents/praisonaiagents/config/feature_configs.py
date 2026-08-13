@@ -239,6 +239,12 @@ class MemoryConfig:
     # History injection (auto-inject session history into context)
     history: bool = False
     history_limit: int = 10
+
+    # Turn-start long-term memory retrieval. Disabled by default so existing
+    # agents incur no backend query or prompt changes.
+    prefetch: bool = False
+    prefetch_limit: int = 5
+    prefetch_token_budget: int = 512
     
     # Auto-save session name (consolidated from standalone auto_save param)
     # When set, automatically saves session to memory with this name
@@ -265,6 +271,9 @@ class MemoryConfig:
             "learn": learn_dict,
             "history": self.history,
             "history_limit": self.history_limit,
+            "prefetch": self.prefetch,
+            "prefetch_limit": self.prefetch_limit,
+            "prefetch_token_budget": self.prefetch_token_budget,
             "auto_save": self.auto_save,
         }
 
