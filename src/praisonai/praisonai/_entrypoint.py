@@ -42,19 +42,44 @@ def _resolve_run_inputs(framework: str | None) -> tuple[Any, list[dict[str, Any]
     return adapter, _build_config_list()
 
 
+# Loose kwargs whose CLI dest differs from the intuitive Python name. Mapping
+# them keeps the documented option effective instead of silently dropping it
+# into ``cli_config`` under a key no downstream consumer reads.
+_CLI_KWARG_ALIASES = {"session": "resume_session"}
+
+
+def _apply_model_override(config_list: list[dict[str, Any]], extra: dict) -> None:
+    """Honour a loose ``model=``/``llm=`` kwarg by writing it onto the resolved
+    ``config_list`` the generator reads model selection from.
+
+    Mirrors the CLI's ``--llm`` behaviour (see ``direct_prompt`` /
+    ``agents_generator``: model is taken from ``config_list[0]['model']``), so a
+    Python caller's ``model=`` is actually applied instead of being ignored.
+    Mutates ``extra`` in place, popping the consumed key so it is not also
+    forwarded through ``cli_config``.
+    """
+    model = extra.pop("model", None)
+    if model is None:
+        model = extra.pop("llm", None)
+    if model and config_list:
+        config_list[0]["model"] = model
+
+
 def _merge_cli_config(cli_config: dict | None, extra: dict) -> dict | None:
     """Merge loose ``run()``/``arun()`` kwargs into the ``cli_config`` escape
     hatch the CLI already forwards to ``AgentsGenerator``.
 
     This gives Python callers the same pass-through the CLI uses for advanced
-    options (e.g. ``model``, ``session``) without inventing a parallel option
-    surface. Explicit ``cli_config`` keys win over loose kwargs.
+    options without inventing a parallel option surface. Loose names whose CLI
+    dest differs (e.g. ``session`` -> ``resume_session``) are normalised so they
+    reach the consumer that reads them. Explicit ``cli_config`` keys win over
+    loose kwargs.
     """
     if not extra:
         return cli_config
     merged = dict(cli_config or {})
     for key, value in extra.items():
-        merged.setdefault(key, value)
+        merged.setdefault(_CLI_KWARG_ALIASES.get(key, key), value)
     return merged
 
 
@@ -67,13 +92,16 @@ def run(agent_file: str,
         **kwargs: Any) -> str:
     """One-line Python entry point. Equivalent to `praisonai <agent_file>`.
 
-    Advanced ``praisonai run`` options (e.g. ``model=``, ``session=``) can be
-    passed as loose keyword arguments; they are forwarded through ``cli_config``
-    to the generator, mirroring the CLI's own pass-through.
+    Advanced ``praisonai run`` options can be passed as loose keyword arguments.
+    ``model=`` (alias ``llm=``) selects the LLM like the CLI's ``--llm``;
+    ``session=`` resumes a session like ``--resume``; any other option is
+    forwarded through ``cli_config`` to the generator, mirroring the CLI's
+    pass-through.
     """
     from .agents_generator import AgentsGenerator
 
     adapter, config_list = _resolve_run_inputs(framework)
+    _apply_model_override(config_list, kwargs)
     cli_config = _merge_cli_config(cli_config, kwargs)
 
     # Own the generator's lifecycle so its lazily-allocated tool-timeout
@@ -110,6 +138,7 @@ async def arun(agent_file: str,
     # synchronous credential/config-file I/O does not block it. This is the
     # reason arun exists: a FastAPI handler awaiting arun must not stall the loop.
     adapter, config_list = await asyncio.to_thread(_resolve_run_inputs, framework)
+    _apply_model_override(config_list, kwargs)
     cli_config = _merge_cli_config(cli_config, kwargs)
 
     # Own the generator's lifecycle so its lazily-allocated tool-timeout
