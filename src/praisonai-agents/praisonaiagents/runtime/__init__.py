@@ -77,6 +77,15 @@ __all__ = [
     "collect_findings",
     "apply_fixes",
     "plan_fixes",
+    # Extensible runtime health checks
+    "HealthCheckProtocol",
+    "HealthCheckResult",
+    "HealthRepairResult",
+    "HealthCheckRegistry",
+    "get_health_check_registry",
+    "register_health_check",
+    "run_health_checks",
+    "arun_health_checks",
     # Capability types
     "RuntimeCapability",
     "RuntimeCapabilityMatrix",
@@ -164,6 +173,18 @@ _LAZY_GROUPS = {
         'collect_findings': ('praisonaiagents.runtime.doctor_registry', 'collect_findings'),
         'apply_fixes': ('praisonaiagents.runtime.doctor_registry', 'apply_fixes'),
         'plan_fixes': ('praisonaiagents.runtime.doctor_registry', 'plan_fixes'),
+    },
+    'health_check': {
+        'HealthCheckProtocol': ('praisonaiagents.runtime.health_check', 'HealthCheckProtocol'),
+        'HealthCheckResult': ('praisonaiagents.runtime.health_check', 'HealthCheckResult'),
+        'HealthRepairResult': ('praisonaiagents.runtime.health_check', 'HealthRepairResult'),
+    },
+    'health_registry': {
+        'HealthCheckRegistry': ('praisonaiagents.runtime.health_registry', 'HealthCheckRegistry'),
+        'get_health_check_registry': ('praisonaiagents.runtime.health_registry', 'get_health_check_registry'),
+        'register_health_check': ('praisonaiagents.runtime.health_registry', 'register_health_check'),
+        'run_health_checks': ('praisonaiagents.runtime.health_registry', 'run_health_checks'),
+        'arun_health_checks': ('praisonaiagents.runtime.health_registry', 'arun_health_checks'),
     },
     'journal': {
         'RunJournal': ('praisonaiagents.runtime.journal', 'RunJournal'),
