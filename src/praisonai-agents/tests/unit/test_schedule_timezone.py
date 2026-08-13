@@ -1,5 +1,6 @@
 """Timezone and DST coverage for the core scheduler."""
 
+import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -24,10 +25,8 @@ def _job(schedule, *, created_at=0.0, last_run_at=None):
     )
 
 
-pytest.importorskip("croniter")
-
-
 def test_cron_keeps_local_hour_across_spring_dst_transition():
+    pytest.importorskip("croniter")
     next_run = next_fire_time(
         "0 8 * * *",
         _epoch(2026, 3, 7, 13),
@@ -38,6 +37,7 @@ def test_cron_keeps_local_hour_across_spring_dst_transition():
 
 
 def test_cron_keeps_local_hour_across_fall_dst_transition():
+    pytest.importorskip("croniter")
     next_run = next_fire_time(
         "0 8 * * *",
         _epoch(2026, 10, 31, 12),
@@ -137,3 +137,90 @@ def test_config_store_uses_instance_default_timezone(tmp_path):
     assert store.claim_due(_epoch(2026, 7, 1, 12, 59), "worker") == []
     claimed = store.claim_due(_epoch(2026, 7, 1, 13, 0), "worker")
     assert [item.id for item in claimed] == ["brief"]
+
+
+def test_config_store_rejects_invalid_instance_timezone(tmp_path):
+    import yaml
+
+    from praisonaiagents.scheduler.config_store import ConfigYamlScheduleStore
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        yaml.safe_dump({"scheduler": {"timezone": "Mars/Base"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Mars/Base"):
+        ConfigYamlScheduleStore(str(config))
+
+
+def _schedule_agent_fixture(tmp_path):
+    from praisonaiagents.scheduler.store import FileScheduleStore
+    from praisonaiagents.tools.schedule_tools import schedule_add
+
+    return FileScheduleStore(store_dir=str(tmp_path)), schedule_add
+
+
+def test_schedule_tool_agent_smoke(monkeypatch, tmp_path):
+    from unittest.mock import patch
+
+    from praisonaiagents import Agent
+
+    store, schedule_add = _schedule_agent_fixture(tmp_path)
+    agent = Agent(
+        name="schedule-smoke",
+        instructions="Use the scheduling tool to create the requested job.",
+        tools=[schedule_add],
+    )
+    monkeypatch.setattr(
+        agent,
+        "chat",
+        lambda prompt, **kwargs: schedule_add(
+            name="agent-morning-brief",
+            schedule="cron:0 8 * * *",
+            tz="America/New_York",
+        ),
+    )
+
+    with patch(
+        "praisonaiagents.tools.schedule_tools._get_store", return_value=store
+    ):
+        result = agent.start("Schedule a morning brief for 8 AM New York time.")
+    print(result)
+
+    assert store.get_by_name("agent-morning-brief").schedule.tz == "America/New_York"
+
+
+@pytest.mark.network
+@pytest.mark.skipif(
+    os.environ.get("RUN_REAL_KEY_TESTS") != "1"
+    or not os.environ.get("OPENAI_API_KEY"),
+    reason="Set RUN_REAL_KEY_TESTS=1 and OPENAI_API_KEY for the real agentic test",
+)
+def test_schedule_tool_real_agentic(tmp_path):
+    from unittest.mock import patch
+
+    from praisonaiagents import Agent
+
+    store, schedule_add = _schedule_agent_fixture(tmp_path)
+    agent = Agent(
+        name="schedule-agentic",
+        model="gpt-4o-mini",
+        instructions=(
+            "Always use schedule_add for scheduling requests and preserve the "
+            "timezone exactly as requested."
+        ),
+        tools=[schedule_add],
+    )
+
+    with patch(
+        "praisonaiagents.tools.schedule_tools._get_store", return_value=store
+    ):
+        result = agent.start(
+            "Use schedule_add to create a job named agent-morning-brief at "
+            "cron:0 8 * * * with timezone America/New_York."
+        )
+    print(result)
+
+    assert result
+    assert store.get_by_name("agent-morning-brief").schedule.tz == "America/New_York"

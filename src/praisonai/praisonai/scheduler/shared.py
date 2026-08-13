@@ -64,6 +64,10 @@ class ScheduleTicker:
         # falls between this anchor and "now" is treated as missed → caught up.
         self.created_at: float = time.time()
         self._is_cron = self.schedule_expr.lower().startswith("cron:")
+        if self._is_cron:
+            from praisonaiagents.scheduler.due import resolve_schedule_timezone
+
+            resolve_schedule_timezone(self.timezone)
         # For plain intervals we reuse the existing integer-interval parse so
         # behaviour is byte-for-byte identical to the fixed-interval loop.
         self._interval: Optional[int] = None

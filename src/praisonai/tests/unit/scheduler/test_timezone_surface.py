@@ -22,8 +22,20 @@ def test_schedule_ticker_uses_timezone_across_dst():
     assert ticker.is_due(_epoch(2026, 3, 8, 12, 0)) is True
 
 
+def test_schedule_ticker_rejects_invalid_timezone():
+    import pytest
+
+    from praisonai.scheduler.shared import ScheduleTicker
+
+    with pytest.raises(ValueError, match="Mars/Base"):
+        ScheduleTicker("cron:0 8 * * *", timezone="Mars/Base")
+
+
 def test_yaml_cron_and_timezone_are_preserved(tmp_path):
-    from praisonai.scheduler.yaml_loader import load_agent_yaml_with_schedule
+    from praisonai.scheduler.yaml_loader import (
+        load_agent_yaml_with_schedule,
+        validate_schedule_config,
+    )
 
     config = tmp_path / "agents.yaml"
     config.write_text(
@@ -38,9 +50,19 @@ def test_yaml_cron_and_timezone_are_preserved(tmp_path):
     )
 
     _, schedule = load_agent_yaml_with_schedule(str(config))
+    validate_schedule_config(schedule)
 
     assert schedule["interval"] == "cron:0 8 * * *"
     assert schedule["tz"] == "America/New_York"
+
+
+def test_yaml_validator_rejects_empty_cron():
+    import pytest
+
+    from praisonai.scheduler.yaml_loader import validate_schedule_config
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        validate_schedule_config({"interval": "cron:"})
 
 
 def test_schedule_add_cli_passes_timezone(monkeypatch):
