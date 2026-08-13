@@ -93,19 +93,90 @@ def test_recover_orphaned_runs_notifies_origin(monkeypatch):
 
     sent = []
 
-    async def _fake_notice(channel_target, text, session_id, run_epoch):
-        sent.append((channel_target, text, session_id, run_epoch))
+    async def _fake_notice(channel_target, text, run_id):
+        sent.append((channel_target, text, run_id))
         return True
 
-    gateway._deliver_restart_notice = _fake_notice
+    gateway._deliver_lost_run_notice = _fake_notice
 
     recovered = asyncio.run(gateway._recover_orphaned_runs())
 
     assert recovered == 1
     assert len(sent) == 1
     assert sent[0][0] == "telegram:42"
-    assert sent[0][2] == "run:r1"
+    assert sent[0][2] == "r1"
     assert ledger.closed is True
+
+
+def test_lost_run_notice_uses_durable_outbox(monkeypatch):
+    """The notice is persisted to the durable outbox *before* delivery.
+
+    Issue #3881 (review): ``recover_orphans`` terminalises a run to ``LOST`` and
+    never re-scans it, so the notice must survive a not-ready transport. Verify
+    the durable ``scheduled_outbox`` path is taken with a stable
+    ``run-recovery:{run_id}`` key rather than the in-process-only router path.
+    """
+    gateway = _make_gateway()
+
+    enqueued = {}
+
+    class _FakeRouter:
+        pass
+
+    class _FakeOutbox:
+        pass
+
+    monkeypatch.setattr(
+        type(gateway), "delivery_router",
+        property(lambda self: _FakeRouter()),
+    )
+    monkeypatch.setattr(
+        type(gateway), "scheduled_outbox",
+        property(lambda self: _FakeOutbox()),
+    )
+
+    async def _fake_via_outbox(outbox, router, route, text, idem):
+        enqueued["route"] = route
+        enqueued["idem"] = idem
+        return True
+
+    gateway._deliver_via_outbox = _fake_via_outbox
+
+    ok = asyncio.run(
+        gateway._deliver_lost_run_notice("telegram:42", "hi", "r1")
+    )
+
+    assert ok is True
+    assert enqueued["route"] == "telegram:42"
+    assert enqueued["idem"] == "run-recovery:r1"
+
+
+def test_lost_run_notice_falls_back_without_outbox(monkeypatch):
+    """No durable outbox => best-effort restart-notice path is used."""
+    gateway = _make_gateway()
+    monkeypatch.setattr(
+        type(gateway), "delivery_router", property(lambda self: None),
+    )
+    monkeypatch.setattr(
+        type(gateway), "scheduled_outbox", property(lambda self: None),
+    )
+
+    called = {}
+
+    async def _fake_restart(channel_target, text, session_id, run_epoch):
+        called["channel_target"] = channel_target
+        called["session_id"] = session_id
+        return True
+
+    gateway._deliver_restart_notice = _fake_restart
+
+    ok = asyncio.run(
+        gateway._deliver_lost_run_notice("telegram:42", "hi", "r1")
+    )
+
+    assert ok is True
+    assert called["channel_target"] == "telegram:42"
+    assert called["session_id"] == "run:r1"
 
 
 def test_recover_orphaned_runs_survives_recover_error(monkeypatch):

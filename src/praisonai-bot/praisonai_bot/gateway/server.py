@@ -5480,8 +5480,8 @@ class WebSocketGateway:
                     f"not be recovered ({outcome}). Please resend your request."
                 )
                 try:
-                    await self._deliver_restart_notice(
-                        channel_target, notice, f"run:{record.run_id}", 0,
+                    await self._deliver_lost_run_notice(
+                        channel_target, notice, record.run_id,
                     )
                 except Exception:
                     logger.exception(
@@ -5500,6 +5500,46 @@ class WebSocketGateway:
                     close()
                 except Exception:  # pragma: no cover - defensive
                     pass
+
+    async def _deliver_lost_run_notice(
+        self, channel_target: str, text: str, run_id: str,
+    ) -> bool:
+        """Notify a lost run's origin *durably*, surviving a not-ready transport.
+
+        Issue #3881 (review): a run reconciled by ``recover_orphans`` is already
+        terminal ``LOST`` and is never returned by a later boot's scan, so the
+        one notice we owe the user must not depend on the origin transport being
+        ready *this* boot. ``_deliver_restart_notice`` routes through the
+        ``DeliveryRouter`` whose dedup is a per-process LRU — a boot-time send to
+        a not-yet-connected channel returns ``False`` and the notice is lost for
+        good.
+
+        So we enqueue into the same durable SQLite ``scheduled_outbox`` the
+        scheduled-result path uses (:meth:`_deliver_via_outbox`) under a stable
+        ``run-recovery:{run_id}`` key *before* attempting delivery. A boot-time
+        miss leaves a pending row that drains on the next boot; the ``UNIQUE``
+        key makes a crash-loop notify at most once. When no durable outbox or
+        router is available we fall back to the best-effort restart-notice path
+        so older/embedded gateways still emit *something*.
+        """
+        router = self.delivery_router
+        outbox = self.scheduled_outbox
+        if router is not None and outbox is not None:
+            if ":" not in channel_target:
+                logger.warning(
+                    "channel_target '%s' must be 'channel:target'; skipping "
+                    "lost-run notice", channel_target,
+                )
+                return False
+            idem = f"run-recovery:{run_id}"
+            return await self._deliver_via_outbox(
+                outbox, router, channel_target, text, idem,
+            )
+        # No durable outbox (older/embedded gateway): best-effort exactly-once
+        # in-process notice keyed on the run id.
+        return await self._deliver_restart_notice(
+            channel_target, text, f"run:{run_id}", 0,
+        )
 
     def _open_run_ledger(self) -> Optional[Any]:
         """Open the durable run ledger, or ``None`` when it is unavailable.
