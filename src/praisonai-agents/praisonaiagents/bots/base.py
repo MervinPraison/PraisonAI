@@ -53,14 +53,194 @@ import asyncio
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 from .protocols import PlatformCapabilities
 
 __all__ = [
+    "SendErrorKind",
     "SendResult",
+    "classify_send_error",
     "BasePlatformAdapter",
 ]
+
+
+class SendErrorKind(str, Enum):
+    """Structured, machine-readable classification of *why* a send failed.
+
+    Carried on :class:`SendResult` so the retry loop, delivery router,
+    dead-target registry, DLQ and user-notice path can all reason about a
+    failure uniformly instead of substring-matching an English error string.
+
+    Members:
+        RATE_LIMITED: Throttled by the platform (HTTP 429); retry after wait.
+        TARGET_NOT_FOUND: Chat/channel no longer exists (HTTP 404/410); the
+            whole target is permanently unreachable — do not retry, mark dead.
+        FORBIDDEN: Bot was kicked/blocked or lacks rights (HTTP 403); the
+            target is permanently unreachable — do not retry, mark dead.
+        AUTH_FATAL: Bad/expired/revoked credential (HTTP 401); retrying the
+            same token is pointless — surface as a degraded state.
+        INVALID_REQUEST: Malformed payload the platform rejects (HTTP 400);
+            retrying the identical request will fail again.
+        TRANSIENT: Network blip / 5xx / timeout; safe to retry with backoff.
+        UNKNOWN: Could not classify; treated as retryable to preserve the
+            historical default (do not silently drop a send we can't classify).
+    """
+
+    RATE_LIMITED = "rate_limited"
+    TARGET_NOT_FOUND = "target_not_found"
+    FORBIDDEN = "forbidden"
+    AUTH_FATAL = "auth_fatal"
+    INVALID_REQUEST = "invalid_request"
+    TRANSIENT = "transient"
+    UNKNOWN = "unknown"
+
+
+#: Kinds that must NOT be retried by the default delivery loop. Everything
+#: else (rate-limited, transient, unknown) stays retryable so the historical
+#: behaviour is preserved and only *provably permanent* failures short-circuit.
+_NON_RETRYABLE_KINDS = frozenset(
+    {
+        SendErrorKind.TARGET_NOT_FOUND,
+        SendErrorKind.FORBIDDEN,
+        SendErrorKind.AUTH_FATAL,
+        SendErrorKind.INVALID_REQUEST,
+    }
+)
+
+
+def _retryable_for_kind(kind: Optional[SendErrorKind]) -> bool:
+    """Derive whether a failure of ``kind`` should be retried.
+
+    ``None`` (no classification) and the transient/rate-limited/unknown kinds
+    are retryable; only the confirmed-permanent kinds are not.
+    """
+    if kind is None:
+        return True
+    return kind not in _NON_RETRYABLE_KINDS
+
+
+def _error_status_code(exc: BaseException) -> Optional[int]:
+    """Best-effort extract an HTTP/platform status code from ``exc``.
+
+    Reads the common attributes platform SDKs expose (``status``,
+    ``status_code``, ``error_code``) so the fallback classifier can key off a
+    real status code with full fidelity rather than reverse-engineering the
+    error's string. Returns None when no integer status is present.
+    """
+    for attr in ("status", "status_code", "error_code"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, int):
+            return val
+    return None
+
+
+def classify_send_error(exc: BaseException) -> "SendResult":
+    """Pure, dependency-free fallback classifier for a send exception.
+
+    Maps an exception into a :class:`SendResult` carrying a
+    :class:`SendErrorKind` and derived ``retryable`` flag, keying primarily off
+    the HTTP/platform status code (highest fidelity) and falling back to a
+    small set of generic, cross-platform substrings. It is deliberately
+    conservative: anything it cannot confidently classify becomes
+    ``UNKNOWN`` (retryable), preserving the historical retry-everything default.
+
+    Adapters that know their native exception types should override
+    :meth:`BasePlatformAdapter.classify_error` for higher fidelity; this
+    ensures adapters that don't still behave correctly for standard HTTP cases.
+    """
+    error = str(exc)
+    status = _error_status_code(exc)
+
+    kind: SendErrorKind
+    if status is not None:
+        if status == 429:
+            kind = SendErrorKind.RATE_LIMITED
+        elif status == 401:
+            kind = SendErrorKind.AUTH_FATAL
+        elif status == 403:
+            kind = SendErrorKind.FORBIDDEN
+        elif status in (404, 410):
+            kind = SendErrorKind.TARGET_NOT_FOUND
+        elif status == 400:
+            kind = SendErrorKind.INVALID_REQUEST
+        elif 500 <= status < 600 or status == 408:
+            kind = SendErrorKind.TRANSIENT
+        else:
+            kind = SendErrorKind.UNKNOWN
+    elif isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError)):
+        kind = SendErrorKind.TRANSIENT
+    else:
+        kind = _classify_by_text(error)
+
+    return SendResult(
+        ok=False,
+        error=error,
+        error_kind=kind,
+        retryable=_retryable_for_kind(kind),
+    )
+
+
+#: Generic, cross-platform substrings used only when no status code / typed
+#: exception is available. Kept intentionally small and lower-cased; adapters
+#: own the high-fidelity mapping via ``classify_error``.
+_TEXT_RATE_LIMITED = ("too many requests", "rate limit", "rate_limited", "flood")
+_TEXT_FORBIDDEN = (
+    "forbidden",
+    "blocked",
+    "kicked",
+    "not enough rights",
+    "no rights to send",
+)
+_TEXT_TARGET_NOT_FOUND = (
+    "chat not found",
+    "channel not found",
+    "peer_id_invalid",
+    "user is deactivated",
+    "group chat was deleted",
+)
+_TEXT_AUTH_FATAL = (
+    "unauthorized",
+    "invalid token",
+    "invalid_auth",
+    "token_revoked",
+    "not_authed",
+    "authentication failed",
+)
+_TEXT_TRANSIENT = (
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "service unavailable",
+    "connection reset",
+    "connection refused",
+    "bad gateway",
+    "gateway timeout",
+)
+
+
+def _classify_by_text(error: str) -> SendErrorKind:
+    """Classify a send error from its message when no status code is present."""
+    text = error.lower()
+    for pat in _TEXT_RATE_LIMITED:
+        if pat in text:
+            return SendErrorKind.RATE_LIMITED
+    for pat in _TEXT_TARGET_NOT_FOUND:
+        if pat in text:
+            return SendErrorKind.TARGET_NOT_FOUND
+    for pat in _TEXT_AUTH_FATAL:
+        if pat in text:
+            return SendErrorKind.AUTH_FATAL
+    for pat in _TEXT_FORBIDDEN:
+        if pat in text:
+            return SendErrorKind.FORBIDDEN
+    for pat in _TEXT_TRANSIENT:
+        if pat in text:
+            return SendErrorKind.TRANSIENT
+    return SendErrorKind.UNKNOWN
 
 
 @dataclass
@@ -78,6 +258,13 @@ class SendResult:
         chat_id: The chat/channel the message was delivered to.
         message_ids: All platform message ids produced (one per chunk).
         error: Human-readable error string when ``ok`` is False.
+        error_kind: Structured, machine-readable classification of *why* the
+            send failed (see :class:`SendErrorKind`). ``None`` on success or
+            when a legacy adapter reports a failure without classifying it.
+        retryable: Whether the failure is worth retrying. Derived from
+            ``error_kind`` (permanent kinds → False); defaults True so an
+            unclassified failure preserves the historical retry-everything
+            behaviour rather than being silently dropped.
         retry_after: Suggested seconds to wait before retrying (from the
             platform's rate-limit response, if provided).
         metadata: Additional platform-specific result details.
@@ -88,6 +275,8 @@ class SendResult:
     chat_id: Optional[str] = None
     message_ids: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    error_kind: Optional[SendErrorKind] = None
+    retryable: bool = True
     retry_after: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -99,6 +288,8 @@ class SendResult:
             "chat_id": self.chat_id,
             "message_ids": list(self.message_ids),
             "error": self.error,
+            "error_kind": self.error_kind.value if self.error_kind else None,
+            "retryable": self.retryable,
             "retry_after": self.retry_after,
             "metadata": self.metadata,
         }
@@ -339,6 +530,22 @@ class BasePlatformAdapter(ABC):
         """Delete a message. Default: not supported → returns False."""
         return False
 
+    def classify_error(self, exc: BaseException) -> SendResult:
+        """Map a native send exception into a classified :class:`SendResult`.
+
+        This is the seam adapters override to translate their platform SDK's
+        exception types and status codes into the shared
+        :class:`SendErrorKind` taxonomy with full fidelity — done once at the
+        boundary where that information is available, rather than
+        reverse-engineered from a string later in the delivery loop.
+
+        The default delegates to the pure, status/text-aware
+        :func:`classify_send_error`, so an adapter that does not override still
+        behaves correctly for standard HTTP cases and only *provably permanent*
+        failures short-circuit the retry loop.
+        """
+        return classify_send_error(exc)
+
     async def deliver(
         self,
         chat_id: Any,
@@ -396,7 +603,16 @@ class BasePlatformAdapter(ABC):
         reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
-        """Send one chunk with retry/backoff honouring ``retry_after``."""
+        """Send one chunk with retry/backoff, honouring the error taxonomy.
+
+        Failures are classified once (via :meth:`classify_error` for raised
+        exceptions, or read from the ``SendResult`` an adapter returns) into a
+        :class:`SendErrorKind`. Only ``retryable`` failures are retried with
+        backoff; a provably-permanent failure (forbidden / target-not-found /
+        auth-fatal / invalid-request) short-circuits immediately so a blocked
+        user or deleted chat no longer burns the full retry budget. The caller
+        can act on ``result.error_kind`` (e.g. mark the target dead by kind).
+        """
         last: SendResult = SendResult(ok=False, chat_id=chat_id, error="unsent")
         attempts = max(1, int(self.max_retries))
         for attempt in range(attempts):
@@ -404,11 +620,16 @@ class BasePlatformAdapter(ABC):
                 result = await self.send(
                     chat_id, content, reply_to=reply_to, metadata=metadata
                 )
-            except Exception as exc:  # transport error — retry
-                result = SendResult(ok=False, chat_id=chat_id, error=str(exc))
+            except Exception as exc:  # transport error — classify then decide
+                result = self.classify_error(exc)
+                result.chat_id = chat_id
             if result.ok:
                 return result
             last = result
+            # Short-circuit provably-permanent failures: no point backing off
+            # and re-sending to a blocked user / deleted chat / bad token.
+            if not result.retryable:
+                return result
             if attempt < attempts - 1:
                 delay = result.retry_after
                 if delay is None:
