@@ -86,12 +86,18 @@ class ChatMixin:
         if isinstance(item, dict):
             for key in ("memory", "text", "content", "value"):
                 value = item.get(key)
-                if value is not None:
+                if isinstance(value, str):
                     return str(value).strip()
+            nested_item = item.get("item")
+            if nested_item is not None and nested_item is not item:
+                return ChatMixin._memory_prefetch_text(nested_item)
         for attr in ("memory", "text", "content", "value"):
             value = getattr(item, attr, None)
-            if value is not None:
+            if isinstance(value, str):
                 return str(value).strip()
+        nested_item = getattr(item, "item", None)
+        if nested_item is not None and nested_item is not item:
+            return ChatMixin._memory_prefetch_text(nested_item)
         return ""
 
     def _format_memory_prefetch(self, results: Any, limit: int, token_budget: int) -> str:
@@ -102,7 +108,8 @@ class ChatMixin:
         try:
             from ..context.tokens import estimate_tokens_heuristic
         except ImportError:  # pragma: no cover - core module is always present
-            estimate_tokens_heuristic = lambda text: max(1, len(text) // 4)
+            def estimate_tokens_heuristic(text: str) -> int:
+                return max(1, len(text) // 4)
 
         lines = []
         seen = set()
@@ -142,15 +149,14 @@ class ChatMixin:
         if not config or not getattr(config, "prefetch", False) or memory is None:
             return ""
 
-        query = self._memory_prefetch_query(prompt)
-        if not query:
-            return ""
-        limit = max(0, int(getattr(config, "prefetch_limit", 5)))
-        budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
-        if not limit or not budget:
-            return ""
-
         try:
+            query = self._memory_prefetch_query(prompt)
+            if not query:
+                return ""
+            limit = max(0, int(getattr(config, "prefetch_limit", 5)))
+            budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
+            if not limit or not budget:
+                return ""
             if hasattr(memory, "search_long_term"):
                 results = memory.search_long_term(query, limit=limit)
             elif hasattr(memory, "search"):
@@ -169,15 +175,14 @@ class ChatMixin:
         if not config or not getattr(config, "prefetch", False) or memory is None:
             return ""
 
-        query = self._memory_prefetch_query(prompt)
-        if not query:
-            return ""
-        limit = max(0, int(getattr(config, "prefetch_limit", 5)))
-        budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
-        if not limit or not budget:
-            return ""
-
         try:
+            query = self._memory_prefetch_query(prompt)
+            if not query:
+                return ""
+            limit = max(0, int(getattr(config, "prefetch_limit", 5)))
+            budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
+            if not limit or not budget:
+                return ""
             results = await self.asearch_memory(
                 query, memory_type="long_term", limit=limit
             )

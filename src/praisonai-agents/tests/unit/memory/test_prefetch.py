@@ -77,6 +77,21 @@ def test_prefetch_injects_deduplicated_system_context_before_user_message():
     }
 
 
+def test_prefetch_extracts_default_file_memory_search_shape():
+    agent = _agent(MemoryConfig(prefetch=True))
+    backend = MagicMock()
+    backend.search_long_term.return_value = [
+        {
+            "type": "long_term",
+            "item": {"content": "Timezone: Asia/Singapore"},
+            "score": 0.9,
+        }
+    ]
+    agent._memory_instance = backend
+
+    assert agent._prefetch_memory("timezone") == "- Timezone: Asia/Singapore"
+
+
 def test_prefetch_limit_and_token_budget_are_enforced_with_ellipsis():
     agent = _agent(MemoryConfig(
         prefetch=True,
@@ -105,6 +120,26 @@ def test_prefetch_backend_failure_is_non_fatal():
     agent._memory_instance = backend
 
     assert agent._prefetch_memory("question") == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("prefetch_limit", None),
+        ("prefetch_limit", "many"),
+        ("prefetch_token_budget", None),
+        ("prefetch_token_budget", "large"),
+    ],
+)
+def test_prefetch_invalid_numeric_config_is_non_fatal(field, value):
+    config = MemoryConfig(prefetch=True)
+    setattr(config, field, value)
+    agent = _agent(config)
+    backend = MagicMock()
+    agent._memory_instance = backend
+
+    assert agent._prefetch_memory("question") == ""
+    backend.search_long_term.assert_not_called()
 
 
 @pytest.mark.asyncio
