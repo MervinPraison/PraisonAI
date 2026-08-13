@@ -461,6 +461,36 @@ def test_agent_chat_isolates_stop_reason_across_overlapping_turns(tmp_path):
     assert agent.execution.resume_run_id is None
 
 
+def test_agent_chat_does_not_reuse_default_controller_cancellation(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    controller = InterruptController()
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        interrupt_controller=controller,
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+
+    def cancelled_result(*args, **kwargs):
+        controller.request("first turn")
+        return None
+
+    with patch.object(agent, "_chat_impl", side_effect=cancelled_result):
+        assert agent.chat("cancelled task") is None
+    cancelled_run_id = agent.last_durable_run_id
+
+    with patch.object(agent, "_chat_impl", return_value=None):
+        assert agent.chat("later task") is None
+    failed_run_id = agent.last_durable_run_id
+
+    journal = RunJournal(path)
+    assert journal.run_meta(cancelled_run_id).status == "cancelled"
+    assert journal.run_meta(failed_run_id).status == "failed"
+    journal.close()
+
+
 @pytest.mark.asyncio
 async def test_agent_achat_none_result_finalizes_run(tmp_path):
     from praisonaiagents import Agent
@@ -536,6 +566,37 @@ async def test_agent_achat_isolates_stop_reason_across_overlapping_turns(tmp_pat
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_agent_achat_does_not_reuse_default_controller_cancellation(tmp_path):
+    from praisonaiagents import Agent
+
+    path = str(tmp_path / "journal.db")
+    controller = InterruptController()
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        interrupt_controller=controller,
+        execution=ExecutionConfig(durable=True, journal_path=path),
+    )
+
+    async def cancelled_result(*args, **kwargs):
+        controller.request("first turn")
+        return None
+
+    with patch.object(agent, "_achat_impl", side_effect=cancelled_result):
+        assert await agent.achat("cancelled task") is None
+    cancelled_run_id = agent.last_durable_run_id
+
+    with patch.object(agent, "_achat_impl", AsyncMock(return_value=None)):
+        assert await agent.achat("later task") is None
+    failed_run_id = agent.last_durable_run_id
+
+    journal = RunJournal(path)
+    assert journal.run_meta(cancelled_run_id).status == "cancelled"
+    assert journal.run_meta(failed_run_id).status == "failed"
+    journal.close()
 
 
 def test_custom_llm_fatal_tool_error_reaches_durable_lifecycle(tmp_path):

@@ -30,12 +30,18 @@ if TYPE_CHECKING:
 class _TurnCancelToken:
     """Track cancellation observed by one call without shared backend state."""
 
-    def __init__(self, source: Any):
+    def __init__(self, source: Any, *, accept_preexisting: bool):
         self._source = source
         self._observed = False
+        self._accept_preexisting = accept_preexisting
+        self._start_generation = getattr(source, "_request_generation", None)
 
     def is_set(self) -> bool:
-        is_set = bool(getattr(self._source, "is_set", lambda: False)())
+        generation = getattr(self._source, "_request_generation", None)
+        if not self._accept_preexisting and generation is not None:
+            is_set = generation > self._start_generation
+        else:
+            is_set = bool(getattr(self._source, "is_set", lambda: False)())
         self._observed = self._observed or is_set
         return is_set
 
@@ -2718,7 +2724,13 @@ Your Goal: {self.goal}"""
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
-            _cancel = _TurnCancelToken(cancel_source) if cancel_source is not None else None
+            _cancel = (
+                _TurnCancelToken(
+                    cancel_source, accept_preexisting=cancel_token is not None
+                )
+                if cancel_source is not None
+                else None
+            )
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -3398,7 +3410,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         durable_context = None
         durable_token = None
         cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
-        _cancel = _TurnCancelToken(cancel_source) if cancel_source is not None else None
+        _cancel = (
+            _TurnCancelToken(
+                cancel_source, accept_preexisting=cancel_token is not None
+            )
+            if cancel_source is not None
+            else None
+        )
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import abegin_durable_run

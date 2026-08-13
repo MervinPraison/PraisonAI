@@ -57,6 +57,7 @@ class InterruptController:
     
     _flag: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
     _reason: Optional[str] = field(default=None, init=False)
+    _generation: int = field(default=0, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def request(self, reason: str = "user") -> None:
@@ -66,9 +67,16 @@ class InterruptController:
             reason: Human-readable reason for cancellation
         """
         with self._lock:
+            self._generation += 1
             if not self._flag.is_set():
                 self._reason = reason
                 self._flag.set()
+
+    @property
+    def _request_generation(self) -> int:
+        """Monotonic request counter used to scope cancellation to active turns."""
+        with self._lock:
+            return self._generation
 
     def clear(self) -> None:
         """Clear the cancellation request."""
