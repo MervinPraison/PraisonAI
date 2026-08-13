@@ -9,7 +9,17 @@ for maintainability.
 import os
 import inspect
 import logging
+import contextvars
 from typing import Optional
+
+# Per-turn ownership of appended chat-history messages. Each chat()/achat() turn
+# runs in its own thread (sync) or task (async); both get an isolated copy of
+# this context var. The append helpers record every message THIS turn appends
+# into its own list, so a failing turn's rollback removes only its own messages
+# and never a concurrent turn's - even though all turns share one chat_history.
+_active_turn_owned: "contextvars.ContextVar[Optional[list]]" = contextvars.ContextVar(
+    "praisonai_active_turn_owned", default=None
+)
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -57,7 +67,11 @@ class MemoryMixin:
             content: Message content
         """
         with self._history_lock:
-            self.chat_history.append({"role": role, "content": content})
+            msg = {"role": role, "content": content}
+            self.chat_history.append(msg)
+            owned = _active_turn_owned.get()
+            if owned is not None:
+                owned.append(msg)
 
     def _add_to_chat_history_if_not_duplicate(self, role, content) -> bool:
         """Thread-safe method to add messages to chat history only if not duplicate.
@@ -79,7 +93,11 @@ class MemoryMixin:
                 return False
             
             # Not a duplicate, add the message
-            self.chat_history.append({"role": role, "content": content})
+            msg = {"role": role, "content": content}
+            self.chat_history.append(msg)
+            owned = _active_turn_owned.get()
+            if owned is not None:
+                owned.append(msg)
             return True
 
     def _get_chat_history_length(self):
@@ -95,6 +113,66 @@ class MemoryMixin:
         """
         with self._history_lock:
             self.chat_history = self.chat_history[:length]
+
+    def _begin_turn_tracking(self):
+        """Start recording the messages appended by the current turn.
+
+        Returns a token to reset the context var when the turn ends. Each turn
+        runs in its own thread (sync ``chat``) or task (async ``achat``), so the
+        context var copy is isolated per turn. Safe to call unconditionally; when
+        a turn opts in, its rollback removes only its own messages by identity.
+        """
+        return _active_turn_owned.set([])
+
+    def _end_turn_tracking(self, token):
+        """Stop recording for the current turn and drop its ownership list."""
+        try:
+            _active_turn_owned.reset(token)
+        except (ValueError, LookupError):
+            _active_turn_owned.set(None)
+
+    def _clear_turn_tracking(self):
+        """Drop any per-turn ownership list from a prior turn on this context.
+
+        Used at the start of an async turn (whose control flow has no single
+        wrapping ``finally``) so a stale list from a completed turn on the same
+        task cannot accumulate messages from unrelated turns.
+        """
+        _active_turn_owned.set(None)
+
+    def _rollback_chat_history_to(self, rollback_length):
+        """Thread-safe rollback that never clobbers a concurrent turn's messages.
+
+        A turn snapshots ``len(self.chat_history)`` before a multi-second LLM
+        call, then rolls back to that length on failure.
+
+        Ownership-safe path (default for ``chat``/``achat`` turns): when the turn
+        opted into per-turn tracking via ``_begin_turn_tracking()``, remove ONLY
+        the messages this turn actually appended, identified by object identity.
+        A concurrent turn that interleaved its own messages after this snapshot
+        keeps every one of them - the old positional ``del chat_history[n:]``
+        would have erased them and corrupted the transcript.
+
+        Positional fallback (untracked callers): remove the tail from
+        ``rollback_length`` onward, and only if the history actually grew that
+        far. Backward compatible for any path that does not track ownership.
+
+        Args:
+            rollback_length: History length to roll back to (this turn's snapshot).
+        """
+        owned = _active_turn_owned.get()
+        with self._history_lock:
+            if owned:
+                owned_ids = {id(m) for m in owned}
+                self.chat_history[:] = [
+                    m for m in self.chat_history if id(m) not in owned_ids
+                ]
+                owned.clear()
+                return
+
+            # Untracked turn (or nothing appended): safe positional rollback.
+            if len(self.chat_history) > rollback_length:
+                del self.chat_history[rollback_length:]
 
     def _cache_get(self, cache_dict, key):
         """Thread-safe LRU cache get operation.
