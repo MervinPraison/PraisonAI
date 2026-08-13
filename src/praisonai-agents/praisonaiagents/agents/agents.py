@@ -1112,16 +1112,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         return None
 
     def clean_json_output(self, output: str) -> str:
-        # NOTE: This method is duplicated in chat_mixin.ChatMixin.clean_json_output.
-        # Keep both implementations in sync when modifying either.
-        cleaned = output.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[len("```json"):].strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned[len("```"):].strip()
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
-        return cleaned
+        """Clean JSON output while preserving the legacy team method."""
+        from ..main import clean_triple_backticks
+
+        return clean_triple_backticks(output)
 
     @property
     def context_manager(self):

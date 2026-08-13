@@ -3161,20 +3161,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return None
 
     def clean_json_output(self, output: str) -> str:
-        """Clean and extract JSON from response text.
-        
-        NOTE: This method is duplicated in agents.Agents.clean_json_output.
-        Keep both implementations in sync when modifying either.
-        """
-        cleaned = output.strip()
-        # Remove markdown code blocks if present
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[len("```json"):].strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned[len("```"):].strip()
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
-        return cleaned  
+        """Clean JSON output while preserving the legacy agent method."""
+        from ..main import clean_triple_backticks
+
+        return clean_triple_backticks(output)
 
     async def achat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
         """Async version of chat method with self-reflection support.
