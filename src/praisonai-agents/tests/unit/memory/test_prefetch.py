@@ -98,6 +98,36 @@ def test_prefetch_limit_and_token_budget_are_enforced_with_ellipsis():
     assert estimate_tokens_heuristic(recalled) <= 8
 
 
+def test_prefetch_decodes_file_memory_nested_item_shape():
+    agent = _agent(MemoryConfig(prefetch=True, prefetch_limit=2))
+    backend = MagicMock()
+    # FileMemory.search_long_term nests the payload under "item".
+    backend.search_long_term.return_value = [
+        {"type": "long_term", "item": {"content": "User's name is John"}, "score": 1.0},
+        {"type": "long_term", "item": {"content": "Prefers dark mode"}, "score": 0.8},
+    ]
+    agent._memory_instance = backend
+
+    recalled = agent._prefetch_memory("what do you know about me?")
+
+    assert "User's name is John" in recalled
+    assert "Prefers dark mode" in recalled
+
+
+def test_prefetch_tolerates_malformed_numeric_config():
+    agent = _agent(MemoryConfig(prefetch=True))
+    # Simulate malformed config values that would otherwise raise on int().
+    agent._memory_config.prefetch_limit = None
+    agent._memory_config.prefetch_token_budget = "not-a-number"
+    backend = MagicMock()
+    backend.search_long_term.return_value = [{"text": "recalled fact"}]
+    agent._memory_instance = backend
+
+    recalled = agent._prefetch_memory("question")
+
+    assert "recalled fact" in recalled
+
+
 def test_prefetch_backend_failure_is_non_fatal():
     agent = _agent(MemoryConfig(prefetch=True))
     backend = MagicMock()

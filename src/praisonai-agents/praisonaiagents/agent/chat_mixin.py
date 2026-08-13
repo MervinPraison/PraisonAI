@@ -45,6 +45,20 @@ class ChatMixin:
         return str(prompt).strip() if prompt is not None else ""
 
     @staticmethod
+    def _memory_prefetch_int(value: Any, default: int) -> int:
+        """Coerce an optional prefetch bound to a non-negative int.
+
+        Malformed config (None, empty, or non-numeric strings) must never abort
+        a turn, so any coercion failure falls back to the supplied default.
+        """
+        if value is None:
+            return default
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
     def _memory_prefetch_text(item: Any) -> str:
         """Extract display text from the common memory-adapter result shapes."""
         if isinstance(item, str):
@@ -54,6 +68,15 @@ class ChatMixin:
                 value = item.get(key)
                 if value is not None:
                     return str(value).strip()
+            # FileMemory nests the payload under "item" (e.g.
+            # {"type": "long_term", "item": {"content": ...}}), so recurse
+            # once into that wrapper before giving up.
+            nested = item.get("item")
+            if isinstance(nested, dict):
+                for key in ("memory", "text", "content", "value"):
+                    value = nested.get(key)
+                    if value is not None:
+                        return str(value).strip()
         for attr in ("memory", "text", "content", "value"):
             value = getattr(item, attr, None)
             if value is not None:
@@ -111,8 +134,8 @@ class ChatMixin:
         query = self._memory_prefetch_query(prompt)
         if not query:
             return ""
-        limit = max(0, int(getattr(config, "prefetch_limit", 5)))
-        budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
+        limit = self._memory_prefetch_int(getattr(config, "prefetch_limit", 5), 5)
+        budget = self._memory_prefetch_int(getattr(config, "prefetch_token_budget", 512), 512)
         if not limit or not budget:
             return ""
 
@@ -138,8 +161,8 @@ class ChatMixin:
         query = self._memory_prefetch_query(prompt)
         if not query:
             return ""
-        limit = max(0, int(getattr(config, "prefetch_limit", 5)))
-        budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
+        limit = self._memory_prefetch_int(getattr(config, "prefetch_limit", 5), 5)
+        budget = self._memory_prefetch_int(getattr(config, "prefetch_token_budget", 512), 512)
         if not limit or not budget:
             return ""
 
