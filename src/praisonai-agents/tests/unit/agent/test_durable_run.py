@@ -509,6 +509,29 @@ def test_agent_chat_consumes_preexisting_default_cancellation():
         assert agent.chat("later task") == "done"
 
 
+def test_agent_chat_does_not_forward_late_default_cancellation():
+    from praisonaiagents import Agent
+
+    controller = InterruptController()
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        interrupt_controller=controller,
+    )
+
+    def late_cancel(*args, cancel_token=None, **kwargs):
+        assert cancel_token is not None
+        assert not cancel_token.is_set()
+        controller.request("too late for this turn")
+        return "done"
+
+    with patch.object(agent, "_chat_impl", side_effect=late_cancel):
+        assert agent.chat("first task") == "done"
+
+    with patch.object(agent, "_chat_impl", return_value="later done"):
+        assert agent.chat("later task") == "later done"
+
+
 @pytest.mark.asyncio
 async def test_agent_achat_none_result_finalizes_run(tmp_path):
     from praisonaiagents import Agent

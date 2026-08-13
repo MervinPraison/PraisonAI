@@ -11,7 +11,6 @@ import re
 import time
 import json
 import logging
-import threading
 from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 
@@ -19,7 +18,6 @@ from ..errors import BudgetExceededError, ToolExecutionError
 from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
-_interrupt_generation_lock = threading.Lock()
 
 
 
@@ -36,23 +34,19 @@ class _TurnCancelToken:
         self,
         source: Any,
         *,
-        start_generation: Optional[int] = None,
-        on_observed=None,
+        turn_id: Optional[int] = None,
     ):
         self._source = source
         self._observed = False
-        self._start_generation = start_generation
-        self._on_observed = on_observed
+        self._turn_id = turn_id
 
     def is_set(self) -> bool:
-        generation = getattr(self._source, "_request_generation", None)
-        if self._start_generation is not None and generation is not None:
-            is_set = generation > self._start_generation
+        turn_checker = getattr(self._source, "_turn_is_cancelled", None)
+        if self._turn_id is not None and callable(turn_checker):
+            is_set = bool(turn_checker(self._turn_id))
         else:
             is_set = bool(getattr(self._source, "is_set", lambda: False)())
         self._observed = self._observed or is_set
-        if is_set and self._on_observed is not None:
-            self._on_observed(generation)
         return is_set
 
     @property
@@ -65,6 +59,12 @@ class _TurnCancelToken:
 
     def was_cancelled(self) -> bool:
         return self._observed or self.is_set()
+
+    def close(self) -> None:
+        end_turn = getattr(self._source, "_end_turn", None)
+        if self._turn_id is not None and callable(end_turn):
+            end_turn(self._turn_id)
+            self._turn_id = None
 
     def __getattr__(self, name: str):
         return getattr(self._source, name)
@@ -90,31 +90,10 @@ class ChatMixin:
         """Create per-turn cancellation state while consuming default requests once."""
         if source is None:
             return None
-        generation = getattr(source, "_request_generation", None)
-        if explicit or generation is None:
+        begin_turn = getattr(source, "_begin_turn", None)
+        if explicit or not callable(begin_turn):
             return _TurnCancelToken(source)
-
-        source_key = id(source)
-        with _interrupt_generation_lock:
-            consumed = getattr(self, "_consumed_interrupt_generations", None)
-            if consumed is None:
-                consumed = {}
-                self._consumed_interrupt_generations = consumed
-            start_generation = consumed.get(source_key, 0)
-
-        def mark_observed(observed_generation):
-            if observed_generation is None:
-                return
-            with _interrupt_generation_lock:
-                consumed[source_key] = max(
-                    consumed.get(source_key, 0), observed_generation
-                )
-
-        return _TurnCancelToken(
-            source,
-            start_generation=start_generation,
-            on_observed=mark_observed,
-        )
+        return _TurnCancelToken(source, turn_id=begin_turn())
 
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
@@ -2803,7 +2782,11 @@ Your Goal: {self.goal}"""
 
                 end_durable_run(durable_token)
                 durable_context.close()
-            _trace_emitter.agent_end(self.name)
+            try:
+                _trace_emitter.agent_end(self.name)
+            finally:
+                if _cancel is not None:
+                    _cancel.close()
 
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal chat implementation (extracted for trace wrapping)."""
@@ -3490,7 +3473,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 end_durable_run(durable_token)
                 await durable_context.aclose()
-            _trace_emitter.agent_end(self.name)
+            try:
+                _trace_emitter.agent_end(self.name)
+            finally:
+                if _cancel is not None:
+                    _cancel.close()
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
