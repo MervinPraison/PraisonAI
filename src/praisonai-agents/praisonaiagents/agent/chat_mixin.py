@@ -3171,6 +3171,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception as e:
                 logger.warning(f"Steering check failed, continuing without steering: {e}")
 
+        # Check if external managed backend is configured (async parity with the
+        # sync chat() path). Without this the configured backend is silently
+        # ignored on the async path and execution falls through to direct-LLM.
+        if hasattr(self, 'backend') and self.backend is not None:
+            delegation_kwargs = {
+                'temperature': temperature,
+                'tools': tools,
+                'output_json': output_json,
+                'output_pydantic': output_pydantic,
+                'reasoning_steps': reasoning_steps,
+                'stream': stream,
+                'task_name': task_name,
+                'task_description': task_description,
+                'task_id': task_id,
+                'config': config,
+                'force_retrieval': force_retrieval,
+                'skip_retrieval': skip_retrieval,
+                'attachments': attachments,
+                'tool_choice': tool_choice,
+            }
+            return await self._adelegate_to_backend(prompt, **delegation_kwargs)
+
         # Emit context trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()
@@ -3194,6 +3216,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
         self._reset_turn_tools()
+        # Apply rate limiter if configured (before any LLM call) - async parity
+        # with the sync path in _chat_impl; without this, async bursts (astart,
+        # async_execution=True) would fire with zero throttling.
+        if self._rate_limiter is not None:
+            await self._rate_limiter.acquire_async()
         # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():

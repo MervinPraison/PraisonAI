@@ -39,6 +39,23 @@ class GuardrailChain:
         self.guardrails = guardrails
         self.fail_open = fail_open
         
+    def __call__(self, task_output) -> Tuple[bool, Any]:
+        """Validate an Agent/Task output through the chain's output guardrails.
+
+        Makes ``GuardrailChain`` directly usable as ``Agent(guardrails=chain)``:
+        the Agent's guardrail runner calls the guardrail with a single
+        ``TaskOutput`` (or plain string) and expects a ``(success, result)``
+        tuple. Takes exactly one positional parameter so it passes the Agent's
+        guardrail signature validation. On success the original ``task_output``
+        is passed through so the downstream pipeline keeps its object; on failure
+        the error message is returned (fail-closed by default).
+        """
+        raw_text = task_output if isinstance(task_output, str) else getattr(task_output, "raw", str(task_output))
+        is_valid, result = self.validate_output(raw_text)
+        if is_valid:
+            return True, task_output
+        return False, result
+
     def validate_input(self, content: str, **kwargs) -> Tuple[bool, str]:
         """Validate input through all guardrails."""
         return self._validate_through_chain("validate_input", content, **kwargs)

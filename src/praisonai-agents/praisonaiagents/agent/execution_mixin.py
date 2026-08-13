@@ -437,7 +437,40 @@ class ExecutionMixin:
             self._auto_save_session()
         
         return result
-    
+
+    async def _adelegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
+        """Async delegation to an external managed backend (async parity with
+        ``_delegate_to_backend``). Awaits the backend's async ``execute`` directly
+        instead of bridging through a worker thread, then records prompt/response
+        in chat_history so session management stays consistent.
+        """
+        from praisonaiagents.agent.protocols import ManagedBackendProtocol
+        if not (isinstance(self.backend, ManagedBackendProtocol) or hasattr(self.backend, 'execute')):
+            raise RuntimeError(f"Backend {type(self.backend).__name__} does not support execute() method")
+
+        result = await self.backend.execute(prompt, **kwargs)
+
+        if result is not None:
+            self._append_to_chat_history({"role": "user", "content": prompt})
+            self._append_to_chat_history({"role": "assistant", "content": str(result)})
+            if hasattr(self.backend, 'managed_session_id'):
+                msid = self.backend.managed_session_id
+                if msid and self._session_store is not None:
+                    try:
+                        sid = getattr(self, 'auto_save', None) or getattr(self, '_session_id', None)
+                        if sid and hasattr(self._session_store, 'set_gateway_info'):
+                            self._session_store.set_gateway_info(sid, gateway_session_id=msid)
+                    except Exception as e:
+                        logger.warning(
+                            "Session gateway linkage failed: %s",
+                            e,
+                            extra={"session_id": sid, "managed_session_id": msid},
+                            exc_info=True,
+                        )
+            self._auto_save_session()
+
+        return result
+
     def _execute_backend_sync(self, prompt: str, **kwargs) -> Optional[str]:
         """Execute backend in sync mode, handling async backends."""
         try:
@@ -1280,6 +1313,34 @@ Write the complete compiled report:"""
         # the review's own calls are not tracked and cannot recurse. Locked so
         # concurrent turns on the same Agent don't corrupt the buffer (#3307).
         self._record_turn_tool(function_name)
+
+        # Result-aware tool-loop detection (async parity with the sync path in
+        # tool_execution.py). Without this, an agent driven via achat()/astart()
+        # that repeatedly calls the same tool with the same args gets no
+        # stuck-loop detection, while the identical sync agent would be caught.
+        # Zero overhead when the detector is disabled.
+        if hasattr(self, '_ensure_loop_detector'):
+            from . import loop_detection as _loop_detection
+            _ld_history, _ld_config = self._ensure_loop_detector()
+            if _ld_config.enabled:
+                _loop_detection.record_tool_call(
+                    _ld_history, function_name, arguments, _ld_config
+                )
+                _verdict = _loop_detection.detect_tool_loop(
+                    _ld_history, function_name, arguments, _ld_config
+                )
+                if _verdict.get("stuck"):
+                    if _verdict.get("level") == "critical":
+                        return {
+                            "error": _verdict.get("message", "loop detected"),
+                            "loop_blocked": True,
+                        }
+                    elif not getattr(self, '_loop_warned_this_turn', False):
+                        self._loop_warned_this_turn = True
+                        self._pending_self_correction = (
+                            f"[System: repeated {_verdict.get('detector')} detected. "
+                            f"Try a different approach. {_verdict.get('message', '')}]"
+                        )
 
         # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,
         # mirroring the sync execute_tool path in tool_execution.py. Without
