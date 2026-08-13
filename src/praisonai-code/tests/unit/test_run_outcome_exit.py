@@ -113,3 +113,84 @@ def test_try_attach_runtime_exits_nonzero_on_empty_runtime_result(monkeypatch):
     assert exc.value.exit_code == 1
     assert output.printed_errors, "expected a printed failure"
     assert output.printed_errors[-1][1] == "run_failed"
+
+
+def test_append_system_prompt_bypasses_warm_runtime(monkeypatch):
+    """`--append-system-prompt` must run in-process, never via the warm runtime.
+
+    Regression guard (issue #3743 / PR #3756 review): the warm runtime is a
+    separate process that never received the CLI's PRAISONAI_APPEND_SYSTEM_PROMPT
+    export and reuses a cached agent, so forwarding a run with an append suffix
+    would silently drop it. The in-process path applies the suffix, so the run
+    must stay in-process when the suffix is set.
+    """
+    output = _RecordingOutput()
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
+
+    attach_calls = []
+
+    def _fake_attach(*args, **kwargs):
+        attach_calls.append((args, kwargs))
+        return True  # Pretend the runtime handled it, so a bug would short-circuit.
+
+    monkeypatch.setattr(run_cmd, "_try_attach_runtime", _fake_attach)
+
+    class _FakePraisonAI:
+        def __init__(self, *a, **k):
+            self.config_list = [{}]
+            self.args = None
+
+        def handle_direct_prompt(self, prompt):
+            return "done"
+
+    import sys
+    import types
+
+    fake_main = types.ModuleType("praisonai_code.cli.main")
+    fake_main.PraisonAI = _FakePraisonAI
+    monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+
+    run_cmd._run_prompt(
+        "refactor this",
+        no_save=True,
+        append_system_prompt="Always answer in French",
+    )
+
+    assert not attach_calls, "append-system-prompt run must not forward to warm runtime"
+
+
+def test_no_append_still_allows_warm_runtime(monkeypatch):
+    """Without an append suffix, an eligible no-save run still attaches warm.
+
+    Complements the guard above: the append-suffix gate must not accidentally
+    disable the warm-runtime fast path for ordinary runs.
+    """
+    output = _RecordingOutput()
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
+
+    attach_calls = []
+
+    def _fake_attach(*args, **kwargs):
+        attach_calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(run_cmd, "_try_attach_runtime", _fake_attach)
+
+    class _FakePraisonAI:
+        def __init__(self, *a, **k):
+            self.config_list = [{}]
+            self.args = None
+
+        def handle_direct_prompt(self, prompt):
+            return "done"
+
+    import sys
+    import types
+
+    fake_main = types.ModuleType("praisonai_code.cli.main")
+    fake_main.PraisonAI = _FakePraisonAI
+    monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+
+    run_cmd._run_prompt("refactor this", no_save=True)
+
+    assert attach_calls, "an eligible no-save run should attach to the warm runtime"
