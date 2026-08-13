@@ -447,6 +447,11 @@ def auth_list():
         store = CredentialStore()
         providers = store.list_providers()
 
+        # Zero-disk mode: credentials come from PRAISONAI_AUTH_CONTENT in memory
+        # and nothing is read from or written to disk. Surface it so the source
+        # is not silently invisible.
+        stored_source = "env (in-memory)" if store.is_in_memory else "stored"
+
         # Get detailed info for each stored provider.
         provider_info = []
         stored_names = set()
@@ -457,7 +462,7 @@ def auth_list():
                 provider_info.append({
                     "provider": provider_name,
                     "auth_method": cred.auth_method,
-                    "source": "stored",
+                    "source": stored_source,
                     "env_var": None,
                     "key_redacted": redact_key(cred.api_key),
                     "base_url": cred.base_url,
@@ -590,11 +595,14 @@ def auth_status(
             env_var = _PROVIDER_ENV_KEYS.get(provider.lower())
             env_value = os.environ.get(env_var) if env_var else None
             active_from_env = bool(env_value) and not cred.is_oauth()
+            # Zero-disk mode: the store itself is sourced from
+            # PRAISONAI_AUTH_CONTENT in memory; label it so the source is clear.
+            stored_source = "env (in-memory)" if store.is_in_memory else "stored"
 
             if cred.is_oauth():
                 format_valid, format_msg = True, "OAuth token"
                 secret = cred.api_key
-                source = "stored"
+                source = stored_source
             elif active_from_env:
                 format_valid, format_msg = validate_api_key(provider, env_value)
                 secret = env_value
@@ -602,7 +610,7 @@ def auth_status(
             else:
                 format_valid, format_msg = validate_api_key(provider, cred.api_key)
                 secret = cred.api_key
-                source = "stored"
+                source = stored_source
 
             status_info = {
                 "provider": provider,
@@ -651,6 +659,8 @@ def auth_status(
         else:
             # Check all providers
             providers = store.list_providers()
+            # Zero-disk mode label so the in-memory source is visible.
+            stored_source = "env (in-memory)" if store.is_in_memory else "stored"
 
             all_status = []
             stored_names = set()
@@ -666,7 +676,7 @@ def auth_status(
                     status = {
                         "provider": provider_name,
                         "auth_method": cred.auth_method,
-                        "source": "stored",
+                        "source": stored_source,
                         "key_redacted": redact_key(cred.api_key),
                         "format_valid": format_valid,
                         "format_message": format_msg,
