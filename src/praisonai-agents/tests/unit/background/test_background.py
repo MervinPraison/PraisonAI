@@ -311,6 +311,39 @@ class TestBackgroundRunner:
         assert task.id in callback_called
     
     @pytest.mark.asyncio
+    async def test_on_complete_fires_on_queued_cancellation(self):
+        """on_complete fires when a task is cancelled while queued on the semaphore."""
+        config = BackgroundConfig(max_concurrent_tasks=1)
+        runner = BackgroundRunner(config=config)
+
+        callback_called = []
+
+        def on_complete(task):
+            callback_called.append((task.id, task.status))
+
+        async def long_running():
+            await asyncio.sleep(10)
+
+        # Occupy the only slot.
+        blocker = await runner.submit(func=long_running, name="blocker")
+        await asyncio.sleep(0.05)
+
+        # This task queues on the semaphore (never enters the try's body).
+        queued = await runner.submit(
+            func=long_running, name="queued", on_complete=on_complete
+        )
+        await asyncio.sleep(0.05)
+
+        result = await runner.cancel_task(queued.id)
+        await asyncio.sleep(0.05)
+
+        assert result
+        assert queued.status == TaskStatus.CANCELLED
+        assert (queued.id, TaskStatus.CANCELLED) in callback_called
+
+        await runner.cancel_task(blocker.id)
+
+    @pytest.mark.asyncio
     async def test_concurrent_execution(self, runner):
         """Test concurrent task execution."""
         results = []
