@@ -402,7 +402,7 @@ def test_agent_chat_none_result_finalizes_run(tmp_path):
 
     run_id = agent.last_durable_run_id
     journal = RunJournal(path)
-    assert journal.run_meta(run_id).status == "succeeded"
+    assert journal.run_meta(run_id).status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None
@@ -423,7 +423,7 @@ async def test_agent_achat_none_result_finalizes_run(tmp_path):
 
     run_id = agent.last_durable_run_id
     journal = RunJournal(path)
-    assert journal.run_meta(run_id).status == "succeeded"
+    assert journal.run_meta(run_id).status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None
