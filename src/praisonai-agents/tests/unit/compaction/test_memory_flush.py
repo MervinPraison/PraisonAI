@@ -198,7 +198,14 @@ def test_sync_flush_worker_is_daemon_and_timeout_is_non_fatal():
 
 
 def test_sync_timeout_discards_late_memory_writes():
-    backend = MagicMock()
+    class _Backend:
+        def __init__(self):
+            self.commits = []
+
+        def commit_memory_batch(self, writes, *, deadline, commit_guard):
+            commit_guard.commit(lambda: self.commits.extend(writes))
+
+    backend = _Backend()
     release = __import__("threading").Event()
     finished = __import__("threading").Event()
 
@@ -229,21 +236,25 @@ def test_sync_timeout_discards_late_memory_writes():
 
     assert result.reason == "timeout"
     assert finished.wait(1)
-    backend.store_long_term.assert_not_called()
+    assert backend.commits == []
 
 
 def test_sync_timeout_includes_staged_memory_commit():
     import threading
 
-    backend = MagicMock()
+    committed = []
     commit_started = threading.Event()
     release = threading.Event()
+    commit_finished = threading.Event()
 
-    def _slow_store(_content):
-        commit_started.set()
-        release.wait(1)
+    class _Backend:
+        def commit_memory_batch(self, writes, *, deadline, commit_guard):
+            commit_started.set()
+            release.wait(1)
+            commit_guard.commit(lambda: committed.extend(writes))
+            commit_finished.set()
 
-    backend.store_long_term.side_effect = _slow_store
+    backend = _Backend()
 
     class _Child:
         def __init__(self, memory):
@@ -269,8 +280,78 @@ def test_sync_timeout_includes_staged_memory_commit():
         release.set()
 
     assert commit_started.wait(1)
+    assert commit_finished.wait(1)
     assert result.reason == "timeout"
     assert result.completed is False
+    assert committed == []
+
+
+def test_file_memory_batch_is_atomic_across_multiple_stores(tmp_path):
+    from praisonaiagents.memory.file_memory import FileMemory
+
+    backend = FileMemory(user_id="flush-test", base_path=str(tmp_path))
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            self.memory.store_long_term("first fact")
+            self.memory.store_long_term("second fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(backend),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=1
+            ),
+        )
+
+    assert result.completed is True
+    assert {item.content for item in backend.get_long_term()} == {
+        "first fact",
+        "second fact",
+    }
+
+
+def test_file_memory_mixed_batch_fails_before_any_write(tmp_path):
+    from praisonaiagents.memory.file_memory import FileMemory
+
+    backend = FileMemory(user_id="flush-test", base_path=str(tmp_path))
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            self.memory.store_long_term("long fact")
+            self.memory.store_short_term("short fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(backend),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=1
+            ),
+        )
+
+    assert result.reason == "error"
+    assert backend.get_long_term() == []
+    assert backend.get_short_term() == []
 
 
 def test_transcript_excludes_system_and_tool_payloads_and_is_bounded():
@@ -345,10 +426,16 @@ async def test_async_flush_awaits_child_and_completes():
 
 @pytest.mark.asyncio
 async def test_async_flush_uses_async_memory_commit_with_shared_deadline():
-    backend = SimpleNamespace(
-        store_long_term=MagicMock(),
-        astore_long_term=AsyncMock(return_value="memory-id"),
-    )
+    class _Backend:
+        def __init__(self):
+            self.commits = []
+
+        async def acommit_memory_batch(
+            self, writes, *, deadline, commit_guard
+        ):
+            commit_guard.commit(lambda: self.commits.extend(writes))
+
+    backend = _Backend()
 
     class _Child:
         def __init__(self, memory):
@@ -370,11 +457,12 @@ async def test_async_flush_uses_async_memory_commit_with_shared_deadline():
             PreCompactionMemoryFlushConfig(
                 min_turns_to_flush=1, timeout_seconds=1
             ),
-        )
+    )
 
     assert result.completed is True
-    backend.astore_long_term.assert_awaited_once_with("durable fact")
-    backend.store_long_term.assert_not_called()
+    assert [(name, args) for name, args, _ in backend.commits] == [
+        ("store_long_term", ("durable fact",))
+    ]
 
 
 @pytest.mark.asyncio
