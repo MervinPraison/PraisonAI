@@ -2625,10 +2625,10 @@ Your Goal: {self.goal}
                     )
                     # For basic compatibility, include in clone_kwargs if not already set
                     if old_attr == 'allow_code_execution' and clone_kwargs['execution'] is None:
-                        from ..config.execution import ExecutionConfig
+                        from ..config.feature_configs import ExecutionConfig
                         clone_kwargs['execution'] = ExecutionConfig(code_execution=value)
                     elif old_attr == 'auto_save' and clone_kwargs['memory'] is None:
-                        from ..config.memory import MemoryConfig  
+                        from ..config.feature_configs import MemoryConfig
                         clone_kwargs['memory'] = MemoryConfig(auto_save=value)
         
         # Create new Agent instance
