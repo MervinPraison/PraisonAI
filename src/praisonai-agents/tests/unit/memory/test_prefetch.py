@@ -48,6 +48,16 @@ def test_prefetch_disabled_does_not_touch_backend():
     backend.search_long_term.assert_not_called()
 
 
+def test_prefetch_without_system_prompt_does_not_touch_backend():
+    agent = _agent(MemoryConfig(prefetch=True))
+    agent.use_system_prompt = False
+    backend = MagicMock()
+    agent._memory_instance = backend
+
+    assert agent._prefetch_memory("remember this") == ""
+    backend.search_long_term.assert_not_called()
+
+
 def test_prefetch_injects_deduplicated_system_context_before_user_message():
     agent = _agent(MemoryConfig(
         prefetch=True,
@@ -167,6 +177,16 @@ async def test_async_prefetch_uses_async_memory_search():
     agent.asearch_memory.assert_awaited_once_with(
         "async question", memory_type="long_term", limit=1
     )
+
+
+@pytest.mark.asyncio
+async def test_async_prefetch_without_system_prompt_does_not_touch_backend():
+    agent = _agent(MemoryConfig(prefetch=True))
+    agent.use_system_prompt = False
+    agent.asearch_memory = AsyncMock()
+
+    assert await agent._aprefetch_memory("async question") == ""
+    agent.asearch_memory.assert_not_awaited()
 
 
 @pytest.mark.asyncio

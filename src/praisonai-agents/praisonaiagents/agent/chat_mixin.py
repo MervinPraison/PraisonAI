@@ -157,6 +157,8 @@ class ChatMixin:
 
     def _prefetch_memory(self, prompt: Any) -> str:
         """Best-effort synchronous turn-start retrieval (default-off)."""
+        if not self.use_system_prompt:
+            return ""
         config = getattr(self, "_memory_config", None)
         memory = getattr(self, "_memory_instance", None)
         if not config or not getattr(config, "prefetch", False) or memory is None:
@@ -184,6 +186,8 @@ class ChatMixin:
 
     async def _aprefetch_memory(self, prompt: Any) -> str:
         """Best-effort asynchronous turn-start retrieval (default-off)."""
+        if not self.use_system_prompt:
+            return ""
         config = getattr(self, "_memory_config", None)
         memory = getattr(self, "_memory_instance", None)
         if not config or not getattr(config, "prefetch", False) or memory is None:
