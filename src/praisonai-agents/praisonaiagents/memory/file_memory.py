@@ -284,7 +284,9 @@ class FileMemory:
         A batch may target short- or long-term memory, but not both because they
         live in separate files. The complete JSON payload is prepared in a
         temporary file; the cancellation guard protects the single
-        ``os.replace`` that makes the batch visible.
+        ``os.replace`` that makes the batch visible. A short-term overflow that
+        would require cross-file auto-promotion is rejected before either file
+        changes; batch commits never silently skip configured promotion.
         """
         import tempfile
 
@@ -346,6 +348,11 @@ class FileMemory:
                 limit = self.config[limit_key]
                 if len(items) > limit:
                     if memory_type == "short_term":
+                        if self.config["auto_promote"]:
+                            raise ValueError(
+                                "Atomic short-term batch would require "
+                                "cross-file auto-promotion"
+                            )
                         items = items[-limit:]
                     else:
                         items.sort(key=lambda item: item.importance, reverse=True)

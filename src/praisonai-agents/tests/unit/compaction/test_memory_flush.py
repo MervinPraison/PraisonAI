@@ -354,6 +354,43 @@ def test_file_memory_mixed_batch_fails_before_any_write(tmp_path):
     assert backend.get_short_term() == []
 
 
+def test_file_memory_short_term_promotion_fails_before_any_write(tmp_path):
+    from praisonaiagents.memory.file_memory import FileMemory
+
+    backend = FileMemory(
+        user_id="flush-test",
+        base_path=str(tmp_path),
+        config={"short_term_limit": 1, "auto_promote": True},
+    )
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            self.memory.store_short_term("first fact")
+            self.memory.store_short_term("second fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(backend),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=1
+            ),
+        )
+
+    assert result.reason == "error"
+    assert backend.get_short_term() == []
+    assert backend.get_long_term() == []
+
+
 def test_transcript_excludes_system_and_tool_payloads_and_is_bounded():
     transcript = format_messages_to_flush(_messages(), max_tokens=12)
 
