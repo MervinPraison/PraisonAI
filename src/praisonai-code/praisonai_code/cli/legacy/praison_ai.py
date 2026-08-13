@@ -364,7 +364,12 @@ class PraisonAI:
         # session flags (e.g. ``--allow`` with ``--no-save`` sets approval but not
         # cli_project_sessions), so preserve them unconditionally when present.
         if preserved_args:
-            for attr in ('approval', 'approve_all_tools', 'approval_timeout'):
+            for attr in (
+                'approval',
+                'approve_all_tools',
+                'approval_timeout',
+                'output',
+            ):
                 if hasattr(preserved_args, attr):
                     setattr(args, attr, getattr(preserved_args, attr))
         
@@ -1981,6 +1986,12 @@ class PraisonAI:
             cli_config['stream'] = stream or stream_metrics
             if stream_metrics:
                 cli_config['stream_metrics'] = True
+
+        output_mode = getattr(self.args, 'output', None)
+        if output_mode is None:
+            output_mode = getattr(self.args, 'output_format', None)
+        if output_mode is not None:
+            cli_config['output'] = output_mode
 
         # Extract handoff configuration for YAML CLI parity
         handoff = getattr(self.args, 'handoff', None)

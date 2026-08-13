@@ -8,6 +8,9 @@ YAML engine's ``args`` so YAML agents are permission-gated exactly like
 single-agent `run "<prompt>"`, instead of silently bypassing the approval gate.
 """
 
+import sys
+from types import ModuleType
+
 import pytest
 
 from praisonai_code.cli.commands import run as run_cmd
@@ -119,6 +122,7 @@ class _PreservedArgs:
         self.approval = None
         self.approve_all_tools = None
         self.approval_timeout = None
+        self.output = None
         self.cli_project_sessions = False
         for k, v in kw.items():
             setattr(self, k, v)
@@ -185,3 +189,35 @@ def test_main_preserves_approval_without_session_flag(monkeypatch):
     preserved = _PreservedArgs(approval="console", cli_project_sessions=False)
     args = _run_main_preserving(monkeypatch, preserved)
     assert args.approval == "console"
+
+
+def test_main_preserves_output_across_parse_args_boundary(monkeypatch):
+    preserved = _PreservedArgs(output="stream-json")
+    args = _run_main_preserving(monkeypatch, preserved)
+    assert args.output == "stream-json"
+
+
+def test_profiled_yaml_path_forwards_output_mode(monkeypatch):
+    class _Profiler:
+        def __init__(self, config):
+            pass
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    profiler_module = ModuleType("praisonai_code.cli.features.cli_profiler")
+    profiler_module.CLIProfileConfig = lambda **kwargs: kwargs
+    profiler_module.CLIProfiler = _Profiler
+    monkeypatch.setitem(
+        sys.modules, "praisonai_code.cli.features.cli_profiler", profiler_module
+    )
+
+    run_cmd._run_from_file_profiled(
+        "workflow.yaml",
+        no_save=True,
+        output_mode="stream-json",
+    )
+
+    args = _FakePraisonAI.last_instance.args
+    assert args is not None
+    assert args.output == "stream-json"

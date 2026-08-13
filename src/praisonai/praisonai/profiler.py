@@ -560,6 +560,15 @@ class _ProfilerImpl:
             with self._lock:
                 self._cprofile_stats.append((name, stats))
 
+    def record_cprofile(self, name: str, stats_text: str) -> None:
+        """Store rendered cProfile output for decorator-based profiling."""
+        with self._lock:
+            self._cprofile_stats.append({
+                "name": name,
+                "stats": stats_text,
+                "timestamp": time.time(),
+            })
+
     @contextmanager
     def memory(self, name: str):
         """Profile memory usage for a block when tracemalloc is available."""
@@ -910,6 +919,11 @@ class ProfilerCompat:
         return get_profiler().cprofile(name)
 
     @staticmethod
+    def record_cprofile(name: str, stats_text: str) -> None:
+        """Store detailed cProfile output on the active profiler."""
+        get_profiler().record_cprofile(name, stats_text)
+
+    @staticmethod
     def memory(name: str):
         """Context manager for memory profiling."""
         return get_profiler().memory(name)
@@ -1016,6 +1030,35 @@ def profile_async(func: Optional[Callable] = None, *, category: str = "async"):
 # Import Profiling
 # ============================================================================
 
+_IMPORT_HOOK_LOCK = threading.Lock()
+_IMPORT_HOOK_CONTEXTS: List["ImportProfiler"] = []
+_IMPORT_HOOK_ORIGINAL = None
+
+
+def _profiled_import(name, globals=None, locals=None, fromlist=(), level=0):
+    """Single process-wide dispatcher shared by active import profilers."""
+    with _IMPORT_HOOK_LOCK:
+        original = _IMPORT_HOOK_ORIGINAL
+        profilers = tuple(_IMPORT_HOOK_CONTEXTS)
+
+    if original is None:  # Defensive: the dispatcher is never installed alone.
+        raise RuntimeError("Import profiler dispatcher has no original import hook")
+
+    start = time.time()
+    try:
+        return original(name, globals, locals, fromlist, level)
+    finally:
+        duration_ms = (time.time() - start) * 1000
+        if duration_ms > 1:
+            records = [
+                ImportRecord(module=name, duration_ms=duration_ms) for _ in profilers
+            ]
+            with _IMPORT_HOOK_LOCK:
+                for profiler, record in zip(profilers, records):
+                    profiler._imports.append(record)
+            if profilers:
+                Profiler.record_import(name, duration_ms)
+
 class ImportProfiler:
     """
     Context manager to profile imports.
@@ -1028,30 +1071,35 @@ class ImportProfiler:
     """
     
     def __init__(self):
-        self._original_import = None
         self._imports: List[ImportRecord] = []
+        self._active = False
     
     def __enter__(self):
         import builtins
-        self._original_import = builtins.__import__
-        
-        def profiled_import(name, globals=None, locals=None, fromlist=(), level=0):
-            start = time.time()
-            try:
-                return self._original_import(name, globals, locals, fromlist, level)
-            finally:
-                duration_ms = (time.time() - start) * 1000
-                if duration_ms > 1:  # Only record imports > 1ms
-                    record = ImportRecord(module=name, duration_ms=duration_ms)
-                    self._imports.append(record)
-                    Profiler.record_import(name, duration_ms)
-        
-        builtins.__import__ = profiled_import
+        global _IMPORT_HOOK_ORIGINAL
+
+        with _IMPORT_HOOK_LOCK:
+            if self._active:
+                return self
+            if not _IMPORT_HOOK_CONTEXTS:
+                _IMPORT_HOOK_ORIGINAL = builtins.__import__
+                builtins.__import__ = _profiled_import
+            _IMPORT_HOOK_CONTEXTS.append(self)
+            self._active = True
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         import builtins
-        builtins.__import__ = self._original_import
+        global _IMPORT_HOOK_ORIGINAL
+
+        with _IMPORT_HOOK_LOCK:
+            if self in _IMPORT_HOOK_CONTEXTS:
+                _IMPORT_HOOK_CONTEXTS.remove(self)
+            self._active = False
+            if not _IMPORT_HOOK_CONTEXTS:
+                if builtins.__import__ is _profiled_import and _IMPORT_HOOK_ORIGINAL is not None:
+                    builtins.__import__ = _IMPORT_HOOK_ORIGINAL
+                _IMPORT_HOOK_ORIGINAL = None
         return False
     
     def get_imports(self, min_duration_ms: float = 0) -> List[ImportRecord]:
@@ -1157,11 +1205,7 @@ def profile_detailed(func: Optional[Callable] = None):
                 s = io.StringIO()
                 ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
                 ps.print_stats(20)
-                Profiler._cprofile_stats.append({
-                    'name': fn.__name__,
-                    'stats': s.getvalue(),
-                    'timestamp': time.time()
-                })
+                Profiler.record_cprofile(fn.__name__, s.getvalue())
         
         return wrapper
     

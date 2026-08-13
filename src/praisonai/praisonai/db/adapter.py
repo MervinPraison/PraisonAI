@@ -302,25 +302,26 @@ class PraisonAIDB:
         from ..persistence.conversation._ops import resume_or_create_session
         
         store = self._conversation_store
-        existing = self._resolve_sync(store.get_session(session_id))
-        messages = self._resolve_sync(
-            resume_or_create_session(
-                store,
-                existing,
-                session_id,
-                build_session=lambda: ConversationSession(
-                    session_id=session_id,
-                    user_id=user_id or "default",
-                    agent_id=agent_name,
-                    name=f"Session {session_id}",
-                    metadata=metadata or {},
-                ),
-                # An async-mode store returns a coroutine from create_session;
-                # resolve it here so a new session is actually persisted instead
-                # of being silently dropped as an un-awaited coroutine.
-                create_session=lambda s: self._resolve_sync(store.create_session(s)),
-                get_messages=lambda: self._resolve_sync(store.get_messages(session_id)),
-            )
+        existing = self._call_store(
+            store, "get_session", "async_get_session", session_id
+        )
+        messages = resume_or_create_session(
+            store,
+            existing,
+            session_id,
+            build_session=lambda: ConversationSession(
+                session_id=session_id,
+                user_id=user_id or "default",
+                agent_id=agent_name,
+                name=f"Session {session_id}",
+                metadata=metadata or {},
+            ),
+            create_session=lambda s: self._call_store(
+                store, "create_session", "async_create_session", s
+            ),
+            get_messages=lambda: self._call_store(
+                store, "get_messages", "async_get_messages", session_id
+            ),
         )
         
         if messages is None:
@@ -361,7 +362,13 @@ class PraisonAIDB:
             metadata=metadata or {},
             created_at=time.time()
         )
-        self._conversation_store.add_message(session_id, msg)
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
     
     def on_agent_message(
         self,
@@ -385,7 +392,13 @@ class PraisonAIDB:
             metadata=metadata or {},
             created_at=time.time()
         )
-        self._conversation_store.add_message(session_id, msg)
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
     
     @staticmethod
     def _serialize_tool_call(tool_name: str, args: Any, result: Any) -> str:
@@ -428,7 +441,13 @@ class PraisonAIDB:
             metadata={"tool_name": tool_name, **(metadata or {})},
             created_at=time.time()
         )
-        self._conversation_store.add_message(session_id, msg)
+        self._call_store(
+            self._conversation_store,
+            "add_message",
+            "async_add_message",
+            session_id,
+            msg,
+        )
     
     def on_agent_end(
         self,
@@ -441,10 +460,20 @@ class PraisonAIDB:
             return
         
         # Update session metadata
-        session = self._conversation_store.get_session(session_id)
+        session = self._call_store(
+            self._conversation_store,
+            "get_session",
+            "async_get_session",
+            session_id,
+        )
         if session:
             session.metadata = {**(session.metadata or {}), "ended_at": time.time()}
-            self._conversation_store.update_session(session)
+            self._call_store(
+                self._conversation_store,
+                "update_session",
+                "async_update_session",
+                session,
+            )
     
     def on_run_start(
         self,
@@ -458,7 +487,7 @@ class PraisonAIDB:
         # Store run start in state if available (even without conversation store)
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
-            self._state_store.set(run_key, {
+            self._call_store(self._state_store, "set", "async_set", run_key, {
                 "run_id": run_id,
                 "session_id": session_id,
                 "started_at": time.time(),
@@ -480,7 +509,9 @@ class PraisonAIDB:
         self._init_stores()
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
-            run_data = self._state_store.get(run_key) or {}
+            run_data = self._call_store(
+                self._state_store, "get", "async_get", run_key
+            ) or {}
             run_data.update({
                 "ended_at": time.time(),
                 "output_content": output_content,
@@ -488,7 +519,9 @@ class PraisonAIDB:
                 "metrics": metrics or {},
                 "metadata": {**run_data.get("metadata", {}), **(metadata or {})}
             })
-            self._state_store.set(run_key, run_data)
+            self._call_store(
+                self._state_store, "set", "async_set", run_key, run_data
+            )
     
     def get_runs(
         self,
@@ -581,7 +614,12 @@ class PraisonAIDB:
             name=data.get("name", f"Imported Session {session_id}"),
             metadata=data.get("metadata", {})
         )
-        self._conversation_store.create_session(session)
+        self._call_store(
+            self._conversation_store,
+            "create_session",
+            "async_create_session",
+            session,
+        )
         
         # Import messages with new IDs to avoid conflicts
         for msg_data in data.get("messages", []):
@@ -593,7 +631,13 @@ class PraisonAIDB:
                 metadata=msg_data.get("metadata", {}),
                 created_at=msg_data.get("created_at", time.time())
             )
-            self._conversation_store.add_message(session_id, msg)
+            self._call_store(
+                self._conversation_store,
+                "add_message",
+                "async_add_message",
+                session_id,
+                msg,
+            )
         
         return session_id
     
@@ -612,7 +656,7 @@ class PraisonAIDB:
         self._init_stores()
         if self._state_store:
             trace_key = f"trace:{trace_id}"
-            self._state_store.set(trace_key, {
+            self._call_store(self._state_store, "set", "async_set", trace_key, {
                 "trace_id": trace_id,
                 "session_id": session_id,
                 "run_id": run_id,
@@ -634,13 +678,17 @@ class PraisonAIDB:
         self._init_stores()
         if self._state_store:
             trace_key = f"trace:{trace_id}"
-            trace_data = self._state_store.get(trace_key) or {}
+            trace_data = self._call_store(
+                self._state_store, "get", "async_get", trace_key
+            ) or {}
             trace_data.update({
                 "ended_at": time.time(),
                 "status": status,
                 "metadata": {**trace_data.get("metadata", {}), **(metadata or {})}
             })
-            self._state_store.set(trace_key, trace_data)
+            self._call_store(
+                self._state_store, "set", "async_set", trace_key, trace_data
+            )
     
     def on_span_start(
         self,
@@ -654,7 +702,7 @@ class PraisonAIDB:
         self._init_stores()
         if self._state_store:
             span_key = f"span:{span_id}"
-            self._state_store.set(span_key, {
+            self._call_store(self._state_store, "set", "async_set", span_key, {
                 "span_id": span_id,
                 "trace_id": trace_id,
                 "name": name,
@@ -675,13 +723,17 @@ class PraisonAIDB:
         self._init_stores()
         if self._state_store:
             span_key = f"span:{span_id}"
-            span_data = self._state_store.get(span_key) or {}
+            span_data = self._call_store(
+                self._state_store, "get", "async_get", span_key
+            ) or {}
             span_data.update({
                 "ended_at": time.time(),
                 "status": status,
                 "attributes": {**span_data.get("attributes", {}), **(attributes or {})}
             })
-            self._state_store.set(span_key, span_data)
+            self._call_store(
+                self._state_store, "set", "async_set", span_key, span_data
+            )
     
     def get_traces(
         self,
@@ -725,32 +777,33 @@ class PraisonAIDB:
     # ========================================================================
 
     @staticmethod
-    def _resolve_sync(value):
-        """Resolve a possibly-awaitable store result on the sync code path.
+    def _store_callable(store, sync_name, async_name):
+        """Select a real async method when declared, else the sync surface.
 
-        A store opened in ``mode="async"`` returns coroutines from its
-        ``get_session`` / ``get_messages`` methods. On the sync hooks that would
-        otherwise be handed straight into ``resume_or_create_session`` and later
-        crash with ``TypeError: 'coroutine' object is not iterable``. Here we run
-        the coroutine to completion when no event loop is active; if we are
-        already inside a running loop we cannot block, so we close the coroutine
-        and raise a clear, actionable error instead of a cryptic ``TypeError``.
+        ``Mock`` and some dynamic proxies fabricate arbitrary attributes from
+        ``getattr``. Static inspection prevents a fabricated ``async_*`` method
+        from shadowing the store's actual sync protocol method.
         """
-        if not inspect.isawaitable(value):
-            return value
         try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(value)
-        # Inside a running loop: cannot block. Close the coroutine to avoid a
-        # "coroutine was never awaited" warning and surface a clear message.
-        if inspect.iscoroutine(value):
-            value.close()
-        raise RuntimeError(
-            "PraisonAIDB sync hook called against an async-mode store from a "
-            "running event loop. Use the async surface (e.g. aon_agent_start) "
-            "or initialise the store with mode='sync'."
-        )
+            inspect.getattr_static(store, async_name)
+        except AttributeError:
+            async_fn = None
+        else:
+            async_fn = getattr(store, async_name, None)
+        return async_fn or getattr(store, sync_name, None)
+
+    @staticmethod
+    def _call_store(store, sync_name, async_name, *args, **kwargs):
+        """Call a store from a sync hook without creating per-call event loops."""
+        fn = PraisonAIDB._store_callable(store, sync_name, async_name)
+        if fn is None:
+            return None
+        result = fn(*args, **kwargs)
+        if inspect.isawaitable(result):
+            from .._async_bridge import run_sync_or_offload
+
+            return run_sync_or_offload(result)
+        return result
 
     @staticmethod
     async def _dispatch_async(store, sync_name, async_name, *args, **kwargs):
@@ -761,7 +814,7 @@ class PraisonAIDB:
         is awaited directly, otherwise it is off-loaded to a thread so the event
         loop is never blocked. Returns ``None`` when neither method exists.
         """
-        fn = getattr(store, async_name, None) or getattr(store, sync_name, None)
+        fn = PraisonAIDB._store_callable(store, sync_name, async_name)
         if fn is None:
             return None
         if inspect.iscoroutinefunction(fn):
