@@ -340,9 +340,16 @@ class ConfigYamlScheduleStore:
             self._default_timezone = None
             scheduler_config = data.get("scheduler", {})
             if isinstance(scheduler_config, dict):
-                self._default_timezone = (
+                configured_tz = (
                     scheduler_config.get("timezone") or scheduler_config.get("tz")
                 )
+                if configured_tz:
+                    # Fail fast on a bad ``scheduler.timezone`` rather than let a
+                    # cron job silently never fire when ``next_fire_time`` later
+                    # raises the resolver's ValueError as a generic cron error.
+                    from .due import resolve_schedule_timezone
+                    resolve_schedule_timezone(configured_tz)
+                self._default_timezone = configured_tz
             schedules = data.get("schedules", {})
             if isinstance(schedules, dict):
                 for job_id, job_data in schedules.items():
@@ -350,6 +357,10 @@ class ConfigYamlScheduleStore:
                         job_data.setdefault("id", job_id)
                         job = ScheduleJob.from_dict(job_data)
                         self._jobs[job.id] = job
+        except ValueError:
+            # Surface an invalid ``scheduler.timezone`` fail-fast instead of
+            # degrading to a scheduler that starts but silently never fires.
+            raise
         except Exception as e:
             logger.warning("Failed to load schedules from %s: %s", self._path, e)
 

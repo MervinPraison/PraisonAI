@@ -64,6 +64,15 @@ class ScheduleTicker:
         # falls between this anchor and "now" is treated as missed → caught up.
         self.created_at: float = time.time()
         self._is_cron = self.schedule_expr.lower().startswith("cron:")
+        # Fail fast on a bad timezone for a cron ticker rather than let the
+        # later ``next_fire_time`` resolver error be swallowed by the fallback
+        # handlers (which would report a start yet never honour wall-clock time).
+        if self._is_cron and self.timezone:
+            try:
+                from praisonaiagents.scheduler.due import resolve_schedule_timezone
+                resolve_schedule_timezone(self.timezone)
+            except ImportError:
+                pass
         # For plain intervals we reuse the existing integer-interval parse so
         # behaviour is byte-for-byte identical to the fixed-interval loop.
         self._interval: Optional[int] = None

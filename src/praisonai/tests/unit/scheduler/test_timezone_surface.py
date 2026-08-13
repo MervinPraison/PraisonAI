@@ -70,3 +70,23 @@ def test_schedule_add_cli_passes_timezone(monkeypatch):
 
     assert result.exit_code == 0, result.stdout
     assert captured["tz"] == "America/New_York"
+
+
+def test_validate_schedule_config_accepts_cron():
+    import pytest
+
+    from praisonai.scheduler.yaml_loader import validate_schedule_config
+
+    validate_schedule_config({"interval": "cron:0 8 * * *"})
+
+    with pytest.raises(ValueError, match="empty"):
+        validate_schedule_config({"interval": "cron:"})
+
+
+def test_schedule_ticker_rejects_invalid_timezone():
+    import pytest
+
+    from praisonai.scheduler.shared import ScheduleTicker
+
+    with pytest.raises(ValueError, match="Unknown IANA timezone"):
+        ScheduleTicker("cron:0 8 * * *", timezone="Mars/Base")

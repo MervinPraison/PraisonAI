@@ -24,10 +24,8 @@ def _job(schedule, *, created_at=0.0, last_run_at=None):
     )
 
 
-pytest.importorskip("croniter")
-
-
 def test_cron_keeps_local_hour_across_spring_dst_transition():
+    pytest.importorskip("croniter")
     next_run = next_fire_time(
         "0 8 * * *",
         _epoch(2026, 3, 7, 13),
@@ -38,6 +36,7 @@ def test_cron_keeps_local_hour_across_spring_dst_transition():
 
 
 def test_cron_keeps_local_hour_across_fall_dst_transition():
+    pytest.importorskip("croniter")
     next_run = next_fire_time(
         "0 8 * * *",
         _epoch(2026, 10, 31, 12),
@@ -137,3 +136,18 @@ def test_config_store_uses_instance_default_timezone(tmp_path):
     assert store.claim_due(_epoch(2026, 7, 1, 12, 59), "worker") == []
     claimed = store.claim_due(_epoch(2026, 7, 1, 13, 0), "worker")
     assert [item.id for item in claimed] == ["brief"]
+
+
+def test_config_store_rejects_invalid_default_timezone(tmp_path):
+    import yaml
+
+    from praisonaiagents.scheduler.config_store import ConfigYamlScheduleStore
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        yaml.safe_dump({"scheduler": {"timezone": "Mars/Base"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Unknown IANA timezone"):
+        ConfigYamlScheduleStore(str(config))

@@ -198,13 +198,20 @@ def validate_schedule_config(schedule_config: Dict[str, Any]) -> None:
     # Validate interval format
     interval = schedule_config['interval']
     valid_intervals = ['hourly', 'daily']
-    
-    if interval not in valid_intervals:
+
+    # ``schedule.cron`` is normalised to a ``cron:<expr>`` interval upstream, so
+    # accept that form here and only reject an empty expression.
+    if isinstance(interval, str) and interval.lower().startswith('cron:'):
+        cron_expr = interval[len('cron:'):].strip()
+        if not cron_expr:
+            raise ValueError("Invalid cron expression: expression is empty")
+    elif interval not in valid_intervals:
         # Check if it's a custom format (*/Nm, */Nh, */Ns, or plain number)
         if not (interval.startswith('*/') or interval.isdigit()):
             raise ValueError(
                 f"Invalid interval format: {interval}. "
-                f"Use 'hourly', 'daily', '*/30m', '*/6h', or seconds as number"
+                f"Use 'hourly', 'daily', '*/30m', '*/6h', "
+                f"'cron:M H * * *', or seconds as number"
             )
     
     # Validate max_retries
