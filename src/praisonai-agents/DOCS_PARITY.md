@@ -18,8 +18,8 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 49 | 15473 |
-| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
+| ✅ Agent | 22 | 50 | 15629 |
+| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 684 |
 | ✅ Approval | 1 | 5 | 2500 |
 | ✅ Audio | 2 | 12 | 1000 |
@@ -27,10 +27,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2736 |
 | ✅ Bots | 7 | 31 | 13274 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35658 |
+| ✅ CLI | 5 | 121 | 35729 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4548 |
+| ✅ Code Execution | 2 | 14 | 4549 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3047 |
 | ✅ Context Management | 16 | 34 | 13388 |
@@ -43,18 +43,18 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2273 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 66 | 24288 |
+| ✅ Gateway | 7 | 67 | 24887 |
 | ✅ Guardrails | 4 | 4 | 1833 |
 | ✅ Handoffs | 11 | 6 | 2563 |
 | ✅ Hooks | 2 | 9 | 4281 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4233 |
-| ✅ LLM | 3 | 14 | 4955 |
+| ✅ LLM | 3 | 14 | 5015 |
 | ✅ Loops | 4 | 5 | 1422 |
-| ✅ MCP | 1 | 60 | 13724 |
+| ✅ MCP | 1 | 60 | 13728 |
 | ✅ Memory | 6 | 17 | 6766 |
 | ✅ OCR | 2 | 1 | 237 |
-| ✅ Observability | 2 | 23 | 2800 |
+| ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 138 | 40206 |
+| ✅ Tools | 12 | 138 | 40224 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1207 |
 | ✅ Video | 2 | 6 | 649 |
