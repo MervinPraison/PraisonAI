@@ -10,6 +10,9 @@ def _epoch(year, month, day, hour, minute=0):
 
 
 def test_schedule_ticker_uses_timezone_across_dst():
+    import pytest
+
+    pytest.importorskip("croniter")
     from praisonai.scheduler.shared import ScheduleTicker
 
     ticker = ScheduleTicker(
