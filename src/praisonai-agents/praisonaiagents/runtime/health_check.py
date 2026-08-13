@@ -71,8 +71,12 @@ class HealthCheckProtocol(Protocol):
     """
 
     @property
-    def id(self) -> str:
-        """Stable namespaced identifier for this check."""
+    def check_id(self) -> str:
+        """Stable namespaced identifier for this check.
+
+        The registry also accepts ``id`` as a compatibility alias for checks
+        written against the first version of this contract.
+        """
         ...
 
     def detect(self, context: Mapping[str, Any]) -> List[Finding]:

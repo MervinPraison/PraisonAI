@@ -85,6 +85,7 @@ __all__ = [
     "get_health_check_registry",
     "register_health_check",
     "run_health_checks",
+    "arun_health_checks",
     # Capability types
     "RuntimeCapability",
     "RuntimeCapabilityMatrix",
@@ -183,6 +184,7 @@ _LAZY_GROUPS = {
         'get_health_check_registry': ('praisonaiagents.runtime.health_registry', 'get_health_check_registry'),
         'register_health_check': ('praisonaiagents.runtime.health_registry', 'register_health_check'),
         'run_health_checks': ('praisonaiagents.runtime.health_registry', 'run_health_checks'),
+        'arun_health_checks': ('praisonaiagents.runtime.health_registry', 'arun_health_checks'),
     },
     'journal': {
         'RunJournal': ('praisonaiagents.runtime.journal', 'RunJournal'),

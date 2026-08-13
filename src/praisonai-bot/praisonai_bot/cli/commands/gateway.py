@@ -4,6 +4,7 @@ Gateway command group for PraisonAI CLI.
 Provides commands for managing the WebSocket gateway with multi-bot support.
 """
 
+import sys
 from typing import Optional
 
 import typer
@@ -610,9 +611,12 @@ def _check_gateway_secret_strength(config_path: str):
 
     # Present-but-weak token: warn on loopback, fail closed externally.
     if is_local:
+        # Advisory only — must go to stderr so callers rendering a
+        # machine-readable JSON document to stdout stay parseable.
         print(
             f"⚠  gateway.auth_token is a known-weak/placeholder value "
-            f"(loopback bind {bind_host}). Rotate before exposing externally."
+            f"(loopback bind {bind_host}). Rotate before exposing externally.",
+            file=sys.stderr,
         )
         return None
 
@@ -808,7 +812,10 @@ class _GatewaySecretHealthCheck:
     def detect(self, context):
         from praisonaiagents.runtime.doctor_protocol import Finding
 
-        message = _check_gateway_secret_strength(str(context["config_path"]))
+        config_path = context.get("config_path")
+        if not config_path:
+            return []
+        message = _check_gateway_secret_strength(str(config_path))
         if not message:
             return []
         return [Finding(
@@ -821,9 +828,14 @@ class _GatewaySecretHealthCheck:
     def repair(self, context, findings):
         from praisonaiagents.runtime.health_check import HealthRepairResult
 
+        config_path = context.get("config_path")
+        if not config_path:
+            return HealthRepairResult(
+                changed=False, message="gateway config path not provided; no action taken"
+            )
         action = _repair_gateway_secret(
             dry_run=bool(context.get("dry_run")),
-            config_path=str(context["config_path"]),
+            config_path=str(config_path),
         )
         if action == "would-repair":
             return HealthRepairResult(
@@ -844,7 +856,10 @@ class _GatewayConfigVersionHealthCheck:
     def detect(self, context):
         from praisonaiagents.runtime.doctor_protocol import Finding
 
-        migration = _check_config_version(str(context["config_path"]))
+        config_path = context.get("config_path")
+        if not config_path:
+            return []
+        migration = _check_config_version(str(config_path))
         if migration is None:
             return []
         if isinstance(migration, str):
@@ -874,9 +889,20 @@ class _GatewayConfigVersionHealthCheck:
     def repair(self, context, findings):
         from praisonaiagents.runtime.health_check import HealthRepairResult
 
+        config_path = context.get("config_path")
+        if not config_path:
+            return HealthRepairResult(
+                changed=False, message="gateway config path not provided; no action taken"
+            )
         details = findings[0].context or {}
         if details.get("unsupported"):
-            return HealthRepairResult(changed=False)
+            return HealthRepairResult(
+                changed=False,
+                message=(
+                    "config: written by a newer build; left untouched to avoid "
+                    "a downgrade"
+                ),
+            )
         reasons = list(details.get("reasons", []))
         from_version = details.get("from_version", "unstamped")
         to_version = details.get("to_version", "current")
@@ -888,7 +914,7 @@ class _GatewayConfigVersionHealthCheck:
             )
             return HealthRepairResult(changed=False, message="\n".join(lines))
 
-        applied = _repair_config_version(str(context["config_path"]))
+        applied = _repair_config_version(str(config_path))
         lines = [f"config: {reason}" for reason in applied]
         lines.append(f"config: config_version {from_version} -> {to_version}")
         return HealthRepairResult(changed=True, message="\n".join(lines))
@@ -899,10 +925,12 @@ def _run_gateway_health_checks(config_path: str, *, fix: bool, dry_run: bool):
     from praisonaiagents.runtime.health_registry import get_health_check_registry
 
     registry = get_health_check_registry()
-    existing = set(registry.get_check_ids())
+    # Register the mandatory gateway checks as protected BEFORE plugin
+    # discovery so an installed extension cannot shadow the required
+    # auth-token/config-version validation and repair.
     for check in (_GatewaySecretHealthCheck(), _GatewayConfigVersionHealthCheck()):
-        if check.check_id not in existing:
-            registry.register_check(check)
+        if check.check_id not in registry.protected_ids():
+            registry.register_check(check, protected=True)
     return registry.run(
         {"config_path": config_path, "dry_run": dry_run},
         fix=fix,
@@ -1203,9 +1231,10 @@ def gateway_doctor(
     config_health = _health_result(health_results, "core/gateway/config-version")
 
     gateway_secret_error = None
+    auth_check_error = auth_health.error if auth_health else None
     fix_report = None
     if auth_health:
-        if auth_health.residual_findings:
+        if auth_health.residual_findings and not auth_check_error:
             gateway_secret_error = auth_health.residual_findings[0].message
         if auth_health.repair:
             if auth_health.repaired:
@@ -1273,6 +1302,8 @@ def gateway_doctor(
         payload["health"] = _health_payload(health_results)
         if gateway_secret_error:
             payload["gateway_auth_token"] = "weak"
+        if auth_check_error:
+            payload["gateway_auth_token_check_error"] = auth_check_error
         if config_migration:
             payload["config_version"] = "out-of-date"
         if config_version_error:
@@ -1307,6 +1338,8 @@ def gateway_doctor(
         payload["secrets"] = availability
     if gateway_secret_error:
         payload["gateway_auth_token"] = "weak"
+    if auth_check_error:
+        payload["gateway_auth_token_check_error"] = auth_check_error
     if config_migration:
         payload["config_version"] = "out-of-date"
     if config_version_error:

@@ -259,7 +259,9 @@ class TestDoctorGatewaySecretStrength:
             'gateway:\n  bind_host: 127.0.0.1\n  auth_token: "change-me"\n',
         )
         assert err is None
-        assert "known-weak" in capsys.readouterr().out
+        captured = capsys.readouterr()
+        assert "known-weak" in captured.err
+        assert captured.out == ""
 
 
 class TestLoopbackAuthBypassDefault:
