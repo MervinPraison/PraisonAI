@@ -35,6 +35,8 @@ def _resolve_gateway_config_path(explicit: Optional[str]) -> Optional[str]:
     if explicit:
         return explicit
 
+    # Prefer the canonical ``praisonai_code`` resolver when co-installed so the
+    # gateway CLI agrees with ``bot start``/``onboard`` on every override path.
     try:
         from praisonai_bot._code_bridge import import_code_module
 
@@ -44,8 +46,31 @@ def _resolve_gateway_config_path(explicit: Optional[str]) -> Optional[str]:
         resolved = resolve_bot_config_path("bot.yaml")
         if resolved and os.path.exists(resolved):
             return resolved
-    except Exception:  # pragma: no cover — fall back to the gateway.yaml alias
+    except Exception:  # pragma: no cover — praisonai-code not installed
+        # ``praisonai-code`` is an OPTIONAL dependency of praisonai-bot, so its
+        # absence must NOT hide an onboarded ``~/.praisonai/bot.yaml`` (which is
+        # a plain filesystem convention, not owned by praisonai-code). Fall
+        # through to the inlined home discovery below (#3880, Greptile P1).
         pass
+
+    # Inlined equivalent of ``resolve_bot_config_path`` so home discovery works
+    # even without praisonai-code: cwd ``./bot.yaml`` → ``PRAISONAI_BOT_CONFIG``
+    # / ``~/.praisonai/bot.yaml``.
+    if os.path.exists("bot.yaml"):
+        return "bot.yaml"
+
+    home_cfg = os.environ.get("PRAISONAI_BOT_CONFIG")
+    if not home_cfg:
+        home = os.environ.get("PRAISONAI_HOME")
+        home_dir = (
+            os.path.expanduser(home) if home
+            else os.path.join(os.path.expanduser("~"), ".praisonai")
+        )
+        home_cfg = os.path.join(home_dir, "bot.yaml")
+    else:
+        home_cfg = os.path.expanduser(home_cfg)
+    if os.path.exists(home_cfg):
+        return home_cfg
 
     if os.path.exists("gateway.yaml"):
         return "gateway.yaml"

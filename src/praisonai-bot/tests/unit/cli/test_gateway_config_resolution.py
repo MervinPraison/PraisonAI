@@ -51,6 +51,48 @@ def test_returns_none_when_nothing_found(tmp_path, monkeypatch):
     assert gw._resolve_gateway_config_path(None) is None
 
 
+def test_discovers_home_bot_yaml_without_praisonai_code(tmp_path, monkeypatch):
+    """Home discovery must not depend on the optional praisonai-code (#3880).
+
+    ``praisonai-code`` is an OPTIONAL dependency of praisonai-bot. When it is not
+    installed the ``import_code_module`` call raises, but an onboarded
+    ``~/.praisonai/bot.yaml`` (a plain filesystem convention) must still be
+    discovered via the inlined fallback rather than being hidden (Greptile P1).
+    """
+    monkeypatch.chdir(tmp_path)
+
+    def _boom(_name):
+        raise ImportError("praisonai-code not installed")
+
+    monkeypatch.setattr(
+        "praisonai_bot._code_bridge.import_code_module", _boom
+    )
+    home_cfg = tmp_path / "home_bot.yaml"
+    home_cfg.write_text("channels: {}\n")
+    monkeypatch.setenv("PRAISONAI_BOT_CONFIG", str(home_cfg))
+
+    assert gw._resolve_gateway_config_path(None) == str(home_cfg)
+
+
+def test_home_default_dir_without_praisonai_code(tmp_path, monkeypatch):
+    """Without praisonai-code, ``~/.praisonai/bot.yaml`` resolves via PRAISONAI_HOME."""
+    monkeypatch.chdir(tmp_path)
+
+    def _boom(_name):
+        raise ImportError("praisonai-code not installed")
+
+    monkeypatch.setattr(
+        "praisonai_bot._code_bridge.import_code_module", _boom
+    )
+    home_dir = tmp_path / ".praisonai"
+    home_dir.mkdir()
+    (home_dir / "bot.yaml").write_text("channels: {}\n")
+    monkeypatch.delenv("PRAISONAI_BOT_CONFIG", raising=False)
+    monkeypatch.setenv("PRAISONAI_HOME", str(home_dir))
+
+    assert gw._resolve_gateway_config_path(None) == str(home_dir / "bot.yaml")
+
+
 def test_doctor_resolver_prefers_onboarded_over_gateway_default(tmp_path, monkeypatch):
     """The ``gateway.yaml`` sentinel resolves to the onboarded bot.yaml (#3880)."""
     monkeypatch.chdir(tmp_path)
