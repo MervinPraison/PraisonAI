@@ -491,6 +491,24 @@ def test_agent_chat_does_not_reuse_default_controller_cancellation(tmp_path):
     journal.close()
 
 
+def test_agent_chat_consumes_preexisting_default_cancellation():
+    from praisonaiagents import Agent
+
+    controller = InterruptController()
+    controller.request("before turn")
+    agent = Agent(
+        name="durable-agent",
+        instructions="test",
+        interrupt_controller=controller,
+    )
+
+    with pytest.raises(InterruptedError, match="before turn"):
+        agent.chat("cancel this turn")
+
+    with patch.object(agent, "_chat_impl", return_value="done"):
+        assert agent.chat("later task") == "done"
+
+
 @pytest.mark.asyncio
 async def test_agent_achat_none_result_finalizes_run(tmp_path):
     from praisonaiagents import Agent

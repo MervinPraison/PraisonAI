@@ -11,6 +11,7 @@ import re
 import time
 import json
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 
@@ -18,6 +19,7 @@ from ..errors import BudgetExceededError, ToolExecutionError
 from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
+_interrupt_generation_lock = threading.Lock()
 
 
 
@@ -30,19 +32,27 @@ if TYPE_CHECKING:
 class _TurnCancelToken:
     """Track cancellation observed by one call without shared backend state."""
 
-    def __init__(self, source: Any, *, accept_preexisting: bool):
+    def __init__(
+        self,
+        source: Any,
+        *,
+        start_generation: Optional[int] = None,
+        on_observed=None,
+    ):
         self._source = source
         self._observed = False
-        self._accept_preexisting = accept_preexisting
-        self._start_generation = getattr(source, "_request_generation", None)
+        self._start_generation = start_generation
+        self._on_observed = on_observed
 
     def is_set(self) -> bool:
         generation = getattr(self._source, "_request_generation", None)
-        if not self._accept_preexisting and generation is not None:
+        if self._start_generation is not None and generation is not None:
             is_set = generation > self._start_generation
         else:
             is_set = bool(getattr(self._source, "is_set", lambda: False)())
         self._observed = self._observed or is_set
+        if is_set and self._on_observed is not None:
+            self._on_observed(generation)
         return is_set
 
     @property
@@ -75,6 +85,36 @@ class ChatMixin:
         from .durable import get_durable_run
 
         return get_durable_run()
+
+    def _turn_cancel_token(self, source: Any, *, explicit: bool):
+        """Create per-turn cancellation state while consuming default requests once."""
+        if source is None:
+            return None
+        generation = getattr(source, "_request_generation", None)
+        if explicit or generation is None:
+            return _TurnCancelToken(source)
+
+        source_key = id(source)
+        with _interrupt_generation_lock:
+            consumed = getattr(self, "_consumed_interrupt_generations", None)
+            if consumed is None:
+                consumed = {}
+                self._consumed_interrupt_generations = consumed
+            start_generation = consumed.get(source_key, 0)
+
+        def mark_observed(observed_generation):
+            if observed_generation is None:
+                return
+            with _interrupt_generation_lock:
+                consumed[source_key] = max(
+                    consumed.get(source_key, 0), observed_generation
+                )
+
+        return _TurnCancelToken(
+            source,
+            start_generation=start_generation,
+            on_observed=mark_observed,
+        )
 
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
@@ -2724,12 +2764,8 @@ Your Goal: {self.goal}"""
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
-            _cancel = (
-                _TurnCancelToken(
-                    cancel_source, accept_preexisting=cancel_token is not None
-                )
-                if cancel_source is not None
-                else None
+            _cancel = self._turn_cancel_token(
+                cancel_source, explicit=cancel_token is not None
             )
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -3410,12 +3446,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         durable_context = None
         durable_token = None
         cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
-        _cancel = (
-            _TurnCancelToken(
-                cancel_source, accept_preexisting=cancel_token is not None
-            )
-            if cancel_source is not None
-            else None
+        _cancel = self._turn_cancel_token(
+            cancel_source, explicit=cancel_token is not None
         )
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
