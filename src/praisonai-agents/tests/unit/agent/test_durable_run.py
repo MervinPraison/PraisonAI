@@ -1,6 +1,8 @@
 """Tests for opt-in RunJournal integration and explicit resume."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from praisonaiagents import ExecutionConfig
+from praisonaiagents.agent.interrupt import InterruptController
 from praisonaiagents.errors import ToolExecutionError
 from praisonaiagents.agent.durable import (
     DurableRunContext,
@@ -408,7 +411,7 @@ def test_agent_chat_none_result_finalizes_run(tmp_path):
     assert agent.execution.resume_run_id is None
 
 
-def test_agent_chat_resets_stale_cancellation_before_none_result(tmp_path):
+def test_agent_chat_isolates_stop_reason_across_overlapping_turns(tmp_path):
     from praisonaiagents import Agent
 
     path = str(tmp_path / "journal.db")
@@ -420,23 +423,39 @@ def test_agent_chat_resets_stale_cancellation_before_none_result(tmp_path):
 
     backend = SimpleNamespace(_last_stop_reason="completed")
     agent.llm_instance = backend
+    cancelled_token = InterruptController()
+    failed_token = InterruptController()
+    barrier = Barrier(2)
+    run_ids = {}
+    real_begin = begin_durable_run
 
-    def cancelled_result(*args, **kwargs):
-        backend._last_stop_reason = "cancelled"
+    def record_begin(current_agent, task):
+        context, token = real_begin(current_agent, task)
+        run_ids[task] = context.run_id
+        return context, token
+
+    def overlapping_result(prompt, *args, **kwargs):
+        if prompt == "cancelled task":
+            cancelled_token.request("test")
+            backend._last_stop_reason = "cancelled"
+        else:
+            backend._last_stop_reason = "completed"
+        barrier.wait()
         return None
 
-    with patch.object(agent, "_chat_impl", side_effect=cancelled_result):
-        assert agent.chat("task") is None
+    with (
+        patch("praisonaiagents.agent.durable.begin_durable_run", side_effect=record_begin),
+        patch.object(agent, "_chat_impl", side_effect=overlapping_result),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        cancelled = pool.submit(agent.chat, "cancelled task", cancel_token=cancelled_token)
+        failed = pool.submit(agent.chat, "failed task", cancel_token=failed_token)
+        assert cancelled.result() is None
+        assert failed.result() is None
 
     journal = RunJournal(path)
-    assert journal.run_meta(agent.last_durable_run_id).status == "cancelled"
-    journal.close()
-
-    with patch.object(agent, "_chat_impl", return_value=None):
-        assert agent.chat("later task") is None
-
-    journal = RunJournal(path)
-    assert journal.run_meta(agent.last_durable_run_id).status == "failed"
+    assert journal.run_meta(run_ids["cancelled task"]).status == "cancelled"
+    assert journal.run_meta(run_ids["failed task"]).status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None
@@ -464,7 +483,7 @@ async def test_agent_achat_none_result_finalizes_run(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_agent_achat_resets_stale_cancellation_before_none_result(tmp_path):
+async def test_agent_achat_isolates_stop_reason_across_overlapping_turns(tmp_path):
     from praisonaiagents import Agent
 
     path = str(tmp_path / "journal.db")
@@ -476,23 +495,44 @@ async def test_agent_achat_resets_stale_cancellation_before_none_result(tmp_path
 
     backend = SimpleNamespace(_last_stop_reason="completed")
     agent.llm_instance = backend
+    cancelled_token = InterruptController()
+    failed_token = InterruptController()
+    cancelled_started = asyncio.Event()
+    failed_finished = asyncio.Event()
+    run_ids = {}
+    from praisonaiagents.agent.durable import abegin_durable_run
 
-    async def cancelled_result(*args, **kwargs):
-        backend._last_stop_reason = "cancelled"
+    async def record_begin(current_agent, task):
+        context, token = await abegin_durable_run(current_agent, task)
+        run_ids[task] = context.run_id
+        return context, token
+
+    async def overlapping_result(prompt, *args, **kwargs):
+        if prompt == "cancelled task":
+            cancelled_token.request("test")
+            backend._last_stop_reason = "cancelled"
+            cancelled_started.set()
+            await failed_finished.wait()
+        else:
+            await cancelled_started.wait()
+            backend._last_stop_reason = "completed"
+            failed_finished.set()
         return None
 
-    with patch.object(agent, "_achat_impl", side_effect=cancelled_result):
-        assert await agent.achat("task") is None
+    with (
+        patch("praisonaiagents.agent.durable.abegin_durable_run", side_effect=record_begin),
+        patch.object(agent, "_achat_impl", side_effect=overlapping_result),
+    ):
+        cancelled, failed = await asyncio.gather(
+            agent.achat("cancelled task", cancel_token=cancelled_token),
+            agent.achat("failed task", cancel_token=failed_token),
+        )
+        assert cancelled is None
+        assert failed is None
 
     journal = RunJournal(path)
-    assert journal.run_meta(agent.last_durable_run_id).status == "cancelled"
-    journal.close()
-
-    with patch.object(agent, "_achat_impl", AsyncMock(return_value=None)):
-        assert await agent.achat("later task") is None
-
-    journal = RunJournal(path)
-    assert journal.run_meta(agent.last_durable_run_id).status == "failed"
+    assert journal.run_meta(run_ids["cancelled task"]).status == "cancelled"
+    assert journal.run_meta(run_ids["failed task"]).status == "failed"
     assert journal.interrupted_runs() == []
     journal.close()
     assert agent.execution.resume_run_id is None
