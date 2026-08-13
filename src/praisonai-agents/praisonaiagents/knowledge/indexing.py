@@ -367,15 +367,27 @@ class FileTracker:
             "size": stat.st_size,
         }
     
-    def mark_indexed(self, filepath: str, info: Dict[str, Any]) -> None:
+    def mark_indexed(self, filepath: str, info: Dict[str, Any], memory_ids: Optional[List[str]] = None) -> None:
         """
         Mark file as indexed.
         
         Args:
             filepath: Path to file
             info: File info from get_file_info()
+            memory_ids: Optional list of vector-store memory IDs produced for this
+                file, so a later re-index can delete stale chunks before re-adding.
         """
-        self._tracked[filepath] = info
+        record = dict(info)
+        if memory_ids is not None:
+            record["memory_ids"] = list(memory_ids)
+        self._tracked[filepath] = record
+
+    def get_memory_ids(self, filepath: str) -> List[str]:
+        """Return the memory IDs previously stored for a file (empty if none)."""
+        tracked = self._tracked.get(filepath)
+        if not tracked:
+            return []
+        return list(tracked.get("memory_ids", []))
     
     def has_changed(self, filepath: str) -> bool:
         """

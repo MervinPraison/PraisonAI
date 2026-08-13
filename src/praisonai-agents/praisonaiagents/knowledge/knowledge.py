@@ -686,7 +686,21 @@ class Knowledge:
                 if incremental and not force and not tracker.has_changed(filepath):
                     result.files_skipped += 1
                     continue
-                
+
+                # Remove the previous version's chunks before re-adding a changed
+                # file, otherwise the vector store grows unbounded and stale,
+                # now-incorrect chunks stay retrievable alongside current content.
+                # IDs whose deletion fails are carried forward so the next
+                # re-index retries their cleanup instead of orphaning them.
+                undeleted_ids = []
+                if incremental:
+                    for old_id in tracker.get_memory_ids(filepath):
+                        try:
+                            self.delete(old_id)
+                        except Exception as e:
+                            undeleted_ids.append(old_id)
+                            logger.warning(f"Failed to delete stale chunk {old_id} for {filepath}: {e}")
+
                 # Index the file
                 add_result = self.add(
                     filepath,
@@ -695,14 +709,23 @@ class Knowledge:
                     run_id=run_id,
                 )
                 
-                # Count chunks
+                # Count chunks and collect the new memory IDs for this file
+                new_memory_ids = []
                 if add_result and isinstance(add_result, dict):
-                    chunks = len(add_result.get('results', []))
+                    results_list = add_result.get('results', [])
+                    chunks = len(results_list)
                     total_chunks += chunks
+                    for entry in results_list:
+                        if isinstance(entry, dict) and entry.get('id') is not None:
+                            new_memory_ids.append(entry['id'])
+                        elif isinstance(entry, str):
+                            new_memory_ids.append(entry)
                 
-                # Mark as indexed
+                # Mark as indexed (with memory IDs for future stale-chunk
+                # cleanup). Any old IDs that failed to delete are retained so the
+                # next re-index retries them rather than leaving orphaned chunks.
                 file_info = tracker.get_file_info(filepath)
-                tracker.mark_indexed(filepath, file_info)
+                tracker.mark_indexed(filepath, file_info, memory_ids=undeleted_ids + new_memory_ids)
                 
                 result.files_indexed += 1
                 
