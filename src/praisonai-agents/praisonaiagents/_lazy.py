@@ -28,8 +28,11 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 _logger = logging.getLogger(__name__)
 
-# Global cache lock for thread-safe access
-_cache_lock = threading.Lock()
+# Global cache lock for thread-safe access.
+# Reentrant so that a lazy import which triggers another lazy import on the
+# same thread (e.g. a package attribute that re-exports from a submodule via
+# its own __getattr__) degrades to redundant work instead of self-deadlocking.
+_cache_lock = threading.RLock()
 
 # Global module cache
 _module_cache: Dict[str, Any] = {}
