@@ -19,12 +19,32 @@ from praisonai.cli.commands.setup import app
 
 runner = CliRunner()
 
-_PROVIDER_DETECT_KEYS = (
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-)
+def _provider_detect_keys():
+    """Every provider credential env-var the setup wizard auto-detects.
+
+    Derived from ``PROVIDER_ENV_CATALOGUE`` so the interactive-path tests blank
+    out *all* catalogued keys (not just the historical four); otherwise a stray
+    catalogued key on the CI host (e.g. OPENROUTER_API_KEY) would trigger the
+    non-interactive auto-detect path and change the assertion. Falls back to the
+    historical four if the catalogue is unavailable.
+    """
+    try:
+        from praisonai.llm.catalogue import provider_env_vars
+
+        vars_ = provider_env_vars()
+        if vars_:
+            return tuple(vars_)
+    except Exception:
+        pass
+    return (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    )
+
+
+_PROVIDER_DETECT_KEYS = _provider_detect_keys()
 
 
 @pytest.fixture

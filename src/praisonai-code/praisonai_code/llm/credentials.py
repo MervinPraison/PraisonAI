@@ -112,9 +112,27 @@ def detect_local_endpoint():
 
 
 def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
-    """Map a model id to the environment variable(s) for its provider."""
+    """Map a model id to the environment variable(s) for its provider.
+
+    Catalogue-driven: consults ``PROVIDER_ENV_CATALOGUE`` so any provider it
+    declares (Mistral, DeepSeek, xAI, …) resolves, not a hardcoded head.
+    """
     if not model:
         return ()
+    try:
+        from praisonai_code.llm.catalogue import (
+            provider_for_model,
+            env_vars_for_provider,
+        )
+
+        provider = provider_for_model(model)
+        if provider:
+            vars_ = env_vars_for_provider(provider)
+            if vars_:
+                return vars_
+    except Exception:
+        pass
+
     m = model.lower()
     if m.startswith("anthropic/") or m.startswith("claude"):
         return ("ANTHROPIC_API_KEY",)
@@ -153,11 +171,55 @@ _VAR_TO_STORED_PROVIDERS = {
 }
 
 
+def _known_credential_vars() -> tuple[str, ...]:
+    """Return every credential env-var the first-run gate should honour.
+
+    Catalogue-driven so a valid key for any catalogued provider (Mistral,
+    DeepSeek, Together, Fireworks, xAI, Perplexity, …) counts as configured.
+    Falls back to the historical 8-key set if the catalogue is unavailable.
+    """
+    try:
+        from praisonai_code.llm.catalogue import provider_env_vars
+
+        vars_ = provider_env_vars()
+        if vars_:
+            return vars_
+    except Exception:
+        pass
+    return (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
+        "OPENROUTER_API_KEY", "OLLAMA_HOST",
+    )
+
+
 def _stored_providers_for_vars(vars_: tuple[str, ...]) -> tuple[str, ...]:
-    """Return stored-credential provider names matching the given env-vars."""
+    """Return stored-credential provider names matching the given env-vars.
+
+    Catalogue-driven: any catalogued provider (Mistral, DeepSeek, xAI,
+    Together, Perplexity, Fireworks, …) whose credential env-var appears in
+    ``vars_`` is recognised, so a stored key for an explicit provider-prefixed
+    model satisfies ``is_configured()``. The historical
+    ``_VAR_TO_STORED_PROVIDERS`` aliases (e.g. GOOGLE/GEMINI) are layered on top
+    to preserve the prior cross-mapping behaviour.
+    """
     out: list[str] = []
+
+    try:
+        from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+
+        for provider, (env_vars, _model, _prefix) in PROVIDER_ENV_CATALOGUE.items():
+            if any(v in vars_ for v in env_vars):
+                if provider not in out:
+                    out.append(provider)
+    except Exception:
+        pass
+
     for v in vars_:
-        out.extend(_VAR_TO_STORED_PROVIDERS.get(v, ()))
+        for provider in _VAR_TO_STORED_PROVIDERS.get(v, ()):
+            if provider not in out:
+                out.append(provider)
+
     return tuple(out)
 
 
@@ -165,11 +227,7 @@ def is_configured(model: Optional[str] = None) -> bool:
     """Check if credentials are configured for the specified or default model."""
     import os
 
-    known_keys = (
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
-        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
-        "OPENROUTER_API_KEY", "OLLAMA_HOST",
-    )
+    known_keys = _known_credential_vars()
 
     explicit_model = model is not None
     if model is None:

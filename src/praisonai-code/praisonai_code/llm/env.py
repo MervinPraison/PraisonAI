@@ -59,17 +59,36 @@ _ALL_FALLBACK_PROVIDERS = (
     "openai", "anthropic", "google", "gemini", "groq", "cohere", "openrouter",
 )
 
-# Ordered list of (credential env-var, provider-appropriate default model).
-_PROVIDER_DEFAULTS = (
-    ("OPENAI_API_KEY", "gpt-4o-mini"),
-    ("ANTHROPIC_API_KEY", "anthropic/claude-3-5-sonnet-latest"),
-    ("GEMINI_API_KEY", "gemini/gemini-1.5-flash"),
-    ("GOOGLE_API_KEY", "google/gemini-1.5-flash"),
-    ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
-    ("COHERE_API_KEY", "cohere/command-r"),
-    ("OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini"),
-    ("OLLAMA_HOST", "ollama/llama3.2"),
-)
+# Ordered list of (credential env-var, provider-appropriate default model),
+# derived from the single PROVIDER_ENV_CATALOGUE so first-run detection covers
+# any catalogued provider (Mistral, DeepSeek, xAI, …) rather than a hardcoded
+# head. The catalogue's ordering keeps the historical 8-provider preference at
+# the front, so existing zero-config behaviour is unchanged and new providers
+# are purely additive. Falls back to the historical literal list if the
+# catalogue import is unavailable for any reason.
+def _build_provider_defaults() -> tuple:
+    try:
+        from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+
+        rows: list = []
+        for _provider, (env_vars, model, _prefix) in PROVIDER_ENV_CATALOGUE.items():
+            for var in env_vars:
+                rows.append((var, model))
+        return tuple(rows)
+    except Exception:
+        return (
+            ("OPENAI_API_KEY", "gpt-4o-mini"),
+            ("ANTHROPIC_API_KEY", "anthropic/claude-3-5-sonnet-latest"),
+            ("GEMINI_API_KEY", "gemini/gemini-1.5-flash"),
+            ("GOOGLE_API_KEY", "google/gemini-1.5-flash"),
+            ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
+            ("COHERE_API_KEY", "cohere/command-r"),
+            ("OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini"),
+            ("OLLAMA_HOST", "ollama/llama3.2"),
+        )
+
+
+_PROVIDER_DEFAULTS = _build_provider_defaults()
 
 
 def _load_model_catalogue():
@@ -144,6 +163,29 @@ def _provider_from_model(model: str) -> tuple[str, str | None]:
     for prefix, (key_var, default_base) in _PROVIDER_MAP.items():
         if normalized.startswith(prefix):
             return key_var, default_base
+    # Catalogue-driven fallback: a catalogued provider (Mistral, DeepSeek, xAI,
+    # …) supplies its own API-key env-var; base_url stays ``None`` so litellm's
+    # provider routing derives the endpoint from the model prefix.
+    try:
+        from praisonai_code.llm.catalogue import (
+            provider_for_model,
+            env_vars_for_provider,
+        )
+
+        provider = provider_for_model(model)
+        if provider:
+            vars_ = env_vars_for_provider(provider)
+            if vars_:
+                # Prefer whichever alias the user actually set so providers with
+                # multiple env-var spellings (e.g. TOGETHER_API_KEY /
+                # TOGETHERAI_API_KEY, FIREWORKS_API_KEY / FIREWORKS_AI_API_KEY)
+                # still resolve a key; otherwise the canonical first var.
+                key_var = next(
+                    (var for var in vars_ if os.environ.get(var)), vars_[0]
+                )
+                return key_var, None
+    except Exception:
+        pass
     return _DEFAULT_KEY_VAR, None
 
 
