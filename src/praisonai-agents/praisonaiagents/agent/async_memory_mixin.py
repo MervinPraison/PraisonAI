@@ -93,11 +93,11 @@ class AsyncMemoryMixin:
         user_id = getattr(config, "user_id", None)
         session_id = getattr(config, "session_id", None)
         if user_id:
-            scoped_kwargs.setdefault("user_id", user_id)
+            scoped_kwargs["user_id"] = user_id
         if session_id:
-            scoped_kwargs.setdefault("session_id", session_id)
+            scoped_kwargs["session_id"] = session_id
             metadata_filter = dict(scoped_kwargs.get("metadata_filter") or {})
-            metadata_filter.setdefault("session_id", session_id)
+            metadata_filter["session_id"] = session_id
             scoped_kwargs["metadata_filter"] = metadata_filter
             
         # Check if memory adapter supports async operations

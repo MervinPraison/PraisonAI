@@ -180,14 +180,21 @@ async def test_async_memory_search_enforces_configured_identity_scope():
     backend.search_long_term.return_value = []
     agent._memory_instance = backend
 
-    await agent.asearch_memory("question", memory_type="long_term", limit=2)
+    await agent.asearch_memory(
+        "question",
+        memory_type="long_term",
+        limit=2,
+        user_id="other-user",
+        session_id="other-session",
+        metadata_filter={"session_id": "other-session", "kind": "fact"},
+    )
 
     backend.search_long_term.assert_called_once_with(
         "question",
         2,
         user_id="user-7",
         session_id="session-9",
-        metadata_filter={"session_id": "session-9"},
+        metadata_filter={"session_id": "session-9", "kind": "fact"},
     )
 
 
