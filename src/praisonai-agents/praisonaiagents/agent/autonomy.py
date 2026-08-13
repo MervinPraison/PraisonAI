@@ -262,17 +262,6 @@ class AutonomySignal(str, Enum):
         )
         super().__init_subclass__(**kwargs)
 
-def _warn_autonomy_signal():
-    """Emit deprecation warning when AutonomySignal is accessed."""
-    from ..utils.deprecation import warn_deprecated_param
-    warn_deprecated_param(
-        "AutonomySignal",
-        since="1.0.0",
-        removal="2.0.0",
-        alternative="use EscalationSignal from praisonaiagents.escalation.types instead",
-        stacklevel=4
-    )
-
 class AutonomyTrigger:
     """Detects signals from prompts for autonomy decisions.
     
