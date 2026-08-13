@@ -273,6 +273,37 @@ def build_tool_result_message_pair(
     return tool_message, followup_message
 
 
+def try_append_multimodal_tool_result(
+    messages, tool_result, tool_call_id, function_name=None, deferred_followups=None
+) -> bool:
+    """Append a multimodal (image/file) tool result if present.
+
+    The ``tool`` reply is appended in-place so all tool replies for the
+    assistant turn stay consecutive (provider contract). The media-bearing
+    ``user`` follow-up is collected into ``deferred_followups`` for the caller
+    to flush after the whole batch; if no collector is supplied it is appended
+    directly. External tool text parts are fenced via ``function_name``.
+
+    Returns True if the result was multimodal (caller should skip its default
+    text-only tool message); False otherwise for the unchanged path.
+    """
+    try:
+        pair = build_tool_result_message_pair(
+            tool_result, tool_call_id, function_name=function_name
+        )
+        if pair:
+            tool_message, followup_message = pair
+            messages.append(tool_message)
+            if deferred_followups is not None:
+                deferred_followups.append(followup_message)
+            else:
+                messages.append(followup_message)
+            return True
+    except Exception as e:
+        logging.debug(f"Multimodal tool result formatting skipped: {e}")
+    return False
+
+
 def _fence_external_text(function_name: str, text: str) -> str:
     """Apply the external-content prompt-injection fence to a text string."""
     try:
