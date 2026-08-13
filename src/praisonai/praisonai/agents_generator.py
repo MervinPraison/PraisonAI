@@ -1135,6 +1135,30 @@ class AgentsGenerator:
             or workflow_type in {'job', 'hybrid'}
         )
 
+    def _validate_adapter_cli_capabilities(self, adapter) -> None:
+        """Reject CLI modes an adapter would otherwise silently ignore."""
+        cli_config = getattr(self, "cli_config", None) or {}
+        adapter_name = getattr(adapter, "name", type(adapter).__name__)
+
+        if (
+            cli_config.get("resume_session") or cli_config.get("auto_save")
+        ) and not getattr(adapter, "SUPPORTS_SESSION_CONTINUITY", False):
+            raise ValueError(
+                "--resume / --session / --continue / --fork are not supported "
+                f"by framework {adapter_name!r}. Use --framework praisonai or "
+                "an adapter that declares SUPPORTS_SESSION_CONTINUITY = True."
+            )
+
+        output_mode = cli_config.get("output") or cli_config.get("output_format")
+        if output_mode == "stream-json" and not getattr(
+            adapter, "SUPPORTS_STREAM_BRIDGE", False
+        ):
+            raise ValueError(
+                "--output stream-json is not supported by framework "
+                f"{adapter_name!r}. Use --framework praisonai or an adapter "
+                "that declares SUPPORTS_STREAM_BRIDGE = True."
+            )
+
     def generate_crew_and_kickoff(self):
         """
         Generates a crew of agents and initiates tasks based on the provided configuration.
@@ -1164,6 +1188,7 @@ class AgentsGenerator:
 
         # Use shared preparation logic
         prep = self._prepare_for_run(config)
+        self._validate_adapter_cli_capabilities(prep['adapter'])
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always
@@ -1211,6 +1236,7 @@ class AgentsGenerator:
 
         # Use shared preparation logic (off the event loop to avoid blocking imports)
         prep = await self._aprepare_for_run(config)
+        self._validate_adapter_cli_capabilities(prep['adapter'])
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always

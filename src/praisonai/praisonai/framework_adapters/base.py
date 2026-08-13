@@ -65,6 +65,12 @@ def warn_unsupported_fields(adapter_name: str, spec_extras: Dict[str, Any]) -> N
 class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
     """Wrapper base adapter with PraisonAIModel LLM resolution for CrewAI etc."""
 
+    # CLI runtime capabilities are opt-in. Adapters that do not implement
+    # these contracts must fail before dispatch instead of silently ignoring
+    # session or structured-stream flags.
+    SUPPORTS_SESSION_CONTINUITY = False
+    SUPPORTS_STREAM_BRIDGE = False
+
     def _resolve_llm(self, spec: Any, llm_config: Optional[List[Dict]]):
         """Build a provider model object from spec and shared llm_config."""
         from ..inc import PraisonAIModel
