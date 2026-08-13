@@ -2758,11 +2758,25 @@ Respond with ONLY a valid JSON tool call in this format:
                             tool_results = []
                             for tool_call_obj, tool_result_obj in zip(tool_calls_batch, tool_results_batch):
                                 if tool_result_obj.error is not None:
-                                    raise tool_result_obj.error
-                                # Register any deferred handle so its eventual
-                                # background result is re-injected, not lost.
-                                self._register_deferred_if_any(tool_result_obj)
-                                tool_result = tool_result_obj.result
+                                    # Report the failure back to the model instead of
+                                    # aborting the whole run (safe-by-default, matching
+                                    # the async path in execution_mixin.py).
+                                    logging.warning(f"Tool '{tool_result_obj.function_name}' failed: {tool_result_obj.error}")
+                                    tool_result = {"error": str(tool_result_obj.error)}
+                                else:
+                                    # Register any deferred handle so its eventual
+                                    # background result is re-injected, not lost.
+                                    self._register_deferred_if_any(tool_result_obj)
+                                    tool_result = tool_result_obj.result
+                                    # Guard against non-JSON-serializable results
+                                    # (datetime, set, bytes, custom objects) so a
+                                    # serialization failure doesn't abort the run.
+                                    if tool_result is not None:
+                                        try:
+                                            json.dumps(tool_result)
+                                        except (TypeError, ValueError):
+                                            logging.warning(f"Result of '{tool_result_obj.function_name}' not JSON serializable, converting to string")
+                                            tool_result = {"result": str(tool_result)}
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
 
@@ -3524,8 +3538,24 @@ Respond with ONLY a valid JSON tool call in this format:
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
-                            tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            # Capture tool failures and report them back to the model
+                            # instead of aborting the whole run (safe-by-default,
+                            # matching the async path in execution_mixin.py).
+                            try:
+                                tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            except Exception as tool_error:
+                                logging.warning(f"Tool '{function_name}' failed: {tool_error}")
+                                tool_result = {"error": str(tool_error)}
                             tool_call_count += 1  # Increment tool call counter for guardrails
+                            # Guard against non-JSON-serializable results (datetime,
+                            # set, bytes, custom objects) so a serialization failure
+                            # doesn't abort the run downstream.
+                            if tool_result is not None:
+                                try:
+                                    json.dumps(tool_result)
+                                except (TypeError, ValueError):
+                                    logging.warning(f"Result of '{function_name}' not JSON serializable, converting to string")
+                                    tool_result = {"result": str(tool_result)}
                             logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result} (call #{tool_call_count})")
                             tool_results.append(tool_result)  # Store the result
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations

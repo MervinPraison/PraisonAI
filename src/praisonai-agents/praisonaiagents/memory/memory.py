@@ -592,6 +592,36 @@ class Memory(SearchMixin, MemoryCoreMixin):
         self._emit_memory_event("store", "short_term", len(text), metadata=metadata)
         return ident
 
+    @staticmethod
+    def _build_metadata_filter(
+        metadata_filter: Optional[Dict[str, Any]],
+        user_id: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Merge user_id into metadata_filter for scoped memory search.
+
+        An explicit ``user_id`` always wins so a conflicting
+        ``metadata_filter["user_id"]`` can never widen the scope to another
+        tenant's data.
+        """
+        if user_id is None:
+            return metadata_filter
+        merged = dict(metadata_filter) if metadata_filter else {}
+        merged["user_id"] = user_id
+        return merged
+
+    @staticmethod
+    def _apply_metadata_filter(
+        results: List[Dict[str, Any]],
+        metadata_filter: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Post-filter results by metadata for adapters that don't scope natively."""
+        if not metadata_filter:
+            return results
+        return [
+            r for r in results
+            if all(r.get("metadata", {}).get(k) == v for k, v in metadata_filter.items())
+        ]
+
     def search_short_term(
         self, 
         query: str, 
@@ -599,22 +629,31 @@ class Memory(SearchMixin, MemoryCoreMixin):
         min_quality: float = 0.0,
         relevance_cutoff: float = 0.0,
         rerank: bool = False,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
-        """Search short-term memory with optional quality filter"""
+        """Search short-term memory with optional quality/metadata/user filter"""
         self._log_verbose(f"Searching short memory for: {query}")
+        metadata_filter = self._build_metadata_filter(metadata_filter, user_id)
         
         if self.use_mem0 and hasattr(self, "mem0_client"):
+            # Over-fetch when a metadata_filter is present so scoped results
+            # ranked beyond `limit` are still evaluated before truncation.
+            fetch_limit = limit * 10 if metadata_filter else limit
             # Pass rerank and other kwargs to Mem0 search
-            search_params = {"query": query, "limit": limit, "rerank": rerank}
+            search_params = {"query": query, "limit": fetch_limit, "rerank": rerank}
             search_params.update(kwargs)
             results = self._safe_mem0_search(self.mem0_client, **search_params)
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
-            return filtered
+            return self._apply_metadata_filter(filtered, metadata_filter)[:limit]
             
         elif self.use_mongodb and hasattr(self, "mongo_short_term"):
             try:
                 results = []
+                # Over-fetch when a metadata_filter is present so scoped results
+                # ranked beyond `limit` survive the post-filter below.
+                fetch_limit = limit * 10 if metadata_filter else limit
                 
                 # If vector search is enabled and we have embeddings
                 if self.use_vector_search and hasattr(self, "_get_embedding"):
@@ -627,8 +666,8 @@ class Memory(SearchMixin, MemoryCoreMixin):
                                     "index": "vector_index",
                                     "path": "embedding",
                                     "queryVector": embedding,
-                                    "numCandidates": limit * 10,
-                                    "limit": limit
+                                    "numCandidates": fetch_limit * 10,
+                                    "limit": fetch_limit
                                 }
                             },
                             {
@@ -659,7 +698,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                         "metadata.quality": {"$gte": min_quality}
                     }
                     
-                    for doc in self.mongo_short_term.find(search_filter).limit(limit):
+                    for doc in self.mongo_short_term.find(search_filter).limit(fetch_limit):
                         results.append({
                             "id": str(doc["_id"]),
                             "text": doc["content"],
@@ -667,7 +706,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                             "score": 1.0  # Default score for text search
                         })
                 
-                return results
+                return self._apply_metadata_filter(results, metadata_filter)[:limit]
                 
             except Exception as e:
                 self._log_verbose(f"Error searching MongoDB short-term memory: {e}", logging.ERROR)
@@ -683,9 +722,12 @@ class Memory(SearchMixin, MemoryCoreMixin):
                     self._log_verbose("Failed to get embedding for query", logging.WARNING)
                     return []
                 
+                # Over-fetch when a metadata_filter is present so scoped results
+                # ranked beyond `limit` survive the post-filter below.
+                fetch_limit = limit * 10 if metadata_filter else limit
                 resp = self.chroma_col.query(
                     query_embeddings=[query_embedding],
-                    n_results=limit
+                    n_results=fetch_limit
                 )
                 
                 results = []
@@ -701,7 +743,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                                 "metadata": metadata,
                                 "score": score
                             })
-                return results
+                return self._apply_metadata_filter(results, metadata_filter)[:limit]
             except Exception as e:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
                 return []
@@ -715,7 +757,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
             # adapter store succeeded — would always return [].
             if getattr(self, "memory_adapter", None):
                 try:
-                    adapter_results = self.memory_adapter.search_short_term(query, limit=limit, **kwargs)
+                    # Over-fetch when a metadata_filter is present so post-filtering
+                    # can still return up to `limit` scoped results.
+                    adapter_limit = limit * 10 if metadata_filter else limit
+                    adapter_results = self.memory_adapter.search_short_term(query, limit=adapter_limit, **kwargs)
+                    adapter_results = self._apply_metadata_filter(adapter_results, metadata_filter)
                     if min_quality > 0:
                         adapter_results = [
                             r for r in adapter_results
@@ -736,9 +782,10 @@ class Memory(SearchMixin, MemoryCoreMixin):
             # Local fallback
             conn = self._get_stm_conn()
             c = conn.cursor()
+            fetch_limit = limit * 10 if metadata_filter else limit
             rows = c.execute(
                 "SELECT id, content, meta FROM short_mem WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit)
+                (f"%{query}%", fetch_limit)
             ).fetchall()
 
             results = []
@@ -751,6 +798,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                         "text": row[1],
                         "metadata": meta
                     })
+            results = self._apply_metadata_filter(results, metadata_filter)[:limit]
             # Emit trace event for memory search
             top_score = results[0].get("score") if results else None
             self._emit_memory_event("search", "short_term", query=query, 
@@ -934,17 +982,24 @@ class Memory(SearchMixin, MemoryCoreMixin):
         relevance_cutoff: float = 0.0,
         min_quality: float = 0.0,
         rerank: bool = False,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
-        """Search long-term memory with optional quality filter"""
+        """Search long-term memory with optional quality/metadata/user filter"""
         self._log_verbose(f"Searching long memory for: {query}")
         self._log_verbose(f"Min quality: {min_quality}")
+        metadata_filter = self._build_metadata_filter(metadata_filter, user_id)
 
         found = []
+        # Over-fetch from every backend when a metadata_filter is present so
+        # scoped records ranked beyond `limit` survive the post-filter applied
+        # before the final `[:limit]` truncation below.
+        fetch_limit = limit * 10 if metadata_filter else limit
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Pass rerank and other kwargs to Mem0 search
-            search_params = {"query": query, "limit": limit, "rerank": rerank}
+            search_params = {"query": query, "limit": fetch_limit, "rerank": rerank}
             search_params.update(kwargs)
             results = self._safe_mem0_search(self.mem0_client, **search_params)
             # Filter by quality
@@ -967,8 +1022,8 @@ class Memory(SearchMixin, MemoryCoreMixin):
                                     "index": "vector_index",
                                     "path": "embedding",
                                     "queryVector": embedding,
-                                    "numCandidates": limit * 10,
-                                    "limit": limit
+                                    "numCandidates": fetch_limit * 10,
+                                    "limit": fetch_limit
                                 }
                             },
                             {
@@ -1003,7 +1058,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                         "metadata.quality": {"$gte": min_quality}
                     }
                     
-                    for doc in self.mongo_long_term.find(search_filter).limit(limit):
+                    for doc in self.mongo_long_term.find(search_filter).limit(fetch_limit):
                         text = doc["content"]
                         # Add memory record citation
                         if "(Memory record:" not in text:
@@ -1034,7 +1089,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                     # Search ChromaDB with embedding
                     resp = self.chroma_col.query(
                         query_embeddings=[query_embedding],
-                        n_results=limit,
+                        n_results=fetch_limit,
                         include=["documents", "metadatas", "distances"]
                     )
                     
@@ -1063,7 +1118,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # lost to the legacy long_mem query that was never written to.
         if not found and getattr(self, "memory_adapter", None):
             try:
-                adapter_results = self.memory_adapter.search_long_term(query, limit=limit, **kwargs)
+                # Over-fetch when a metadata_filter is present so post-filtering
+                # can still return up to `limit` scoped results.
+                adapter_limit = limit * 10 if metadata_filter else limit
+                adapter_results = self.memory_adapter.search_long_term(query, limit=adapter_limit, **kwargs)
+                adapter_results = self._apply_metadata_filter(adapter_results, metadata_filter)
                 if min_quality > 0:
                     adapter_results = [
                         r for r in adapter_results
@@ -1086,7 +1145,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         c = conn.cursor()
         rows = c.execute(
             "SELECT id, content, meta, created_at FROM long_mem WHERE content LIKE ? LIMIT ?",
-            (f"%{query}%", limit)
+            (f"%{query}%", fetch_limit)
         ).fetchall()
 
         for row in rows:
@@ -1106,6 +1165,9 @@ class Memory(SearchMixin, MemoryCoreMixin):
         logger.info(f"Found {len(found)} total results after SQLite")
 
         results = found
+
+        # Scope by metadata_filter/user_id if requested
+        results = self._apply_metadata_filter(results, metadata_filter)
 
         # Filter by quality if needed
         if min_quality > 0:

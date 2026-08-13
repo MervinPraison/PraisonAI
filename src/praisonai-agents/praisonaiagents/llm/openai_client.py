@@ -1723,10 +1723,21 @@ class OpenAIClient:
                     # Always trigger callback for tool call tracking (even when verbose=False)
                     display_tool_call_fn = _get_display_tool_call()
                     
-                    # Execute the tool (pass tool_call_id for event correlation)
+                    # Execute the tool (pass tool_call_id for event correlation).
+                    # Capture failures and report them back to the model instead of
+                    # aborting the whole run (safe-by-default, matching the streaming
+                    # path chat_completion_with_tools_stream).
                     _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
-                    tool_result = execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
-                    results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                    try:
+                        tool_result = execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
+                    except Exception as tool_error:
+                        logging.warning(f"Tool '{function_name}' failed: {tool_error}")
+                        tool_result = {"error": str(tool_error)}
+                    try:
+                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                    except (TypeError, ValueError):
+                        tool_result = {"result": str(tool_result)}
+                        results_str = json.dumps(tool_result)
                     
                     # Trigger callback with structured parameters for status output
                     display_tool_call_fn(
@@ -1993,24 +2004,35 @@ class OpenAIClient:
                     if verbose and console:
                         console.print(f"[dim]Arguments:[/dim] {arguments}")
                     
-                    # Execute the tool (async) - pass tool_call_id for event correlation
+                    # Execute the tool (async) - pass tool_call_id for event correlation.
+                    # Capture failures and report them back to the model instead of
+                    # aborting the whole run (safe-by-default, matching the streaming
+                    # path chat_completion_with_tools_stream).
                     _tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
-                    if asyncio.iscoroutinefunction(execute_tool_fn):
-                        tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
-                    else:
-                        # Run sync function in executor (preserve ContextVars e.g. SessionContext)
-                        loop = asyncio.get_running_loop()
-                        from ..trace.context_events import copy_context_to_callable
-                        tool_result = await loop.run_in_executor(
-                            None,
-                            copy_context_to_callable(
-                                lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(
-                                    fn, args, tool_call_id=tcid
-                                )
-                            ),
-                        )
-                    
-                    results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                    try:
+                        if asyncio.iscoroutinefunction(execute_tool_fn):
+                            tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
+                        else:
+                            # Run sync function in executor (preserve ContextVars e.g. SessionContext)
+                            loop = asyncio.get_running_loop()
+                            from ..trace.context_events import copy_context_to_callable
+                            tool_result = await loop.run_in_executor(
+                                None,
+                                copy_context_to_callable(
+                                    lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(
+                                        fn, args, tool_call_id=tcid
+                                    )
+                                ),
+                            )
+                    except Exception as tool_error:
+                        logging.warning(f"Tool '{function_name}' failed: {tool_error}")
+                        tool_result = {"error": str(tool_error)}
+
+                    try:
+                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                    except (TypeError, ValueError):
+                        tool_result = {"result": str(tool_result)}
+                        results_str = json.dumps(tool_result)
                     
                     # Trigger callback with result
                     display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=console if verbose else None)
