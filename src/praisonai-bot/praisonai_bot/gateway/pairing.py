@@ -34,10 +34,11 @@ _DEFAULT_STORE_FILE = "pairing.json"
 def _get_secret() -> str:
     """Return the HMAC signing secret.
 
-    Uses ``PRAISONAI_GATEWAY_SECRET`` env-var when set; otherwise generates
-    a per-process random secret (codes will NOT survive restarts).
+    An explicit ``PRAISONAI_GATEWAY_SECRET`` override wins; otherwise the
+    persisted, auto-provisioned secret is loaded (and created 0600 on first
+    use) so pairing codes survive process restarts with zero operator action.
     """
-    return os.environ.get("PRAISONAI_GATEWAY_SECRET", "") or secrets.token_hex(32)
+    return _load_or_create_secret(_DEFAULT_STORE_DIR).decode()
 
 
 def _secure_secret_permissions(secret_path: str) -> None:
@@ -147,21 +148,49 @@ def _load_or_create_secret(store_dir: str) -> bytes:
             with open(secret_path, "rb") as f:
                 secret = f.read().strip()
         except (OSError, IOError) as e:
-            logger.warning(f"Failed to read gateway secret from {secret_path}: {e}")
-        else:
+            # Do not silently regenerate on a read failure of an *existing*
+            # secret — that would rotate the HMAC key and invalidate every
+            # outstanding pairing code. Fail closed so the caller sees it.
+            logger.error(f"Failed to read gateway secret from {secret_path}: {e}")
+            raise
+        # Reject an empty/whitespace-only file: an empty HMAC key would let
+        # pairing/callback signatures be forged. Regenerate below instead.
+        if secret:
             # Remediate insecure permissions instead of warn-and-load.
             # A chmod failure here propagates (fail closed) rather than
-            # being swallowed as a read error and silently regenerating
-            # the secret (which would rotate the HMAC key and invalidate
-            # all outstanding pairing codes).
+            # being swallowed and silently regenerating the secret.
             _secure_secret_permissions(secret_path)
             return secret
+        logger.warning(
+            "Gateway secret at %s is empty; regenerating.", secret_path
+        )
 
-    # Generate new secret
+    # Generate new secret. Use exclusive creation (O_EXCL) so two racing
+    # processes cannot each write a different secret and then diverge — the
+    # loser re-reads the winner's persisted secret instead.
     secret = secrets.token_hex(32).encode()
     try:
-        # Create file with secure permissions (0600)
-        fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another process created it first; adopt its secret.
+        try:
+            with open(secret_path, "rb") as f:
+                existing = f.read().strip()
+            if existing:
+                _secure_secret_permissions(secret_path)
+                return existing
+        except (OSError, IOError) as e:
+            logger.warning(
+                f"Failed to read gateway secret written by peer at "
+                f"{secret_path}: {e}"
+            )
+        return secret
+    except (OSError, IOError) as e:
+        logger.warning(f"Failed to save gateway secret to {secret_path}: {e}")
+        # Fall back to in-memory secret for this process
+        return secret
+
+    try:
         with os.fdopen(fd, "wb") as f:
             f.write(secret)
         # On Windows the 0o600 open flag is not authoritative; lock down ACL.

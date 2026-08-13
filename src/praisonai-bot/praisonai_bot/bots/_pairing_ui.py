@@ -18,11 +18,48 @@ logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
+def _persisted_callback_secret() -> str:
+    """Return the persisted gateway signing secret (cached read).
+
+    Resolves through the same auto-provisioned, owner-only secret store used
+    by the pairing code path so approve/deny buttons survive process restarts.
+
+    If the store is genuinely unwritable/unreadable, a single per-process
+    random secret is cached (via ``lru_cache``) and an explicit warning is
+    emitted. This keeps *this* process internally consistent (buttons it
+    issues verify against the same key) while making the degraded mode
+    visible instead of silently rotating keys on every call.
+    """
+    try:
+        from praisonai_bot.gateway.pairing import _DEFAULT_STORE_DIR, _load_or_create_secret
+
+        return _load_or_create_secret(_DEFAULT_STORE_DIR).decode()
+    except (OSError, IOError) as exc:  # pragma: no cover - defensive fallback
+        import secrets
+
+        logger.warning(
+            "Gateway secret store unavailable (%s); falling back to a "
+            "per-process callback secret. Interactive approve/deny buttons "
+            "issued before a restart will not verify afterwards. Set "
+            "PRAISONAI_GATEWAY_SECRET to persist a shared secret.",
+            exc,
+        )
+        return secrets.token_hex(32)
+
+
 def _get_callback_secret() -> str:
-    """Get HMAC secret for callback payload verification."""
+    """Get HMAC secret for callback payload verification.
+
+    An explicit ``PRAISONAI_CALLBACK_SECRET`` override wins; otherwise the
+    persisted gateway secret is reused so interactive buttons keep verifying
+    across restarts with zero operator action.
+    """
     import os
-    import secrets
-    return os.environ.get("PRAISONAI_CALLBACK_SECRET", "") or secrets.token_hex(32)
+
+    override = os.environ.get("PRAISONAI_CALLBACK_SECRET", "")
+    if override:
+        return override
+    return _persisted_callback_secret()
 
 
 class PairingUIBuilder:
