@@ -119,7 +119,7 @@ export class ImageAgent {
         style: config.style || 'vivid',
       });
 
-      const urls = response.data.map(img => img.url).filter((url): url is string => !!url);
+      const urls = (response.data ?? []).map(img => img.url).filter((url): url is string => !!url);
 
       if (this.verbose) {
         console.log(`[ImageAgent] Generated ${urls.length} image(s)`);
