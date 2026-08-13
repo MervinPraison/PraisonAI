@@ -279,7 +279,17 @@ class TrafilaturaTools:
             "newspaper": None,
             "spider": None
         }
-        
+
+        # Validate the URL once before any fetcher runs so the newspaper and
+        # requests paths below are protected against SSRF, just like the
+        # trafilatura path (which validates inside extract_content).
+        if not self._validate_url(url):
+            error = {"error": f"Invalid or unsafe URL: {url}"}
+            comparison["trafilatura"] = error
+            comparison["newspaper"] = error
+            comparison["spider"] = error
+            return comparison
+
         # Get Trafilatura extraction
         try:
             comparison["trafilatura"] = self.extract_content(url)
