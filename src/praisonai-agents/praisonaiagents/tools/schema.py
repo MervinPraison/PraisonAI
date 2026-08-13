@@ -238,7 +238,17 @@ def build_parameters_schema(
         # Skip explicitly excluded parameters
         if param_name in skip:
             continue
-        
+
+        # Skip *args/**kwargs: they are never individual named parameters the
+        # LLM should supply, and marking them "required" produces an invalid
+        # schema (and a TypeError if the model honors it). Mirrors the filter
+        # build_tool_definition already applies so both builders agree.
+        if _param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+
         # Get type hint
         param_type = hints.get(param_name, Any)
         

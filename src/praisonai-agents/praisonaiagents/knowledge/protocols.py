@@ -199,6 +199,28 @@ class ScopeRequiredError(KnowledgeBackendError):
         super().__init__(message or default_msg)
 
 
+def require_scope(user_id, agent_id, run_id, operation: str = "operation", backend: str = None) -> None:
+    """Enforce that at least one scope identifier is provided.
+
+    Shared helper so every knowledge adapter enforces the same tenant-scope
+    contract (mem0 already did via its own ``_check_scope``). Without this, an
+    unscoped call that raises ``ScopeRequiredError`` on the mem0 backend would
+    silently return or wipe *every* tenant's data on the Chroma/SQLite backends
+    — a data-loss/leak hazard depending purely on which backend is installed.
+
+    Raises:
+        ScopeRequiredError: If none of user_id/agent_id/run_id is provided.
+    """
+    if not any([user_id, agent_id, run_id]):
+        raise ScopeRequiredError(
+            message=(
+                f"{operation} requires at least one of 'user_id', 'agent_id', "
+                f"or 'run_id' to scope the {operation}."
+            ),
+            backend=backend,
+        )
+
+
 class BackendNotAvailableError(KnowledgeBackendError):
     """Raised when a requested backend is not available."""
     
