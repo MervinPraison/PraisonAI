@@ -1,7 +1,10 @@
-"""Hybrid CLI interactive package: wrapper core/TUI + code runtime modules.
+"""Back-compat interactive package: forwards to ``praisonai_code.cli.interactive``.
 
-After C8 repatriation, ``core`` and ``async_tui`` live under this package.
-Config, events, REPL, and frontends remain in ``praisonai_code.cli.interactive``.
+The full interactive experience (``core``, ``async_tui``, ``config``, ``events``,
+REPL, frontends) is resident in ``praisonai_code.cli.interactive`` so
+``pip install praisonai-code`` alone yields a working interactive ``chat``/``code``
+session. This package keeps the old ``praisonai.cli.interactive.*`` import paths
+working via lightweight shims that preserve module identity.
 """
 
 try:  # pragma: no cover - defensive

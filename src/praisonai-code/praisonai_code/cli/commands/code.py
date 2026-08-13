@@ -293,16 +293,17 @@ def code_main(
             "plan", non_interactive=True
         )
 
-    # Import and run the terminal-native interactive mode
+    # Import and run the terminal-native interactive mode. The full interactive
+    # code session is resident in praisonai-code via the async split-pane TUI, so
+    # `pip install praisonai-code` alone yields a working `code` session. The
+    # heavier legacy dispatch (`PraisonAI._start_interactive_mode`) adds
+    # wrapper-only extras, so use it only when the wrapper is installed and fall
+    # back to the resident TUI otherwise.
     from praisonai_code._wrapper_bridge import wrapper_available
 
     if not wrapper_available():
-        typer.echo(
-            "Error: code requires the praisonai wrapper. "
-            "Install the full wrapper: pip install praisonai",
-            err=True,
-        )
-        raise typer.Exit(1)
+        _run_resident_code(prompt, args, plan=plan, session_id=session_id)
+        return
 
     from praisonai_code.cli.main import PraisonAI
     
@@ -314,6 +315,70 @@ def code_main(
     else:
         # Interactive REPL mode - use _start_interactive_mode
         praison._start_interactive_mode(args)
+
+
+def _run_resident_code(prompt, args, *, plan=False, session_id=None):
+    """Run interactive/one-shot ``code`` on the resident split-pane TUI.
+
+    Used when the ``praisonai`` wrapper is absent so the CLI-first package
+    delivers its own flagship interactive coding session with no wrapper
+    dependency. Mirrors the ``chat`` command's resident path, mapping the code
+    session's args (model/workspace/no-acp/no-lsp/--plan) onto ``AsyncTUIConfig``.
+    """
+    import os
+
+    from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+
+    model = getattr(args, "llm", None)
+    try:
+        from ..configuration.model_resolver import resolve_default_model
+
+        resolved_model = resolve_default_model(model)
+    except Exception:
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+
+        resolved_model = model or DEFAULT_FALLBACK_MODEL
+
+    # Enforce the resolved permission policy (e.g. --plan / --agent scope) by
+    # registering it on the global approval registry the resident TUI reads.
+    # Without this the read-only PLAN contract would be silently dropped and
+    # mutating tools (write/edit/shell) would stay available. The TUI syncs its
+    # PLAN indicator from this backend at construction, so registering here is
+    # sufficient — no new AsyncTUIConfig knob is needed for approval wiring.
+    agent_approval = getattr(args, "agent_approval", None)
+    if agent_approval is not None:
+        # resolve_approval_config returns a plain backend for simple modes
+        # (e.g. --plan) and an ApprovalConfig wrapper when a profile carries
+        # a permissions map; unwrap the wrapper so the registry always holds a
+        # concrete backend the TUI can query for PLAN enforcement.
+        backend = getattr(agent_approval, "backend", agent_approval)
+        try:
+            from praisonaiagents.approval import get_approval_registry
+
+            get_approval_registry().set_backend(backend)
+        except Exception:
+            pass
+
+    tui_config = AsyncTUIConfig(
+        model=resolved_model,
+        session_id=session_id,
+        workspace=os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd(),
+        debug=getattr(args, "verbose", False),
+        plan_mode=plan,
+        enable_acp=not getattr(args, "no_acp", False),
+        enable_lsp=not getattr(args, "no_lsp", False),
+    )
+
+    tui = AsyncTUI(config=tui_config)
+
+    if prompt:
+        response = tui.run_single(prompt)
+        if response:
+            print(response)
+        if tui.execution_failed:
+            raise typer.Exit(1)
+    else:
+        tui.run()
 
 
 def _print_result_succeeded(result) -> bool:
