@@ -1,9 +1,7 @@
-"""Lazy access to autogen_tools, with `find_spec` startup probes for crewai/autogen."""
+"""Lazy access to the optional :mod:`autogen_tools` helpers."""
 from .._lazy_cache import lazy_get
 
 from .._framework_availability import is_available
-CREWAI_AVAILABLE = is_available("crewai")
-AUTOGEN_AVAILABLE = is_available("autogen")
 PRAISONAI_TOOLS_PACKAGE_AVAILABLE = is_available("praisonai_tools")
 
 
