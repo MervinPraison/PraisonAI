@@ -13,20 +13,19 @@ Zero Performance Impact:
 - No overhead when not in use
 
 Usage:
+    from praisonaiagents import Agent
     from praisonaiagents.thinking import ThinkingBudget, ThinkingConfig
-    
+
     # Create a thinking budget
     budget = ThinkingBudget(
         max_tokens=16000,
         max_time_seconds=60,
         adaptive=True
     )
-    
-    # Apply to agent
-    agent = Agent(
-        instructions="...",
-        thinking_budget=budget
-    )
+
+    # Apply to agent (thinking_budget is a property, not an __init__ arg)
+    agent = Agent(instructions="...")
+    agent.thinking_budget = budget
 """
 
 __all__ = [

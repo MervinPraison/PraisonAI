@@ -6,19 +6,18 @@ Implementations are provided by the wrapper layer (praisonai_tools.observability
 
 Usage (simplest - recommended):
     from praisonaiagents import Agent, obs
-    
-    agent = Agent(
-        name="Assistant",
-        observability=obs.auto(),  # Auto-detect from env vars
-    )
+
+    obs.auto()  # Auto-detect from env vars; instruments the LLM client globally
+
+    agent = Agent(name="Assistant")
     agent.chat("Hello!")  # Auto-traces to configured provider
 
-Alternative (explicit provider):
-    observability=obs.langfuse()     # Langfuse
-    observability=obs.langsmith()    # LangSmith
-    observability=obs.agentops()     # AgentOps
-    observability=obs.arize()        # Arize Phoenix
-    observability=obs.datadog()      # Datadog
+Alternative (explicit provider - call before creating the agent):
+    obs.langfuse()     # Langfuse
+    obs.langsmith()    # LangSmith
+    obs.agentops()     # AgentOps
+    obs.arize()        # Arize Phoenix
+    obs.datadog()      # Datadog
 """
 
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
