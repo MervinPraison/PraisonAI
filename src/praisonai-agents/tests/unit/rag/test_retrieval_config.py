@@ -152,6 +152,36 @@ class TestConfigConversion:
         assert "reranker" in knowledge_config
         assert knowledge_config["reranker"]["enabled"] is True
     
+    def test_to_knowledge_config_with_embedder_config(self):
+        """Full embedder_config dict is forwarded to mem0 (issue #3941)."""
+        config = RetrievalConfig(
+            embedder_config={
+                "provider": "gemini",
+                "config": {"model": "models/text-embedding-004"},
+            }
+        )
+        
+        knowledge_config = config.to_knowledge_config()
+        
+        assert knowledge_config["embedder"]["provider"] == "gemini"
+        assert knowledge_config["embedder"]["config"]["model"] == "models/text-embedding-004"
+    
+    def test_to_knowledge_config_embedder_provider_shorthand(self):
+        """embedder_provider acts as a provider shorthand (issue #3941)."""
+        config = RetrievalConfig(embedder_provider="gemini")
+        
+        knowledge_config = config.to_knowledge_config()
+        
+        assert knowledge_config["embedder"]["provider"] == "gemini"
+    
+    def test_to_knowledge_config_no_embedder_by_default(self):
+        """Default config emits no embedder override (mem0 default is used)."""
+        config = RetrievalConfig()
+        
+        knowledge_config = config.to_knowledge_config()
+        
+        assert "embedder" not in knowledge_config
+    
     def test_to_rag_config(self):
         """Test conversion to RAG pipeline config."""
         config = RetrievalConfig(

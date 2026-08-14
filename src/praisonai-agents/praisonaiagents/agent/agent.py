@@ -1413,6 +1413,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                         'rerank': _knowledge_config.rerank,
                         'rerank_model': _knowledge_config.rerank_model,
                     }
+                # Forward embedder settings so they reach Knowledge (mem0).
+                # embedder is a provider shorthand (e.g. "gemini"); embedder_config
+                # is the full mem0 embedder dict. Only override when explicitly set.
+                if _knowledge_config.embedder and _knowledge_config.embedder != "openai":
+                    retrieval_config.setdefault('embedder_provider', _knowledge_config.embedder)
+                if _knowledge_config.embedder_config:
+                    retrieval_config.setdefault('embedder_config', _knowledge_config.embedder_config)
                 knowledge = _knowledge_config.sources if _knowledge_config.sources else None
             elif isinstance(_knowledge_config, list):
                 knowledge = _knowledge_config
