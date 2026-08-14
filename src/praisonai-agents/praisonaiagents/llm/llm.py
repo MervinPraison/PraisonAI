@@ -4295,7 +4295,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 arguments=arguments, 
                                 tool_call_id=tool_call_id,
                                 is_ollama=is_ollama,
-                                iteration_index=iteration_count,
+                                iteration_index=0,
                             ))
                         
                         # Create appropriate executor based on parallel_tool_calls setting
