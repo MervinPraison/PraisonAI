@@ -88,6 +88,42 @@ def _get_profiler_max() -> int:
 _PROFILER_MAX = _get_profiler_max()
 
 
+# tracemalloc is a process-wide singleton, so concurrent memory() scopes must
+# coordinate: reference-count how many scopes we started so only the *last*
+# one calls tracemalloc.stop(). Locking is required because is_tracing()+start()
+# is not atomic. Without this, one scope's stop() zeroes another's reading.
+_TRACEMALLOC_LOCK = threading.Lock()
+_TRACEMALLOC_STARTERS = 0
+
+
+def _tracemalloc_acquire() -> bool:
+    """Start tracing if needed and register this scope. Returns whether this
+    scope is responsible for eventually stopping tracing (i.e. we started it)."""
+    global _TRACEMALLOC_STARTERS
+    with _TRACEMALLOC_LOCK:
+        started_here = not tracemalloc.is_tracing()
+        if started_here:
+            tracemalloc.start()
+        # Only track scopes we own; if something *else* started tracing we must
+        # not stop it, so we leave the counter alone and return False.
+        if started_here or _TRACEMALLOC_STARTERS:
+            _TRACEMALLOC_STARTERS += 1
+            return True
+        return False
+
+
+def _tracemalloc_release(owned: bool) -> None:
+    """Deregister a scope; stop tracing only when the last owned scope exits."""
+    global _TRACEMALLOC_STARTERS
+    if not owned:
+        return
+    with _TRACEMALLOC_LOCK:
+        if _TRACEMALLOC_STARTERS > 0:
+            _TRACEMALLOC_STARTERS -= 1
+            if _TRACEMALLOC_STARTERS == 0:
+                tracemalloc.stop()
+
+
 # ============================================================================
 # Data Classes
 # ============================================================================
@@ -572,17 +608,12 @@ class _ProfilerImpl:
     @contextmanager
     def memory(self, name: str):
         """Profile memory usage for a block when tracemalloc is available."""
-        import tracemalloc
-
-        was_tracing = tracemalloc.is_tracing()
-        if not was_tracing:
-            tracemalloc.start()
+        owned = _tracemalloc_acquire()
         try:
             yield
         finally:
             current, peak = tracemalloc.get_traced_memory()
-            if not was_tracing:
-                tracemalloc.stop()
+            _tracemalloc_release(owned)
             self.record_memory(
                 name=name,
                 current_kb=current / 1024.0,
@@ -591,16 +622,11 @@ class _ProfilerImpl:
 
     def memory_snapshot(self) -> Dict[str, float]:
         """Return current process memory snapshot in KB."""
-        import tracemalloc
-
-        was_tracing = tracemalloc.is_tracing()
-        if not was_tracing:
-            tracemalloc.start()
+        owned = _tracemalloc_acquire()
         try:
             current, peak = tracemalloc.get_traced_memory()
         finally:
-            if not was_tracing:
-                tracemalloc.stop()
+            _tracemalloc_release(owned)
         return {"current_kb": current / 1024.0, "peak_kb": peak / 1024.0}
 
     def export_json(self) -> str:
