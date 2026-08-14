@@ -40,11 +40,13 @@ class FakeCompute:
             if path in self.files:
                 return {"stdout": self.files[path], "stderr": "", "exit_code": 0}
             return {"stdout": "", "stderr": f"cat: {path}: No such file", "exit_code": 1}
-        if "__PRAISON_EOF__" in command:
-            # Real form: mkdir -p ... && cat > 'PATH' <<'__PRAISON_EOF__'\nBODY\n__PRAISON_EOF__
+        if "cat > " in command and " <<'" in command:
+            # Real form: mkdir -p ... && cat > 'PATH' <<'DELIM'\nBODY\nDELIM
+            # DELIM is randomised per write, so parse it out of the command.
             path = command.split("cat > ", 1)[1].split(" <<", 1)[0].strip("'\"")
-            body = command.split("<<'__PRAISON_EOF__'\n", 1)[1]
-            body = body.rsplit("\n__PRAISON_EOF__", 1)[0]
+            delimiter = command.split(" <<'", 1)[1].split("'\n", 1)[0]
+            body = command.split(f"<<'{delimiter}'\n", 1)[1]
+            body = body.rsplit(f"\n{delimiter}", 1)[0]
             self.files[path] = body
             return {"stdout": "", "stderr": "", "exit_code": 0}
         return {"stdout": "ok", "stderr": "", "exit_code": 0}
@@ -125,6 +127,46 @@ def test_write_then_read_shares_state():
         _, read_file, write_file, _ = sc.build_tools()
         write_file("/workspace/a.txt", "SECRET-42")
         assert read_file("/workspace/a.txt") == "SECRET-42"
+
+
+def test_concurrent_first_use_provisions_once():
+    """Parallel first-use calls must share one sandbox, not race into several."""
+    import threading
+
+    class SlowCompute(FakeCompute):
+        async def provision(self, config):
+            import time
+            time.sleep(0.05)  # widen the race window
+            return await super().provision(config)
+
+    fake = SlowCompute()
+    sc = SharedCompute(fake)
+    ec, _, _, _ = sc.build_tools()
+
+    barrier = threading.Barrier(8)
+
+    def hit():
+        barrier.wait()
+        ec("echo hi")
+
+    threads = [threading.Thread(target=hit) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert fake.provisioned == 1, "concurrent first use must provision exactly one sandbox"
+    assert len({inst for inst, _ in fake.commands}) == 1
+
+
+def test_write_file_content_containing_delimiter_token_is_preserved():
+    """Content that looks like the heredoc terminator must not truncate/execute."""
+    fake = FakeCompute()
+    with SharedCompute(fake) as sc:
+        _, read_file, write_file, _ = sc.build_tools()
+        payload = "line1\n__PRAISON_EOF__\nrm -rf /\nline4"
+        write_file("/workspace/danger.txt", payload)
+        assert read_file("/workspace/danger.txt") == payload
 
 
 def test_result_is_never_empty_string():

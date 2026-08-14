@@ -15,6 +15,8 @@ import asyncio
 import concurrent.futures
 import logging
 import shlex
+import threading
+import uuid
 from typing import Any, Dict, List, Optional
 
 from ._compute_bridge import resolve_compute
@@ -70,6 +72,10 @@ class SharedCompute:
         self._auto_shutdown = auto_shutdown
         self._idle_timeout_s = idle_timeout_s
         self._patched: List[Any] = []
+        # Serialises lazy provisioning: parallel steps can make their first tool
+        # call concurrently, and without this two threads would each provision
+        # their own sandbox -- splitting the run and leaking one instance.
+        self._provision_lock = threading.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     @property
@@ -77,28 +83,38 @@ class SharedCompute:
         return getattr(self.provider, "provider_name", type(self.provider).__name__)
 
     def ensure_provisioned(self) -> str:
-        """Provision on first use and return the instance id."""
+        """Provision on first use and return the instance id.
+
+        Guarded by a lock so concurrent first-use calls (e.g. from a parallel
+        step) share one sandbox instead of racing and provisioning several.
+        """
         if self.instance_id is not None:
             return self.instance_id
 
-        config = self._config
-        if config is None:
-            from .protocols import ComputeConfig
+        with self._provision_lock:
+            # Re-check inside the lock: another thread may have provisioned
+            # while we were waiting.
+            if self.instance_id is not None:
+                return self.instance_id
 
-            config = ComputeConfig(
-                working_dir=self.working_dir,
-                auto_shutdown=self._auto_shutdown,
-                idle_timeout_s=self._idle_timeout_s,
+            config = self._config
+            if config is None:
+                from .protocols import ComputeConfig
+
+                config = ComputeConfig(
+                    working_dir=self.working_dir,
+                    auto_shutdown=self._auto_shutdown,
+                    idle_timeout_s=self._idle_timeout_s,
+                )
+
+            info = _run_sync(self.provider.provision(config))
+            self.instance_id = getattr(info, "instance_id", info)
+            logger.info(
+                "[shared_compute] provisioned %s instance %s",
+                self.provider_name,
+                self.instance_id,
             )
-
-        info = _run_sync(self.provider.provision(config))
-        self.instance_id = getattr(info, "instance_id", info)
-        logger.info(
-            "[shared_compute] provisioned %s instance %s",
-            self.provider_name,
-            self.instance_id,
-        )
-        return self.instance_id
+            return self.instance_id
 
     def shutdown(self) -> None:
         """Tear down the instance and restore any agents we patched."""
@@ -167,7 +183,17 @@ class SharedCompute:
         def write_file(path: str, content: str) -> str:
             """Write a file to the shared remote sandbox."""
             quoted = shlex.quote(path)
-            heredoc = f"mkdir -p $(dirname {quoted}) && cat > {quoted} <<'__PRAISON_EOF__'\n{content}\n__PRAISON_EOF__"
+            # Random per-write delimiter so file content can never terminate the
+            # heredoc early (which would truncate the file and run the remainder
+            # as shell commands). Guard against the astronomically-unlikely case
+            # where the token still appears in the body.
+            delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex}__"
+            while delimiter in content:
+                delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex}__"
+            heredoc = (
+                f"mkdir -p $(dirname {quoted}) && "
+                f"cat > {quoted} <<'{delimiter}'\n{content}\n{delimiter}"
+            )
             result = self.run_command(heredoc)
             if result.get("exit_code"):
                 return self._format(result)
