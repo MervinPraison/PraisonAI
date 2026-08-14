@@ -379,7 +379,8 @@ class FileMemory:
                         "Memory batch deadline expired before atomic commit"
                     )
                 if not commit_guard.commit(
-                    lambda: os.replace(tmp_path, filepath)
+                    lambda: os.replace(tmp_path, filepath),
+                    deadline=deadline,
                 ):
                     raise TimeoutError("Memory batch was cancelled")
                 tmp_path = None

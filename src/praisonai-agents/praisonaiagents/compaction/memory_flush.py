@@ -121,7 +121,15 @@ def format_messages_to_flush(
 
 
 class _AtomicCommitGuard:
-    """Serialize cancellation with the backend's final atomic mutation."""
+    """Serialize commit authorization with cancellation without blocking.
+
+    Backends must perform all potentially blocking preparation before calling
+    :meth:`commit` and pass only their short, final atomic mutation. Commit
+    authorization is serialized with cancellation and rechecks the deadline.
+    Cancellation prevents a mutation that is not yet authorized. An already-
+    authorized final mutation may persist after timeout; cancellation records
+    the request without waiting for that operation.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -132,15 +140,23 @@ class _AtomicCommitGuard:
         with self._lock:
             return self._cancelled
 
-    def commit(self, operation: Any) -> bool:
+    def commit(self, operation: Any, *, deadline: float) -> bool:
         with self._lock:
-            if self._cancelled:
+            if self._cancelled or time.monotonic() >= deadline:
                 return False
             operation()
             return True
 
     def cancel(self) -> None:
-        with self._lock:
+        # Try to serialize with commit() so an unauthorized mutation can never
+        # start after the deadline. If the lock is already held a commit is
+        # in flight and was authorized before now; do not block on its I/O.
+        if self._lock.acquire(blocking=False):
+            try:
+                self._cancelled = True
+            finally:
+                self._lock.release()
+        else:
             self._cancelled = True
 
 
@@ -361,8 +377,12 @@ def run_pre_compaction_flush_sync(
     """Run a bounded sync flush in a worker without blocking past its timeout.
 
     The worker runs in a daemon thread so a stuck provider cannot delay process
-    shutdown. Its memory writes are staged and committed only after successful,
-    in-time completion, so a timed-out worker cannot mutate the parent store.
+    shutdown. Its memory writes are staged and commits that have not been
+    authorized by the deadline are discarded. Cancellation is serialized with
+    the final atomic mutation, so a flush reported as timed out never starts a
+    new mutation; only a mutation already authorized before the deadline may
+    finish. Backends must therefore keep that final mutation short and
+    non-blocking, and cancellation never waits on backend I/O.
     """
     resolved, transcript, count, skipped = _prepare_flush(
         parent_agent, messages_to_flush, config

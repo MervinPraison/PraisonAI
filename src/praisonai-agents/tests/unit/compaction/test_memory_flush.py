@@ -203,7 +203,9 @@ def test_sync_timeout_discards_late_memory_writes():
             self.commits = []
 
         def commit_memory_batch(self, writes, *, deadline, commit_guard):
-            commit_guard.commit(lambda: self.commits.extend(writes))
+            commit_guard.commit(
+                lambda: self.commits.extend(writes), deadline=deadline
+            )
 
     backend = _Backend()
     release = __import__("threading").Event()
@@ -251,7 +253,9 @@ def test_sync_timeout_includes_staged_memory_commit():
         def commit_memory_batch(self, writes, *, deadline, commit_guard):
             commit_started.set()
             release.wait(1)
-            commit_guard.commit(lambda: committed.extend(writes))
+            commit_guard.commit(
+                lambda: committed.extend(writes), deadline=deadline
+            )
             commit_finished.set()
 
     backend = _Backend()
@@ -284,6 +288,145 @@ def test_sync_timeout_includes_staged_memory_commit():
     assert result.reason == "timeout"
     assert result.completed is False
     assert committed == []
+
+
+def test_sync_timeout_does_not_wait_for_blocked_atomic_backend():
+    import threading
+    import time
+
+    commit_started = threading.Event()
+    release = threading.Event()
+    commit_finished = threading.Event()
+
+    class _Backend:
+        def commit_memory_batch(self, writes, *, deadline, commit_guard):
+            def _blocked_atomic_operation():
+                commit_started.set()
+                release.wait(1)
+                commit_finished.set()
+
+            commit_guard.commit(_blocked_atomic_operation, deadline=deadline)
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            self.memory.store_long_term("durable fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    result_holder = {}
+    caller_finished = threading.Event()
+
+    def _run_flush():
+        try:
+            result_holder["result"] = run_pre_compaction_flush_sync(
+                _parent(_Backend()),
+                _messages(),
+                PreCompactionMemoryFlushConfig(
+                    min_turns_to_flush=1, timeout_seconds=0.1
+                ),
+            )
+        finally:
+            caller_finished.set()
+
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        caller = threading.Thread(target=_run_flush)
+        caller.start()
+        try:
+            assert commit_started.wait(1)
+            started_at = time.monotonic()
+            assert caller_finished.wait(0.25)
+            elapsed = time.monotonic() - started_at
+        finally:
+            release.set()
+            caller.join(1)
+
+    assert not caller.is_alive()
+    assert commit_finished.wait(1)
+    assert result_holder["result"].reason == "timeout"
+    assert elapsed < 0.25
+
+
+def test_commit_guard_cancel_blocks_unstarted_mutation():
+    import time
+
+    from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
+
+    guard = _AtomicCommitGuard()
+    guard.cancel()
+
+    mutated = []
+    assert guard.commit(
+        lambda: mutated.append(True), deadline=time.monotonic() + 1
+    ) is False
+    assert mutated == []
+    assert guard.cancelled is True
+
+
+def test_commit_guard_rejects_expired_deadline():
+    import time
+
+    from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
+
+    guard = _AtomicCommitGuard()
+    mutated = []
+
+    assert guard.commit(
+        lambda: mutated.append(True), deadline=time.monotonic() - 1
+    ) is False
+    assert mutated == []
+
+
+def test_commit_guard_cancel_does_not_block_authorized_mutation():
+    import threading
+    import time
+
+    from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
+
+    guard = _AtomicCommitGuard()
+    in_operation = threading.Event()
+    release = threading.Event()
+    committed = []
+
+    def _slow_operation():
+        in_operation.set()
+        release.wait()
+        committed.append(True)
+
+    cancel_returned = threading.Event()
+
+    def _cancel():
+        guard.cancel()
+        cancel_returned.set()
+
+    worker = threading.Thread(
+        target=lambda: guard.commit(
+            _slow_operation, deadline=time.monotonic() + 1
+        )
+    )
+    worker.start()
+    cancel_worker = None
+    try:
+        assert in_operation.wait(1)
+        cancel_worker = threading.Thread(target=_cancel)
+        cancel_worker.start()
+        assert cancel_returned.wait(1)
+        assert not release.is_set()
+    finally:
+        release.set()
+        worker.join(1)
+        if cancel_worker is not None:
+            cancel_worker.join(1)
+
+    assert not worker.is_alive()
+    assert cancel_worker is not None and not cancel_worker.is_alive()
+    assert committed == [True]
 
 
 def test_file_memory_batch_is_atomic_across_multiple_stores(tmp_path):
@@ -470,7 +613,9 @@ async def test_async_flush_uses_async_memory_commit_with_shared_deadline():
         async def acommit_memory_batch(
             self, writes, *, deadline, commit_guard
         ):
-            commit_guard.commit(lambda: self.commits.extend(writes))
+            commit_guard.commit(
+                lambda: self.commits.extend(writes), deadline=deadline
+            )
 
     backend = _Backend()
 
