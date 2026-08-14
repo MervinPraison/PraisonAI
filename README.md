@@ -106,6 +106,170 @@ agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown tabl
 
 ---
 
+## 🧬 The Five-Layer Agent Stack
+
+Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
+
+Each layer wraps the one inside it. When an agent misbehaves, the layer tells you where to look.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ⬡ MANAGED AGENTS — Where does it actually run?                  │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ 5 · GRAPH — Who runs when, and who checks whom?             │ │
+│ │ ┌─────────────────────────────────────────────────────────┐ │ │
+│ │ │ 4 · LOOP — When do we stop?                             │ │ │
+│ │ │ ┌─────────────────────────────────────────────────────┐ │ │ │
+│ │ │ │ 3 · HARNESS — Can it act, and be checked?           │ │ │ │
+│ │ │ │ ┌─────────────────────────────────────────────────┐ │ │ │ │
+│ │ │ │ │ 2 · CONTEXT — Is the right thing in the window? │ │ │ │ │
+│ │ │ │ │ ┌─────────────────────────────────────────────┐ │ │ │ │ │
+│ │ │ │ │ │ 1 · PROMPT — Did I say it clearly?          │ │ │ │ │ │
+│ │ │ │ │ └─────────────────────────────────────────────┘ │ │ │ │ │
+│ │ │ │ └─────────────────────────────────────────────────┘ │ │ │ │
+│ │ │ └─────────────────────────────────────────────────────┘ │ │ │
+│ │ └─────────────────────────────────────────────────────────┘ │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Layer | The question it answers | PraisonAI |
+|:--|:--|:--|
+| **1 · Prompt** | Did I say it clearly? | `instructions=`, `role`/`goal`/`backstory`, `output=`, `templates=` |
+| **2 · Context** | Is the right thing in the window? | `memory=`, `knowledge=`, `context=`, handoff `ContextPolicy` |
+| **3 · Harness** | Can it act, and be checked? | `tools=`, `MCP()`, `guardrails=`, `approval=`, `hooks=`, `sandbox=` |
+| **4 · Loop** | When do we stop? | `execution=ExecutionConfig(...)`, `reflection=`, `autonomy=`, doom-loop detection |
+| **5 · Graph** | Who runs when, and who checks whom? | `AgentFlow`, `route()`, `parallel()`, `loop()`, `repeat()` |
+| **⬡ Managed** | *Where does it actually run?* | `backend=ManagedAgent(compute="e2b")` — remote sandbox, or a fully hosted loop |
+
+### Layer 1 · Prompt — *Did I say it clearly?*
+
+Role, instructions, examples, output format.
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    role="Senior Data Analyst",
+    goal="Turn raw numbers into decisions",
+    output="verbose",              # markdown-formatted output
+)
+agent.start("Summarise Q3 revenue trends")
+```
+
+### Layer 2 · Context — *Is the right thing in the window?*
+
+Write, select, compress, isolate — the four context operations, one parameter each.
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    instructions="You are a support engineer.",
+    memory={"user_id": "u-42"},    # write    — persists across runs (needs a user_id)
+    knowledge=["docs/"],           # select   — retrieves only what's relevant
+    context="summarize",           # compress — auto-compacts before the limit
+)
+```
+
+> **Isolate** is `handoffs=[specialist]` — a sub-agent inherits the last few messages and the intersection of your tools, not your whole transcript. [📖 Handoffs](https://docs.praison.ai/docs/concepts/handoffs)
+
+### Layer 3 · Harness — *Can it act, and be checked?*
+
+*Agent = Model + Harness.* Tool dispatch, plus the guides that steer before acting and the sensors that observe after.
+
+```python
+from praisonaiagents import Agent, MCP, tool
+
+@tool
+def deploy(env: str) -> str:
+    """Deploy the current build to an environment."""
+    return f"Deployed to {env}"
+
+agent = Agent(
+    name="ReleaseEngineer",
+    instructions="You are a release engineer.",
+    tools=[deploy, MCP("npx -y @modelcontextprotocol/server-filesystem /tmp")],
+    approval=True,                 # guide — human gate before risky tools run
+)
+agent.start("Deploy to staging, then list the files you can read")
+```
+
+### Layer 4 · Loop — *When do we stop?*
+
+Hard iteration caps, budget ceilings, no-progress detection and completion checks — every brake is explicit.
+
+```python
+from praisonaiagents import Agent, ExecutionConfig
+
+agent = Agent(
+    instructions="Fix the failing tests.",
+    execution=ExecutionConfig(max_iter=30, max_budget=0.50, on_budget_exceeded="stop"),
+    reflection=True,               # completion check — the agent grades its own answer
+    autonomy=True,                 # required to drive the loop with run_autonomous()
+)
+result = agent.run_autonomous("Refactor the auth module", max_iterations=5)
+
+print(result.completion_reason)
+# goal | no_tool_calls | max_iterations | timeout | doom_loop | needs_help | error
+# (with on_budget_exceeded="stop", hitting the cap raises BudgetExceededError,
+#  surfaced here as completion_reason="error")
+```
+
+> **Doom-loop detection is on by default.** Repeated identical tool calls and A→B→A→B oscillation get caught — while a poller whose output keeps changing does not. [📖 Doom Loop Detection](https://docs.praison.ai/docs/features/doom-loop-detection)
+
+### Layer 5 · Graph — *Who runs when, and who checks whom?*
+
+Topology as a versionable artifact: prompt chaining, routing, parallelisation, orchestrator-worker.
+
+```python
+from praisonaiagents import AgentFlow
+from praisonaiagents.workflows import route, parallel, repeat
+
+flow = AgentFlow(steps=[
+    classifier,
+    route({"bug": [bug_agent], "feature": [feature_agent], "default": [triage]}),
+    parallel([reviewer, tester]),                      # fan out, join automatically
+    repeat(editor, until=lambda ctx: "approved" in ctx.previous_result.lower(),
+           max_iterations=3),                          # evaluator–optimizer
+])
+flow.run("Ticket #123: login fails on Safari")
+```
+
+> The same graph is expressible in YAML with no Python at all. [📖 AgentFlow](https://docs.praison.ai/docs/concepts/agentflow)
+
+### ⬡ Outside the stack: Managed Agents — *Where does it actually run?*
+
+The harness is commoditising; **where** the agent executes is the next multiplier. Rather than burning your laptop's CPU, hand an agent a short-lived cloud sandbox — repo, tools and tests run there.
+
+```bash
+pip install praisonai
+```
+
+```python
+from praisonai import Agent, ManagedAgent, LocalManagedConfig
+
+# A. Tools run in a remote sandbox; the agent loop stays local
+sandboxed = ManagedAgent(
+    provider="local", compute="e2b",   # or modal | daytona | flyio | docker | tenki
+    config=LocalManagedConfig(model="gpt-4o-mini", name="RemoteTools"),
+)
+agent = Agent(name="builder", backend=sandboxed)
+
+# B. The entire agent loop runs in the cloud (needs ANTHROPIC_API_KEY;
+#    with no key set, ManagedAgent() falls back to a local loop)
+agent = Agent(name="teacher", backend=ManagedAgent())
+agent.start("Write a Python script that prints the first 10 primes, then run it")
+```
+
+Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), and a post-setup snapshot is reused so the next run skips the image pull and dependency install. Commit a `.praisonai/environment.yaml` and the environment travels with the repo.
+
+> 📖 [20 runnable examples](examples/python/managed-agents/) · manage sessions with `praisonai managed sessions list <agent-id>` or `praisonai managed sessions resume <session-id> "<prompt>"`
+
+<sub>Stack framing adapted from [The Five-Layer Agent Stack](https://mer.vin/2026/07/five-layer-agent-stack-match-bug-to-right-layer/) and [Agent Harnesses vs Orbs](https://mer.vin/2026/08/agent-harnesses-vs-orbs-why-remote-sandboxes-beat-local-agent-loops/).</sub>
+
+---
+
 ## 🌌 The PraisonAI Ecosystem
 
 Start simple with the core SDK, or expand to full visual builders and dashboards when you're ready.
@@ -200,9 +364,9 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 | 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
 | 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
 | 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
-| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoff=True` |
+| 🔄 | **Agent Handoffs** — seamless conversation passing | `handoffs=[other_agent]` |
 | 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
-|  | **Web Search + Fetch** — native browsing | `web_search=True` |
+|  | **Web Search + Fetch** — native browsing | `web=True` |
 | 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
 | 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
 | 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
@@ -212,9 +376,9 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 | | Feature | How |
 |--|---------|-----|
-| 💡 | **Prompt Caching** — reduce latency + cost | `prompt_caching=True` |
+| 💡 | **Prompt Caching** — reduce latency + cost | `caching=True` |
 | 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
-| 💭 | **Thinking Budgets** — control reasoning depth | `thinking_budget=1024` |
+| 💭 | **Thinking Budgets** — control reasoning depth | `agent.thinking_budget = 1024` |
 | 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
 | 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
 | 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
@@ -341,8 +505,10 @@ from praisonaiagents import Agent, db
 
 agent = Agent(
     name="Assistant",
-    db=db(database_url="postgresql://localhost/mydb"),
-    session_id="my-session"
+    memory={
+        "db": db(database_url="postgresql://localhost/mydb"),
+        "session_id": "my-session",
+    },
 )
 agent.chat("Hello!")  # Auto-persists messages, runs, traces
 ```
@@ -891,8 +1057,10 @@ from praisonaiagents import Agent, db
 
 agent = Agent(
     name="Assistant",
-    db=db(database_url="postgresql://localhost/mydb"),
-    session_id="my-session"
+    memory={
+        "db": db(database_url="postgresql://localhost/mydb"),
+        "session_id": "my-session",
+    },
 )
 ```
 
@@ -908,8 +1076,8 @@ from praisonaiagents import Agent
 
 agent = Agent(
     name="Assistant",
-    memory=True,  # Enables file-based memory (no extra deps!)
-    user_id="user123"
+    # Enables file-based memory (no extra deps!)
+    memory={"user_id": "user123"},
 )
 ```
 
