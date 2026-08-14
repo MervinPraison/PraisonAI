@@ -4887,6 +4887,8 @@ class WebSocketGateway:
             redis_pubsub = getattr(self, "_redis_pubsub", None)
             if redis_pubsub is not None:
                 push_status["redis_connected"] = getattr(redis_pubsub, "_client", None) is not None
+                push_status["redis_degraded"] = getattr(redis_pubsub, "is_degraded", False)
+                push_status["redis_dropped_writes"] = getattr(redis_pubsub, "dropped_writes", 0)
             result["push"] = push_status
         
         return result
