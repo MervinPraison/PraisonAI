@@ -627,7 +627,17 @@ class AgentFlow:
     execution: Optional[Any] = None  # Union[str, ExecutionConfig] - execution control
     caching: Optional[Any] = None  # Union[bool, CachingConfig] - caching
     learn: Optional[Any] = None  # Union[bool, LearnConfig] - continuous learning
-    
+
+    # ============================================================
+    # REMOTE EXECUTION
+    # ============================================================
+    # Union[str, ComputeProviderProtocol] - run every step's shell/file tools in
+    # ONE shared remote sandbox ("docker", "e2b", "modal", "daytona", "flyio",
+    # "tenki", "local"). Agents share /workspace, so a file written by one step
+    # is visible to later steps. Orchestration stays local. Pass a configured
+    # provider instance instead of a name to customise image/resources.
+    compute: Optional[Any] = None
+
     # ============================================================
     # ROBUSTNESS PARAMS (debugging & audit trail)
     # ============================================================
@@ -1105,9 +1115,73 @@ class AgentFlow:
                 "separate Workflow instance per concurrent run."
             )
         try:
-            return self._run_impl(input, llm, verbose, stream)
+            if self.compute is None:
+                return self._run_impl(input, llm, verbose, stream)
+            # One sandbox for the whole run; torn down even if a step raises.
+            with self._shared_compute() as shared:
+                shared.attach(self._collect_agents())
+                return self._run_impl(input, llm, verbose, stream)
         finally:
             self._execution_lock.release()
+
+    def _shared_compute(self):
+        """Build the SharedCompute for this run (see the ``compute=`` field)."""
+        from ..managed.shared_compute import SharedCompute
+
+        return SharedCompute(self.compute)
+
+    def _collect_agents(self) -> List[Any]:
+        """Walk steps (including nested route/parallel/loop/repeat/if) for Agents.
+
+        Returns each Agent once, in first-seen order. Anything that is not an
+        Agent -- plain functions, Tasks without an agent -- is ignored.
+        """
+        found: List[Any] = []
+        seen = set()
+
+        def visit(step: Any) -> None:
+            if step is None:
+                return
+            if isinstance(step, (list, tuple)):
+                for item in step:
+                    visit(item)
+                return
+
+            # Nested step containers.
+            if isinstance(step, Route):
+                for branch in step.routes.values():
+                    visit(branch)
+                visit(step.default)
+                return
+            if isinstance(step, Parallel):
+                visit(step.steps)
+                return
+            if isinstance(step, Loop):
+                visit(step.step)
+                visit(step.steps)
+                return
+            if isinstance(step, Repeat):
+                visit(step.step)
+                return
+            if isinstance(step, If):
+                visit(step.then_steps)
+                visit(step.else_steps)
+                return
+
+            # A Task carries the agent that will execute it.
+            agent = getattr(step, "agent", None)
+            candidate = agent if agent is not None else step
+
+            # Duck-type an Agent: has chat() and instructions/role.
+            if hasattr(candidate, "chat") and (
+                hasattr(candidate, "instructions") or hasattr(candidate, "role")
+            ):
+                if id(candidate) not in seen:
+                    seen.add(id(candidate))
+                    found.append(candidate)
+
+        visit(self.steps)
+        return found
 
     def _run_impl(
         self,

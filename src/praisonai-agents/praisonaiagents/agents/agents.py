@@ -660,6 +660,13 @@ class AgentTeam(SpawnAnnounceProtocol):
         reflection: Optional[Any] = None,  # Union[bool, ReflectionConfig] - self-reflection
         caching: Optional[Any] = None,  # Union[bool, CachingConfig] - caching
         learn: Optional[Any] = None,  # Union[bool, LearnConfig] - continuous learning
+        # Union[str, ComputeProviderProtocol] - run every agent's shell/file
+        # tools in ONE shared remote sandbox ("docker", "e2b", "modal",
+        # "daytona", "flyio", "tenki", "local"). Agents share /workspace, so
+        # files written by one agent are visible to the others. Orchestration
+        # stays local. Pass a configured provider instance instead of a name to
+        # customise image/resources.
+        compute: Optional[Any] = None,
     ):
         """
         Initialize AgentManager with consolidated feature parameters.
@@ -890,7 +897,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         self.process = process
         self.stream = _stream
         self.name = name
-        
+        # Remote execution: one shared sandbox for every agent on this team.
+        self.compute = compute
+
         # Callbacks for workflow execution
         self.on_task_start = _on_task_start
         self.on_task_complete = _on_task_complete
@@ -1752,6 +1761,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             result = agents.start(output="silent")
             ```
         """
+        # Remote execution: provision ONE sandbox shared by every agent on the
+        # team, and tear it down even if execution raises. Re-enters start()
+        # with compute cleared so the wrapper applies exactly once.
+        if getattr(self, "compute", None) is not None:
+            from ..managed.shared_compute import SharedCompute
+
+            compute, self.compute = self.compute, None
+            try:
+                with SharedCompute(compute) as shared:
+                    shared.attach(list(self.agents or []))
+                    return self.start(content=content, return_dict=return_dict,
+                                      output=output, **kwargs)
+            finally:
+                self.compute = compute
+
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True)
