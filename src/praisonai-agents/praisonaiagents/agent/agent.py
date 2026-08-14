@@ -2457,7 +2457,8 @@ Your Goal: {self.goal}
         """Custom deepcopy that creates fresh threading primitives.
 
         threading primitives cannot be deep-copied on all supported Python
-        versions. This hook replaces the Agent-owned locks directly, while
+        versions, and ``asyncio.Lock`` copies silently share internal waiter
+        state. This hook replaces the Agent-owned locks directly, while
         lock-bearing state wrappers provide their own deepcopy hooks, so the
         clone receives independent state and fresh locks.
         """
@@ -2470,6 +2471,8 @@ Your Goal: {self.goal}
                 object.__setattr__(result, k, threading.RLock())
             elif k == "_cost_lock":
                 object.__setattr__(result, k, threading.Lock())
+            elif k == "_approvals_lock":
+                object.__setattr__(result, k, asyncio.Lock())
             else:
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
         return result

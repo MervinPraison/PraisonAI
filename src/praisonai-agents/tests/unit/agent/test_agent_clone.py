@@ -94,3 +94,13 @@ class TestAgentDeepCopy:
         assert cloned._Agent__chat_history_state is not agent._Agent__chat_history_state
         assert cloned._Agent__snapshot_state is not agent._Agent__snapshot_state
         assert cloned._turn_tools_lock is not agent._turn_tools_lock
+
+    def test_deepcopy_isolates_approvals_lock(self):
+        import asyncio
+
+        agent = self._make_agent()
+        cloned = copy.deepcopy(agent)
+
+        assert cloned._approvals_lock is not agent._approvals_lock
+        assert isinstance(cloned._approvals_lock, asyncio.Lock)
+        assert cloned._pending_approvals is not agent._pending_approvals
