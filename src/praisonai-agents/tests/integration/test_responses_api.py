@@ -372,6 +372,27 @@ class TestOpenAIClientResponsesAPI:
             ],
         }]
 
+    def test_build_responses_input_preserves_image_detail(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {
+                    "url": "https://example.com/image.png",
+                    "detail": "high",
+                },
+            }],
+        }], "gpt-4o-mini")
+
+        assert params["input"][0]["content"][0] == {
+            "type": "input_image",
+            "image_url": "https://example.com/image.png",
+            "detail": "high",
+        }
+
     def test_build_responses_input_encodes_local_image(self, tmp_path):
         from praisonaiagents.llm.openai_client import OpenAIClient
 
