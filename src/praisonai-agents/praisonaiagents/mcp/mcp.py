@@ -428,8 +428,12 @@ class MCP:
                 self.is_npx = False
                 return
             
-        # Handle the single string format for stdio client
-        if isinstance(command_or_string, str) and args is None:
+        # Handle the single string format for stdio client.
+        # Split the command string whenever it contains whitespace so that
+        # multi-word forms like MCP("npx -y pkg", args=["/tmp"]) work — the
+        # first token is the executable and the remaining tokens are prepended
+        # to any explicitly supplied args.
+        if isinstance(command_or_string, str) and ' ' in command_or_string.strip():
             # Split the string into command and args using shell-like parsing
             if platform.system() == 'Windows':
                 # Use shlex with posix=False for Windows to handle quotes and paths with spaces
@@ -442,9 +446,9 @@ class MCP:
                 raise ValueError("Empty command string")
             
             cmd = parts[0]
-            arguments = parts[1:] if len(parts) > 1 else []
+            arguments = parts[1:] + (args or [])
         else:
-            # Use the original format with separate command and args
+            # Use the original format with a bare command and separate args
             cmd = command_or_string
             arguments = args or []
         
