@@ -37,75 +37,6 @@ curl -fsSL https://praison.ai/install.sh | bash
   <br>
 </div>
 
-<p align="center">
-  <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
-</p>
-
-<p align="center">
-  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
-</p>
-
-```
- ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
- ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
- ██████╔╝██████╔╝███████║██║███████╗██║   ██║██╔██╗ ██║    ███████║██║
- ██╔═══╝ ██╔══██╗██╔══██║██║╚════██║██║   ██║██║╚██╗██║    ██╔══██║██║
- ██║     ██║  ██║██║  ██║██║███████║╚██████╔╝██║ ╚████║    ██║  ██║██║
- ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚═╝
-
- pip install praisonai
-```
-
-<p align="center">
-  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
-</p>
-
-\* `export TAVILY_API_KEY=xxxxx`
-
-<div align="center">
-  <a href="https://docs.praison.ai">
-    <p align="center">
-      <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
-    </p>
-  </a>
-</div>
-
----
-
-## 🎯 Use Cases
-
-AI agents solving real-world problems across industries:
-
-| Use Case | Description |
-|----------|-------------|
-| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
-| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
-| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
-| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
-| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
-| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
-
----
-
-## 🚀 Meet your first Agent (Under 1 Minute)
-
-1. Install the lightweight core SDK:
-```bash
-pip install praisonaiagents
-export OPENAI_API_KEY="your-api-key"
-```
-
-2. Run your first autonomous agent:
-```python
-from praisonaiagents import Agent
-
-# Give your agent a goal, and watch it work.
-agent = Agent(instructions="You are a senior data analyst.")
-agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown table.")
-```
-
----
-
 ## 🧬 The Five-Layer Agent Stack
 
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
@@ -267,6 +198,75 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
 > 📖 [20 runnable examples](examples/python/managed-agents/) · manage sessions with `praisonai managed sessions list <agent-id>` or `praisonai managed sessions resume <session-id> "<prompt>"`
 
 <sub>Stack framing adapted from [The Five-Layer Agent Stack](https://mer.vin/2026/07/five-layer-agent-stack-match-bug-to-right-layer/) and [Agent Harnesses vs Orbs](https://mer.vin/2026/08/agent-harnesses-vs-orbs-why-remote-sandboxes-beat-local-agent-loops/).</sub>
+
+---
+
+<p align="center">
+  <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+</p>
+
+<p align="center">
+  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
+</p>
+
+```
+ ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
+ ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
+ ██████╔╝██████╔╝███████║██║███████╗██║   ██║██╔██╗ ██║    ███████║██║
+ ██╔═══╝ ██╔══██╗██╔══██║██║╚════██║██║   ██║██║╚██╗██║    ██╔══██║██║
+ ██║     ██║  ██║██║  ██║██║███████║╚██████╔╝██║ ╚████║    ██║  ██║██║
+ ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚═╝
+
+ pip install praisonai
+```
+
+<p align="center">
+  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
+</p>
+
+\* `export TAVILY_API_KEY=xxxxx`
+
+<div align="center">
+  <a href="https://docs.praison.ai">
+    <p align="center">
+      <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
+    </p>
+  </a>
+</div>
+
+---
+
+## 🎯 Use Cases
+
+AI agents solving real-world problems across industries:
+
+| Use Case | Description |
+|----------|-------------|
+| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
+| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
+| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
+| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
+| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
+| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
+
+---
+
+## 🚀 Meet your first Agent (Under 1 Minute)
+
+1. Install the lightweight core SDK:
+```bash
+pip install praisonaiagents
+export OPENAI_API_KEY="your-api-key"
+```
+
+2. Run your first autonomous agent:
+```python
+from praisonaiagents import Agent
+
+# Give your agent a goal, and watch it work.
+agent = Agent(instructions="You are a senior data analyst.")
+agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown table.")
+```
 
 ---
 
