@@ -81,17 +81,19 @@ class PraisonAICodeAgent(BaseInstalledAgent):
         model = self.model_name or "openai/gpt-4o-mini"
 
         command = (
+            "log_file=$(mktemp /tmp/praisonai_code.XXXXXX); "
+            "chmod 600 \"$log_file\"; "
             f"praisonai code -p --output json {shlex.quote(instruction)} "
             f"--dangerously-skip-approval "
             f"--model {shlex.quote(model)} "
-            "> /tmp/praisonai_code.log 2>&1; "
+            "> \"$log_file\" 2>&1; "
             # Capture the real exit status so install/auth/startup failures still
             # surface instead of being silently masked (Harbor otherwise records a
             # completed attempt for a crashed agent).
             "status=$?; "
             # Echo the envelope so Harbor captures it for post-run accounting.
-            "cp /tmp/praisonai_code.log /tmp/praisonai_code_run.log 2>/dev/null || true; "
-            "cat /tmp/praisonai_code.log; "
+            "cat \"$log_file\"; "
+            "rm -f \"$log_file\"; "
             # `praisonai code` normally exits 0 (Harbor grades by task
             # verification), so a genuine benchmark miss won't fail here — but a
             # nonzero status means the assistant itself failed to run.
@@ -128,7 +130,6 @@ class PraisonAICodeAgent(BaseInstalledAgent):
             "agent_type": "code-cli",
             "agent_name": self.name(),
             "model": self.model_name,
-            "log_path": "/tmp/praisonai_code.log",
             "session_id": envelope.get("session_id") if envelope else None,
             "status": envelope.get("status") if envelope else "unknown",
         }

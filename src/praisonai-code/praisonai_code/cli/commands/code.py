@@ -491,13 +491,6 @@ def _run_print_code(
         except Exception:
             resolved_session = None
 
-    workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
-    tool_groups = ["basic", "acp", "edit", "search", "lsp"]
-    code_tools = _get_headless_code_tools(
-        groups=tool_groups,
-        workspace=workspace,
-    )
-
     agent_config = {
         "name": "CodeAgent",
         "role": "Code Assistant",
@@ -510,7 +503,6 @@ def _run_print_code(
         # A minimal output preset keeps the agent from printing its own
         # decorations so stdout carries only our envelope.
         "output": "minimal",
-        "tools": code_tools,
     }
     if model:
         agent_config["llm"] = model
@@ -532,6 +524,11 @@ def _run_print_code(
     result = None
     error_message = None
     try:
+        workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
+        agent_config["tools"] = _get_headless_code_tools(
+            groups=["basic", "acp", "edit", "search", "lsp"],
+            workspace=workspace,
+        )
         agent = Agent(**agent_config)
         if thinking_budget is not None:
             agent.thinking_budget = thinking_budget

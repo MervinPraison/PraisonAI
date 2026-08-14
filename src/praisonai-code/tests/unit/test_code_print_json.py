@@ -154,6 +154,7 @@ def test_code_print_real_agent_writes_workspace(tmp_path):
             "gpt-4o-mini",
             "--workspace",
             str(tmp_path),
+            "--dangerously-skip-approval",
             f"Create {target.name} containing exactly HEADLESS_OK.",
         ],
     )
