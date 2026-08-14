@@ -83,7 +83,17 @@ class PollManager:
         """Register a polling client and return a poll token."""
         cid = client_id or str(uuid.uuid4())
         token = str(uuid.uuid4())
-        state = PollClientState(client_id=cid, poll_token=token)
+        # Bound the per-client queue so sustained backpressure overflows into
+        # the durable store (at-least-once) rather than growing unbounded in
+        # memory and vanishing on restart. ``max_queue_size <= 0`` disables the
+        # bound (legacy unbounded behaviour, no overflow).
+        max_queue_size = getattr(self._config, "max_queue_size", 0) or 0
+        queue: asyncio.Queue = (
+            asyncio.Queue(maxsize=max_queue_size)
+            if max_queue_size > 0
+            else asyncio.Queue()
+        )
+        state = PollClientState(client_id=cid, poll_token=token, queue=queue)
         self._poll_clients[token] = state
         self._client_tokens[cid] = token
         logger.debug("Poll client registered: %s", cid)

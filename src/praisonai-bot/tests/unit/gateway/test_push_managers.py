@@ -421,6 +421,26 @@ class TestPollManagerDurability:
         return PollManager(gateway, PollingConfig())
 
     @pytest.mark.asyncio
+    async def test_config_bounds_queue_so_overflow_is_reachable(self, gateway):
+        """A registered client's queue is bounded by config — overflow (and thus
+        durable persistence) is reachable in production, not only via manual test
+        override.
+        """
+        from praisonai_bot.gateway.push_polling import PollManager
+        mgr = PollManager(gateway, PollingConfig(max_queue_size=2))
+        reg = mgr.register_client(client_id="c1")
+        state = mgr.get_client_state(reg["poll_token"])
+        assert state.queue.maxsize == 2
+
+    @pytest.mark.asyncio
+    async def test_zero_max_queue_size_is_unbounded(self, gateway):
+        from praisonai_bot.gateway.push_polling import PollManager
+        mgr = PollManager(gateway, PollingConfig(max_queue_size=0))
+        reg = mgr.register_client(client_id="c1")
+        state = mgr.get_client_state(reg["poll_token"])
+        assert state.queue.maxsize == 0
+
+    @pytest.mark.asyncio
     async def test_overflow_persists_to_durable_store(self, poll_mgr, delivery_mgr):
         reg = poll_mgr.register_client(client_id="c1")
         state = poll_mgr.get_client_state(reg["poll_token"])
