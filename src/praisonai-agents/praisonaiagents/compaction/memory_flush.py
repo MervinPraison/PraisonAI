@@ -121,29 +121,44 @@ def format_messages_to_flush(
 
 
 class _AtomicCommitGuard:
-    """Cancel commits without making the timeout path wait on backend I/O.
+    """Serialize cancellation with the final mutation without blocking cancel.
 
     Backends must perform all potentially blocking preparation before calling
-    :meth:`commit` and pass only their short, final atomic mutation.  A final
-    mutation that has already started cannot be rolled back safely, but a
-    misbehaving backend must not be able to make cancellation block.
+    :meth:`commit` and pass only their short, final atomic mutation. Commit and
+    cancellation are mutually exclusive, so a cancellation that wins the race
+    prevents the mutation from starting and a timed-out flush never persists
+    memory. Cancellation itself never waits on backend I/O: if a final mutation
+    is already running it was authorized before the deadline, so :meth:`cancel`
+    records the request without blocking rather than joining the operation.
     """
 
     def __init__(self) -> None:
-        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._cancelled = False
 
     @property
     def cancelled(self) -> bool:
-        return self._cancelled.is_set()
+        with self._lock:
+            return self._cancelled
 
     def commit(self, operation: Any) -> bool:
-        if self._cancelled.is_set():
-            return False
-        operation()
-        return True
+        with self._lock:
+            if self._cancelled:
+                return False
+            operation()
+            return True
 
     def cancel(self) -> None:
-        self._cancelled.set()
+        # Try to serialize with commit() so an unauthorized mutation can never
+        # start after the deadline. If the lock is already held a commit is
+        # in flight and was authorized before now; do not block on its I/O.
+        if self._lock.acquire(blocking=False):
+            try:
+                self._cancelled = True
+            finally:
+                self._lock.release()
+        else:
+            self._cancelled = True
 
 
 class _StagedMemory:
@@ -364,9 +379,11 @@ def run_pre_compaction_flush_sync(
 
     The worker runs in a daemon thread so a stuck provider cannot delay process
     shutdown. Its memory writes are staged and commits that have not been
-    authorized by the deadline are discarded. A final atomic mutation already
-    in progress may finish after timeout, so backends must keep it non-blocking;
-    cancellation never waits for backend I/O.
+    authorized by the deadline are discarded. Cancellation is serialized with
+    the final atomic mutation, so a flush reported as timed out never starts a
+    new mutation; only a mutation already authorized before the deadline may
+    finish. Backends must therefore keep that final mutation short and
+    non-blocking, and cancellation never waits on backend I/O.
     """
     resolved, transcript, count, skipped = _prepare_flush(
         parent_agent, messages_to_flush, config

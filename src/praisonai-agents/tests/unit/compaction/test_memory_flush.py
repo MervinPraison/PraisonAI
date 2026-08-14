@@ -334,6 +334,48 @@ def test_sync_timeout_does_not_wait_for_blocked_atomic_backend():
     assert elapsed < 0.25
 
 
+def test_commit_guard_cancel_blocks_unstarted_mutation():
+    from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
+
+    guard = _AtomicCommitGuard()
+    guard.cancel()
+
+    mutated = []
+    assert guard.commit(lambda: mutated.append(True)) is False
+    assert mutated == []
+    assert guard.cancelled is True
+
+
+def test_commit_guard_cancel_does_not_block_authorized_mutation():
+    import threading
+    import time
+
+    from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
+
+    guard = _AtomicCommitGuard()
+    in_operation = threading.Event()
+    release = threading.Event()
+    committed = []
+
+    def _slow_operation():
+        in_operation.set()
+        release.wait(1)
+        committed.append(True)
+
+    worker = threading.Thread(target=lambda: guard.commit(_slow_operation))
+    worker.start()
+    assert in_operation.wait(1)
+
+    started = time.monotonic()
+    guard.cancel()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.25
+    release.set()
+    worker.join(1)
+    assert committed == [True]
+
+
 def test_file_memory_batch_is_atomic_across_multiple_stores(tmp_path):
     from praisonaiagents.memory.file_memory import FileMemory
 
