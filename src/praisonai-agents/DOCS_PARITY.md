@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 50 | 15804 |
+| ✅ Agent | 22 | 50 | 15806 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
 | ✅ Approval | 1 | 5 | 2537 |
@@ -27,32 +27,32 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2744 |
 | ✅ Bots | 7 | 31 | 13314 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35970 |
+| ✅ CLI | 5 | 121 | 36021 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4583 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3047 |
-| ✅ Context Management | 16 | 34 | 13388 |
+| ✅ Context Management | 16 | 34 | 13396 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
 | ✅ Evaluation | 1 | 7 | 2905 |
 | ✅ Events | 1 | 2 | 749 |
-| ✅ Execution | 3 | 4 | 1560 |
+| ✅ Execution | 3 | 4 | 1562 |
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2273 |
 | ✅ Flow | 1 | 3 | 788 |
 | ✅ Gateway | 7 | 72 | 26391 |
-| ✅ Guardrails | 4 | 4 | 1950 |
+| ✅ Guardrails | 4 | 4 | 2017 |
 | ✅ Handoffs | 11 | 6 | 2563 |
-| ✅ Hooks | 2 | 9 | 4309 |
+| ✅ Hooks | 2 | 9 | 4317 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4245 |
-| ✅ LLM | 3 | 15 | 5140 |
+| ✅ LLM | 3 | 15 | 5192 |
 | ✅ Loops | 4 | 5 | 1422 |
 | ✅ MCP | 1 | 61 | 13847 |
-| ✅ Memory | 6 | 18 | 7067 |
+| ✅ Memory | 6 | 18 | 7070 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 141 | 41237 |
+| ✅ Tools | 12 | 141 | 41242 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1207 |
 | ✅ Video | 2 | 6 | 649 |
