@@ -71,6 +71,10 @@ def test_streaming_tool_call_is_executed_before_follow_up(monkeypatch):
 
     assert chunks == ["final answer"]
     assert [call["stream"] for call in completion_calls] == [True, False]
+    assert completion_calls[1]["messages"][-1] == {
+        "role": "tool",
+        "content": "ok",
+    }
     assert len(batches) == 1
     assert batches[0][0].function_name == "lookup"
     assert batches[0][0].iteration_index == 0
