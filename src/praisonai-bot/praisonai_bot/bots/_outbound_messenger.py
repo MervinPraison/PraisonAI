@@ -239,7 +239,7 @@ class BotOutboundMessenger:
         """Add/remove a reaction on a message via the delivery router.
 
         Dispatches through the live adapter's native reaction primitive, gated
-        on the channel's ``PlatformCapabilities.reactions`` (Issue #3917). When
+        on the channel's ``capabilities["reactions"]`` flag (Issue #3917). When
         ``message_id`` is empty and ``target`` is ``"origin"`` the inbound
         message being handled is used, so a model can acknowledge the current
         message with a single emoji instead of a full text reply. A channel that

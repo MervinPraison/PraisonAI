@@ -1003,7 +1003,7 @@ class DeliveryRouter:
 
         Resolves the symbolic target and dispatches through the live adapter's
         native ``add_reaction``/``remove_reaction`` primitive, gated on the
-        adapter's ``PlatformCapabilities.reactions``. Returns a ``(status,
+        adapter's ``capabilities["reactions"]`` flag. Returns a ``(status,
         resolved_target)`` tuple where ``status`` is one of ``"ok"``,
         ``"unsupported"``, ``"failed"`` or ``"no_route"`` — never raising — so a
         channel that cannot react degrades gracefully (Issue #3917).
@@ -1025,8 +1025,8 @@ class DeliveryRouter:
         # does for upload primitives).
         adapter = getattr(bot, "adapter", None) or bot
 
-        caps = getattr(adapter, "platform_capabilities", None)
-        if caps is None or not getattr(caps, "reactions", False):
+        caps = getattr(adapter, "capabilities", None) or {}
+        if not caps.get("reactions", False):
             return ("unsupported", resolved)
 
         fn = getattr(

@@ -318,15 +318,11 @@ def _make_reaction_router(*, reactions=True, react_ok=True):
     """
     calls = []
 
-    class FakeCaps:
-        def __init__(self, reactions):
-            self.reactions = reactions
-
     class FakeAdapter:
         platform = "telegram"
 
         def __init__(self, reactions, react_ok):
-            self.platform_capabilities = FakeCaps(reactions)
+            self.capabilities = {"reactions": reactions}
             self._react_ok = react_ok
 
         async def add_reaction(self, channel_id, message_id, emoji):
