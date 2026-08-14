@@ -38,6 +38,7 @@ from praisonaiagents.gateway.protocols import (
     ConnectErrorCode,
     ConnectRecoveryStep,
     GatewayCloseCode,
+    LivenessDecision,
     HelloResult,
     HelloError,
     GATEWAY_PROTOCOL_VERSION,
@@ -78,6 +79,14 @@ SLOW_CONSUMER_CLOSE_CODE = 1013
 # structured GatewayCloseCode.CREDENTIALS_ROTATED reason travels in the close
 # ``reason`` so clients can branch deterministically and re-authenticate.
 CREDENTIALS_ROTATED_CLOSE_CODE = 4001
+
+# WebSocket close code used when a session is reaped for missing too many
+# application-level heartbeats (Issue #2798/#3911). 4002 is in the private-use
+# (4000-4999) range reserved for application-defined codes; the structured
+# GatewayCloseCode.LIVENESS_TIMEOUT reason travels in the close ``reason`` so a
+# client can branch deterministically and reconnect (its own watchdog usually
+# force-reconnects first).
+LIVENESS_TIMEOUT_CLOSE_CODE = 4002
 
 
 class _ChannelBotOS:
@@ -923,6 +932,13 @@ class WebSocketGateway:
         # serving loop only when a ``gateway.watchdog`` block (or the CLI
         # ``--watchdog`` flag) enables it; ``None`` means zero cost.
         self._watchdog = None
+        # Issue #2798/#3911: application-level connection-liveness heartbeat +
+        # half-open reaper. The background task emits ``PING`` at the configured
+        # interval and closes any session whose ``last_activity`` exceeds the
+        # merged ``LivenessPolicy`` window with ``LIVENESS_TIMEOUT``. ``None``
+        # until ``start()`` launches it (see ``_liveness_loop``).
+        self._liveness_task: Optional[asyncio.Task] = None
+        self._reaped_connections = 0
         
         self._agents: Dict[str, "Agent"] = {}
         self._sessions: Dict[str, GatewaySession] = {}
@@ -2126,6 +2142,15 @@ class WebSocketGateway:
         # all-thread stacks and hard-exits with GATEWAY_RESTART_EXIT_CODE so
         # systemd/launchd/Docker relaunch the process. No-op when unconfigured.
         self._arm_watchdog()
+
+        # Issue #2798/#3911: launch the connection-liveness heartbeat/reaper so
+        # half-open peers are pinged and, on missing too many beats, reaped with
+        # LIVENESS_TIMEOUT — releasing their session/presence/queue state. No-op
+        # when the policy is disabled (``interval_ms == 0``).
+        if self._liveness_task is None:
+            self._liveness_task = asyncio.create_task(
+                self._liveness_loop(), name="gateway-liveness"
+            )
         try:
             await self._server.serve()
         except Exception as e:
@@ -2137,6 +2162,20 @@ class WebSocketGateway:
             raise
         finally:
             self._disarm_watchdog()
+            await self._cancel_liveness_task()
+
+    async def _cancel_liveness_task(self) -> None:
+        """Stop the connection-liveness heartbeat/reaper task (idempotent)."""
+        task = self._liveness_task
+        self._liveness_task = None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Liveness task exited with error on cancel")
 
     # ── Event-loop liveness watchdog (Issue #3410) ──
 
@@ -2703,6 +2742,9 @@ class WebSocketGateway:
         # watchdog so it never hard-exits the process during graceful shutdown.
         self._disarm_watchdog()
 
+        # Issue #2798/#3911: stop the connection-liveness heartbeat/reaper.
+        await self._cancel_liveness_task()
+
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
             self._pid_lock.release_lock()
@@ -2727,6 +2769,22 @@ class WebSocketGateway:
         self.notify_inbound()
         if self._is_dormant:
             await self.wake()
+
+        # Issue #2798/#3911: any inbound frame is proof of life — refresh the
+        # session's ``last_activity`` so the liveness reaper keeps a healthy
+        # connection. An inbound ``PONG`` (reply to our ``PING``) or the peer's
+        # own ``PING`` count as activity too; a ``PING`` is answered with a
+        # ``PONG`` and neither is routed further.
+        session_id = self._client_sessions.get(client_id)
+        if session_id:
+            session = self._sessions.get(session_id)
+            if session is not None:
+                session._last_activity = time.time()
+        if msg_type == EventType.PING.value:
+            await self._send_to_client(client_id, {"type": EventType.PONG.value})
+            return
+        if msg_type == EventType.PONG.value:
+            return
 
         # Handle versioned handshake
         if msg_type == "hello":
@@ -2862,13 +2920,21 @@ class WebSocketGateway:
                     EventType.DELIVERY_RETRY.value,
                 ])
             
-            # Build policy limits - use configured values where available
+            # Build policy limits - use configured values where available.
+            # Issue #2798/#3911: advertise the *liveness* heartbeat interval so
+            # the client's heartbeat/watchdog derives its cadence and 2x silence
+            # window from the same number the server reaper uses. Falls back to
+            # the legacy advisory ``heartbeat_interval`` when liveness is off.
             heartbeat_interval = getattr(self.config, 'heartbeat_interval', 30)
+            heartbeat_ms = int(heartbeat_interval * 1000)
+            liveness_policy = self._liveness_policy()
+            if liveness_policy.enabled:
+                heartbeat_ms = liveness_policy.interval_ms
             policy = {
                 "max_payload": getattr(self.config, 'max_payload', 1048576),  # 1MB default
                 "max_buffered_bytes": getattr(self.config, 'max_buffered_bytes', 8388608),  # 8MB default
                 "max_queued_frames": getattr(self.config, 'max_queued_frames', 1000),
-                "heartbeat_ms": int(heartbeat_interval * 1000),  # Convert seconds to ms
+                "heartbeat_ms": heartbeat_ms,
             }
             
             # Send successful handshake response
@@ -3662,6 +3728,97 @@ class WebSocketGateway:
                     client_id,
                     exc,
                 )
+
+    # ── Application-level connection liveness (Issue #2798/#3911) ──
+    def _liveness_policy(self):
+        """Build the core ``LivenessPolicy`` this gateway enforces.
+
+        Consumes the already-merged ``gateway.liveness`` config (#2799). When
+        the config leaves liveness disabled we still protect the default path:
+        an ``enabled`` policy is synthesised from the config's ``interval_ms`` /
+        ``missed_beats_before_reap`` so the out-of-box gateway reaps half-open
+        peers — defaults are the product. Setting ``interval_ms=0`` (or a future
+        explicit opt-out) yields a disabled policy and the loop stays inert.
+        """
+        cfg = getattr(self.config, "liveness", None)
+        if cfg is None:
+            from praisonaiagents.gateway.protocols import LivenessPolicy
+
+            return LivenessPolicy()
+        if cfg.enabled:
+            return cfg.to_policy()
+        # Config default is off; enable out-of-box using its window unless the
+        # interval was explicitly zeroed to disable liveness.
+        from praisonaiagents.gateway.protocols import LivenessPolicy
+
+        return LivenessPolicy(
+            interval_ms=cfg.interval_ms,
+            missed_beats_before_reap=cfg.missed_beats_before_reap,
+        )
+
+    async def _reap_session(self, client_id: str) -> None:
+        """Close one dead/half-open connection with ``LIVENESS_TIMEOUT``.
+
+        Reuses the same server-initiated close + deterministic state cleanup as
+        slow-consumer / credential-rotation eviction so a reaped peer leaves no
+        stale session/presence/queue entries.
+        """
+        ws = self._clients.pop(client_id, None)
+        await self._teardown_client_conn(client_id)
+        self._client_scopes.pop(client_id, None)
+        self._client_auth_generation.pop(client_id, None)
+        session_id = self._client_sessions.pop(client_id, None)
+        if session_id:
+            self.close_session(session_id)
+        self._reaped_connections += 1
+        if ws is not None:
+            try:
+                await ws.close(
+                    code=LIVENESS_TIMEOUT_CLOSE_CODE,
+                    reason=GatewayCloseCode.LIVENESS_TIMEOUT.value,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Could not close liveness-timed-out session %s: %s",
+                    client_id,
+                    exc,
+                )
+
+    async def _liveness_loop(self) -> None:
+        """Emit ``PING`` heartbeats and reap half-open connections.
+
+        Applies the core :class:`LivenessPolicy` to each session's stamped
+        ``last_activity``: a ``KEEP`` connection is pinged (any inbound frame or
+        ``PONG`` refreshes its activity), a ``REAP`` connection is closed with
+        ``LIVENESS_TIMEOUT`` and its state released. No-op when the policy is
+        disabled (``interval_ms == 0``).
+        """
+        policy = self._liveness_policy()
+        if not policy.enabled:
+            return
+        interval = policy.interval_seconds
+        while self._is_running:
+            try:
+                await asyncio.sleep(interval)
+                if self._draining:
+                    continue
+                now = time.time()
+                for client_id in list(self._clients.keys()):
+                    session_id = self._client_sessions.get(client_id)
+                    session = self._sessions.get(session_id) if session_id else None
+                    last_activity = (
+                        session.last_activity if session is not None else now
+                    )
+                    if policy.evaluate(last_activity, now) is LivenessDecision.REAP:
+                        await self._reap_session(client_id)
+                    else:
+                        await self._send_to_client(
+                            client_id, {"type": EventType.PING.value}
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Liveness heartbeat/reaper iteration failed")
 
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
         """Send data to a specific client through its bounded outbound queue."""
@@ -4837,6 +4994,21 @@ class WebSocketGateway:
                 "armed": bool(getattr(watchdog, "armed", False)),
                 "wedge_after_s": watchdog.policy.wedge_after_s,
             }
+
+        # Issue #2798/#3911: surface connection-liveness state so an operator can
+        # confirm the heartbeat/reaper is running and see how many half-open
+        # peers have been reaped. Only included when the reaper task is active.
+        if self._liveness_task is not None:
+            try:
+                policy = self._liveness_policy()
+                result["liveness"] = {
+                    "enabled": policy.enabled,
+                    "interval_ms": policy.interval_ms,
+                    "missed_beats_before_reap": policy.missed_beats_before_reap,
+                    "reaped_connections": self._reaped_connections,
+                }
+            except Exception:
+                pass
 
         # Issue #3049: surface config hot-reload observability so an operator
         # can see the last reload outcome, whether the watcher is alive, and

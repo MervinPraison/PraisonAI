@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 
@@ -159,6 +160,14 @@ class GatewayClient:
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._running = False
         self._receive_task: Optional[asyncio.Task] = None
+        # Issue #2798/#3911: connection-liveness heartbeat + silence watchdog.
+        # ``_last_recv`` is refreshed on every inbound frame (any frame, plus the
+        # server's own ``PING``/``PONG``) so the watchdog can force a reconnect
+        # after ~2x the advertised heartbeat interval of silence — healing a
+        # half-open socket before the server reaps it. ``None`` until a heartbeat
+        # interval is advertised.
+        self._last_recv: float = time.monotonic()
+        self._heartbeat_task: Optional[asyncio.Task] = None
         # Server-supplied backoff floor (seconds) for the next reconnect delay,
         # honoured once then cleared so it does not shortcut the exponential
         # sequence on subsequent attempts.
@@ -308,12 +317,21 @@ class GatewayClient:
                 
                 # Reset reconnect attempts on successful connection
                 self._reconnect_attempts = 0
-                
+
+                # Issue #2798/#3911: a fresh connection is live now — reset the
+                # silence watchdog and start the heartbeat/watchdog alongside the
+                # receive loop (no-op when the server advertises no heartbeat).
+                self._last_recv = time.monotonic()
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
                 # Start receive loop
                 self._receive_task = asyncio.create_task(self._receive_loop())
-                
-                # Wait for disconnect or stop
-                await self._receive_task
+
+                try:
+                    # Wait for disconnect or stop
+                    await self._receive_task
+                finally:
+                    await self._stop_heartbeat()
                 
             except GatewayConnectError as e:
                 # Terminal connect rejection (auth/pairing/protocol/config):
@@ -541,10 +559,22 @@ class GatewayClient:
             while self._ws and not self._ws.closed:
                 message = await self._ws.recv()
                 data = json.loads(message)
-                
+
+                # Issue #2798/#3911: any inbound frame is proof the peer is
+                # alive — refresh the silence watchdog. A server ``PING`` is
+                # answered with a ``PONG``; a ``PONG`` (reply to our heartbeat)
+                # is consumed. Neither is surfaced as an event.
+                self._last_recv = time.monotonic()
+
                 # Handle different message types
                 msg_type = data.get("type")
-                
+
+                if msg_type == EventType.PING.value:
+                    await self._safe_send_raw({"type": EventType.PONG.value})
+                    continue
+                if msg_type == EventType.PONG.value:
+                    continue
+
                 if msg_type == "replay":
                     # Handle replayed event
                     event_data = data.get("event", {})
@@ -570,7 +600,68 @@ class GatewayClient:
             logger.error(f"Receive loop error: {e}")
         finally:
             self._set_state(ConnectionState.DISCONNECTED)
-    
+
+    async def _safe_send_raw(self, message: Dict[str, Any]) -> None:
+        """Best-effort raw send that never raises out of a background loop."""
+        ws = self._ws
+        if ws is None:
+            return
+        try:
+            await ws.send(json.dumps(message))
+        except Exception:
+            pass
+
+    async def _heartbeat_loop(self) -> None:
+        """Send ``PING`` heartbeats and force-reconnect on prolonged silence.
+
+        Issue #2798/#3911: mirrors the server reaper's arithmetic from one
+        advertised ``heartbeat_ms`` — a ``PING`` is sent every interval and, if
+        no inbound frame has arrived for ``~2x`` the interval (the server's
+        default ``missed_beats_before_reap``), the socket is presumed half-open
+        and closed so the existing reconnect/backoff/resume path re-establishes
+        it (healing before the server reaps). No-op when no heartbeat interval
+        is advertised (legacy gateway or heartbeat disabled).
+        """
+        interval_ms = self.heartbeat_ms
+        if not interval_ms or interval_ms <= 0:
+            return
+        interval = interval_ms / 1000.0
+        silence_deadline = interval * 2
+        try:
+            while self._running and self._ws is not None and not self._ws.closed:
+                await asyncio.sleep(interval)
+                if time.monotonic() - self._last_recv > silence_deadline:
+                    logger.warning(
+                        "Gateway silent for >%.1fs (2x heartbeat); "
+                        "forcing reconnect",
+                        silence_deadline,
+                    )
+                    ws = self._ws
+                    if ws is not None:
+                        try:
+                            await ws.close()
+                        except Exception:
+                            pass
+                    return
+                await self._safe_send_raw({"type": EventType.PING.value})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug(f"Heartbeat loop error: {e}")
+
+    async def _stop_heartbeat(self) -> None:
+        """Cancel the heartbeat/watchdog task (idempotent)."""
+        task = self._heartbeat_task
+        self._heartbeat_task = None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
     async def _handle_event(self, event: GatewayEvent) -> None:
         """Handle an event with gap detection."""
         # Check for sequence gap
@@ -614,7 +705,10 @@ class GatewayClient:
                 await self._receive_task
             except asyncio.CancelledError:
                 pass
-        
+
+        # Issue #2798/#3911: stop the heartbeat/watchdog task.
+        await self._stop_heartbeat()
+
         if self._ws:
             await self._ws.close()
             self._ws = None
