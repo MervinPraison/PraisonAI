@@ -425,8 +425,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         )
     
     config = config or {}
-    auth_type = config.get("auth") or "none"
-    if auth_type not in SUPPORTED_AUTH_TYPES:
+    auth_type = config.get("auth", "none")
+    if auth_type is None:
+        auth_type = "none"
+    if not isinstance(auth_type, str) or auth_type not in SUPPORTED_AUTH_TYPES:
         supported = ", ".join(sorted(SUPPORTED_AUTH_TYPES))
         raise ValueError(
             f"Unsupported recipe server auth mode {auth_type!r}. "

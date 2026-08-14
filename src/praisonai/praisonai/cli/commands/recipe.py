@@ -551,7 +551,7 @@ def recipe_serve(
     print("\033[93m'praisonai recipe serve' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
     print("\033[93mPlease use 'praisonai serve recipe' instead.\033[0m\n", file=sys.stderr)
     
-    print(f"🚀 Starting recipe server...")
+    print("🚀 Starting recipe server...")
     print(f"   Host: {host}")
     print(f"   Port: {port}")
     if recipe:
@@ -559,12 +559,16 @@ def recipe_serve(
     if config:
         print(f"   Config: {config}")
     if api_key:
-        print(f"   Auth: API Key enabled")
+        print("   Auth: API Key enabled")
     if workers > 1:
         print(f"   Workers: {workers}")
 
     try:
-        from praisonai.recipe.serve import serve, load_config
+        from praisonai.recipe.serve import (
+            SUPPORTED_AUTH_TYPES,
+            load_config,
+            serve,
+        )
         
         # Load config from file if provided
         serve_config = {}
@@ -572,13 +576,13 @@ def recipe_serve(
             serve_config = load_config(config)
 
         auth_mode = serve_config.get("auth", "none")
-        supported_auth_modes = ("api-key", "jwt")
+        supported_auth_modes = SUPPORTED_AUTH_TYPES - {"none"}
         if host not in ("127.0.0.1", "localhost") and not api_key:
             if auth_mode not in supported_auth_modes:
                 print(
                     "\n\033[91mError:\033[0m Auth required for non-localhost binding. "
                     "Use --api-key or set a supported auth mode "
-                    f"({', '.join(supported_auth_modes)}) in the config.",
+                    f"({', '.join(sorted(supported_auth_modes))}) in the config.",
                     file=sys.stderr,
                 )
                 raise typer.Exit(1)
@@ -602,7 +606,7 @@ def recipe_serve(
         print(f"   OpenAPI: http://{host}:{port}/openapi.json")
         if metrics:
             print(f"   Metrics: http://{host}:{port}/metrics")
-        print(f"\n   Press Ctrl+C to stop\n")
+        print("\n   Press Ctrl+C to stop\n")
         
         serve(
             host=host,

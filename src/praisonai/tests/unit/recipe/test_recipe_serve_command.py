@@ -50,6 +50,7 @@ def test_recipe_serve_honours_auth_from_config(monkeypatch):
     load_config.assert_called_once_with("serve.yaml")
     serve.assert_called_once()
     assert serve.call_args.kwargs["config"]["auth"] == "api-key"
+    assert serve.call_args.kwargs["config"]["api_key"] == "configured"
 
 
 def test_recipe_serve_rejects_unsupported_auth_mode(monkeypatch):
@@ -62,6 +63,7 @@ def test_recipe_serve_rejects_unsupported_auth_mode(monkeypatch):
     with pytest.raises(typer.Exit):
         _invoke_recipe_serve(host="0.0.0.0", config="serve.yaml")
 
+    load_config.assert_called_once_with("serve.yaml")
     serve.assert_not_called()
 
 
@@ -74,10 +76,18 @@ def test_recipe_serve_allows_jwt_auth_from_config(monkeypatch):
 
     _invoke_recipe_serve(host="0.0.0.0", config="serve.yaml")
 
+    load_config.assert_called_once_with("serve.yaml")
     serve.assert_called_once()
     assert serve.call_args.kwargs["config"]["auth"] == "jwt"
+    assert serve.call_args.kwargs["config"]["jwt_secret"] == "secret"
 
 
 def test_recipe_server_rejects_unknown_auth_mode():
     with pytest.raises(ValueError, match="Unsupported recipe server auth mode"):
         create_app({"auth": "api-keey"})
+
+
+@pytest.mark.parametrize("auth_mode", ["", False, []])
+def test_recipe_server_rejects_falsey_invalid_auth_modes(auth_mode):
+    with pytest.raises(ValueError, match="Unsupported recipe server auth mode"):
+        create_app({"auth": auth_mode})
