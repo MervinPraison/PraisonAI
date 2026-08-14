@@ -172,7 +172,7 @@ agent = Agent(
 )
 ```
 
-> **Isolate** is `handoffs=[specialist]` — a sub-agent inherits a summary and the intersection of your tools, not your whole transcript. [📖 Handoffs](https://docs.praison.ai/docs/concepts/handoffs)
+> **Isolate** is `handoffs=[specialist]` — a sub-agent inherits the last few messages and the intersection of your tools, not your whole transcript. [📖 Handoffs](https://docs.praison.ai/docs/concepts/handoffs)
 
 ### Layer 3 · Harness — *Can it act, and be checked?*
 
@@ -211,7 +211,9 @@ agent = Agent(
 result = agent.run_autonomous("Refactor the auth module", max_iterations=5)
 
 print(result.completion_reason)
-# goal | no_tool_calls | max_iterations | timeout | budget_exhausted | doom_loop | needs_help
+# goal | no_tool_calls | max_iterations | timeout | doom_loop | needs_help | error
+# (with on_budget_exceeded="stop", hitting the cap raises BudgetExceededError,
+#  surfaced here as completion_reason="error")
 ```
 
 > **Doom-loop detection is on by default.** Repeated identical tool calls and A→B→A→B oscillation get caught — while a poller whose output keeps changing does not. [📖 Doom Loop Detection](https://docs.praison.ai/docs/features/doom-loop-detection)
@@ -254,14 +256,15 @@ sandboxed = ManagedAgent(
 )
 agent = Agent(name="builder", backend=sandboxed)
 
-# B. The entire agent loop runs in the cloud
+# B. The entire agent loop runs in the cloud (needs ANTHROPIC_API_KEY;
+#    with no key set, ManagedAgent() falls back to a local loop)
 agent = Agent(name="teacher", backend=ManagedAgent())
 agent.start("Write a Python script that prints the first 10 primes, then run it")
 ```
 
 Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), and a post-setup snapshot is reused so the next run skips the image pull and dependency install. Commit a `.praisonai/environment.yaml` and the environment travels with the repo.
 
-> 📖 [20 runnable examples](examples/python/managed-agents/) · manage sessions with `praisonai managed sessions list|resume`
+> 📖 [20 runnable examples](examples/python/managed-agents/) · manage sessions with `praisonai managed sessions list <agent-id>` or `praisonai managed sessions resume <session-id> "<prompt>"`
 
 <sub>Stack framing adapted from [The Five-Layer Agent Stack](https://mer.vin/2026/07/five-layer-agent-stack-match-bug-to-right-layer/) and [Agent Harnesses vs Orbs](https://mer.vin/2026/08/agent-harnesses-vs-orbs-why-remote-sandboxes-beat-local-agent-loops/).</sub>
 
