@@ -83,7 +83,17 @@ class PollManager:
         """Register a polling client and return a poll token."""
         cid = client_id or str(uuid.uuid4())
         token = str(uuid.uuid4())
-        state = PollClientState(client_id=cid, poll_token=token)
+        # Bound the per-client queue so sustained backpressure overflows into
+        # the durable store (at-least-once) rather than growing unbounded in
+        # memory and vanishing on restart. ``max_queue_size <= 0`` disables the
+        # bound (legacy unbounded behaviour, no overflow).
+        max_queue_size = getattr(self._config, "max_queue_size", 0) or 0
+        queue: asyncio.Queue = (
+            asyncio.Queue(maxsize=max_queue_size)
+            if max_queue_size > 0
+            else asyncio.Queue()
+        )
+        state = PollClientState(client_id=cid, poll_token=token, queue=queue)
         self._poll_clients[token] = state
         self._client_tokens[cid] = token
         logger.debug("Poll client registered: %s", cid)
@@ -106,7 +116,15 @@ class PollManager:
     # ------------------------------------------------------------------
 
     def enqueue_for_client(self, client_id: str, event_dict: Dict[str, Any]) -> bool:
-        """Queue a message for a polling client."""
+        """Queue a message for a polling client.
+
+        On overflow the message is not silently dropped: if a durable delivery
+        manager is wired, the event is persisted to the shared push store so it
+        survives backpressure and a gateway restart and is replayed on the next
+        poll (see :meth:`poll_messages`). Only when there is no durable backend
+        does a full queue fall back to a best-effort drop, which is then the
+        honest ``False`` signal rather than hidden loss.
+        """
         token = self._client_tokens.get(client_id)
         if token is None:
             return False
@@ -117,7 +135,27 @@ class PollManager:
             state.queue.put_nowait(event_dict)
             return True
         except asyncio.QueueFull:
-            logger.warning("Poll queue full for client %s", client_id)
+            delivery_mgr = getattr(self._gateway, "_delivery_mgr", None)
+            if delivery_mgr is not None:
+                try:
+                    event = GatewayEvent.from_dict(event_dict)
+                except Exception:
+                    logger.warning(
+                        "Poll queue full for client %s; event undecodable", client_id,
+                    )
+                    return False
+                asyncio.ensure_future(
+                    delivery_mgr.track_delivery(client_id, event)
+                )
+                logger.debug(
+                    "Poll queue full for client %s; persisted %s to durable store",
+                    client_id, event.event_id,
+                )
+                return True
+            logger.warning(
+                "Poll queue full for client %s and no durable store; dropping",
+                client_id,
+            )
             return False
 
     # ------------------------------------------------------------------
@@ -138,8 +176,16 @@ class PollManager:
         poll_timeout = timeout or self._config.long_poll_timeout
         messages: List[Dict[str, Any]] = []
 
+        # Replay any durably-persisted events first (backpressure overflow or
+        # events that survived a restart). These are already recorded in the
+        # shared push store and are cleared when the client acks.
+        messages.extend(await self._drain_durable(state.client_id))
+
         # Drain any immediately available messages
-        while not state.queue.empty() and len(messages) < self._config.max_batch_size:
+        while (
+            not state.queue.empty()
+            and len(messages) < self._config.max_batch_size
+        ):
             try:
                 msg = state.queue.get_nowait()
                 messages.append(msg)
@@ -166,6 +212,25 @@ class PollManager:
                 pass  # Return empty — client should poll again
 
         return messages
+
+    async def _drain_durable(self, client_id: str) -> List[Dict[str, Any]]:
+        """Return durably-pending events for a client, or [] if none/no store.
+
+        These are events persisted on queue overflow or reconstructed after a
+        restart. They stay in the store until the client acks, so at-least-once
+        delivery holds for the poll transport as it does for WebSocket.
+        """
+        delivery_mgr = getattr(self._gateway, "_delivery_mgr", None)
+        if delivery_mgr is None:
+            return []
+        try:
+            events = await delivery_mgr.get_unacknowledged(
+                client_id, limit=self._config.max_batch_size,
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.error("Durable poll drain failed for %s: %s", client_id, e)
+            return []
+        return [ev.to_dict() for ev in events]
 
     # ------------------------------------------------------------------
     # HTTP route handlers (Starlette)
@@ -207,10 +272,15 @@ class PollManager:
             if state is None:
                 return JSONResponse({"ok": False, "error": "unknown client"}, status_code=404)
             delivery_mgr = getattr(self._gateway, "_delivery_mgr", None)
-            if delivery_mgr:
-                ok = await delivery_mgr.acknowledge(state.client_id, event_id)
-            else:
-                ok = True
+            if delivery_mgr is None:
+                # No tracked delivery to acknowledge — reporting success here
+                # would let a client "ack" a message that was never recorded.
+                # Surface it as a configuration finding, not a silent ok.
+                return JSONResponse(
+                    {"ok": False, "error": "delivery guarantee not enabled"},
+                    status_code=503,
+                )
+            ok = await delivery_mgr.acknowledge(state.client_id, event_id)
             return JSONResponse({"ok": ok})
 
         async def subscribe(request: Request) -> JSONResponse:

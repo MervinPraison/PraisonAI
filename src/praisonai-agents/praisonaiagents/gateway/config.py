@@ -474,11 +474,15 @@ class PollingConfig:
         enabled: Toggle polling fallback
         long_poll_timeout: Long-poll hang duration (seconds)
         max_batch_size: Max messages per poll response
+        max_queue_size: Per-client in-memory queue bound. When >0 the queue
+            overflows once full, routing further events to the durable store
+            (at-least-once). 0 keeps the queue unbounded (no overflow).
     """
     
     enabled: bool = True
     long_poll_timeout: int = 30
     max_batch_size: int = 100
+    max_queue_size: int = 1000
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -486,6 +490,7 @@ class PollingConfig:
             "enabled": self.enabled,
             "long_poll_timeout": self.long_poll_timeout,
             "max_batch_size": self.max_batch_size,
+            "max_queue_size": self.max_queue_size,
         }
 
 

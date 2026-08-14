@@ -1,11 +1,12 @@
 """Tests for push ChannelManager, PresenceManager, and DeliveryGuaranteeManager."""
 
 import asyncio
+import json
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from praisonaiagents.gateway.config import DeliveryConfig, PresenceConfig
+from praisonaiagents.gateway.config import DeliveryConfig, PollingConfig, PresenceConfig
 from praisonaiagents.gateway.protocols import EventType, GatewayEvent
 
 
@@ -393,3 +394,121 @@ class TestSqlitePushStore:
     def test_invalid_backend_rejected(self):
         with pytest.raises(ValueError):
             DeliveryConfig(store_backend="postgres")
+
+
+# ---------------------------------------------------------------------------
+# PollManager durability (Issue #3912)
+# ---------------------------------------------------------------------------
+
+class TestPollManagerDurability:
+    @pytest.fixture
+    def gateway(self):
+        return MockGateway()
+
+    @pytest.fixture
+    def delivery_mgr(self, gateway):
+        from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
+        cfg = DeliveryConfig(
+            ack_timeout=2, max_retries=2, retry_backoff=1.0, store_backend="memory",
+        )
+        dm = DeliveryGuaranteeManager(gateway, cfg)
+        gateway._delivery_mgr = dm
+        return dm
+
+    @pytest.fixture
+    def poll_mgr(self, gateway):
+        from praisonai_bot.gateway.push_polling import PollManager
+        return PollManager(gateway, PollingConfig())
+
+    @pytest.mark.asyncio
+    async def test_config_bounds_queue_so_overflow_is_reachable(self, gateway):
+        """A registered client's queue is bounded by config — overflow (and thus
+        durable persistence) is reachable in production, not only via manual test
+        override.
+        """
+        from praisonai_bot.gateway.push_polling import PollManager
+        mgr = PollManager(gateway, PollingConfig(max_queue_size=2))
+        reg = mgr.register_client(client_id="c1")
+        state = mgr.get_client_state(reg["poll_token"])
+        assert state.queue.maxsize == 2
+
+    @pytest.mark.asyncio
+    async def test_zero_max_queue_size_is_unbounded(self, gateway):
+        from praisonai_bot.gateway.push_polling import PollManager
+        mgr = PollManager(gateway, PollingConfig(max_queue_size=0))
+        reg = mgr.register_client(client_id="c1")
+        state = mgr.get_client_state(reg["poll_token"])
+        assert state.queue.maxsize == 0
+
+    @pytest.mark.asyncio
+    async def test_overflow_persists_to_durable_store(self, poll_mgr, delivery_mgr):
+        reg = poll_mgr.register_client(client_id="c1")
+        state = poll_mgr.get_client_state(reg["poll_token"])
+        # Force a full queue so the next enqueue overflows.
+        state.queue = asyncio.Queue(maxsize=1)
+        state.queue.put_nowait({"first": True})
+
+        event = GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={"n": 2})
+        ok = poll_mgr.enqueue_for_client("c1", event.to_dict())
+        # Overflow is a recorded, durable outcome — not a silent drop.
+        assert ok is True
+        await asyncio.sleep(0)  # let the scheduled track_delivery run
+
+        unacked = await delivery_mgr.get_unacknowledged("c1")
+        assert [e.event_id for e in unacked] == [event.event_id]
+
+    @pytest.mark.asyncio
+    async def test_overflow_without_store_returns_false(self, poll_mgr, gateway):
+        assert getattr(gateway, "_delivery_mgr", None) is None
+        reg = poll_mgr.register_client(client_id="c1")
+        state = poll_mgr.get_client_state(reg["poll_token"])
+        state.queue = asyncio.Queue(maxsize=1)
+        state.queue.put_nowait({"first": True})
+
+        ok = poll_mgr.enqueue_for_client(
+            "c1", GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={}).to_dict(),
+        )
+        # No durable backend: an honest False, not a hidden success.
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_poll_replays_durable_pending(self, poll_mgr, delivery_mgr):
+        reg = poll_mgr.register_client(client_id="c1")
+        event = GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={"replay": True})
+        await delivery_mgr.track_delivery("c1", event)
+
+        msgs = await poll_mgr.poll_messages(reg["poll_token"], timeout=0)
+        assert [m["event_id"] for m in msgs] == [event.event_id]
+
+    @pytest.mark.asyncio
+    async def test_ack_without_delivery_mgr_is_not_ok(self, poll_mgr, gateway):
+        assert getattr(gateway, "_delivery_mgr", None) is None
+        routes = {r.path: r for r in poll_mgr.get_routes()}
+        ack = routes["/api/push/poll/ack"].endpoint
+        reg = poll_mgr.register_client(client_id="c1")
+
+        req = MagicMock()
+        req.json = AsyncMock(return_value={
+            "poll_token": reg["poll_token"], "event_id": "e1",
+        })
+        resp = await ack(req)
+        assert resp.status_code == 503
+        assert json.loads(bytes(resp.body)) == {
+            "ok": False, "error": "delivery guarantee not enabled",
+        }
+
+    @pytest.mark.asyncio
+    async def test_ack_with_delivery_mgr_evicts_pending(self, poll_mgr, delivery_mgr):
+        reg = poll_mgr.register_client(client_id="c1")
+        event = GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={})
+        await delivery_mgr.track_delivery("c1", event)
+
+        routes = {r.path: r for r in poll_mgr.get_routes()}
+        ack = routes["/api/push/poll/ack"].endpoint
+        req = MagicMock()
+        req.json = AsyncMock(return_value={
+            "poll_token": reg["poll_token"], "event_id": event.event_id,
+        })
+        resp = await ack(req)
+        assert json.loads(bytes(resp.body)) == {"ok": True}
+        assert await delivery_mgr.get_unacknowledged("c1") == []
