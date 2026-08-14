@@ -34,11 +34,19 @@ except ImportError as e:
 try:
     from praisonaiagents import Agent
     from praisonaiagents.approval import get_approval_registry, AutoApproveBackend
+    from praisonaiagents.config.feature_configs import ExecutionConfig
 except ImportError as e:
     raise ImportError(
         f"PraisonAI not installed: {e}\n"
         "Install with: pip install praisonaiagents"
     ) from e
+
+
+TB_EXECUTION = ExecutionConfig(
+    max_tool_calls_per_turn=80,
+    max_iter=40,
+    max_steps=80,
+)
 
 
 class PraisonAIExternalAgent(BaseAgent):
@@ -142,26 +150,14 @@ class PraisonAIExternalAgent(BaseAgent):
                 ),
                 tools=[bash_tool],
                 llm=self.model_name or "openai/gpt-4o-mini",
+                execution=TB_EXECUTION,
             )
 
-            # Execute the agent with outer loop to handle premature stopping
+            # Execute one deliberately long coding turn. Harbor's hidden verifier
+            # is the only completion authority; model or pytest text is not.
             print(f"🚀 PraisonAI Agent starting task: {instruction[:100]}...")
             result = await agent.achat(instruction)
-            for _iter in range(19):
-                result_str = str(result)
-                # Stop if test passed
-                if any(sig in result_str.lower() for sig in [
-                    " passed", "passed ", "test passed", "all tests pass", "1 passed"
-                ]):
-                    break
-                result = await agent.achat(
-                    "The task is NOT complete yet — keep working. Run bash_tool commands now. "
-                    "If you haven't already: (1) read all files in /app/, "
-                    "(2) run the test to see the exact failure, "
-                    "(3) implement a fix, (4) run the test again. "
-                    "Repeat until the test passes. What is your next bash_tool command?"
-                )
-            print(f"✅ PraisonAI Agent completed task")
+            print("✅ PraisonAI Agent completed task")
             
             # Populate Harbor context with metadata
             self._populate_context(agent, context, result)
@@ -203,11 +199,26 @@ class PraisonAIExternalAgent(BaseAgent):
                 "tools_used": ["bash_tool"],
                 "framework": "praisonai",
                 "version": self.version(),
+                "stop_reason": self._get_stop_reason(agent),
+                "max_tool_calls_per_turn": TB_EXECUTION.max_tool_calls_per_turn,
+                "max_steps": TB_EXECUTION.max_steps,
             }
             
         except Exception as e:
             # Don't fail the whole run if context population fails
             context.metadata = {"context_error": str(e)}
+
+    @staticmethod
+    def _get_stop_reason(agent: Agent) -> Any:
+        """Best-effort extraction of the last runtime stop reason."""
+        for llm in (
+            getattr(agent, "_llm_instance", None),
+            getattr(agent, "llm", None),
+        ):
+            reason = getattr(llm, "_last_stop_reason", None)
+            if reason:
+                return reason
+        return None
 
 
 # Example usage for testing
