@@ -189,34 +189,99 @@ def resolve_tool_groups(
     return tool_names
 
 
-def _load_basic_tools() -> Dict[str, Callable]:
-    """Lazy load basic tools from praisonaiagents."""
+def _bind_basic_file_shell_tools(config: ToolConfig) -> Optional[Dict[str, Callable]]:
+    """Bind the basic file/shell tools to the configured workspace.
+
+    The module-level ``read_file``/``write_file``/``list_files`` helpers and the
+    raw ``execute_command`` are unbound: their fallback path only rejects ``..``
+    traversal and still accepts absolute paths (e.g. ``/etc/hosts``) resolved
+    against the *process* working directory, and ``execute_command`` honours any
+    caller-supplied ``cwd``. Under auto-approval (``--dangerously-skip-approval``)
+    that lets the agent read/write/execute outside ``--workspace``.
+
+    Mirror the fail-closed containment already used by the ``edit`` group: bind
+    ``FileTools`` to a ``Workspace`` so relative and absolute paths resolve
+    *inside* the workspace, and force ``execute_command`` to run with its ``cwd``
+    pinned to the workspace root. Returns ``None`` when containment is
+    unavailable so the caller can fall back to the unbound tools (manual
+    approval still guards them).
+    """
+    try:
+        from pathlib import Path
+        from praisonaiagents.workspace import Workspace  # type: ignore
+        from praisonaiagents.tools.file_tools import FileTools
+        from praisonaiagents.tools.shell_tools import ShellTools
+    except ImportError as e:
+        logger.debug(f"Workspace-bound basic tools unavailable: {e}")
+        return None
+
+    try:
+        workspace = Workspace(root=Path(config.workspace))
+    except Exception as e:
+        logger.warning(
+            f"Basic tools not workspace-bound: containment unavailable: {e}"
+        )
+        return None
+
+    file_tools = FileTools(workspace=workspace)
+    shell_tools = ShellTools()
+    workspace_root = str(Path(config.workspace).resolve())
+
+    bound: Dict[str, Callable] = {
+        "read_file": file_tools.read_file,
+        "write_file": file_tools.write_file,
+        "list_files": file_tools.list_files,
+    }
+
+    raw_execute = shell_tools.execute_command
+
+    def execute_command(command: str, timeout: int = 30, **kwargs):
+        """Execute a shell command with its working directory pinned to the
+        configured workspace so it cannot escape ``--workspace``."""
+        kwargs.pop("cwd", None)
+        return raw_execute(command, cwd=workspace_root, timeout=timeout, **kwargs)
+
+    execute_command.__name__ = "execute_command"
+    bound["execute_command"] = execute_command
+    return bound
+
+
+def _load_basic_tools(config: Optional[ToolConfig] = None) -> Dict[str, Callable]:
+    """Lazy load basic tools from praisonaiagents.
+
+    When ``config`` carries a workspace, the file and shell tools are bound to
+    it (fail-closed) so an auto-approved headless run stays inside ``--workspace``.
+    """
     tools = {}
-    
-    try:
-        from praisonaiagents.tools import read_file
-        tools["read_file"] = read_file
-    except ImportError:
-        logger.debug("read_file not available")
-    
-    try:
-        from praisonaiagents.tools import write_file
-        tools["write_file"] = write_file
-    except ImportError:
-        logger.debug("write_file not available")
-    
-    try:
-        from praisonaiagents.tools import list_files
-        tools["list_files"] = list_files
-    except ImportError:
-        logger.debug("list_files not available")
-    
-    try:
-        from praisonaiagents.tools import execute_command
-        tools["execute_command"] = execute_command
-    except ImportError:
-        logger.debug("execute_command not available")
-    
+
+    bound = _bind_basic_file_shell_tools(config) if config is not None else None
+    if bound is not None:
+        tools.update(bound)
+    else:
+        try:
+            from praisonaiagents.tools import read_file
+            tools["read_file"] = read_file
+        except ImportError:
+            logger.debug("read_file not available")
+
+        try:
+            from praisonaiagents.tools import write_file
+            tools["write_file"] = write_file
+        except ImportError:
+            logger.debug("write_file not available")
+
+        try:
+            from praisonaiagents.tools import list_files
+            tools["list_files"] = list_files
+        except ImportError:
+            logger.debug("list_files not available")
+
+        try:
+            from praisonaiagents.tools import execute_command
+            tools["execute_command"] = execute_command
+        except ImportError:
+            logger.debug("execute_command not available")
+
     try:
         from praisonaiagents.tools import internet_search
         tools["internet_search"] = internet_search
@@ -550,9 +615,10 @@ def get_interactive_tools(
     # Load tools by group
     all_tools: Dict[str, Callable] = {}
     
-    # Load basic tools (always available, no runtime needed)
+    # Load basic tools (always available, no runtime needed). Pass the config so
+    # the file/shell tools bind to the configured workspace (fail-closed).
     if config.enable_basic and not (disable and "basic" in disable):
-        basic_tools = _load_basic_tools()
+        basic_tools = _load_basic_tools(config)
         all_tools.update(basic_tools)
     
     # Load fast search tools (always available, no runtime needed)

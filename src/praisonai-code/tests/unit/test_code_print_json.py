@@ -154,6 +154,9 @@ def test_code_print_real_agent_writes_workspace(tmp_path):
             "gpt-4o-mini",
             "--workspace",
             str(tmp_path),
+            # CliRunner has no interactive approval path, so skip the prompt or
+            # the write tool would hang/deny and never create the probe file.
+            "--dangerously-skip-approval",
             f"Create {target.name} containing exactly HEADLESS_OK.",
         ],
     )
@@ -162,6 +165,40 @@ def test_code_print_real_agent_writes_workspace(tmp_path):
     payload = json.loads(result.stdout.strip())
     assert payload["status"] == "ok"
     assert target.read_text(encoding="utf-8").strip() == "HEADLESS_OK"
+
+
+def test_headless_basic_tools_are_workspace_bound(tmp_path):
+    """The headless `basic` group must stay inside `--workspace`.
+
+    Under `--dangerously-skip-approval` these tools run unguarded, so an
+    absolute path outside the workspace must be rejected rather than written —
+    matching the fail-closed containment used by the `edit` group.
+    """
+    import os
+
+    os.environ["PRAISON_APPROVAL_MODE"] = "auto"
+    os.environ["PRAISONAI_TOOL_SAFETY"] = "off"
+    from praisonaiagents.approval import add_yaml_approved_tools
+
+    add_yaml_approved_tools(["write_file", "read_file", "list_files"])
+
+    from praisonai_code.cli.features.interactive_tools import (
+        ToolConfig,
+        _load_basic_tools,
+    )
+
+    tools = _load_basic_tools(ToolConfig(workspace=str(tmp_path)))
+    write_file = tools["write_file"]
+
+    assert write_file("inside.txt", "hello") is True
+    assert (tmp_path / "inside.txt").read_text() == "hello"
+
+    escape = tmp_path.parent / "escape_probe.txt"
+    if escape.exists():
+        escape.unlink()
+    assert write_file(str(escape), "escaped") is False
+    assert not escape.exists()
+    assert tools["execute_command"].__name__ == "execute_command"
 
 
 def test_code_print_text_mode_clean_stdout(monkeypatch):

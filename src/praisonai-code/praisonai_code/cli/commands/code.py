@@ -491,47 +491,51 @@ def _run_print_code(
         except Exception:
             resolved_session = None
 
-    workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
-    tool_groups = ["basic", "acp", "edit", "search", "lsp"]
-    code_tools = _get_headless_code_tools(
-        groups=tool_groups,
-        workspace=workspace,
-    )
-
-    agent_config = {
-        "name": "CodeAgent",
-        "role": "Code Assistant",
-        "goal": "Help with coding tasks",
-        "instructions": (
-            "You are a terminal coding assistant. Inspect the workspace and "
-            "use the provided tools for coding tasks. Keep all file operations "
-            "inside the configured workspace."
-        ),
-        # A minimal output preset keeps the agent from printing its own
-        # decorations so stdout carries only our envelope.
-        "output": "minimal",
-        "tools": code_tools,
-    }
-    if model:
-        agent_config["llm"] = model
-
-    memory_cfg = None
-    if resolved_session:
-        try:
-            from ..state.project_sessions import build_cli_memory_config
-
-            memory_cfg = build_cli_memory_config(
-                session_id=resolved_session, auto_save=resolved_session
-            )
-        except Exception:
-            memory_cfg = None
-    if memory_cfg is not None:
-        agent_config["memory"] = memory_cfg
-
     status = "ok"
     result = None
     error_message = None
     try:
+        # Resolve the workspace and load the coding tools *inside* the protected
+        # lifecycle: tool loading spins up the ACP/LSP runtime, which can raise.
+        # Keeping it here guarantees a failure still emits the JSON error
+        # envelope and always runs cleanup_runtime() via the finally block,
+        # instead of aborting before either.
+        workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
+        tool_groups = ["basic", "acp", "edit", "search", "lsp"]
+        code_tools = _get_headless_code_tools(
+            groups=tool_groups,
+            workspace=workspace,
+        )
+
+        agent_config = {
+            "name": "CodeAgent",
+            "role": "Code Assistant",
+            "goal": "Help with coding tasks",
+            "instructions": (
+                "You are a terminal coding assistant. Inspect the workspace and "
+                "use the provided tools for coding tasks. Keep all file "
+                "operations inside the configured workspace."
+            ),
+            # A minimal output preset keeps the agent from printing its own
+            # decorations so stdout carries only our envelope.
+            "output": "minimal",
+            "tools": code_tools,
+        }
+        if model:
+            agent_config["llm"] = model
+
+        if resolved_session:
+            try:
+                from ..state.project_sessions import build_cli_memory_config
+
+                memory_cfg = build_cli_memory_config(
+                    session_id=resolved_session, auto_save=resolved_session
+                )
+            except Exception:
+                memory_cfg = None
+            if memory_cfg is not None:
+                agent_config["memory"] = memory_cfg
+
         agent = Agent(**agent_config)
         if thinking_budget is not None:
             agent.thinking_budget = thinking_budget
