@@ -117,7 +117,7 @@ class HostedAgent(AnthropicManagedAgent):
         from .backend_registry import get_backend_registry
 
         _llm_hints = {"openai", "gemini", "ollama", "local"}
-        _compute_hints = {"e2b", "modal", "flyio", "daytona", "docker"}
+        _compute_hints = {"e2b", "modal", "flyio", "daytona", "docker", "tenki"}
 
         if provider in _llm_hints:
             hint = (

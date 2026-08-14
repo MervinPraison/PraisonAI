@@ -1042,7 +1042,7 @@ class LocalManagedAgent:
         Accepts:
         - None → no remote compute
         - A string: ``"local"``, ``"docker"``, ``"e2b"``, ``"modal"``,
-          ``"daytona"``, ``"flyio"``
+          ``"daytona"``, ``"flyio"``, ``"tenki"``
         - An already-instantiated compute provider object
         """
         if compute is None:
@@ -1067,6 +1067,9 @@ class LocalManagedAgent:
             elif name == "flyio":
                 from praisonai.integrations.compute.flyio import FlyioCompute
                 return FlyioCompute()
+            elif name == "tenki":
+                from praisonai.integrations.compute.tenki import TenkiCompute
+                return TenkiCompute()
             else:
                 raise ValueError(f"Unknown compute provider: {name}")
         return compute  # Already an instance
@@ -1113,6 +1116,15 @@ class LocalManagedAgent:
                 "working_dir",
                 self._cfg.get("working_dir") or _default("working_dir", "/workspace"),
             ),
+            # Forward the networking policy and provider metadata so providers
+            # that honour them (e.g. Tenki's allow_outbound / tenki_image) see
+            # the caller's request instead of always getting the defaults. Copy
+            # metadata — it's mutated below with env_cfg.metadata.
+            networking=kwargs.get(
+                "networking",
+                self._cfg.get("networking") or _default("networking", {"type": "unrestricted"}),
+            ),
+            metadata=kwargs.get("metadata", dict(self._cfg.get("metadata") or {})),
             auto_shutdown=kwargs.get("auto_shutdown", True),
             idle_timeout_s=kwargs.get("idle_timeout_s", 300),
         )
