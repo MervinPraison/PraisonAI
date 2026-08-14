@@ -332,6 +332,12 @@ class RedisPubSubAdapter:
                 # record the degradation and reconnect with bounded backoff,
                 # re-subscribing every channel before resuming (Issue #3913).
                 logger.error("Redis listener error: %s", e)
+                # Drop the stale handles immediately so concurrent writes are
+                # counted as dropped (rather than calling a closed client) and
+                # ``redis_connected`` reports the outage while we reconnect
+                # (Issue #3913). ``_reconnect`` best-effort-closes them again.
+                self._client = None
+                self._pubsub = None
                 self._mark_degraded(str(e))
                 recovered = await self._reconnect_with_backoff()
                 if not recovered:

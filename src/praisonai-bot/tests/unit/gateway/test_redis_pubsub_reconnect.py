@@ -61,6 +61,44 @@ class TestDegradedMarking:
         assert adapter.is_degraded is False
 
 
+class TestOutageBookkeeping:
+    @pytest.mark.asyncio
+    async def test_listener_drops_client_on_outage_so_writes_are_counted(self, monkeypatch):
+        """During the reconnect window writes must be counted, not sent to a
+        closed client, and status must not report connected (Issue #3913)."""
+        registry = DegradedCapabilityRegistry()
+        adapter = _adapter(registry)
+
+        # Live handles before the drop.
+        adapter._client = AsyncMock()
+        pubsub = AsyncMock()
+        pubsub.get_message.side_effect = ConnectionError("dropped")
+        adapter._pubsub = pubsub
+
+        async def backoff_asserts_disconnected():
+            # By the time backoff runs, the listener must have cleared the
+            # stale handles so concurrent writes are counted as dropped.
+            assert adapter._client is None
+            await adapter.publish("chan", {"a": 1})
+            await adapter.set_presence("c1", {"x": 1})
+            assert adapter.dropped_writes == 2
+            # Simulate a successful reconnect that stops the loop cleanly.
+            adapter._client = AsyncMock()
+            recovered = AsyncMock()
+            recovered.get_message.side_effect = asyncio.CancelledError()
+            adapter._pubsub = recovered
+            return True
+
+        monkeypatch.setattr(
+            adapter, "_reconnect_with_backoff", backoff_asserts_disconnected
+        )
+
+        await adapter._run_listener()
+
+        assert adapter.dropped_writes == 2
+        assert adapter.is_degraded is False
+
+
 class TestReconnect:
     @pytest.mark.asyncio
     async def test_reconnect_resubscribes_channels(self, monkeypatch):
@@ -122,7 +160,13 @@ class TestReconnect:
         original_backoff = fake_backoff
 
         async def backoff_then_stop():
-            pubsub.get_message.side_effect = asyncio.CancelledError()
+            # The listener nulls the stale handles on drop, so simulate a
+            # successful reconnect by installing a fresh pub/sub whose next
+            # read cancels the loop cleanly.
+            adapter._client = AsyncMock()
+            recovered = AsyncMock()
+            recovered.get_message.side_effect = asyncio.CancelledError()
+            adapter._pubsub = recovered
             return await original_backoff()
 
         monkeypatch.setattr(adapter, "_reconnect_with_backoff", backoff_then_stop)
