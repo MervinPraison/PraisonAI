@@ -121,15 +121,14 @@ def format_messages_to_flush(
 
 
 class _AtomicCommitGuard:
-    """Serialize cancellation with the final mutation without blocking cancel.
+    """Serialize commit authorization with cancellation without blocking.
 
     Backends must perform all potentially blocking preparation before calling
-    :meth:`commit` and pass only their short, final atomic mutation. Commit and
-    cancellation are mutually exclusive, so a cancellation that wins the race
-    prevents the mutation from starting and a timed-out flush never persists
-    memory. Cancellation itself never waits on backend I/O: if a final mutation
-    is already running it was authorized before the deadline, so :meth:`cancel`
-    records the request without blocking rather than joining the operation.
+    :meth:`commit` and pass only their short, final atomic mutation. Commit
+    authorization is serialized with cancellation and rechecks the deadline.
+    Cancellation prevents a mutation that is not yet authorized. An already-
+    authorized final mutation may persist after timeout; cancellation records
+    the request without waiting for that operation.
     """
 
     def __init__(self) -> None:
@@ -141,9 +140,9 @@ class _AtomicCommitGuard:
         with self._lock:
             return self._cancelled
 
-    def commit(self, operation: Any) -> bool:
+    def commit(self, operation: Any, *, deadline: float) -> bool:
         with self._lock:
-            if self._cancelled:
+            if self._cancelled or time.monotonic() >= deadline:
                 return False
             operation()
             return True

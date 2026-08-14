@@ -203,7 +203,9 @@ def test_sync_timeout_discards_late_memory_writes():
             self.commits = []
 
         def commit_memory_batch(self, writes, *, deadline, commit_guard):
-            commit_guard.commit(lambda: self.commits.extend(writes))
+            commit_guard.commit(
+                lambda: self.commits.extend(writes), deadline=deadline
+            )
 
     backend = _Backend()
     release = __import__("threading").Event()
@@ -251,7 +253,9 @@ def test_sync_timeout_includes_staged_memory_commit():
         def commit_memory_batch(self, writes, *, deadline, commit_guard):
             commit_started.set()
             release.wait(1)
-            commit_guard.commit(lambda: committed.extend(writes))
+            commit_guard.commit(
+                lambda: committed.extend(writes), deadline=deadline
+            )
             commit_finished.set()
 
     backend = _Backend()
@@ -301,7 +305,7 @@ def test_sync_timeout_does_not_wait_for_blocked_atomic_backend():
                 release.wait(1)
                 commit_finished.set()
 
-            commit_guard.commit(_blocked_atomic_operation)
+            commit_guard.commit(_blocked_atomic_operation, deadline=deadline)
 
     class _Child:
         def __init__(self, memory):
@@ -350,15 +354,33 @@ def test_sync_timeout_does_not_wait_for_blocked_atomic_backend():
 
 
 def test_commit_guard_cancel_blocks_unstarted_mutation():
+    import time
+
     from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
 
     guard = _AtomicCommitGuard()
     guard.cancel()
 
     mutated = []
-    assert guard.commit(lambda: mutated.append(True)) is False
+    assert guard.commit(
+        lambda: mutated.append(True), deadline=time.monotonic() + 1
+    ) is False
     assert mutated == []
     assert guard.cancelled is True
+
+
+def test_commit_guard_rejects_expired_deadline():
+    import time
+
+    from praisonaiagents.compaction.memory_flush import _AtomicCommitGuard
+
+    guard = _AtomicCommitGuard()
+    mutated = []
+
+    assert guard.commit(
+        lambda: mutated.append(True), deadline=time.monotonic() - 1
+    ) is False
+    assert mutated == []
 
 
 def test_commit_guard_cancel_does_not_block_authorized_mutation():
@@ -374,20 +396,36 @@ def test_commit_guard_cancel_does_not_block_authorized_mutation():
 
     def _slow_operation():
         in_operation.set()
-        release.wait(1)
+        release.wait()
         committed.append(True)
 
-    worker = threading.Thread(target=lambda: guard.commit(_slow_operation))
+    cancel_returned = threading.Event()
+
+    def _cancel():
+        guard.cancel()
+        cancel_returned.set()
+
+    worker = threading.Thread(
+        target=lambda: guard.commit(
+            _slow_operation, deadline=time.monotonic() + 1
+        )
+    )
     worker.start()
-    assert in_operation.wait(1)
+    cancel_worker = None
+    try:
+        assert in_operation.wait(1)
+        cancel_worker = threading.Thread(target=_cancel)
+        cancel_worker.start()
+        assert cancel_returned.wait(1)
+        assert not release.is_set()
+    finally:
+        release.set()
+        worker.join(1)
+        if cancel_worker is not None:
+            cancel_worker.join(1)
 
-    started = time.monotonic()
-    guard.cancel()
-    elapsed = time.monotonic() - started
-
-    assert elapsed < 0.25
-    release.set()
-    worker.join(1)
+    assert not worker.is_alive()
+    assert cancel_worker is not None and not cancel_worker.is_alive()
     assert committed == [True]
 
 
@@ -575,7 +613,9 @@ async def test_async_flush_uses_async_memory_commit_with_shared_deadline():
         async def acommit_memory_batch(
             self, writes, *, deadline, commit_guard
         ):
-            commit_guard.commit(lambda: self.commits.extend(writes))
+            commit_guard.commit(
+                lambda: self.commits.extend(writes), deadline=deadline
+            )
 
     backend = _Backend()
 
