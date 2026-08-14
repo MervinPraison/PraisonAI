@@ -59,10 +59,11 @@ class ACPServer:
         self._sessions: Dict[str, ACPSession] = {}
         self._client = None  # ACP client connection
         self._cancelled_sessions: set = set()
+        self._agents_by_workspace: Dict[str, Any] = {}
         
         _setup_stderr_logging(self.config.debug)
     
-    def _get_agent(self):
+    def _get_agent(self, workspace: Optional[Path] = None):
         """Lazy load or create agent."""
         if self._agent is not None:
             return self._agent
@@ -70,18 +71,85 @@ class ACPServer:
         if self._agents is not None:
             return self._agents
         
-        # Create default agent
+        workspace = Path(workspace or self.config.workspace).resolve()
+        cache_key = str(workspace)
+        if cache_key in self._agents_by_workspace:
+            return self._agents_by_workspace[cache_key]
+
+        # Create a workspace-scoped default agent.
         try:
             from praisonaiagents import Agent
-            self._agent = Agent(
-                name="PraisonAI",
-                instructions="You are a helpful AI coding assistant.",
-                model=self.config.model or "gpt-4o-mini",
+            tools = self._filter_workspace_tools(
+                self._load_workspace_tools(workspace)
             )
-            return self._agent
+            agent = Agent(
+                name="PraisonAI",
+                instructions=(
+                    "You are a coding assistant inside an editor. Use the "
+                    "provided tools to inspect and modify files when permitted. "
+                    "Keep all file operations inside the workspace."
+                ),
+                model=self.config.model or "gpt-4o-mini",
+                tools=tools,
+                output="minimal",
+                approval=True if self.config.approval_mode == "auto" else False,
+            )
+            self._agents_by_workspace[cache_key] = agent
+            return agent
         except ImportError:
             logger.error("praisonaiagents not installed")
             raise RuntimeError("praisonaiagents package required")
+
+    def _load_workspace_tools(self, workspace: Path) -> List[Any]:
+        """Load the canonical coding tools bound to an ACP session workspace."""
+        from praisonai_code.cli.features.interactive_tools import (
+            ToolConfig,
+            get_interactive_tools,
+        )
+
+        tool_config = ToolConfig(
+            workspace=str(workspace),
+            approval_mode=self.config.approval_mode,
+        )
+        return get_interactive_tools(
+            groups=["basic", "acp", "edit", "search", "lsp"],
+            config=tool_config,
+            workspace=str(workspace),
+        )
+
+    def _filter_workspace_tools(self, tools: List[Any]) -> List[Any]:
+        """Apply ACPConfig capability gates before tools reach the model."""
+        read_tools = {
+            "read_file", "list_files", "grep", "glob", "ast_grep_search",
+            "lsp_list_symbols", "lsp_find_definition", "lsp_find_references",
+            "lsp_get_diagnostics",
+        }
+        write_tools = {
+            "write_file", "edit_file", "apply_patch", "acp_create_file",
+            "acp_edit_file", "acp_delete_file",
+        }
+        shell_tools = {"execute_command", "acp_execute_command"}
+        network_tools = {"internet_search", "web_crawl"}
+
+        allowed = set(read_tools)
+        if self.config.can_write():
+            allowed.update(write_tools)
+        if self.config.can_execute_shell():
+            allowed.update(shell_tools)
+        if self.config.allow_network:
+            allowed.update(network_tools)
+        return [
+            tool for tool in tools
+            if getattr(tool, "__name__", "") in allowed
+        ]
+
+    @staticmethod
+    def _reject_unsupported_mcp_servers(mcp_servers: List[Dict[str, Any]]) -> None:
+        """Fail closed until client-provided MCP lifecycle is implemented."""
+        if mcp_servers:
+            raise ValueError(
+                "MCP servers are not supported by the PraisonAI ACP server yet"
+            )
     
     def on_connect(self, client) -> None:
         """Called when client connects."""
@@ -121,6 +189,11 @@ class ACPServer:
                     "http": False,
                     "sse": False,
                 },
+                "sessionCapabilities": {
+                    "fork": {},
+                    "list": {},
+                    "resume": {},
+                },
             },
             "agentInfo": {
                 "name": "praisonai",
@@ -149,6 +222,8 @@ class ACPServer:
             mcp_servers: List of MCP server configurations
         """
         logger.info(f"New session: cwd={cwd}")
+
+        self._reject_unsupported_mcp_servers(mcp_servers)
         
         workspace = Path(cwd).resolve()
         session = ACPSession.create(
@@ -180,6 +255,8 @@ class ACPServer:
         Replays conversation history via session/update notifications.
         """
         logger.info(f"Load session: session_id={session_id}")
+
+        self._reject_unsupported_mcp_servers(mcp_servers)
         
         # Try to load from store
         session = self._session_store.load(session_id)
@@ -286,7 +363,7 @@ class ACPServer:
         
         try:
             # Get agent response
-            agent = self._get_agent()
+            agent = self._get_agent(session.workspace)
             
             # Send thinking update
             await self._send_thought(session_id, "Processing your request...")

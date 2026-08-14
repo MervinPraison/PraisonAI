@@ -106,6 +106,32 @@ class TestACPRealLLM:
         # Log for verification (no secrets)
         print(f"[TEST] Prompt completed: stopReason={prompt_result['stopReason']}")
         print(f"[TEST] Session: {session_id[:20]}...")
+
+    @pytest.mark.asyncio
+    async def test_prompt_writes_file_when_explicitly_allowed(self, tmp_path):
+        """Exercise the real ACP → Agent → workspace tool loop."""
+        from praisonai.acp.config import ACPConfig
+        from praisonai.acp.server import ACPServer
+
+        server = ACPServer(config=ACPConfig(
+            workspace=tmp_path,
+            model="gpt-4o-mini",
+            read_only=False,
+            allow_write=True,
+            approval_mode="auto",
+        ))
+        session = await server.new_session(cwd=str(tmp_path), mcp_servers=[])
+
+        result = await server.prompt(
+            prompt=[{
+                "type": "text",
+                "text": "Create acp_probe.txt containing exactly ACP_TOOLS_OK.",
+            }],
+            session_id=session["sessionId"],
+        )
+
+        assert result["stopReason"] == "end_turn"
+        assert (tmp_path / "acp_probe.txt").read_text(encoding="utf-8").strip() == "ACP_TOOLS_OK"
     
     @pytest.mark.asyncio
     async def test_session_resume(self, acp_server):
