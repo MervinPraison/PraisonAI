@@ -956,6 +956,8 @@ class OpenAIClient:
                         ))
                     
                     return final_response
+                except (FileNotFoundError, ValueError):
+                    raise
                 except Exception as e:
                     self.logger.warning(f"Responses API streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
@@ -1223,6 +1225,8 @@ class OpenAIClient:
                         ))
                     
                     return final_response
+                except (FileNotFoundError, ValueError):
+                    raise
                 except Exception as e:
                     self.logger.warning(f"Responses API async streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
@@ -1418,6 +1422,8 @@ class OpenAIClient:
                 )
                 raw = self.sync_client.responses.create(**resp_params)
                 return self._responses_to_chat_completion(raw)
+            except (FileNotFoundError, ValueError):
+                raise
             except Exception as e:
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
@@ -1477,6 +1483,8 @@ class OpenAIClient:
                 )
                 raw = await self.async_client.responses.create(**resp_params)
                 return self._responses_to_chat_completion(raw)
+            except (FileNotFoundError, ValueError):
+                raise
             except Exception as e:
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions

@@ -252,6 +252,7 @@ class TestResponsesAPIRealAgent:
         )
 
         assert response
+        print(response)
 
     def test_responses_api_with_tool(self):
         """
