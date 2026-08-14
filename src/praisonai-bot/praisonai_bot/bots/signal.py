@@ -135,7 +135,10 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._bot_user: Optional[BotUser] = None
 
         from ._session import build_session_manager
-        self._session_mgr = build_session_manager(self.config, platform="signal")
+        # Exposed as ``_session`` (not ``_session_mgr``) so the gateway routing
+        # handler can stage per-route tool policies on it (Issue #2298): that
+        # handler looks up ``_session`` before the adapter's own ``chat()``.
+        self._session = build_session_manager(self.config, platform="signal")
         self._message_handlers: List[Callable] = []
         self._http_session: Any = None
         self._background_tasks: set = set()
@@ -175,7 +178,7 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
         async def _new(msg):
             user_id = msg.sender.user_id if msg.sender else "unknown"
-            self._session_mgr.reset(user_id)
+            self._session.reset(user_id)
             return "Session reset. Send a message to start a new conversation."
 
         async def _help(msg):
@@ -188,7 +191,7 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
         async def _stop(msg):
             user_id = msg.sender.user_id if msg.sender else "unknown"
-            return handle_stop_command(self._session_mgr, user_id)
+            return handle_stop_command(self._session, user_id)
 
         self.register_command("status", _status, description="Show bot status and info")
         self.register_command("new", _new, description="Reset conversation session")
@@ -386,7 +389,7 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
         if self._agent and content:
             try:
-                response = await self._session_mgr.chat(
+                response = await self._session.chat(
                     self._agent, source, content,
                     chat_id=chat_id,
                     user_name=source_name or "",

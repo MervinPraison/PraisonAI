@@ -5685,7 +5685,7 @@ class WebSocketGateway:
         elif not isinstance(channels_cfg, dict):
             errors.append("'channels' must be a non-empty dictionary")
         else:
-            _tokenless = {"email", "agentmail"}
+            _tokenless = {"email", "agentmail", "signal"}
             for cname, cdef in channels_cfg.items():
                 if not isinstance(cdef, dict):
                     continue
@@ -6090,8 +6090,9 @@ class WebSocketGateway:
             # WhatsApp web mode doesn't require a token
             wa_web_mode = (channel_type == "whatsapp" and
                            ch_cfg.get("mode", "cloud").lower().strip() == "web")
-            # Email/AgentMail use env vars for tokens — not required in YAML
-            is_email_platform = channel_type in ("email", "agentmail")
+            # Email/AgentMail use env vars for tokens; Signal links a device via
+            # a local bridge — none require a token in YAML.
+            is_email_platform = channel_type in ("email", "agentmail", "signal")
             if not token and not wa_web_mode and not is_email_platform:
                 logger.warning(f"No token for channel '{channel_name}', skipping")
                 # Issue #3159: keep the skipped channel queryable as degraded so
@@ -7574,8 +7575,9 @@ class WebSocketGateway:
         # WhatsApp web mode doesn't require a token
         wa_web_mode = (channel_type == "whatsapp" and
                        ch_cfg.get("mode", "cloud").lower().strip() == "web")
-        # Email/AgentMail use env vars for tokens — not required in YAML
-        is_email_platform = channel_type in ("email", "agentmail")
+        # Email/AgentMail use env vars for tokens; Signal links a device via a
+        # local bridge — none require a token in YAML.
+        is_email_platform = channel_type in ("email", "agentmail", "signal")
         
         if not token and not wa_web_mode and not is_email_platform:
             logger.warning(f"No token for channel '{channel_name}', skipping")
