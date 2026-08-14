@@ -26,7 +26,9 @@ def test_real_agent_dispatches_tool_while_streaming():
         llm="gpt-4o-mini",
         instructions=(
             "Always call stream_lookup exactly once before answering. "
-            "Include the tool's complete result in the final answer."
+            "After the tool call, reply with the exact marker "
+            "STREAM-FOLLOW-UP-COMPLETE and include the tool's complete "
+            "result in the final answer."
         ),
         tools=[stream_lookup],
     )
@@ -39,4 +41,5 @@ def test_real_agent_dispatches_tool_while_streaming():
 
     print(result)
     assert calls == ["NEBULA-7"]
+    assert "STREAM-FOLLOW-UP-COMPLETE" in result
     assert "stream-result:NEBULA-7" in result
