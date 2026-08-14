@@ -64,6 +64,10 @@ _EXTRA_ENV_MAP = {
         "inbox_id": "AGENTMAIL_INBOX_ID",
         "domain": "AGENTMAIL_DOMAIN",
     },
+    "signal": {
+        "account": "SIGNAL_ACCOUNT",
+        "bridge_url": "SIGNAL_BRIDGE_URL",
+    },
 }
 
 
