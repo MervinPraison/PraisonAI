@@ -7,7 +7,8 @@ multiple agents and managing real-time communication.
 
 from praisonaiagents import Agent, GatewayConfig, SessionConfig
 
-# Configure the gateway
+# Configure the gateway using the typed SDK GatewayConfig.
+# In gateway.yaml, the optional ``gateway:`` block is validated at load time (#3050).
 gateway_config = GatewayConfig(
     host="127.0.0.1",
     port=8765,

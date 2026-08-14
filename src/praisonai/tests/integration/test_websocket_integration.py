@@ -135,6 +135,24 @@ class TestWebSocketIntegration:
         assert cfg["channels"]["telegram"]["token"] == "test123"
 
     @pytest.mark.asyncio
+    async def test_gateway_config_rejects_misspelled_server_block(self, tmp_path):
+        """Misspelled ``gateway:`` server settings fail at load time (#3050)."""
+        try:
+            from praisonai.gateway.server import WebSocketGateway
+        except ImportError:
+            pytest.skip("praisonai.gateway not available")
+
+        bad_config = tmp_path / "bad.yaml"
+        bad_config.write_text(
+            "agents:\n  bot:\n    instructions: hi\n"
+            "channels:\n  telegram:\n    token: test123\n"
+            "gateway:\n  drain_timout: 30\n"
+        )
+
+        with pytest.raises(ValueError, match="drain_timout"):
+            WebSocketGateway.load_gateway_config(str(bad_config))
+
+    @pytest.mark.asyncio
     async def test_websocket_connect_and_message(self):
         """Test actual WebSocket connection to gateway server.
 
