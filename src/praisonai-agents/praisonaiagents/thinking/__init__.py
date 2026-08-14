@@ -13,20 +13,24 @@ Zero Performance Impact:
 - No overhead when not in use
 
 Usage:
-    from praisonaiagents.thinking import ThinkingBudget, ThinkingConfig
-    
-    # Create a thinking budget
+    from praisonaiagents import Agent
+    from praisonaiagents.thinking import ThinkingBudget
+
+    # Create a thinking budget (helper for computing per-task token limits)
     budget = ThinkingBudget(
         max_tokens=16000,
         max_time_seconds=60,
         adaptive=True
     )
-    
-    # Apply to agent
-    agent = Agent(
-        instructions="...",
-        thinking_budget=budget
-    )
+
+    # Compute an adaptive token budget for a given task complexity (0.0-1.0)
+    tokens = budget.get_tokens_for_complexity(0.8)
+
+    # Note: `agent.thinking_budget` stores this object on the agent as a hint,
+    # but the core Agent request pipeline does not yet apply it automatically.
+    # To influence step-by-step reasoning today, use the built-in
+    # `reasoning_steps` option instead:
+    agent = Agent(instructions="...", reasoning_steps=True)
 """
 
 __all__ = [

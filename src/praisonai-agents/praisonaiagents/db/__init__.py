@@ -6,20 +6,28 @@ Implementations are provided by the wrapper layer (praisonai.db).
 
 Usage (simplest - recommended):
     from praisonaiagents import Agent, db
-    
+
     agent = Agent(
         name="Assistant",
-        db=db(database_url="postgresql://localhost/mydb"),  # db(...) shortcut
-        session_id="my-session"  # optional: defaults to per-hour ID
+        memory=db(database_url="postgresql://localhost/mydb"),  # db(...) shortcut
     )
     agent.chat("Hello!")  # auto-persists messages, runs, traces, tool calls
 
-Alternative (explicit backend):
-    db=db.DB(database_url="...")           # Short name (recommended)
-    db=db.PraisonAIDB(database_url="...")  # Auto-detect backend
-    db=db.PostgresDB(host="localhost")   # PostgreSQL
-    db=db.SQLiteDB(path="data.db")       # SQLite
-    db=db.RedisDB(host="localhost")      # Redis (state only)
+With an explicit session_id (use MemoryConfig):
+    from praisonaiagents import Agent, db, MemoryConfig
+
+    agent = Agent(
+        name="Assistant",
+        memory=MemoryConfig(db=db(database_url="postgresql://localhost/mydb"),
+                            session_id="my-session"),  # optional: defaults to per-hour ID
+    )
+
+Alternative (explicit backend, passed via memory=):
+    memory=db.DB(database_url="...")           # Short name (recommended)
+    memory=db.PraisonAIDB(database_url="...")  # Auto-detect backend
+    memory=db.PostgresDB(host="localhost")   # PostgreSQL
+    memory=db.SQLiteDB(path="data.db")       # SQLite
+    memory=db.RedisDB(host="localhost")      # Redis (state only)
 """
 
 from .protocol import (
