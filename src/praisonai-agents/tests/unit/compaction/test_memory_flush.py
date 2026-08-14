@@ -313,24 +313,39 @@ def test_sync_timeout_does_not_wait_for_blocked_atomic_backend():
     def _child(_parent, _config, memory_override=None):
         return _Child(memory_override)
 
-    started_at = time.monotonic()
+    result_holder = {}
+    caller_finished = threading.Event()
+
+    def _run_flush():
+        try:
+            result_holder["result"] = run_pre_compaction_flush_sync(
+                _parent(_Backend()),
+                _messages(),
+                PreCompactionMemoryFlushConfig(
+                    min_turns_to_flush=1, timeout_seconds=0.1
+                ),
+            )
+        finally:
+            caller_finished.set()
+
     with patch(
         "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
         side_effect=_child,
     ):
-        result = run_pre_compaction_flush_sync(
-            _parent(_Backend()),
-            _messages(),
-            PreCompactionMemoryFlushConfig(
-                min_turns_to_flush=1, timeout_seconds=0.02
-            ),
-        )
-    elapsed = time.monotonic() - started_at
-    release.set()
+        caller = threading.Thread(target=_run_flush)
+        caller.start()
+        try:
+            assert commit_started.wait(1)
+            started_at = time.monotonic()
+            assert caller_finished.wait(0.25)
+            elapsed = time.monotonic() - started_at
+        finally:
+            release.set()
+            caller.join(1)
 
-    assert commit_started.wait(1)
+    assert not caller.is_alive()
     assert commit_finished.wait(1)
-    assert result.reason == "timeout"
+    assert result_holder["result"].reason == "timeout"
     assert elapsed < 0.25
 
 
