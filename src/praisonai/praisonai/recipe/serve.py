@@ -81,6 +81,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 DEFAULT_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
 DEFAULT_RATE_LIMIT = 100  # requests per minute
 DEFAULT_RATE_LIMIT_EXEMPT_PATHS = ["/health", "/metrics"]
+SUPPORTED_AUTH_TYPES = frozenset({"none", "api-key", "jwt"})
 
 
 class RateLimiter:
@@ -424,6 +425,13 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         )
     
     config = config or {}
+    auth_type = config.get("auth") or "none"
+    if auth_type not in SUPPORTED_AUTH_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_AUTH_TYPES))
+        raise ValueError(
+            f"Unsupported recipe server auth mode {auth_type!r}. "
+            f"Expected one of: {supported}"
+        )
     
     async def health(request: Request) -> JSONResponse:
         """GET /health - Health check."""
@@ -690,8 +698,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         )
     
     # Add auth middleware if configured
-    auth_type = config.get("auth")
-    if auth_type and auth_type != "none":
+    if auth_type != "none":
         auth_middleware = create_auth_middleware(
             auth_type,
             api_key=config.get("api_key"),

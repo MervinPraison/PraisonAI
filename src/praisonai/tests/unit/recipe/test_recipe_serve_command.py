@@ -7,6 +7,7 @@ import pytest
 import typer
 
 from praisonai.cli.commands.recipe import recipe_serve
+from praisonai.recipe.serve import create_app
 
 
 def _invoke_recipe_serve(**overrides):
@@ -75,3 +76,8 @@ def test_recipe_serve_allows_jwt_auth_from_config(monkeypatch):
 
     serve.assert_called_once()
     assert serve.call_args.kwargs["config"]["auth"] == "jwt"
+
+
+def test_recipe_server_rejects_unknown_auth_mode():
+    with pytest.raises(ValueError, match="Unsupported recipe server auth mode"):
+        create_app({"auth": "api-keey"})
