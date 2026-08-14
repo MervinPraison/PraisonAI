@@ -12,8 +12,8 @@ Required environment variables:
     - OPENAI_API_KEY: OpenAI API key
 """
 import os
+import base64
 import sys
-import time
 import pytest
 
 # Note: Only real API tests are gated by RUN_REAL_KEY_TESTS.
@@ -230,6 +230,29 @@ class TestResponsesAPIRealAgent:
         assert len(response) > 100, f"Response too short ({len(response)} chars)"
         print(f"[PASS] gpt-4o-mini - {len(response)} chars")
 
+    def test_bare_model_accepts_local_image_attachment(self, tmp_path):
+        """Exercise Agent.start() through OpenAIClient with a local image."""
+        from praisonaiagents import Agent
+
+        image_path = tmp_path / "pixel.png"
+        image_path.write_bytes(base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+            "/x8AAusB9WlV9ZkAAAAASUVORK5CYII="
+        ))
+        agent = Agent(
+            name="LocalImageAgent",
+            instructions="Answer image questions briefly.",
+            llm="gpt-4o-mini",
+        )
+
+        response = agent.start(
+            "Confirm that you can inspect the attached image.",
+            attachments=[str(image_path)],
+            stream=False,
+        )
+
+        assert response
+
     def test_responses_api_with_tool(self):
         """
         Test that Responses API correctly handles tool calls — the key
@@ -251,7 +274,7 @@ class TestResponsesAPIRealAgent:
 
         assert response is not None
         assert "42" in response, f"Expected '42' in response, got: {response[:200]}"
-        print(f"[PASS] Tool call via Responses API (Path P1) - response contains '42'")
+        print("[PASS] Tool call via Responses API (Path P1) - response contains '42'")
 
     def test_openai_client_path_with_tool(self):
         """
@@ -275,7 +298,7 @@ class TestResponsesAPIRealAgent:
 
         assert response is not None
         assert "42" in response, f"Expected '42' in response, got: {response[:200]}"
-        print(f"[PASS] Tool call via OpenAIClient Responses API (Path P2) - response contains '42'")
+        print("[PASS] Tool call via OpenAIClient Responses API (Path P2) - response contains '42'")
 
 
 # ── OpenAIClient-specific unit tests ───────────────────────────────────
@@ -320,6 +343,67 @@ class TestOpenAIClientResponsesAPI:
         assert params["temperature"] == 0.5
         # Tools should be in Responses API format (flattened)
         assert params["tools"] == [{"type": "function", "name": "add", "description": "Add", "parameters": {}}]
+
+    def test_build_responses_input_maps_chat_multimodal_parts(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://example.com/image.png"},
+                },
+            ],
+        }]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        assert params["input"] == [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Describe this image"},
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.com/image.png",
+                },
+            ],
+        }]
+
+    def test_build_responses_input_encodes_local_image(self, tmp_path):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        image_path = tmp_path / "pixel.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+        client = OpenAIClient.__new__(OpenAIClient)
+
+        params = client._build_responses_input([{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": str(image_path)},
+            }],
+        }], "gpt-4o-mini")
+
+        image_url = params["input"][0]["content"][0]["image_url"]
+        assert image_url == "data:image/png;base64,iVBORw0KGgo="
+
+    def test_build_responses_input_rejects_missing_local_image(self, tmp_path):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        missing_path = tmp_path / "missing.png"
+
+        with pytest.raises(FileNotFoundError, match="Local image file does not exist"):
+            client._build_responses_input([{
+                "role": "user",
+                "content": [{
+                    "type": "image_url",
+                    "image_url": {"url": str(missing_path)},
+                }],
+            }], "gpt-4o-mini")
 
     def test_responses_to_chat_completion(self):
         from praisonaiagents.llm.openai_client import OpenAIClient

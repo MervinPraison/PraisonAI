@@ -6,7 +6,9 @@ supporting both synchronous and asynchronous operations.
 """
 
 import os
+import base64
 import logging
+import mimetypes
 from praisonaiagents._logging import get_logger
 import time
 import json
@@ -16,6 +18,7 @@ from typing import Any, Dict, List, Optional, Union, AsyncIterator, Iterator, Ca
 from pydantic import BaseModel
 from dataclasses import dataclass
 import inspect
+from pathlib import Path
 
 from ..errors import ToolExecutionError
 
@@ -675,7 +678,11 @@ class OpenAIClient:
                         "output": msg.get("content", ""),
                     })
                 else:
-                    input_items.append(msg)
+                    item = dict(msg)
+                    item["content"] = self._build_responses_content(
+                        msg.get("content", "")
+                    )
+                    input_items.append(item)
 
         if instructions:
             params["instructions"] = instructions
@@ -708,6 +715,61 @@ class OpenAIClient:
             params["temperature"] = temperature
 
         return params
+
+    @staticmethod
+    def _normalise_responses_image_url(image_url: Any) -> str:
+        """Return an API-fetchable URL, encoding local image files as data URLs."""
+        if isinstance(image_url, dict):
+            image_url = image_url.get("url", "")
+        if not isinstance(image_url, str) or not image_url:
+            raise ValueError("Image content must include a non-empty URL or local path")
+        if image_url.startswith(("http://", "https://", "data:")):
+            return image_url
+
+        image_path = Path(image_url).expanduser()
+        if not image_path.is_file():
+            raise FileNotFoundError(
+                f"Local image file does not exist: {image_path}"
+            )
+        mime_type = mimetypes.guess_type(image_path.name)[0]
+        if not mime_type or not mime_type.startswith("image/"):
+            raise ValueError(f"Unsupported local image type: {image_path}")
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    @classmethod
+    def _build_responses_content(cls, content: Any) -> Any:
+        """Translate Chat Completions content parts to Responses API parts."""
+        if not isinstance(content, list):
+            return content
+
+        responses_content: List[Any] = []
+        for part in content:
+            if not isinstance(part, dict):
+                responses_content.append(part)
+                continue
+            part_type = part.get("type")
+            if part_type == "text":
+                responses_content.append({
+                    "type": "input_text",
+                    "text": part.get("text", ""),
+                })
+            elif part_type == "image_url":
+                responses_content.append({
+                    "type": "input_image",
+                    "image_url": cls._normalise_responses_image_url(
+                        part.get("image_url")
+                    ),
+                })
+            elif part_type == "input_image":
+                item = dict(part)
+                item["image_url"] = cls._normalise_responses_image_url(
+                    part.get("image_url")
+                )
+                responses_content.append(item)
+            else:
+                responses_content.append(part)
+        return responses_content
 
     def _responses_to_chat_completion(self, response) -> ChatCompletion:
         """
