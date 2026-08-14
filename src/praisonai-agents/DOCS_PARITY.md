@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2744 |
 | ✅ Bots | 7 | 31 | 13314 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35960 |
+| ✅ CLI | 5 | 121 | 35970 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4583 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2273 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 69 | 25485 |
+| ✅ Gateway | 7 | 72 | 26391 |
 | ✅ Guardrails | 4 | 4 | 1950 |
 | ✅ Handoffs | 11 | 6 | 2563 |
 | ✅ Hooks | 2 | 9 | 4309 |
@@ -51,8 +51,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 13 | 4245 |
 | ✅ LLM | 3 | 15 | 5140 |
 | ✅ Loops | 4 | 5 | 1422 |
-| ✅ MCP | 1 | 60 | 13732 |
-| ✅ Memory | 6 | 17 | 6797 |
+| ✅ MCP | 1 | 61 | 13847 |
+| ✅ Memory | 6 | 18 | 7067 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
