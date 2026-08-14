@@ -5836,6 +5836,7 @@ Answer:"""
             GuardrailResult: The result of the guardrail validation
         """
         from ..guardrails import GuardrailResult
+        from pydantic import PydanticUserError
         
         if not self._guardrail_fn:
             return GuardrailResult(success=True, result=task_output)
@@ -5846,7 +5847,12 @@ Answer:"""
             
             # Convert the result to a GuardrailResult
             return GuardrailResult.from_tuple(result)
-            
+
+        except PydanticUserError:
+            # Programming/configuration errors (e.g. an unresolved model) are
+            # not guardrail rejections. Swallowing them would silently null the
+            # agent's response after retries, so let them propagate.
+            raise
         except Exception as e:
             logging.error(f"Agent {self.name}: Error in guardrail validation: {e}")
             # On error, return failure

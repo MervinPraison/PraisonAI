@@ -742,36 +742,8 @@ class ReflectionOutput(BaseModel):
     reflection: str
     satisfactory: Literal["yes", "no"]
 
-class TaskOutput(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    description: str
-    summary: Optional[str] = None
-    raw: str
-    pydantic: Optional[BaseModel] = None
-    json_dict: Optional[Dict[str, Any]] = None
-    agent: str
-    output_format: Literal["RAW", "JSON", "Pydantic"] = "RAW"
-    token_metrics: Optional['TokenMetrics'] = None  # Add token metrics field
-    callback_error: Optional[str] = None
-    non_fatal_errors: Optional[list[str]] = None
-
-    def json(self) -> Optional[str]:
-        if self.output_format == "JSON" and self.json_dict:
-            return json.dumps(self.json_dict)
-        return None
-
-    def to_dict(self) -> dict:
-        output_dict = {}
-        if self.json_dict:
-            output_dict.update(self.json_dict)
-        if self.pydantic:
-            output_dict.update(self.pydantic.model_dump())
-        return output_dict
-
-    def __str__(self):
-        if self.pydantic:
-            return str(self.pydantic)
-        elif self.json_dict:
-            return json.dumps(self.json_dict)
-        else:
-            return self.raw 
+# Re-export the single canonical TaskOutput so main.TaskOutput and
+# output.models.TaskOutput are the SAME class. Previously two near-identical
+# classes both named TaskOutput existed, which broke guardrail validation
+# (GuardrailResult expected one class while agents produced the other).
+from .output.models import TaskOutput
