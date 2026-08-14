@@ -1356,7 +1356,10 @@ Respond with ONLY a valid JSON tool call in this format:
             The completion response from litellm
         """
         import litellm
-        return self._call_with_retry(litellm.completion, **completion_params)
+        response = self._call_with_retry(litellm.completion, **completion_params)
+        if not completion_params.get("stream"):
+            self._track_token_usage(response, self.model)
+        return response
 
     async def _acompletion_with_retry(self, **completion_params):
         """Execute litellm.acompletion with automatic retry on rate limit errors.
@@ -2879,10 +2882,6 @@ Respond with ONLY a valid JSON tool call in this format:
                                 is_reasoning=False
                             ))
                         
-                        # Always account for provider usage. ``metrics`` controls
-                        # rendering/callback detail, not whether usage exists.
-                        self._track_token_usage(final_response, self.model)
-                        
                         # Trigger llm_end callback with metrics for debug output
                         llm_latency_ms = (time.time() - current_time) * 1000
                         
@@ -3096,10 +3095,6 @@ Respond with ONLY a valid JSON tool call in this format:
                                             response_content = final_response["choices"][0]["message"].get("content")
                                             response_text = response_content if response_content is not None else ""
                                             
-                                            self._track_token_usage(
-                                                final_response,
-                                                self.model,
-                                            )
                                         
                                         # Execute callbacks and display based on verbose setting
                                         if verbose and not interaction_displayed:
@@ -3289,10 +3284,6 @@ Respond with ONLY a valid JSON tool call in this format:
                                 response_content = final_response["choices"][0]["message"].get("content")
                                 response_text = response_content if response_content is not None else ""
                                 
-                                self._track_token_usage(
-                                    final_response,
-                                    self.model,
-                                )
                             
                             # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
@@ -5449,14 +5440,43 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         return int(value or 0)
                 return 0
 
+            def _detail_value(detail_names: tuple[str, ...], name: str) -> int:
+                for detail_name in detail_names:
+                    details = (
+                        usage.get(detail_name)
+                        if isinstance(usage, dict)
+                        else getattr(usage, detail_name, None)
+                    )
+                    if details:
+                        value = (
+                            details.get(name)
+                            if isinstance(details, dict)
+                            else getattr(details, name, None)
+                        )
+                        if value is not None:
+                            return int(value or 0)
+                return 0
+
             # Extract token counts
             metrics = TokenMetrics(
                 input_tokens=_usage_value("prompt_tokens", "input_tokens"),
                 output_tokens=_usage_value("completion_tokens", "output_tokens"),
-                cached_tokens=_usage_value("cached_tokens"),
-                reasoning_tokens=_usage_value("reasoning_tokens"),
-                audio_input_tokens=_usage_value("audio_input_tokens"),
-                audio_output_tokens=_usage_value("audio_output_tokens"),
+                cached_tokens=_usage_value("cached_tokens") or _detail_value(
+                    ("prompt_tokens_details", "input_tokens_details"),
+                    "cached_tokens",
+                ),
+                reasoning_tokens=_usage_value("reasoning_tokens") or _detail_value(
+                    ("completion_tokens_details", "output_tokens_details"),
+                    "reasoning_tokens",
+                ),
+                audio_input_tokens=_usage_value("audio_input_tokens") or _detail_value(
+                    ("prompt_tokens_details", "input_tokens_details"),
+                    "audio_tokens",
+                ),
+                audio_output_tokens=_usage_value("audio_output_tokens") or _detail_value(
+                    ("completion_tokens_details", "output_tokens_details"),
+                    "audio_tokens",
+                ),
             )
             
             # Store metrics

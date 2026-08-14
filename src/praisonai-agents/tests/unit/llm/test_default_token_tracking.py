@@ -23,8 +23,8 @@ def test_chat_completion_tracks_tokens_when_metrics_display_is_disabled(
     monkeypatch.setattr(llm, "_supports_responses_api", lambda: False)
     monkeypatch.setattr(
         llm,
-        "_completion_with_retry",
-        lambda **_kwargs: {
+        "_call_with_retry",
+        lambda _fn, **_kwargs: {
             "choices": [{"message": {"content": "ok"}}],
             "usage": {"prompt_tokens": 12, "completion_tokens": 3},
         },
@@ -40,6 +40,25 @@ def test_chat_completion_tracks_tokens_when_metrics_display_is_disabled(
     assert summary["total_interactions"] == 1
     assert summary["total_metrics"]["input_tokens"] == 12
     assert summary["total_metrics"]["output_tokens"] == 3
+
+
+def test_nested_usage_details_are_collected():
+    collector = get_token_collector()
+    collector.reset()
+    llm = LLM(model="custom/test-model", api_key="test")
+
+    llm._track_token_usage({"usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 3,
+        "prompt_tokens_details": {"cached_tokens": 4, "audio_tokens": 2},
+        "completion_tokens_details": {"reasoning_tokens": 1, "audio_tokens": 1},
+    }}, llm.model)
+
+    metrics = collector.get_session_summary()["total_metrics"]
+    assert metrics["cached_tokens"] == 4
+    assert metrics["reasoning_tokens"] == 1
+    assert metrics["audio_input_tokens"] == 2
+    assert metrics["audio_output_tokens"] == 1
 
 
 def test_responses_api_tracks_tokens_when_metrics_display_is_disabled(
