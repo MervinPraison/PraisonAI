@@ -17,7 +17,9 @@ class TestAgentDeepCopy:
 
     def _make_agent(self, **kwargs):
         from praisonaiagents.agent.agent import Agent
-        return Agent(name="TestAgent", instructions="test", **kwargs)
+        options = {"name": "TestAgent", "instructions": "test"}
+        options.update(kwargs)
+        return Agent(**options)
 
     def test_deepcopy_does_not_raise(self):
         """copy.deepcopy(agent) must not raise TypeError for RLock."""
@@ -80,3 +82,15 @@ class TestAgentDeepCopy:
         for _ in range(3):
             cloned = copy.deepcopy(agent)
             assert cloned is not agent
+
+    def test_deepcopy_isolates_async_safe_state_and_turn_lock(self):
+        agent = self._make_agent()
+        agent.chat_history = [{"role": "user", "content": "hello"}]
+
+        cloned = copy.deepcopy(agent)
+        cloned.chat_history.append({"role": "assistant", "content": "hi"})
+
+        assert agent.chat_history == [{"role": "user", "content": "hello"}]
+        assert cloned._Agent__chat_history_state is not agent._Agent__chat_history_state
+        assert cloned._Agent__snapshot_state is not agent._Agent__snapshot_state
+        assert cloned._turn_tools_lock is not agent._turn_tools_lock
