@@ -2456,10 +2456,11 @@ Your Goal: {self.goal}
     def __deepcopy__(self, memo: dict) -> "Agent":
         """Custom deepcopy that creates fresh threading primitives.
 
-        threading.RLock (self.__cache_lock) and threading.Lock (self._cost_lock)
-        cannot be deep-copied on CPython < 3.13.  This hook deep-copies every
-        other attribute normally and replaces the locks with new instances so
-        that copy.deepcopy(agent) works in any Python version.
+        threading primitives cannot be deep-copied on all supported Python
+        versions, while copying an asyncio.Lock can preserve its locked/waiter
+        state. This hook replaces the Agent-owned locks directly, while
+        lock-bearing state wrappers provide their own deepcopy hooks, so the
+        clone receives independent state and fresh locks.
         """
         import copy
         cls = self.__class__
@@ -2470,6 +2471,8 @@ Your Goal: {self.goal}
                 object.__setattr__(result, k, threading.RLock())
             elif k == "_cost_lock":
                 object.__setattr__(result, k, threading.Lock())
+            elif k == "_approvals_lock":
+                object.__setattr__(result, k, asyncio.Lock())
             else:
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
         return result

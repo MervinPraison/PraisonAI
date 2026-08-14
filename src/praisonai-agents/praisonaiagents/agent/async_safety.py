@@ -5,8 +5,9 @@ This module provides dual-lock abstractions that automatically select
 the appropriate lock type based on the execution context (sync vs async).
 """
 import asyncio
+import copy
 import threading
-from typing import Any, Optional, Union
+from typing import Any
 from contextlib import contextmanager, asynccontextmanager
 from weakref import WeakKeyDictionary
 
@@ -39,6 +40,12 @@ class DualLock:
         """Initialize with separate threading and asyncio locks."""
         self._thread_lock = threading.RLock()  # Re-entrant lock to handle nested acquisitions
         self._async_locks = WeakKeyDictionary()  # Per-event-loop async locks
+
+    def __deepcopy__(self, memo):
+        """Return an unlocked primitive with no event-loop state sharing."""
+        result = type(self)()
+        memo[id(self)] = result
+        return result
     
     @contextmanager
     def sync(self):
@@ -103,6 +110,15 @@ class AsyncSafeState:
     def __init__(self, initial_value: Any = None):
         self.value = initial_value
         self._lock = DualLock()
+
+    def __deepcopy__(self, memo):
+        """Copy the protected value while replacing all lock state."""
+        result = type(self).__new__(type(self))
+        memo[id(self)] = result
+        with self.lock():
+            result.value = copy.deepcopy(self.value, memo)
+        result._lock = DualLock()
+        return result
         
     @contextmanager 
     def lock(self):
