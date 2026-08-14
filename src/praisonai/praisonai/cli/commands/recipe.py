@@ -572,17 +572,16 @@ def recipe_serve(
             serve_config = load_config(config)
 
         auth_mode = serve_config.get("auth", "none")
-        if (
-            host not in ("127.0.0.1", "localhost")
-            and auth_mode == "none"
-            and not api_key
-        ):
-            print(
-                "\n\033[91mError:\033[0m Auth required for non-localhost binding. "
-                "Use --api-key or --auth api-key",
-                file=sys.stderr,
-            )
-            raise typer.Exit(1)
+        supported_auth_modes = ("api-key", "jwt")
+        if host not in ("127.0.0.1", "localhost") and not api_key:
+            if auth_mode not in supported_auth_modes:
+                print(
+                    "\n\033[91mError:\033[0m Auth required for non-localhost binding. "
+                    "Use --api-key or set a supported auth mode "
+                    f"({', '.join(supported_auth_modes)}) in the config.",
+                    file=sys.stderr,
+                )
+                raise typer.Exit(1)
         
         # Override with CLI options
         if api_key:
