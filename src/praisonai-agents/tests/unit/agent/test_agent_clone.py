@@ -11,6 +11,8 @@ import asyncio
 import copy
 import threading
 
+import pytest
+
 
 class TestAgentDeepCopy:
     """Test Agent.__deepcopy__ and clone_for_channel()."""
@@ -104,3 +106,33 @@ class TestAgentDeepCopy:
         assert cloned._approvals_lock is not agent._approvals_lock
         assert agent._approvals_lock.locked() is True
         assert cloned._approvals_lock.locked() is False
+
+    def test_deepcopy_rejects_active_async_state_access(self):
+        from praisonaiagents.agent.async_safety import AsyncSafeState
+
+        async def _exercise():
+            state = AsyncSafeState(["stable"])
+            entered = asyncio.Event()
+            release = asyncio.Event()
+
+            async def _hold_state():
+                async with state.async_lock():
+                    entered.set()
+                    await release.wait()
+
+            holder = asyncio.create_task(_hold_state())
+            await entered.wait()
+            try:
+                with pytest.raises(
+                    RuntimeError,
+                    match="during asynchronous access",
+                ):
+                    copy.deepcopy(state)
+            finally:
+                release.set()
+                await holder
+
+            cloned = copy.deepcopy(state)
+            assert cloned.value == ["stable"]
+
+        asyncio.run(_exercise())
