@@ -526,7 +526,7 @@ def _run_print_code(
     try:
         workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
         agent_config["tools"] = _get_headless_code_tools(
-            groups=["basic", "acp", "edit", "search", "lsp"],
+            groups=["acp", "edit", "search", "lsp"],
             workspace=workspace,
         )
         agent = Agent(**agent_config)

@@ -132,7 +132,7 @@ def test_code_print_uses_supported_agent_kwargs_and_workspace_tools(monkeypatch,
     assert captured["output"] == "minimal"
     assert captured["tools"]
     assert captured["workspace"] == str(tmp_path)
-    assert captured["tool_groups"] == ["basic", "acp", "edit", "search", "lsp"]
+    assert captured["tool_groups"] == ["acp", "edit", "search", "lsp"]
 
 
 @pytest.mark.skipif(
