@@ -150,6 +150,11 @@ class AgentScheduler(_BaseAgentScheduler):
             if self._timeout_executor is not None:
                 self._timeout_executor.shutdown(wait=False, cancel_futures=True)
                 self._timeout_executor = None
+            # Reset leak accounting with the pool: the stale count belongs to the
+            # discarded executor. Leaving it non-zero would make the *next* pool
+            # (e.g. after a restart) get recycled on its first use — needless
+            # churn against a fresh, un-leaked executor.
+            self._leaked_workers = 0
         
     def start(
         self,
