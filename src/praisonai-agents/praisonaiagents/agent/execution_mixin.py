@@ -570,39 +570,62 @@ class ExecutionMixin:
                     thread.join()
                     
                 except RuntimeError:
-                    # No event loop - can run directly
-                    async def run_stream():
-                        async for item in self.backend.stream(prompt, **kwargs):
-                            yield item
-                    
-                    # Use asyncio.run for each item (not ideal but works)
-                    async_gen = run_stream()
-                    
-                    async def collect_all():
-                        results = []
-                        async for item in async_gen:
-                            results.append(item)
-                        return results
-                    
-                    results = asyncio.run(collect_all())
-                    for item in results:
-                        # Similar conversion logic
-                        if isinstance(item, dict):
-                            if item.get('type') == 'agent.message':
-                                content = item.get('content', [])
-                                if isinstance(content, list):
-                                    text_parts = []
-                                    for block in content:
-                                        if isinstance(block, dict) and block.get('type') == 'text':
-                                            text_parts.append(block.get('text', ''))
-                                        elif isinstance(block, str):
-                                            text_parts.append(block)
-                                    if text_parts:
-                                        yield ''.join(text_parts)
-                                elif isinstance(content, str):
-                                    yield content
-                        elif isinstance(item, str):
-                            yield item
+                    # No event loop (the common script/CLI case). Drive the
+                    # backend's async generator from a background thread and
+                    # push each chunk through a queue as it arrives, so the
+                    # caller receives chunks incrementally instead of only
+                    # after the whole response has been buffered. Mirrors the
+                    # running-loop branch above.
+                    import threading
+                    import queue
+                    bridge_queue = queue.Queue()
+
+                    def run_in_thread_noloop():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            async def pump():
+                                try:
+                                    async for item in self.backend.stream(prompt, **kwargs):
+                                        bridge_queue.put(('item', item))
+                                    bridge_queue.put(('done', None))
+                                except Exception as e:
+                                    bridge_queue.put(('error', e))
+
+                            new_loop.run_until_complete(pump())
+                        finally:
+                            new_loop.close()
+
+                    thread = threading.Thread(target=run_in_thread_noloop)
+                    thread.start()
+
+                    while True:
+                        msg_type, data = bridge_queue.get()
+                        if msg_type == 'item':
+                            item = data
+                            # Same conversion logic as the running-loop branch.
+                            if isinstance(item, dict):
+                                if item.get('type') == 'agent.message':
+                                    content = item.get('content', [])
+                                    if isinstance(content, list):
+                                        text_parts = []
+                                        for block in content:
+                                            if isinstance(block, dict) and block.get('type') == 'text':
+                                                text_parts.append(block.get('text', ''))
+                                            elif isinstance(block, str):
+                                                text_parts.append(block)
+                                        if text_parts:
+                                            yield ''.join(text_parts)
+                                    elif isinstance(content, str):
+                                        yield content
+                            elif isinstance(item, str):
+                                yield item
+                        elif msg_type == 'done':
+                            break
+                        elif msg_type == 'error':
+                            raise data
+
+                    thread.join()
             
             return sync_stream()
             

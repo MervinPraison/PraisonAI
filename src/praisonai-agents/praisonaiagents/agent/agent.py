@@ -5844,6 +5844,28 @@ Answer:"""
                 error=f"Agent guardrail validation error: {str(e)}"
             )
 
+    def _validate_input_with_guardrail(self, prompt):
+        """Validate the incoming prompt with the guardrail's input surface.
+
+        Only runs when the configured guardrail exposes a ``validate_input``
+        method (e.g. a ``GuardrailChain`` or an object implementing
+        ``GuardrailProtocol``). Plain callable/string guardrails have no input
+        surface and are skipped, so behaviour is unchanged for them.
+
+        Returns (success, result, error). Fails closed on error.
+        """
+        fn = getattr(self, "_guardrail_fn", None)
+        if fn is None or not hasattr(fn, "validate_input"):
+            return True, prompt, None
+        try:
+            is_valid, result = fn.validate_input(prompt, agent_name=self.name)
+            if is_valid:
+                return True, (result if isinstance(result, str) else prompt), None
+            return False, None, (result if isinstance(result, str) else "Input blocked by guardrail")
+        except Exception as e:
+            logging.error(f"Agent {self.name}: Error in input guardrail validation: {e}")
+            return False, None, f"Input guardrail validation error: {str(e)}"
+
     def _validate_with_guardrail(self, response_text):
         """Validate response with guardrail. Returns (success, result, error)."""
         if not self._guardrail_fn:
