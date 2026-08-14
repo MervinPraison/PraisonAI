@@ -2491,6 +2491,35 @@ Your Goal: {self.goal}"""
                     agent_id=self.name
                 )
         
+        # Trigger BEFORE_LLM hook (parity with sync _chat_completion). Without
+        # this, hook-based features registered on BEFORE_LLM (e.g. PII
+        # redaction via enable_pii_redaction()) silently stop applying on the
+        # async path. Only build the input if a hook is actually registered.
+        _achat_start_time = time.time()
+        from ..hooks import HookEvent, BeforeLLMInput
+        if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_LLM):
+            before_llm_input = BeforeLLMInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_LLM,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                messages=messages,
+                model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                temperature=temperature
+            )
+            _before_llm_results = await self._hook_runner.execute(HookEvent.BEFORE_LLM, before_llm_input)
+            if self._hook_runner.is_blocked(_before_llm_results):
+                _block_reason = next(
+                    (getattr(r.output, "reason", None) for r in _before_llm_results
+                     if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                    None,
+                ) or "Blocked by hook"
+                logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
+                return f"[LLM request blocked by hook: {_block_reason}]"
+            # Adopt any BEFORE_LLM hook mutations (e.g. PII redactor).
+            messages = before_llm_input.messages
+
         # Execute unified async dispatch with all necessary parameters
         # Includes all parameters from both legacy paths to ensure full compatibility
         try:
@@ -2569,6 +2598,22 @@ Your Goal: {self.goal}"""
                     )
                 elif callable(self._on_budget_exceeded):
                     self._on_budget_exceeded(current_cost, self._max_budget)
+
+            # Trigger AFTER_LLM hook (parity with sync _chat_completion).
+            from ..hooks import AfterLLMInput
+            if self._hook_runner.registry.has_hooks(HookEvent.AFTER_LLM):
+                after_llm_input = AfterLLMInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.AFTER_LLM,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    messages=messages,
+                    response=str(final_response),
+                    model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    latency_ms=(time.time() - _achat_start_time) * 1000
+                )
+                await self._hook_runner.execute(HookEvent.AFTER_LLM, after_llm_input)
 
             return final_response
 
@@ -2863,6 +2908,16 @@ Your Goal: {self.goal}"""
                     prompt = f"{prompt}\n\n{steering_msg}"
             except Exception as e:
                 logger.warning(f"Steering check failed, continuing without steering: {e}")
+
+        # Input-side guardrail validation (no-op unless the guardrail exposes
+        # validate_input). Runs before any backend/LLM dispatch so a rejected
+        # prompt never reaches the model.
+        if hasattr(self, '_validate_input_with_guardrail'):
+            _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            if not _in_ok:
+                logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
+                return None
+            prompt = _in_prompt
 
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
@@ -3537,6 +3592,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     prompt = f"{prompt}\n\n{steering_msg}"
             except Exception as e:
                 logger.warning(f"Steering check failed, continuing without steering: {e}")
+
+        # Input-side guardrail validation (parity with sync chat()). No-op
+        # unless the guardrail exposes validate_input; runs before any
+        # backend/LLM dispatch so a rejected prompt never reaches the model.
+        if hasattr(self, '_validate_input_with_guardrail'):
+            _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            if not _in_ok:
+                logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
+                return None
+            prompt = _in_prompt
 
         # Check if external managed backend is configured (async parity with the
         # sync chat() path). Without this the configured backend is silently

@@ -570,39 +570,90 @@ class ExecutionMixin:
                     thread.join()
                     
                 except RuntimeError:
-                    # No event loop - can run directly
-                    async def run_stream():
-                        async for item in self.backend.stream(prompt, **kwargs):
-                            yield item
-                    
-                    # Use asyncio.run for each item (not ideal but works)
-                    async_gen = run_stream()
-                    
-                    async def collect_all():
-                        results = []
-                        async for item in async_gen:
-                            results.append(item)
-                        return results
-                    
-                    results = asyncio.run(collect_all())
-                    for item in results:
-                        # Similar conversion logic
-                        if isinstance(item, dict):
-                            if item.get('type') == 'agent.message':
-                                content = item.get('content', [])
-                                if isinstance(content, list):
-                                    text_parts = []
-                                    for block in content:
-                                        if isinstance(block, dict) and block.get('type') == 'text':
-                                            text_parts.append(block.get('text', ''))
-                                        elif isinstance(block, str):
-                                            text_parts.append(block)
-                                    if text_parts:
-                                        yield ''.join(text_parts)
-                                elif isinstance(content, str):
-                                    yield content
-                        elif isinstance(item, str):
-                            yield item
+                    # No event loop (the common script/CLI case). Drive the
+                    # backend's async generator from a background thread and
+                    # push each chunk through a queue as it arrives, so the
+                    # caller receives chunks incrementally instead of only
+                    # after the whole response has been buffered. Mirrors the
+                    # running-loop branch above.
+                    import threading
+                    import queue
+                    # Bounded queue so an abandoned consumer applies
+                    # back-pressure instead of letting the producer fill memory
+                    # unbounded. ``cancel_event`` lets the producer stop early
+                    # when the caller closes the generator.
+                    bridge_queue = queue.Queue(maxsize=64)
+                    cancel_event = threading.Event()
+
+                    def run_in_thread_noloop():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            async def pump():
+                                try:
+                                    async for item in self.backend.stream(prompt, **kwargs):
+                                        if cancel_event.is_set():
+                                            break
+                                        # Block until space is available or the
+                                        # consumer signals cancellation, so we
+                                        # never spin nor grow the queue forever.
+                                        while not cancel_event.is_set():
+                                            try:
+                                                bridge_queue.put(('item', item), timeout=0.1)
+                                                break
+                                            except queue.Full:
+                                                continue
+                                    if not cancel_event.is_set():
+                                        bridge_queue.put(('done', None))
+                                except Exception as e:
+                                    if not cancel_event.is_set():
+                                        bridge_queue.put(('error', e))
+
+                            new_loop.run_until_complete(pump())
+                        finally:
+                            new_loop.close()
+
+                    # Daemon thread so a stalled/abandoned producer can never
+                    # block interpreter shutdown.
+                    thread = threading.Thread(target=run_in_thread_noloop, daemon=True)
+                    thread.start()
+
+                    try:
+                        while True:
+                            msg_type, data = bridge_queue.get()
+                            if msg_type == 'item':
+                                item = data
+                                # Same conversion logic as the running-loop branch.
+                                if isinstance(item, dict):
+                                    if item.get('type') == 'agent.message':
+                                        content = item.get('content', [])
+                                        if isinstance(content, list):
+                                            text_parts = []
+                                            for block in content:
+                                                if isinstance(block, dict) and block.get('type') == 'text':
+                                                    text_parts.append(block.get('text', ''))
+                                                elif isinstance(block, str):
+                                                    text_parts.append(block)
+                                            if text_parts:
+                                                yield ''.join(text_parts)
+                                        elif isinstance(content, str):
+                                            yield content
+                                elif isinstance(item, str):
+                                    yield item
+                            elif msg_type == 'done':
+                                break
+                            elif msg_type == 'error':
+                                raise data
+                    finally:
+                        # Runs on normal completion AND on early generator
+                        # close/GC: signal the producer to stop, drain one slot
+                        # so a blocked put() can observe the cancel, and join.
+                        cancel_event.set()
+                        try:
+                            bridge_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        thread.join(timeout=5)
             
             return sync_stream()
             

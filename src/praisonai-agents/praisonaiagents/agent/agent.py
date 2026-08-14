@@ -5786,6 +5786,15 @@ Answer:"""
                 except Exception:
                     pass
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
+            # A string guardrail is an output-quality validator. Although the
+            # resulting LLMGuardrail also exposes ``validate_input`` (via
+            # GuardrailProtocol), it must NOT be invoked as an input gate here:
+            # doing so would fire an extra, synchronous LLM call on every
+            # chat()/achat() (a hot-path regression, and blocking on the async
+            # event loop). Mark it so input validation skips it. Explicit
+            # GuardrailChain/GuardrailProtocol objects (passed as callables)
+            # remain the only deliberate input surface.
+            self._guardrail_fn._praison_output_only = True
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
 
@@ -5846,6 +5855,33 @@ Answer:"""
                 result=None,
                 error=f"Agent guardrail validation error: {str(e)}"
             )
+
+    def _validate_input_with_guardrail(self, prompt):
+        """Validate the incoming prompt with the guardrail's input surface.
+
+        Only runs when the configured guardrail exposes a ``validate_input``
+        method (e.g. a ``GuardrailChain`` or an object implementing
+        ``GuardrailProtocol``). Plain callable guardrails and string (output-
+        quality) guardrails have no deliberate input surface and are skipped,
+        so behaviour is unchanged for them.
+
+        Returns (success, result, error). Fails closed on error.
+        """
+        fn = getattr(self, "_guardrail_fn", None)
+        if fn is None or not hasattr(fn, "validate_input"):
+            return True, prompt, None
+        # String guardrails are output-only validators; do not run them as an
+        # input gate (would add a synchronous LLM call to every chat/achat).
+        if getattr(fn, "_praison_output_only", False):
+            return True, prompt, None
+        try:
+            is_valid, result = fn.validate_input(prompt, agent_name=self.name)
+            if is_valid:
+                return True, (result if isinstance(result, str) else prompt), None
+            return False, None, (result if isinstance(result, str) else "Input blocked by guardrail")
+        except Exception as e:
+            logging.error(f"Agent {self.name}: Error in input guardrail validation: {e}")
+            return False, None, f"Input guardrail validation error: {str(e)}"
 
     def _validate_with_guardrail(self, response_text):
         """Validate response with guardrail. Returns (success, result, error)."""
