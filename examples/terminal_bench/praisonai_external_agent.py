@@ -201,6 +201,7 @@ class PraisonAIExternalAgent(BaseAgent):
                 "version": self.version(),
                 "stop_reason": getattr(agent, "last_stop_reason", None),
                 "max_tool_calls_per_turn": TB_EXECUTION.max_tool_calls_per_turn,
+                "max_iter": TB_EXECUTION.max_iter,
                 "max_steps": TB_EXECUTION.max_steps,
             }
             
