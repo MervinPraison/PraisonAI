@@ -107,7 +107,15 @@ class TestAgentDeepCopy:
         assert agent._approvals_lock.locked() is True
         assert cloned._approvals_lock.locked() is False
 
-    def test_deepcopy_rejects_active_async_state_access(self):
+    @pytest.mark.parametrize(
+        "use_async_lock_helper",
+        [True, False],
+        ids=["async-lock-helper", "async-context-manager"],
+    )
+    def test_deepcopy_rejects_active_async_state_access(
+        self,
+        use_async_lock_helper,
+    ):
         from praisonaiagents.agent.async_safety import AsyncSafeState
 
         async def _exercise():
@@ -116,7 +124,8 @@ class TestAgentDeepCopy:
             release = asyncio.Event()
 
             async def _hold_state():
-                async with state.async_lock():
+                context = state.async_lock() if use_async_lock_helper else state
+                async with context:
                     entered.set()
                     await release.wait()
 
