@@ -97,6 +97,7 @@ class RetrievalConfig:
     # Embedding configuration
     embedder_provider: Optional[str] = None
     embedder_model: Optional[str] = None
+    embedder_config: Optional[Dict[str, Any]] = None  # Full mem0 embedder dict: {"provider": ..., "config": {...}}
     
     # Auto mode heuristics
     auto_keywords: frozenset = field(default_factory=lambda: frozenset({
@@ -193,6 +194,7 @@ class RetrievalConfig:
             "persist_path": self.persist_path,
             "embedder_provider": self.embedder_provider,
             "embedder_model": self.embedder_model,
+            "embedder_config": self.embedder_config,
             "auto_min_length": self.auto_min_length,
             "context_template": self.context_template,
             "system_separation": self.system_separation,
@@ -241,6 +243,7 @@ class RetrievalConfig:
             persist_path=data.get("persist_path"),
             embedder_provider=data.get("embedder_provider"),
             embedder_model=data.get("embedder_model"),
+            embedder_config=data.get("embedder_config"),
             auto_keywords=auto_keywords,
             auto_min_length=data.get("auto_min_length", 10),
             context_template=data.get("context_template", cls.__dataclass_fields__["context_template"].default),
@@ -261,7 +264,15 @@ class RetrievalConfig:
         if self.collection_name:
             config["vector_store"]["config"]["collection_name"] = self.collection_name
         
-        if self.embedder_provider or self.embedder_model:
+        # Normalise embedder into mem0's {"provider": ..., "config": {...}} shape.
+        # A full embedder_config dict (from KnowledgeConfig.embedder_config) takes
+        # precedence; embedder_provider acts as a shorthand for the provider.
+        if self.embedder_config:
+            embedder = dict(self.embedder_config)
+            if "provider" not in embedder and self.embedder_provider:
+                embedder["provider"] = self.embedder_provider
+            config["embedder"] = embedder
+        elif self.embedder_provider or self.embedder_model:
             config["embedder"] = {}
             if self.embedder_provider:
                 config["embedder"]["provider"] = self.embedder_provider

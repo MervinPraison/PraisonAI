@@ -152,6 +152,36 @@ class TestConfigConversion:
         assert "reranker" in knowledge_config
         assert knowledge_config["reranker"]["enabled"] is True
     
+    def test_to_knowledge_config_with_embedder_config(self):
+        """Full embedder_config dict is forwarded to mem0 (issue #3941)."""
+        config = RetrievalConfig(
+            embedder_config={
+                "provider": "gemini",
+                "config": {"model": "models/text-embedding-004"},
+            }
+        )
+        
+        knowledge_config = config.to_knowledge_config()
+        
+        assert knowledge_config["embedder"]["provider"] == "gemini"
+        assert knowledge_config["embedder"]["config"]["model"] == "models/text-embedding-004"
+    
+    def test_to_knowledge_config_embedder_provider_shorthand(self):
+        """embedder_provider acts as a provider shorthand (issue #3941)."""
+        config = RetrievalConfig(embedder_provider="gemini")
+        
+        knowledge_config = config.to_knowledge_config()
+        
+        assert knowledge_config["embedder"]["provider"] == "gemini"
+    
+    def test_to_knowledge_config_no_embedder_by_default(self):
+        """Default config emits no embedder override (mem0 default is used)."""
+        config = RetrievalConfig()
+        
+        knowledge_config = config.to_knowledge_config()
+        
+        assert "embedder" not in knowledge_config
+    
     def test_to_rag_config(self):
         """Test conversion to RAG pipeline config."""
         config = RetrievalConfig(
@@ -256,6 +286,60 @@ class TestLegacyConfigMigration:
         assert config.top_k == 25
         assert config.policy == RetrievalPolicy.ALWAYS
         assert config.citations_mode == CitationsMode.INLINE
+
+
+class TestAgentEmbedderForwarding:
+    """Test KnowledgeConfig embedder reaches Knowledge via the Agent (issue #3941)."""
+
+    def _knowledge_config(self, agent):
+        assert agent._retrieval_config is not None
+        return agent._retrieval_config.to_knowledge_config()
+
+    def test_agent_forwards_embedder_config(self):
+        """Full embedder_config dict on KnowledgeConfig reaches Knowledge config."""
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import KnowledgeConfig
+
+        agent = Agent(
+            instructions="test",
+            knowledge=KnowledgeConfig(
+                sources=["doc.pdf"],
+                embedder_config={
+                    "provider": "gemini",
+                    "config": {"model": "models/text-embedding-004"},
+                },
+            ),
+        )
+
+        knowledge_config = self._knowledge_config(agent)
+        assert knowledge_config["embedder"]["provider"] == "gemini"
+        assert knowledge_config["embedder"]["config"]["model"] == "models/text-embedding-004"
+
+    def test_agent_forwards_embedder_provider_shorthand(self):
+        """Provider shorthand on KnowledgeConfig reaches Knowledge config."""
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import KnowledgeConfig
+
+        agent = Agent(
+            instructions="test",
+            knowledge=KnowledgeConfig(sources=["doc.pdf"], embedder="gemini"),
+        )
+
+        knowledge_config = self._knowledge_config(agent)
+        assert knowledge_config["embedder"]["provider"] == "gemini"
+
+    def test_agent_default_embedder_no_override(self):
+        """Default embedder ("openai") emits no override so mem0 default is kept."""
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import KnowledgeConfig
+
+        agent = Agent(
+            instructions="test",
+            knowledge=KnowledgeConfig(sources=["doc.pdf"]),
+        )
+
+        knowledge_config = self._knowledge_config(agent)
+        assert "embedder" not in knowledge_config
 
 
 class TestSerialization:
