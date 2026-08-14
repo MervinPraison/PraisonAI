@@ -199,7 +199,7 @@ class PraisonAIExternalAgent(BaseAgent):
                 "tools_used": ["bash_tool"],
                 "framework": "praisonai",
                 "version": self.version(),
-                "stop_reason": self._get_stop_reason(agent),
+                "stop_reason": getattr(agent, "last_stop_reason", None),
                 "max_tool_calls_per_turn": TB_EXECUTION.max_tool_calls_per_turn,
                 "max_steps": TB_EXECUTION.max_steps,
             }
@@ -207,18 +207,6 @@ class PraisonAIExternalAgent(BaseAgent):
         except Exception as e:
             # Don't fail the whole run if context population fails
             context.metadata = {"context_error": str(e)}
-
-    @staticmethod
-    def _get_stop_reason(agent: Agent) -> Any:
-        """Best-effort extraction of the last runtime stop reason."""
-        for llm in (
-            getattr(agent, "_llm_instance", None),
-            getattr(agent, "llm", None),
-        ):
-            reason = getattr(llm, "_last_stop_reason", None)
-            if reason:
-                return reason
-        return None
 
 
 # Example usage for testing
