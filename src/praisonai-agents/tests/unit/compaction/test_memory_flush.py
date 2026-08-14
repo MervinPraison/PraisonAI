@@ -286,6 +286,54 @@ def test_sync_timeout_includes_staged_memory_commit():
     assert committed == []
 
 
+def test_sync_timeout_does_not_wait_for_blocked_atomic_backend():
+    import threading
+    import time
+
+    commit_started = threading.Event()
+    release = threading.Event()
+    commit_finished = threading.Event()
+
+    class _Backend:
+        def commit_memory_batch(self, writes, *, deadline, commit_guard):
+            def _blocked_atomic_operation():
+                commit_started.set()
+                release.wait(1)
+                commit_finished.set()
+
+            commit_guard.commit(_blocked_atomic_operation)
+
+    class _Child:
+        def __init__(self, memory):
+            self.memory = memory
+
+        def start(self, _prompt):
+            self.memory.store_long_term("durable fact")
+
+    def _child(_parent, _config, memory_override=None):
+        return _Child(memory_override)
+
+    started_at = time.monotonic()
+    with patch(
+        "praisonaiagents.compaction.memory_flush.create_memory_flush_agent",
+        side_effect=_child,
+    ):
+        result = run_pre_compaction_flush_sync(
+            _parent(_Backend()),
+            _messages(),
+            PreCompactionMemoryFlushConfig(
+                min_turns_to_flush=1, timeout_seconds=0.02
+            ),
+        )
+    elapsed = time.monotonic() - started_at
+    release.set()
+
+    assert commit_started.wait(1)
+    assert commit_finished.wait(1)
+    assert result.reason == "timeout"
+    assert elapsed < 0.25
+
+
 def test_file_memory_batch_is_atomic_across_multiple_stores(tmp_path):
     from praisonaiagents.memory.file_memory import FileMemory
 

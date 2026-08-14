@@ -121,27 +121,29 @@ def format_messages_to_flush(
 
 
 class _AtomicCommitGuard:
-    """Serialize cancellation with the backend's final atomic mutation."""
+    """Cancel commits without making the timeout path wait on backend I/O.
+
+    Backends must perform all potentially blocking preparation before calling
+    :meth:`commit` and pass only their short, final atomic mutation.  A final
+    mutation that has already started cannot be rolled back safely, but a
+    misbehaving backend must not be able to make cancellation block.
+    """
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._cancelled = False
+        self._cancelled = threading.Event()
 
     @property
     def cancelled(self) -> bool:
-        with self._lock:
-            return self._cancelled
+        return self._cancelled.is_set()
 
     def commit(self, operation: Any) -> bool:
-        with self._lock:
-            if self._cancelled:
-                return False
-            operation()
-            return True
+        if self._cancelled.is_set():
+            return False
+        operation()
+        return True
 
     def cancel(self) -> None:
-        with self._lock:
-            self._cancelled = True
+        self._cancelled.set()
 
 
 class _StagedMemory:
@@ -361,8 +363,10 @@ def run_pre_compaction_flush_sync(
     """Run a bounded sync flush in a worker without blocking past its timeout.
 
     The worker runs in a daemon thread so a stuck provider cannot delay process
-    shutdown. Its memory writes are staged and committed only after successful,
-    in-time completion, so a timed-out worker cannot mutate the parent store.
+    shutdown. Its memory writes are staged and commits that have not been
+    authorized by the deadline are discarded. A final atomic mutation already
+    in progress may finish after timeout, so backends must keep it non-blocking;
+    cancellation never waits for backend I/O.
     """
     resolved, transcript, count, skipped = _prepare_flush(
         parent_agent, messages_to_flush, config
