@@ -41,10 +41,6 @@ curl -fsSL https://praison.ai/install.sh | bash
   <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
 </p>
 
-<p align="center">
-  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
-</p>
-
 ```
  ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
  ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
@@ -55,12 +51,6 @@ curl -fsSL https://praison.ai/install.sh | bash
 
  pip install praisonai
 ```
-
-<p align="center">
-  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
-</p>
-
-\* `export TAVILY_API_KEY=xxxxx`
 
 <div align="center">
   <a href="https://docs.praison.ai">
@@ -953,6 +943,16 @@ PraisonAI is built for speed, with agent instantiation in around 14μs. This red
 [![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
 
 ---
+
+<p align="center">
+  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
+</p>
+
+<p align="center">
+  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
+</p>
+
+\* `export TAVILY_API_KEY=xxxxx`
 
 ## 🔍 Langfuse Tracing
 
