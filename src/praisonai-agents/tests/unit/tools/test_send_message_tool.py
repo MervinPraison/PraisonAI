@@ -15,6 +15,7 @@ from praisonaiagents.tools.messaging_tools import _parse_media
 from praisonaiagents.gateway import (
     OutboundMessengerProtocol,
     DeliveryResult,
+    ReactionResult,
     TargetInfo,
     SendDecision,
     SendPolicyProtocol,
@@ -35,6 +36,7 @@ class FakeMessenger:
 
     def __init__(self):
         self.sent = []
+        self.reactions = []
 
     async def send(self, target, text, *, media=None):
         self.sent.append((target, text, media))
@@ -51,6 +53,10 @@ class FakeMessenger:
                 label="Telegram",
             )
         ]
+
+    async def react(self, target, emoji, *, message_id="", remove=False):
+        self.reactions.append((target, emoji, message_id, remove))
+        return ReactionResult(status="ok", target=target)
 
 
 def test_messenger_satisfies_protocol():
@@ -111,6 +117,64 @@ def test_unknown_action_message():
     try:
         out = send_message("origin", "hi", action="frobnicate")
         assert "Unknown action" in out
+        # The new react/unreact actions are advertised in the hint.
+        assert "react" in out
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_react_action_routes_to_messenger():
+    # Issue #3917: the emoji is passed as ``message``; unreact sets remove=True.
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("origin", "\U0001F44D", action="react")
+        parsed = json.loads(out)
+        assert parsed["status"] == "ok"
+        assert parsed["target"] == "origin"
+
+        out2 = send_message("telegram:1", "\u2705", action="unreact")
+        assert json.loads(out2)["status"] == "ok"
+
+        assert messenger.reactions == [
+            ("origin", "\U0001F44D", "", False),
+            ("telegram:1", "\u2705", "", True),
+        ]
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_react_without_emoji_is_typed_failure():
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        out = send_message("origin", "   ", action="react")
+        parsed = json.loads(out)
+        assert parsed["status"] == "failed"
+        assert messenger.reactions == []  # nothing dispatched
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_react_no_gateway_fails_cleanly():
+    out = send_message("origin", "\U0001F44D", action="react")
+    assert "No active gateway" in out
+
+
+def test_react_unsupported_when_messenger_lacks_react():
+    # A legacy messenger without ``react`` yields a typed unsupported outcome.
+    class LegacyMessenger:
+        async def send(self, target, text, *, media=None):
+            return DeliveryResult(ok=True, target=target)
+
+        def list_targets(self):
+            return []
+
+    token = register_outbound_messenger(LegacyMessenger())
+    try:
+        out = send_message("origin", "\U0001F44D", action="react")
+        parsed = json.loads(out)
+        assert parsed["status"] == "unsupported"
     finally:
         clear_outbound_messenger(token)
 

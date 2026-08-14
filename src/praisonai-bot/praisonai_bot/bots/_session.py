@@ -1045,6 +1045,7 @@ class BotSessionManager:
                         channel_id=chat_id,
                         user_id=user_id,
                         thread_id=thread_id,
+                        message_id=message_id or None,
                     )
                 messenger = BotOutboundMessenger(
                     self._delivery_router, origin=origin_source
