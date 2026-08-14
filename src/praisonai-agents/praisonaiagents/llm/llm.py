@@ -1468,22 +1468,6 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         return function_name == "memory" and self._supports_claude_memory()
 
-    def _execute_memory_tool_call(self, arguments: Dict[str, Any]) -> str:
-        """
-        Execute a Claude Memory Tool call.
-        
-        Args:
-            arguments: The arguments from Claude's tool call
-            
-        Returns:
-            Result string from the memory operation
-        """
-        memory_tool = self._get_claude_memory_tool()
-        if not memory_tool:
-            return "Error: Memory tool not initialized"
-        
-        return memory_tool.process_tool_call(arguments)
-
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
         Generate a summary from tool results for Ollama to prevent infinite loops.
