@@ -944,6 +944,13 @@ class WebSocketGateway:
         self._sessions: Dict[str, GatewaySession] = {}
         self._clients: Dict[str, Any] = {}  # WebSocket connections
         self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
+        # Issue #2798/#3911: per-connection last-seen wall-clock, used as the
+        # liveness fallback for a client that has connected but not yet bound a
+        # session (pre-``hello``/``join``). Without it a half-open handshake
+        # would never be reaped because a missing session defaulted its
+        # activity to ``now`` on every reaper pass. Stamped at registration,
+        # refreshed on every inbound frame, dropped on teardown.
+        self._client_last_seen: Dict[str, float] = {}  # client_id -> last activity ts
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
         # Issue #3467: in-flight turn registry so a running turn can be aborted
@@ -2775,11 +2782,17 @@ class WebSocketGateway:
         # connection. An inbound ``PONG`` (reply to our ``PING``) or the peer's
         # own ``PING`` count as activity too; a ``PING`` is answered with a
         # ``PONG`` and neither is routed further.
+        now_ts = time.time()
+        # Refresh the per-connection fallback clock even before a session is
+        # bound, so a pre-``hello`` peer that is actively handshaking is not
+        # reaped while a truly silent one still ages out.
+        if client_id in self._client_last_seen:
+            self._client_last_seen[client_id] = now_ts
         session_id = self._client_sessions.get(client_id)
         if session_id:
             session = self._sessions.get(session_id)
             if session is not None:
-                session._last_activity = time.time()
+                session._last_activity = now_ts
         if msg_type == EventType.PING.value:
             await self._send_to_client(client_id, {"type": EventType.PONG.value})
             return
@@ -3614,10 +3627,14 @@ class WebSocketGateway:
         )
         conn.start()
         self._client_conns[client_id] = conn
+        # Seed the liveness fallback clock so a connection that never binds a
+        # session (stalled pre-``hello``/``join`` handshake) still ages out.
+        self._client_last_seen[client_id] = time.time()
         return conn
 
     async def _teardown_client_conn(self, client_id: str) -> None:
         """Stop and remove a client's bounded outbound connection."""
+        self._client_last_seen.pop(client_id, None)
         conn = self._client_conns.pop(client_id, None)
         if conn is not None:
             await conn.close()
@@ -3790,8 +3807,10 @@ class WebSocketGateway:
         Applies the core :class:`LivenessPolicy` to each session's stamped
         ``last_activity``: a ``KEEP`` connection is pinged (any inbound frame or
         ``PONG`` refreshes its activity), a ``REAP`` connection is closed with
-        ``LIVENESS_TIMEOUT`` and its state released. No-op when the policy is
-        disabled (``interval_ms == 0``).
+        ``LIVENESS_TIMEOUT`` and its state released. A connection with no bound
+        session yet (stalled pre-``hello``/``join`` handshake) is evaluated
+        against its per-connection ``_client_last_seen`` clock so it too ages
+        out. No-op when the policy is disabled (``interval_ms == 0``).
         """
         policy = self._liveness_policy()
         if not policy.enabled:
@@ -3806,9 +3825,13 @@ class WebSocketGateway:
                 for client_id in list(self._clients.keys()):
                     session_id = self._client_sessions.get(client_id)
                     session = self._sessions.get(session_id) if session_id else None
-                    last_activity = (
-                        session.last_activity if session is not None else now
-                    )
+                    if session is not None:
+                        last_activity = session.last_activity
+                    else:
+                        # No bound session yet (pre-``hello``/``join``): fall
+                        # back to the per-connection last-seen clock so a
+                        # stalled handshake ages out instead of living forever.
+                        last_activity = self._client_last_seen.get(client_id, now)
                     if policy.evaluate(last_activity, now) is LivenessDecision.REAP:
                         await self._reap_session(client_id)
                     else:
@@ -3944,6 +3967,7 @@ class WebSocketGateway:
             True if client was found and removed, False otherwise
         """
         removed = self._clients.pop(client_id, None) is not None
+        self._client_last_seen.pop(client_id, None)
         conn = self._client_conns.pop(client_id, None)
         if conn is not None:
             # Best-effort async teardown of the drain task; schedule it on the

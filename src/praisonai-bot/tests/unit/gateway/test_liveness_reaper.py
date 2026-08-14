@@ -13,6 +13,9 @@ These tests exercise the wrapper wiring:
   * The reaper KEEPs a connection with fresh activity and REAPs a silent one.
   * An inbound frame / ``PONG`` refreshes ``last_activity``; an inbound
     ``PING`` is answered with a ``PONG`` and not routed further.
+  * A connection that never binds a session (stalled pre-``hello``/``join``
+    handshake) still ages out via the per-connection last-seen fallback and is
+    reaped, rather than living forever.
   * ``hello_ok`` advertises the liveness interval as ``heartbeat_ms``.
 """
 
@@ -143,6 +146,66 @@ async def test_inbound_frame_refreshes_last_activity():
     await gateway._handle_client_message("c1", {"type": "pong"})
 
     assert session.last_activity > 0.0
+
+
+def test_sessionless_connection_seeds_last_seen():
+    # A client that connects but has not yet bound a session still gets a
+    # per-connection last-seen clock so the reaper can age it out.
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    gateway.add_client("c1", _RecordingWS())
+    assert "c1" in gateway._client_last_seen
+
+
+@pytest.mark.asyncio
+async def test_sessionless_stalled_connection_is_reaped():
+    # No ``hello``/``join`` ever completes: the pre-session fallback clock must
+    # let a silent handshake time out instead of living forever (Greptile P1).
+    cfg = GatewayConfig(auth_token="tmp")
+    cfg.liveness = LivenessConfig(
+        enabled=True, interval_ms=1_000, missed_beats_before_reap=2
+    )
+    gateway = WebSocketGateway(config=cfg)
+    ws = _RecordingWS()
+    gateway.add_client("c1", ws)
+    # No session bound; backdate the fallback clock past the reap window.
+    gateway._client_last_seen["c1"] = 0.0
+
+    policy = gateway._liveness_policy()
+    import time as _time
+
+    now = _time.time()
+    last_activity = gateway._client_last_seen.get("c1", now)
+    assert policy.evaluate(last_activity, now) is LivenessDecision.REAP
+
+    await gateway._reap_session("c1")
+    assert ws.close_code == LIVENESS_TIMEOUT_CLOSE_CODE
+    assert "c1" not in gateway._clients
+    assert "c1" not in gateway._client_last_seen
+
+
+@pytest.mark.asyncio
+async def test_sessionless_inbound_frame_refreshes_last_seen():
+    # An actively-handshaking pre-session peer must not be reaped: any inbound
+    # frame refreshes the fallback clock even before a session is bound.
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    gateway.add_client("c1", _RecordingWS())
+    gateway._client_last_seen["c1"] = 0.0
+
+    async def _noop(client_id, data):
+        pass
+
+    gateway._send_to_client = _noop  # type: ignore[assignment]
+    await gateway._handle_client_message("c1", {"type": "ping"})
+
+    assert gateway._client_last_seen["c1"] > 0.0
+
+
+def test_teardown_drops_last_seen():
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    gateway.add_client("c1", _RecordingWS())
+    assert "c1" in gateway._client_last_seen
+    gateway.remove_client("c1")
+    assert "c1" not in gateway._client_last_seen
 
 
 def test_liveness_timeout_close_code_enum_value():
