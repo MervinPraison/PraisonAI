@@ -228,9 +228,18 @@ class StreamingTracker(_CoreStreamingTracker):
     def __init__(self, name: str):
         super().__init__(name)
         self._total_tokens: int = 0
+        self._recorded: bool = False
 
     def end(self, total_tokens: int = 0) -> None:
-        """End tracking and record to the wrapper Profiler."""
+        """End tracking and record to the wrapper Profiler.
+
+        Idempotent: safe to call explicitly inside a
+        ``with Profiler.streaming(...)`` block (whose ``finally`` also calls
+        ``end()``); only the first invocation records a StreamingRecord.
+        """
+        if self._recorded:
+            return
+        self._recorded = True
         self._end_time = time.perf_counter()
         self._total_tokens = total_tokens
 
