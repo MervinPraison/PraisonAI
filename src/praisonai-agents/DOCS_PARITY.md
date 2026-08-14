@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 50 | 15806 |
+| ✅ Agent | 22 | 50 | 15809 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
 | ✅ Approval | 1 | 5 | 2537 |
@@ -48,7 +48,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Handoffs | 11 | 6 | 2563 |
 | ✅ Hooks | 2 | 9 | 4317 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 13 | 4245 |
+| ✅ Knowledge | 4 | 13 | 4333 |
 | ✅ LLM | 3 | 15 | 5192 |
 | ✅ Loops | 4 | 5 | 1422 |
 | ✅ MCP | 1 | 61 | 13847 |
@@ -63,21 +63,21 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Prompts | 2 | 9 | 1965 |
 | ✅ Providers | 1 | 56 | 7735 |
 | ✅ Query | 1 | 2 | 736 |
-| ✅ RAG | 5 | 15 | 2936 |
+| ✅ RAG | 5 | 15 | 3003 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 680 |
-| ✅ Retrieval | 2 | 5 | 1044 |
+| ✅ Retrieval | 2 | 5 | 1054 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2918 |
 | ✅ Security | 1 | 3 | 3206 |
-| ✅ Sessions | 4 | 17 | 6960 |
+| ✅ Sessions | 4 | 17 | 6963 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
 | ✅ Tools | 12 | 141 | 41242 |
 | ✅ Tracing | 3 | 2 | 139 |
-| ✅ Vector Store | 1 | 12 | 1207 |
+| ✅ Vector Store | 1 | 12 | 1211 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 9 | 2467 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6703 lines)
+- ℹ️ Database (42 docs, 6713 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
