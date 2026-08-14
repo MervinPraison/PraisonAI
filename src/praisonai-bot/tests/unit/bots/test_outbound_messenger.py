@@ -17,6 +17,7 @@ from praisonai_bot.bots.delivery import DeliveryRouter, SessionSource
 from praisonaiagents.gateway import (
     OutboundMessengerProtocol,
     DeliveryResult,
+    ReactionResult,
     TargetInfo,
 )
 from praisonaiagents.session.context import (
@@ -307,6 +308,128 @@ def test_list_targets_includes_origin_and_directory():
     assert "origin" in tokens
     assert "telegram" in tokens  # home channel addressed by platform name
     assert "ops" in tokens  # alias addressed by friendly name
+
+
+def _make_reaction_router(*, reactions=True, react_ok=True):
+    """Build a DeliveryRouter over a fake bot with reaction primitives (#3917).
+
+    The reaction primitives live on an ``.adapter`` so the router's unwrap path
+    is exercised, matching real Telegram/Slack/Discord adapters.
+    """
+    calls = []
+
+    class FakeAdapter:
+        platform = "telegram"
+
+        def __init__(self, reactions, react_ok):
+            self.capabilities = {"reactions": reactions}
+            self._react_ok = react_ok
+
+        async def add_reaction(self, channel_id, message_id, emoji):
+            calls.append(("add", channel_id, message_id, emoji))
+            return self._react_ok
+
+        async def remove_reaction(self, channel_id, message_id, emoji):
+            calls.append(("remove", channel_id, message_id, emoji))
+            return self._react_ok
+
+    class FakeWrapper:
+        def __init__(self, reactions, react_ok):
+            self.adapter = FakeAdapter(reactions, react_ok)
+
+        async def send_message(self, channel_id, text):
+            pass
+
+    wrapper = FakeWrapper(reactions, react_ok)
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return wrapper if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+    return router, calls
+
+
+def test_react_on_origin_uses_inbound_message_id():
+    router, calls = _make_reaction_router()
+    origin = SessionSource(platform="telegram", channel_id="123", message_id="17")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    result = asyncio.run(messenger.react("origin", "\U0001F44D"))
+
+    assert isinstance(result, ReactionResult)
+    assert result.status == "ok"
+    assert result.target == "telegram:123"
+    assert calls == [("add", "123", "17", "\U0001F44D")]
+
+
+def test_unreact_dispatches_remove():
+    router, calls = _make_reaction_router()
+    origin = SessionSource(platform="telegram", channel_id="123", message_id="17")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    result = asyncio.run(messenger.react("origin", "\u2705", remove=True))
+
+    assert result.status == "ok"
+    assert calls == [("remove", "123", "17", "\u2705")]
+
+
+def test_react_unsupported_channel_returns_typed_outcome():
+    router, calls = _make_reaction_router(reactions=False)
+    origin = SessionSource(platform="telegram", channel_id="123", message_id="17")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    result = asyncio.run(messenger.react("origin", "\U0001F44D"))
+
+    assert result.status == "unsupported"
+    assert "reactions capability" in (result.detail or "")
+    assert calls == []  # never dispatched to the adapter
+
+
+def test_react_without_message_id_fails_cleanly():
+    router, calls = _make_reaction_router()
+    origin = SessionSource(platform="telegram", channel_id="123")  # no message_id
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    result = asyncio.run(messenger.react("origin", "\U0001F44D"))
+
+    assert result.status == "failed"
+    assert calls == []
+
+
+def test_react_unresolvable_target_returns_no_route():
+    router, calls = _make_reaction_router()
+    messenger = BotOutboundMessenger(router)  # no origin
+
+    result = asyncio.run(messenger.react("origin", "\U0001F44D", message_id="17"))
+
+    assert result.status == "no_route"
+    assert calls == []
+
+
+def test_react_explicit_target_and_message_id():
+    router, calls = _make_reaction_router()
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(
+        messenger.react("telegram:456", "\U0001F389", message_id="88")
+    )
+
+    assert result.status == "ok"
+    assert result.target == "telegram:456"
+    assert calls == [("add", "456", "88", "\U0001F389")]
+
+
+def test_messenger_still_satisfies_protocol_with_react():
+    router, _ = _make_reaction_router()
+    messenger = BotOutboundMessenger(router)
+    assert isinstance(messenger, OutboundMessengerProtocol)
 
 
 class TestSessionManagerRegistration:

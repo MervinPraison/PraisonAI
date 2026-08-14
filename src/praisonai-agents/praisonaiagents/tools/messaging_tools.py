@@ -248,12 +248,19 @@ def send_message(
             - "<alias>": a friendly alias for a known target
         message: The text to send. Append " MEDIA:<path>" to attach a local
             file, e.g. "Report ready MEDIA:/tmp/report.pdf".
-        action: "send" to deliver a message (default), or "list" to return the
-            targets currently reachable so you can pick a destination.
+        action: "send" to deliver a message (default), "list" to return the
+            targets currently reachable so you can pick a destination, "react"
+            to add an emoji reaction to the message being handled (pass the
+            emoji as ``message``), or "unreact" to remove one. Reactions are a
+            lightweight acknowledgement for busy group channels; on a channel
+            that cannot react you get a typed ``unsupported`` outcome rather
+            than an error.
 
     Returns:
         For action="send": a short human-readable summary of the delivery.
         For action="list": a JSON array of reachable targets.
+        For action="react"/"unreact": a JSON object with a typed ``status``
+            (``ok`` / ``unsupported`` / ``failed`` / ``no_route``).
     """
     try:
         from ..session.context import get_outbound_messenger
@@ -266,8 +273,39 @@ def send_message(
             targets = messenger.list_targets()
             return json.dumps([t.as_dict() for t in targets])
 
+        if action in ("react", "unreact"):
+            # Reuse the same operator send-policy guard as ``send`` so a
+            # steered/prompt-injected agent cannot react on a channel the
+            # operator never intended. Absent a policy, allow-all is preserved.
+            denied = _check_send_policy(target)
+            if denied is not None:
+                return json.dumps({"status": "failed", "detail": denied})
+
+            emoji = message.strip()
+            if not emoji:
+                return json.dumps(
+                    {"status": "failed", "detail": "no emoji provided"}
+                )
+
+            react = getattr(messenger, "react", None)
+            if react is None:
+                return json.dumps(
+                    {
+                        "status": "unsupported",
+                        "detail": "the active gateway does not support reactions",
+                    }
+                )
+
+            result = _run_async(
+                react(target, emoji, remove=(action == "unreact"))
+            )
+            return json.dumps(result.as_dict())
+
         if action != "send":
-            return f"Unknown action '{action}'. Use 'send' or 'list'."
+            return (
+                f"Unknown action '{action}'. Use 'send', 'list', 'react', "
+                "or 'unreact'."
+            )
 
         # Outbound send-policy guard (Issue #2226): the target is
         # model-controlled, so a steered/prompt-injected agent could misdeliver

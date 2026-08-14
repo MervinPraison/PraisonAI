@@ -2486,6 +2486,45 @@ class TargetInfo:
         }
 
 
+ReactionStatus = Literal["ok", "unsupported", "failed", "no_route"]
+"""Closed set of outcomes for a :meth:`OutboundMessengerProtocol.react` call.
+
+* ``ok`` — the reaction was added/removed.
+* ``unsupported`` — the channel has no ``reactions`` capability.
+* ``failed`` — the transport rejected the reaction (e.g. no such message).
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class ReactionResult:
+    """Outcome of an agent-initiated message reaction (Issue #3917).
+
+    Every call resolves to exactly one :data:`ReactionStatus`, so the agent
+    always gets a typed answer rather than a hard error — in particular a
+    channel that cannot react returns ``unsupported`` rather than raising.
+
+    Attributes:
+        status: The outcome (``ok`` / ``unsupported`` / ``failed`` /
+            ``no_route``).
+        target: The resolved target the reaction was routed to.
+        detail: Optional model-readable explanation.
+    """
+
+    status: ReactionStatus
+    target: str = ""
+    detail: Optional[str] = None
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["target"] = self.target
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
 @runtime_checkable
 class OutboundMessengerProtocol(Protocol):
     """Protocol for agent-facing proactive message delivery.
@@ -2527,6 +2566,35 @@ class OutboundMessengerProtocol(Protocol):
 
     def list_targets(self) -> List["TargetInfo"]:
         """List the targets currently reachable from this runtime."""
+        ...
+
+    async def react(
+        self,
+        target: str,
+        emoji: str,
+        *,
+        message_id: str = "",
+        remove: bool = False,
+    ) -> "ReactionResult":
+        """Add (or remove) a reaction on a message (Issue #3917).
+
+        A lightweight acknowledgement path for busy group channels: rather than
+        posting a whole reply, an agent can react with a single emoji. Gated on
+        the channel's ``PlatformCapabilities.reactions`` — a channel that cannot
+        react returns a typed ``unsupported`` outcome instead of raising, so the
+        model never has to guess.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            emoji: The reaction emoji to add/remove.
+            message_id: The message to react to. When empty and ``target`` is
+                ``"origin"``, the message currently being handled is used.
+            remove: When True, remove the reaction instead of adding it.
+
+        Returns:
+            A :class:`ReactionResult` describing the outcome.
+        """
         ...
 
 

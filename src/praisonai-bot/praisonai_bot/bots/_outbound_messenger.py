@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from praisonaiagents.gateway import DeliveryResult, TargetInfo
+from praisonaiagents.gateway import DeliveryResult, ReactionResult, TargetInfo
 
 from .delivery import DeliveryRouter, SessionSource
 from ._outbound_media import (
@@ -227,6 +227,48 @@ class BotOutboundMessenger:
                 )
 
         return sent, skipped, notes
+
+    async def react(
+        self,
+        target: str,
+        emoji: str,
+        *,
+        message_id: str = "",
+        remove: bool = False,
+    ) -> ReactionResult:
+        """Add/remove a reaction on a message via the delivery router.
+
+        Dispatches through the live adapter's native reaction primitive, gated
+        on the channel's ``capabilities["reactions"]`` flag (Issue #3917). When
+        ``message_id`` is empty and ``target`` is ``"origin"`` the inbound
+        message being handled is used, so a model can acknowledge the current
+        message with a single emoji instead of a full text reply. A channel that
+        cannot react returns a typed ``unsupported`` outcome rather than raising.
+        """
+        resolved_message_id = message_id
+        if not resolved_message_id and target == "origin" and self._origin is not None:
+            resolved_message_id = self._origin.message_id or ""
+
+        if not resolved_message_id:
+            return ReactionResult(
+                status="failed",
+                target=target,
+                detail="no message_id to react to",
+            )
+
+        status, resolved = await self._router.react(
+            target,
+            emoji,
+            resolved_message_id,
+            self._origin,
+            remove=remove,
+        )
+        detail = None
+        if status == "unsupported":
+            detail = f"channel '{resolved}' has no reactions capability"
+        elif status == "no_route":
+            detail = f"could not resolve target '{target}'"
+        return ReactionResult(status=status, target=resolved, detail=detail)
 
     def list_targets(self) -> List[TargetInfo]:
         """List targets currently reachable through the delivery router.

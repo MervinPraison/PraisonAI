@@ -136,6 +136,9 @@ class SessionSource:
     channel_id: str
     user_id: Optional[str] = None
     thread_id: Optional[str] = None
+    # The inbound message being handled, so ``react("origin", ...)`` can target
+    # it without the agent having to know a platform message id (Issue #3917).
+    message_id: Optional[str] = None
 
 
 class ChannelDirectory:
@@ -986,6 +989,64 @@ class DeliveryRouter:
                 "DeliveryRouter: media delivery failed for '%s': %s", target, e
             )
             return False
+
+    async def react(
+        self,
+        target: str,
+        emoji: str,
+        message_id: str,
+        origin: Optional[SessionSource] = None,
+        *,
+        remove: bool = False,
+    ) -> Tuple[str, str]:
+        """Add/remove a reaction ``emoji`` on ``message_id`` at ``target``.
+
+        Resolves the symbolic target and dispatches through the live adapter's
+        native ``add_reaction``/``remove_reaction`` primitive, gated on the
+        adapter's ``capabilities["reactions"]`` flag. Returns a ``(status,
+        resolved_target)`` tuple where ``status`` is one of ``"ok"``,
+        ``"unsupported"``, ``"failed"`` or ``"no_route"`` — never raising — so a
+        channel that cannot react degrades gracefully (Issue #3917).
+        """
+        try:
+            platform, channel_id, _thread_id = self.resolve(target, origin)
+        except ValueError as e:
+            logger.debug("DeliveryRouter.react: cannot resolve '%s': %s", target, e)
+            return ("no_route", target)
+
+        resolved = f"{platform}:{channel_id}"
+
+        bot = self._botos.get_bot(platform)
+        if not bot:
+            return ("no_route", resolved)
+
+        # Native reaction primitives live on the underlying adapter, not the
+        # user-facing ``Bot`` wrapper — unwrap it before dispatch (as send_media
+        # does for upload primitives).
+        adapter = getattr(bot, "adapter", None) or bot
+
+        caps = getattr(adapter, "capabilities", None) or {}
+        if not caps.get("reactions", False):
+            return ("unsupported", resolved)
+
+        fn = getattr(
+            adapter, "remove_reaction" if remove else "add_reaction", None
+        )
+        if not callable(fn):
+            return ("unsupported", resolved)
+
+        try:
+            ok = await fn(channel_id, message_id, emoji)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.error(
+                "DeliveryRouter.react failed for %s (%s): %s",
+                resolved,
+                message_id,
+                e,
+            )
+            return ("failed", resolved)
+
+        return ("ok" if ok else "failed", resolved)
 
     def configure_from_dict(self, config: Dict) -> None:
         """
