@@ -1,4 +1,8 @@
-"""Opt-in real-provider coverage for streamed tool dispatch."""
+"""Opt-in real-provider coverage for streamed tool dispatch.
+
+Run with ``RUN_REAL_KEY_TESTS=1`` and ``OPENAI_API_KEY`` set to exercise the
+provider-backed follow-up completion path.
+"""
 
 import os
 
