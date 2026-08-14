@@ -755,12 +755,16 @@ class OpenAIClient:
                     "text": part.get("text", ""),
                 })
             elif part_type == "image_url":
-                responses_content.append({
+                image_item = {
                     "type": "input_image",
                     "image_url": cls._normalise_responses_image_url(
                         part.get("image_url")
                     ),
-                })
+                }
+                image_value = part.get("image_url")
+                if isinstance(image_value, dict) and image_value.get("detail"):
+                    image_item["detail"] = image_value["detail"]
+                responses_content.append(image_item)
             elif part_type == "input_image":
                 item = dict(part)
                 item["image_url"] = cls._normalise_responses_image_url(

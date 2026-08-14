@@ -354,7 +354,10 @@ class TestOpenAIClientResponsesAPI:
                 {"type": "text", "text": "Describe this image"},
                 {
                     "type": "image_url",
-                    "image_url": {"url": "https://example.com/image.png"},
+                    "image_url": {
+                        "url": "https://example.com/image.png",
+                        "detail": "high",
+                    },
                 },
             ],
         }]
@@ -368,6 +371,7 @@ class TestOpenAIClientResponsesAPI:
                 {
                     "type": "input_image",
                     "image_url": "https://example.com/image.png",
+                    "detail": "high",
                 },
             ],
         }]
