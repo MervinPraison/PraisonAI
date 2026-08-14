@@ -7,7 +7,7 @@ the appropriate lock type based on the execution context (sync vs async).
 import asyncio
 import copy
 import threading
-from typing import Any, Optional, Union
+from typing import Any
 from contextlib import contextmanager, asynccontextmanager
 from weakref import WeakKeyDictionary
 

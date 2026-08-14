@@ -7,9 +7,9 @@ Validates:
 - Key configuration attributes are preserved in the clone
 - Multiple clones are isolated from each other
 """
+import asyncio
 import copy
 import threading
-import pytest
 
 
 class TestAgentDeepCopy:
@@ -94,3 +94,13 @@ class TestAgentDeepCopy:
         assert cloned._Agent__chat_history_state is not agent._Agent__chat_history_state
         assert cloned._Agent__snapshot_state is not agent._Agent__snapshot_state
         assert cloned._turn_tools_lock is not agent._turn_tools_lock
+
+    def test_deepcopy_replaces_locked_approvals_lock(self):
+        agent = self._make_agent()
+        asyncio.run(agent._approvals_lock.acquire())
+
+        cloned = copy.deepcopy(agent)
+
+        assert cloned._approvals_lock is not agent._approvals_lock
+        assert agent._approvals_lock.locked() is True
+        assert cloned._approvals_lock.locked() is False
