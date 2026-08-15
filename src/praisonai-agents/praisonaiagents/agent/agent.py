@@ -2591,8 +2591,15 @@ Your Goal: {self.goal}
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),
             
-            # Shallow copy tools to avoid deepcopy issues with nested objects
-            'tools': list(self.tools) if self.tools else None,
+            # Shallow copy tools to avoid deepcopy issues with nested objects.
+            # Drop framework-generated sandbox tools: they close over the source
+            # agent, so the constructor must regenerate clone-bound replacements
+            # (see the sandbox wiring below). User tools with colliding names
+            # lack the tag and are preserved.
+            'tools': (
+                [t for t in self.tools if not getattr(t, "_praison_sandbox_tool", False)]
+                if self.tools else None
+            ),
             
             # Skip handoffs entirely - they shouldn't be shared across channels
             # and can contain nested Agent instances that cause RLock issues

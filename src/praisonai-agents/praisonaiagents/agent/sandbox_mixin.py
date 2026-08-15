@@ -241,5 +241,15 @@ class SandboxMixin:
                 return result.stdout or result.output
             else:
                 return f"Error: {result.error or result.stderr}"
-        
-        return [execute_python_code, execute_shell_command]
+
+        # Tag as framework-generated so clone_for_channel() can drop these
+        # source-bound wrappers and regenerate clone-owned ones. Without the
+        # tag, a clone would inherit tools closing over the *source* agent and
+        # silently share its SandboxManager.
+        generated = [execute_python_code, execute_shell_command]
+        for _t in generated:
+            try:
+                _t._praison_sandbox_tool = True
+            except Exception:  # pragma: no cover - tool object may be immutable
+                pass
+        return generated

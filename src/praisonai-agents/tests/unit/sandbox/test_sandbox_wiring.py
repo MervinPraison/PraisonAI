@@ -58,9 +58,10 @@ def test_sandbox_does_not_duplicate_tools_on_name_clash():
 def test_sandboxed_code_runs_out_of_process():
     """The point of the feature: not the same interpreter as the caller."""
     agent = Agent(name="T", instructions="x", sandbox=True)
-    run = [t for t in agent.tools if getattr(t, "__name__", "") == "execute_python_code"][0]
+    run = next(t for t in agent.tools if getattr(t, "__name__", "") == "execute_python_code")
     out = str(run("import os; print(os.getpid())"))
-    assert str(os.getpid()) not in out, "code executed in the host process — not sandboxed"
+    child_pid = int(out.strip().splitlines()[-1])
+    assert child_pid != os.getpid(), "code executed in the host process — not sandboxed"
 
 
 def test_security_warning_does_not_break_execution():
@@ -81,6 +82,24 @@ def test_clone_keeps_sandbox():
     clone = agent.clone_for_channel()
     assert agent.sandbox_config is not None
     assert getattr(clone, "sandbox_config", None) is not None, "clone lost its sandbox"
+
+
+def test_clone_regenerates_clone_bound_sandbox_tools():
+    """The generated tools close over the source agent. If the clone merely
+    copied them, invoking a clone tool would run through the *source* agent's
+    SandboxManager — sharing execution state across channels. The clone must
+    own its execution tools."""
+    agent = Agent(name="T", instructions="x", sandbox=True)
+    clone = agent.clone_for_channel()
+
+    src_run = next(t for t in agent.tools if getattr(t, "__name__", "") == "execute_python_code")
+    clone_run = next(t for t in clone.tools if getattr(t, "__name__", "") == "execute_python_code")
+
+    assert clone_run is not src_run, "clone reused the source-bound execution tool"
+
+    src_mgr = agent.get_sandbox_manager()
+    clone_mgr = clone.get_sandbox_manager()
+    assert clone_mgr is not src_mgr, "clone shares the source agent's SandboxManager"
 
 
 # ── conflicting settings must not be silent ──────────────────────────────────
