@@ -2447,6 +2447,42 @@ Your Goal: {self.goal}
         # Sandbox configuration - initialize SandboxMixin
         super().__init__(sandbox=sandbox)
 
+        # Give the model sandboxed code-execution tools when a sandbox is set.
+        # Without this, `sandbox=` built a SandboxConfig that nothing ever read:
+        # the agent looked isolated and was not. Note this isolates *code the
+        # model writes* -- Python callables passed via `tools=` are ordinary
+        # in-process functions and cannot be retrofitted into a sandbox.
+        if self.sandbox_config is not None:
+            try:
+                existing = {
+                    getattr(t, "__name__", getattr(t, "name", None))
+                    for t in (self.tools or [])
+                }
+                sandbox_tools = [
+                    t for t in self._get_code_execution_tools()
+                    if getattr(t, "__name__", getattr(t, "name", None)) not in existing
+                ]
+                if sandbox_tools:
+                    self.tools = list(self.tools or []) + sandbox_tools
+            except Exception as exc:  # pragma: no cover - never block construction
+                logging.warning(
+                    "Could not attach sandbox code-execution tools to %s: %s",
+                    self.name, exc,
+                )
+
+        # A managed backend takes over the whole turn before any local execution,
+        # so a sandbox set alongside it silently does nothing. Say so.
+        if self.sandbox_config is not None and getattr(self, "backend", None) is not None:
+            import warnings
+
+            warnings.warn(
+                "Agent(sandbox=..., backend=...): the managed backend handles the "
+                "entire turn, so the sandbox= setting is ignored. Configure "
+                "isolation on the backend instead (e.g. LocalAgent(compute='docker')).",
+                FutureWarning,
+                stacklevel=2,
+            )
+
     @staticmethod
     def _resolve_tool_config(tool_config):
         """Resolve tool_config parameter with backward compatibility."""
@@ -2607,7 +2643,10 @@ Your Goal: {self.goal}
             'interrupt_controller': None,  # Let new instance create its own
             
             # Sandbox config
-            'sandbox': getattr(self, '_sandbox_config', None),
+            # SandboxMixin stores this as `sandbox_config`; reading the
+            # underscore name (never assigned) made every clone silently drop
+            # its sandbox and run unisolated.
+            'sandbox': getattr(self, 'sandbox_config', None),
         }
         
         # Handle deprecated parameters for backward compatibility
