@@ -347,7 +347,25 @@ class YAMLWorkflowParser:
         
         # Parse history flag for execution tracing (robustness feature)
         history_enabled = data.get('history', False)
-        
+
+        # Remote execution: `run_on: docker` gives every step's shell/file tools
+        # one shared sandbox. Validated here so a typo fails at load time with
+        # the list of valid names, rather than at first tool call.
+        run_on = data.get('run_on')
+        if run_on is not None:
+            if not isinstance(run_on, str):
+                raise ValueError(
+                    f"'run_on' must be a provider name string, got {type(run_on).__name__}"
+                )
+            from ..managed._compute_bridge import available_providers
+
+            if run_on.lower().strip() not in available_providers():
+                raise ValueError(
+                    f"Unknown run_on provider {run_on!r}. "
+                    f"Available: {', '.join(available_providers())}"
+                )
+            run_on = run_on.lower().strip()
+
         workflow = Workflow(
             name=name,
             steps=steps,
@@ -360,6 +378,7 @@ class YAMLWorkflowParser:
             memory=memory_value,  # Pass memory config to Workflow
             context=context_value,  # Pass context management config to Workflow
             history=history_enabled,  # Enable execution history tracking (robustness)
+            run_on=run_on,  # Shared remote sandbox for every step (None = local)
         )
         
         # Store additional attributes for feature parity with agents.yaml

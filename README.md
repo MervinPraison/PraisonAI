@@ -130,7 +130,7 @@ Each layer wraps the one inside it. When an agent misbehaves, the layer tells yo
 | **3 · Harness** | Can it act, and be checked? | `tools=`, `MCP()`, `guardrails=`, `approval=`, `hooks=`, `sandbox=` |
 | **4 · Loop** | When do we stop? | `execution=ExecutionConfig(...)`, `reflection=`, `autonomy=`, doom-loop detection |
 | **5 · Graph** | Who runs when, and who checks whom? | `AgentFlow`, `route()`, `parallel()`, `loop()`, `repeat()` |
-| **⬡ Managed** | *Where does it actually run?* | `backend=ManagedAgent(compute="e2b")` — remote sandbox, or a fully hosted loop |
+| **⬡ Managed** | *Where does it actually run?* | `run_on="docker"` — one shared remote sandbox, or a fully hosted loop |
 
 ### Layer 1 · Prompt — *Did I say it clearly?*
 
@@ -236,20 +236,54 @@ The harness is commoditising; **where** the agent executes is the next multiplie
 pip install praisonai
 ```
 
+The simplest way in is `run_on=` — one whole team or workflow shares **one** sandbox, so a file written by step 1 is there for step 2:
+
 ```python
-from praisonai import Agent, ManagedAgent, LocalManagedConfig
+from praisonaiagents import Agent, AgentFlow
+
+writer = Agent(name="Writer", instructions="You write files.")
+reader = Agent(name="Reader", instructions="You read files.")
+
+flow = AgentFlow(run_on="docker", steps=[writer, reader])   # or e2b | modal | daytona | flyio
+flow.run("Write 'hello' to /workspace/note.txt, then read it back")
+```
+
+Same thing with no Python at all:
+
+```yaml
+name: remote-demo
+run_on: docker            # every step shares one sandbox
+agents:
+  writer: {role: Writer, goal: Write files}
+  reader: {role: Reader, goal: Read files}
+steps:
+  - agent: writer
+    action: "Write 'hello' to /workspace/note.txt"
+  - agent: reader
+    action: "Read /workspace/note.txt"
+```
+
+For a single agent, pick the axis you need — remote **tools** or a remote **loop**:
+
+```python
+from praisonai import Agent, LocalAgent, LocalAgentConfig, HostedAgent
 
 # A. Tools run in a remote sandbox; the agent loop stays local
-sandboxed = ManagedAgent(
-    provider="local", compute="e2b",   # or modal | daytona | flyio | docker | tenki
-    config=LocalManagedConfig(model="gpt-4o-mini", name="RemoteTools"),
-)
-agent = Agent(name="builder", backend=sandboxed)
+agent = Agent(name="builder", backend=LocalAgent(
+    compute="e2b",                     # or modal | daytona | flyio | docker | tenki
+    config=LocalAgentConfig(model="gpt-4o-mini", name="RemoteTools"),
+))
 
-# B. The entire agent loop runs in the cloud (needs ANTHROPIC_API_KEY;
-#    with no key set, ManagedAgent() falls back to a local loop)
-agent = Agent(name="teacher", backend=ManagedAgent())
+# B. The entire agent loop runs in the cloud (needs ANTHROPIC_API_KEY)
+agent = Agent(name="teacher", backend=HostedAgent(provider="anthropic"))
 agent.start("Write a Python script that prints the first 10 primes, then run it")
+```
+
+See what is running and reclaim strays:
+
+```bash
+praisonai managed ps          # list running sandboxes
+praisonai managed stop --all  # reclaim them
 ```
 
 Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), and a post-setup snapshot is reused so the next run skips the image pull and dependency install. Commit a `.praisonai/environment.yaml` and the environment travels with the repo.
