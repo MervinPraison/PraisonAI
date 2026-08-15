@@ -208,6 +208,39 @@ def test_timeout_proxy_isolated_across_generators():
         exec_b.shutdown()
 
 
+def test_explicit_workflow_timeout_ignores_cli_default():
+    # The legacy CLI always injects its --tool-timeout argparse default (60)
+    # into cli_config, so a bare default must NOT be treated as a user request
+    # (otherwise every ordinary workflow YAML run would raise). Regression for
+    # the workflow tool_timeout fail-fast (PR #3963).
+    gen = _make_generator()
+    gen.cli_config = {"tool_timeout": 60}
+    assert gen._resolve_explicit_workflow_tool_timeout({}) is None
+    assert gen._resolve_explicit_workflow_tool_timeout(
+        {"roles": {"a": {}}}
+    ) is None
+
+
+def test_explicit_workflow_timeout_flags_changed_cli_value():
+    gen = _make_generator()
+    gen.cli_config = {"tool_timeout": 30}
+    assert gen._resolve_explicit_workflow_tool_timeout({}) == 30.0
+
+
+def test_explicit_workflow_timeout_flags_yaml_declared():
+    gen = _make_generator()
+    gen.cli_config = {"tool_timeout": 60}  # bare CLI default
+    config = {"roles": {"a": {"tool_timeout": 10}}}
+    assert gen._resolve_explicit_workflow_tool_timeout(config) == 10.0
+
+
+def test_explicit_workflow_timeout_ignores_bool_yaml():
+    gen = _make_generator()
+    gen.cli_config = {}
+    config = {"agents": {"a": {"tool_timeout": True}}}
+    assert gen._resolve_explicit_workflow_tool_timeout(config) is None
+
+
 def test_ag2_not_in_default_priority():
     from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
 

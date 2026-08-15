@@ -295,7 +295,10 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Use stream-json format for streaming (local parameter, no instance mutation)
+        # Use stream-json format for streaming (per-call override, no instance
+        # mutation); drop a caller-supplied output_format so the forced value
+        # wins instead of raising "multiple values for keyword argument".
+        options.pop("output_format", None)
         cmd = self._build_command(prompt, output_format="stream-json", **options)
         
         async for line in self.stream_async(cmd):
