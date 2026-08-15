@@ -72,29 +72,34 @@ def approve(
     try:
         store = PairingStore(store_dir=store_dir)
         
-        # First check if the code exists and get its details without consuming it
+        # Look up the pending entry for its channel_id metadata. Codes are
+        # hashed at rest, so cross-process a pending entry may not expose the
+        # raw code — fall back to matching the salted hash of the presented code.
         pending_pairings = store.list_pending()
+        code_hash = store._hash(code)
         code_info = None
         for pairing in pending_pairings:
-            if pairing.get('code') == code:
+            if pairing.get('code') == code or pairing.get('code_hash') == code_hash:
                 code_info = pairing
                 break
-        
-        if not code_info:
-            typer.echo(f"❌ Invalid or expired code: {code}", err=True)
-            raise typer.Exit(1)
-        
-        # Now verify and pair (this will consume the code)
+
+        # Verify and pair (this consumes the code). verify_and_pair performs the
+        # authoritative hash lookup + HMAC check + brute-force lockout, so a
+        # missing pre-match is not itself fatal — trust its return value.
         success = store.verify_and_pair(
             code=code,
             channel_id=channel_id,
             channel_type=platform,
             label=label
         )
-        
+
         if success:
             # Use the actual channel_id from the code info if channel_id was auto-resolved
-            resolved_channel_id = channel_id or code_info.get('channel_id', 'unknown')
+            resolved_channel_id = (
+                channel_id
+                or (code_info.get('channel_id') if code_info else None)
+                or 'unknown'
+            )
             typer.echo(f"✅ Successfully paired {platform} channel {resolved_channel_id}")
             if label:
                 typer.echo(f"   Label: {label}")

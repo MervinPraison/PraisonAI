@@ -141,24 +141,39 @@ async def test_exec_approval_allowlist():
 
 @pytest.mark.asyncio
 async def test_pending_persists_across_instances():
-    """Pending codes should survive PairingStore recreation (cross-process test)."""
+    """Pending codes should survive PairingStore recreation (cross-process test).
+
+    Codes are hashed at rest, so the raw code is NOT recoverable from a fresh
+    instance — but the pending request is still visible and verifiable.
+    """
     import tempfile
     import os
-    
+    import json
+
     # Create temporary directory for this test
     with tempfile.TemporaryDirectory() as tmpdir:
         # Instance A generates a code (no explicit secret - uses persisted secret file)
         store_a = PairingStore(store_dir=tmpdir)
         code = store_a.generate_code(channel_type="telegram", channel_id="tg_42")
         assert len(code) == 8
-        
-        # Instance B (simulating CLI in separate process) should see the pending code
+
+        # The raw code must never be written to disk in plaintext.
+        with open(os.path.join(tmpdir, "pairing.json")) as fh:
+            raw = fh.read()
+        assert code not in raw
+        assert "code_hash" in json.loads(raw)["pending"][0]
+
+        # Instance B (simulating CLI in separate process) should see the pending
+        # request (metadata) but not the raw code.
         store_b = PairingStore(store_dir=tmpdir)
         pending = store_b.list_pending()
         assert len(pending) == 1
-        assert pending[0]["code"] == code
+        assert pending[0]["code"] is None
         assert pending[0]["channel_type"] == "telegram"
         assert pending[0]["channel_id"] == "tg_42"
+
+        # And it can still verify the code presented from chat (hash match).
+        assert store_b.verify_and_pair(code, None, "telegram") is True
 
 
 @pytest.mark.asyncio 
@@ -366,3 +381,80 @@ async def test_cli_approve_survives_restart():
         # Verify pairing persisted (fresh instance uses same secret file)
         final_store = PairingStore(store_dir=tmpdir)
         assert final_store.is_paired("tg_restart", "telegram") is True
+
+
+@pytest.mark.asyncio
+async def test_codes_use_unambiguous_alphabet():
+    """Generated codes must avoid ambiguous characters (0/O/1/I)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = PairingStore(store_dir=tmpdir)
+        for _ in range(50):
+            code = store.generate_code(channel_type="telegram")
+            assert len(code) == 8
+            assert set(code) <= set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+
+
+@pytest.mark.asyncio
+async def test_codes_hashed_at_rest():
+    """The raw pairing code must never be written to pairing.json."""
+    import tempfile
+    import os
+    import json
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = PairingStore(store_dir=tmpdir)
+        code = store.generate_code(channel_type="telegram", channel_id="tg_hash")
+
+        with open(os.path.join(tmpdir, "pairing.json")) as fh:
+            data = json.load(fh)
+        entry = data["pending"][0]
+        assert "code" not in entry
+        assert entry["code_hash"] != code
+        assert len(entry["code_hash"]) == 64  # sha256 hexdigest
+
+
+@pytest.mark.asyncio
+async def test_store_level_brute_force_lockout():
+    """After N failed verifications a channel_type is locked out uniformly."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = PairingStore(
+            store_dir=tmpdir,
+            max_failures=3,
+            lockout_window=60.0,
+            lockout_cooldown=300.0,
+        )
+        good = store.generate_code(channel_type="telegram", channel_id="tg_bf")
+
+        # Enough wrong codes to exceed the ceiling and trip the lockout window.
+        for _ in range(4):
+            assert store.verify_and_pair("WRONGXXX", "tg_bf", "telegram") is False
+
+        # Once locked out, even the VALID code is refused while the cooldown is
+        # active — protection is store-level (not tied to a single surface).
+        assert store.verify_and_pair(good, "tg_bf", "telegram") is False
+        assert store.is_paired("tg_bf", "telegram") is False
+
+
+@pytest.mark.asyncio
+async def test_successful_verify_clears_failures():
+    """A successful pairing resets the failed-attempt counter."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = PairingStore(store_dir=tmpdir, max_failures=3)
+        # Two failures, then a success should clear the counter.
+        assert store.verify_and_pair("WRONGXXX", "tg_ok", "telegram") is False
+        assert store.verify_and_pair("WRONGYYY", "tg_ok", "telegram") is False
+        code = store.generate_code(channel_type="telegram", channel_id="tg_ok")
+        assert store.verify_and_pair(code, "tg_ok", "telegram") is True
+
+        # Counter cleared: a fresh burst of failures is allowed again without
+        # the earlier two counting toward the ceiling.
+        code2 = store.generate_code(channel_type="telegram", channel_id="tg_ok2")
+        assert store.verify_and_pair("WRONGZZZ", "tg_ok2", "telegram") is False
+        assert store.verify_and_pair("WRONGWWW", "tg_ok2", "telegram") is False
+        assert store.verify_and_pair(code2, "tg_ok2", "telegram") is True
