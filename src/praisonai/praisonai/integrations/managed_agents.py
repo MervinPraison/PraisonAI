@@ -1092,10 +1092,10 @@ def ManagedAgent(
       (It does NOT raise; prefer LocalAgent(compute="...") directly.)
     
     Returns:
-        An instance satisfying ``ManagedBackendProtocol``.
-        
-    Raises:
-        ValueError: For compute-provider names that should use LocalAgent(compute=).
+        An instance satisfying ``ManagedBackendProtocol``. Compute-provider
+        names ({"e2b","modal","flyio","daytona","docker","tenki"}) do NOT
+        raise — they emit a ``DeprecationWarning`` and delegate to
+        ``LocalManagedAgent(compute=<provider>)``.
     """
     # Track if provider was auto-detected to avoid spurious deprecation warnings
     auto_detected = provider is None

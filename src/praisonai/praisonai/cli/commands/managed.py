@@ -663,7 +663,13 @@ _PS_PROVIDERS = ("docker", "e2b", "modal", "daytona", "flyio", "tenki")
 
 
 def _discover_instances(provider_filter: Optional[str] = None):
-    """Return [(provider_name, InstanceInfo), ...] for every reachable provider.
+    """Return (instances, errors) for reachable providers.
+
+    ``instances`` is [(provider_name, InstanceInfo), ...].
+    ``errors`` is [(provider_name, message), ...] for providers that were
+    *available* (installed + configured) but failed while listing — those must
+    surface, otherwise ``ps``/``stop --all`` would wrongly report an empty,
+    successful inventory while sandboxes keep running.
 
     Providers that are not installed or not configured are skipped silently --
     absence of an E2B key is a normal state, not an error worth printing.
@@ -674,26 +680,32 @@ def _discover_instances(provider_filter: Optional[str] = None):
 
     names = [provider_filter] if provider_filter else list(_PS_PROVIDERS)
     found = []
+    errors = []
 
     async def _collect():
         for name in names:
             try:
                 provider = resolve_compute(name)
             except Exception:
-                continue  # provider package not installed
+                # Not installed / unknown provider. Silent unless explicitly
+                # requested, where the user deserves to know it went nowhere.
+                if provider_filter:
+                    errors.append((name, "provider not installed or unknown"))
+                continue
             try:
                 if not getattr(provider, "is_available", True):
-                    continue
+                    continue  # daemon down / no credentials — a normal state
             except Exception:
-                continue  # daemon down / no credentials
+                continue
             try:
                 for info in await provider.list_instances():
                     found.append((name, info))
-            except Exception:
-                continue
+            except Exception as e:
+                # Available but listing failed: real error, never hide it.
+                errors.append((name, str(e)))
 
     asyncio.run(_collect())
-    return found
+    return found, errors
 
 
 def _format_uptime(created_at: float) -> str:
@@ -729,36 +741,44 @@ def managed_ps(
         praisonai managed ps --provider docker
         praisonai managed ps --json
     """
-    rows = _discover_instances(provider)
+    rows, errors = _discover_instances(provider)
 
     if as_json:
-        typer.echo(json.dumps([
-            {
-                "provider": name,
-                "instance_id": info.instance_id,
-                "status": getattr(info.status, "value", str(info.status)),
-                "endpoint": info.endpoint,
-                "created_at": info.created_at,
-                "metadata": info.metadata,
-            }
-            for name, info in rows
-        ], indent=2))
-        return
+        typer.echo(json.dumps({
+            "sandboxes": [
+                {
+                    "provider": name,
+                    "instance_id": info.instance_id,
+                    "status": getattr(info.status, "value", str(info.status)),
+                    "endpoint": info.endpoint,
+                    "created_at": info.created_at,
+                    "metadata": info.metadata,
+                }
+                for name, info in rows
+            ],
+            "errors": [{"provider": name, "error": msg} for name, msg in errors],
+        }, indent=2))
+        raise typer.Exit(1 if errors else 0)
 
     if not rows:
         typer.echo("No running sandboxes.")
-        return
+    else:
+        typer.echo(f"{'INSTANCE ID':<26} {'PROVIDER':<10} {'STATUS':<10} {'UPTIME':<8} IMAGE")
+        typer.echo("-" * 78)
+        for name, info in rows:
+            status = getattr(info.status, "value", str(info.status))
+            image = (info.metadata or {}).get("image") or info.endpoint or ""
+            typer.echo(
+                f"{info.instance_id:<26} {name:<10} {status:<10} "
+                f"{_format_uptime(info.created_at):<8} {image}"
+            )
+        typer.echo(f"\n{len(rows)} running. Stop with: praisonai managed stop <instance-id>")
 
-    typer.echo(f"{'INSTANCE ID':<26} {'PROVIDER':<10} {'STATUS':<10} {'UPTIME':<8} IMAGE")
-    typer.echo("-" * 78)
-    for name, info in rows:
-        status = getattr(info.status, "value", str(info.status))
-        image = (info.metadata or {}).get("image") or info.endpoint or ""
-        typer.echo(
-            f"{info.instance_id:<26} {name:<10} {status:<10} "
-            f"{_format_uptime(info.created_at):<8} {image}"
-        )
-    typer.echo(f"\n{len(rows)} running. Stop with: praisonai managed stop <instance-id>")
+    if errors:
+        typer.echo("\nSome providers could not be queried (sandboxes may still be running):")
+        for name, msg in errors:
+            typer.echo(f"  {name}: {msg}")
+        raise typer.Exit(1)
 
 
 @app.command("stop")
@@ -784,14 +804,14 @@ def managed_stop(
         typer.echo("Give an instance ID or --all. See: praisonai managed ps")
         raise typer.Exit(1)
 
-    rows = _discover_instances(provider)
+    rows, errors = _discover_instances(provider)
     if instance_id:
         rows = [r for r in rows if r[1].instance_id == instance_id]
         if not rows:
             typer.echo(f"No running sandbox with ID {instance_id!r}. See: praisonai managed ps")
             raise typer.Exit(1)
 
-    if not rows:
+    if not rows and not errors:
         typer.echo("No running sandboxes.")
         return
 
@@ -806,7 +826,15 @@ def managed_stop(
             failed += 1
 
     typer.echo(f"\n{stopped} stopped" + (f", {failed} failed" if failed else ""))
-    if failed:
+
+    if errors:
+        # A provider we could not even inventory may still hold live sandboxes
+        # we never got the chance to stop. Never claim a clean sweep.
+        typer.echo("\nSome providers could not be queried (sandboxes may still be running):")
+        for name, msg in errors:
+            typer.echo(f"  {name}: {msg}")
+
+    if failed or errors:
         raise typer.Exit(1)
 
 

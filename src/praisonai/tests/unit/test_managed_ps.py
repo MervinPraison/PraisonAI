@@ -97,13 +97,15 @@ def test_ps_json_is_machine_readable(runner, one_docker_instance):
     result = runner.invoke(app, ["ps", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload[0]["instance_id"] == "docker_abc123"
-    assert payload[0]["provider"] == "docker"
-    assert payload[0]["status"] == "running"
+    sandboxes = payload["sandboxes"]
+    assert sandboxes[0]["instance_id"] == "docker_abc123"
+    assert sandboxes[0]["provider"] == "docker"
+    assert sandboxes[0]["status"] == "running"
+    assert payload["errors"] == []
 
 
 def test_ps_reports_empty_state(runner, monkeypatch):
-    monkeypatch.setattr(managed_cli, "_discover_instances", lambda *a, **k: [])
+    monkeypatch.setattr(managed_cli, "_discover_instances", lambda *a, **k: ([], []))
     result = runner.invoke(app, ["ps"])
     assert result.exit_code == 0
     assert "No running sandboxes" in result.output
@@ -119,6 +121,35 @@ def test_ps_skips_unavailable_providers(runner, monkeypatch):
     result = runner.invoke(app, ["ps"])
     assert result.exit_code == 0
     assert "never_shown" not in result.output
+
+
+def test_ps_surfaces_listing_failure(runner, monkeypatch):
+    """An available provider that fails to list must NOT report clean success."""
+    class Broken(FakeProvider):
+        async def list_instances(self):
+            raise RuntimeError("daemon exploded")
+
+    monkeypatch.setattr(managed_cli, "_PS_PROVIDERS", ("docker",))
+    monkeypatch.setattr(
+        "praisonaiagents.managed._compute_bridge.resolve_compute",
+        lambda name: Broken(available=True),
+    )
+    result = runner.invoke(app, ["ps"])
+    assert result.exit_code == 1
+    assert "daemon exploded" in result.output
+
+
+def test_ps_explicit_unknown_provider_is_loud(runner, monkeypatch):
+    """`--provider foo` for an uninstalled/unknown provider should not be silent."""
+    def fake_resolve(name):
+        raise ImportError(f"{name} not installed")
+
+    monkeypatch.setattr(
+        "praisonaiagents.managed._compute_bridge.resolve_compute", fake_resolve
+    )
+    result = runner.invoke(app, ["ps", "--provider", "e2b"])
+    assert result.exit_code == 1
+    assert "e2b" in result.output
 
 
 # ── stop ─────────────────────────────────────────────────────────────────────
