@@ -37,6 +37,45 @@ def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str
         return {"_durable_iteration_index": index}
     return {}
 
+
+def _handle_native_deferred_result(
+    tool_result: Any,
+    messages: List[Dict],
+    tool_call_id: Optional[str],
+    function_name: str,
+) -> Any:
+    """Register a directly-returned ``DeferredToolResult`` on the native path.
+
+    Parity with the LiteLLM loop (``llm.py:_register_deferred_if_any``): a tool
+    may return a ``DeferredToolResult`` to signal "started; will resolve later".
+    On the native OpenAI-SDK loop the value was previously stringified and the
+    handle lost, so the eventual background result was never re-injected. Here
+    we register the handle on the shared resolver so a later
+    ``resolve_deferred(handle_id, value)`` appends a follow-up tool message to
+    the same ``messages`` history, and surface the ``note`` to the model now.
+
+    Returns the value to record for this turn (the deferred ``note`` string when
+    deferred, otherwise the unchanged ``tool_result``). Never raises.
+    """
+    from ..tools.call_executor import DeferredToolResult
+    if not isinstance(tool_result, DeferredToolResult):
+        return tool_result
+    try:
+        from ..tools.call_executor import get_deferred_resolver
+        resolver = get_deferred_resolver()
+
+        def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": f"[deferred:{function_name}] {value}",
+            })
+
+        resolver.register_if_absent(tool_result.handle_id, _reinject)
+    except Exception as e:  # noqa: BLE001 — registration must never break the turn
+        logging.debug("Native deferred registration skipped (non-fatal): %s", e)
+    return tool_result.note
+
 # Lazy imports for optional dependencies
 _openai_module = None
 _rich_console = None
@@ -1797,6 +1836,11 @@ class OpenAIClient:
                     except Exception as tool_error:
                         logging.warning(f"Tool '{function_name}' failed: {tool_error}")
                         tool_result = {"error": str(tool_error)}
+                    # Parity with the LiteLLM loop: register a deferred handle so
+                    # its eventual background value is re-injected, not lost.
+                    tool_result = _handle_native_deferred_result(
+                        tool_result, messages, _tool_call_id, function_name,
+                    )
                     try:
                         results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                     except (TypeError, ValueError):
@@ -2106,6 +2150,11 @@ class OpenAIClient:
                         logging.warning(f"Tool '{function_name}' failed: {tool_error}")
                         tool_result = {"error": str(tool_error)}
 
+                    # Parity with the LiteLLM loop: register a deferred handle so
+                    # its eventual background value is re-injected, not lost.
+                    tool_result = _handle_native_deferred_result(
+                        tool_result, messages, _tool_call_id, function_name,
+                    )
                     try:
                         results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                     except (TypeError, ValueError):
@@ -2314,6 +2363,11 @@ class OpenAIClient:
                                 **_durable_iteration_kwargs(
                                     execute_tool_fn, iteration_count
                                 ),
+                            )
+                            # Parity with the LiteLLM loop: register a deferred
+                            # handle so its eventual value is re-injected.
+                            tool_result = _handle_native_deferred_result(
+                                tool_result, messages, _tool_call_id, function_name,
                             )
                             results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                         except ToolExecutionError:
