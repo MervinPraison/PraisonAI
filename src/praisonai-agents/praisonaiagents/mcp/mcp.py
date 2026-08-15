@@ -428,9 +428,15 @@ class MCP:
                 self.is_npx = False
                 return
             
-        # Handle the single string format for stdio client
-        if isinstance(command_or_string, str) and args is None:
-            # Split the string into command and args using shell-like parsing
+        # Handle the single string format for stdio client.
+        # Shell-split the command string first, then decide based on how many
+        # tokens it yields. This makes multi-word forms like
+        # MCP("npx -y pkg", args=["/tmp"]) work — the first token is the
+        # executable and the remaining tokens are prepended to any explicitly
+        # supplied args. Using shlex handles all whitespace (spaces, tabs,
+        # newlines) and lets an executable path that contains spaces be passed
+        # intact by quoting it, e.g. MCP('"/opt/my app"', args=["run"]).
+        if isinstance(command_or_string, str):
             if platform.system() == 'Windows':
                 # Use shlex with posix=False for Windows to handle quotes and paths with spaces
                 parts = shlex.split(command_or_string, posix=False)
@@ -438,13 +444,19 @@ class MCP:
                 parts = [part.strip('"') for part in parts]
             else:
                 parts = shlex.split(command_or_string)
-            if not parts:
-                raise ValueError("Empty command string")
-            
-            cmd = parts[0]
-            arguments = parts[1:] if len(parts) > 1 else []
+
+            if len(parts) > 1:
+                # Multi-token string: first token is the executable, the rest
+                # are prepended to any explicitly supplied args.
+                cmd = parts[0]
+                arguments = parts[1:] + (args or [])
+            else:
+                # Single token (or a quoted spaced path): treat the whole
+                # string as a bare executable and keep explicit args as-is.
+                cmd = parts[0] if parts else command_or_string
+                arguments = args or []
         else:
-            # Use the original format with separate command and args
+            # Use the original format with a bare command and separate args
             cmd = command_or_string
             arguments = args or []
         
