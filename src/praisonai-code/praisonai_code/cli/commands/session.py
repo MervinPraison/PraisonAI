@@ -310,7 +310,7 @@ def session_resume(
                 content = msg.get("content", "")
                 if not content:
                     tool_calls = msg.get("tool_calls")
-                    if tool_calls:
+                    if isinstance(tool_calls, list) and tool_calls:
                         names = ", ".join(
                             (tc.get("function", {}) or {}).get("name", "tool")
                             for tc in tool_calls

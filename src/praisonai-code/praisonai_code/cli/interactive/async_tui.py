@@ -826,7 +826,7 @@ class AsyncTUI:
                 role = "system"
             if not content:
                 tool_calls = msg.get("tool_calls")
-                if tool_calls:
+                if isinstance(tool_calls, list) and tool_calls:
                     names = ", ".join(
                         (tc.get("function", {}) or {}).get("name", "tool")
                         for tc in tool_calls
@@ -1037,9 +1037,19 @@ Tips:
                         session = store.load(sorted_sessions[0].get("session_id"))
                         if session:
                             self.session_id = session.session_id
-                            # Load history
-                            history = session.get_chat_history()
+                            # Load the full stored history (not the default
+                            # 50-message tail) so the replay's "… N earlier
+                            # turns" note reflects the true total and older
+                            # turns aren't silently dropped before bounding.
+                            history = session.get_chat_history(
+                                max_messages=max(session.message_count, 1)
+                            )
                             self._conversation_history = history
+                            # Reset the display so repeated /continue calls (or
+                            # continuing after prior activity) redraw the
+                            # restored conversation cleanly instead of appending
+                            # to — and duplicating — stale on-screen turns.
+                            self.messages.clear()
                             self.messages.append(ChatMessage(
                                 role="system", 
                                 content=f"Continued session: {self.session_id} ({len(history)} messages)"
@@ -1759,10 +1769,22 @@ Example: /handoff code "refactor the auth module" """
                     continue
                 
                 if user_input.startswith("/"):
+                    before = len(self.messages)
                     self._handle_command(user_input)
-                    for msg in self.messages:
-                        if msg.role == "system":
+                    # Commands like /continue clear and repopulate the message
+                    # list with restored user/assistant turns. Render every
+                    # newly-appended message (not just system lines) so the
+                    # replayed conversation is visible in fallback mode too.
+                    new_msgs = self.messages[before:] if len(self.messages) >= before else list(self.messages)
+                    for msg in new_msgs:
+                        if msg.role == "user":
+                            print(f"› {msg.content}")
+                        elif msg.role == "assistant":
+                            print(f"● {msg.content}")
+                        else:
                             print(f"  {msg.content}")
+                    # Drop rendered system lines; keep user/assistant turns as
+                    # conversational context for subsequent prompts.
                     self.messages = [m for m in self.messages if m.role != "system"]
                     continue
                 
