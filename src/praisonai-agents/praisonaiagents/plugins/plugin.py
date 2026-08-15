@@ -26,9 +26,12 @@ class GuardrailBlocked(Exception):
     A ``POLICY``/``GUARDRAIL`` plugin can raise this from any ``before_*``
     method (``before_tool``, ``before_llm``, ``before_agent``,
     ``before_message``) to stop the tool call / LLM request / agent run /
-    inbound message. The plugin bridge converts it into a denying
-    ``HookResult`` so the runtime's existing ``is_blocked`` enforcement skips
-    the action and surfaces ``reason``.
+    inbound message. It may also be raised from ``after_tool`` to block
+    *propagation* of a tool result (e.g. secret/PII detected) — the tool has
+    already run, but the output is suppressed before it reaches the model.
+    The plugin bridge converts it into a denying ``HookResult`` so the
+    runtime's existing ``is_blocked`` enforcement skips the action and
+    surfaces ``reason``.
     """
 
     def __init__(self, reason: str = "Blocked by guardrail plugin"):
