@@ -106,8 +106,11 @@ class AutonomyConfig:
         track_changes: Whether to track filesystem changes via shadow git.
             Defaults to True when level="full_auto", False otherwise.
             When enabled, agent.undo()/redo()/diff() become available.
-        sandbox: Optional SandboxConfig for execution isolation.
-            When level="full_auto" and sandbox is None, subprocess sandbox is auto-enabled.
+        sandbox: Optional SandboxConfig, carried for forward compatibility.
+            NOT IMPLEMENTED: nothing currently reads this field, and no sandbox
+            is auto-enabled at any autonomy level. To isolate execution, set it
+            on the agent itself -- Agent(sandbox=...) -- or run the whole
+            workflow remotely with AgentFlow(run_on="docker").
         snapshot_dir: Directory for snapshot storage. Defaults to ~/.praisonai/snapshots.
     
     Usage::

@@ -79,19 +79,30 @@ class SandboxMixin:
             )
         
         # Security pre-check if enabled
+        security_warnings = None
         if check_security:
             from ..sandbox import check_code_safety, format_warnings
-            warnings = check_code_safety(code, language)
-            if warnings:
-                warning_text = format_warnings(warnings)
+            security_warnings = check_code_safety(code, language)
+            if security_warnings:
+                warning_text = format_warnings(security_warnings)
                 if self.verbose:
                     logger.warning(f"Security warnings for code execution:\n{warning_text}")
-                
-                # Store warnings in result metadata
-                kwargs.setdefault('metadata', {})['security_warnings'] = warnings
-        
+
         manager = self.get_sandbox_manager()
-        return await manager.run_code(code, language=language, **kwargs)
+        result = await manager.run_code(code, language=language, **kwargs)
+
+        # Attach warnings to the result rather than forwarding a `metadata`
+        # kwarg: SandboxProtocol.execute() has no such parameter, so passing it
+        # through raised TypeError for any code that tripped a warning -- i.e.
+        # sandboxed execution failed exactly when the check mattered most.
+        if security_warnings:
+            try:
+                existing = getattr(result, "metadata", None) or {}
+                existing["security_warnings"] = security_warnings
+                result.metadata = existing
+            except Exception:  # pragma: no cover - result may be immutable
+                logger.debug("Could not attach security warnings to sandbox result")
+        return result
     
     def execute_code_sync(
         self,
@@ -230,5 +241,15 @@ class SandboxMixin:
                 return result.stdout or result.output
             else:
                 return f"Error: {result.error or result.stderr}"
-        
-        return [execute_python_code, execute_shell_command]
+
+        # Tag as framework-generated so clone_for_channel() can drop these
+        # source-bound wrappers and regenerate clone-owned ones. Without the
+        # tag, a clone would inherit tools closing over the *source* agent and
+        # silently share its SandboxManager.
+        generated = [execute_python_code, execute_shell_command]
+        for _t in generated:
+            try:
+                _t._praison_sandbox_tool = True
+            except Exception:  # pragma: no cover - tool object may be immutable
+                pass
+        return generated

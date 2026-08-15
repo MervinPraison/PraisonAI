@@ -847,9 +847,11 @@ class ExecutionConfig:
     code_execution: bool = False
     code_mode: str = "safe"  # "safe" or "unsafe"
     
-    # Code execution sandbox mode - "sandbox" (default) uses subprocess isolation
-    # "direct" runs in current process (legacy, less secure)
-    code_sandbox_mode: str = "sandbox"  # "sandbox" or "direct"
+    # NOT IMPLEMENTED - no execution path reads this field, so setting it
+    # provides NO isolation. Do not rely on it for safety. Use
+    # Agent(sandbox=...) for local isolation, or AgentFlow(run_on="docker")
+    # to run a whole workflow in a remote sandbox.
+    code_sandbox_mode: str = "sandbox"  # "sandbox" or "direct" (inert)
 
     # Code-execution-with-tools (code mode): when True, model-generated code may
     # call the agent's registered tools directly via injected proxies, enabling
