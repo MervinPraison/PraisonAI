@@ -11,6 +11,20 @@ import asyncio
 import copy
 import threading
 
+import pytest
+
+
+class _BlockingDeepcopyValue:
+    def __init__(self, entered, release):
+        self.entered = entered
+        self.release = release
+
+    def __deepcopy__(self, memo):
+        self.entered.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("timed out waiting to finish deepcopy")
+        return "copied"
+
 
 class TestAgentDeepCopy:
     """Test Agent.__deepcopy__ and clone_for_channel()."""
@@ -104,3 +118,82 @@ class TestAgentDeepCopy:
         assert cloned._approvals_lock is not agent._approvals_lock
         assert agent._approvals_lock.locked() is True
         assert cloned._approvals_lock.locked() is False
+
+    @pytest.mark.parametrize(
+        "use_async_lock_helper",
+        [True, False],
+        ids=["async-lock-helper", "async-context-manager"],
+    )
+    def test_deepcopy_rejects_active_async_state_access(
+        self,
+        use_async_lock_helper,
+    ):
+        from praisonaiagents.agent.async_safety import AsyncSafeState
+
+        async def _exercise():
+            state = AsyncSafeState(["stable"])
+            entered = asyncio.Event()
+            release = asyncio.Event()
+
+            async def _hold_state():
+                context = state.async_lock() if use_async_lock_helper else state
+                async with context:
+                    entered.set()
+                    await release.wait()
+
+            holder = asyncio.create_task(_hold_state())
+            await entered.wait()
+            try:
+                with pytest.raises(
+                    RuntimeError,
+                    match="during asynchronous access",
+                ):
+                    copy.deepcopy(state)
+            finally:
+                release.set()
+                await holder
+
+            cloned = copy.deepcopy(state)
+            assert cloned.value == ["stable"]
+
+        asyncio.run(_exercise())
+
+    @pytest.mark.parametrize(
+        "use_async_lock_helper",
+        [True, False],
+        ids=["async-lock-helper", "async-context-manager"],
+    )
+    def test_async_state_access_rejects_active_deepcopy(
+        self,
+        use_async_lock_helper,
+    ):
+        from praisonaiagents.agent.async_safety import AsyncSafeState
+
+        async def _exercise():
+            copy_entered = threading.Event()
+            copy_release = threading.Event()
+            state = AsyncSafeState(
+                _BlockingDeepcopyValue(copy_entered, copy_release)
+            )
+            copy_task = asyncio.create_task(asyncio.to_thread(copy.deepcopy, state))
+            assert await asyncio.to_thread(copy_entered.wait, 5)
+
+            try:
+                context = state.async_lock() if use_async_lock_helper else state
+                with pytest.raises(
+                    RuntimeError,
+                    match="during synchronous deepcopy",
+                ):
+                    async with context:
+                        pass
+            finally:
+                copy_release.set()
+
+            cloned = await copy_task
+            assert cloned.value == "copied"
+
+            context = state.async_lock() if use_async_lock_helper else state
+            async with context as value:
+                assert value is state.value
+
+        asyncio.run(_exercise())

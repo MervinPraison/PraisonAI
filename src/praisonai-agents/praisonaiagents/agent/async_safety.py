@@ -110,14 +110,32 @@ class AsyncSafeState:
     def __init__(self, initial_value: Any = None):
         self.value = initial_value
         self._lock = DualLock()
+        self._activity_lock = threading.Lock()
+        self._async_holders = 0
+        self._copying = False
 
     def __deepcopy__(self, memo):
-        """Copy the protected value while replacing all lock state."""
+        """Copy protected state, rejecting overlap with asynchronous access."""
         result = type(self).__new__(type(self))
         memo[id(self)] = result
-        with self.lock():
-            result.value = copy.deepcopy(self.value, memo)
+        with self._activity_lock:
+            if self._async_holders:
+                raise RuntimeError(
+                    "Cannot deepcopy AsyncSafeState during asynchronous access"
+                )
+            if self._copying:
+                raise RuntimeError("AsyncSafeState deepcopy is already in progress")
+            self._copying = True
+        try:
+            with self.lock():
+                result.value = copy.deepcopy(self.value, memo)
+        finally:
+            with self._activity_lock:
+                self._copying = False
         result._lock = DualLock()
+        result._activity_lock = threading.Lock()
+        result._async_holders = 0
+        result._copying = False
         return result
         
     @contextmanager 
@@ -130,7 +148,25 @@ class AsyncSafeState:
     async def async_lock(self):
         """Acquire lock in async context."""
         async with self._lock.async_lock():
-            yield self.value
+            self._begin_async_access()
+            try:
+                yield self.value
+            finally:
+                self._end_async_access()
+
+    def _begin_async_access(self) -> None:
+        """Register async access unless a synchronous copy is in progress."""
+        with self._activity_lock:
+            if self._copying:
+                raise RuntimeError(
+                    "Cannot access AsyncSafeState during synchronous deepcopy"
+                )
+            self._async_holders += 1
+
+    def _end_async_access(self) -> None:
+        """Unregister one active asynchronous accessor."""
+        with self._activity_lock:
+            self._async_holders -= 1
             
     def __enter__(self):
         """Support for synchronous context manager protocol (backward compatibility)."""
@@ -146,12 +182,20 @@ class AsyncSafeState:
         """Support for asynchronous context manager protocol."""
         async_lock = self._lock._get_async_lock()
         await async_lock.acquire()
+        try:
+            self._begin_async_access()
+        except Exception:
+            async_lock.release()
+            raise
         return self.value
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Support for asynchronous context manager protocol."""
         async_lock = self._lock._get_async_lock()
-        async_lock.release()
+        try:
+            self._end_async_access()
+        finally:
+            async_lock.release()
         return None
             
     def get(self) -> Any:
