@@ -1039,7 +1039,10 @@ class AutoGenerator(BaseAutoGenerator):
             is_async=is_async,
         )
         json_data = json.loads(response.model_dump_json())
-        self.convert_and_save(json_data, merge=merge)
+        # Off-loop the blocking merge/YAML-dump/fsync so a running event loop
+        # (e.g. under `praisonai serve`) is not parked; mirrors the run path's
+        # asyncio.to_thread offload in AgentsGenerator._aload_config.
+        await asyncio.to_thread(self.convert_and_save, json_data, merge=merge)
         full_path = os.path.abspath(self.agent_file)
         return full_path
 
@@ -1546,10 +1549,16 @@ Respond with:
         )
         
         json_data = json.loads(response.model_dump_json())
-        
-        if merge and os.path.exists(self.workflow_file):
-            return self._save_workflow(self.merge_with_existing_workflow(json_data), pattern)
-        return self._save_workflow(json_data, pattern)
+
+        # Off-loop the blocking merge/read + YAML-dump/fsync so a running event
+        # loop (e.g. under `praisonai serve`) is not parked; mirrors the run
+        # path's asyncio.to_thread offload in AgentsGenerator._aload_config.
+        def _merge_and_save():
+            if merge and os.path.exists(self.workflow_file):
+                return self._save_workflow(self.merge_with_existing_workflow(json_data), pattern)
+            return self._save_workflow(json_data, pattern)
+
+        return await asyncio.to_thread(_merge_and_save)
     
     def merge_with_existing_workflow(self, new_data: Dict) -> Dict:
         """
@@ -1955,8 +1964,11 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
             ],
             is_async=is_async,
         )
-        
-        return self._save_workflow(response)
+
+        # Off-loop the blocking YAML-dump/fsync so a running event loop (e.g.
+        # under `praisonai serve`) is not parked; mirrors the run path's
+        # asyncio.to_thread offload in AgentsGenerator._aload_config.
+        return await asyncio.to_thread(self._save_workflow, response)
     
     def _get_prompt(self, include_judge: bool, include_approve: bool) -> str:
         """Generate the prompt for job workflow generation."""

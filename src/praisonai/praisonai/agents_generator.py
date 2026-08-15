@@ -1337,15 +1337,18 @@ class AgentsGenerator:
         # tool_timeout is enforced by _wrap_tool_with_timeout on the
         # sequential/hierarchical path via tools_dict. The native workflow engine
         # resolves its own tools by name, so that wrapper hook does not apply
-        # here. Surface the gap explicitly rather than dropping the field
-        # silently, so a user who set a timeout knows it is not enforced on this
-        # path.
+        # here. Fail fast rather than accepting the field and silently ignoring
+        # it, mirroring _validate_workflow_cli_capabilities which already
+        # refuses --resume/--session/--fork and --output stream-json on this
+        # path. A warn-only no-op left the same CLI+YAML surface with silently
+        # different execution semantics gated on the process: value.
         effective_timeout = self._resolve_effective_tool_timeout(config)
         if effective_timeout and effective_timeout > 0:
-            self.logger.warning(
-                "tool_timeout=%s is not enforced on the workflow (process: workflow) "
-                "path; per-tool timeouts apply to sequential/hierarchical runs only.",
-                effective_timeout,
+            raise ValueError(
+                f"tool_timeout={effective_timeout} is not supported for "
+                "'process: workflow' YAMLs; per-tool timeouts are only enforced "
+                "on the sequential/hierarchical path. Either remove tool_timeout "
+                "or convert to a sequential/hierarchical process."
             )
 
         # Pass model from config_list to workflow as default_llm
