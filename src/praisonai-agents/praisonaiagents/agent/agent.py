@@ -2447,28 +2447,26 @@ Your Goal: {self.goal}
         # Sandbox configuration - initialize SandboxMixin
         super().__init__(sandbox=sandbox)
 
-        # Give the model sandboxed code-execution tools when a sandbox is set.
-        # Without this, `sandbox=` built a SandboxConfig that nothing ever read:
-        # the agent looked isolated and was not. Note this isolates *code the
-        # model writes* -- Python callables passed via `tools=` are ordinary
-        # in-process functions and cannot be retrofitted into a sandbox.
-        if self.sandbox_config is not None:
-            try:
-                existing = {
-                    getattr(t, "__name__", getattr(t, "name", None))
-                    for t in (self.tools or [])
-                }
-                sandbox_tools = [
-                    t for t in self._get_code_execution_tools()
-                    if getattr(t, "__name__", getattr(t, "name", None)) not in existing
-                ]
-                if sandbox_tools:
-                    self.tools = list(self.tools or []) + sandbox_tools
-            except Exception as exc:  # pragma: no cover - never block construction
-                logging.warning(
-                    "Could not attach sandbox code-execution tools to %s: %s",
-                    self.name, exc,
-                )
+        # NOTE: `sandbox=` deliberately does NOT add code-execution tools.
+        #
+        # An earlier version auto-attached execute_python_code /
+        # execute_shell_command here. That was reverted: `sandbox=` is a
+        # RESTRICTION, and it must never grant a capability the caller did not
+        # ask for. Concretely, the injection
+        #   - escalated privilege: Agent(approval="read_only") exposes no tools,
+        #     but Agent(approval="read_only", sandbox=True) exposed two ungated
+        #     arbitrary-code-execution tools, since the injected names are not in
+        #     the approval registry's dangerous-tool presets; and
+        #   - advertised them to the model as "safely in sandbox" while the
+        #     default subprocess backend enforces none of its own SecurityPolicy
+        #     (network reachable despite allow_network=False; ~/.ssh readable
+        #     despite blocked_paths; `import subprocess` works despite
+        #     blocked_imports).
+        #
+        # `sandbox=` still configures isolation for the explicit, user-invoked
+        # agent.execute_code() / run_shell_command() APIs, which is what it has
+        # always meant. Giving the model a sandboxed execution tool should be an
+        # explicit act by the caller, the way MCP() is.
 
         # A managed backend takes over the whole turn before any local execution,
         # so a sandbox set alongside it silently does nothing. Say so.
