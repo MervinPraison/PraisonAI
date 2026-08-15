@@ -800,6 +800,43 @@ class AsyncTUI:
             return None
         return self._registry
 
+    def _replay_history(self, history, limit: int = 20) -> None:
+        """Redraw a restored conversation as live chat messages.
+
+        Reuses the same renderer that draws live turns so a resumed session
+        shows prior user/assistant turns (and tool activity) exactly as they
+        appeared, instead of only a one-line summary. Bounded to the last
+        ``limit`` turns with a note about older turns.
+        """
+        if not history:
+            return
+
+        total = len(history)
+        shown = history[-limit:] if limit and total > limit else history
+        if total > len(shown):
+            self.messages.append(ChatMessage(
+                role="system",
+                content=f"… {total - len(shown)} earlier turns",
+            ))
+
+        for msg in shown:
+            role = msg.get("role", "assistant")
+            content = msg.get("content", "")
+            if role == "tool":
+                role = "system"
+            if not content:
+                tool_calls = msg.get("tool_calls")
+                if tool_calls:
+                    names = ", ".join(
+                        (tc.get("function", {}) or {}).get("name", "tool")
+                        for tc in tool_calls
+                        if isinstance(tc, dict)
+                    )
+                    content = f"[tool call] {names}" if names else "[tool call]"
+                else:
+                    continue
+            self.messages.append(ChatMessage(role=role, content=content))
+
     def _handle_command(self, command: str) -> bool:
         """Handle slash commands. Returns True if handled."""
         parts = command.split(maxsplit=1)
@@ -1007,6 +1044,7 @@ Tips:
                                 role="system", 
                                 content=f"Continued session: {self.session_id} ({len(history)} messages)"
                             ))
+                            self._replay_history(history)
                         else:
                             self.messages.append(ChatMessage(role="system", content="Could not load session."))
             except Exception as e:
