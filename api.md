@@ -888,11 +888,13 @@ Methods:
 * <code title="cli">praisonai managed list <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed managed-callback <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed multi <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed ps <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed restore <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed resume <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed run <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed save <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed show <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
+* <code title="cli">praisonai managed stop <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai managed update <a href="./src/praisonai/praisonai/cli/commands/managed.py">--help</a></code>
 * <code title="cli">praisonai n8n export <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai n8n import <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
