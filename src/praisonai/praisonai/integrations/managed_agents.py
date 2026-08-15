@@ -1087,9 +1087,9 @@ def ManagedAgent(
     - provider="anthropic" → HostedAgent(provider="anthropic", ...)
     - provider in {"openai","gemini","ollama","local"} → LocalAgent(...)
       (DeprecationWarning: "use LocalAgent directly; put LLM name in model=")
-    - provider in {"e2b","modal","flyio","daytona","docker"} → raise ValueError
-      ("Cloud compute belongs on LocalAgent(compute=...). Hosted runtimes for
-       these providers are not yet available.")
+    - provider in {"e2b","modal","flyio","daytona","docker","tenki"} → emits a
+      DeprecationWarning and delegates to LocalManagedAgent(compute=<provider>).
+      (It does NOT raise; prefer LocalAgent(compute="...") directly.)
     
     Returns:
         An instance satisfying ``ManagedBackendProtocol``.

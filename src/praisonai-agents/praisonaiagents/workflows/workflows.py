@@ -631,12 +631,12 @@ class AgentFlow:
     # ============================================================
     # REMOTE EXECUTION
     # ============================================================
-    # Union[str, ComputeProviderProtocol] - run every step's shell/file tools in
-    # ONE shared remote sandbox ("docker", "e2b", "modal", "daytona", "flyio",
-    # "tenki", "local"). Agents share /workspace, so a file written by one step
-    # is visible to later steps. Orchestration stays local. Pass a configured
-    # provider instance instead of a name to customise image/resources.
-    compute: Optional[Any] = None
+    # Union[str, ComputeProviderProtocol] - where each step's shell/file tools
+    # run: "docker", "e2b", "modal", "daytona", "flyio", "tenki", "local".
+    # Every step shares ONE sandbox and /workspace, so a file written by one
+    # step is visible to later steps. Orchestration stays local. Pass a
+    # configured provider instance instead of a name to customise resources.
+    run_on: Optional[Any] = None
 
     # ============================================================
     # ROBUSTNESS PARAMS (debugging & audit trail)
@@ -1115,7 +1115,7 @@ class AgentFlow:
                 "separate Workflow instance per concurrent run."
             )
         try:
-            if self.compute is None:
+            if self.run_on is None:
                 return self._run_impl(input, llm, verbose, stream)
             # One sandbox for the whole run; torn down even if a step raises.
             with self._shared_compute() as shared:
@@ -1125,10 +1125,10 @@ class AgentFlow:
             self._execution_lock.release()
 
     def _shared_compute(self):
-        """Build the SharedCompute for this run (see the ``compute=`` field)."""
+        """Build the SharedCompute for this run (see the ``run_on=`` field)."""
         from ..managed.shared_compute import SharedCompute
 
-        return SharedCompute(self.compute)
+        return SharedCompute(self.run_on)
 
     def _collect_agents(self) -> List[Any]:
         """Walk steps (including nested route/parallel/loop/repeat/if) for Agents.

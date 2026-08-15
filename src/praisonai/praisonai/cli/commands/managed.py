@@ -653,6 +653,163 @@ def ids_restore(
 # ─────────────────────────────────────────────────────────────────────────────
 # Register sub-apps onto main app
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# sandbox lifecycle: ps / stop
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Providers worth polling for running sandboxes. "local" is excluded: it runs
+# on this machine and has nothing to reclaim.
+_PS_PROVIDERS = ("docker", "e2b", "modal", "daytona", "flyio", "tenki")
+
+
+def _discover_instances(provider_filter: Optional[str] = None):
+    """Return [(provider_name, InstanceInfo), ...] for every reachable provider.
+
+    Providers that are not installed or not configured are skipped silently --
+    absence of an E2B key is a normal state, not an error worth printing.
+    """
+    import asyncio
+
+    from praisonaiagents.managed._compute_bridge import resolve_compute
+
+    names = [provider_filter] if provider_filter else list(_PS_PROVIDERS)
+    found = []
+
+    async def _collect():
+        for name in names:
+            try:
+                provider = resolve_compute(name)
+            except Exception:
+                continue  # provider package not installed
+            try:
+                if not getattr(provider, "is_available", True):
+                    continue
+            except Exception:
+                continue  # daemon down / no credentials
+            try:
+                for info in await provider.list_instances():
+                    found.append((name, info))
+            except Exception:
+                continue
+
+    asyncio.run(_collect())
+    return found
+
+
+def _format_uptime(created_at: float) -> str:
+    import time
+
+    if not created_at:
+        return "-"
+    seconds = max(0, int(time.time() - created_at))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+    return f"{seconds // 86400}d{(seconds % 86400) // 3600:02d}h"
+
+
+@app.command("ps")
+def managed_ps(
+    provider: Optional[str] = typer.Option(
+        None, "--provider", "-p", help="Only this provider (docker, e2b, modal, ...)"
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """List running agent sandboxes.
+
+    Sandboxes normally shut themselves down when a run finishes, but a crashed
+    or killed run can leave one behind. This shows what is still up, so nothing
+    keeps burning resources unnoticed.
+
+    Example:
+        praisonai managed ps
+        praisonai managed ps --provider docker
+        praisonai managed ps --json
+    """
+    rows = _discover_instances(provider)
+
+    if as_json:
+        typer.echo(json.dumps([
+            {
+                "provider": name,
+                "instance_id": info.instance_id,
+                "status": getattr(info.status, "value", str(info.status)),
+                "endpoint": info.endpoint,
+                "created_at": info.created_at,
+                "metadata": info.metadata,
+            }
+            for name, info in rows
+        ], indent=2))
+        return
+
+    if not rows:
+        typer.echo("No running sandboxes.")
+        return
+
+    typer.echo(f"{'INSTANCE ID':<26} {'PROVIDER':<10} {'STATUS':<10} {'UPTIME':<8} IMAGE")
+    typer.echo("-" * 78)
+    for name, info in rows:
+        status = getattr(info.status, "value", str(info.status))
+        image = (info.metadata or {}).get("image") or info.endpoint or ""
+        typer.echo(
+            f"{info.instance_id:<26} {name:<10} {status:<10} "
+            f"{_format_uptime(info.created_at):<8} {image}"
+        )
+    typer.echo(f"\n{len(rows)} running. Stop with: praisonai managed stop <instance-id>")
+
+
+@app.command("stop")
+def managed_stop(
+    instance_id: Optional[str] = typer.Argument(None, help="Instance ID to stop"),
+    all_instances: bool = typer.Option(False, "--all", help="Stop every running sandbox"),
+    provider: Optional[str] = typer.Option(
+        None, "--provider", "-p", help="Only this provider"
+    ),
+):
+    """Stop a running agent sandbox (or all of them).
+
+    Example:
+        praisonai managed stop docker_a1b2c3d4
+        praisonai managed stop --all
+        praisonai managed stop --all --provider docker
+    """
+    import asyncio
+
+    from praisonaiagents.managed._compute_bridge import resolve_compute
+
+    if not instance_id and not all_instances:
+        typer.echo("Give an instance ID or --all. See: praisonai managed ps")
+        raise typer.Exit(1)
+
+    rows = _discover_instances(provider)
+    if instance_id:
+        rows = [r for r in rows if r[1].instance_id == instance_id]
+        if not rows:
+            typer.echo(f"No running sandbox with ID {instance_id!r}. See: praisonai managed ps")
+            raise typer.Exit(1)
+
+    if not rows:
+        typer.echo("No running sandboxes.")
+        return
+
+    stopped, failed = 0, 0
+    for name, info in rows:
+        try:
+            asyncio.run(resolve_compute(name).shutdown(info.instance_id))
+            typer.echo(f"Stopped {info.instance_id} ({name})")
+            stopped += 1
+        except Exception as e:
+            typer.echo(f"Failed to stop {info.instance_id} ({name}): {e}")
+            failed += 1
+
+    typer.echo(f"\n{stopped} stopped" + (f", {failed} failed" if failed else ""))
+    if failed:
+        raise typer.Exit(1)
+
+
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(agents_app,   name="agents")
 app.add_typer(envs_app,     name="envs")
