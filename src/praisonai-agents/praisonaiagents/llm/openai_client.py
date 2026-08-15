@@ -6,7 +6,9 @@ supporting both synchronous and asynchronous operations.
 """
 
 import os
+import base64
 import logging
+import mimetypes
 from praisonaiagents._logging import get_logger
 import time
 import json
@@ -16,6 +18,7 @@ from typing import Any, Dict, List, Optional, Union, AsyncIterator, Iterator, Ca
 from pydantic import BaseModel
 from dataclasses import dataclass
 import inspect
+from pathlib import Path
 
 from ..errors import ToolExecutionError
 
@@ -675,7 +678,11 @@ class OpenAIClient:
                         "output": msg.get("content", ""),
                     })
                 else:
-                    input_items.append(msg)
+                    item = dict(msg)
+                    item["content"] = self._build_responses_content(
+                        msg.get("content", "")
+                    )
+                    input_items.append(item)
 
         if instructions:
             params["instructions"] = instructions
@@ -708,6 +715,65 @@ class OpenAIClient:
             params["temperature"] = temperature
 
         return params
+
+    @staticmethod
+    def _normalise_responses_image_url(image_url: Any) -> str:
+        """Return an API-fetchable URL, encoding local image files as data URLs."""
+        if isinstance(image_url, dict):
+            image_url = image_url.get("url", "")
+        if not isinstance(image_url, str) or not image_url:
+            raise ValueError("Image content must include a non-empty URL or local path")
+        if image_url.startswith(("http://", "https://", "data:")):
+            return image_url
+
+        image_path = Path(image_url).expanduser()
+        if not image_path.is_file():
+            raise FileNotFoundError(
+                f"Local image file does not exist: {image_path}"
+            )
+        mime_type = mimetypes.guess_type(image_path.name)[0]
+        if not mime_type or not mime_type.startswith("image/"):
+            raise ValueError(f"Unsupported local image type: {image_path}")
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    @classmethod
+    def _build_responses_content(cls, content: Any) -> Any:
+        """Translate Chat Completions content parts to Responses API parts."""
+        if not isinstance(content, list):
+            return content
+
+        responses_content: List[Any] = []
+        for part in content:
+            if not isinstance(part, dict):
+                responses_content.append(part)
+                continue
+            part_type = part.get("type")
+            if part_type == "text":
+                responses_content.append({
+                    "type": "input_text",
+                    "text": part.get("text", ""),
+                })
+            elif part_type == "image_url":
+                image_item = {
+                    "type": "input_image",
+                    "image_url": cls._normalise_responses_image_url(
+                        part.get("image_url")
+                    ),
+                }
+                image_value = part.get("image_url")
+                if isinstance(image_value, dict) and image_value.get("detail"):
+                    image_item["detail"] = image_value["detail"]
+                responses_content.append(image_item)
+            elif part_type == "input_image":
+                item = dict(part)
+                item["image_url"] = cls._normalise_responses_image_url(
+                    part.get("image_url")
+                )
+                responses_content.append(item)
+            else:
+                responses_content.append(part)
+        return responses_content
 
     def _responses_to_chat_completion(self, response) -> ChatCompletion:
         """
@@ -890,6 +956,8 @@ class OpenAIClient:
                         ))
                     
                     return final_response
+                except (FileNotFoundError, ValueError):
+                    raise
                 except Exception as e:
                     self.logger.warning(f"Responses API streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
@@ -1157,6 +1225,8 @@ class OpenAIClient:
                         ))
                     
                     return final_response
+                except (FileNotFoundError, ValueError):
+                    raise
                 except Exception as e:
                     self.logger.warning(f"Responses API async streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
@@ -1352,6 +1422,8 @@ class OpenAIClient:
                 )
                 raw = self.sync_client.responses.create(**resp_params)
                 return self._responses_to_chat_completion(raw)
+            except (FileNotFoundError, ValueError):
+                raise
             except Exception as e:
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
@@ -1411,6 +1483,8 @@ class OpenAIClient:
                 )
                 raw = await self.async_client.responses.create(**resp_params)
                 return self._responses_to_chat_completion(raw)
+            except (FileNotFoundError, ValueError):
+                raise
             except Exception as e:
                 self.logger.warning(f"Responses API failed, falling back to Chat Completions: {e}")
                 # Fall through to Chat Completions
