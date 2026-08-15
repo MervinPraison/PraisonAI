@@ -1,0 +1,40 @@
+# Run a whole workflow's shell/file tools inside ONE shared remote sandbox.
+#
+#   praisonai examples/yaml/workflows/remote_sandbox_workflow.yaml
+#
+# `run_on:` is the only line that differs from a normal local workflow. Every
+# step shares the same sandbox and /workspace, so the file the writer creates
+# is there for the reader. Orchestration still runs on your machine, and the
+# sandbox is torn down when the run finishes.
+#
+# Providers: docker | e2b | modal | daytona | flyio | tenki | local
+#   - docker needs a local Docker daemon and nothing else
+#   - e2b / modal / daytona / flyio need that provider's API key
+#
+# See what is still running:  praisonai managed ps
+# Reclaim strays:             praisonai managed stop --all
+
+name: remote-sandbox-demo
+run_on: docker
+
+agents:
+  writer:
+    role: File Writer
+    goal: Write files into the shared workspace
+    instructions: >
+      You have write_file and execute_command running on a remote Linux
+      sandbox. Use them; never say you cannot run commands.
+
+  reader:
+    role: File Reader
+    goal: Read files back out of the shared workspace
+    instructions: >
+      You have read_file and execute_command running on the same remote
+      sandbox the writer used. Use them.
+
+steps:
+  - agent: writer
+    action: "Use write_file to put exactly 'hello from step 1' in /workspace/note.txt"
+
+  - agent: reader
+    action: "Use read_file on /workspace/note.txt and report its exact contents"
