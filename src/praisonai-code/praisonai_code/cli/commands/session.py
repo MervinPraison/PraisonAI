@@ -300,9 +300,25 @@ def session_resume(
 
         if restored.chat_history:
             output.print("\n--- Restored Conversation ---\n")
-            for msg in restored.chat_history[-10:]:
+            limit = 20
+            total = len(restored.chat_history)
+            shown = restored.chat_history[-limit:] if total > limit else restored.chat_history
+            if total > len(shown):
+                output.print(f"… {total - len(shown)} earlier turns\n")
+            for msg in shown:
                 role = msg.get("role", "?")
                 content = msg.get("content", "")
+                if not content:
+                    tool_calls = msg.get("tool_calls")
+                    if isinstance(tool_calls, list) and tool_calls:
+                        names = ", ".join(
+                            (tc.get("function", {}) or {}).get("name", "tool")
+                            for tc in tool_calls
+                            if isinstance(tc, dict)
+                        )
+                        content = f"[tool call] {names}" if names else "[tool call]"
+                    else:
+                        continue
                 output.print(f"[{role}] {content}")
         return
 
