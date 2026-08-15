@@ -8,6 +8,8 @@ let a privilege-escalating change ship on a green suite. These tests assert the
 calls, and never silently grants the model new capabilities.
 """
 
+import os
+
 import pytest
 
 from praisonaiagents import Agent
@@ -111,12 +113,17 @@ def test_backend_alone_does_not_warn(recwarn):
 
 # ── the no-injection contract must stay documented at the call site ──────────
 def test_no_injection_contract_is_documented():
+    """The call site should explain *why* sandbox= adds no tools, so the next
+    person does not "fix" the missing injection. Assert on the concepts rather
+    than an exact phrase, so harmless wording edits don't fail the suite."""
     import inspect
 
     from praisonaiagents.agent import agent as agent_mod
 
-    src = inspect.getsource(agent_mod.Agent.__init__)
-    assert "does NOT add code-execution tools" in src
+    src = inspect.getsource(agent_mod.Agent.__init__).lower()
+    assert "sandbox" in src
+    assert "does not add" in src or "not add" in src or "no code-execution" in src
+    assert "restriction" in src
 
 
 # ── inert fields must stay labelled ──────────────────────────────────────────
@@ -130,3 +137,20 @@ def test_inert_fields_are_documented_as_inert():
     src = inspect.getsource(feature_configs.ExecutionConfig)
     idx = src.find("code_sandbox_mode")
     assert "NOT IMPLEMENTED" in src[max(0, idx - 400):idx]
+
+
+# ── real agentic run: sandbox= adds no model-visible execution tools ─────────
+@pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="requires a live LLM key; run locally to exercise the real path",
+)
+def test_sandbox_agent_start_adds_no_execution_tools():
+    """End-to-end guard: build a sandboxed Agent, run a real prompt through the
+    LLM, print the output, and confirm the model-visible tool set never gained
+    execute_python_code / execute_shell_command from `sandbox=` alone."""
+    agent = Agent(name="E2E", instructions="Reply briefly.", sandbox=True)
+    output = agent.start("Say the single word: ok")
+    print(output)
+    names = set(_tool_names(agent))
+    assert "execute_python_code" not in names
+    assert "execute_shell_command" not in names
