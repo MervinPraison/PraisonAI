@@ -462,6 +462,7 @@ def _run_print_code(
     scripts/CI/benchmarks a reliable signal — parity with ``run --output json``.
     """
     import json
+    import os
 
     try:
         from praisonaiagents import Agent
@@ -494,7 +495,11 @@ def _run_print_code(
         "name": "CodeAgent",
         "role": "Code Assistant",
         "goal": "Help with coding tasks",
-        "verbose": verbose,
+        "instructions": (
+            "You are a terminal coding assistant. Inspect the workspace and "
+            "use the provided tools for coding tasks. Keep all file operations "
+            "inside the configured workspace."
+        ),
         # A minimal output preset keeps the agent from printing its own
         # decorations so stdout carries only our envelope.
         "output": "minimal",
@@ -519,6 +524,11 @@ def _run_print_code(
     result = None
     error_message = None
     try:
+        workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
+        agent_config["tools"] = _get_headless_code_tools(
+            groups=["acp", "edit", "search", "lsp"],
+            workspace=workspace,
+        )
         agent = Agent(**agent_config)
         if thinking_budget is not None:
             agent.thinking_budget = thinking_budget
@@ -535,6 +545,13 @@ def _run_print_code(
     except Exception as exc:  # noqa: BLE001 - surface any failure via exit code
         status = "error"
         error_message = str(exc)
+    finally:
+        try:
+            from praisonai_code.cli.features.interactive_tools import cleanup_runtime
+
+            cleanup_runtime()
+        except Exception:
+            pass
 
     if status != "error" and not _print_result_succeeded(result):
         status = "failed"
@@ -569,6 +586,13 @@ def _run_print_code(
 
     if status != "ok":
         raise typer.Exit(1)
+
+
+def _get_headless_code_tools(*, groups: List[str], workspace: str):
+    """Load the same workspace-bound coding tool groups used by the TUI."""
+    from praisonai_code.cli.features.interactive_tools import get_interactive_tools
+
+    return get_interactive_tools(groups=groups, workspace=workspace)
 
 
 def _run_profiled_code(

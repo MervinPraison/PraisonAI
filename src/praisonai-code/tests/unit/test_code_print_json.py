@@ -14,6 +14,7 @@ scripts, CI, and benchmark harnesses. These tests assert the new `-p/--print` +
 """
 
 import json
+import os
 
 import pytest
 from typer.testing import CliRunner
@@ -93,6 +94,109 @@ def test_code_print_defaults_to_json(monkeypatch):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout.strip())
     assert payload["result"] == "ok result"
+
+
+def test_code_print_uses_supported_agent_kwargs_and_workspace_tools(monkeypatch, tmp_path):
+    """The real constructor contract and coding-tool wiring must stay aligned."""
+    import inspect
+    import praisonaiagents
+    from praisonaiagents.agent.agent import Agent as RealAgent
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "ok"
+
+    def fake_tools(*, groups, workspace):
+        captured["tool_groups"] = groups
+        captured["workspace"] = workspace
+        return [lambda: None]
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+    monkeypatch.setattr(code_module, "_get_headless_code_tools", fake_tools)
+
+    result = CliRunner().invoke(
+        app,
+        ["-p", "--workspace", str(tmp_path), "inspect the workspace"],
+    )
+
+    assert result.exit_code == 0, result.output
+    real_params = set(inspect.signature(RealAgent.__init__).parameters)
+    agent_keys = set(captured) - {"tool_groups", "workspace"}
+    assert agent_keys <= real_params
+    assert "verbose" not in captured
+    assert captured["output"] == "minimal"
+    assert captured["tools"]
+    assert captured["workspace"] == str(tmp_path)
+    assert captured["tool_groups"] == ["acp", "edit", "search", "lsp"]
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_REAL_KEY_TESTS", "").lower() not in {"1", "true", "yes"}
+    or not os.environ.get("OPENAI_API_KEY"),
+    reason="Real OpenAI test disabled",
+)
+def test_code_print_real_agent_writes_workspace(tmp_path):
+    """Run the real headless coding agent and exercise a workspace write."""
+    target = tmp_path / "headless_probe.txt"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "-p",
+            "--output",
+            "json",
+            "--model",
+            "gpt-4o-mini",
+            "--workspace",
+            str(tmp_path),
+            "--dangerously-skip-approval",
+            f"Create {target.name} containing exactly HEADLESS_OK.",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout.strip())
+    assert payload["status"] == "ok"
+    assert target.read_text(encoding="utf-8").strip() == "HEADLESS_OK"
+
+
+def test_headless_search_tools_are_workspace_bound(tmp_path):
+    """Search tools must contain reads to --workspace, not the process cwd.
+
+    The core ``grep``/``glob`` default containment to ``os.getcwd()`` and
+    ``ast_grep_search`` performs none, so the headless loader must bind them to
+    the configured workspace. A model-supplied path that escapes the workspace
+    (absolute or ``..``) must be rejected without touching the filesystem.
+    """
+    from praisonai_code.cli.features.interactive_tools import (
+        ToolConfig,
+        _load_search_tools,
+    )
+
+    (tmp_path / "inside.txt").write_text("needle here", encoding="utf-8")
+
+    config = ToolConfig(workspace=str(tmp_path))
+    tools = _load_search_tools(config)
+    by_name = {t.__name__: t for t in tools.values()}
+
+    # grep is always available (pure-Python fallback), so assert on it.
+    grep = by_name["grep"]
+    assert "escapes the workspace" in grep("needle", path="/etc")
+    assert "escapes the workspace" in grep("needle", path="../../..")
+    # An in-workspace search still works and finds the seeded match.
+    assert "inside.txt" in grep("needle", path=".")
+
+    if "glob" in by_name:
+        assert "escapes the workspace" in by_name["glob"]("*", path="/etc")
+    if "ast_grep_search" in by_name:
+        assert "escapes the workspace" in by_name["ast_grep_search"](
+            "x", lang="python", path="/etc"
+        )
 
 
 def test_code_print_text_mode_clean_stdout(monkeypatch):

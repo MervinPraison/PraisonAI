@@ -232,30 +232,146 @@ def _load_basic_tools() -> Dict[str, Callable]:
     return tools
 
 
-def _load_search_tools() -> Dict[str, Callable]:
+def _load_search_tools(config: ToolConfig) -> Dict[str, Callable]:
     """Lazy load fast codebase-search tools from praisonaiagents.
 
     Wires the existing core search builtins into the default interactive
     toolset so the coding agent no longer has to shell out to a raw
     ``grep -rn``: ripgrep-backed ``grep`` and ``glob`` (gitignore-aware,
     result-capped, truncation-safe) and structural ``ast_grep_search``.
+
+    The core ``grep``/``glob`` contain paths to ``os.getcwd()`` and
+    ``ast_grep_search`` performs no containment at all. In headless
+    ``code -p --workspace <dir>`` mode the process is not chdir'd into the
+    selected workspace, so a model-supplied ``path`` (relative *or* absolute)
+    could read outside it. Fail closed by binding every search tool's ``path``
+    to the configured workspace before delegating — mirroring the containment
+    the edit/ACP/LSP groups already enforce. If containment is unavailable we
+    do not expose the search tools rather than expose an unbounded reader.
+
+    The wrapper resolves the caller path against the workspace root and then
+    delegates with the process cwd temporarily pinned to that root, so the
+    core tool's own ``os.getcwd()``-based containment agrees with ours instead
+    of rejecting a legitimate absolute in-workspace path.
     """
-    tools = {}
+    tools: Dict[str, Callable] = {}
 
     try:
-        from praisonaiagents.tools import grep
+        import contextlib
+        from pathlib import Path
+
+        from praisonaiagents.tools.path_safety import resolve_within_root
+    except ImportError as e:
+        logger.warning(
+            f"Search tools disabled: path containment unavailable: {e}"
+        )
+        return tools
+
+    root = str(Path(config.workspace).resolve())
+
+    def _contained(path: Optional[str]) -> Optional[str]:
+        """Resolve *path* under the workspace root, or ``None`` if it escapes."""
+        return resolve_within_root(path or ".", root)
+
+    @contextlib.contextmanager
+    def _in_workspace():
+        """Pin the process cwd to the workspace root for the delegated call.
+
+        The core search builtins hard-bind containment/relative resolution to
+        ``os.getcwd()``. Restored in a ``finally`` so it never leaks. Best
+        effort: if the chdir fails we still return the (already contained)
+        absolute path to the core tool.
+        """
+        prev = None
+        try:
+            prev = os.getcwd()
+        except OSError:
+            prev = None
+        try:
+            os.chdir(root)
+        except OSError:
+            pass
+        try:
+            yield
+        finally:
+            if prev is not None:
+                try:
+                    os.chdir(prev)
+                except OSError:
+                    pass
+
+    try:
+        from praisonaiagents.tools import grep as _grep
+
+        def grep(pattern: str, path: str = ".", glob: Optional[str] = None,
+                 case_insensitive: bool = False, max_results: int = 100) -> str:
+            """Search file contents for a regex/literal pattern in the workspace.
+
+            Args:
+                pattern: Regex/literal to search for.
+                path: Directory/file under the workspace to search.
+                glob: Optional filename glob (e.g. ``"*.py"``).
+                case_insensitive: Case-insensitive matching when True.
+                max_results: Hard cap on the number of matching lines returned.
+
+            Returns:
+                ``path:line: match`` entries, or an error string.
+            """
+            safe = _contained(path)
+            if safe is None:
+                return f"Error: path {path!r} escapes the workspace."
+            with _in_workspace():
+                return _grep(pattern, safe, glob, case_insensitive, max_results)
+
         tools["grep"] = grep
     except ImportError:
         logger.debug("grep not available")
 
     try:
-        from praisonaiagents.tools import glob
+        from praisonaiagents.tools import glob as _glob
+
+        def glob(pattern: str, path: str = ".", max_results: int = 100) -> str:
+            """Return files matching a glob pattern under the workspace.
+
+            Args:
+                pattern: Glob pattern (e.g. ``"**/*.py"``).
+                path: Directory under the workspace to search.
+                max_results: Hard cap on the number of paths returned.
+
+            Returns:
+                Newline-joined relative file paths, or an error string.
+            """
+            safe = _contained(path)
+            if safe is None:
+                return f"Error: path {path!r} escapes the workspace."
+            with _in_workspace():
+                return _glob(pattern, safe, max_results)
+
         tools["glob"] = glob
     except ImportError:
         logger.debug("glob not available")
 
     try:
-        from praisonaiagents.tools import ast_grep_search
+        from praisonaiagents.tools import ast_grep_search as _ast_grep_search
+
+        def ast_grep_search(pattern: str, lang: str, path: str = ".",
+                            json_output: bool = True) -> str:
+            """Structural (AST) code search under the workspace.
+
+            Args:
+                pattern: AST pattern (e.g. ``"def $FN($$$)"``).
+                lang: Programming language (python, javascript, ...).
+                path: Directory/file under the workspace to search.
+                json_output: Return JSON when True.
+
+            Returns:
+                Search results, or an error string.
+            """
+            safe = _contained(path)
+            if safe is None:
+                return f"Error: path {path!r} escapes the workspace."
+            return _ast_grep_search(pattern, lang, safe, json_output)
+
         tools["ast_grep_search"] = ast_grep_search
     except ImportError:
         logger.debug("ast_grep_search not available")
@@ -557,7 +673,7 @@ def get_interactive_tools(
     
     # Load fast search tools (always available, no runtime needed)
     if config.enable_search and not (disable and "search" in disable):
-        search_tools = _load_search_tools()
+        search_tools = _load_search_tools(config)
         all_tools.update(search_tools)
     
     # Load targeted/fuzzy edit tools (no runtime needed)
