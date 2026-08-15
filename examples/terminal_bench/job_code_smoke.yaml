@@ -14,9 +14,9 @@ datasets:
     # A small verified subset for a cheap smoke run. Verify against the registry
     # with `harbor datasets list` before editing.
     task_names:
-      - hello-world
-      - fix-permissions
-      - csv-to-parquet
+      - terminal-bench/build-pmars
+      - terminal-bench/bn-fit-modify
+      - terminal-bench/break-filter-js-from-html
 
 agents:
   - import_path: examples.terminal_bench.praisonai_code_agent:PraisonAICodeAgent
