@@ -1332,6 +1332,28 @@ wheels = [
 ]
 
 [[package]]
+name = "novita-sandbox"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "dockerfile-parse" },
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "packaging" },
+    { name = "protobuf" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+    { name = "rich" },
+    { name = "typing-extensions" },
+    { name = "wcmatch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1d/40/7bc405ef0335a292296c131a8789361df251864127f9903903fde770c272/novita_sandbox-2.1.0.tar.gz", hash = "sha256:dab6508370ea53b037db754ccf9e7bb9e559ce6966586ab8921c44365c0a55cb", size = 495277, upload-time = "2026-08-12T05:42:02.023Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/1a/c9d35a60ca68d263f2955eca325e0ff0ebd0333623ce6794ca50265d11d1/novita_sandbox-2.1.0-py3-none-any.whl", hash = "sha256:834d007a88b960345238463a68a1e4d3d4e225378e96948b199824fc93e33a8a", size = 623296, upload-time = "2026-08-12T05:42:00.293Z" },
+]
+
+[[package]]
 name = "obstore"
 version = "0.8.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1584,7 +1606,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-sandbox"
-version = "0.0.11"
+version = "0.0.12"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1600,6 +1622,7 @@ all = [
     { name = "docker" },
     { name = "e2b-code-interpreter" },
     { name = "modal" },
+    { name = "novita-sandbox" },
     { name = "sandlock" },
 ]
 daytona = [
@@ -1613,6 +1636,9 @@ e2b = [
 ]
 modal = [
     { name = "modal" },
+]
+novita = [
+    { name = "novita-sandbox" },
 ]
 sandlock = [
     { name = "sandlock" },
@@ -1629,17 +1655,18 @@ requires-dist = [
     { name = "docker", marker = "extra == 'docker'", specifier = ">=7.0.0" },
     { name = "e2b-code-interpreter", marker = "extra == 'e2b'", specifier = ">=1.0.0" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=0.64.0" },
-    { name = "praisonai-sandbox", extras = ["docker", "e2b", "sandlock", "ssh", "modal", "daytona"], marker = "extra == 'all'" },
+    { name = "novita-sandbox", marker = "extra == 'novita'", specifier = ">=2.0.0" },
+    { name = "praisonai-sandbox", extras = ["docker", "e2b", "sandlock", "ssh", "modal", "daytona", "novita"], marker = "extra == 'all'" },
     { name = "praisonaiagents", directory = "../praisonai-agents" },
     { name = "rich", specifier = ">=13.7" },
     { name = "sandlock", marker = "extra == 'sandlock'", specifier = ">=0.1.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
-provides-extras = ["docker", "e2b", "sandlock", "ssh", "modal", "daytona", "all"]
+provides-extras = ["docker", "e2b", "sandlock", "ssh", "modal", "daytona", "novita", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.166"
+version = "1.6.167"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
