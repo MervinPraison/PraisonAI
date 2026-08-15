@@ -392,28 +392,53 @@ class DockerCompute:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._shutdown_sync, instance_id)
 
+    def _find_container(self, instance_id: str):
+        """Look up a container by name, for instances this process didn't start.
+
+        ``_containers`` only knows about instances provisioned by *this*
+        process, so a CLI invocation (``praisonai managed stop``) would
+        otherwise find nothing and silently no-op.
+        """
+        try:
+            return self._get_client().containers.get(f"praisonai_{instance_id}")
+        except Exception:
+            return None
+
     def _shutdown_sync(self, instance_id: str) -> None:
         info = self._containers.pop(instance_id, None)
-        if info:
-            container = info["container"]
-            try:
-                container.stop(timeout=10)
-                if info["config"].auto_shutdown:
-                    container.remove(force=True)
-            except Exception as e:
-                logger.warning("[docker_compute] shutdown error: %s", e)
-            logger.info("[docker_compute] shutdown: %s", instance_id)
+        container = info["container"] if info else self._find_container(instance_id)
+        if container is None:
+            # Report rather than silently succeeding: callers (and the CLI)
+            # must be able to tell "stopped it" from "never found it".
+            raise ValueError(f"No docker container found for instance {instance_id!r}")
+
+        # Containers started by another process have no in-process config;
+        # default to removing, matching ComputeConfig.auto_shutdown's default.
+        auto_shutdown = info["config"].auto_shutdown if info else True
+        try:
+            container.stop(timeout=10)
+            if auto_shutdown:
+                container.remove(force=True)
+        except Exception as e:
+            logger.warning("[docker_compute] shutdown error: %s", e)
+            raise
+        logger.info("[docker_compute] shutdown: %s", instance_id)
 
     async def get_status(self, instance_id: str) -> Any:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
         info = self._containers.get(instance_id)
         if not info:
-            return InstanceInfo(
-                instance_id=instance_id,
-                status=InstanceStatus.STOPPED,
-                provider="docker",
-            )
+            # May have been started by another process; look it up by name
+            # before declaring it stopped.
+            container = self._find_container(instance_id)
+            if container is None:
+                return InstanceInfo(
+                    instance_id=instance_id,
+                    status=InstanceStatus.STOPPED,
+                    provider="docker",
+                )
+            info = {"container": container}
 
         try:
             info["container"].reload()
@@ -528,23 +553,75 @@ class DockerCompute:
             return False
 
     async def list_instances(self) -> list:
+        """List every running praisonai-managed container on this host.
+
+        Enumerates Docker by the ``praisonai=managed`` label rather than the
+        in-process ``_containers`` registry, so instances started by an earlier
+        process (a finished script, a crashed run) are still discoverable --
+        which is the whole point of being able to find and reclaim strays.
+        """
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
-        result = []
-        for iid, info in self._containers.items():
+        import calendar
+        import email.utils
+
+        def _created_at(container, fallback: float) -> float:
+            """Best-effort container start time as a POSIX timestamp."""
+            created = (container.attrs or {}).get("Created")
+            if not isinstance(created, str) or not created:
+                return fallback
             try:
-                info["container"].reload()
-                if info["container"].status == "running":
-                    result.append(InstanceInfo(
-                        instance_id=iid,
-                        status=InstanceStatus.RUNNING,
-                        endpoint=f"docker://{info['container'].id[:12]}",
-                        provider="docker",
-                        created_at=info.get("created_at", 0),
-                    ))
+                # Docker reports RFC3339 with nanosecond precision, which
+                # datetime cannot parse directly; trim to microseconds.
+                text = created.replace("Z", "+00:00")
+                if "." in text:
+                    head, _, tail = text.partition(".")
+                    frac, sign, offset = (
+                        tail.partition("+") if "+" in tail else tail.partition("-")
+                    )
+                    text = f"{head}.{frac[:6]}{sign}{offset}"
+                from datetime import datetime
+
+                return datetime.fromisoformat(text).timestamp()
             except Exception:
-                pass
-        return result
+                try:
+                    return calendar.timegm(email.utils.parsedate(created))
+                except Exception:
+                    return fallback
+
+        def _list_sync():
+            client = self._get_client()
+            containers = client.containers.list(
+                filters={"label": "praisonai=managed", "status": "running"}
+            )
+            found = []
+            for container in containers:
+                instance_id = (container.labels or {}).get("instance_id")
+                if not instance_id:
+                    # Fall back to the naming convention for older containers.
+                    instance_id = (container.name or "").removeprefix("praisonai_")
+                if not instance_id:
+                    continue
+                known = self._containers.get(instance_id, {})
+                found.append(InstanceInfo(
+                    instance_id=instance_id,
+                    status=InstanceStatus.RUNNING,
+                    endpoint=f"docker://{container.id[:12]}",
+                    provider="docker",
+                    created_at=_created_at(container, known.get("created_at", 0)),
+                    metadata={
+                        "image": (container.image.tags or [""])[0] if container.image else "",
+                        "name": container.name or "",
+                    },
+                ))
+            return found
+
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, _list_sync)
+        except Exception as exc:
+            logger.debug("[docker_compute] list_instances failed: %s", exc)
+            return []
 
     def _install_packages_sync(self, container, packages: Dict[str, list]) -> None:
         pip_pkgs = packages.get("pip", [])

@@ -237,9 +237,9 @@ def test_collect_agents_walks_nested_steps_and_dedupes():
     assert [x.name for x in collected] == ["A", "B"], "each agent exactly once, in order"
 
 
-def test_flow_without_compute_does_not_provision():
+def test_flow_without_run_on_does_not_provision():
     from praisonaiagents import AgentFlow
 
     flow = AgentFlow(steps=[FakeAgent("A")])
-    assert flow.compute is None
+    assert flow.run_on is None
     assert flow._collect_agents()[0].tools == []
