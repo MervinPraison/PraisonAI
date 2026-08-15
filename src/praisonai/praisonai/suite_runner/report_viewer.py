@@ -190,8 +190,9 @@ def find_latest_report_dir(suite: str, base_dir: Optional[Path] = None) -> Optio
     if not candidates:
         return None
     
-    # Sort by mtime (newest first)
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # Sort by mtime (newest first), breaking ties by name so timestamp-named
+    # dirs (e.g. "20260109_140000") remain deterministic when mtimes collide.
+    candidates.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
     return candidates[0]
 
 
