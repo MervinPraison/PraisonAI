@@ -2371,7 +2371,11 @@ Your Goal: {self.goal}"""
                     task_name=task_name,
                     task_description=task_description,
                     task_id=task_id,
-                    agent_name=getattr(self, 'name', 'assistant')
+                    agent_name=getattr(self, 'name', 'assistant'),
+                    # Durable re-injection target for deferred tool results:
+                    # background jobs completing after this call must land in the
+                    # persistent history a later turn replays, not the loop copy.
+                    deferred_history_sink=getattr(self, 'chat_history', None),
                 )
                 return final_response
             except ValueError as e:
@@ -2427,6 +2431,8 @@ Your Goal: {self.goal}"""
                     ]
                     or None
                 ),
+                # Durable re-injection target for deferred tool results (see above).
+                deferred_history_sink=getattr(self, 'chat_history', None),
             )
             return final_response
             

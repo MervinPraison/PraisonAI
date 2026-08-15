@@ -43,6 +43,7 @@ def _handle_native_deferred_result(
     messages: List[Dict],
     tool_call_id: Optional[str],
     function_name: str,
+    history_sink: Optional[List[Dict]] = None,
 ) -> Any:
     """Register a directly-returned ``DeferredToolResult`` on the native path.
 
@@ -51,8 +52,15 @@ def _handle_native_deferred_result(
     On the native OpenAI-SDK loop the value was previously stringified and the
     handle lost, so the eventual background result was never re-injected. Here
     we register the handle on the shared resolver so a later
-    ``resolve_deferred(handle_id, value)`` appends a follow-up tool message to
-    the same ``messages`` history, and surface the ``note`` to the model now.
+    ``resolve_deferred(handle_id, value)`` appends a follow-up tool message that
+    a subsequent turn will replay, and surface the ``note`` to the model now.
+
+    The re-injection target is ``history_sink`` when provided — this must be the
+    caller's *durable* conversation history (e.g. the agent's ``chat_history``),
+    since the background job typically completes after this native loop has
+    already returned and its per-call ``messages`` copy has been discarded. When
+    no durable sink is given we fall back to ``messages`` (correct only if the
+    handle resolves while the loop is still open), preserving prior behaviour.
 
     Returns the value to record for this turn (the deferred ``note`` string when
     deferred, otherwise the unchanged ``tool_result``). Never raises.
@@ -63,9 +71,10 @@ def _handle_native_deferred_result(
     try:
         from ..tools.call_executor import get_deferred_resolver
         resolver = get_deferred_resolver()
+        sink = history_sink if history_sink is not None else messages
 
         def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
-            messages.append({
+            sink.append({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "content": f"[deferred:{function_name}] {value}",
@@ -1600,6 +1609,11 @@ class OpenAIClient:
         # path so /stop and live steering work on the OpenAI-native loop too.
         cancel_token = kwargs.pop("cancel_token", None)
         steering_drain = kwargs.pop("steering_drain", None)
+        # Durable sink for deferred tool re-injection: the caller's persistent
+        # conversation history (e.g. the agent's ``chat_history``). Background
+        # jobs usually complete after this loop returns, so late results must
+        # land in a list a subsequent turn replays — not the per-call copy below.
+        deferred_history_sink = kwargs.pop("deferred_history_sink", None)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -1840,6 +1854,7 @@ class OpenAIClient:
                     # its eventual background value is re-injected, not lost.
                     tool_result = _handle_native_deferred_result(
                         tool_result, messages, _tool_call_id, function_name,
+                        history_sink=deferred_history_sink,
                     )
                     try:
                         results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
@@ -1930,6 +1945,8 @@ class OpenAIClient:
         # path so /stop and live steering work on the OpenAI-native loop too.
         cancel_token = kwargs.pop("cancel_token", None)
         steering_drain = kwargs.pop("steering_drain", None)
+        # Durable sink for deferred tool re-injection (see sync counterpart).
+        deferred_history_sink = kwargs.pop("deferred_history_sink", None)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -2154,6 +2171,7 @@ class OpenAIClient:
                     # its eventual background value is re-injected, not lost.
                     tool_result = _handle_native_deferred_result(
                         tool_result, messages, _tool_call_id, function_name,
+                        history_sink=deferred_history_sink,
                     )
                     try:
                         results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
@@ -2227,6 +2245,8 @@ class OpenAIClient:
         Yields:
             String chunks of the response as they are generated
         """
+        # Durable sink for deferred tool re-injection (see sync counterpart).
+        deferred_history_sink = kwargs.pop("deferred_history_sink", None)
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)
         
@@ -2368,6 +2388,7 @@ class OpenAIClient:
                             # handle so its eventual value is re-injected.
                             tool_result = _handle_native_deferred_result(
                                 tool_result, messages, _tool_call_id, function_name,
+                                history_sink=deferred_history_sink,
                             )
                             results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                         except ToolExecutionError:
