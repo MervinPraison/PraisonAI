@@ -382,11 +382,16 @@ class DoomLoopDetector:
         # Only count progress markers within the current no-progress window.
         # Without this recency filter a single early success would suppress
         # NO_PROGRESS detection for the rest of the session.
-        window = self._actions[-self.config.max_no_progress_steps:]
-        window_start = window[0].timestamp
+        # Use the boundary *before* the window (the completion timestamp of the
+        # action immediately preceding it, or 0 if the window is the whole
+        # history) so a marker recorded *during* the window's first action —
+        # whose own record_action timestamp is set at completion, i.e. after the
+        # marker — is still counted rather than filtered out.
+        n = self.config.max_no_progress_steps
+        boundary = self._actions[-n - 1].timestamp if len(self._actions) > n else 0.0
         recent_markers = [
             m for (m, ts) in self._progress_markers
-            if ts >= window_start
+            if ts >= boundary
         ]
         if recent_markers:
             return False
