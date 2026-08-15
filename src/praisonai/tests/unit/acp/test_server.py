@@ -38,6 +38,9 @@ class TestACPServer:
         assert result["protocolVersion"] == 1
         assert "agentCapabilities" in result
         assert result["agentCapabilities"]["loadSession"] is True
+        assert set(result["agentCapabilities"]["sessionCapabilities"]) == {
+            "fork", "list", "resume"
+        }
         assert result["agentInfo"]["name"] == "praisonai"
     
     def test_new_session(self):
@@ -54,20 +57,71 @@ class TestACPServer:
         assert result["sessionId"] in server._sessions
     
     def test_new_session_with_mcp_servers(self):
-        """Test new_session with MCP servers."""
+        """Unsupported MCP configs fail closed instead of being ignored."""
+        import pytest
+
         server = ACPServer()
         
         mcp_servers = [
             {"name": "test", "command": "/usr/bin/test", "args": []}
         ]
         
-        result = asyncio.run(server.new_session(
-            cwd="/tmp/test",
-            mcp_servers=mcp_servers,
-        ))
-        
-        session = server._sessions[result["sessionId"]]
-        assert session.mcp_servers == mcp_servers
+        with pytest.raises(ValueError, match="MCP servers are not supported"):
+            asyncio.run(server.new_session(
+                cwd="/tmp/test",
+                mcp_servers=mcp_servers,
+            ))
+
+    def test_read_only_agent_exposes_only_non_mutating_tools(self, monkeypatch):
+        server = ACPServer(config=ACPConfig(read_only=True))
+        tools = self._fake_tools()
+        monkeypatch.setattr(server, "_load_workspace_tools", lambda _workspace: tools)
+
+        agent = server._get_agent()
+        names = {tool.__name__ for tool in agent.tools}
+
+        assert {"read_file", "list_files", "grep"} <= names
+        assert not names & {
+            "write_file", "edit_file", "acp_create_file",
+            "execute_command", "internet_search",
+        }
+
+    def test_permission_flags_control_write_shell_and_network_tools(self, monkeypatch):
+        config = ACPConfig(
+            read_only=False,
+            allow_write=True,
+            allow_shell=True,
+            allow_network=True,
+            approval_mode="auto",
+        )
+        server = ACPServer(config=config)
+        tools = self._fake_tools()
+        monkeypatch.setattr(server, "_load_workspace_tools", lambda _workspace: tools)
+
+        agent = server._get_agent()
+        names = {tool.__name__ for tool in agent.tools}
+
+        assert {
+            "write_file", "edit_file", "acp_create_file",
+            "execute_command", "internet_search",
+        } <= names
+
+    @staticmethod
+    def _fake_tools():
+        def make(name):
+            def tool():
+                return name
+
+            tool.__name__ = name
+            return tool
+
+        return [
+            make(name) for name in (
+                "read_file", "list_files", "grep", "write_file", "edit_file",
+                "acp_create_file", "execute_command", "acp_execute_command",
+                "internet_search", "web_crawl",
+            )
+        ]
     
     def test_set_session_mode(self):
         """Test set_session_mode handler."""
