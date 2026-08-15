@@ -6,11 +6,16 @@ It is kept separate from main.py to avoid importing rich at module level.
 """
 
 import json
-from typing import Optional, Dict, Any, Literal, TYPE_CHECKING
+from typing import Optional, Dict, Any, Literal
 from pydantic import BaseModel, ConfigDict
 
-if TYPE_CHECKING:
+# Import token metrics at runtime so the forward reference in TaskOutput can be
+# resolved by model_rebuild() below. Importing only under TYPE_CHECKING left the
+# model perpetually "not fully defined", making any instantiation raise.
+try:
     from ..telemetry.token_collector import TokenMetrics
+except ImportError:
+    TokenMetrics = None
 
 
 class TaskOutput(BaseModel):
@@ -52,3 +57,8 @@ class ReflectionOutput(BaseModel):
     """Output model for self-reflection results."""
     reflection: str
     satisfactory: Literal["yes", "no"]
+
+
+# Resolve the 'TokenMetrics' forward reference now that it is available at
+# runtime, so TaskOutput can actually be instantiated.
+TaskOutput.model_rebuild()

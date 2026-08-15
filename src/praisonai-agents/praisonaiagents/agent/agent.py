@@ -5853,7 +5853,7 @@ Answer:"""
             
             # Convert the result to a GuardrailResult
             return GuardrailResult.from_tuple(result)
-            
+
         except Exception as e:
             logging.error(f"Agent {self.name}: Error in guardrail validation: {e}")
             # On error, return failure
