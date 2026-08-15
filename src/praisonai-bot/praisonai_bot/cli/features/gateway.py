@@ -904,158 +904,87 @@ def handle_gateway_command(args) -> int:
     Args:
         args: List of CLI arguments (from main.py unknown_args) or argparse Namespace.
     """
-    import argparse
-    
-    if isinstance(args, list):
-        parser = argparse.ArgumentParser(
-            prog="praisonai gateway",
-            description="Manage the PraisonAI Gateway server",
-        )
-        subparsers = parser.add_subparsers(dest="gateway_command", help="Gateway commands")
-        
-        # start subcommand
-        start_parser = subparsers.add_parser("start", help="Start the gateway server")
-        start_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
-        start_parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
-        start_parser.add_argument("--agents", help="Path to agent configuration file")
-        start_parser.add_argument("--config", dest="config_file", help="Path to gateway.yaml for multi-bot mode")
-        start_parser.add_argument(
-            "--drain-timeout", dest="drain_timeout", type=float, default=None,
-            help="Seconds to wait for in-flight agent turns to finish on shutdown (0 disables; #2375)",
-        )
-        start_parser.add_argument(
-            "--max-concurrent-runs", dest="max_concurrent_runs", type=int, default=None,
-            help="Gateway-wide ceiling on simultaneously-running agent turns (0 disables; #2454)",
-        )
-        start_parser.add_argument(
-            "--queue-depth", dest="queue_depth", type=int, default=None,
-            help="Bounded wait queue depth when at the concurrency ceiling (#2454)",
-        )
-        start_parser.add_argument(
-            "--overflow-policy", dest="overflow_policy", default=None,
-            choices=["reject", "queue", "shed_oldest"],
-            help="Behaviour when the wait queue is full (default: reject; #2454)",
-        )
-        start_parser.add_argument(
-            "--reliability", dest="reliability", default=None,
-            choices=["production", "default", "off"],
-            help="Named reliability posture composing drain + admission in one "
-                 "switch (#2531)",
-        )
-        start_parser.add_argument(
-            "--identity-store", dest="identity_store", default=None,
-            help="Enable cross-platform conversation continuity: path to the "
-                 "identity link-map JSON (default ~/.praisonai/identity.json). "
-                 "Paired/linked users share one session + memory across "
-                 "channels (#3020)",
-        )
-        start_parser.add_argument(
-            "--scale-to-zero", dest="scale_to_zero", action="store_true", default=None,
-            help="Quiesce the gateway when idle for --idle-minutes (scale-to-zero; #3021)",
-        )
-        start_parser.add_argument(
-            "--idle-minutes", dest="idle_minutes", type=float, default=None,
-            help="Minutes of no inbound / in-flight work before quiescing (#3021)",
-        )
-        start_parser.add_argument(
-            "--drain-marker", dest="drain_marker", default=None,
-            help="Path to watch for an epoch-aware external drain marker file (#3021)",
-        )
-        start_parser.add_argument(
-            "--watchdog", dest="watchdog", action="store_true", default=None,
-            help="Enable the event-loop liveness watchdog: an OS-thread backstop "
-                 "that dumps stacks and hard-exits (restart code 75) if the loop "
-                 "freezes, so the supervisor relaunches the process (#3410)",
-        )
-        start_parser.add_argument(
-            "--watchdog-timeout", dest="watchdog_timeout", type=float, default=None,
-            help="Seconds the event loop may stall before the watchdog trips a "
-                 "restart (default ~15s = 5s x 3 strikes; #3410)",
-        )
+    # Route the public ``praisonai gateway ...`` entry point to the SINGLE
+    # canonical Typer command app so it advertises exactly the same command
+    # surface -- and the same safe ``start`` (auto-discovery, config-version
+    # migration, credential + tool preflight, ``--openai-api``/``--mcp``) -- as
+    # ``praisonai-bot gateway ...``. One command surface, one ``start``: the
+    # gateway's own degraded-state retry hints (``praisonai gateway doctor`` /
+    # ``doctor --fix`` / ``test``) now name commands the operator can actually
+    # run from the ``praisonai`` binary (#3966).
+    import click
+    from typer.main import get_command
 
-        # status subcommand
-        status_parser = subparsers.add_parser("status", help="Check gateway status")
-        status_parser.add_argument("--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)")
-        status_parser.add_argument("--port", type=int, default=8765, help="Gateway port (default: 8765)")
+    from praisonai_bot.cli.commands.gateway import app as gateway_app
 
-        # hooks subcommand — manage inbound trigger hooks (Issue #2281)
-        hooks_parser = subparsers.add_parser(
-            "hooks", help="Manage inbound trigger hooks (POST /hooks/<path>)"
-        )
-        hooks_sub = hooks_parser.add_subparsers(
-            dest="hooks_command", help="Hook commands"
-        )
+    # Typer may drive the command with a vendored copy of click
+    # (``typer._click``) whose exception classes are distinct from the
+    # top-level ``click`` ones. Catch both families so unknown-subcommand /
+    # bad-flag errors degrade to an exit code with a rendered message rather
+    # than a traceback, regardless of the installed Typer version (#3966).
+    click_exception_types = [click.ClickException]
+    abort_types = [click.exceptions.Abort]
+    try:  # pragma: no cover - only one click family is present at runtime
+        from typer import _click as _typer_click  # type: ignore
 
-        hooks_add = hooks_sub.add_parser("add", help="Add a hook to gateway.yaml")
-        hooks_add.add_argument("path", help="Hook path, e.g. 'gmail' -> POST /hooks/gmail")
-        hooks_add.add_argument("--agent", help="Agent id to run (default: first agent)")
-        hooks_add.add_argument(
-            "--action", dest="action_type", default="agent",
-            choices=["agent", "wake"], help="agent runs a turn, wake nudges a session",
-        )
-        hooks_add.add_argument("--auth", help="Bearer token / shared secret for this hook")
-        hooks_add.add_argument("--session-key", dest="session_key", help="Session key template")
-        hooks_add.add_argument(
-            "--idempotency-key", dest="idempotency_key", help="Idempotency key template",
-        )
-        hooks_add.add_argument("--deliver-to", dest="deliver_to", help="channel:target for the reply")
-        hooks_add.add_argument("--message", help="Message template from the payload")
-        hooks_add.add_argument(
-            "--config", dest="config_file", default="gateway.yaml",
-            help="Path to gateway.yaml (default: gateway.yaml)",
-        )
+        click_exception_types.append(_typer_click.exceptions.ClickException)
+        abort_types.append(_typer_click.exceptions.Abort)
+    except (ImportError, AttributeError):
+        # Typer without a vendored ``_click`` (or a differing layout): the
+        # top-level ``click`` families already loaded above are sufficient.
+        pass
+    click_exception_types = tuple(click_exception_types)
+    abort_types = tuple(abort_types)
 
-        hooks_list = hooks_sub.add_parser("list", help="List configured hooks")
-        hooks_list.add_argument(
-            "--config", dest="config_file", default="gateway.yaml",
-            help="Path to gateway.yaml (default: gateway.yaml)",
-        )
+    # A pre-parsed argparse ``Namespace`` (legacy internal callers) is adapted
+    # back to an argv list so there is exactly one dispatch path through the
+    # canonical Typer app; a plain list is passed straight through.
+    argv = args if isinstance(args, list) else _namespace_to_gateway_argv(args)
 
-        hooks_remove = hooks_sub.add_parser("remove", help="Remove a hook")
-        hooks_remove.add_argument("path", help="Hook path to remove")
-        hooks_remove.add_argument(
-            "--config", dest="config_file", default="gateway.yaml",
-            help="Path to gateway.yaml (default: gateway.yaml)",
-        )
-
-        try:
-            args = parser.parse_args(args)
-        except SystemExit:
-            return 1
-    
-    handler = GatewayHandler()
-    
-    subcommand = getattr(args, "gateway_command", None) or "start"
-    
-    if subcommand == "start":
-        # Propagate the supervisor-friendly exit code from start() (#2437):
-        # 0 clean, 75 transient/restart, 78 fatal-config/do-not-restart.
-        return handler.start(
-            host=getattr(args, "host", "127.0.0.1"),
-            port=getattr(args, "port", 8765),
-            agent_file=getattr(args, "agents", None),
-            config_file=getattr(args, "config_file", None),
-            drain_timeout=getattr(args, "drain_timeout", None),
-            max_concurrent_runs=getattr(args, "max_concurrent_runs", None),
-            queue_depth=getattr(args, "queue_depth", None),
-            overflow_policy=getattr(args, "overflow_policy", None),
-            reliability=getattr(args, "reliability", None),
-            identity_store=getattr(args, "identity_store", None),
-            scale_to_zero=getattr(args, "scale_to_zero", None),
-            idle_minutes=getattr(args, "idle_minutes", None),
-            drain_marker=getattr(args, "drain_marker", None),
-            watchdog=getattr(args, "watchdog", None),
-            watchdog_timeout=getattr(args, "watchdog_timeout", None),
-        )
-    elif subcommand == "status":
-        handler.status(
-            host=getattr(args, "host", "127.0.0.1"),
-            port=getattr(args, "port", 8765),
-        )
-    elif subcommand == "hooks":
-        return handler.hooks(args)
-    else:
-        print(f"Unknown gateway command: {subcommand}")
-        print("Available commands: start, status, hooks")
+    command = get_command(gateway_app)
+    try:
+        # ``standalone_mode=False`` returns the command's value (exit code)
+        # instead of calling ``sys.exit`` — so the caller (parse_args) can
+        # ``sys.exit`` once at the top level, matching the argparse contract.
+        return command(args=list(argv), standalone_mode=False) or 0
+    except abort_types:
+        # Ctrl+C at a prompt → clean interrupt.
         return 1
-    return 0
+    except click_exception_types as exc:
+        # Unknown subcommand / bad flags: render the message (the way click
+        # would in standalone mode) and surface a non-zero code instead of a
+        # traceback, so the public CLI degrades gracefully like the canonical
+        # binary rather than dead-ending (#3966).
+        exc.show()
+        return exc.exit_code
+    except SystemExit as exc:  # --help and other explicit exits
+        code = exc.code
+        return code if isinstance(code, int) else (0 if code is None else 1)
+
+
+def _namespace_to_gateway_argv(args) -> list:
+    """Adapt a legacy argparse ``Namespace`` to a ``gateway`` argv list.
+
+    Only ``start``/``status``/``hooks`` were ever produced by the old argparse
+    parser; anything else falls back to ``start`` (its historical default) so
+    the canonical Typer app handles it identically to the public path.
+    """
+    subcommand = getattr(args, "gateway_command", None) or "start"
+    argv: list = [subcommand]
+    if subcommand in ("start", "status"):
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        if host is not None:
+            argv += ["--host", str(host)]
+        if port is not None:
+            argv += ["--port", str(port)]
+    if subcommand == "start":
+        if getattr(args, "agents", None):
+            argv += ["--agents", str(args.agents)]
+        if getattr(args, "config_file", None):
+            argv += ["--config", str(args.config_file)]
+    if subcommand == "hooks":
+        hooks_command = getattr(args, "hooks_command", None)
+        if hooks_command:
+            argv.append(hooks_command)
+    return argv
