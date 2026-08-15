@@ -30,6 +30,18 @@ _DEFAULT_STORE_DIR = os.path.join(
 )
 _DEFAULT_STORE_FILE = "pairing.json"
 
+# Unambiguous alphabet for human-entered codes (drops 0/O/1/I) so a code
+# read aloud or retyped from another device is not mis-entered.
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_CODE_LENGTH = 8
+
+# Store-level brute-force ceiling defaults (per channel_type). These guard the
+# verification path uniformly across every approval surface (HTTP, in-chat
+# button, CLI) — the optional IP-keyed HTTP limiter remains an outer layer.
+_LOCKOUT_MAX_FAILURES = 5
+_LOCKOUT_WINDOW_SECONDS = 60.0
+_LOCKOUT_COOLDOWN_SECONDS = 300.0
+
 
 def _get_secret() -> str:
     """Return the HMAC signing secret.
@@ -216,15 +228,21 @@ class PairedChannel:
 class PairingStore:
     """File-backed store of pairing codes and authorised channels.
 
-    The store generates *8-character* hex codes signed with HMAC-SHA256.
-    A channel presents the code to the gateway; the gateway verifies
-    the signature and adds the channel to the allow-list.
+    The store generates *8-character* codes (from an unambiguous alphabet that
+    drops ``0/O/1/I``) signed with HMAC-SHA256. A channel presents the code to
+    the gateway; the gateway verifies the signature and adds the channel to the
+    allow-list.
 
     Thread-safe via ``threading.Lock``.
 
     Security:
         - Codes are one-time use (consumed on verify).
         - HMAC-signed to prevent forgery.
+        - Only a salted hash of each code is persisted — reading the state
+          file never yields a usable pairing code.
+        - Store-level brute-force ceiling: failed verifications are counted
+          per channel_type and locked out after ``max_failures``, uniformly
+          across every approval surface (HTTP, in-chat button, CLI).
         - Timing-safe comparison via ``hmac.compare_digest``.
         - Atomic file writes (tempfile + rename) to prevent corruption.
         - Configurable TTL for pending codes.
@@ -256,6 +274,9 @@ class PairingStore:
         code_ttl: float = 300.0,
         secret: Optional[str] = None,
         max_pending: int = 100,
+        max_failures: int = _LOCKOUT_MAX_FAILURES,
+        lockout_window: float = _LOCKOUT_WINDOW_SECONDS,
+        lockout_cooldown: float = _LOCKOUT_COOLDOWN_SECONDS,
     ) -> None:
         self._dir = store_dir or _DEFAULT_STORE_DIR
         self._path = os.path.join(self._dir, _DEFAULT_STORE_FILE)
@@ -264,10 +285,24 @@ class PairingStore:
         self._max_pending = max_pending
         self._lock = threading.Lock()
 
-        # code -> {signature, channel_type, created_at}
+        # code -> {signature, channel_type, created_at}  (raw code in memory only)
         self._pending: Dict[str, dict] = {}
+        # code_hash -> {signature, channel_type, created_at}  (rehydrated from disk;
+        # lets verification succeed cross-process without persisting the raw code)
+        self._pending_by_hash: Dict[str, dict] = {}
         # (channel_id, channel_type) -> PairedChannel
         self._paired: Dict[tuple, PairedChannel] = {}
+
+        # Store-level brute-force ceiling, keyed by channel_type. Reuses the
+        # gateway's own limiter so protection is uniform across every approval
+        # surface (HTTP, in-chat button, CLI), not just the HTTP routes.
+        from .rate_limiter import AuthRateLimiter
+
+        self._lockout = AuthRateLimiter(
+            max_attempts=max_failures,
+            window_seconds=lockout_window,
+            lockout_seconds=lockout_cooldown,
+        )
 
         self._load()
 
@@ -279,23 +314,29 @@ class PairingStore:
         The code is HMAC-signed so the gateway can verify it was not forged.
         Raises ``RuntimeError`` if max pending codes is reached.
         """
-        code = secrets.token_hex(4)  # 8 hex chars
+        code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
         sig = self._sign(code)
 
         with self._lock:
             self._prune_expired()
-            if len(self._pending) >= self._max_pending:
+            # Count *all* logical pending entries, including ones rehydrated
+            # from disk into ``_pending_by_hash`` after a restart. ``_pending``
+            # alone under-counts cross-process state, letting repeated restarts
+            # grow ``pairing.json`` past ``max_pending``.
+            if len(self._pending_by_hash) >= self._max_pending:
                 raise RuntimeError(
                     f"Too many pending pairing codes (max={self._max_pending}). "
                     "Wait for existing codes to expire or be consumed."
                 )
-            self._pending[code] = {
+            info = {
                 "signature": sig,
                 "channel_type": channel_type,
                 "channel_id": channel_id,
                 "created_at": time.time(),
             }
-            self._save()  # NEW — persist pending codes
+            self._pending[code] = info
+            self._pending_by_hash[self._hash(code)] = dict(info)
+            self._save()  # NEW — persist pending codes (hashed at rest)
         return code
 
     def verify_and_pair(
@@ -311,20 +352,41 @@ class PairingStore:
         The code is consumed (one-time use) regardless of outcome.
         If ``channel_id`` is omitted, a channel-bound pending code may provide it.
         """
+        # Store-level brute-force ceiling: refuse verification for a channel
+        # type that has exceeded its failed-attempt budget, regardless of which
+        # approval surface (HTTP, in-chat, CLI) is calling. Checking the lockout
+        # here does not itself count as an attempt — only failures are counted.
+        if self._locked_out(channel_type):
+            logger.warning(
+                "Pairing verification locked out for channel_type=%s", channel_type
+            )
+            return False
+
         with self._lock:
             self._prune_expired()
             pending = self._pending.pop(code, None)
+            if pending is None:
+                # Cross-process fallback: the raw code was never persisted, so
+                # match against the salted hash rehydrated from disk.
+                pending = self._pending_by_hash.pop(self._hash(code), None)
             if pending is not None:
+                self._pending_by_hash.pop(self._hash(code), None)
                 self._save()  # NEW — persist the pop
 
         if pending is None:
+            self._record_failure(channel_type)
             return False
 
         # Timing-safe comparison
         expected_sig = self._sign(code)
         if not hmac.compare_digest(pending["signature"], expected_sig):
+            self._record_failure(channel_type)
             return False
 
+        # Validate the channel binding *before* clearing the failure counter.
+        # A valid HMAC presented against the wrong ``channel_id`` still fails
+        # to pair — clearing the lockout here would hand subsequent guesses a
+        # fresh attempt budget after an unsuccessful pairing.
         pending_channel_id = pending.get("channel_id")
         if pending_channel_id and channel_id and channel_id != pending_channel_id:
             return False
@@ -332,6 +394,10 @@ class PairingStore:
         resolved_channel_id = channel_id or pending_channel_id
         if not resolved_channel_id:
             return False
+
+        # Binding is valid — this was a legitimate, successful verification, so
+        # the brute-force counter for this channel_type is cleared.
+        self._clear_failures(channel_type)
 
         paired = PairedChannel(
             channel_id=resolved_channel_id,
@@ -407,10 +473,12 @@ class PairingStore:
             pending_list = []
             now = time.time()
             
+            in_memory_hashes = set()
             for code, info in self._pending.items():
+                in_memory_hashes.add(self._hash(code))
                 if channel_type and info.get("channel_type") != channel_type:
                     continue
-                    
+
                 ct = info.get("channel_type", "unknown")
                 cid = info.get("channel_id")
                 created_at = info.get("created_at", now)
@@ -425,7 +493,31 @@ class PairingStore:
                     "user_name": f"User {code}",
                     "age_seconds": int(now - created_at),
                 })
-                
+
+            # Cross-process pending codes rehydrated from disk carry only a
+            # salted hash — the raw code was never persisted. Surface them so
+            # operators still see a pending request exists (and can approve by
+            # re-entering the code from chat), but never expose a usable code.
+            for chash, info in self._pending_by_hash.items():
+                if chash in in_memory_hashes:
+                    continue
+                if channel_type and info.get("channel_type") != channel_type:
+                    continue
+                ct = info.get("channel_type", "unknown")
+                cid = info.get("channel_id")
+                created_at = info.get("created_at", now)
+                pending_list.append({
+                    "code": None,
+                    "code_hash": chash,
+                    "channel_type": ct,
+                    "channel_id": cid,
+                    "created_at": created_at,
+                    "channel": ct,
+                    "user_id": cid,
+                    "user_name": f"User {cid}" if cid else "pending",
+                    "age_seconds": int(now - created_at),
+                })
+
         return pending_list
 
     # ── Persistence ───────────────────────────────────────────────────
@@ -437,13 +529,25 @@ class PairingStore:
         """
         try:
             Path(self._dir).mkdir(parents=True, exist_ok=True)
+            # Merge in-memory (raw-code) pending with any cross-process entries
+            # rehydrated from disk. Only a salted hash of the code is persisted —
+            # reading pairing.json never yields a usable code.
+            pending_out = []
+            seen_hashes = set()
+            for c, info in self._pending.items():
+                chash = self._hash(c)
+                seen_hashes.add(chash)
+                pending_out.append({"code_hash": chash, **info})
+            for chash, info in self._pending_by_hash.items():
+                if chash in seen_hashes:
+                    continue
+                pending_out.append({"code_hash": chash, **info})
+
             data = {
                 "paired": [
                     asdict(ch) for ch in self._paired.values()
                 ],
-                "pending": [
-                    {"code": c, **info} for c, info in self._pending.items()
-                ],
+                "pending": pending_out,
             }
             # Atomic write: tempfile → rename
             fd, tmp_path = tempfile.mkstemp(
@@ -473,11 +577,22 @@ class PairingStore:
             for entry in data.get("paired", []):
                 ch = PairedChannel(**entry)
                 self._paired[(ch.channel_id, ch.channel_type)] = ch
-            # Load pending codes
+            # Load pending codes. New format persists only a salted ``code_hash``;
+            # the legacy plaintext ``code`` field is still read for backward
+            # compatibility so existing on-disk stores keep working.
             for entry in data.get("pending", []):
-                code = entry.pop("code")
-                self._pending[code] = entry
-            logger.debug("Loaded %d paired channels, %d pending codes", len(self._paired), len(self._pending))
+                if "code" in entry:  # legacy plaintext store
+                    code = entry.pop("code")
+                    self._pending[code] = entry
+                    self._pending_by_hash[self._hash(code)] = dict(entry)
+                elif "code_hash" in entry:  # hashed-at-rest store
+                    chash = entry.pop("code_hash")
+                    self._pending_by_hash[chash] = entry
+            logger.debug(
+                "Loaded %d paired channels, %d pending codes",
+                len(self._paired),
+                len(self._pending_by_hash),
+            )
         except (OSError, json.JSONDecodeError, TypeError) as exc:
             logger.warning("Failed to load pairing store: %s", exc)
 
@@ -485,6 +600,27 @@ class PairingStore:
 
     def _sign(self, code: str) -> str:
         return hmac.new(self._secret, code.encode(), hashlib.sha256).hexdigest()
+
+    def _hash(self, code: str) -> str:
+        """Salted SHA-256 of a code for at-rest storage.
+
+        The salt is derived from the per-install HMAC secret, so the hash is
+        stable across processes (enabling cross-process verification) yet a
+        precomputed rainbow table is useless without the secret.
+        """
+        return hashlib.sha256(self._secret + b":" + code.encode()).hexdigest()
+
+    # ── Brute-force ceiling helpers ───────────────────────────────────
+
+    def _locked_out(self, channel_type: str) -> bool:
+        return self._lockout.time_until_allowed("pairing_verify", channel_type) > 0
+
+    def _record_failure(self, channel_type: str) -> None:
+        # ``allow`` counts this attempt and trips the lockout at the ceiling.
+        self._lockout.allow("pairing_verify", channel_type)
+
+    def _clear_failures(self, channel_type: str) -> None:
+        self._lockout.reset("pairing_verify", channel_type)
 
     def _prune_expired(self) -> None:
         """Remove expired pending codes (caller holds lock)."""
@@ -494,4 +630,11 @@ class PairingStore:
             if (now - info["created_at"]) >= self._code_ttl
         ]
         for c in expired:
+            self._pending_by_hash.pop(self._hash(c), None)
             del self._pending[c]
+        expired_hashes = [
+            h for h, info in self._pending_by_hash.items()
+            if (now - info["created_at"]) >= self._code_ttl
+        ]
+        for h in expired_hashes:
+            del self._pending_by_hash[h]
