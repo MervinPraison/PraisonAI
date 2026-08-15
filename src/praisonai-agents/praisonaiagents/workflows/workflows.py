@@ -1120,7 +1120,14 @@ class AgentFlow:
             # One sandbox for the whole run; torn down even if a step raises.
             with self._shared_compute() as shared:
                 shared.attach(self._collect_agents())
-                return self._run_impl(input, llm, verbose, stream)
+                # Expose the live sandbox so agents created *during* the run
+                # (e.g. an action-only step's temporary agent) can be attached
+                # too, instead of silently executing tools locally.
+                self._active_shared_compute = shared
+                try:
+                    return self._run_impl(input, llm, verbose, stream)
+                finally:
+                    self._active_shared_compute = None
         finally:
             self._execution_lock.release()
 
@@ -1516,6 +1523,13 @@ class AgentFlow:
                             caching=self.caching,  # Propagate caching config
                             hooks=self.hooks,  # Propagate hooks/callbacks
                         )
+                        # An action-only step builds its agent here, after the
+                        # run's initial attach(). Bind it to the shared sandbox
+                        # too, so its shell/file tools land in the same instance
+                        # as every other step instead of running locally.
+                        shared = getattr(self, "_active_shared_compute", None)
+                        if shared is not None:
+                            shared.attach([temp_agent])
                         # Substitute variables in action
                         action = step.action
                         action = _substitute_action_variables(action, all_variables, previous_output, input)
