@@ -74,7 +74,11 @@ function isClaudeTriggerNoise(c) {
 
 function isClaudeFinalReplyComment(c) {
   const login = (c.user?.login || '').toLowerCase();
-  if (!login.includes('praisonai-triage')) return false;
+  const fromAutomation =
+    login.includes('praisonai-triage') ||
+    login.includes('github-actions') ||
+    AUTO_ACTORS.some((a) => a.toLowerCase() === login);
+  if (!fromAutomation) return false;
   return (c.body || '').includes('Claude finished');
 }
 
@@ -96,13 +100,45 @@ function isConflictRebaseTriggerComment(c) {
 
 function isConflictRebaseCompletionComment(c) {
   const login = (c.user?.login || '').toLowerCase();
-  if (!login.includes('praisonai-triage') && !login.includes('github-actions')) return false;
+  const fromAutomation =
+    login.includes('praisonai-triage') ||
+    login.includes('github-actions') ||
+    AUTO_ACTORS.some((a) => a.toLowerCase() === login);
+  if (!fromAutomation) return false;
   const body = (c.body || '').toLowerCase();
   return (
     body.includes('rebase complete') ||
     body.includes('rebase onto') ||
+    body.includes('force-pushed') ||
     (body.includes('conflict') && body.includes('resolved'))
   );
+}
+
+/** HEAD landed after conflict rebase but no FINAL @claude since that push. */
+function needsFinalReReviewAfterConflictRebase(comments, headPushedAt) {
+  if (!headPushedAt) return false;
+  const headTime = new Date(headPushedAt).getTime();
+  const conflictTriggers = comments.filter(isConflictRebaseTriggerComment);
+  if (conflictTriggers.length === 0) return false;
+
+  const latestConflict = conflictTriggers.reduce((a, b) =>
+    new Date(a.created_at) > new Date(b.created_at) ? a : b
+  );
+  const conflictTime = new Date(latestConflict.created_at).getTime();
+  if (headTime <= conflictTime) return false;
+
+  const rebaseDone = comments.some(
+    (c) =>
+      new Date(c.created_at).getTime() > conflictTime && isConflictRebaseCompletionComment(c)
+  );
+  if (!rebaseDone) return false;
+
+  const finalsAfterHead = comments.filter(
+    (c) =>
+      isFinalClaudeTriggerComment(c) &&
+      new Date(c.created_at).getTime() >= headTime - 60000
+  );
+  return finalsAfterHead.length === 0;
 }
 
 function conflictRebaseQuiescent(comments, headPushedAt) {
@@ -244,6 +280,9 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
   }
   if (headPusherLogin && isClaudeAutomationLogin(headPusherLogin)) {
     return { skip: true, reason: 'head pushed by Claude automation' };
+  }
+  if (needsFinalReReviewAfterConflictRebase(comments, headPushedAt)) {
+    return { skip: false, reason: '' };
   }
   if (isPushSoonAfterLatestFinal(comments, headPushedAt)) {
     return {
@@ -916,6 +955,7 @@ module.exports = {
   hasRecentConflictComment,
   isConflictRebaseTriggerComment,
   isConflictRebaseCompletionComment,
+  needsFinalReReviewAfterConflictRebase,
   conflictRebaseQuiescent,
   hasHumanChangesRequested,
   hasAnyChangesRequested,
