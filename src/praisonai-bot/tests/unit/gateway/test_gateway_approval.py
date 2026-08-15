@@ -458,3 +458,47 @@ async def test_successful_verify_clears_failures():
         assert store.verify_and_pair("WRONGZZZ", "tg_ok2", "telegram") is False
         assert store.verify_and_pair("WRONGWWW", "tg_ok2", "telegram") is False
         assert store.verify_and_pair(code2, "tg_ok2", "telegram") is True
+
+
+@pytest.mark.asyncio
+async def test_channel_id_mismatch_does_not_reset_failures():
+    """A valid code presented with the wrong channel_id must not clear the
+    brute-force counter — otherwise each rejected binding hands the next guess
+    a fresh attempt budget."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = PairingStore(store_dir=tmpdir, max_failures=3)
+        # Three failed guesses prime the counter right up to the ceiling.
+        assert store.verify_and_pair("WRONGXXX", "tg_x", "telegram") is False
+        assert store.verify_and_pair("WRONGYYY", "tg_x", "telegram") is False
+        assert store.verify_and_pair("WRONGZZZ", "tg_x", "telegram") is False
+
+        # A valid code bound to tg_bound, but presented with the WRONG
+        # channel_id: it is rejected and must NOT reset the primed counter.
+        good = store.generate_code(channel_type="telegram", channel_id="tg_bound")
+        assert store.verify_and_pair(good, "tg_wrong", "telegram") is False
+
+        # Counter was preserved, so the next failure trips the lockout.
+        assert store.verify_and_pair("WRONGWWW", "tg_x", "telegram") is False
+        # Locked out now: even a fresh valid code is refused during cooldown.
+        good2 = store.generate_code(channel_type="telegram", channel_id="tg_bound2")
+        assert store.verify_and_pair(good2, "tg_bound2", "telegram") is False
+
+
+@pytest.mark.asyncio
+async def test_max_pending_counts_rehydrated_entries():
+    """max_pending must count entries rehydrated from disk after a restart,
+    not just in-memory raw codes — otherwise repeated restarts grow the store
+    past the configured bound."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_a = PairingStore(store_dir=tmpdir, max_pending=2)
+        store_a.generate_code(channel_type="telegram", channel_id="tg_1")
+        store_a.generate_code(channel_type="telegram", channel_id="tg_2")
+
+        # Fresh instance rehydrates both pending entries as hashes only.
+        store_b = PairingStore(store_dir=tmpdir, max_pending=2)
+        with pytest.raises(RuntimeError):
+            store_b.generate_code(channel_type="telegram", channel_id="tg_3")

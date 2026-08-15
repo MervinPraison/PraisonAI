@@ -319,7 +319,11 @@ class PairingStore:
 
         with self._lock:
             self._prune_expired()
-            if len(self._pending) >= self._max_pending:
+            # Count *all* logical pending entries, including ones rehydrated
+            # from disk into ``_pending_by_hash`` after a restart. ``_pending``
+            # alone under-counts cross-process state, letting repeated restarts
+            # grow ``pairing.json`` past ``max_pending``.
+            if len(self._pending_by_hash) >= self._max_pending:
                 raise RuntimeError(
                     f"Too many pending pairing codes (max={self._max_pending}). "
                     "Wait for existing codes to expire or be consumed."
@@ -379,8 +383,10 @@ class PairingStore:
             self._record_failure(channel_type)
             return False
 
-        self._clear_failures(channel_type)
-
+        # Validate the channel binding *before* clearing the failure counter.
+        # A valid HMAC presented against the wrong ``channel_id`` still fails
+        # to pair — clearing the lockout here would hand subsequent guesses a
+        # fresh attempt budget after an unsuccessful pairing.
         pending_channel_id = pending.get("channel_id")
         if pending_channel_id and channel_id and channel_id != pending_channel_id:
             return False
@@ -388,6 +394,10 @@ class PairingStore:
         resolved_channel_id = channel_id or pending_channel_id
         if not resolved_channel_id:
             return False
+
+        # Binding is valid — this was a legitimate, successful verification, so
+        # the brute-force counter for this channel_type is cleared.
+        self._clear_failures(channel_type)
 
         paired = PairedChannel(
             channel_id=resolved_channel_id,
