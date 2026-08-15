@@ -177,7 +177,13 @@ class Plugin(ABC):
         return args
     
     def after_tool(self, tool_name: str, result: Any) -> Any:
-        """Called after tool execution. Can modify result."""
+        """Called after tool execution.
+
+        Return a modified ``result`` (rewrite/redact) to replace the effective
+        tool output before it reaches the model or a channel, a deny/block
+        decision (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`), or ``None`` for no-op.
+        """
         return result
 
     def before_tool_definitions(
