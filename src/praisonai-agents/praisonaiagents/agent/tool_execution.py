@@ -787,7 +787,7 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
-                                if not hasattr(self, '_tool_executor'):
+                                if not hasattr(self, '_tool_executor') or self._tool_executor is None:
                                     self._tool_executor = concurrent.futures.ThreadPoolExecutor(
                                         max_workers=2, thread_name_prefix=f"tool-{self.name}"
                                     )
@@ -801,6 +801,11 @@ class ToolExecutionMixin:
                                     future.cancel()
                                     logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
                                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                                    # The timed-out thread cannot be reclaimed; retire this
+                                    # executor so a future call gets a fresh worker instead of
+                                    # queuing behind a permanently stuck one.
+                                    self._tool_executor.shutdown(wait=False)
+                                    self._tool_executor = None
                         else:
                             with tool_progress_channel(_progress_sink), with_injection_context(state):
                                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)

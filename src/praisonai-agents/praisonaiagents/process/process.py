@@ -956,7 +956,19 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
     async def asequential(self) -> AsyncGenerator[str, None]:
         """Async version of sequential method"""
         for task_id in self.tasks:
-            if self.tasks[task_id].status != "completed":
+            task = self.tasks[task_id]
+            if task.status == "failed":
+                continue  # Skip failed tasks
+            # Check if any context dependency failed
+            if hasattr(task, 'context') and task.context:
+                deps_failed = any(
+                    self.tasks[dep.id].status == "failed"
+                    for dep in task.context if hasattr(dep, 'id') and dep.id in self.tasks
+                )
+                if deps_failed:
+                    task.status = "failed"
+                    continue
+            if task.status != "completed":
                 yield task_id
 
     async def ahierarchical(self) -> AsyncGenerator[str, None]:
