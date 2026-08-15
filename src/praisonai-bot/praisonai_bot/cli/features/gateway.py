@@ -929,7 +929,9 @@ def handle_gateway_command(args) -> int:
 
         click_exception_types.append(_typer_click.exceptions.ClickException)
         abort_types.append(_typer_click.exceptions.Abort)
-    except Exception:
+    except (ImportError, AttributeError):
+        # Typer without a vendored ``_click`` (or a differing layout): the
+        # top-level ``click`` families already loaded above are sufficient.
         pass
     click_exception_types = tuple(click_exception_types)
     abort_types = tuple(abort_types)

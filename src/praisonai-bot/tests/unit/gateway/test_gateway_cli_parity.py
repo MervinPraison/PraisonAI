@@ -61,6 +61,32 @@ def test_gateway_start_exposes_openai_and_mcp_flags():
     assert "--mcp" in opts
 
 
+def test_namespace_caller_still_dispatches():
+    """Legacy argparse callers keep working through argv adaptation (#3966).
+
+    ``_namespace_to_gateway_argv`` depends on exact canonical option names; pin
+    that every long option it emits is actually accepted by the target Typer
+    command so an option-name drift is caught at review time.
+    """
+    from argparse import Namespace
+
+    from typer.main import get_command
+
+    from praisonai_bot.cli.features.gateway import _namespace_to_gateway_argv
+
+    argv = _namespace_to_gateway_argv(
+        Namespace(gateway_command="status", host="127.0.0.1", port=8765)
+    )
+    assert argv[0] == "status"
+
+    command = get_command(gateway_app)
+    status = command.get_command(click.Context(command), "status")
+    opts = {opt for param in status.params for opt in param.opts}
+    for token in argv[1:]:
+        if token.startswith("--"):
+            assert token in opts, f"status does not accept {token}"
+
+
 def test_unknown_gateway_command_no_longer_dead_ends(capsys):
     """An unknown verb yields a non-zero code, not the old static dead-end."""
     rc = handle_gateway_command(["definitely-not-a-command"])
