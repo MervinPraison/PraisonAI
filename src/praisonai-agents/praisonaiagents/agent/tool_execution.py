@@ -22,6 +22,13 @@ from ..config.feature_configs import DEFAULT_TOOL_OUTPUT_LIMIT
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on how many timed-out (still-blocked) tool executors a single
+# agent may retire before it stops recycling and falls back to reusing the
+# existing bounded pool. This keeps the "fresh worker after a timeout"
+# throughput win while capping leaked threads from pathological repeated
+# timeouts so they cannot exhaust process resources.
+_MAX_ORPHANED_TOOL_EXECUTORS = 4
+
 if TYPE_CHECKING:
     pass
 
@@ -787,7 +794,7 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
-                                if not hasattr(self, '_tool_executor'):
+                                if not hasattr(self, '_tool_executor') or self._tool_executor is None:
                                     self._tool_executor = concurrent.futures.ThreadPoolExecutor(
                                         max_workers=2, thread_name_prefix=f"tool-{self.name}"
                                     )
@@ -801,6 +808,18 @@ class ToolExecutionMixin:
                                     future.cancel()
                                     logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
                                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                                    # The timed-out thread cannot be reclaimed. Retire this
+                                    # executor so the next call gets a fresh worker instead of
+                                    # queuing behind a permanently stuck one — but bound how many
+                                    # orphaned (still-blocked) threads we allow to accumulate:
+                                    # once the cap is reached we stop recycling and keep reusing
+                                    # the existing pool so repeated timeouts can't exhaust process
+                                    # resources with an unbounded number of leaked threads.
+                                    orphaned = getattr(self, '_tool_executor_orphaned', 0)
+                                    if orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
+                                        self._tool_executor.shutdown(wait=False)
+                                        self._tool_executor = None
+                                        self._tool_executor_orphaned = orphaned + 1
                         else:
                             with tool_progress_channel(_progress_sink), with_injection_context(state):
                                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)

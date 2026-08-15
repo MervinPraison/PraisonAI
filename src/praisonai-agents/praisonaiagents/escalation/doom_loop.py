@@ -6,7 +6,7 @@ Provides recovery strategies when loops are detected.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 import time
 import hashlib
@@ -117,7 +117,7 @@ class DoomLoopDetector:
         self._loop_events: List[DoomLoopEvent] = []
         self._recovery_attempts: int = 0
         self._start_time: Optional[float] = None
-        self._progress_markers: List[str] = []
+        self._progress_markers: List[Tuple[str, float]] = []
         self._current_backoff: float = self.config.initial_backoff
         self._content_chunk_counts: Dict[str, int] = {}  # hash -> count
     
@@ -193,7 +193,7 @@ class DoomLoopDetector:
         Call this when the agent makes real progress (e.g., file modified,
         test passed, user goal partially achieved).
         """
-        self._progress_markers.append(marker)
+        self._progress_markers.append((marker, time.time()))
     
     def is_doom_loop(self) -> bool:
         """
@@ -379,10 +379,19 @@ class DoomLoopDetector:
         if len(self._actions) < self.config.max_no_progress_steps:
             return False
         
-        # If we have progress markers, we're making progress
+        # Only count progress markers within the current no-progress window.
+        # Without this recency filter a single early success would suppress
+        # NO_PROGRESS detection for the rest of the session.
+        # Use the boundary *before* the window (the completion timestamp of the
+        # action immediately preceding it, or 0 if the window is the whole
+        # history) so a marker recorded *during* the window's first action —
+        # whose own record_action timestamp is set at completion, i.e. after the
+        # marker — is still counted rather than filtered out.
+        n = self.config.max_no_progress_steps
+        boundary = self._actions[-n - 1].timestamp if len(self._actions) > n else 0.0
         recent_markers = [
-            m for m in self._progress_markers
-            if True  # Could add timestamp filtering
+            m for (m, ts) in self._progress_markers
+            if ts >= boundary
         ]
         if recent_markers:
             return False

@@ -1463,7 +1463,25 @@ class AgentTeam(SpawnAnnounceProtocol):
                 if async_tasks_to_run:
                     await self._gather_with_isolation(async_tasks_to_run)
                     async_tasks_to_run = []
-            
+
+            def _deps_failed(task_id):
+                """Re-check dependency failure at consumption time.
+
+                asequential() runs this check inside the generator, but async
+                tasks are buffered and drained later, so an upstream async task
+                may not have failed yet when the generator yielded the dependent.
+                Re-checking here — after pending async tasks are flushed — makes
+                the failure cascade fire for the async_execution path too.
+                """
+                task = self.tasks[task_id]
+                if getattr(task, 'context', None):
+                    return any(
+                        self.tasks[dep.id].status == "failed"
+                        for dep in task.context
+                        if hasattr(dep, 'id') and dep.id in self.tasks
+                    )
+                return False
+
             async for task_id in process.asequential():
                 if self.tasks[task_id].async_execution:
                     # Collect async tasks to run in parallel
@@ -1471,6 +1489,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                 else:
                     # Before running a sync task, execute all pending async tasks
                     await flush_async_tasks()
+                    # A just-flushed async prerequisite may now be failed; skip
+                    # the dependent so we don't run it with missing upstream context.
+                    if _deps_failed(task_id):
+                        self.tasks[task_id].status = "failed"
+                        continue
                     # Run sync task in an executor to avoid blocking the event loop
                     # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
                     from ..trace.context_events import copy_context_to_callable
