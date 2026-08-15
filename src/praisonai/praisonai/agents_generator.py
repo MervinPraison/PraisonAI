@@ -922,6 +922,36 @@ class AgentsGenerator:
                     name, v, tightest,
                 )
         return tightest
+
+    # Mirror the legacy CLI's --tool-timeout argparse default so the workflow
+    # validation can tell an implicit default apart from a user request.
+    _CLI_TOOL_TIMEOUT_DEFAULT = 60
+
+    def _resolve_explicit_workflow_tool_timeout(self, config):
+        """Resolve a tool_timeout the user *explicitly* requested, else ``None``.
+
+        The workflow path cannot enforce per-tool timeouts, so it fails fast on
+        a requested one. But the legacy CLI always injects its --tool-timeout
+        argparse default into ``cli_config`` (see direct_prompt.py), so a plain
+        ``_resolve_effective_tool_timeout`` would flag every ordinary workflow
+        run. Here a CLI value equal to the bare default is treated as "not
+        requested"; any other CLI value, or any per-agent/role YAML timeout,
+        counts as explicit.
+        """
+        cli_timeout = (self.cli_config or {}).get("tool_timeout")
+        if (
+            isinstance(cli_timeout, (int, float))
+            and not isinstance(cli_timeout, bool)
+            and float(cli_timeout) != float(self._CLI_TOOL_TIMEOUT_DEFAULT)
+        ):
+            return float(cli_timeout)
+
+        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
+        for entity in entities.values():
+            v = entity.get("tool_timeout") if isinstance(entity, dict) else None
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                return float(v)
+        return None
     
     def _select_framework(self, framework: str, config: Dict[str, Any]) -> Any:
         """Select and resolve the appropriate framework adapter.
@@ -1342,10 +1372,17 @@ class AgentsGenerator:
         # refuses --resume/--session/--fork and --output stream-json on this
         # path. A warn-only no-op left the same CLI+YAML surface with silently
         # different execution semantics gated on the process: value.
-        effective_timeout = self._resolve_effective_tool_timeout(config)
-        if effective_timeout and effective_timeout > 0:
+        #
+        # Only an *explicit* request is rejected: the legacy CLI always injects
+        # its --tool-timeout argparse default (60) into cli_config, so treating
+        # that implicit value as a user request would break every ordinary
+        # workflow YAML run. We therefore ignore the bare CLI default and only
+        # fail on a per-agent/role YAML tool_timeout or a CLI value the user
+        # actually changed.
+        explicit_timeout = self._resolve_explicit_workflow_tool_timeout(config)
+        if explicit_timeout and explicit_timeout > 0:
             raise ValueError(
-                f"tool_timeout={effective_timeout} is not supported for "
+                f"tool_timeout={explicit_timeout} is not supported for "
                 "'process: workflow' YAMLs; per-tool timeouts are only enforced "
                 "on the sequential/hierarchical path. Either remove tool_timeout "
                 "or convert to a sequential/hierarchical process."
