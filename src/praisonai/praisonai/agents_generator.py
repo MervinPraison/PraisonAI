@@ -934,23 +934,38 @@ class AgentsGenerator:
         a requested one. But the legacy CLI always injects its --tool-timeout
         argparse default into ``cli_config`` (see direct_prompt.py), so a plain
         ``_resolve_effective_tool_timeout`` would flag every ordinary workflow
-        run. Here a CLI value equal to the bare default is treated as "not
-        requested"; any other CLI value, or any per-agent/role YAML timeout,
-        counts as explicit.
+        run. Here a per-agent/role YAML timeout always counts as explicit; a CLI
+        value only counts when the user actually changed it away from the bare
+        argparse default. The per-agent/role resolution is delegated to
+        ``_resolve_effective_tool_timeout`` so both paths share one source of
+        truth and its override warnings still fire.
         """
+        # A per-agent/role YAML timeout is always an explicit request. Resolve it
+        # from config alone (ignoring the always-injected CLI default) via the
+        # shared effective resolver, so the tightest-value warning still fires.
         cli_timeout = (self.cli_config or {}).get("tool_timeout")
-        if (
+        cli_changed = (
             isinstance(cli_timeout, (int, float))
             and not isinstance(cli_timeout, bool)
             and float(cli_timeout) != float(self._CLI_TOOL_TIMEOUT_DEFAULT)
-        ):
+        )
+        if cli_changed:
             return float(cli_timeout)
 
-        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
-        for entity in entities.values():
-            v = entity.get("tool_timeout") if isinstance(entity, dict) else None
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
-                return float(v)
+        # No user-changed CLI value: fall back to a YAML-declared timeout, if any.
+        # Temporarily mask the injected CLI default so the effective resolver
+        # reports only what the YAML declared.
+        saved_cli_config = self.cli_config
+        try:
+            if isinstance(self.cli_config, dict) and "tool_timeout" in self.cli_config:
+                self.cli_config = {
+                    k: v for k, v in self.cli_config.items() if k != "tool_timeout"
+                }
+            declared = self._resolve_effective_tool_timeout(config)
+        finally:
+            self.cli_config = saved_cli_config
+        if declared and declared > 0:
+            return float(declared)
         return None
     
     def _select_framework(self, framework: str, config: Dict[str, Any]) -> Any:
@@ -1378,7 +1393,9 @@ class AgentsGenerator:
         # that implicit value as a user request would break every ordinary
         # workflow YAML run. We therefore ignore the bare CLI default and only
         # fail on a per-agent/role YAML tool_timeout or a CLI value the user
-        # actually changed.
+        # actually changed. The per-agent/role resolution is delegated to
+        # _resolve_effective_tool_timeout so the sequential/hierarchical and
+        # workflow paths share one source of truth.
         explicit_timeout = self._resolve_explicit_workflow_tool_timeout(config)
         if explicit_timeout and explicit_timeout > 0:
             raise ValueError(
