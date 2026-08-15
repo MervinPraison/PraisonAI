@@ -165,6 +165,40 @@ def test_code_print_real_agent_writes_workspace(tmp_path):
     assert target.read_text(encoding="utf-8").strip() == "HEADLESS_OK"
 
 
+def test_headless_search_tools_are_workspace_bound(tmp_path):
+    """Search tools must contain reads to --workspace, not the process cwd.
+
+    The core ``grep``/``glob`` default containment to ``os.getcwd()`` and
+    ``ast_grep_search`` performs none, so the headless loader must bind them to
+    the configured workspace. A model-supplied path that escapes the workspace
+    (absolute or ``..``) must be rejected without touching the filesystem.
+    """
+    from praisonai_code.cli.features.interactive_tools import (
+        ToolConfig,
+        _load_search_tools,
+    )
+
+    (tmp_path / "inside.txt").write_text("needle here", encoding="utf-8")
+
+    config = ToolConfig(workspace=str(tmp_path))
+    tools = _load_search_tools(config)
+    by_name = {t.__name__: t for t in tools.values()}
+
+    # grep is always available (pure-Python fallback), so assert on it.
+    grep = by_name["grep"]
+    assert "escapes the workspace" in grep("needle", path="/etc")
+    assert "escapes the workspace" in grep("needle", path="../../..")
+    # An in-workspace search still works and finds the seeded match.
+    assert "inside.txt" in grep("needle", path=".")
+
+    if "glob" in by_name:
+        assert "escapes the workspace" in by_name["glob"]("*", path="/etc")
+    if "ast_grep_search" in by_name:
+        assert "escapes the workspace" in by_name["ast_grep_search"](
+            "x", lang="python", path="/etc"
+        )
+
+
 def test_code_print_text_mode_clean_stdout(monkeypatch):
     """`-p --output text` prints just the result text, no envelope or decorations."""
     import praisonaiagents
