@@ -21,6 +21,7 @@ from praisonaiagents.hooks.runner import HookRunner
 from praisonaiagents.hooks.types import HookEvent, HookResult
 from praisonaiagents.hooks.events import (
     AfterLLMInput,
+    AfterToolInput,
     BeforeToolInput,
     SessionStartInput,
     SessionEndInput,
@@ -46,6 +47,37 @@ class ToolArgPlugin(Plugin):
         args = dict(args)
         args["injected"] = True
         return args
+
+
+class RedactToolResultPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="redacttool", hooks=[PluginHook.AFTER_TOOL])
+
+    def after_tool(self, tool_name, result):
+        return str(result).replace("sk-SECRET123", "[REDACTED]")
+
+
+class BlockToolResultPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="blocktoolresult", hooks=[PluginHook.AFTER_TOOL])
+
+    def after_tool(self, tool_name, result):
+        if "sk-SECRET123" in str(result):
+            return PluginDecision.block("Secret detected in tool output")
+        return result
+
+
+class RaiseBlockToolResultPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="raiseblocktool", hooks=[PluginHook.AFTER_TOOL])
+
+    def after_tool(self, tool_name, result):
+        if "sk-SECRET123" in str(result):
+            raise GuardrailBlocked("Secret detected in tool output")
+        return result
 
 
 class NoopPlugin(Plugin):
@@ -150,6 +182,107 @@ class TestBridge:
         )
         runner.execute_sync(HookEvent.BEFORE_TOOL, data)
         assert data.tool_input.get("injected") is True
+
+    def test_after_tool_plugin_redacts_result(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(RedactToolResultPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        data = AfterToolInput(
+            session_id="s", cwd=os.getcwd(), event_name=HookEvent.AFTER_TOOL,
+            timestamp=str(time.time()), agent_name="a",
+            tool_name="fetch", tool_output="token=sk-SECRET123 ok",
+        )
+        runner.execute_sync(HookEvent.AFTER_TOOL, data)
+        assert data.tool_output == "token=[REDACTED] ok"
+        assert "sk-SECRET123" not in data.tool_output
+
+    def test_after_tool_passthrough_leaves_result(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(BlockToolResultPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        data = AfterToolInput(
+            session_id="s", cwd=os.getcwd(), event_name=HookEvent.AFTER_TOOL,
+            timestamp=str(time.time()), agent_name="a",
+            tool_name="fetch", tool_output="clean output",
+        )
+        runner.execute_sync(HookEvent.AFTER_TOOL, data)
+        assert data.tool_output == "clean output"
+
+    def test_after_tool_decision_blocks(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(BlockToolResultPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        data = AfterToolInput(
+            session_id="s", cwd=os.getcwd(), event_name=HookEvent.AFTER_TOOL,
+            timestamp=str(time.time()), agent_name="a",
+            tool_name="fetch", tool_output="token=sk-SECRET123",
+        )
+        results = runner.execute_sync(HookEvent.AFTER_TOOL, data)
+        assert runner.is_blocked(results) is True
+
+    def test_after_tool_guardrail_blocked_raises(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(RaiseBlockToolResultPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        data = AfterToolInput(
+            session_id="s", cwd=os.getcwd(), event_name=HookEvent.AFTER_TOOL,
+            timestamp=str(time.time()), agent_name="a",
+            tool_name="fetch", tool_output="token=sk-SECRET123",
+        )
+        results = runner.execute_sync(HookEvent.AFTER_TOOL, data)
+        assert runner.is_blocked(results) is True
+        assert runner.get_blocking_reason(results) == "Secret detected in tool output"
+
+    def test_agent_execute_tool_redacts_output(self):
+        """End-to-end: an AFTER_TOOL plugin scrubs the value the executor returns."""
+        from praisonaiagents import Agent, tool
+
+        @tool
+        def leak() -> str:
+            """Return a secret token."""
+            return "token=sk-SECRET123 ok"
+
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(RedactToolResultPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        agent = Agent(name="a", role="r", goal="g", tools=[leak], hooks=reg)
+        result = agent.execute_tool("leak", {})
+        print(f"[test_agent_execute_tool_redacts_output] result={result!r}")
+        assert "sk-SECRET123" not in str(result)
+        assert "[REDACTED]" in str(result)
+
+    def test_agent_execute_tool_blocks_output(self):
+        """End-to-end: an AFTER_TOOL block stops secret output reaching the model."""
+        from praisonaiagents import Agent, tool
+
+        @tool
+        def leak() -> str:
+            """Return a secret token."""
+            return "token=sk-SECRET123"
+
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(BlockToolResultPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        agent = Agent(name="a", role="r", goal="g", tools=[leak], hooks=reg)
+        result = agent.execute_tool("leak", {})
+        print(f"[test_agent_execute_tool_blocks_output] result={result!r}")
+        assert "sk-SECRET123" not in str(result)
 
     def test_disabled_plugin_not_wired(self):
         reg = HookRegistry()

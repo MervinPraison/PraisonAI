@@ -1149,6 +1149,20 @@ class ToolExecutionMixin:
                 )
                 after_tool_results = self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
 
+                # Honour a post-tool block: a plugin/hook can deny the result
+                # (e.g. secret/PII detected) so the original output never
+                # reaches the model. Mirrors the BEFORE_TOOL block path above.
+                if self._hook_runner.is_blocked(after_tool_results):
+                    reason = self._hook_runner.get_blocking_reason(after_tool_results)
+                    logging.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
+                    return reason or f"Result of {function_name} was blocked by security policy."
+
+                # Read back any rewritten/redacted tool_output so a plugin can
+                # scrub secrets before the result reaches the model. The bridge
+                # mutates ``after_tool_input.tool_output`` in place.
+                if getattr(after_tool_input, "tool_output", result) is not result:
+                    result = after_tool_input.tool_output
+
                 # Surface any additional_context returned by AFTER_TOOL hooks
                 # back to the model by appending it to the tool result (mirrors
                 # the loop-guard injection pattern below). Without this the

@@ -26,9 +26,12 @@ class GuardrailBlocked(Exception):
     A ``POLICY``/``GUARDRAIL`` plugin can raise this from any ``before_*``
     method (``before_tool``, ``before_llm``, ``before_agent``,
     ``before_message``) to stop the tool call / LLM request / agent run /
-    inbound message. The plugin bridge converts it into a denying
-    ``HookResult`` so the runtime's existing ``is_blocked`` enforcement skips
-    the action and surfaces ``reason``.
+    inbound message. It may also be raised from ``after_tool`` to block
+    *propagation* of a tool result (e.g. secret/PII detected) — the tool has
+    already run, but the output is suppressed before it reaches the model.
+    The plugin bridge converts it into a denying ``HookResult`` so the
+    runtime's existing ``is_blocked`` enforcement skips the action and
+    surfaces ``reason``.
     """
 
     def __init__(self, reason: str = "Blocked by guardrail plugin"):
@@ -177,7 +180,13 @@ class Plugin(ABC):
         return args
     
     def after_tool(self, tool_name: str, result: Any) -> Any:
-        """Called after tool execution. Can modify result."""
+        """Called after tool execution.
+
+        Return a modified ``result`` (rewrite/redact) to replace the effective
+        tool output before it reaches the model or a channel, a deny/block
+        decision (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`), or ``None`` for no-op.
+        """
         return result
 
     def before_tool_definitions(

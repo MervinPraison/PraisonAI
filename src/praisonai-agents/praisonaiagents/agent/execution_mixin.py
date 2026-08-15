@@ -1456,6 +1456,18 @@ Write the complete compiled report:"""
                 after_results = await hook_runner.execute(
                     HookEvent.AFTER_TOOL, after_tool_input, target=function_name
                 )
+                # Honour a post-tool block so a redacted/denied result never
+                # reaches the model (mirrors the BEFORE_TOOL block path above).
+                if hook_runner.is_blocked(after_results):
+                    reason = hook_runner.get_blocking_reason(after_results)
+                    logging.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
+                    return _record_async_loop_outcome(
+                        reason or f"Result of {function_name} was blocked by security policy."
+                    )
+                # Read back any rewritten/redacted tool_output so a plugin can
+                # scrub secrets before the result reaches the model.
+                if getattr(after_tool_input, "tool_output", result) is not result:
+                    result = after_tool_input.tool_output
                 extra_context = hook_runner.aggregate_context(after_results)
                 if extra_context:
                     if isinstance(result, str):

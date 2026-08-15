@@ -828,7 +828,16 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("after_tool"):
         def after_tool_hook(data, _p=plugin):
-            _p.after_tool(getattr(data, "tool_name", ""), getattr(data, "tool_output", None))
+            try:
+                new_result = _p.after_tool(getattr(data, "tool_name", ""),
+                                           getattr(data, "tool_output", None))
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new_result)
+            if decision is not None:
+                return decision
+            if new_result is not None and hasattr(data, "tool_output"):
+                data.tool_output = new_result
             return HookResult.allow()
         yield HookEvent.AFTER_TOOL, after_tool_hook
 
