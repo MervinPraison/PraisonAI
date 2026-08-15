@@ -1356,7 +1356,10 @@ Respond with ONLY a valid JSON tool call in this format:
             The completion response from litellm
         """
         import litellm
-        return self._call_with_retry(litellm.completion, **completion_params)
+        response = self._call_with_retry(litellm.completion, **completion_params)
+        if not completion_params.get("stream"):
+            self._track_token_usage(response, self.model)
+        return response
 
     async def _acompletion_with_retry(self, **completion_params):
         """Execute litellm.acompletion with automatic retry on rate limit errors.
@@ -1371,7 +1374,13 @@ Respond with ONLY a valid JSON tool call in this format:
             The completion response from litellm
         """
         import litellm
-        return await self._call_with_retry_async(litellm.acompletion, **completion_params)
+        response = await self._call_with_retry_async(
+            litellm.acompletion,
+            **completion_params,
+        )
+        if not completion_params.get("stream"):
+            self._track_token_usage(response, self.model)
+        return response
 
     def _supports_web_search(self) -> bool:
         """
@@ -2646,7 +2655,11 @@ Respond with ONLY a valid JSON tool call in this format:
                             resp = self._call_responses_api(**responses_params)
                             response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
 
-                            # Track token usage
+                            # Usage accounting is independent from metrics display.
+                            # Quiet/default agents must still update the public
+                            # token collector after a paid model call.
+                            self._track_token_usage(resp, self.model)
+
                             if self.metrics and hasattr(resp, 'usage') and resp.usage:
                                 usage = resp.usage
                                 tokens_in = getattr(usage, 'input_tokens', 0) or 0
@@ -2869,10 +2882,6 @@ Respond with ONLY a valid JSON tool call in this format:
                                 is_reasoning=False
                             ))
                         
-                        # Track token usage
-                        if self.metrics:
-                            self._track_token_usage(final_response, self.model)
-                        
                         # Trigger llm_end callback with metrics for debug output
                         llm_latency_ms = (time.time() - current_time) * 1000
                         
@@ -3086,9 +3095,6 @@ Respond with ONLY a valid JSON tool call in this format:
                                             response_content = final_response["choices"][0]["message"].get("content")
                                             response_text = response_content if response_content is not None else ""
                                             
-                                            # Track token usage
-                                            if self.metrics:
-                                                self._track_token_usage(final_response, self.model)
                                         
                                         # Execute callbacks and display based on verbose setting
                                         if verbose and not interaction_displayed:
@@ -3278,9 +3284,6 @@ Respond with ONLY a valid JSON tool call in this format:
                                 response_content = final_response["choices"][0]["message"].get("content")
                                 response_text = response_content if response_content is not None else ""
                                 
-                                # Track token usage
-                                if self.metrics:
-                                    self._track_token_usage(final_response, self.model)
                             
                             # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
@@ -5414,27 +5417,66 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 litellm.callbacks.append(event)
         self._registered_callbacks = list(events)
 
-    def _track_token_usage(self, response: Dict[str, Any], model: str) -> Optional[TokenMetrics]:
+    def _track_token_usage(self, response: Any, model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
         if not TokenMetrics or not get_token_collector:
             return None
-        
-        # Note: metrics check moved to call sites for performance
-        # This method should only be called when self.metrics=True
-        
+
         try:
-            usage = response.get("usage", {})
+            if isinstance(response, dict):
+                usage = response.get("usage", {})
+            else:
+                usage = getattr(response, "usage", None)
             if not usage:
                 return None
-            
+
+            def _usage_value(*names: str) -> int:
+                for name in names:
+                    if isinstance(usage, dict):
+                        value = usage.get(name)
+                    else:
+                        value = getattr(usage, name, None)
+                    if value is not None:
+                        return int(value or 0)
+                return 0
+
+            def _detail_value(detail_names: tuple[str, ...], name: str) -> int:
+                for detail_name in detail_names:
+                    details = (
+                        usage.get(detail_name)
+                        if isinstance(usage, dict)
+                        else getattr(usage, detail_name, None)
+                    )
+                    if details:
+                        value = (
+                            details.get(name)
+                            if isinstance(details, dict)
+                            else getattr(details, name, None)
+                        )
+                        if value is not None:
+                            return int(value or 0)
+                return 0
+
             # Extract token counts
             metrics = TokenMetrics(
-                input_tokens=usage.get("prompt_tokens", 0),
-                output_tokens=usage.get("completion_tokens", 0),
-                cached_tokens=usage.get("cached_tokens", 0),
-                reasoning_tokens=usage.get("reasoning_tokens", 0),
-                audio_input_tokens=usage.get("audio_input_tokens", 0),
-                audio_output_tokens=usage.get("audio_output_tokens", 0)
+                input_tokens=_usage_value("prompt_tokens", "input_tokens"),
+                output_tokens=_usage_value("completion_tokens", "output_tokens"),
+                cached_tokens=_usage_value("cached_tokens") or _detail_value(
+                    ("prompt_tokens_details", "input_tokens_details"),
+                    "cached_tokens",
+                ),
+                reasoning_tokens=_usage_value("reasoning_tokens") or _detail_value(
+                    ("completion_tokens_details", "output_tokens_details"),
+                    "reasoning_tokens",
+                ),
+                audio_input_tokens=_usage_value("audio_input_tokens") or _detail_value(
+                    ("prompt_tokens_details", "input_tokens_details"),
+                    "audio_tokens",
+                ),
+                audio_output_tokens=_usage_value("audio_output_tokens") or _detail_value(
+                    ("completion_tokens_details", "output_tokens_details"),
+                    "audio_tokens",
+                ),
             )
             
             # Store metrics
@@ -5942,7 +5984,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Returns a ``ResponsesAPIResponse`` object.
         """
         import litellm
-        return await self._call_with_retry_async(litellm.aresponses, **params)
+        response = await self._call_with_retry_async(litellm.aresponses, **params)
+        self._track_token_usage(response, self.model)
+        return response
 
     def _extract_from_responses_output(self, response) -> tuple:
         """
