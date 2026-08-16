@@ -15,6 +15,19 @@ Supports deep-merge semantics and backward compatibility with legacy paths.
 The managed layer is fully opt-in: with no managed source configured
 (``PRAISONAI_MANAGED_CONFIG_URL`` / ``PRAISONAI_MANAGED_CONFIG_DIR`` or a global
 ``managed`` config section), resolution behaves exactly as before.
+
+Zero-disk config injection: the user-config layer (slots 3+4 above) can be
+supplied entirely from the environment for read-only/stateless runs, mirroring
+the ``PRAISONAI_AUTH_CONTENT`` credential blob:
+
+- ``PRAISONAI_CONFIG_CONTENT`` — an inline JSON/YAML blob parsed in memory as the
+  user-config layer; no global/project file is read for that layer.
+- ``PRAISONAI_CONFIG`` — an explicit config file path loaded as the user-config
+  layer in place of the discovered global/project files.
+
+Inline content wins over an explicit path, which wins over file discovery. In
+all cases the higher-precedence layers (per-key env vars, CLI flags) and managed
+policy are unchanged. Unset → today's file-discovery behaviour is preserved.
 """
 
 import os
@@ -39,6 +52,19 @@ from ..utils.env_utils import interpolate
 # organisation can guarantee (not merely suggest) them. Everything else from a
 # managed source is treated as a default and layered BELOW local config.
 MANAGED_POLICY_KEYS = ("permissions", "model_allowlist")
+
+#: Environment variable that, when set, supplies the entire user-config layer as
+#: an inline JSON/YAML blob (parsed in memory). It occupies the same precedence
+#: slot as the discovered global/project file, so higher layers (per-key env
+#: vars, CLI flags) and managed policy still win. When set, no global/project
+#: config file is read for that layer. Sibling of ``PRAISONAI_AUTH_CONTENT`` so a
+#: single CI/container secret set can supply auth + config with nothing on disk.
+CONFIG_CONTENT_ENV = "PRAISONAI_CONFIG_CONTENT"
+
+#: Environment variable naming an explicit config file path to load as the
+#: user-config layer, in place of the discovered global/project files. Lower
+#: precedence than ``PRAISONAI_CONFIG_CONTENT`` (inline content wins).
+CONFIG_PATH_ENV = "PRAISONAI_CONFIG"
 
 # Where the managed-config on-disk cache lives (fail-soft last-good copy).
 _MANAGED_CACHE_DIRNAME = "state"
@@ -459,17 +485,27 @@ class ConfigResolver:
             config = self._merge_configs(config, managed_defaults)
             config.sources.append(f"managed:{managed_source}")
         
-        # Layer 3: Global user config
-        global_config = self._load_global_config()
-        if global_config:
-            config = self._merge_configs(config, global_config)
-            config.sources.append(f"global:{global_config['_source']}")
-        
-        # Layer 4: Project config (with walk-up discovery)
-        project_config = self._load_project_config()
-        if project_config:
-            config = self._merge_configs(config, project_config)
-            config.sources.append(f"project:{project_config['_source']}")
+        # Layers 3+4: User-config layer. When PRAISONAI_CONFIG_CONTENT (inline)
+        # or PRAISONAI_CONFIG (explicit path) is set, that single source stands
+        # in for both the global and project files (nothing on disk is
+        # discovered for this layer). Otherwise fall back to the usual global
+        # then project walk-up discovery.
+        env_user_config = self._load_env_user_config()
+        if env_user_config is not None:
+            config = self._merge_configs(config, env_user_config)
+            config.sources.append(f"env-config:{env_user_config['_source']}")
+        else:
+            # Layer 3: Global user config
+            global_config = self._load_global_config()
+            if global_config:
+                config = self._merge_configs(config, global_config)
+                config.sources.append(f"global:{global_config['_source']}")
+
+            # Layer 4: Project config (with walk-up discovery)
+            project_config = self._load_project_config()
+            if project_config:
+                config = self._merge_configs(config, project_config)
+                config.sources.append(f"project:{project_config['_source']}")
         
         # Layer 5: Environment variables
         env_config = self._load_env_config()
@@ -498,6 +534,74 @@ class ConfigResolver:
         
         return config
     
+    def _parse_config_blob(self, raw: str) -> Optional[Dict[str, Any]]:
+        """Parse an inline config blob (JSON or YAML) into a dict.
+
+        JSON is a strict subset of YAML, so ``yaml.safe_load`` handles both.
+        ``${VAR}`` / ``{env:VAR}`` / ``{file:...}`` directives are interpolated
+        so the blob composes with the same conventions as an on-disk file.
+        Returns ``None`` when the blob is empty or does not parse to a mapping.
+        """
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            warnings.warn(
+                f"Ignoring {CONFIG_CONTENT_ENV}: value is not valid JSON/YAML.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return None
+        if not isinstance(data, dict):
+            if data is not None:
+                warnings.warn(
+                    f"Ignoring {CONFIG_CONTENT_ENV}: value must be a mapping.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            return None
+        return interpolate(data)
+
+    def _load_env_user_config(self) -> Optional[Dict[str, Any]]:
+        """Source the user-config layer from the environment, if requested.
+
+        Returns the parsed config dict (with ``_source`` provenance) when either
+        ``PRAISONAI_CONFIG_CONTENT`` (inline, parsed in memory — no file touched)
+        or ``PRAISONAI_CONFIG`` (explicit path) is set. Inline content wins over
+        an explicit path. Returns ``None`` when neither is set, so file discovery
+        (global then project) runs exactly as before.
+        """
+        raw = os.environ.get(CONFIG_CONTENT_ENV)
+        if raw:
+            data = self._parse_config_blob(raw)
+            # A valid empty mapping ({}) is authoritative: it still stands in for
+            # the user-config layer, so file discovery must NOT re-enable. Only a
+            # None (unparseable / non-mapping, already warned) falls back.
+            if data is not None:
+                data["_source"] = f"env:{CONFIG_CONTENT_ENV}"
+                self._validate(data, data["_source"])
+                return data
+            return None
+
+        path = os.environ.get(CONFIG_PATH_ENV)
+        if path:
+            config_path = Path(path).expanduser()
+            data = self._read_config_file(config_path)
+            # Require a mapping: an empty file (which _read_config_file coerces to
+            # {}) is still authoritative and suppresses discovery, while a list /
+            # scalar body is rejected (would break _source assignment downstream).
+            if isinstance(data, dict):
+                data["_source"] = str(config_path)
+                self._validate(data, str(config_path))
+                return data
+            warnings.warn(
+                f"{CONFIG_PATH_ENV} points at '{config_path}', which could not "
+                "be read as a config mapping; falling back to file discovery.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        return None
+
     def _load_global_config(self) -> Optional[Dict[str, Any]]:
         """Load global user configuration."""
         configs = []
@@ -791,17 +895,28 @@ class ConfigResolver:
         if managed_defaults:
             _record(f"managed:{managed_source}", managed_source, managed_defaults)
 
-        # Layer 3: global user config.
-        global_config = self._load_global_config()
-        if global_config:
-            source = global_config.get("_source")
-            _record("global", source, {k: v for k, v in global_config.items() if k != "_source"})
+        # Layers 3+4: user-config layer. An env-supplied config
+        # (PRAISONAI_CONFIG_CONTENT / PRAISONAI_CONFIG) stands in for both the
+        # global and project files; otherwise discover them as usual.
+        env_user_config = self._load_env_user_config()
+        if env_user_config is not None:
+            source = env_user_config.get("_source")
+            _record(
+                "env-config", source,
+                {k: v for k, v in env_user_config.items() if k != "_source"},
+            )
+        else:
+            # Layer 3: global user config.
+            global_config = self._load_global_config()
+            if global_config:
+                source = global_config.get("_source")
+                _record("global", source, {k: v for k, v in global_config.items() if k != "_source"})
 
-        # Layer 4: project config (walk-up discovery).
-        project_config = self._load_project_config()
-        if project_config:
-            source = project_config.get("_source")
-            _record("project", source, {k: v for k, v in project_config.items() if k != "_source"})
+            # Layer 4: project config (walk-up discovery).
+            project_config = self._load_project_config()
+            if project_config:
+                source = project_config.get("_source")
+                _record("project", source, {k: v for k, v in project_config.items() if k != "_source"})
 
         # Layer 5: environment variables.
         env_config = self._load_env_config()
