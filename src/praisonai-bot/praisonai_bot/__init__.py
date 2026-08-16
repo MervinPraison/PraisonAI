@@ -8,6 +8,12 @@ _LAZY_EXPORTS = {
     "Bot": ("praisonai_bot.bots.bot", "Bot"),
     "BotOS": ("praisonai_bot.bots.botos", "BotOS"),
     "WebSocketGateway": ("praisonai_bot.gateway.server", "WebSocketGateway"),
+    "GatewayRepairResult": ("praisonai_bot.gateway.admin", "GatewayRepairResult"),
+    "repair_gateway_config": ("praisonai_bot.gateway.admin", "repair_gateway_config"),
+    "provision_gateway_config": (
+        "praisonai_bot.gateway.admin",
+        "provision_gateway_config",
+    ),
 }
 
 
@@ -21,4 +27,12 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["Bot", "BotOS", "WebSocketGateway", "__version__"]
+__all__ = [
+    "Bot",
+    "BotOS",
+    "WebSocketGateway",
+    "GatewayRepairResult",
+    "repair_gateway_config",
+    "provision_gateway_config",
+    "__version__",
+]
