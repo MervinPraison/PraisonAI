@@ -694,27 +694,6 @@ class BaseAutoGenerator:
             thread_name="praisonai-sync-completion",
         )
 
-    async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
-        """
-        Make an async structured LLM completion with provider fallback.
-
-        Priority:
-        1. LiteLLM async (if available) - supports 100+ LLM providers
-        2. OpenAI AsyncSDK (fallback) - uses beta.chat.completions.parse
-
-        Args:
-            response_model: Pydantic model class for structured output
-            messages: List of message dicts for the LLM
-            **kwargs: Additional arguments passed to the LLM
-
-        Returns:
-            Instance of response_model with parsed response
-
-        Raises:
-            ImportError: If neither litellm nor openai is installed
-        """
-        return await self._completion_impl(response_model, messages, is_async=True, **kwargs)
-
     async def _structured_completion_async(
         self, response_model: Type[T], messages: List[Dict], *, is_async: bool, **kwargs
     ) -> T:
