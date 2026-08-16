@@ -16,6 +16,8 @@ Usage:
     prompt_xml = manager.to_prompt()
 """
 
+from .._lazy import create_lazy_getattr_with_groups
+
 __all__ = [
     # Models
     "SkillProperties",
@@ -74,76 +76,91 @@ __all__ = [
 ]
 
 
+_LAZY_GROUPS = {
+    'models': {
+        'SkillProperties': ('praisonaiagents.skills.models', 'SkillProperties'),
+        'SkillMetadata': ('praisonaiagents.skills.models', 'SkillMetadata'),
+        'SkillRequirements': ('praisonaiagents.skills.models', 'SkillRequirements'),
+        'SkillState': ('praisonaiagents.skills.models', 'SkillState'),
+        'ParseError': ('praisonaiagents.skills.models', 'ParseError'),
+        'ValidationError': ('praisonaiagents.skills.models', 'ValidationError'),
+    },
+    'parser': {
+        'parse_frontmatter': ('praisonaiagents.skills.parser', 'parse_frontmatter'),
+        'find_skill_md': ('praisonaiagents.skills.parser', 'find_skill_md'),
+        'read_properties': ('praisonaiagents.skills.parser', 'read_properties'),
+    },
+    'validator': {
+        'validate': ('praisonaiagents.skills.validator', 'validate'),
+        'validate_metadata': ('praisonaiagents.skills.validator', 'validate_metadata'),
+        '_validate_name': ('praisonaiagents.skills.validator', '_validate_name'),
+        '_validate_description': ('praisonaiagents.skills.validator', '_validate_description'),
+        '_validate_compatibility': ('praisonaiagents.skills.validator', '_validate_compatibility'),
+    },
+    'prompt': {
+        'to_prompt': ('praisonaiagents.skills.prompt', 'to_prompt'),
+        'generate_skills_xml': ('praisonaiagents.skills.prompt', 'generate_skills_xml'),
+        'format_skill_for_prompt': ('praisonaiagents.skills.prompt', 'format_skill_for_prompt'),
+    },
+    'learn': {
+        'build_learn_prompt': ('praisonaiagents.skills.learn', 'build_learn_prompt'),
+    },
+    'discovery': {
+        'discover_skills': ('praisonaiagents.skills.discovery', 'discover_skills'),
+        'get_default_skill_dirs': ('praisonaiagents.skills.discovery', 'get_default_skill_dirs'),
+    },
+    'bundles': {
+        'BundleManifest': ('praisonaiagents.skills.bundles', 'BundleManifest'),
+        'discover_bundles': ('praisonaiagents.skills.bundles', 'discover_bundles'),
+    },
+    'loader': {
+        'SkillLoader': ('praisonaiagents.skills.loader', 'SkillLoader'),
+    },
+    'manager': {
+        'SkillManager': ('praisonaiagents.skills.manager', 'SkillManager'),
+    },
+    'substitution': {
+        'render_skill_body': ('praisonaiagents.skills.substitution', 'render_skill_body'),
+    },
+    'shell_render': {
+        'render_shell_blocks': ('praisonaiagents.skills.shell_render', 'render_shell_blocks'),
+    },
+    'protocols_sources': {
+        'SkillSourceProtocol': ('praisonaiagents.skills.protocols', 'SkillSourceProtocol'),
+        'RemoteSkillSourceProtocol': ('praisonaiagents.skills.protocols', 'RemoteSkillSourceProtocol'),
+        'SkillInvocationPolicyProtocol': ('praisonaiagents.skills.protocols', 'SkillInvocationPolicyProtocol'),
+        'SkillMutatorProtocol': ('praisonaiagents.skills.protocols', 'SkillMutatorProtocol'),
+    },
+    'remote': {
+        'GitRemoteSkillSource': ('praisonaiagents.skills.remote', 'GitRemoteSkillSource'),
+        'fetch_remote_skill_dirs': ('praisonaiagents.skills.remote', 'fetch_remote_skill_dirs'),
+    },
+    'protocols_review': {
+        'SkillReviewProtocol': ('praisonaiagents.skills.protocols', 'SkillReviewProtocol'),
+        'DefaultSkillReviewPolicy': ('praisonaiagents.skills.protocols', 'DefaultSkillReviewPolicy'),
+    },
+    'activation': {
+        'SkillActivationProtocol': ('praisonaiagents.skills.activation', 'SkillActivationProtocol'),
+    },
+    'events': {
+        'SkillDiscoveredEvent': ('praisonaiagents.skills.events', 'SkillDiscoveredEvent'),
+        'SkillActivatedEvent': ('praisonaiagents.skills.events', 'SkillActivatedEvent'),
+    },
+    'budget': {
+        'SkillPromptBudget': ('praisonaiagents.skills.budget', 'SkillPromptBudget'),
+    },
+    'capability_validator': {
+        'CapabilityValidator': ('praisonaiagents.skills.capability_validator', 'CapabilityValidator'),
+        'EnforcementLevel': ('praisonaiagents.skills.capability_validator', 'EnforcementLevel'),
+        'ValidationResult': ('praisonaiagents.skills.capability_validator', 'ValidationResult'),
+    },
+}
+
+_lazy_getattr = create_lazy_getattr_with_groups(_LAZY_GROUPS, __name__)
+
+
 def __getattr__(name: str):
     """Lazy load module components to avoid import overhead."""
-    if name in ("SkillProperties", "SkillMetadata", "SkillRequirements", "SkillState", "ParseError", "ValidationError"):
-        from .models import SkillProperties, SkillMetadata, SkillRequirements, SkillState, ParseError, ValidationError
-        return locals()[name]
-    
-    if name in ("parse_frontmatter", "find_skill_md", "read_properties"):
-        from .parser import parse_frontmatter, find_skill_md, read_properties
-        return locals()[name]
-    
-    if name in ("validate", "validate_metadata", "_validate_name", "_validate_description", "_validate_compatibility"):
-        from .validator import validate, validate_metadata, _validate_name, _validate_description, _validate_compatibility
-        return locals()[name]
-    
-    if name in ("to_prompt", "generate_skills_xml", "format_skill_for_prompt"):
-        from .prompt import to_prompt, generate_skills_xml, format_skill_for_prompt
-        return locals()[name]
-
-    if name == "build_learn_prompt":
-        from .learn import build_learn_prompt
-        return build_learn_prompt
-    
-    if name in ("discover_skills", "get_default_skill_dirs"):
-        from .discovery import discover_skills, get_default_skill_dirs
-        return locals()[name]
-
-    if name in ("BundleManifest", "discover_bundles"):
-        from .bundles import BundleManifest, discover_bundles
-        return locals()[name]
-    
-    if name == "SkillLoader":
-        from .loader import SkillLoader
-        return SkillLoader
-    
-    if name == "SkillManager":
-        from .manager import SkillManager
-        return SkillManager
-
-    if name == "render_skill_body":
-        from .substitution import render_skill_body
-        return render_skill_body
-
-    if name == "render_shell_blocks":
-        from .shell_render import render_shell_blocks
-        return render_shell_blocks
-
-    if name in ("SkillSourceProtocol", "RemoteSkillSourceProtocol", "SkillInvocationPolicyProtocol", "SkillMutatorProtocol"):
-        from .protocols import SkillSourceProtocol, RemoteSkillSourceProtocol, SkillInvocationPolicyProtocol, SkillMutatorProtocol
-        return locals()[name]
-
-    if name in ("GitRemoteSkillSource", "fetch_remote_skill_dirs"):
-        from .remote import GitRemoteSkillSource, fetch_remote_skill_dirs
-        return locals()[name]
-
-    if name in ("SkillReviewProtocol", "DefaultSkillReviewPolicy"):
-        from .protocols import SkillReviewProtocol, DefaultSkillReviewPolicy
-        return locals()[name]
-
-    if name == "SkillActivationProtocol":
-        from .activation import SkillActivationProtocol
-        return SkillActivationProtocol
-
-    if name in ("SkillDiscoveredEvent", "SkillActivatedEvent"):
-        from .events import SkillDiscoveredEvent, SkillActivatedEvent
-        return locals()[name]
-
-    if name == "SkillPromptBudget":
-        from .budget import SkillPromptBudget
-        return SkillPromptBudget
-
     if name == "load_skill":
         # Fixes G12: praisonai.capabilities.skills.skill_load import target.
         # Returns a LoadedSkill (metadata + activated instructions) by name,
@@ -163,9 +180,5 @@ def __getattr__(name: str):
             return None
 
         return load_skill
-    
-    if name in ("CapabilityValidator", "EnforcementLevel", "ValidationResult"):
-        from .capability_validator import CapabilityValidator, EnforcementLevel, ValidationResult
-        return locals()[name]
 
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return _lazy_getattr(name)
