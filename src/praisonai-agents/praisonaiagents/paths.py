@@ -56,11 +56,18 @@ XDG_APP_NAME = "praisonai"
 # Cache for data dir to avoid repeated filesystem checks
 _data_dir_cache: Optional[Path] = None
 
+# Cache for the single-root decision. Snapshotted on first resolution so that
+# creating the default data directory later in the same process does not
+# retroactively flip config/state/cache from their XDG locations onto a
+# single root (see Issue #3981). ``False`` means "resolved: no single root".
+_single_root_cache: Union[Path, bool, None] = None
+
 
 def _clear_cache() -> None:
-    """Clear the data dir cache. Used for testing."""
-    global _data_dir_cache
+    """Clear cached path decisions. Used for testing."""
+    global _data_dir_cache, _single_root_cache
     _data_dir_cache = None
+    _single_root_cache = None
 
 
 def _single_root() -> Optional[Path]:
@@ -72,20 +79,33 @@ def _single_root() -> Optional[Path]:
     that single root, preserving full backward compatibility. When no such root
     exists (a fresh install), ``None`` is returned so callers fall through to
     the XDG base directories.
+
+    ``PRAISONAI_HOME`` is always honoured live (never cached) so tests and
+    runtime overrides take effect immediately. The existence-based legacy
+    detection, however, is snapshotted on first use: once a run has resolved
+    "no single root", later creation of the default ``~/.praisonai`` data
+    directory must not retroactively move config/state/cache onto it mid-run.
     """
     env_path = os.environ.get(ENV_VAR)
     if env_path:
         return Path(env_path).expanduser()
 
+    global _single_root_cache
+    if _single_root_cache is not None:
+        return _single_root_cache or None
+
     home = Path.home()
     new_path = home / DEFAULT_DIR_NAME
     if new_path.exists():
+        _single_root_cache = new_path
         return new_path
 
     legacy_path = home / LEGACY_DIR_NAME
     if legacy_path.exists():
+        _single_root_cache = legacy_path
         return legacy_path
 
+    _single_root_cache = False
     return None
 
 

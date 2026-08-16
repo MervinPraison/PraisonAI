@@ -191,6 +191,44 @@ class TestXDGResolution:
                 assert get_config_dir() == mock_home / ".config" / "praisonai"
         _clear_cache()
 
+    def test_roots_stable_after_data_dir_created_midrun(self, tmp_path):
+        """Creating the default data dir mid-run must not flip other classes.
+
+        Regression for the case where a fresh install resolves config/state/
+        cache to XDG locations, then some caller creates ~/.praisonai (the
+        default data dir). The single-root decision is snapshotted, so the
+        XDG classes must remain on XDG rather than switching to ~/.praisonai.
+        """
+        from praisonaiagents.paths import (
+            get_config_dir,
+            get_state_dir,
+            get_cache_dir,
+            _clear_cache,
+        )
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        env = {
+            "XDG_CONFIG_HOME": str(tmp_path / "c"),
+            "XDG_STATE_HOME": str(tmp_path / "s"),
+            "XDG_CACHE_HOME": str(tmp_path / "ca"),
+        }
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, env, clear=True):
+                # Fresh install: XDG locations resolved first.
+                assert get_config_dir() == tmp_path / "c" / "praisonai"
+                assert get_state_dir() == tmp_path / "s" / "praisonai"
+                assert get_cache_dir() == tmp_path / "ca" / "praisonai"
+
+                # Simulate a caller creating the default data directory.
+                (mock_home / ".praisonai").mkdir(parents=True)
+
+                # Classes must stay on XDG, not flip to ~/.praisonai.
+                assert get_config_dir() == tmp_path / "c" / "praisonai"
+                assert get_state_dir() == tmp_path / "s" / "praisonai"
+                assert get_cache_dir() == tmp_path / "ca" / "praisonai"
+        _clear_cache()
+
 
 class TestGetSessionsDir:
     """Tests for get_sessions_dir() function."""
