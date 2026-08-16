@@ -142,14 +142,42 @@ class SafeEditPipeline:
         if not file_path.is_absolute():
             file_path = self.workspace / file_path
         
+        import os
+
         resolved = file_path.resolve()
-        
+        workspace = self.workspace.resolve()
+
         # Security check: ensure path is within workspace
         try:
-            resolved.relative_to(self.workspace.resolve())
+            rel = resolved.relative_to(workspace)
         except ValueError:
             raise ValueError(f"Path {file_path} is outside workspace {self.workspace}")
-        
+
+        # Defence-in-depth against the parent-symlink TOCTOU: even though
+        # resolve() follows symlinks, an attacker can swap an *intermediate*
+        # workspace-owned directory for a symlink between propose and apply so a
+        # later pathname-based write escapes containment. Reject when any
+        # existing parent component (workspace -> target) is a symlink, so the
+        # only writable path is one made entirely of real directories we own.
+        current = workspace
+        for part in rel.parts[:-1]:
+            current = current / part
+            if current.is_symlink():
+                raise ValueError(
+                    f"Refusing to write through symlinked parent {current} "
+                    f"(possible containment bypass)"
+                )
+            # A parent component that exists but is not a directory is also
+            # unsafe to traverse for a nested write.
+            if current.exists() and not current.is_dir():
+                raise ValueError(f"Parent {current} is not a directory")
+        # Reject a symlinked target itself so we overwrite the link, not its
+        # (potentially external) destination.
+        if os.path.islink(resolved):
+            raise ValueError(
+                f"Refusing to write through symlinked target {resolved}"
+            )
+
         return resolved
     
     def propose_edit(

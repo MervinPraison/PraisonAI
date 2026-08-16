@@ -64,6 +64,21 @@ class JobStore(ABC):
         """Remove jobs older than max_age_seconds. Returns count deleted."""
         pass
 
+    async def save_if_absent(self, job: Job) -> Job:
+        """Insert ``job`` unless one with the same idempotency key already exists.
+
+        Returns the effective job (the newly saved one, or the pre-existing
+        winner of a concurrent submit). The default is a best-effort
+        check-then-save; backends with a native uniqueness guarantee (e.g.
+        :class:`SqliteJobStore`) override this to be truly atomic.
+        """
+        if job.idempotency_key:
+            existing = await self.get_by_idempotency_key(job.idempotency_key)
+            if existing:
+                return existing
+        await self.save(job)
+        return job
+
 
 class InMemoryJobStore(JobStore):
     """
@@ -255,12 +270,56 @@ class SqliteJobStore(JobStore):
             )
             """
         )
+        # UNIQUE (not just an index) so two concurrent requests carrying the
+        # same idempotency key cannot both INSERT distinct job ids — the second
+        # INSERT raises IntegrityError, which save_if_absent() turns into a
+        # "return the winner" so external side-effects run exactly once. NULLs
+        # are exempt from UNIQUE in sqlite, so keyless jobs are unaffected.
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_idempotency "
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency "
             "ON jobs(idempotency_key)"
         )
         self._conn.commit()
         self._lock = threading.Lock()
+        # Reconcile jobs that were still QUEUED/RUNNING when the previous
+        # process died: with no executor to resume them they would poll forever
+        # and pin their idempotency key to a job that can never complete. Mark
+        # them FAILED terminally so callers (and idempotent retries) get a
+        # definitive outcome instead of hanging.
+        self._reconcile_interrupted_jobs()
+
+    def _reconcile_interrupted_jobs(self) -> None:
+        import sqlite3
+
+        nonterminal = (JobStatus.QUEUED.value, JobStatus.RUNNING.value)
+        placeholders = ",".join("?" for _ in nonterminal)
+        now = datetime.utcnow().isoformat()
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT data FROM jobs WHERE status IN ({placeholders})",
+                    nonterminal,
+                ).fetchall()
+                for (data,) in rows:
+                    job = self._row_to_job(data)
+                    job.status = JobStatus.FAILED
+                    if job.error is None:
+                        job.error = "Interrupted by service restart"
+                    if job.completed_at is None:
+                        job.completed_at = datetime.utcnow()
+                    self._conn.execute(
+                        "UPDATE jobs SET status = ?, completed_at = ?, data = ? "
+                        "WHERE id = ?",
+                        (job.status.value, now, job.model_dump_json(), job.id),
+                    )
+                self._conn.commit()
+            if rows:
+                logger.warning(
+                    "Reconciled %d interrupted job(s) to FAILED after restart",
+                    len(rows),
+                )
+        except sqlite3.Error as exc:  # pragma: no cover - defensive
+            logger.error("Failed to reconcile interrupted jobs: %s", exc)
 
     def _row_to_job(self, data: str) -> Job:
         return Job.model_validate_json(data)
@@ -285,6 +344,52 @@ class SqliteJobStore(JobStore):
                 self._conn.commit()
 
         await asyncio.to_thread(_save)
+
+    async def save_if_absent(self, job: Job) -> Job:
+        """Atomically insert ``job`` unless its idempotency key already exists.
+
+        Returns the job that "won" the race: the newly inserted ``job`` when this
+        caller committed first, or the pre-existing job with the same key when a
+        concurrent caller beat it. This closes the check-then-insert race the
+        plain get→save path leaves open, so an idempotency-keyed side effect can
+        only ever be created once even under concurrent submits. Jobs without an
+        idempotency key fall back to a normal insert.
+        """
+        import sqlite3
+
+        def _save_if_absent() -> Job:
+            with self._lock:
+                try:
+                    self._conn.execute(
+                        "INSERT INTO jobs "
+                        "(id, status, session_id, idempotency_key, created_at, completed_at, data) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            job.id,
+                            job.status.value,
+                            job.session_id,
+                            job.idempotency_key,
+                            job.created_at.isoformat() if job.created_at else None,
+                            job.completed_at.isoformat() if job.completed_at else None,
+                            job.model_dump_json(),
+                        ),
+                    )
+                    self._conn.commit()
+                    return job
+                except sqlite3.IntegrityError:
+                    # Lost the race (UNIQUE idempotency_key). Return the winner.
+                    self._conn.rollback()
+                    if job.idempotency_key:
+                        cur = self._conn.execute(
+                            "SELECT data FROM jobs WHERE idempotency_key = ? LIMIT 1",
+                            (job.idempotency_key,),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            return self._row_to_job(row[0])
+                    raise
+
+        return await asyncio.to_thread(_save_if_absent)
 
     async def get(self, job_id: str) -> Optional[Job]:
         def _get():
