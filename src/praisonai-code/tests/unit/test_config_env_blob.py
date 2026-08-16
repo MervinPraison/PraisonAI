@@ -31,7 +31,20 @@ def _isolate_env(monkeypatch, tmp_path):
     for var in (
         CONFIG_CONTENT_ENV,
         CONFIG_PATH_ENV,
+        # Every per-key var consumed by _load_env_config(): a host value would
+        # change resolution and could hide a precedence defect or fail a test.
+        "MODEL_NAME",
+        "OPENAI_MODEL_NAME",
         "PRAISONAI_MODEL",
+        "PRAISONAI_PROVIDER",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "PRAISONAI_BASE_URL",
+        "PRAISONAI_OUTPUT_FORMAT",
+        "PRAISONAI_COLOR",
+        "PRAISONAI_VERBOSE",
+        "PRAISONAI_QUIET",
+        "PRAISONAI_TELEMETRY",
         "PRAISONAI_MANAGED_CONFIG_URL",
         "PRAISONAI_MANAGED_CONFIG_DIR",
     ):
@@ -140,6 +153,45 @@ def test_invalid_blob_falls_back_gracefully(tmp_path, monkeypatch):
 def test_missing_explicit_path_falls_back_to_discovery(tmp_path, monkeypatch):
     (tmp_path / "praisonai.yaml").write_text("agent:\n  model: disk-model\n")
     monkeypatch.setenv(CONFIG_PATH_ENV, str(tmp_path / "does-not-exist.yaml"))
+
+    with pytest.warns(UserWarning):
+        config = ConfigResolver(cwd=tmp_path).resolve()
+
+    assert config.agent.model == "disk-model"
+
+
+def test_empty_inline_mapping_suppresses_discovery(tmp_path, monkeypatch):
+    # A valid empty mapping is authoritative: it stands in for the user-config
+    # layer, so a disk file must NOT be re-discovered.
+    (tmp_path / "praisonai.yaml").write_text("agent:\n  model: disk-model\n")
+    monkeypatch.setenv(CONFIG_CONTENT_ENV, "{}")
+
+    config = ConfigResolver(cwd=tmp_path).resolve()
+
+    assert config.agent.model is None
+    assert not any(s.startswith("project:") for s in config.sources)
+    assert any(s.startswith("env-config:") for s in config.sources)
+
+
+def test_empty_explicit_file_suppresses_discovery(tmp_path, monkeypatch):
+    (tmp_path / "praisonai.yaml").write_text("agent:\n  model: disk-model\n")
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(empty))
+
+    config = ConfigResolver(cwd=tmp_path).resolve()
+
+    assert config.agent.model is None
+    assert not any(s.startswith("project:") for s in config.sources)
+
+
+def test_non_mapping_explicit_file_falls_back_to_discovery(tmp_path, monkeypatch):
+    # A YAML list/scalar body is rejected (would break _source assignment) and
+    # discovery applies as usual, with a warning.
+    (tmp_path / "praisonai.yaml").write_text("agent:\n  model: disk-model\n")
+    bad = tmp_path / "list.yaml"
+    bad.write_text("- one\n- two\n")
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(bad))
 
     with pytest.warns(UserWarning):
         config = ConfigResolver(cwd=tmp_path).resolve()

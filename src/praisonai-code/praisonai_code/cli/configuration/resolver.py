@@ -573,7 +573,10 @@ class ConfigResolver:
         raw = os.environ.get(CONFIG_CONTENT_ENV)
         if raw:
             data = self._parse_config_blob(raw)
-            if data:
+            # A valid empty mapping ({}) is authoritative: it still stands in for
+            # the user-config layer, so file discovery must NOT re-enable. Only a
+            # None (unparseable / non-mapping, already warned) falls back.
+            if data is not None:
                 data["_source"] = f"env:{CONFIG_CONTENT_ENV}"
                 self._validate(data, data["_source"])
                 return data
@@ -583,13 +586,16 @@ class ConfigResolver:
         if path:
             config_path = Path(path).expanduser()
             data = self._read_config_file(config_path)
-            if data:
+            # Require a mapping: an empty file (which _read_config_file coerces to
+            # {}) is still authoritative and suppresses discovery, while a list /
+            # scalar body is rejected (would break _source assignment downstream).
+            if isinstance(data, dict):
                 data["_source"] = str(config_path)
                 self._validate(data, str(config_path))
                 return data
             warnings.warn(
                 f"{CONFIG_PATH_ENV} points at '{config_path}', which could not "
-                "be read as a config file; falling back to file discovery.",
+                "be read as a config mapping; falling back to file discovery.",
                 UserWarning,
                 stacklevel=2,
             )
