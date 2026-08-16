@@ -29,16 +29,19 @@ _LAZY_IMPORTS = {
     "ThreadLocalEventLoop": ("praisonaiagents.mcp.mcp_schema_utils", "ThreadLocalEventLoop"),
     "get_thread_local_event_loop": ("praisonaiagents.mcp.mcp_schema_utils", "get_thread_local_event_loop"),
     # Auth storage (lazy loaded)
-    "MCPAuthStorage": ("praisonaiagents.mcp.mcp_auth_storage", "MCPAuthStorage"),
-    "get_default_auth_filepath": ("praisonaiagents.mcp.mcp_auth_storage", "get_default_auth_filepath"),
+    # NOTE: the (module, attribute) tuples below are import targets, not
+    # credentials; the trailing pragma silences GitGuardian's generic
+    # "Authentication Tuple" false positive on the auth/oauth string pairs.
+    "MCPAuthStorage": ("praisonaiagents.mcp.mcp_auth_storage", "MCPAuthStorage"),  # pragma: allowlist secret
+    "get_default_auth_filepath": ("praisonaiagents.mcp.mcp_auth_storage", "get_default_auth_filepath"),  # pragma: allowlist secret
     # OAuth callback utilities (lazy loaded)
-    "OAuthCallbackHandler": ("praisonaiagents.mcp.mcp_oauth_callback", "OAuthCallbackHandler"),
+    "OAuthCallbackHandler": ("praisonaiagents.mcp.mcp_oauth_callback", "OAuthCallbackHandler"),  # pragma: allowlist secret
     "generate_state": ("praisonaiagents.mcp.mcp_oauth_callback", "generate_state"),
     "generate_code_verifier": ("praisonaiagents.mcp.mcp_oauth_callback", "generate_code_verifier"),
     "generate_code_challenge": ("praisonaiagents.mcp.mcp_oauth_callback", "generate_code_challenge"),
     "get_redirect_url": ("praisonaiagents.mcp.mcp_oauth_callback", "get_redirect_url"),
     "OAUTH_CALLBACK_PORT": ("praisonaiagents.mcp.mcp_oauth_callback", "OAUTH_CALLBACK_PORT"),
-    "OAUTH_CALLBACK_PATH": ("praisonaiagents.mcp.mcp_oauth_callback", "OAUTH_CALLBACK_PATH"),
+    "OAUTH_CALLBACK_PATH": ("praisonaiagents.mcp.mcp_oauth_callback", "OAUTH_CALLBACK_PATH"),  # pragma: allowlist secret
     # Protocols (lazy loaded)
     "MCPClientProtocol": ("praisonaiagents.mcp.protocols", "MCPClientProtocol"),
     # Loader (lazy loaded)
