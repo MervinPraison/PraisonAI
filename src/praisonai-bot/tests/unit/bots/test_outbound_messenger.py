@@ -19,6 +19,7 @@ from praisonaiagents.gateway import (
     DeliveryResult,
     ReactionResult,
     TargetInfo,
+    ThreadResult,
 )
 from praisonaiagents.session.context import (
     get_outbound_messenger,
@@ -428,6 +429,103 @@ def test_react_explicit_target_and_message_id():
 
 def test_messenger_still_satisfies_protocol_with_react():
     router, _ = _make_reaction_router()
+    messenger = BotOutboundMessenger(router)
+    assert isinstance(messenger, OutboundMessengerProtocol)
+
+
+def _make_thread_router(*, threads=True, thread_id="T99"):
+    """Build a DeliveryRouter over a fake bot with a create_thread primitive (#3987).
+
+    The thread primitive lives on an ``.adapter`` so the router's unwrap path is
+    exercised, matching real Telegram/Slack/Discord adapters.
+    """
+    calls = []
+
+    class FakeAdapter:
+        platform = "telegram"
+
+        def __init__(self, threads, thread_id):
+            self.capabilities = {"threads": threads}
+            self._thread_id = thread_id
+
+        async def create_thread(self, channel_id, name):
+            calls.append((channel_id, name))
+            return self._thread_id
+
+    class FakeWrapper:
+        def __init__(self, threads, thread_id):
+            self.adapter = FakeAdapter(threads, thread_id)
+
+        async def send_message(self, channel_id, text):
+            pass
+
+    wrapper = FakeWrapper(threads, thread_id)
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return wrapper if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+    return router, calls
+
+
+def test_create_thread_ok_returns_thread_id():
+    router, calls = _make_thread_router(thread_id="T123")
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.create_thread("telegram:456", "research"))
+
+    assert isinstance(result, ThreadResult)
+    assert result.status == "ok"
+    assert result.ok is True
+    assert result.target == "telegram:456"
+    assert result.thread_id == "T123"
+    assert calls == [("456", "research")]
+
+
+def test_create_thread_unsupported_channel_returns_typed_outcome():
+    router, calls = _make_thread_router(threads=False)
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.create_thread("telegram:456", "research"))
+
+    assert result.status == "unsupported"
+    assert result.ok is False
+    assert result.thread_id == ""
+    assert "threads capability" in (result.detail or "")
+    assert calls == []  # never dispatched to the adapter
+
+
+def test_create_thread_unresolvable_target_returns_no_route():
+    router, calls = _make_thread_router()
+    messenger = BotOutboundMessenger(router)  # no origin
+
+    result = asyncio.run(messenger.create_thread("origin", "research"))
+
+    assert result.status == "no_route"
+    assert result.thread_id == ""
+    assert calls == []
+
+
+def test_create_thread_empty_id_reports_failed():
+    router, calls = _make_thread_router(thread_id="")
+    messenger = BotOutboundMessenger(router)
+
+    result = asyncio.run(messenger.create_thread("telegram:456", "research"))
+
+    assert result.status == "failed"
+    assert result.thread_id == ""
+    assert calls == [("456", "research")]
+
+
+def test_messenger_still_satisfies_protocol_with_create_thread():
+    router, _ = _make_thread_router()
     messenger = BotOutboundMessenger(router)
     assert isinstance(messenger, OutboundMessengerProtocol)
 

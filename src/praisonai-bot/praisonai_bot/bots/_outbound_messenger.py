@@ -25,7 +25,12 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from praisonaiagents.gateway import DeliveryResult, ReactionResult, TargetInfo
+from praisonaiagents.gateway import (
+    DeliveryResult,
+    ReactionResult,
+    TargetInfo,
+    ThreadResult,
+)
 
 from .delivery import DeliveryRouter, SessionSource
 from ._outbound_media import (
@@ -269,6 +274,41 @@ class BotOutboundMessenger:
         elif status == "no_route":
             detail = f"could not resolve target '{target}'"
         return ReactionResult(status=status, target=resolved, detail=detail)
+
+    async def create_thread(
+        self,
+        target: str,
+        name: str,
+    ) -> ThreadResult:
+        """Open a new thread/topic named ``name`` under ``target`` (#3987).
+
+        Dispatches through the live adapter's native ``create_thread`` primitive,
+        gated on the channel's ``capabilities["threads"]`` flag. A channel that
+        cannot thread returns a typed ``unsupported`` outcome rather than raising,
+        so the caller can fall back to the parent channel::
+
+            res = await messenger.create_thread("slack:C123", name="research")
+            target = f"slack:C123:{res.thread_id}" if res.ok else "slack:C123"
+            await messenger.send(target, subtask_output)
+        """
+        status, resolved, thread_id = await self._router.create_thread(
+            target,
+            name,
+            self._origin,
+        )
+        detail = None
+        if status == "unsupported":
+            detail = f"channel '{resolved}' has no threads capability"
+        elif status == "no_route":
+            detail = f"could not resolve target '{target}'"
+        elif status == "failed":
+            detail = f"transport could not open a thread on '{resolved}'"
+        return ThreadResult(
+            status=status,
+            target=resolved,
+            thread_id=thread_id,
+            detail=detail,
+        )
 
     def list_targets(self) -> List[TargetInfo]:
         """List targets currently reachable through the delivery router.
