@@ -209,14 +209,28 @@ class DiagHandler:
         logs_dir = tmppath / "logs"
         logs_dir.mkdir(exist_ok=True)
         
-        # Look for log files in common locations
+        # Look for log files in common locations, including the canonical
+        # (possibly XDG) state home where logs are written (Issue #3981).
         log_locations = [
             Path.home() / ".praison" / "logs",
             Path.home() / ".praisonai" / "logs",
             Path("/var/log/praisonai"),
         ]
-        
+        try:
+            from praisonai_code.cli.configuration.paths import get_logs_dir
+            log_locations.insert(0, get_logs_dir())
+        except Exception:
+            pass
+
+        seen_dirs = set()
         for log_dir in log_locations:
+            try:
+                resolved = log_dir.resolve()
+            except (OSError, ValueError):
+                resolved = log_dir
+            if resolved in seen_dirs:
+                continue
+            seen_dirs.add(resolved)
             if log_dir.exists():
                 for log_file in log_dir.glob("*.log"):
                     if log_file.is_file():

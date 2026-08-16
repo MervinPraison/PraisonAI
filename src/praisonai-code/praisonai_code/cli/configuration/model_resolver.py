@@ -5,7 +5,9 @@ Resolves a sensible default model for zero-config first runs in this
 precedence:
 
 1. Explicit value (``--model`` / config / YAML) — handled by the caller.
-2. Most-recently-used model, persisted under ``~/.praison/state/model.json``.
+2. Most-recently-used model, persisted under the canonical state home
+   (``<state>/state/model.json``; e.g. ``~/.praisonai/state/model.json`` or
+   ``$XDG_STATE_HOME/praisonai/state/model.json``).
 3. Best available model inferred from which provider credentials are present
    (delegated to :func:`default_model_for_available_provider`).
 
@@ -19,7 +21,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from .paths import get_user_config_dir
+from .paths import get_state_dir
 
 
 def _fallback_model() -> str:
@@ -33,12 +35,17 @@ def _fallback_model() -> str:
 
 
 def _state_dir() -> Path:
-    """Return the user state directory (``~/.praison/state``)."""
-    return get_user_config_dir() / "state"
+    """Return the user state directory (``<state>/state``).
+
+    Anchored on the canonical state home (``get_state_dir``) so recency shares
+    one location with the rest of the SDK — ending the historical
+    ``~/.praison`` vs ``~/.praisonai`` split — and honours ``XDG_STATE_HOME``.
+    """
+    return get_state_dir() / "state"
 
 
 def _model_state_path() -> Path:
-    """Return the recency file path (``~/.praison/state/model.json``)."""
+    """Return the recency file path (``<state>/state/model.json``)."""
     return _state_dir() / "model.json"
 
 

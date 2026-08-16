@@ -161,6 +161,23 @@ def get_project_config_path(project_root: Optional[Path] = None) -> Path:
     return get_project_config_dir(project_root) / "config.toml"
 
 
+def get_state_dir() -> Path:
+    """Return the machine-local state directory (MRU model, logs, spill).
+
+    Delegates to the core ``praisonaiagents.paths.get_state_dir`` so the wrapper
+    and SDK never diverge: honours ``PRAISONAI_HOME`` / an existing single root,
+    and otherwise resolves to ``$XDG_STATE_HOME/praisonai`` (else
+    ``~/.local/state/praisonai``). Falls back to the canonical home root if the
+    core package is unavailable for any reason.
+    """
+    try:
+        from praisonaiagents.paths import get_state_dir as _core_state_dir
+
+        return _core_state_dir()
+    except Exception:
+        return home_root()
+
+
 def get_sessions_dir() -> Path:
     """Get sessions directory under the canonical home root (e.g. ~/.praisonai/sessions/)."""
     return get_user_config_dir() / "sessions"
@@ -172,8 +189,8 @@ def get_traces_dir() -> Path:
 
 
 def get_logs_dir() -> Path:
-    """Get logs directory under the canonical home root (e.g. ~/.praisonai/logs/)."""
-    return get_user_config_dir() / "logs"
+    """Get logs directory under the state home (e.g. ~/.praisonai/logs/ or state)."""
+    return get_state_dir() / "logs"
 
 
 def get_cache_dir() -> Path:
