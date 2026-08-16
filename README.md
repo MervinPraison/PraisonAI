@@ -974,7 +974,7 @@ PraisonAI is built for speed, with agent instantiation in around 14μs. This red
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
+[![Star History Chart](https://star-history.dera.page/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
 
 ---
 
