@@ -239,7 +239,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
     _env_output_checked = False
     _default_model = None
     _default_model_checked = False
-    
+
+    # Deprecated __init__ params (accepted via **legacy_kwargs, mapped to config
+    # objects). Kept out of the explicit signature to keep the API minimal.
+    # name -> original default value.
+    _LEGACY_AGENT_PARAMS = {
+        "allow_delegation": False,      # -> handoffs=
+        "allow_code_execution": False,  # -> execution=ExecutionConfig(code_execution=True)
+        "code_execution_mode": "safe",  # -> execution=ExecutionConfig(code_mode=...)
+        "auto_save": None,              # -> memory=MemoryConfig(auto_save="name")
+        "rate_limiter": None,           # -> execution=ExecutionConfig(rate_limiter=obj)
+        "verification_hooks": None,     # -> autonomy=AutonomyConfig(verification_hooks=[...])
+        "cli_backend": None,            # -> runtime=
+    }
+
     @property
     def _hook_runner(self):
         """Lazy-loaded HookRunner for event-based hooks (zero overhead when not used)."""
@@ -516,13 +529,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Tools
         tools: Optional[List[Any]] = None,
         toolsets: Optional[List[str]] = None,  # Named toolset groups to resolve
-        allow_delegation: bool = False,  # Deprecated: use handoffs= instead
-        allow_code_execution: Optional[bool] = False,  # Deprecated: use execution=ExecutionConfig(code_execution=True)
-        code_execution_mode: Literal["safe", "unsafe"] = "safe",  # Deprecated: use execution=ExecutionConfig(code_mode="safe")
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
-        # Session management (deprecated standalone params - use config objects)
-        auto_save: Optional[str] = None,  # Deprecated: use memory=MemoryConfig(auto_save="name")
-        rate_limiter: Optional[Any] = None,  # Deprecated: use execution=ExecutionConfig(rate_limiter=obj)
         # ============================================================
         # CONSOLIDATED FEATURE PARAMS (agent-centric API)
         # Each follows: False=disabled, True=defaults, Config=custom
@@ -536,7 +543,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         web: Optional[Union[bool, str, 'WebConfig']] = None,
         context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
         autonomy: Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']] = None,
-        verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
         output: Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']] = None,
         execution: Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']] = None,
         templates: Optional[Union[Dict[str, Any], 'TemplateConfig']] = None,
@@ -548,13 +554,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
-        cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code") - DEPRECATED
         runtime: Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']] = None,  # Model-scoped runtime configuration with capability validation
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
         retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
+        **legacy_kwargs: Any,  # Deprecated params (see _LEGACY_AGENT_PARAMS) consolidated into config objects
     ):
         """Initialize an Agent instance.
 
@@ -711,6 +717,28 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             - verification_hooks → autonomy=AutonomyConfig(verification_hooks=)
             - Use tool_config=ToolConfig(...) for tool execution configuration
         """
+        # ============================================================
+        # LEGACY PARAM UNPACKING
+        # Deprecated params are accepted via **legacy_kwargs to keep the
+        # visible constructor signature minimal. They are rebound to locals
+        # here with their original defaults so downstream logic is unchanged,
+        # and still emit DeprecationWarnings further below.
+        # ============================================================
+        _legacy_defaults = Agent._LEGACY_AGENT_PARAMS
+        _unknown = set(legacy_kwargs) - _legacy_defaults.keys()
+        if _unknown:
+            raise TypeError(
+                f"Agent.__init__() got unexpected keyword argument(s): "
+                f"{', '.join(sorted(_unknown))}"
+            )
+        allow_delegation = legacy_kwargs.get("allow_delegation", _legacy_defaults["allow_delegation"])
+        allow_code_execution = legacy_kwargs.get("allow_code_execution", _legacy_defaults["allow_code_execution"])
+        code_execution_mode = legacy_kwargs.get("code_execution_mode", _legacy_defaults["code_execution_mode"])
+        auto_save = legacy_kwargs.get("auto_save", _legacy_defaults["auto_save"])
+        rate_limiter = legacy_kwargs.get("rate_limiter", _legacy_defaults["rate_limiter"])
+        verification_hooks = legacy_kwargs.get("verification_hooks", _legacy_defaults["verification_hooks"])
+        cli_backend = legacy_kwargs.get("cli_backend", _legacy_defaults["cli_backend"])
+
         # Add check at start if memory is requested
         if memory is not None:
             try:
