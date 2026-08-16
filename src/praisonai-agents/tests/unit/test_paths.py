@@ -71,6 +71,127 @@ class TestGetDataDir:
         _clear_cache()
 
 
+class TestXDGResolution:
+    """Tests for XDG Base Directory compliance (Issue #3981)."""
+
+    def _fresh_home(self, tmp_path):
+        """A home with no legacy PraisonAI root present."""
+        mock_home = tmp_path / "home"
+        mock_home.mkdir(parents=True)
+        return mock_home
+
+    def test_config_dir_uses_xdg_config_home(self, tmp_path):
+        from praisonaiagents.paths import get_config_dir, _clear_cache
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        xdg = tmp_path / "xdg-config"
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg)}, clear=True):
+                assert get_config_dir() == xdg / "praisonai"
+        _clear_cache()
+
+    def test_config_dir_default_when_unset(self, tmp_path):
+        from praisonaiagents.paths import get_config_dir, _clear_cache
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, {}, clear=True):
+                assert get_config_dir() == mock_home / ".config" / "praisonai"
+        _clear_cache()
+
+    def test_state_dir_uses_xdg_state_home(self, tmp_path):
+        from praisonaiagents.paths import get_state_dir, _clear_cache
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        xdg = tmp_path / "xdg-state"
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, {"XDG_STATE_HOME": str(xdg)}, clear=True):
+                assert get_state_dir() == xdg / "praisonai"
+        _clear_cache()
+
+    def test_data_dir_uses_xdg_data_home_on_fresh_install(self, tmp_path):
+        from praisonaiagents.paths import get_data_dir, _clear_cache
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        xdg = tmp_path / "xdg-data"
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg)}, clear=True):
+                assert get_data_dir() == xdg / "praisonai"
+        _clear_cache()
+
+    def test_cache_dir_uses_xdg_cache_home(self, tmp_path):
+        from praisonaiagents.paths import get_cache_dir, _clear_cache
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        xdg = tmp_path / "xdg-cache"
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(xdg)}, clear=True):
+                assert get_cache_dir() == xdg / "praisonai"
+        _clear_cache()
+
+    def test_existing_legacy_root_ignores_xdg(self, tmp_path):
+        """A pre-existing ~/.praisonai keeps every class under it (back-compat)."""
+        from praisonaiagents.paths import (
+            get_config_dir,
+            get_state_dir,
+            get_cache_dir,
+            _clear_cache,
+        )
+
+        _clear_cache()
+        mock_home = tmp_path / "home"
+        (mock_home / ".praisonai").mkdir(parents=True)
+        env = {
+            "XDG_CONFIG_HOME": str(tmp_path / "c"),
+            "XDG_STATE_HOME": str(tmp_path / "s"),
+            "XDG_CACHE_HOME": str(tmp_path / "ca"),
+        }
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, env, clear=True):
+                root = mock_home / ".praisonai"
+                assert get_config_dir() == root
+                assert get_state_dir() == root
+                assert get_cache_dir() == root / "cache"
+        _clear_cache()
+
+    def test_praisonai_home_wins_over_xdg(self, tmp_path):
+        from praisonaiagents.paths import (
+            get_config_dir,
+            get_state_dir,
+            get_cache_dir,
+            _clear_cache,
+        )
+
+        _clear_cache()
+        root = tmp_path / "explicit"
+        env = {
+            "PRAISONAI_HOME": str(root),
+            "XDG_CONFIG_HOME": str(tmp_path / "c"),
+            "XDG_STATE_HOME": str(tmp_path / "s"),
+        }
+        with patch.dict(os.environ, env, clear=True):
+            assert get_config_dir() == root
+            assert get_state_dir() == root
+            assert get_cache_dir() == root / "cache"
+        _clear_cache()
+
+    def test_relative_xdg_ignored(self, tmp_path):
+        """Per spec, non-absolute XDG paths are ignored in favour of defaults."""
+        from praisonaiagents.paths import get_config_dir, _clear_cache
+
+        _clear_cache()
+        mock_home = self._fresh_home(tmp_path)
+        with patch("praisonaiagents.paths.Path.home", return_value=mock_home):
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": "relative/path"}, clear=True):
+                assert get_config_dir() == mock_home / ".config" / "praisonai"
+        _clear_cache()
+
+
 class TestGetSessionsDir:
     """Tests for get_sessions_dir() function."""
     
