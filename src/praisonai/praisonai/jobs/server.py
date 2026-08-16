@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .store import InMemoryJobStore, JobStore
+from .store import InMemoryJobStore, JobStore, SqliteJobStore
 from .executor import JobExecutor
 from .router import create_router
 
@@ -26,13 +26,39 @@ _store_lock = threading.Lock()
 _executor_lock = threading.Lock()
 
 
+def _build_default_store() -> JobStore:
+    """Select the default job store backend.
+
+    Persist to SQLite when ``PRAISONAI_JOBS_DB_PATH`` is set so job state and
+    idempotency keys survive restarts (retries then correctly de-duplicate).
+    Fall back to the in-memory store only for local dev, and refuse to start
+    with it in production so a deployment cannot silently lose idempotency.
+    """
+    db_path = os.environ.get("PRAISONAI_JOBS_DB_PATH")
+    if db_path:
+        logger.info("Jobs API using persistent SQLite store: %s", db_path)
+        return SqliteJobStore(path=db_path)
+    if os.environ.get("ENVIRONMENT") == "production":
+        raise RuntimeError(
+            "Jobs API refused to start with the in-memory store in production. "
+            "Set PRAISONAI_JOBS_DB_PATH (e.g. /var/lib/praisonai/jobs.db) to "
+            "persist jobs and idempotency keys across restarts, or explicitly "
+            "pass store=InMemoryJobStore() to create_app()."
+        )
+    logger.warning(
+        "Jobs API using in-memory store - jobs and idempotency keys are LOST "
+        "on restart. Set PRAISONAI_JOBS_DB_PATH to persist across restarts."
+    )
+    return InMemoryJobStore(max_jobs=1000)
+
+
 def get_store() -> JobStore:
     """Get or create the job store."""
     global _store
     if _store is None:
         with _store_lock:
             if _store is None:
-                _store = InMemoryJobStore(max_jobs=1000)
+                _store = _build_default_store()
     return _store
 
 

@@ -94,9 +94,16 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
             session_id=body.session_id,
             idempotency_key=effective_key
         )
-        
-        # Submit for execution
-        await executor.submit(job)
+
+        # Atomically claim the idempotency key. If a concurrent request with the
+        # same key won the race, save_if_absent returns THAT job and we must NOT
+        # start a second execution (side effects run exactly once).
+        effective_job = await store.save_if_absent(job)
+        if effective_job.id == job.id:
+            # We won the claim: hand off to the executor for actual execution.
+            await executor.submit(job)
+        else:
+            job = effective_job
         
         # Build response with Location and Retry-After headers (RFC best practice)
         base_url = str(request.base_url).rstrip("/")

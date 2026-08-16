@@ -32,6 +32,7 @@ __all__ = [
     # Store
     "JobStore",
     "InMemoryJobStore",
+    "SqliteJobStore",
     # Executor
     "JobExecutor",
     # Router
@@ -48,8 +49,8 @@ def __getattr__(name: str):
         from .models import Job, JobStatus, JobSubmitRequest, JobStatusResponse, JobResultResponse
         return locals()[name]
     
-    if name in ("JobStore", "InMemoryJobStore"):
-        from .store import JobStore, InMemoryJobStore
+    if name in ("JobStore", "InMemoryJobStore", "SqliteJobStore"):
+        from .store import JobStore, InMemoryJobStore, SqliteJobStore
         return locals()[name]
     
     if name == "JobExecutor":

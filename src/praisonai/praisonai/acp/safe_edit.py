@@ -7,6 +7,7 @@ Ensures no silent file writes - all changes require explicit approval.
 
 import difflib
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -123,10 +124,14 @@ class SafeEditPipeline:
             auto_approve: If True, auto-approve all edits (dangerous, for testing only)
             approval_callback: Optional callback for approval (async or sync)
         """
-        self.workspace = Path(workspace) if workspace else Path.cwd()
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
         self.auto_approve = auto_approve
         self.approval_callback = approval_callback
         self._proposals: Dict[str, EditProposal] = {}
+        # Guards the shared _proposals dict + status transitions so multiple
+        # agents/threads in the same process cannot race into a double-apply or
+        # KeyError. Reentrant so nested helper calls under the lock are safe.
+        self._lock = threading.RLock()
     
     def _validate_path(self, file_path: Path) -> Path:
         """
@@ -137,14 +142,42 @@ class SafeEditPipeline:
         if not file_path.is_absolute():
             file_path = self.workspace / file_path
         
+        import os
+
         resolved = file_path.resolve()
-        
+        workspace = self.workspace.resolve()
+
         # Security check: ensure path is within workspace
         try:
-            resolved.relative_to(self.workspace.resolve())
+            rel = resolved.relative_to(workspace)
         except ValueError:
             raise ValueError(f"Path {file_path} is outside workspace {self.workspace}")
-        
+
+        # Defence-in-depth against the parent-symlink TOCTOU: even though
+        # resolve() follows symlinks, an attacker can swap an *intermediate*
+        # workspace-owned directory for a symlink between propose and apply so a
+        # later pathname-based write escapes containment. Reject when any
+        # existing parent component (workspace -> target) is a symlink, so the
+        # only writable path is one made entirely of real directories we own.
+        current = workspace
+        for part in rel.parts[:-1]:
+            current = current / part
+            if current.is_symlink():
+                raise ValueError(
+                    f"Refusing to write through symlinked parent {current} "
+                    f"(possible containment bypass)"
+                )
+            # A parent component that exists but is not a directory is also
+            # unsafe to traverse for a nested write.
+            if current.exists() and not current.is_dir():
+                raise ValueError(f"Parent {current} is not a directory")
+        # Reject a symlinked target itself so we overwrite the link, not its
+        # (potentially external) destination.
+        if os.path.islink(resolved):
+            raise ValueError(
+                f"Refusing to write through symlinked target {resolved}"
+            )
+
         return resolved
     
     def propose_edit(
@@ -183,7 +216,8 @@ class SafeEditPipeline:
             description=description,
         )
         
-        self._proposals[proposal.proposal_id] = proposal
+        with self._lock:
+            self._proposals[proposal.proposal_id] = proposal
         logger.info(f"Created edit proposal {proposal.proposal_id} for {file_path}")
         
         return proposal
@@ -226,7 +260,8 @@ class SafeEditPipeline:
     
     def get_proposal(self, proposal_id: str) -> Optional[EditProposal]:
         """Get a proposal by ID."""
-        return self._proposals.get(proposal_id)
+        with self._lock:
+            return self._proposals.get(proposal_id)
     
     def list_proposals(self, status: Optional[EditStatus] = None) -> List[EditProposal]:
         """
@@ -238,7 +273,8 @@ class SafeEditPipeline:
         Returns:
             List of proposals
         """
-        proposals = list(self._proposals.values())
+        with self._lock:
+            proposals = list(self._proposals.values())
         if status:
             proposals = [p for p in proposals if p.status == status]
         return proposals
@@ -253,17 +289,16 @@ class SafeEditPipeline:
         Returns:
             True if approved, False if not found or already processed
         """
-        proposal = self._proposals.get(proposal_id)
-        if not proposal:
-            logger.warning(f"Proposal {proposal_id} not found")
-            return False
-        
-        if proposal.status != EditStatus.PENDING:
-            logger.warning(f"Proposal {proposal_id} is not pending (status: {proposal.status})")
-            return False
-        
-        proposal.status = EditStatus.APPROVED
-        proposal.approved_at = datetime.now().isoformat()
+        with self._lock:
+            proposal = self._proposals.get(proposal_id)
+            if not proposal:
+                logger.warning(f"Proposal {proposal_id} not found")
+                return False
+            if proposal.status != EditStatus.PENDING:
+                logger.warning(f"Proposal {proposal_id} is not pending (status: {proposal.status})")
+                return False
+            proposal.status = EditStatus.APPROVED
+            proposal.approved_at = datetime.now().isoformat()
         logger.info(f"Approved proposal {proposal_id}")
         return True
     
@@ -278,17 +313,16 @@ class SafeEditPipeline:
         Returns:
             True if rejected, False if not found or already processed
         """
-        proposal = self._proposals.get(proposal_id)
-        if not proposal:
-            logger.warning(f"Proposal {proposal_id} not found")
-            return False
-        
-        if proposal.status != EditStatus.PENDING:
-            logger.warning(f"Proposal {proposal_id} is not pending (status: {proposal.status})")
-            return False
-        
-        proposal.status = EditStatus.REJECTED
-        proposal.error = reason
+        with self._lock:
+            proposal = self._proposals.get(proposal_id)
+            if not proposal:
+                logger.warning(f"Proposal {proposal_id} not found")
+                return False
+            if proposal.status != EditStatus.PENDING:
+                logger.warning(f"Proposal {proposal_id} is not pending (status: {proposal.status})")
+                return False
+            proposal.status = EditStatus.REJECTED
+            proposal.error = reason
         logger.info(f"Rejected proposal {proposal_id}: {reason}")
         return True
     
@@ -302,37 +336,50 @@ class SafeEditPipeline:
         Returns:
             True if applied successfully, False otherwise
         """
-        proposal = self._proposals.get(proposal_id)
-        if not proposal:
-            logger.error(f"Proposal {proposal_id} not found")
-            return False
-        
-        if proposal.status != EditStatus.APPROVED:
-            logger.error(f"Proposal {proposal_id} is not approved (status: {proposal.status})")
-            return False
-        
+        # Claim the APPROVED -> APPLIED transition atomically so a concurrent
+        # second apply_edit() on the same id cannot double-write. The actual
+        # disk work runs OUTSIDE the lock to avoid holding it across I/O.
+        with self._lock:
+            proposal = self._proposals.get(proposal_id)
+            if not proposal:
+                logger.error(f"Proposal {proposal_id} not found")
+                return False
+            if proposal.status != EditStatus.APPROVED:
+                logger.error(f"Proposal {proposal_id} is not approved (status: {proposal.status})")
+                return False
+            proposal.status = EditStatus.APPLIED  # tentative claim
+
         try:
+            # Re-validate the path RIGHT BEFORE the write to close the symlink
+            # TOCTOU window between propose and apply.
+            final_path = self._validate_path(proposal.file_path)
             if proposal.is_deletion:
                 # Delete file
-                if proposal.file_path.exists():
-                    proposal.file_path.unlink()
-                    logger.info(f"Deleted {proposal.file_path}")
+                if final_path.exists():
+                    final_path.unlink()
+                    logger.info(f"Deleted {final_path}")
             else:
                 # Create parent directories if needed
-                proposal.file_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Write new content
-                proposal.file_path.write_text(proposal.proposed_content)
-                logger.info(f"Applied edit to {proposal.file_path}")
-            
-            proposal.status = EditStatus.APPLIED
-            proposal.applied_at = datetime.now().isoformat()
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Write new content atomically (sibling temp + fsync + replace)
+                # so a crash mid-write cannot truncate the target file.
+                from praisonai.auto import _atomic_write_text
+                _atomic_write_text(
+                    str(final_path),
+                    lambda f: f.write(proposal.proposed_content),
+                )
+                logger.info(f"Applied edit to {final_path}")
+
+            with self._lock:
+                proposal.applied_at = datetime.now().isoformat()
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to apply proposal {proposal_id}: {e}")
-            proposal.status = EditStatus.FAILED
-            proposal.error = str(e)
+            with self._lock:
+                proposal.status = EditStatus.FAILED
+                proposal.error = str(e)
             return False
     
     def propose_and_apply(
@@ -417,26 +464,37 @@ class SafeEditPipeline:
         Returns:
             Number of proposals cleared
         """
-        if status is None:
-            count = len(self._proposals)
-            self._proposals.clear()
-        else:
-            to_remove = [pid for pid, p in self._proposals.items() if p.status == status]
-            for pid in to_remove:
-                del self._proposals[pid]
-            count = len(to_remove)
+        with self._lock:
+            if status is None:
+                count = len(self._proposals)
+                self._proposals.clear()
+            else:
+                to_remove = [pid for pid, p in self._proposals.items() if p.status == status]
+                for pid in to_remove:
+                    del self._proposals[pid]
+                count = len(to_remove)
         
         logger.info(f"Cleared {count} proposals")
         return count
 
 
-# Global pipeline instance for ACP
-_safe_edit_pipeline: Optional[SafeEditPipeline] = None
+# One pipeline per workspace so two sessions/agents that pass different
+# workspaces never share containment boundaries or proposal state. The previous
+# single global silently bound every caller to the FIRST caller's workspace.
+_pipelines: Dict[Path, SafeEditPipeline] = {}
+_pipelines_lock = threading.Lock()
 
 
 def get_safe_edit_pipeline(workspace: Optional[Path] = None) -> SafeEditPipeline:
-    """Get or create the global safe edit pipeline."""
-    global _safe_edit_pipeline
-    if _safe_edit_pipeline is None:
-        _safe_edit_pipeline = SafeEditPipeline(workspace=workspace)
-    return _safe_edit_pipeline
+    """Get or create the safe edit pipeline for ``workspace``.
+
+    Returns a distinct, thread-safe pipeline per resolved workspace so
+    concurrent agents cannot leak edits across workspaces.
+    """
+    ws = (Path(workspace) if workspace else Path.cwd()).resolve()
+    with _pipelines_lock:
+        pipe = _pipelines.get(ws)
+        if pipe is None:
+            pipe = SafeEditPipeline(workspace=ws)
+            _pipelines[ws] = pipe
+        return pipe
