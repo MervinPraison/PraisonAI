@@ -529,6 +529,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Tools
         tools: Optional[List[Any]] = None,
         toolsets: Optional[List[str]] = None,  # Named toolset groups to resolve
+        # ============================================================
+        # Keyword-only separator.
+        #
+        # The 7 deprecated params (allow_delegation, allow_code_execution,
+        # code_execution_mode, auto_save, rate_limiter, verification_hooks,
+        # cli_backend) that used to sit between `toolsets` and `handoffs` were
+        # consolidated into **legacy_kwargs (see _LEGACY_AGENT_PARAMS). Making
+        # `handoffs` and every consolidated feature param below keyword-only
+        # prevents a stray positional value — e.g. an old, undocumented
+        # `Agent(..., True)` that used to fill the `allow_delegation` slot —
+        # from silently binding to `handoffs` or a config param. All of these
+        # are (and have always been) passed by keyword in practice.
+        # ============================================================
+        *,
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         # ============================================================
         # CONSOLIDATED FEATURE PARAMS (agent-centric API)
@@ -725,6 +739,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # and still emit DeprecationWarnings further below.
         # ============================================================
         _legacy_defaults = Agent._LEGACY_AGENT_PARAMS
+        # Internal-only kwarg: clone_for_channel() forwards the resolved
+        # fallback_models list so per-channel clones keep their LLM fallbacks.
+        # There is no public fallback_models= param (it is set via
+        # LLMConfig(fallback_models=[...])), so accept it here without exposing
+        # it in the signature and seed the local below.
+        _cloned_fallback_models = legacy_kwargs.pop("fallback_models", None)
         _unknown = set(legacy_kwargs) - _legacy_defaults.keys()
         if _unknown:
             raise TypeError(
@@ -1734,7 +1754,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
-        fallback_models = None  # Initialize for internal use
+        # Seed from clone_for_channel()'s forwarded list (if any); an explicit
+        # LLMConfig(fallback_models=[...]) on llm=/model= still takes precedence.
+        fallback_models = _cloned_fallback_models  # Initialize for internal use
         
         # Check if llm is an LLMConfig object
         from ..config import LLMConfig
