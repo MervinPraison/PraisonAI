@@ -385,7 +385,7 @@ def test_doctor_json_single_document_with_turn(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Bot, "probe", all_ok_probe)
     monkeypatch.setattr(
-        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        "praisonai_bot.gateway.admin._check_gateway_secret_strength",
         lambda _cfg: None,
     )
 
@@ -480,7 +480,7 @@ def test_gateway_test_check_runtime_json(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Bot, "probe", all_ok_probe)
     monkeypatch.setattr(
-        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        "praisonai_bot.gateway.admin._check_gateway_secret_strength",
         lambda _cfg: None,
     )
     monkeypatch.setattr(
@@ -519,7 +519,7 @@ def test_gateway_test_check_inbound_fails(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Bot, "probe", all_ok_probe)
     monkeypatch.setattr(
-        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        "praisonai_bot.gateway.admin._check_gateway_secret_strength",
         lambda _cfg: None,
     )
     monkeypatch.setattr(
@@ -565,7 +565,7 @@ def test_doctor_fix_mints_strong_token_and_revalidates(monkeypatch, tmp_path):
         return "weak: gateway.auth_token" if calls["n"] == 1 else None
 
     monkeypatch.setattr(
-        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        "praisonai_bot.gateway.admin._check_gateway_secret_strength",
         _weak_then_strong,
     )
 
@@ -597,7 +597,7 @@ def test_doctor_fix_dry_run_writes_nothing(monkeypatch, tmp_path):
     typer_testing = pytest.importorskip("typer.testing")
 
     monkeypatch.setattr(
-        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        "praisonai_bot.gateway.admin._check_gateway_secret_strength",
         lambda _cfg: "weak: gateway.auth_token",
     )
 
@@ -678,7 +678,7 @@ def test_doctor_fix_preserves_env_ref_yaml_token(monkeypatch, tmp_path):
         return "weak: gateway.auth_token" if calls["n"] == 1 else None
 
     monkeypatch.setattr(
-        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        "praisonai_bot.gateway.admin._check_gateway_secret_strength",
         _weak_then_strong,
     )
     monkeypatch.setattr(
