@@ -516,32 +516,59 @@ def provision_gateway_config(
     reference) so secrets stay out of the YAML.
 
     Args:
-        platform: Channel platform to configure, e.g. ``"telegram"``.
-        token: The channel token to persist to ``~/.praisonai/.env``.
-        agents: Agent names to declare (defaults to ``["assistant"]``); the
-            first is used as the channel's default route.
+        platform: Channel platform to configure, e.g. ``"telegram"``. Must be a
+            known built-in or ``pip``-installed channel; an unsupported value
+            raises :class:`ValueError` rather than writing a config the gateway
+            would reject at startup (Issue #3985).
+        token: The channel token to persist to ``~/.praisonai/.env``. Must be a
+            non-empty string; an empty credential raises :class:`ValueError`
+            rather than writing a channel the gateway would boot degraded.
+        agents: Agent names to declare (defaults to ``["assistant"]``). Every
+            name is declared in the ``agents:`` block; the first is used as the
+            channel's default route.
         config_path: Where to write the config (defaults to the onboarded
             ``~/.praisonai/bot.yaml``).
 
     Returns:
         The path the config was written to.
+
+    Raises:
+        ValueError: If ``platform`` is not a supported channel or ``token`` is
+            empty — fail-closed so provisioning never reports success for a
+            configuration the gateway cannot serve.
     """
     from praisonai_bot.cli.features.onboard import (
-        PLATFORMS,
+        _available_platforms,
         _generate_bot_yaml,
         _praison_home,
         _save_env_vars,
     )
 
-    agent_names = list(agents) if agents else ["assistant"]
+    if not token or not str(token).strip():
+        raise ValueError(
+            f"provision_gateway_config: a non-empty token is required for "
+            f"channel {platform!r}; the gateway would boot this channel "
+            f"degraded without a credential."
+        )
+
+    available = _available_platforms()
+    info = available.get(platform)
+    if info is None:
+        supported = ", ".join(sorted(available)) or "(none)"
+        raise ValueError(
+            f"provision_gateway_config: unsupported platform {platform!r}. "
+            f"Supported channels: {supported}."
+        )
+
+    agent_names = list(dict.fromkeys(agents)) if agents else ["assistant"]
     agent_name = agent_names[0]
 
-    info = PLATFORMS.get(platform, {})
     env_var = info.get("token_env", f"{platform.upper()}_BOT_TOKEN")
-    if token:
-        _save_env_vars({env_var: token})
+    _save_env_vars({env_var: token})
 
-    yaml_content = _generate_bot_yaml([platform], agent_name=agent_name)
+    yaml_content = _generate_bot_yaml(
+        [platform], agent_name=agent_name, agent_names=agent_names
+    )
 
     if config_path is not None:
         target = Path(os.path.expanduser(os.fspath(config_path)))

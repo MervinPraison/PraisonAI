@@ -358,7 +358,7 @@ def _generate_bot_yaml_multi_channel(channels: Dict[str, Dict], agent_name: str 
     return "\n".join(lines)
 
 
-def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agent_instructions: str = "") -> str:
+def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agent_instructions: str = "", agent_names: Optional[List[str]] = None) -> str:
     """Generate bot.yaml content compatible with BOTH ``praisonai bot start``
     and ``praisonai gateway start``.
 
@@ -366,9 +366,15 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
       - ``agent:`` (singular) — legacy single-bot schema used by ``bot start``.
       - ``agents:`` (plural) — required by the gateway validator so the same
         file can boot a daemonised gateway (which binds ``/health`` on 8765).
+        When ``agent_names`` lists more than one agent every one is declared so
+        a programmatic caller's full roster is honoured (Issue #3985); the
+        channel routes to ``agent_name`` (the first).
       - ``channels:`` — per-platform, with env-var references so secrets stay
         in ``~/.praisonai/.env``.
     """
+    roster = list(dict.fromkeys(agent_names)) if agent_names else [agent_name]
+    if agent_name not in roster:
+        roster.insert(0, agent_name)
     # Sanitize instructions for YAML safety
     instructions = agent_instructions or "You are a helpful AI assistant."
     instructions = instructions.rstrip('. ')  # Remove trailing periods to avoid double periods
@@ -396,12 +402,16 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
 
     # Multi-agent block — REQUIRED by `gateway start`, ignored by `bot start`.
     lines.append("agents:")
-    lines.append(f"  {agent_name}:")
-    lines.append(f'    instructions: "{instructions_escaped}. You can search the web, manage schedules, and remember past conversations. Use your tools proactively."')
-    lines.append('    model: gpt-4o-mini')
-    lines.append("    memory: false")
-    lines.append("    # tools: []                # Override auto-injected defaults here")
-    lines.append("")
+    for idx, name in enumerate(roster):
+        lines.append(f"  {name}:")
+        if idx == 0:
+            lines.append(f'    instructions: "{instructions_escaped}. You can search the web, manage schedules, and remember past conversations. Use your tools proactively."')
+        else:
+            lines.append(f'    instructions: "You are the {name} agent. {instructions_escaped}. Use your tools proactively."')
+        lines.append('    model: gpt-4o-mini')
+        lines.append("    memory: false")
+        lines.append("    # tools: []                # Override auto-injected defaults here")
+        lines.append("")
 
     # Channels section — shared by both commands.
     lines.append("channels:")

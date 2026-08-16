@@ -105,3 +105,37 @@ def test_provision_defaults_to_home(tmp_path, monkeypatch):
     path = provision_gateway_config(platform="telegram", token="t")
     assert path == tmp_path / "bot.yaml"
     assert path.exists()
+
+
+def test_provision_declares_all_requested_agents(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    config = tmp_path / "bot.yaml"
+
+    provision_gateway_config(
+        platform="telegram",
+        token="123:abc",
+        agents=["assistant", "researcher", "writer"],
+        config_path=config,
+    )
+
+    import yaml
+
+    parsed = yaml.safe_load(config.read_text())
+    assert set(parsed["agents"]) == {"assistant", "researcher", "writer"}
+    assert parsed["channels"]["telegram"]["routes"]["default"] == "assistant"
+
+
+def test_provision_rejects_unsupported_platform(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    with pytest.raises(ValueError, match="unsupported platform"):
+        provision_gateway_config(platform="myspace", token="123:abc")
+    assert not (tmp_path / "bot.yaml").exists()
+
+
+def test_provision_rejects_empty_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    with pytest.raises(ValueError, match="non-empty token"):
+        provision_gateway_config(platform="telegram", token="")
+    with pytest.raises(ValueError, match="non-empty token"):
+        provision_gateway_config(platform="telegram", token="   ")
+    assert not (tmp_path / "bot.yaml").exists()
