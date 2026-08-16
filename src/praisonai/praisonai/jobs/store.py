@@ -6,6 +6,7 @@ Provides storage backends for job state persistence.
 
 import asyncio
 import logging
+import threading
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -221,3 +222,195 @@ class InMemoryJobStore(JobStore):
             "max_jobs": self._max_jobs,
             "status_counts": status_counts
         }
+
+
+class SqliteJobStore(JobStore):
+    """Persistent job store backed by stdlib ``sqlite3``.
+
+    Survives process restarts so in-flight job state and idempotency keys are
+    NOT lost, closing the "restart duplicates side-effects" gap of the
+    in-memory store. Uses only the standard library (no new dependencies),
+    keeping the wrapper lightweight. Blocking sqlite calls run off the event
+    loop via ``asyncio.to_thread`` so the executor loop is never parked.
+    """
+
+    def __init__(self, path: str = "praisonai_jobs.db"):
+        import sqlite3
+
+        self._path = path
+        # check_same_thread=False + a lock lets us reuse one connection across
+        # the thread-pool workers to_thread hands us.
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                session_id TEXT,
+                idempotency_key TEXT,
+                created_at TEXT,
+                completed_at TEXT,
+                data TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_idempotency "
+            "ON jobs(idempotency_key)"
+        )
+        self._conn.commit()
+        self._lock = threading.Lock()
+
+    def _row_to_job(self, data: str) -> Job:
+        return Job.model_validate_json(data)
+
+    async def save(self, job: Job) -> None:
+        def _save():
+            with self._lock:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO jobs "
+                    "(id, status, session_id, idempotency_key, created_at, completed_at, data) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        job.id,
+                        job.status.value,
+                        job.session_id,
+                        job.idempotency_key,
+                        job.created_at.isoformat() if job.created_at else None,
+                        job.completed_at.isoformat() if job.completed_at else None,
+                        job.model_dump_json(),
+                    ),
+                )
+                self._conn.commit()
+
+        await asyncio.to_thread(_save)
+
+    async def get(self, job_id: str) -> Optional[Job]:
+        def _get():
+            with self._lock:
+                cur = self._conn.execute(
+                    "SELECT data FROM jobs WHERE id = ?", (job_id,)
+                )
+                row = cur.fetchone()
+            return self._row_to_job(row[0]) if row else None
+
+        return await asyncio.to_thread(_get)
+
+    async def get_by_idempotency_key(self, key: str) -> Optional[Job]:
+        def _get():
+            with self._lock:
+                cur = self._conn.execute(
+                    "SELECT data FROM jobs WHERE idempotency_key = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (key,),
+                )
+                row = cur.fetchone()
+            return self._row_to_job(row[0]) if row else None
+
+        return await asyncio.to_thread(_get)
+
+    async def list_jobs(
+        self,
+        status: Optional[JobStatus] = None,
+        session_id: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[Job]:
+        def _list():
+            query = "SELECT data FROM jobs"
+            clauses = []
+            params: List[Any] = []
+            if status:
+                clauses.append("status = ?")
+                params.append(status.value)
+            if session_id:
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            with self._lock:
+                cur = self._conn.execute(query, params)
+                rows = cur.fetchall()
+            return [self._row_to_job(r[0]) for r in rows]
+
+        return await asyncio.to_thread(_list)
+
+    async def count(
+        self,
+        status: Optional[JobStatus] = None,
+        session_id: Optional[str] = None,
+    ) -> int:
+        def _count():
+            query = "SELECT COUNT(*) FROM jobs"
+            clauses = []
+            params: List[Any] = []
+            if status:
+                clauses.append("status = ?")
+                params.append(status.value)
+            if session_id:
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            with self._lock:
+                cur = self._conn.execute(query, params)
+                return int(cur.fetchone()[0])
+
+        return await asyncio.to_thread(_count)
+
+    async def delete(self, job_id: str) -> bool:
+        def _delete():
+            with self._lock:
+                cur = self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+                self._conn.commit()
+                return cur.rowcount > 0
+
+        return await asyncio.to_thread(_delete)
+
+    async def cleanup_old_jobs(self, max_age_seconds: int = 86400) -> int:
+        def _cleanup():
+            cutoff = (datetime.utcnow() - timedelta(seconds=max_age_seconds)).isoformat()
+            terminal = (
+                JobStatus.SUCCEEDED.value,
+                JobStatus.FAILED.value,
+                JobStatus.CANCELLED.value,
+            )
+            placeholders = ",".join("?" for _ in terminal)
+            with self._lock:
+                cur = self._conn.execute(
+                    f"DELETE FROM jobs WHERE status IN ({placeholders}) "
+                    "AND completed_at IS NOT NULL AND completed_at < ?",
+                    (*terminal, cutoff),
+                )
+                self._conn.commit()
+                count = cur.rowcount
+            if count:
+                logger.info(f"Cleaned up {count} old jobs")
+            return count
+
+        return await asyncio.to_thread(_cleanup)
+
+    async def get_stats(self) -> Dict[str, Any]:
+        def _stats():
+            with self._lock:
+                total = int(self._conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+                idem = int(
+                    self._conn.execute(
+                        "SELECT COUNT(*) FROM jobs WHERE idempotency_key IS NOT NULL"
+                    ).fetchone()[0]
+                )
+                rows = self._conn.execute(
+                    "SELECT status, COUNT(*) FROM jobs GROUP BY status"
+                ).fetchall()
+            return {
+                "backend": "sqlite",
+                "path": self._path,
+                "total_jobs": total,
+                "idempotency_keys": idem,
+                "status_counts": {status: count for status, count in rows},
+            }
+
+        return await asyncio.to_thread(_stats)
