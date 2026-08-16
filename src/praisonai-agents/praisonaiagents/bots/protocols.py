@@ -109,6 +109,11 @@ class PlatformCapabilities:
             descriptor only; the durable outbox does not forward a token on
             resend, so adapters relying on provider-side dedupe should also set
             ``reconciles_unknown_send`` to get effectively-once delivery.
+        supports_threads: Whether the adapter can open a new thread/topic under
+            a chat (e.g. Telegram forum topics, Discord threads, Slack thread
+            anchoring). When False, ``create_thread`` returns a typed
+            ``unsupported`` outcome and callers fall back to the parent channel
+            rather than raising.
     """
     
     max_message_length: int = 4096
@@ -126,6 +131,7 @@ class PlatformCapabilities:
     reconciles_unknown_send: bool = False
     supports_idempotency_token: bool = False
     supports_media: bool = False
+    supports_threads: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -145,6 +151,7 @@ class PlatformCapabilities:
             "reconciles_unknown_send": self.reconciles_unknown_send,
             "supports_idempotency_token": self.supports_idempotency_token,
             "supports_media": self.supports_media,
+            "supports_threads": self.supports_threads,
         }
     
     @classmethod
@@ -166,6 +173,7 @@ class PlatformCapabilities:
             reconciles_unknown_send=data.get("reconciles_unknown_send", False),
             supports_idempotency_token=data.get("supports_idempotency_token", False),
             supports_media=data.get("supports_media", False),
+            supports_threads=data.get("supports_threads", False),
         )
 
 

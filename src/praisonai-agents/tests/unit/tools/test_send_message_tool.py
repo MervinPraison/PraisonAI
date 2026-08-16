@@ -16,6 +16,7 @@ from praisonaiagents.gateway import (
     OutboundMessengerProtocol,
     DeliveryResult,
     ReactionResult,
+    ThreadResult,
     TargetInfo,
     SendDecision,
     SendPolicyProtocol,
@@ -37,6 +38,7 @@ class FakeMessenger:
     def __init__(self):
         self.sent = []
         self.reactions = []
+        self.threads = []
 
     async def send(self, target, text, *, media=None):
         self.sent.append((target, text, media))
@@ -58,9 +60,26 @@ class FakeMessenger:
         self.reactions.append((target, emoji, message_id, remove))
         return ReactionResult(status="ok", target=target)
 
+    async def create_thread(self, target, name):
+        self.threads.append((target, name))
+        return ThreadResult(status="ok", target=target, thread_id="T1")
+
 
 def test_messenger_satisfies_protocol():
     assert isinstance(FakeMessenger(), OutboundMessengerProtocol)
+
+
+def test_thread_result_ok_and_fallback():
+    ok = ThreadResult(status="ok", target="slack:C123", thread_id="T9")
+    assert ok.ok is True
+    assert ok.as_dict() == {
+        "status": "ok",
+        "target": "slack:C123",
+        "thread_id": "T9",
+    }
+    unsupported = ThreadResult(status="unsupported", target="slack:C123")
+    assert unsupported.ok is False
+    assert "thread_id" not in unsupported.as_dict()
 
 
 def test_no_gateway_fails_cleanly():

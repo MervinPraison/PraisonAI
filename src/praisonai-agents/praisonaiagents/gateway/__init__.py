@@ -50,6 +50,9 @@ from .protocols import (
     # Agent-callable message reactions (Issue #3917)
     ReactionResult,
     ReactionStatus,
+    # Agent/gateway-callable thread creation (Issue #3987)
+    ThreadResult,
+    ThreadStatus,
     # Agent-callable cross-conversation request/reply (Issue #3689)
     ConversationReply,
     ConversationReplyStatus,
@@ -314,6 +317,8 @@ __all__ = [
     "TargetInfo",
     "ReactionResult",
     "ReactionStatus",
+    "ThreadResult",
+    "ThreadStatus",
     # Agent-callable cross-conversation request/reply (Issue #3689)
     "ConversationReply",
     "ConversationReplyStatus",

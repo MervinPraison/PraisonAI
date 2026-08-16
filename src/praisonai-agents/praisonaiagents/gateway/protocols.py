@@ -2525,6 +2525,59 @@ class ReactionResult:
         return data
 
 
+ThreadStatus = Literal["ok", "unsupported", "failed", "no_route"]
+"""Closed set of outcomes for a :meth:`OutboundMessengerProtocol.create_thread`.
+
+* ``ok`` — a new thread/topic was opened; ``thread_id`` carries its id.
+* ``unsupported`` — the channel has no ``supports_threads`` capability.
+* ``failed`` — the transport rejected the attempt (e.g. topics mode off, or
+  the bot lacks permission to manage threads).
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class ThreadResult:
+    """Outcome of an agent/gateway-initiated thread creation (Issue #3987).
+
+    Every call resolves to exactly one :data:`ThreadStatus`, so the caller
+    always gets a typed answer rather than a hard error — in particular a
+    channel that cannot thread returns ``unsupported`` rather than raising, and
+    the caller falls back to the parent channel. This mirrors the
+    :class:`ReactionResult` contract.
+
+    Attributes:
+        status: The outcome (``ok`` / ``unsupported`` / ``failed`` /
+            ``no_route``).
+        target: The resolved parent target the thread was opened under.
+        thread_id: The new thread/topic id, populated only when
+            ``status == "ok"``. Callers compose ``"<target>:<thread_id>"`` to
+            route subsequent sends into it.
+        detail: Optional model-readable explanation.
+    """
+
+    status: ThreadStatus
+    target: str = ""
+    thread_id: str = ""
+    detail: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        """Whether a thread was opened (``status == "ok"``)."""
+        return self.status == "ok"
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["target"] = self.target
+        if self.thread_id:
+            data["thread_id"] = self.thread_id
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
 @runtime_checkable
 class OutboundMessengerProtocol(Protocol):
     """Protocol for agent-facing proactive message delivery.
@@ -2594,6 +2647,37 @@ class OutboundMessengerProtocol(Protocol):
 
         Returns:
             A :class:`ReactionResult` describing the outcome.
+        """
+        ...
+
+    async def create_thread(
+        self,
+        target: str,
+        name: str,
+    ) -> "ThreadResult":
+        """Open a new thread/topic under ``target`` (Issue #3987).
+
+        For multi-agent handoffs, subtasks, and parallel workflow branches, this
+        lets the gateway scope a subtask into its own platform-native thread
+        (Telegram forum topic, Discord thread, Slack thread anchor) instead of
+        flooding the shared channel inline. Gated on the channel's
+        ``PlatformCapabilities.supports_threads`` — a channel that cannot thread
+        returns a typed ``unsupported`` outcome instead of raising, so the
+        caller falls back to the parent channel::
+
+            res = await messenger.create_thread("slack:C123", name="research")
+            target = f"slack:C123:{res.thread_id}" if res.ok else "slack:C123"
+            await messenger.send(target, subtask_output)
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>", or
+                "<platform>:<chat_id>", or a friendly alias).
+            name: Human-friendly thread/topic title.
+
+        Returns:
+            A :class:`ThreadResult` carrying the new thread id on success, or a
+            typed ``unsupported`` / ``failed`` / ``no_route`` outcome. Never
+            raises.
         """
         ...
 

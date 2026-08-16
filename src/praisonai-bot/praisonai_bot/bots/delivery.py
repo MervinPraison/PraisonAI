@@ -1048,6 +1048,64 @@ class DeliveryRouter:
 
         return ("ok" if ok else "failed", resolved)
 
+    async def create_thread(
+        self,
+        target: str,
+        name: str,
+        origin: Optional[SessionSource] = None,
+    ) -> Tuple[str, str, str]:
+        """Open a new thread/topic named ``name`` under ``target``.
+
+        Resolves the symbolic target and dispatches through the live adapter's
+        native ``create_thread`` primitive, gated on the adapter's
+        ``capabilities["threads"]`` flag. Returns a ``(status, resolved_target,
+        thread_id)`` tuple where ``status`` is one of ``"ok"``,
+        ``"unsupported"``, ``"failed"`` or ``"no_route"`` — never raising — so a
+        channel that cannot thread degrades gracefully (Issue #3987).
+        """
+        try:
+            platform, channel_id, _thread_id = self.resolve(target, origin)
+        except ValueError as e:
+            logger.debug(
+                "DeliveryRouter.create_thread: cannot resolve '%s': %s", target, e
+            )
+            return ("no_route", target, "")
+
+        resolved = f"{platform}:{channel_id}"
+
+        bot = self._botos.get_bot(platform)
+        if not bot:
+            return ("no_route", resolved, "")
+
+        # Native thread primitives live on the underlying adapter, not the
+        # user-facing ``Bot`` wrapper — unwrap it before dispatch (as react and
+        # send_media do for their platform primitives).
+        adapter = getattr(bot, "adapter", None) or bot
+
+        caps = getattr(adapter, "capabilities", None) or {}
+        if not caps.get("threads", False):
+            return ("unsupported", resolved, "")
+
+        fn = getattr(adapter, "create_thread", None)
+        if not callable(fn):
+            return ("unsupported", resolved, "")
+
+        try:
+            thread_id = await fn(channel_id, name)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.error(
+                "DeliveryRouter.create_thread failed for %s (%s): %s",
+                resolved,
+                name,
+                e,
+            )
+            return ("failed", resolved, "")
+
+        if not thread_id:
+            return ("failed", resolved, "")
+
+        return ("ok", resolved, str(thread_id))
+
     def configure_from_dict(self, config: Dict) -> None:
         """
         Configure the directory from a configuration dictionary.
