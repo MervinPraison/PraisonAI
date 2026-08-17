@@ -37,10 +37,16 @@ _PLACE_WORDS = {
 
 HERE = "this machine"
 
+# Public sandbox aliases the SandboxManager collapses before it picks a backend
+# (see praisonaiagents/sandbox/manager.py). We must describe the backend that
+# actually runs, not the alias the user typed, or "native"/"local" would report
+# a place that never executes.
+_ALIASES = {"native": "sandlock", "local": "subprocess"}
+
 # Tiers that separate a process but do NOT contain it. Verified: under the
 # subprocess backend, outbound network still works and ~/.ssh is readable even
 # though SecurityPolicy declares them blocked.
-_NOT_A_BOUNDARY = {"subprocess", "local"}
+_NOT_A_BOUNDARY = {"subprocess", "local", "native"}
 
 
 def say_place(name: Any) -> str:
@@ -52,7 +58,9 @@ def say_place(name: Any) -> str:
     if not isinstance(name, str):
         # A configured provider instance: use its own declared name if it has one.
         name = getattr(name, "provider_name", None) or type(name).__name__
-    return _PLACE_WORDS.get(str(name).lower(), str(name))
+    key = str(name).lower()
+    key = _ALIASES.get(key, key)
+    return _PLACE_WORDS.get(key, str(name))
 
 
 def _backend_places(backend: Any) -> Optional[Dict[str, str]]:

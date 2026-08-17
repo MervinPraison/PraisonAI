@@ -95,6 +95,24 @@ def test_unknown_provider_falls_back_to_its_own_name():
     assert say_place("some-new-cloud") == "some-new-cloud"
 
 
+# ── public sandbox aliases must resolve to the backend that actually runs ─────
+@pytest.mark.parametrize("alias,expected", [
+    ("native", "locked-down process"),   # SandboxManager: native -> sandlock
+    ("local", "a separate process"),     # SandboxManager: local  -> subprocess
+])
+def test_sandbox_aliases_report_the_real_backend(alias, expected):
+    """SandboxManager collapses native->sandlock and local->subprocess before
+    it runs anything; describe() must not report the raw alias instead."""
+    class _Cfg:
+        sandbox_type = alias
+
+    class _Obj:
+        sandbox_config = _Cfg()
+
+    assert expected in describe(_Obj())["code_runs_on"]
+    assert alias not in describe(_Obj())["code_runs_on"]
+
+
 # ── vocabulary gate: never reuse a word that is public API elsewhere ─────────
 def test_no_field_name_collides_with_existing_public_api():
     """`loop` was rejected as a field name because it is already
