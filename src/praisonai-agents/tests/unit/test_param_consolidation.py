@@ -379,3 +379,69 @@ class TestMaxRpmAutoWiresRateLimiter:
                 instructions="test",
                 execution=ExecutionConfig(max_rpm=-1, rate_limiter=custom),
             )
+
+
+class TestLegacyKwargsCompatibility:
+    """Signature-reduction backward-compat: keyword-only guard, internal
+    fallback_models forwarding, and unknown-kwarg rejection."""
+
+    def test_unknown_kwarg_raises_type_error(self):
+        from praisonaiagents import Agent
+        with pytest.raises(TypeError):
+            Agent(name="test", instructions="test", totally_unknown=1)
+
+    def test_fallback_models_internal_kwarg_forwarded(self):
+        """clone_for_channel() forwards fallback_models as an internal kwarg;
+        it must not be rejected and must seed Agent.fallback_models."""
+        from praisonaiagents import Agent
+        agent = Agent(
+            name="test",
+            instructions="test",
+            fallback_models=["gpt-4o-mini", "gpt-4o"],
+        )
+        assert agent.fallback_models == ["gpt-4o-mini", "gpt-4o"]
+
+    def test_llm_config_fallback_models_takes_precedence(self):
+        """An explicit LLMConfig(fallback_models=...) wins over any forwarded
+        internal fallback_models kwarg."""
+        from praisonaiagents import Agent
+        from praisonaiagents.config import LLMConfig
+        agent = Agent(
+            name="test",
+            instructions="test",
+            llm=LLMConfig(model="gpt-4o-mini", fallback_models=["a", "b"]),
+            fallback_models=["ignored"],
+        )
+        assert agent.fallback_models == ["a", "b"]
+
+    def test_clone_for_channel_preserves_fallback_models(self):
+        """Regression: cloning an agent configured with fallback models via
+        LLMConfig must not raise and must carry the fallbacks to the clone."""
+        from praisonaiagents import Agent
+        from praisonaiagents.config import LLMConfig
+        agent = Agent(
+            name="test",
+            instructions="test",
+            llm=LLMConfig(model="gpt-4o-mini", fallback_models=["gpt-4o"]),
+        )
+        clone = agent.clone_for_channel()
+        assert clone.fallback_models == ["gpt-4o"]
+
+    def test_handoffs_still_accepted_as_keyword(self):
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test", handoffs=[])
+        assert agent.handoffs == []
+
+    def test_positional_value_cannot_misbind_to_handoffs(self):
+        """The keyword-only separator prevents a stray positional value (an old
+        positional allow_delegation=True) from silently binding to handoffs."""
+        from praisonaiagents import Agent
+        with pytest.raises(TypeError):
+            # 11 positional args land on tools; the 12th (toolsets) then a stray
+            # positional would previously have hit a deprecated slot / handoffs.
+            Agent(
+                "n", "r", "g", "b", "i",      # identity
+                None, None, None, None, None,  # llm..auth
+                None, None,                     # tools, toolsets
+                True,                           # stray positional -> must error
+            )
