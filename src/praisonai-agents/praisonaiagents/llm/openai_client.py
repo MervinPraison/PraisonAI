@@ -377,6 +377,11 @@ class OpenAIClient:
         self._formatted_tools_cache = {}
         self._fixed_schema_cache = {}
         self._max_cache_size = 100
+
+        # Token usage from the most recent completion (Issue #3933). Populated
+        # regardless of any display/metrics flag so headless callers and CLI
+        # envelopes can read real spend after a successful run.
+        self.last_token_metrics = None
     
     @property
     def console(self):
@@ -1435,7 +1440,81 @@ class OpenAIClient:
         except Exception as e:
             self.logger.error(f"Error in async stream processing: {e}")
             return None
-    
+
+    def _track_token_usage(self, response: Any, model: str, agent_name: Optional[str] = None) -> None:
+        """Record token usage from a response into the global collector.
+
+        Usage accounting is independent from any metrics/verbose display flag:
+        a quiet default agent must still populate the public token collector
+        after a paid model call (Issue #3933). This is a cheap dict/attr read
+        plus a collector add — the expensive HTTP call is already paid.
+        """
+        try:
+            from ..telemetry.token_collector import get_token_collector, TokenMetrics
+        except Exception:
+            return
+        try:
+            usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+            if not usage:
+                # No usage on this response (e.g. assembled stream chunks): clear
+                # any stale per-call metrics so envelopes never report a prior
+                # completion's spend as this call's usage.
+                self.last_token_metrics = None
+                return
+
+            def _val(*names: str) -> int:
+                for name in names:
+                    value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+                    if value is not None:
+                        return int(value or 0)
+                return 0
+
+            def _detail(detail_names: tuple, name: str) -> int:
+                for detail_name in detail_names:
+                    details = (
+                        usage.get(detail_name)
+                        if isinstance(usage, dict)
+                        else getattr(usage, detail_name, None)
+                    )
+                    if details:
+                        value = (
+                            details.get(name)
+                            if isinstance(details, dict)
+                            else getattr(details, name, None)
+                        )
+                        if value is not None:
+                            return int(value or 0)
+                return 0
+
+            metrics = TokenMetrics(
+                input_tokens=_val("prompt_tokens", "input_tokens"),
+                output_tokens=_val("completion_tokens", "output_tokens"),
+                cached_tokens=_val("cached_tokens") or _detail(
+                    ("prompt_tokens_details", "input_tokens_details"), "cached_tokens"
+                ),
+                reasoning_tokens=_val("reasoning_tokens") or _detail(
+                    ("completion_tokens_details", "output_tokens_details"), "reasoning_tokens"
+                ),
+                audio_input_tokens=_val("audio_input_tokens") or _detail(
+                    ("prompt_tokens_details", "input_tokens_details"), "audio_tokens"
+                ),
+                audio_output_tokens=_val("audio_output_tokens") or _detail(
+                    ("completion_tokens_details", "output_tokens_details"), "audio_tokens"
+                ),
+            )
+            if metrics.total_tokens == 0:
+                self.last_token_metrics = None
+                return
+            self.last_token_metrics = metrics
+            get_token_collector().track_tokens(
+                model=model,
+                agent=agent_name,
+                metrics=metrics,
+                metadata={"provider": "openai", "stream": False},
+            )
+        except Exception:
+            pass
+
     def create_completion(
         self,
         messages: List[Dict[str, Any]],
@@ -1573,6 +1652,7 @@ class OpenAIClient:
         max_iterations: int = 10,
         stream_callback: Optional[Callable] = None,
         emit_events: bool = False,
+        agent_name: Optional[str] = None,
         **kwargs
     ) -> Optional[ChatCompletion]:
         """
@@ -1743,7 +1823,13 @@ class OpenAIClient:
             
             if not final_response:
                 return None
-            
+
+            # Record usage for THIS billed completion. Every tool-loop iteration
+            # is a separate paid call, so accounting must happen per iteration —
+            # not once after the loop — or intermediate completions are dropped
+            # from session totals and by_model/by_agent rollups (Issue #3933).
+            self._track_token_usage(final_response, model, agent_name)
+
             # Trigger llm_end callback with metrics for debug output
             llm_end_time = time.perf_counter()
             llm_latency_ms = (llm_end_time - start_time) * 1000
@@ -1897,7 +1983,9 @@ class OpenAIClient:
             else:
                 # No tool calls, we're done
                 break
-        
+
+        # Usage is recorded per iteration inside the loop above so every billed
+        # completion (including intermediate tool-call rounds) is accounted for.
         return final_response
     
     async def achat_completion_with_tools(
@@ -1915,6 +2003,7 @@ class OpenAIClient:
         max_iterations: int = 10,
         stream_callback: Optional[Callable] = None,
         emit_events: bool = False,
+        agent_name: Optional[str] = None,
         **kwargs
     ) -> Optional[ChatCompletion]:
         """
@@ -2064,6 +2153,12 @@ class OpenAIClient:
             if not final_response:
                 return None
 
+            # Record usage for THIS billed completion. Every tool-loop iteration
+            # is a separate paid call, so accounting must happen per iteration —
+            # not once after the loop — or intermediate completions are dropped
+            # from session totals and by_model/by_agent rollups (Issue #3933).
+            self._track_token_usage(final_response, model, agent_name)
+
             # Check for tool calls
             if not final_response.choices or final_response.choices[0].message is None:
                 raise ValueError("LLM returned empty or filtered response")
@@ -2206,7 +2301,9 @@ class OpenAIClient:
             else:
                 # No tool calls, we're done
                 break
-        
+
+        # Usage is recorded per iteration inside the loop above so every billed
+        # completion (including intermediate tool-call rounds) is accounted for.
         return final_response
         
     def chat_completion_with_tools_stream(
