@@ -1131,6 +1131,26 @@ class AgentFlow:
         finally:
             self._execution_lock.release()
 
+    def __repr__(self):
+        """Show where this workflow's steps run.
+
+        Defined in the class body on purpose: @dataclass leaves a hand-written
+        __repr__ alone, and the generated one listed every field while saying
+        nothing about execution location.
+        """
+        from ..agent.execution_location import repr_fields
+
+        return (
+            f"AgentFlow(name={self.name!r}, steps={len(self.steps or [])}, "
+            f"{repr_fields(self, shared=True)})"
+        )
+
+    def where_does_it_run(self) -> str:
+        """Plain-English answer to "where does my code actually run?"."""
+        from ..agent.execution_location import explain
+
+        return explain(self, shared=True)
+
     def _shared_compute(self):
         """Build the SharedCompute for this run (see the ``run_on=`` field)."""
         from ..managed.shared_compute import SharedCompute
