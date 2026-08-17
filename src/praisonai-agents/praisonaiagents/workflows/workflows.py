@@ -4427,13 +4427,15 @@ class WorkflowManager:
         # Get previous step output
         previous_output = results[-1].get("output") if results else None
         
-        # Create context for step handlers
-        context = WorkflowContext(
-            input=original_input,
-            previous_result=str(previous_output) if previous_output else None,
-            current_step=step.name,
-            variables=all_variables.copy()
-        )
+        # Create context for step handlers (only when a consumer exists)
+        context = None
+        if step.should_run or step.handler:
+            context = WorkflowContext(
+                input=original_input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name,
+                variables=all_variables.copy()
+            )
         
         # Check should_run condition if provided
         if step.should_run:
@@ -4660,13 +4662,15 @@ class WorkflowManager:
         # Get previous step output
         previous_output = results[-1].get("output") if results else None
 
-        # Create context for step handlers
-        context = WorkflowContext(
-            input=original_input,
-            previous_result=str(previous_output) if previous_output else None,
-            current_step=step.name,
-            variables=all_variables.copy()
-        )
+        # Create context for step handlers (only when a consumer exists)
+        context = None
+        if step.should_run or step.handler:
+            context = WorkflowContext(
+                input=original_input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name,
+                variables=all_variables.copy()
+            )
 
         # Check should_run condition if provided
         if step.should_run:
