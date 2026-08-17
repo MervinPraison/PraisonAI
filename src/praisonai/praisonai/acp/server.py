@@ -630,6 +630,7 @@ def serve(
     allow_write: bool = False,
     allow_shell: bool = False,
     approval_mode: str = "manual",
+    allow_network: bool = False,
     **kwargs: Any,
 ) -> None:
     """
@@ -648,6 +649,7 @@ def serve(
         allow_write: Allow file writes
         allow_shell: Allow shell commands
         approval_mode: Approval mode (manual, auto, scoped)
+        allow_network: Allow network requests (search/crawl tools)
     """
     config = ACPConfig(
         workspace=Path(workspace).resolve(),
@@ -659,6 +661,7 @@ def serve(
         read_only=read_only,
         allow_write=allow_write,
         allow_shell=allow_shell,
+        allow_network=allow_network,
         approval_mode=approval_mode,
     )
     
