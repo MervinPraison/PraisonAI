@@ -2426,9 +2426,13 @@ def _run_custom_agent(
         # allow-list wins; otherwise agents marked `mode: subagent` are used.
         _wire_subagent_delegation(agent_config, subagents)
         
-        # Add verbose flag
-        if verbose:
-            agent_config["verbose"] = verbose
+        # Map verbosity onto the consolidated ``output=`` preset. A legacy
+        # top-level ``verbose=`` kwarg is rejected by the Agent constructor,
+        # so ``run --agent <name> --verbose`` would otherwise crash. Only set
+        # a preset when the definition did not already supply an explicit
+        # ``output``, so a custom agent's own output config still wins.
+        if verbose and "output" not in agent_config:
+            agent_config["output"] = "verbose"
         
         # Resolve per-agent permissions (from definition) layered with
         # invocation flags. Precedence: invocation flags > agent definition.
