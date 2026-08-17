@@ -94,6 +94,11 @@ def _apply_telemetry_defaults(env_vars: dict[str, str]) -> None:
         os.environ.setdefault(key, value)
 
 
+# Cached broken-install ImportError from praisonaiagents so repeated attribute
+# lookups surface the real root cause without re-attempting the failing import.
+_praisonaiagents_import_error = None
+
+
 # Lazy loading for heavy imports
 def __getattr__(name):
     """Lazy load heavy modules to improve import time."""
@@ -197,14 +202,33 @@ def __getattr__(name):
     # Note: n8n is available via direct import: from praisonai.n8n import YAMLToN8nConverter
     # Lazy loading from main package causes recursion, so use direct import for now
     
-    # Try praisonaiagents exports
+    # Try praisonaiagents exports. Distinguish "not installed" (ModuleNotFoundError
+    # -> genuine attribute miss) from "installed but failed to import partway"
+    # (ImportError, e.g. a transitive dep version conflict). The latter is the most
+    # common source of new-installer confusion: silently swallowing it turns a real
+    # broken-install error into a misleading "has no attribute" hunt. Cache the
+    # broken-install failure so repeated lookups don't re-pay the import cost.
+    global _praisonaiagents_import_error
+    if _praisonaiagents_import_error is not None:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}: praisonaiagents is "
+            f"installed but failed to import ({_praisonaiagents_import_error})"
+        ) from _praisonaiagents_import_error
+
     try:
         import praisonaiagents
-        if hasattr(praisonaiagents, name):
-            return getattr(praisonaiagents, name)
-    except ImportError:
-        pass
-    
+    except ModuleNotFoundError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    except ImportError as e:
+        _praisonaiagents_import_error = e
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}: praisonaiagents is "
+            f"installed but failed to import ({e})"
+        ) from e
+
+    if hasattr(praisonaiagents, name):
+        return getattr(praisonaiagents, name)
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

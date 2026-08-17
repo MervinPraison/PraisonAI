@@ -6,6 +6,7 @@ import inspect
 import logging
 import threading
 import uuid
+import weakref
 import re
 import difflib
 import importlib
@@ -291,8 +292,10 @@ class _TimeoutBoundTool:
 
 # Cache of dynamically-generated ``(_TimeoutBoundTool, type(inner))`` subclasses
 # keyed by the inner class, so we build one proxy type per tool class instead of
-# per tool instance.
-_TIMEOUT_PROXY_TYPES: "Dict[type, type]" = {}
+# per tool instance. Keyed weakly so tool classes minted per-request in long-lived
+# hosts (``praisonai serve`` / gateway / jobs) are reclaimed by GC when their last
+# strong reference dies, rather than being pinned for the process lifetime.
+_TIMEOUT_PROXY_TYPES: "weakref.WeakKeyDictionary[type, type]" = weakref.WeakKeyDictionary()
 _TIMEOUT_PROXY_TYPES_LOCK = threading.Lock()
 
 
