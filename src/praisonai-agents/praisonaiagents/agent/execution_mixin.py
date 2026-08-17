@@ -1540,6 +1540,7 @@ Write the complete compiled report:"""
 
     async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async tool execution with retry policy (middleware-agnostic core)."""
+        from ..errors import ToolExecutionError
 
         # Get retry policy (tool-level > agent-level > default)
         retry_policy = self._get_tool_retry_policy(function_name)
@@ -1556,10 +1557,13 @@ Write the complete compiled report:"""
                     # Skip retry for non-retryable errors (approval, permission, etc.).
                     # `retryable is False` covers async tool timeouts, whose executor
                     # work cannot be cancelled — retrying would duplicate side effects.
+                    # `loop_blocked` is a terminal loop-guard decision — retrying would
+                    # defeat the doom-loop protection this stop is meant to add.
                     if (result.get("approval_denied") or 
                         result.get("permission_denied") or 
                         result.get("approval_error") or
                         result.get("circuit_open") or
+                        result.get("loop_blocked") or
                         result.get("retryable") is False):
                         return result
                     
@@ -1585,6 +1589,11 @@ Write the complete compiled report:"""
                     # Success - return result
                     return result
                     
+            except ToolExecutionError:
+                # A loop-guard HALT (raised in _execute_tool_async_impl) is a
+                # terminal, non-retryable decision — let it propagate to stop the
+                # run instead of retrying or swallowing it into an error dict.
+                raise
             except Exception as e:
                 last_exception = e
                 # Determine if retryable
@@ -1616,6 +1625,7 @@ Write the complete compiled report:"""
 
     async def _execute_tool_async_impl(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Internal async tool execution implementation"""
+        from ..errors import ToolExecutionError
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
@@ -1662,6 +1672,29 @@ Write the complete compiled report:"""
             if func is None:
                 logging.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
+
+            # Loop guard (pre-execution) — parity with the sync path in
+            # tool_execution.py. The async path previously had no loop-guard or
+            # doom-loop protection, so a repeatedly-failing tool could be hammered
+            # every turn via achat()/async workflows. check() is pure/sync, so it
+            # is safe to call here without awaiting.
+            loop_guard = None
+            if hasattr(self, '_ensure_loop_guard'):
+                loop_guard = self._ensure_loop_guard()
+                from ..escalation.loop_guard import GuardAction
+                decision = loop_guard.check(function_name, arguments, is_pre_execution=True)
+                if decision.action == GuardAction.BLOCK:
+                    logging.warning(f"Loop guard blocked {function_name}: {decision.message}")
+                    return {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
+                elif decision.action == GuardAction.HALT:
+                    raise ToolExecutionError(
+                        f"[loop-guard] {decision.message}",
+                        tool_name=function_name,
+                        agent_id=self.name,
+                        is_retryable=False,
+                    )
+                elif decision.action == GuardAction.WARN:
+                    logging.warning(f"Loop guard warning for {function_name}: {decision.message}")
 
             # Activate the tool-progress channel so tools running under the async
             # path can stream incremental output (emit_tool_progress) and the
@@ -1735,14 +1768,33 @@ Write the complete compiled report:"""
                         # a duplicate invocation while the original keeps executing —
                         # duplicating DB writes / API calls / file mutations. Surface the
                         # timeout once instead of re-running an uncancellable side effect.
-                        return {
+                        # Fall through (not return) so the loop guard records this
+                        # timeout as a failure — repeated timeouts must accumulate
+                        # toward the BLOCK/HALT thresholds like any other failure.
+                        result = {
                             "error": f"Tool timed out after {tool_timeout}s",
                             "timeout": True,
                             "retryable": False,
                         }
                 else:
                     result = await _invoke()
-                
+
+                # Loop guard (post-execution) — record the outcome and surface a
+                # block/halt decision back to the model on this same turn, mirroring
+                # the sync path in tool_execution.py so repeated failures accumulate
+                # toward the BLOCK/HALT thresholds instead of retrying unbounded.
+                if loop_guard is not None:
+                    is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
+                    loop_guard.record(function_name, arguments, is_success, result=result)
+                    decision = loop_guard.check(function_name, arguments, is_pre_execution=False)
+                    if decision.action.value in ("warn", "block", "halt"):
+                        if isinstance(result, str):
+                            result = f"{result}\n\n[loop-guard] {decision.message}"
+                        elif isinstance(result, dict):
+                            result["_loop_guard"] = {"message": decision.message, "action": decision.action.value}
+                        else:
+                            result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
+
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")
                 if result is None:
@@ -1756,8 +1808,18 @@ Write the complete compiled report:"""
 
             except Exception as e:
                 logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
+                # Record the failed invocation so repeated identical failures
+                # accumulate toward the loop-guard BLOCK/HALT thresholds — a raised
+                # tool exception is a failure just like an error-dict result on the
+                # sync path. The next pre-execution check will then BLOCK/HALT.
+                if loop_guard is not None:
+                    loop_guard.record(function_name, arguments, False, result=None)
                 return {"error": f"Error executing {function_name}: {str(e)}"}
 
+        except ToolExecutionError:
+            # A loop-guard HALT must propagate to stop the run, mirroring the sync
+            # path; do not swallow it into an error dict.
+            raise
         except Exception as e:
             logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
             return {"error": f"Error in execute_tool_async: {str(e)}"}
