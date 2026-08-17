@@ -362,18 +362,40 @@ class BaseAutoGenerator:
     - Config list management
     """
     
-    def __init__(self, config_list: Optional[List[Dict]] = None):
+    def __init__(self, config_list: Optional[List[Dict]] = None, *,
+                 workspace: Optional[str] = None):
         """
         Initialize base generator with LLM configuration.
         
         Args:
             config_list: Optional LLM configuration list
+            workspace: Optional workspace root. When provided, output file names
+                are contained to it so a poisoned request (e.g.
+                ``../../etc/systemd/system/x.yaml`` funnelled through a serve
+                handler) cannot escape and overwrite an arbitrary file. Without a
+                workspace, behaviour is unchanged for backward compatibility.
         """
         # Resolve LLM endpoint configuration from environment variables
         from praisonai.llm.config import build_config_list
         self.config_list = config_list or build_config_list(include_api_type=False)
         self._core_client = None  # lazy, per-instance core OpenAIClient
         self._client_lock = threading.Lock()
+        self._workspace = os.path.realpath(workspace) if workspace else None
+
+    def _safe_join(self, name: str) -> str:
+        """Resolve ``name`` inside the workspace, rejecting path traversal.
+
+        Returns ``name`` unchanged when no workspace is set (backward-compatible).
+        Raises ValueError if the resolved path escapes the workspace root.
+        """
+        if not self._workspace:
+            return name
+        resolved = os.path.realpath(os.path.join(self._workspace, name))
+        if os.path.commonpath([resolved, self._workspace]) != self._workspace:
+            raise ValueError(
+                f"path {name!r} escapes workspace {self._workspace!r}"
+            )
+        return resolved
 
     def _resolve_framework(self, requested: Optional[str], registry,
                            require_workflow: bool = False):
@@ -940,8 +962,8 @@ class AutoGenerator(BaseAutoGenerator):
         
         Note: autogen framework is different from this AutoGenerator class.
         """
-        # Initialize base class first (handles config_list and client)
-        super().__init__(config_list=config_list)
+        # Initialize base class first (handles config_list, client, workspace guard)
+        super().__init__(config_list=config_list, workspace=workspace)
         
         # Resolve + validate framework using the shared adapter registry.
         from .framework_adapters.registry import get_default_registry
@@ -959,29 +981,15 @@ class AutoGenerator(BaseAutoGenerator):
         # can consult it instead of only carrying a bare framework string.
         self._adapter = adapter
         self.topic = topic
-        # When a workspace is explicitly provided, contain the output path to it
-        # so a poisoned request (e.g. agent_file="../../etc/systemd/system/x.yaml"
-        # funnelled through a serve handler) cannot escape and overwrite an
-        # arbitrary file. Without a workspace, behaviour is unchanged for
-        # backward compatibility.
-        self._workspace = os.path.realpath(workspace) if workspace else None
-        self.agent_file = self._safe_join(agent_file) if self._workspace else agent_file
+        # Contain the output path to the workspace (when provided) via the
+        # inherited BaseAutoGenerator._safe_join guard so a poisoned request
+        # cannot escape and overwrite an arbitrary file. Without a workspace,
+        # _safe_join returns the name unchanged (backward-compatible).
+        self.agent_file = self._safe_join(agent_file)
         # Authoritative framework name comes from the resolved adapter.
         self.framework = adapter.name
         self.pattern = pattern
         self.single_agent = single_agent
-
-    def _safe_join(self, name: str) -> str:
-        """Resolve ``name`` inside the workspace, rejecting path traversal.
-
-        Raises ValueError if the resolved path escapes the workspace root.
-        """
-        resolved = os.path.realpath(os.path.join(self._workspace, name))
-        if os.path.commonpath([resolved, self._workspace]) != self._workspace:
-            raise ValueError(
-                f"agent_file {name!r} escapes workspace {self._workspace!r}"
-            )
-        return resolved
     
 
     def generate(self, merge=False):
@@ -1500,7 +1508,8 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
                  config_list: Optional[List[Dict]] = None,
                  framework: Optional[str] = None,
                  single_agent: bool = False,
-                 adapter_registry=None):
+                 adapter_registry=None,
+                 *, workspace: Optional[str] = None):
         """
         Initialize the WorkflowAutoGenerator.
         
@@ -1514,9 +1523,11 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
                 is validated here rather than deferring the failure to a later
                 ``praisonai run`` invocation.
             single_agent: If True, generate a single agent workflow
+            workspace: Optional workspace root; when set, ``workflow_file`` is
+                contained to it to reject path traversal (see BaseAutoGenerator).
         """
-        # Initialize base class (handles config_list and client)
-        super().__init__(config_list=config_list)
+        # Initialize base class (handles config_list, client, workspace guard)
+        super().__init__(config_list=config_list, workspace=workspace)
         
         # Resolve + validate framework through the same single source of truth
         # AutoGenerator and praisonai.run() use, instead of hardcoding a
@@ -1528,7 +1539,7 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         )
         self._adapter = adapter
         self.topic = topic
-        self.workflow_file = workflow_file
+        self.workflow_file = self._safe_join(workflow_file)
         self.framework = adapter.name
         self.single_agent = single_agent
     
@@ -1971,7 +1982,8 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
     
     def __init__(self, topic: str = "Automate a task",
                  workflow_file: str = "job_workflow.yaml",
-                 config_list: Optional[List[Dict]] = None):
+                 config_list: Optional[List[Dict]] = None,
+                 *, workspace: Optional[str] = None):
         """
         Initialize the JobWorkflowAutoGenerator.
         
@@ -1979,10 +1991,12 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
             topic: The task/topic for the workflow
             workflow_file: Output file name
             config_list: Optional LLM configuration
+            workspace: Optional workspace root; when set, ``workflow_file`` is
+                contained to it to reject path traversal (see BaseAutoGenerator).
         """
-        super().__init__(config_list=config_list)
+        super().__init__(config_list=config_list, workspace=workspace)
         self.topic = topic
-        self.workflow_file = workflow_file
+        self.workflow_file = self._safe_join(workflow_file)
     
     def generate(self, include_judge: bool = True, include_approve: bool = False) -> str:
         """

@@ -6,6 +6,7 @@ import inspect
 import logging
 import threading
 import uuid
+import weakref
 import re
 import difflib
 import importlib
@@ -292,7 +293,21 @@ class _TimeoutBoundTool:
 # Cache of dynamically-generated ``(_TimeoutBoundTool, type(inner))`` subclasses
 # keyed by the inner class, so we build one proxy type per tool class instead of
 # per tool instance.
-_TIMEOUT_PROXY_TYPES: "Dict[type, type]" = {}
+#
+# The value is held WEAKLY (``WeakValueDictionary``), not the key. A weak *key*
+# does not work here: the cached ``proxy_cls`` value inherits from ``inner_cls``,
+# so it strongly retains its own key through ``__bases__``/``__mro__`` — the key
+# could then never die and the cache would pin every per-request tool class for
+# the process lifetime. Keying weakly on the value instead breaks that cycle: the
+# proxy class stays cached only while live proxy instances (whose ``__class__`` is
+# ``proxy_cls``) keep it — and those instances transitively keep ``inner_cls``
+# alive via their ``_inner`` reference anyway. Once the last proxy dies, the proxy
+# class is collected, the entry auto-evicts, and ``inner_cls`` is released. This
+# reclaims tool classes minted per-request in long-lived hosts (``praisonai
+# serve`` / gateway / jobs) instead of pinning them forever, while a fallback to
+# the un-subclassable ``_TimeoutBoundTool`` (which cannot be weakly referenced,
+# being module-global and never collected) is simply not cached.
+_TIMEOUT_PROXY_TYPES: "weakref.WeakValueDictionary[type, type]" = weakref.WeakValueDictionary()
 _TIMEOUT_PROXY_TYPES_LOCK = threading.Lock()
 
 
@@ -318,6 +333,12 @@ def _make_timeout_proxy(inner, wrapped_run=None, wrapped__run=None):
                         (_TimeoutBoundTool, inner_cls),
                         {},
                     )
+                    # Only the dynamically-minted subclass is cached, and only
+                    # weakly (see _TIMEOUT_PROXY_TYPES). The un-subclassable
+                    # fallback below is never cached: it is the module-global
+                    # _TimeoutBoundTool (immortal, so caching buys nothing) and
+                    # a WeakValueDictionary cannot retain it usefully anyway.
+                    _TIMEOUT_PROXY_TYPES[inner_cls] = proxy_cls
                 except TypeError:
                     # Some tool classes forbid subclassing (e.g. custom
                     # metaclass/__slots__ conflicts); fall back to the plain
@@ -325,7 +346,6 @@ def _make_timeout_proxy(inner, wrapped_run=None, wrapped__run=None):
                     # inner is still exposed via __getattr__ delegation, and the
                     # generic callable branch is preserved by the caller.
                     proxy_cls = _TimeoutBoundTool
-                _TIMEOUT_PROXY_TYPES[inner_cls] = proxy_cls
 
     proxy = proxy_cls.__new__(proxy_cls)
     object.__setattr__(proxy, "_inner", inner)
