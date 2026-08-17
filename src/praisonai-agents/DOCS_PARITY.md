@@ -24,7 +24,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Approval | 1 | 5 | 2537 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3274 |
-| ✅ Autonomy | 3 | 7 | 2752 |
+| ✅ Autonomy | 3 | 7 | 2756 |
 | ✅ Bots | 7 | 31 | 13366 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 121 | 36059 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 73 | 26717 |
+| ✅ Gateway | 7 | 74 | 27180 |
 | ✅ Guardrails | 4 | 4 | 2025 |
 | ✅ Handoffs | 11 | 6 | 2563 |
 | ✅ Hooks | 2 | 9 | 4434 |
@@ -56,7 +56,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1201 |
+| ✅ Output | 3 | 5 | 1242 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1549 |
 | ✅ Plugins | 8 | 4 | 2858 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 141 | 41242 |
+| ✅ Tools | 12 | 141 | 41246 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1211 |
 | ✅ Video | 2 | 6 | 649 |
