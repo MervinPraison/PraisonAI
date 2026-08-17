@@ -5759,8 +5759,14 @@ Answer:"""
                 # It's a file path
                 self.knowledge.add(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
             elif knowledge_item.startswith("http://") or knowledge_item.startswith("https://"):
-                # It's a URL
-                pass
+                # It's a URL. URL knowledge ingestion is not yet implemented in the
+                # core SDK, so warn instead of silently dropping the source.
+                logging.warning(
+                    f"Knowledge source '{knowledge_item}' is a URL; URL knowledge "
+                    "ingestion is not yet implemented in the core SDK. This source "
+                    "will be skipped. Fetch and pass the content as text, or a local "
+                    "file path, instead."
+                )
             else:
                 # It's a string content
                 self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
