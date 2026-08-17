@@ -102,6 +102,67 @@ class TestResponsesAPIParamBuilder:
         assert params["tools"] == [{"type": "function", "name": "add", "description": "Add nums", "parameters": {}}]
         assert params["tool_choice"] == "auto"
 
+    def test_multimodal_parts_mapped_to_responses_format(self):
+        """Chat Completions content parts must become Responses API parts."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/image.png",
+                        "detail": "high",
+                    },
+                },
+            ],
+        }]
+
+        params = llm._build_responses_params(messages=messages)
+
+        assert params["input"] == [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Describe this image"},
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.com/image.png",
+                    "detail": "high",
+                },
+            ],
+        }]
+
+    def test_multimodal_local_image_becomes_data_url(self, tmp_path):
+        """Local image file paths must be inlined as data URLs, not forwarded."""
+        from praisonaiagents.llm.llm import LLM
+
+        image_path = tmp_path / "pixel.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+        llm = LLM(model="gpt-4o-mini")
+
+        params = llm._build_responses_params(messages=[{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": str(image_path)},
+            }],
+        }])
+
+        image_url = params["input"][0]["content"][0]["image_url"]
+        assert image_url == "data:image/png;base64,iVBORw0KGgo="
+
+    def test_string_content_passed_through(self):
+        """Plain-string content must remain a string (Responses accepts it)."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{"role": "user", "content": "hi"}])
+
+        assert params["input"][0]["content"] == "hi"
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
