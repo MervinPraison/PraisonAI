@@ -5602,6 +5602,174 @@ class _TurnLeaseHold:
 
 
 # ---------------------------------------------------------------------------
+# Per-session turn-execution isolation (Issue #4011)
+#
+# Today every session's agent turn runs as an ``asyncio`` task on the single
+# gateway event loop, in one process: a turn that wedges the loop (a tight CPU
+# loop, a blocking C-extension call, GIL starvation), runs away, or crashes
+# the interpreter degrades or kills *every* session at once, and the only
+# remedy the runtime has is a whole-process ``os._exit(75)`` restart that
+# drops every other user's in-flight turn.
+#
+# This is the pure, dependency-free contract for a swappable turn *executor*,
+# mirroring how every other gateway robustness knob (drain, admission,
+# rate-limit, liveness, dead-letter, turn-lock) is a swappable protocol in
+# core. The executor decides *where* a session's turn runs; the default
+# :class:`InProcessTurnExecutor` runs it on the current loop exactly as today
+# (zero change for existing users, no dependency introduced). Heavy executors
+# that place a turn on an isolated worker (subprocess / container / remote),
+# each with optional per-worker resource limits, are optional-dep runtime
+# concerns that live in the wrapper/bot package; core keeps only the protocol,
+# the placement/fencing invariants, and the safe in-process default so a bad
+# turn can be torn down on its own worker without an ``os._exit`` of the whole
+# gateway.
+# ---------------------------------------------------------------------------
+
+
+class WorkerWedgedError(Exception):
+    """Raised when a session's turn worker is wedged / unresponsive.
+
+    Signals the gateway that the placement's worker can no longer make
+    progress (a wedged loop, an unresponsive subprocess/container, a lost
+    remote worker). The gateway responds by tearing down *only* that
+    placement (:meth:`TurnExecutorProtocol.teardown`) and re-placing the
+    session, rather than the process-wide ``os._exit`` that a single shared
+    loop forces today. Distinct from ordinary turn errors, which surface as
+    the turn's own exception and do not condemn the worker.
+    """
+
+
+@dataclass(frozen=True)
+class TurnPlacement:
+    """Which worker owns a session's turns, and at what epoch (Issue #4011).
+
+    A lifecycle-owned handle returned by :meth:`TurnExecutorProtocol.place`
+    and passed back to :meth:`~TurnExecutorProtocol.execute_turn` /
+    :meth:`~TurnExecutorProtocol.teardown`. The gateway revalidates the
+    placement (worker alive, matching ``epoch``) immediately before dispatch
+    and again after any awaited admission/approval work; a stale placement
+    (its worker was replaced, so ``epoch`` no longer matches) **fails closed**
+    and the session is re-placed rather than executed on a dead worker.
+
+    Attributes:
+        session_id: The resolved session whose turns this placement serves.
+        worker_id: Opaque id of the worker that owns the session's turns. For
+            the in-process default this is a constant (one loop, one worker);
+            for isolated executors it identifies the subprocess/container/
+            remote worker.
+        epoch: Monotonic generation bumped whenever the worker backing a
+            session is replaced (e.g. after a wedge teardown). A turn carrying
+            a stale epoch must not run — the fencing token that stops a
+            reclaimed worker from executing against a session it no longer owns.
+    """
+
+    session_id: str
+    worker_id: str
+    epoch: int = 0
+
+
+@runtime_checkable
+class TurnExecutorProtocol(Protocol):
+    """Contract for *where* a session's agent turn executes (Issue #4011).
+
+    The gateway calls :meth:`place` to obtain a :class:`TurnPlacement` for a
+    session, then :meth:`execute_turn` to run the turn on that placement, and
+    :meth:`teardown` to reclaim a placement's worker. The default
+    :class:`InProcessTurnExecutor` runs the turn on the current event loop,
+    reproducing today's behaviour exactly; an isolated executor (subprocess /
+    container / remote, in the wrapper) runs it on its own worker so a wedged,
+    runaway, or crashed turn is contained to its session.
+
+    Contract:
+        * :meth:`place` returns the placement that owns ``session_id``'s
+          turns. Implementations may cache a placement per session and bump
+          its ``epoch`` when the backing worker is replaced.
+        * :meth:`execute_turn` runs ``turn`` (an ``async`` no-arg callable the
+          gateway already built for this turn) on ``placement`` and returns
+          its result. The in-process default awaits ``turn`` directly on the
+          current loop. An isolated executor does **not** ship this live
+          callable (and its captured loop/agent state) across a process
+          boundary — the worker owns the session (via :meth:`place`) and
+          rebuilds/dispatches the turn from serialisable inputs on its own
+          side; ``turn`` then acts as the gateway-side await point for that
+          worker's result. ``cancel_token`` carries the per-turn interrupt so
+          the existing cancellation seam is preserved. ``limits`` optionally
+          bounds the worker's CPU/memory/wall time (honoured by isolated
+          executors; ignored in-process). It raises :class:`WorkerWedgedError`
+          if the placement's worker can no longer make progress.
+        * :meth:`teardown` reclaims ``placement``'s worker (kills the
+          subprocess/container/remote worker, or is a no-op in-process),
+          scoped to the owning session only.
+
+    A worker fault must fail *scoped*: tear down the offending placement and
+    re-place its session, never the whole gateway — mirroring the fail-safe,
+    blast-radius-contained defaults elsewhere.
+    """
+
+    async def place(self, session_id: str) -> TurnPlacement:
+        """Return the placement that owns ``session_id``'s turns."""
+        ...
+
+    async def execute_turn(
+        self,
+        placement: TurnPlacement,
+        turn: "Callable[[], Awaitable[Any]]",
+        *,
+        cancel_token: Any = None,
+        limits: Any = None,
+    ) -> Any:
+        """Run ``turn`` on ``placement`` and return its result."""
+        ...
+
+    async def teardown(self, placement: TurnPlacement, *, reason: str) -> None:
+        """Reclaim ``placement``'s worker (scoped to its session)."""
+        ...
+
+
+class InProcessTurnExecutor:
+    """Default turn executor — today's on-loop behaviour, no isolation.
+
+    Zero-cost, dependency-free implementation of
+    :class:`TurnExecutorProtocol` for single-process deployments. It runs each
+    turn directly on the current event loop exactly as the gateway does today,
+    so selecting it (or leaving the executor unset) is byte-for-byte backward
+    compatible and introduces no dependency. It provides **no** blast-radius
+    isolation: a turn that wedges the loop still affects the process — choosing
+    an isolated executor (subprocess / container / remote, in the wrapper) is
+    what contains a bad turn to its own worker.
+
+    All turns share one worker (the current process/loop), so every placement
+    carries the same constant ``worker_id`` at ``epoch`` 0, and ``teardown``
+    is inert — an in-process turn is cancelled through the existing
+    ``cancel_token`` when the holding task exits, so there is no worker to
+    reclaim. The ``limits`` argument is accepted for protocol symmetry but is
+    inert here (no separate worker to bound).
+    """
+
+    _WORKER_ID = "inprocess"
+
+    async def place(self, session_id: str) -> TurnPlacement:
+        return TurnPlacement(
+            session_id=session_id, worker_id=self._WORKER_ID, epoch=0
+        )
+
+    async def execute_turn(
+        self,
+        placement: TurnPlacement,
+        turn: "Callable[[], Awaitable[Any]]",
+        *,
+        cancel_token: Any = None,
+        limits: Any = None,
+    ) -> Any:
+        # Run the gateway's pre-built turn coroutine on this loop, unchanged.
+        return await turn()
+
+    async def teardown(self, placement: TurnPlacement, *, reason: str) -> None:
+        # No isolated worker to reclaim; the shared loop keeps serving.
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Declarative method -> required-scope registry (Issue #3206)
 # ---------------------------------------------------------------------------
 
