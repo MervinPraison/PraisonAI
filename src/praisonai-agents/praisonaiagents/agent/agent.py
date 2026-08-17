@@ -5760,9 +5760,14 @@ Answer:"""
                 self.knowledge.add(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
             elif knowledge_item.startswith("http://") or knowledge_item.startswith("https://"):
                 # It's a URL. URL knowledge ingestion is not yet implemented in the
-                # core SDK, so warn instead of silently dropping the source.
+                # core SDK, so warn instead of silently dropping the source. Log only
+                # the scheme+host to avoid leaking any credentials or signed tokens
+                # embedded in the userinfo or query string.
+                from urllib.parse import urlsplit
+                _parts = urlsplit(knowledge_item)
+                _safe_url = f"{_parts.scheme}://{_parts.hostname or ''}"
                 logging.warning(
-                    f"Knowledge source '{knowledge_item}' is a URL; URL knowledge "
+                    f"Knowledge source '{_safe_url}...' is a URL; URL knowledge "
                     "ingestion is not yet implemented in the core SDK. This source "
                     "will be skipped. Fetch and pass the content as text, or a local "
                     "file path, instead."

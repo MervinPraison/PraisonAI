@@ -709,7 +709,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             "guardrails": guardrails, "web": web, "reflection": reflection,
             "caching": caching, "learn": learn, "knowledge": knowledge,
         }
-        _set = [k for k, v in _unwired.items() if v not in (None, False)]
+        _set = [k for k, v in _unwired.items() if v]
         if _set:
             logging.warning(
                 f"AgentTeam received {_set} but does not yet apply them at the team "
