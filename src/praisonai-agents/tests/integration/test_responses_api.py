@@ -102,6 +102,99 @@ class TestResponsesAPIParamBuilder:
         assert params["tools"] == [{"type": "function", "name": "add", "description": "Add nums", "parameters": {}}]
         assert params["tool_choice"] == "auto"
 
+    def test_multimodal_parts_mapped_to_responses_format(self):
+        """Chat Completions content parts must become Responses API parts."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/image.png",
+                        "detail": "high",
+                    },
+                },
+            ],
+        }]
+
+        params = llm._build_responses_params(messages=messages)
+
+        assert params["input"] == [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Describe this image"},
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.com/image.png",
+                    "detail": "high",
+                },
+            ],
+        }]
+
+    def test_multimodal_local_image_becomes_data_url(self, tmp_path):
+        """Local image file paths must be inlined as data URLs, not forwarded."""
+        from praisonaiagents.llm.llm import LLM
+
+        image_path = tmp_path / "pixel.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+        llm = LLM(model="gpt-4o-mini")
+
+        params = llm._build_responses_params(messages=[{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": str(image_path)},
+            }],
+        }])
+
+        image_url = params["input"][0]["content"][0]["image_url"]
+        assert image_url == "data:image/png;base64,iVBORw0KGgo="
+
+    def test_string_content_passed_through(self):
+        """Plain-string content must remain a string (Responses accepts it)."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{"role": "user", "content": "hi"}])
+
+        assert params["input"][0]["content"] == "hi"
+
+    def test_multimodal_existing_data_url_unchanged(self):
+        """A pre-encoded data URL must be forwarded verbatim, not re-encoded."""
+        from praisonaiagents.llm.llm import LLM
+
+        data_url = "data:image/png;base64,iVBORw0KGgo="
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "user",
+            "content": [{
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            }],
+        }])
+
+        assert params["input"][0]["content"][0]["image_url"] == data_url
+
+    def test_multimodal_missing_local_image_rejected(self, tmp_path):
+        """Unreadable local image paths must raise, not silently forward."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        missing_path = tmp_path / "missing.png"
+
+        with pytest.raises(FileNotFoundError, match="Local image file does not exist"):
+            llm._build_responses_params(messages=[{
+                "role": "user",
+                "content": [{
+                    "type": "image_url",
+                    "image_url": {"url": str(missing_path)},
+                }],
+            }])
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
@@ -243,6 +336,30 @@ class TestResponsesAPIRealAgent:
             name="LocalImageAgent",
             instructions="Answer image questions briefly.",
             llm="gpt-4o-mini",
+        )
+
+        response = agent.start(
+            "Confirm that you can inspect the attached image.",
+            attachments=[str(image_path)],
+            stream=False,
+        )
+
+        assert response
+        print(response)
+
+    def test_slash_model_accepts_local_image_attachment(self, tmp_path):
+        """Exercise Agent.start() through the LLM Responses API path with a local image."""
+        from praisonaiagents import Agent
+
+        image_path = tmp_path / "pixel.png"
+        image_path.write_bytes(base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+            "/x8AAusB9WlV9ZkAAAAASUVORK5CYII="
+        ))
+        agent = Agent(
+            name="SlashLocalImageAgent",
+            instructions="Answer image questions briefly.",
+            llm="openai/gpt-4o-mini",
         )
 
         response = agent.start(

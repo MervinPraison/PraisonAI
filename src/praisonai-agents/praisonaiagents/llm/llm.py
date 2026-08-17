@@ -5887,7 +5887,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         "output": msg.get("content", ""),
                     })
                 else:
-                    input_items.append(msg)
+                    # Translate Chat Completions multimodal content parts
+                    # (type=text / image_url) into Responses API parts
+                    # (input_text / input_image); local image paths become
+                    # data URLs. Plain-string content is passed through.
+                    from .openai_client import OpenAIClient
+                    item = dict(msg)
+                    item["content"] = OpenAIClient._build_responses_content(
+                        msg.get("content", "")
+                    )
+                    input_items.append(item)
 
         if instructions:
             params["instructions"] = instructions
