@@ -1540,6 +1540,7 @@ Write the complete compiled report:"""
 
     async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async tool execution with retry policy (middleware-agnostic core)."""
+        from ..errors import ToolExecutionError
 
         # Get retry policy (tool-level > agent-level > default)
         retry_policy = self._get_tool_retry_policy(function_name)
@@ -1556,10 +1557,13 @@ Write the complete compiled report:"""
                     # Skip retry for non-retryable errors (approval, permission, etc.).
                     # `retryable is False` covers async tool timeouts, whose executor
                     # work cannot be cancelled — retrying would duplicate side effects.
+                    # `loop_blocked` is a terminal loop-guard decision — retrying would
+                    # defeat the doom-loop protection this stop is meant to add.
                     if (result.get("approval_denied") or 
                         result.get("permission_denied") or 
                         result.get("approval_error") or
                         result.get("circuit_open") or
+                        result.get("loop_blocked") or
                         result.get("retryable") is False):
                         return result
                     
@@ -1585,6 +1589,11 @@ Write the complete compiled report:"""
                     # Success - return result
                     return result
                     
+            except ToolExecutionError:
+                # A loop-guard HALT (raised in _execute_tool_async_impl) is a
+                # terminal, non-retryable decision — let it propagate to stop the
+                # run instead of retrying or swallowing it into an error dict.
+                raise
             except Exception as e:
                 last_exception = e
                 # Determine if retryable
@@ -1759,7 +1768,10 @@ Write the complete compiled report:"""
                         # a duplicate invocation while the original keeps executing —
                         # duplicating DB writes / API calls / file mutations. Surface the
                         # timeout once instead of re-running an uncancellable side effect.
-                        return {
+                        # Fall through (not return) so the loop guard records this
+                        # timeout as a failure — repeated timeouts must accumulate
+                        # toward the BLOCK/HALT thresholds like any other failure.
+                        result = {
                             "error": f"Tool timed out after {tool_timeout}s",
                             "timeout": True,
                             "retryable": False,
