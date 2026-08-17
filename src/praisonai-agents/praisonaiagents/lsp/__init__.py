@@ -41,6 +41,11 @@ __all__ = [
     "Range",
     # Configuration
     "LSPConfig",
+    # Auto-detection / availability helpers
+    "detect_language",
+    "detect_root_uri",
+    "probe",
+    "DEFAULT_SERVERS",
 ]
 
 
@@ -58,8 +63,9 @@ def __getattr__(name: str):
         )
         return locals()[name]
     
-    if name == "LSPConfig":
-        from .config import LSPConfig
-        return LSPConfig
+    if name in ("LSPConfig", "detect_language", "detect_root_uri", "probe",
+                "DEFAULT_SERVERS"):
+        from . import config
+        return getattr(config, name)
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

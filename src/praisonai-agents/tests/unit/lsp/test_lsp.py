@@ -12,7 +12,9 @@ from praisonaiagents.lsp.types import (
     Position, Range, Location, Diagnostic, DiagnosticSeverity,
     CompletionItem, TextDocumentItem, TextDocumentIdentifier
 )
-from praisonaiagents.lsp.config import LSPConfig, DEFAULT_SERVERS
+from praisonaiagents.lsp.config import (
+    LSPConfig, DEFAULT_SERVERS, detect_language, detect_root_uri, probe,
+)
 from praisonaiagents.lsp.client import LSPClient
 
 
@@ -321,6 +323,88 @@ class TestLSPClient:
         
         assert not client.is_running
         assert not client._initialized
+
+
+# =============================================================================
+# Auto-detection / availability helper tests
+# =============================================================================
+
+class TestDetectLanguage:
+    """Tests for detect_language()."""
+
+    def test_detects_known_extensions(self):
+        assert detect_language("mod.py") == "python"
+        assert detect_language("app.ts") == "typescript"
+        assert detect_language("main.go") == "go"
+        assert detect_language("lib.rs") == "rust"
+        assert detect_language("index.jsx") == "javascript"
+
+    def test_case_insensitive(self):
+        assert detect_language("MOD.PY") == "python"
+
+    def test_unknown_extension_returns_none(self):
+        assert detect_language("notes.txt") is None
+        assert detect_language("noext") is None
+
+
+class TestDetectRootUri:
+    """Tests for detect_root_uri() root-marker discovery."""
+
+    def test_finds_nearest_root_marker(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[tool]\n")
+        sub = tmp_path / "pkg" / "sub"
+        sub.mkdir(parents=True)
+        f = sub / "mod.py"
+        f.write_text("x = 1\n")
+        root = detect_root_uri(str(f))
+        assert root == f"file://{tmp_path}"
+
+    def test_returns_none_without_marker(self, tmp_path):
+        f = tmp_path / "lonely.rs"
+        f.write_text("fn main() {}\n")
+        # No Cargo.toml / .git anywhere up to filesystem root under tmp_path.
+        # Walk may still hit a real marker above tmp; assert it's not the file dir.
+        root = detect_root_uri(str(f))
+        assert root != f"file://{f.parent}"
+
+
+class TestProbe:
+    """Tests for probe() availability check."""
+
+    def test_available_when_on_path(self, monkeypatch):
+        import praisonaiagents.lsp.config as cfg
+        monkeypatch.setattr(cfg.shutil, "which", lambda cmd: "/usr/bin/" + cmd)
+        available, command, hint = probe("python")
+        assert available is True
+        assert command == "pylsp"
+
+    def test_unavailable_returns_command_and_hint(self, monkeypatch):
+        import praisonaiagents.lsp.config as cfg
+        monkeypatch.setattr(cfg.shutil, "which", lambda cmd: None)
+        available, command, hint = probe("go")
+        assert available is False
+        assert command == "gopls"
+        assert hint and "gopls" in hint
+
+    def test_unknown_language(self):
+        available, command, hint = probe("cobol")
+        assert available is False
+        assert command is None
+
+
+class TestStartProbePreflight:
+    """start() should not spawn a missing server; it records last_error."""
+
+    def test_missing_server_sets_last_error(self, monkeypatch):
+        import asyncio
+        import praisonaiagents.lsp.config as cfg
+        monkeypatch.setattr(cfg.shutil, "which", lambda cmd: None)
+        client = LSPClient(language="go")
+        ok = asyncio.run(client.start())
+        assert ok is False
+        assert client.last_error is not None
+        assert "gopls" in client.last_error
+        assert "install" in client.last_error
 
 
 if __name__ == "__main__":
