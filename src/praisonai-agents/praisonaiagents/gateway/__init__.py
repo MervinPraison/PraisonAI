@@ -154,6 +154,11 @@ from .protocols import (
     TurnLeaseToken,
     TurnLockProtocol,
     LocalTurnLock,
+    # Per-session turn-execution isolation (Issue #4011)
+    WorkerWedgedError,
+    TurnPlacement,
+    TurnExecutorProtocol,
+    InProcessTurnExecutor,
     # Schema-validated inbound frame codec (Issue #2831)
     HelloParams,
     HelloResult,
@@ -419,6 +424,11 @@ __all__ = [
     "TurnLeaseToken",
     "TurnLockProtocol",
     "LocalTurnLock",
+    # Per-session turn-execution isolation (Issue #4011)
+    "WorkerWedgedError",
+    "TurnPlacement",
+    "TurnExecutorProtocol",
+    "InProcessTurnExecutor",
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams",
     "HelloResult",
