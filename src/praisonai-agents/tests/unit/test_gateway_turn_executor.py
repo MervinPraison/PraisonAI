@@ -7,6 +7,7 @@ exactly as today and be byte-for-byte backward compatible).
 """
 
 import asyncio
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -29,7 +30,7 @@ def test_worker_wedged_error_is_exception():
 def test_turn_placement_is_frozen_value_type():
     p = TurnPlacement(session_id="s", worker_id="w", epoch=1)
     assert p == TurnPlacement(session_id="s", worker_id="w", epoch=1)
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         p.epoch = 2  # frozen
 
 
