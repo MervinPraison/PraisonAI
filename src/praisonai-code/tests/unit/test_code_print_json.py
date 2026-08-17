@@ -346,5 +346,37 @@ def test_print_rejects_unsupported_options(opt):
     assert "does not support" in result.output
 
 
+def test_profiled_code_agent_kwargs_match_constructor(monkeypatch):
+    """The `--profile` path must not pass the dropped `verbose=` kwarg either.
+
+    The profiled code path builds its own ``Agent`` directly (bypassing
+    ``_run_print_code``). It suffered the same constructor drift: passing a
+    legacy top-level ``verbose=`` that ``Agent.__init__`` now rejects. Guard the
+    kwargs against the real signature so the crash cannot reappear.
+    """
+    import inspect
+    import praisonaiagents
+    from praisonaiagents.agent.agent import Agent as RealAgent
+    from praisonai_code.cli.commands.code import _run_profiled_code
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "ok"
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+
+    _run_profiled_code(prompt="do a thing", verbose=True)
+
+    real_params = set(inspect.signature(RealAgent.__init__).parameters)
+    assert set(captured) <= real_params
+    assert "verbose" not in captured
+    assert captured["output"] == "verbose"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

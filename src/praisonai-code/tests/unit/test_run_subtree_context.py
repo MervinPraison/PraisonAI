@@ -99,6 +99,74 @@ def test_custom_agent_and_profiled_forward_no_rules():
         assert _param_default(fn, "no_rules") is False
 
 
+def test_custom_agent_verbose_maps_to_output_preset(monkeypatch):
+    """``run --agent <name> --verbose`` must not pass the dropped ``verbose=``.
+
+    ``_run_custom_agent`` builds ``Agent(**agent_config)`` directly. It used to
+    set ``agent_config["verbose"]``, which the consolidated constructor rejects
+    with ``TypeError``. Guard that the kwargs stay a subset of the real
+    signature and that verbosity is threaded via the ``output`` preset instead.
+    """
+    import inspect
+
+    import praisonaiagents
+    from praisonaiagents.agent.agent import Agent as RealAgent
+    from praisonai_code.cli.commands.run import _run_custom_agent
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "ok"
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+
+    _run_custom_agent(
+        {"name": "RunAgent", "role": "Assistant", "goal": "Complete the task"},
+        prompt="do a thing",
+        verbose=True,
+    )
+
+    real_params = set(inspect.signature(RealAgent.__init__).parameters)
+    assert set(captured) <= real_params
+    assert "verbose" not in captured
+    assert captured["output"] == "verbose"
+
+
+def test_custom_agent_definition_output_wins_over_verbose(monkeypatch):
+    """A definition's explicit ``output`` is not clobbered by ``--verbose``."""
+    import praisonaiagents
+    from praisonai_code.cli.commands.run import _run_custom_agent
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "ok"
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+
+    _run_custom_agent(
+        {
+            "name": "RunAgent",
+            "role": "Assistant",
+            "goal": "Complete the task",
+            "output": "silent",
+        },
+        prompt="do a thing",
+        verbose=True,
+    )
+
+    assert captured["output"] == "silent"
+    assert "verbose" not in captured
+
+
 # --- Config-declared instruction sources (--instructions / config) ---------
 
 
