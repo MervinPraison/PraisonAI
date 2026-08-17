@@ -45,22 +45,6 @@ from .path_safety import resolve_within_root
 
 logger = logging.getLogger(__name__)
 
-# File extension -> LSP language id.  Mirrors the languages with a default
-# server in ``lsp/config.py`` (DEFAULT_SERVERS) and the map used by the edit
-# path's diagnostics hook, so tool availability tracks the diagnostics feature.
-_LSP_LANGUAGE_BY_EXT = {
-    ".py": "python",
-    ".pyi": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".rs": "rust",
-    ".go": "go",
-}
-
 # Bound the number of navigation results returned to keep output agent-friendly.
 _MAX_RESULTS = 100
 
@@ -95,25 +79,25 @@ def _resolve_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
 
 def _language_for(safe_path: str) -> Optional[str]:
     """Return the LSP language id for *safe_path* by extension, else ``None``."""
-    return _LSP_LANGUAGE_BY_EXT.get(os.path.splitext(safe_path)[1].lower())
+    try:
+        from ..lsp.config import detect_language
+    except Exception:
+        return None
+    return detect_language(safe_path)
 
 
-def _server_available(language: str) -> Tuple[bool, Optional[str]]:
+def _server_available(language: str) -> Tuple[bool, Optional[str], Optional[str]]:
     """Check whether a language server is configured *and* installed.
 
-    Returns ``(True, command)`` when available or ``(False, None)`` otherwise.
-    Everything is lazily imported so importing this module is cheap.
+    Returns ``(available, command, install_hint)`` so callers can surface an
+    actionable "install X" message.  Everything is lazily imported so importing
+    this module is cheap.
     """
-    import shutil
-
     try:
-        from ..lsp.config import DEFAULT_SERVERS
+        from ..lsp.config import probe
     except Exception:
-        return False, None
-    server = DEFAULT_SERVERS.get(language)
-    if not server or not shutil.which(server["command"]):
-        return False, None
-    return True, server["command"]
+        return False, None, None
+    return probe(language)
 
 
 def _resolve_position(safe_path: str, line: Optional[int],
@@ -145,8 +129,16 @@ def _resolve_position(safe_path: str, line: Optional[int],
 
 
 def _uri_path(uri: str) -> str:
-    """Strip a ``file://`` prefix from *uri*, returning the bare path."""
-    return uri[7:] if uri.startswith("file://") else uri
+    """Return the decoded filesystem path for a ``file://`` *uri*.
+
+    Language servers return percent-encoded ``file://`` URIs (spaces, ``#`` …);
+    decode them back to a real path so snippet reads and workspace checks work
+    for projects whose paths contain reserved characters.
+    """
+    if uri.startswith("file://"):
+        from urllib.parse import urlparse, unquote
+        return unquote(urlparse(uri).path)
+    return uri
 
 
 def _within_workspace(path: str) -> Optional[str]:
@@ -235,7 +227,7 @@ def _run_lsp(language: str, coro_factory, open_path: Optional[str] = None):
         return None, f"Error: LSP client unavailable: {e}"
 
     async def _driver():
-        client = LSPClient(language=language)
+        client = LSPClient(language=language, workspace_file=open_path)
         client.config.timeout = min(client.config.timeout, _LSP_TIMEOUT)
         opened = False
         try:
@@ -287,10 +279,11 @@ def _prepare(file_path: str) -> Tuple[Optional[str], Optional[str], Optional[str
         return None, None, (
             f"Error: no language server configured for {os.path.basename(file_path)}"
         )
-    available, _cmd = _server_available(language)
+    available, command, install_hint = _server_available(language)
     if not available:
+        hint = f" (install with `{install_hint}`)" if install_hint else ""
         return None, None, (
-            f"Error: {language} language server not installed; "
+            f"Error: {language} language server `{command}` not installed{hint}; "
             f"install it to use lsp navigation (falling back to grep is advised)"
         )
     return safe_path, language, None
@@ -490,6 +483,7 @@ def lsp_workspace_symbols(query: str, file_path: Optional[str] = None) -> str:
     if not query:
         return "Error: query must be non-empty"
 
+    safe_path: Optional[str] = None
     if file_path:
         safe_path, err = _resolve_file(file_path)
         if err:
@@ -501,15 +495,19 @@ def lsp_workspace_symbols(query: str, file_path: Optional[str] = None) -> str:
     else:
         language = "python"
 
-    available, _cmd = _server_available(language)
+    available, command, install_hint = _server_available(language)
     if not available:
-        return (f"Error: {language} language server not installed; "
+        hint = f" (install with `{install_hint}`)" if install_hint else ""
+        return (f"Error: {language} language server `{command}` not installed{hint}; "
                 f"install it to use lsp navigation")
 
     async def _query(client):
         return await client.get_workspace_symbols(query)
 
-    result, rerr = _run_lsp(language, _query)
+    # Pass the resolved file so the client initialises against the file's real
+    # project root (root markers) rather than the process CWD; without this a
+    # nested-project search returns missing/wrong-project results.
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
         return rerr
     return _format_symbols(result or [], "Workspace symbols", include_container=True)

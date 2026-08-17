@@ -25,21 +25,10 @@ _DIAGNOSTICS_MAX_CHARS = 2000
 # Seconds before a diagnostics subprocess is abandoned.
 _DIAGNOSTICS_TIMEOUT = 10
 
-# File extension -> LSP language id, used to pick a language server for the
-# edited file.  Mirrors the languages with a default server in ``lsp/config.py``
-# (DEFAULT_SERVERS); anything not listed falls back to the per-language checker.
-_LSP_LANGUAGE_BY_EXT = {
-    ".py": "python",
-    ".pyi": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".rs": "rust",
-    ".go": "go",
-}
+# Languages whose LSP server was probed and found missing are recorded here so
+# the "diagnostics unavailable (install X)" note is surfaced only once per run,
+# per language, instead of on every edit.
+_LSP_MISSING_WARNED = set()
 
 
 class EditTools:
@@ -308,24 +297,21 @@ class EditTools:
         Python-only/silent runs pay no startup cost.  Any failure returns
         ``None`` so a missing/slow server never blocks a successful edit.
         """
-        import shutil
-
-        ext = os.path.splitext(safe_path)[1].lower()
-        language = _LSP_LANGUAGE_BY_EXT.get(ext)
-        if language is None:
-            return None
-
         try:
-            from ..lsp.config import DEFAULT_SERVERS
+            from ..lsp.config import detect_language, probe
         except Exception:
             return None
 
-        server = DEFAULT_SERVERS.get(language)
-        if not server:
+        language = detect_language(safe_path)
+        if language is None:
             return None
+
         # Only spawn a server whose command is actually installed; otherwise
-        # fall back to the zero-config checker without importing the client.
-        if not shutil.which(server["command"]):
+        # return ``None`` so the caller can fall back to the zero-config
+        # per-language checker (and, when nothing else reports, surface the
+        # "diagnostics unavailable" note in ``_run_diagnostics``).
+        available, command, install_hint = probe(language)
+        if not available:
             return None
 
         try:
@@ -337,7 +323,7 @@ class EditTools:
             return None
 
         async def _collect() -> Optional[list]:
-            client = LSPClient(language=language)
+            client = LSPClient(language=language, workspace_file=safe_path)
             # Keep the whole exchange inside the shared diagnostics budget so a
             # slow server cannot stall the edit result.
             client.config.timeout = min(client.config.timeout, _DIAGNOSTICS_TIMEOUT)
@@ -424,6 +410,32 @@ class EditTools:
         output = self._bound_output("\n".join(lines))
         return f"\n\nDiagnostics (lsp:{language}):\n{output}"
 
+    def _lsp_unavailable_note(self, safe_path: str) -> str:
+        """Return a one-time, actionable note when the file's LSP server is absent.
+
+        Emitted only when the edited file has a known language server that is
+        not installed *and* no legacy checker is available, so the model/user
+        sees that the post-edit self-correction signal is unavailable (and how
+        to restore it) instead of silently receiving nothing. Deduplicated per
+        language per run via ``_LSP_MISSING_WARNED``.
+        """
+        try:
+            from ..lsp.config import detect_language, probe
+        except Exception:
+            return ""
+        language = detect_language(safe_path)
+        if language is None or language in _LSP_MISSING_WARNED:
+            return ""
+        available, command, install_hint = probe(language)
+        if available or command is None:
+            return ""
+        _LSP_MISSING_WARNED.add(language)
+        hint = f"; install with `{install_hint}`" if install_hint else ""
+        return (
+            f"\n\nDiagnostics (lsp:{language}): unavailable — language server "
+            f"`{command}` not found on PATH{hint}"
+        )
+
     def _run_diagnostics(self, safe_path: str, display_path: str) -> str:
         """Run diagnostics on ``safe_path`` and return a bounded diagnostics block.
 
@@ -448,7 +460,11 @@ class EditTools:
         try:
             resolved = self._diagnostics_command(safe_path)
             if resolved is None:
-                return ""
+                # No LSP server and no legacy checker: if the file's language
+                # has a known-but-uninstalled language server, surface a single
+                # actionable note so the lost self-correction signal is visible
+                # rather than a silent no-op.
+                return self._lsp_unavailable_note(safe_path)
             tool_name, argv = resolved
 
             import subprocess

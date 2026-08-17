@@ -814,7 +814,8 @@ class TestLSPDiagnostics:
                             lambda cmd: "/usr/bin/" + cmd, raising=False)
         monkeypatch.setattr(
             "praisonaiagents.lsp.config.DEFAULT_SERVERS",
-            {"python": {"command": "pyright-langserver", "args": []}},
+            {"python": {"command": "pyright-langserver", "args": [],
+                        "extensions": [".py", ".pyi"]}},
             raising=False,
         )
         monkeypatch.setattr(
