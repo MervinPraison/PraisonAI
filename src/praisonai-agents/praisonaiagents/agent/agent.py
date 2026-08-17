@@ -759,8 +759,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         verification_hooks = legacy_kwargs.get("verification_hooks", _legacy_defaults["verification_hooks"])
         cli_backend = legacy_kwargs.get("cli_backend", _legacy_defaults["cli_backend"])
 
-        # Add check at start if memory is requested
-        if memory is not None:
+        # Add check at start if memory is requested.
+        # Skip the probe for values that resolve to the zero-dependency FileMemory
+        # backend (True, "file", and file-provider dicts without learn); those never
+        # touch the heavy memory.memory module, so probing it just wastes an import.
+        _uses_file_memory = (
+            memory is True
+            or memory == "file"
+            or (
+                isinstance(memory, dict)
+                and not memory.get("learn", False)
+                and memory.get("provider", memory.get("backend", "file")) == "file"
+            )
+        )
+        if memory is not None and not _uses_file_memory:
             try:
                 from ..memory.memory import Memory  # noqa: F401
                 _ = Memory  # Silence unused import warning - we just check availability
