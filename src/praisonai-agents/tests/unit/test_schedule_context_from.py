@@ -146,6 +146,21 @@ class TestResolveContext:
         body = ctx.split("\n", 1)[1]
         assert body == "x" * 100
 
+    def test_non_positive_budget_truncates_to_empty(self):
+        from praisonaiagents.scheduler.models import ScheduleJob
+        from praisonaiagents.scheduler.runner import ScheduleRunner
+
+        store = _fresh_store()
+        up = ScheduleJob(name="fetch")
+        store.add(up)
+        store.log_run(job_id=up.id, status="succeeded", result="y" * 500)
+        runner = ScheduleRunner(store)
+        for bad in (0, -100):
+            job = ScheduleJob(name="d", context_from=["fetch"], context_max_chars=bad)
+            ctx, _ = runner.resolve_context(job)
+            body = ctx.split("\n", 1)[1]
+            assert body == "", f"budget={bad} should truncate to empty, got {body!r}"
+
     def test_missing_upstream_reported(self):
         from praisonaiagents.scheduler.models import ScheduleJob
         from praisonaiagents.scheduler.runner import ScheduleRunner

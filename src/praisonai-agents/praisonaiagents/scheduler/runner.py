@@ -140,7 +140,11 @@ class ScheduleRunner:
         refs = job.context_from or []
         if not refs:
             return "", []
-        budget = job.context_max_chars if job.context_max_chars > 0 else 0
+        # Clamp the budget to a non-negative bound so a misconfigured
+        # zero/negative value enforces "no injected body" rather than silently
+        # returning the full upstream output (which would break the bounded
+        # contract). Truncation is always applied.
+        budget = max(job.context_max_chars, 0)
         parts: List[str] = []
         missing: List[str] = []
         for ref in refs:
@@ -148,8 +152,7 @@ class ScheduleRunner:
             if not output:
                 missing.append(ref)
                 continue
-            if budget:
-                output = output[:budget]
+            output = output[:budget]
             parts.append(f"### Context from '{ref}'\n{output}")
         return "\n\n".join(parts), missing
 
