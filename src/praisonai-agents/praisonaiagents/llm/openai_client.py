@@ -1456,6 +1456,10 @@ class OpenAIClient:
         try:
             usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
             if not usage:
+                # No usage on this response (e.g. assembled stream chunks): clear
+                # any stale per-call metrics so envelopes never report a prior
+                # completion's spend as this call's usage.
+                self.last_token_metrics = None
                 return
 
             def _val(*names: str) -> int:
@@ -1499,6 +1503,7 @@ class OpenAIClient:
                 ),
             )
             if metrics.total_tokens == 0:
+                self.last_token_metrics = None
                 return
             self.last_token_metrics = metrics
             get_token_collector().track_tokens(
@@ -1818,7 +1823,13 @@ class OpenAIClient:
             
             if not final_response:
                 return None
-            
+
+            # Record usage for THIS billed completion. Every tool-loop iteration
+            # is a separate paid call, so accounting must happen per iteration —
+            # not once after the loop — or intermediate completions are dropped
+            # from session totals and by_model/by_agent rollups (Issue #3933).
+            self._track_token_usage(final_response, model, agent_name)
+
             # Trigger llm_end callback with metrics for debug output
             llm_end_time = time.perf_counter()
             llm_latency_ms = (llm_end_time - start_time) * 1000
@@ -1972,11 +1983,9 @@ class OpenAIClient:
             else:
                 # No tool calls, we're done
                 break
-        
-        # Always record token usage after a successful completion so the public
-        # token collector reflects real spend even for quiet/default agents
-        # (Issue #3933). Display flags never gate accounting.
-        self._track_token_usage(final_response, model, agent_name)
+
+        # Usage is recorded per iteration inside the loop above so every billed
+        # completion (including intermediate tool-call rounds) is accounted for.
         return final_response
     
     async def achat_completion_with_tools(
@@ -2144,6 +2153,12 @@ class OpenAIClient:
             if not final_response:
                 return None
 
+            # Record usage for THIS billed completion. Every tool-loop iteration
+            # is a separate paid call, so accounting must happen per iteration —
+            # not once after the loop — or intermediate completions are dropped
+            # from session totals and by_model/by_agent rollups (Issue #3933).
+            self._track_token_usage(final_response, model, agent_name)
+
             # Check for tool calls
             if not final_response.choices or final_response.choices[0].message is None:
                 raise ValueError("LLM returned empty or filtered response")
@@ -2286,9 +2301,9 @@ class OpenAIClient:
             else:
                 # No tool calls, we're done
                 break
-        
-        # Always record token usage after a successful completion (Issue #3933).
-        self._track_token_usage(final_response, model, agent_name)
+
+        # Usage is recorded per iteration inside the loop above so every billed
+        # completion (including intermediate tool-call rounds) is accounted for.
         return final_response
         
     def chat_completion_with_tools_stream(
