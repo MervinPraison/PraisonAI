@@ -14,6 +14,7 @@ from praisonaiagents.lsp.types import (
 )
 from praisonaiagents.lsp.config import (
     LSPConfig, DEFAULT_SERVERS, detect_language, detect_root_uri, probe,
+    path_to_uri,
 )
 from praisonaiagents.lsp.client import LSPClient
 
@@ -397,14 +398,55 @@ class TestStartProbePreflight:
 
     def test_missing_server_sets_last_error(self, monkeypatch):
         import asyncio
-        import praisonaiagents.lsp.config as cfg
-        monkeypatch.setattr(cfg.shutil, "which", lambda cmd: None)
+        import praisonaiagents.lsp.client as client_mod
+        monkeypatch.setattr(client_mod.shutil, "which", lambda cmd: None)
         client = LSPClient(language="go")
         ok = asyncio.run(client.start())
         assert ok is False
         assert client.last_error is not None
         assert "gopls" in client.last_error
         assert "install" in client.last_error
+
+    def test_missing_custom_command_reports_custom_command(self, monkeypatch):
+        """A missing custom server is named in last_error (not the default)."""
+        import asyncio
+        import praisonaiagents.lsp.client as client_mod
+        monkeypatch.setattr(client_mod.shutil, "which", lambda cmd: None)
+        client = LSPClient(language="python", command="pyright-langserver",
+                           args=["--stdio"])
+        ok = asyncio.run(client.start())
+        assert ok is False
+        assert client.last_error is not None
+        assert "pyright-langserver" in client.last_error
+        # The registry install hint is for pylsp; it must not mislead here.
+        assert "python-lsp-server" not in client.last_error
+
+
+class TestPathToUri:
+    """path_to_uri() must produce valid, percent-encoded file:// URIs."""
+
+    def test_plain_path(self, tmp_path):
+        uri = path_to_uri(str(tmp_path))
+        assert uri.startswith("file://")
+
+    def test_encodes_reserved_characters(self, tmp_path):
+        weird = tmp_path / "my project#1"
+        weird.mkdir()
+        uri = path_to_uri(str(weird))
+        assert "#" not in uri
+        assert " " not in uri
+        assert "%23" in uri
+        assert "%20" in uri
+
+    def test_detect_root_uri_encodes_reserved(self, tmp_path):
+        root = tmp_path / "proj space#x"
+        root.mkdir()
+        (root / "pyproject.toml").write_text("[tool]\n")
+        f = root / "mod.py"
+        f.write_text("x = 1\n")
+        uri = detect_root_uri(str(f))
+        assert uri is not None
+        assert "%20" in uri and "%23" in uri
 
 
 if __name__ == "__main__":

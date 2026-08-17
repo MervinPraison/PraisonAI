@@ -87,6 +87,30 @@ def test_workspace_symbols_degrades_without_server(tmp_path, monkeypatch):
     assert "not installed" in out
 
 
+def test_workspace_symbols_passes_file_for_root(tmp_path, monkeypatch):
+    """A nested project file must be forwarded so the server initialises
+    against the file's real project root, not the process CWD."""
+    from praisonaiagents.tools import lsp_tools
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[tool]\n")
+    f = tmp_path / "mod.py"
+    f.write_text("x = 1\n")
+
+    captured = {}
+
+    def fake_run_lsp(language, coro_factory, open_path=None):
+        captured["open_path"] = open_path
+        return [], None
+
+    monkeypatch.setattr(lsp_tools, "_run_lsp", fake_run_lsp)
+    monkeypatch.setattr(lsp_tools, "_server_available",
+                        lambda lang: (True, "pylsp", None))
+
+    lsp_tools.lsp_workspace_symbols("foo", file_path="mod.py")
+    assert captured["open_path"] is not None
+    assert captured["open_path"].endswith("mod.py")
+
+
 # ---------------------------------------------------------------------------
 # Position resolution & formatting helpers
 # ---------------------------------------------------------------------------

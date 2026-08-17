@@ -18,7 +18,7 @@ from .types import (
 )
 import shutil
 
-from .config import LSPConfig, detect_root_uri, probe
+from .config import LSPConfig, detect_root_uri, probe, path_to_uri
 
 logger = get_logger(__name__)
 
@@ -99,13 +99,20 @@ class LSPClient:
         if self.is_running:
             return True
         
-        # Availability pre-flight: probe PATH before spawning so a missing
-        # binary yields a single structured, actionable message instead of a
-        # raw FileNotFoundError. ``last_error`` lets the caller surface an
-        # explicit "install X" notice rather than degrading silently.
-        available, command, install_hint = probe(self.config.language)
-        if not available and command is not None and not shutil.which(self.config.command):
-            hint = f"; install with `{install_hint}`" if install_hint else ""
+        # Availability pre-flight: check the *actual* configured command on
+        # PATH before spawning so a missing binary yields a single structured,
+        # actionable message instead of a raw FileNotFoundError. ``last_error``
+        # lets the caller surface an explicit "install X" notice rather than
+        # degrading silently. We gate on ``self.config.command`` (which may be a
+        # user-supplied custom server), and only surface the registry's install
+        # hint when it matches the default server for the language.
+        if not shutil.which(self.config.command):
+            _, default_command, install_hint = probe(self.config.language)
+            hint = (
+                f"; install with `{install_hint}`"
+                if install_hint and self.config.command == default_command
+                else ""
+            )
             self.last_error = (
                 f"language server `{self.config.command}` not found on PATH{hint}"
             )
@@ -133,7 +140,7 @@ class LSPClient:
             if root_uri is None and self._workspace_file is not None:
                 root_uri = detect_root_uri(self._workspace_file, self.config.language)
             if root_uri is None:
-                root_uri = f"file://{os.getcwd()}"
+                root_uri = path_to_uri(os.getcwd())
             
             result = await self._send_request("initialize", {
                 "processId": os.getpid(),
@@ -219,7 +226,7 @@ class LSPClient:
                 logger.error(f"Failed to read file: {e}")
                 return False
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         await self._send_notification("textDocument/didOpen", {
             "textDocument": TextDocumentItem(
@@ -237,7 +244,7 @@ class LSPClient:
         if not self._initialized:
             return
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         await self._send_notification("textDocument/didClose", {
             "textDocument": TextDocumentIdentifier(uri=uri).to_dict()
@@ -253,7 +260,7 @@ class LSPClient:
         Returns:
             List of diagnostics
         """
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         return self._diagnostics.get(uri, [])
     
     async def get_completions(
@@ -276,7 +283,7 @@ class LSPClient:
         if not self._initialized:
             return []
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         result = await self._send_request("textDocument/completion", {
             "textDocument": {"uri": uri},
@@ -313,7 +320,7 @@ class LSPClient:
         if not self._initialized:
             return []
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         result = await self._send_request("textDocument/definition", {
             "textDocument": {"uri": uri},
@@ -352,7 +359,7 @@ class LSPClient:
         if not self._initialized:
             return []
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         result = await self._send_request("textDocument/references", {
             "textDocument": {"uri": uri},
@@ -385,7 +392,7 @@ class LSPClient:
         if not self._initialized:
             return None
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         result = await self._send_request("textDocument/hover", {
             "textDocument": {"uri": uri},
@@ -422,7 +429,7 @@ class LSPClient:
         if not self._initialized:
             return []
         
-        uri = f"file://{os.path.abspath(file_path)}"
+        uri = path_to_uri(file_path)
         
         result = await self._send_request("textDocument/documentSymbol", {
             "textDocument": {"uri": uri}

@@ -129,8 +129,16 @@ def _resolve_position(safe_path: str, line: Optional[int],
 
 
 def _uri_path(uri: str) -> str:
-    """Strip a ``file://`` prefix from *uri*, returning the bare path."""
-    return uri[7:] if uri.startswith("file://") else uri
+    """Return the decoded filesystem path for a ``file://`` *uri*.
+
+    Language servers return percent-encoded ``file://`` URIs (spaces, ``#`` …);
+    decode them back to a real path so snippet reads and workspace checks work
+    for projects whose paths contain reserved characters.
+    """
+    if uri.startswith("file://"):
+        from urllib.parse import urlparse, unquote
+        return unquote(urlparse(uri).path)
+    return uri
 
 
 def _within_workspace(path: str) -> Optional[str]:
@@ -475,6 +483,7 @@ def lsp_workspace_symbols(query: str, file_path: Optional[str] = None) -> str:
     if not query:
         return "Error: query must be non-empty"
 
+    safe_path: Optional[str] = None
     if file_path:
         safe_path, err = _resolve_file(file_path)
         if err:
@@ -495,7 +504,10 @@ def lsp_workspace_symbols(query: str, file_path: Optional[str] = None) -> str:
     async def _query(client):
         return await client.get_workspace_symbols(query)
 
-    result, rerr = _run_lsp(language, _query)
+    # Pass the resolved file so the client initialises against the file's real
+    # project root (root markers) rather than the process CWD; without this a
+    # nested-project search returns missing/wrong-project results.
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
         return rerr
     return _format_symbols(result or [], "Workspace symbols", include_container=True)

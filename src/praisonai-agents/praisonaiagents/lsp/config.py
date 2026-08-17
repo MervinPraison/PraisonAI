@@ -5,6 +5,7 @@ LSP Configuration for PraisonAI Agents.
 import os
 import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
 
@@ -69,6 +70,16 @@ def detect_language(file_path: str) -> Optional[str]:
     return _extension_map().get(os.path.splitext(file_path)[1].lower())
 
 
+def path_to_uri(path: str) -> str:
+    """Convert an absolute filesystem *path* to a valid ``file://`` URI.
+
+    Uses :meth:`pathlib.Path.as_uri`, which percent-encodes reserved characters
+    (spaces, ``#`` …) so paths with such characters produce a valid, non-truncated
+    URI that language servers accept.
+    """
+    return Path(os.path.abspath(path)).as_uri()
+
+
 def detect_root_uri(file_path: str, language: Optional[str] = None) -> Optional[str]:
     """Discover the workspace root for ``file_path`` from the nearest root marker.
 
@@ -85,7 +96,7 @@ def detect_root_uri(file_path: str, language: Optional[str] = None) -> Optional[
     while True:
         for marker in markers:
             if os.path.exists(os.path.join(current, marker)):
-                return f"file://{current}"
+                return path_to_uri(current)
         parent = os.path.dirname(current)
         if parent == current:
             return None
