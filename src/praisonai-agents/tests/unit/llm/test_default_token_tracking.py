@@ -91,3 +91,79 @@ def test_responses_api_tracks_tokens_when_metrics_display_is_disabled(
     assert summary["total_interactions"] == 1
     assert summary["total_metrics"]["input_tokens"] == 8
     assert summary["total_metrics"]["output_tokens"] == 2
+
+
+def test_openai_client_tracks_tokens_when_display_is_disabled(monkeypatch):
+    """Default Agent(llm="gpt-4o-mini") uses the native OpenAI client path.
+
+    That path must populate the public token collector after a paid call
+    even with no verbose/metrics display (Issue #3933).
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    from praisonaiagents.llm.openai_client import OpenAIClient
+
+    collector = get_token_collector()
+    collector.reset()
+
+    client = OpenAIClient(api_key="test")
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="OK", tool_calls=None, role="assistant"),
+                finish_reason="stop",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=11, completion_tokens=2, total_tokens=13),
+    )
+    monkeypatch.setattr(client, "create_completion", lambda **_kwargs: response)
+    monkeypatch.setattr(client, "format_tools", lambda _tools: None)
+
+    result = client.chat_completion_with_tools(
+        messages=[{"role": "user", "content": "Say OK"}],
+        model="gpt-4o-mini",
+        tools=None,
+        stream=False,
+        verbose=False,
+        agent_name="tester",
+    )
+
+    assert result.choices[0].message.content == "OK"
+    summary = collector.get_session_summary()
+    assert summary["total_interactions"] == 1
+    assert summary["total_metrics"]["input_tokens"] == 11
+    assert summary["total_metrics"]["output_tokens"] == 2
+    assert "gpt-4o-mini" in summary["by_model"]
+    assert "tester" in summary["by_agent"]
+    assert client.last_token_metrics is not None
+
+
+def test_openai_client_usage_without_tokens_is_not_recorded(monkeypatch):
+    """A response with no usage (e.g. assembled stream chunks) is skipped."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    from praisonaiagents.llm.openai_client import OpenAIClient
+
+    collector = get_token_collector()
+    collector.reset()
+
+    client = OpenAIClient(api_key="test")
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="OK", tool_calls=None, role="assistant"),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+    monkeypatch.setattr(client, "create_completion", lambda **_kwargs: response)
+    monkeypatch.setattr(client, "format_tools", lambda _tools: None)
+
+    client.chat_completion_with_tools(
+        messages=[{"role": "user", "content": "Say OK"}],
+        model="gpt-4o-mini",
+        tools=None,
+        stream=False,
+        verbose=False,
+    )
+
+    assert collector.get_session_summary()["total_interactions"] == 0
