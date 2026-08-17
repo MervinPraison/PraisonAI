@@ -629,6 +629,7 @@ def serve(
     read_only: bool = True,
     allow_write: bool = False,
     allow_shell: bool = False,
+    allow_network: bool = False,
     approval_mode: str = "manual",
     **kwargs: Any,
 ) -> None:
@@ -647,6 +648,7 @@ def serve(
         read_only: Read-only mode (default True)
         allow_write: Allow file writes
         allow_shell: Allow shell commands
+        allow_network: Allow network requests (search/crawl tools)
         approval_mode: Approval mode (manual, auto, scoped)
     """
     config = ACPConfig(
@@ -659,6 +661,7 @@ def serve(
         read_only=read_only,
         allow_write=allow_write,
         allow_shell=allow_shell,
+        allow_network=allow_network,
         approval_mode=approval_mode,
     )
     

@@ -123,6 +123,22 @@ class TestACPServer:
             )
         ]
     
+    def test_serve_passes_allow_network_to_config(self, monkeypatch):
+        """`--allow-network` must reach ACPConfig so network tools are gated on it."""
+        from praisonai.acp import server as acp_server
+
+        captured = {}
+
+        def fake_run_server(config):
+            captured["config"] = config
+
+        monkeypatch.setattr(acp_server.asyncio, "run", lambda coro: coro)
+        monkeypatch.setattr(acp_server, "_run_server", fake_run_server)
+
+        acp_server.serve(allow_network=True)
+
+        assert captured["config"].allow_network is True
+
     def test_set_session_mode(self):
         """Test set_session_mode handler."""
         server = ACPServer()

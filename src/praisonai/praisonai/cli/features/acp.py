@@ -153,6 +153,7 @@ class ACPHandler:
                 read_only=read_only,
                 allow_write=args.allow_write,
                 allow_shell=args.allow_shell,
+                allow_network=args.allow_network,
                 approval_mode=args.approve,
             )
             return 0
