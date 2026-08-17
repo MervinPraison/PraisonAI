@@ -5686,11 +5686,17 @@ class TurnExecutorProtocol(Protocol):
           its ``epoch`` when the backing worker is replaced.
         * :meth:`execute_turn` runs ``turn`` (an ``async`` no-arg callable the
           gateway already built for this turn) on ``placement`` and returns
-          its result. ``cancel_token`` carries the per-turn interrupt so the
-          existing cancellation seam is preserved. ``limits`` optionally bounds
-          the worker's CPU/memory/wall time (honoured by isolated executors;
-          ignored in-process). It raises :class:`WorkerWedgedError` if the
-          placement's worker can no longer make progress.
+          its result. The in-process default awaits ``turn`` directly on the
+          current loop. An isolated executor does **not** ship this live
+          callable (and its captured loop/agent state) across a process
+          boundary — the worker owns the session (via :meth:`place`) and
+          rebuilds/dispatches the turn from serialisable inputs on its own
+          side; ``turn`` then acts as the gateway-side await point for that
+          worker's result. ``cancel_token`` carries the per-turn interrupt so
+          the existing cancellation seam is preserved. ``limits`` optionally
+          bounds the worker's CPU/memory/wall time (honoured by isolated
+          executors; ignored in-process). It raises :class:`WorkerWedgedError`
+          if the placement's worker can no longer make progress.
         * :meth:`teardown` reclaims ``placement``'s worker (kills the
           subprocess/container/remote worker, or is a no-op in-process),
           scoped to the owning session only.
