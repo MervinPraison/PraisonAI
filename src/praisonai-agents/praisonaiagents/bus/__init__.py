@@ -32,6 +32,8 @@ Usage:
     bus.publish("session.created", {"session_id": "abc123"})
 """
 
+from .._lazy import create_lazy_getattr
+
 __all__ = [
     "EventBus",
     "Event",
@@ -41,31 +43,13 @@ __all__ = [
     "set_default_bus",
 ]
 
+_LAZY_IMPORTS = {
+    "EventBus": ("praisonaiagents.bus.bus", "EventBus"),
+    "Event": ("praisonaiagents.bus.event", "Event"),
+    "EventType": ("praisonaiagents.bus.event", "EventType"),
+    "Subscriber": ("praisonaiagents.bus.bus", "Subscriber"),
+    "get_default_bus": ("praisonaiagents.bus.bus", "get_default_bus"),
+    "set_default_bus": ("praisonaiagents.bus.bus", "set_default_bus"),
+}
 
-def __getattr__(name: str):
-    """Lazy load module components."""
-    if name == "EventBus":
-        from .bus import EventBus
-        return EventBus
-    
-    if name == "Event":
-        from .event import Event
-        return Event
-    
-    if name == "EventType":
-        from .event import EventType
-        return EventType
-    
-    if name == "Subscriber":
-        from .bus import Subscriber
-        return Subscriber
-    
-    if name == "get_default_bus":
-        from .bus import get_default_bus
-        return get_default_bus
-    
-    if name == "set_default_bus":
-        from .bus import set_default_bus
-        return set_default_bus
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)

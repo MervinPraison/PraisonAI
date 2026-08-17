@@ -30,6 +30,8 @@ Usage:
     )
 """
 
+from .._lazy import create_lazy_getattr_with_groups
+
 __all__ = [
     # Core types
     "ActionEvent",
@@ -66,47 +68,37 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy load module components to avoid import overhead."""
-    if name in ("ActionEvent", "ActionEventType", "ActionTraceConfig"):
-        from .protocol import ActionEvent, ActionEventType, ActionTraceConfig
-        return locals()[name]
-    
-    if name in ("TraceSinkProtocol", "TraceSink", "NoOpSink", "ListSink"):
-        from .protocol import TraceSinkProtocol, TraceSink, NoOpSink, ListSink
-        return locals()[name]
-    
-    if name == "TraceEmitter":
-        from .protocol import TraceEmitter
-        return TraceEmitter
-    
-    if name in ("redact_dict", "REDACT_KEYS"):
-        from .redact import redact_dict, REDACT_KEYS
-        return locals()[name]
+_LAZY_GROUPS = {
+    'protocol': {
+        'ActionEvent': ('praisonaiagents.trace.protocol', 'ActionEvent'),
+        'ActionEventType': ('praisonaiagents.trace.protocol', 'ActionEventType'),
+        'ActionTraceConfig': ('praisonaiagents.trace.protocol', 'ActionTraceConfig'),
+        'TraceSinkProtocol': ('praisonaiagents.trace.protocol', 'TraceSinkProtocol'),
+        'TraceSink': ('praisonaiagents.trace.protocol', 'TraceSink'),
+        'NoOpSink': ('praisonaiagents.trace.protocol', 'NoOpSink'),
+        'ListSink': ('praisonaiagents.trace.protocol', 'ListSink'),
+        'TraceEmitter': ('praisonaiagents.trace.protocol', 'TraceEmitter'),
+    },
+    'redact': {
+        'redact_dict': ('praisonaiagents.trace.redact', 'redact_dict'),
+        'REDACT_KEYS': ('praisonaiagents.trace.redact', 'REDACT_KEYS'),
+        'scrub_pii_text': ('praisonaiagents.trace.redact', 'scrub_pii_text'),
+        'enable_pii_redaction': ('praisonaiagents.trace.redact', 'enable_pii_redaction'),
+        'disable_pii_redaction': ('praisonaiagents.trace.redact', 'disable_pii_redaction'),
+    },
+    'context_events': {
+        'ContextEvent': ('praisonaiagents.trace.context_events', 'ContextEvent'),
+        'ContextEventType': ('praisonaiagents.trace.context_events', 'ContextEventType'),
+        'ContextTraceSinkProtocol': ('praisonaiagents.trace.context_events', 'ContextTraceSinkProtocol'),
+        'ContextTraceSink': ('praisonaiagents.trace.context_events', 'ContextTraceSink'),
+        'ContextNoOpSink': ('praisonaiagents.trace.context_events', 'ContextNoOpSink'),
+        'ContextListSink': ('praisonaiagents.trace.context_events', 'ContextListSink'),
+        'ContextTraceEmitter': ('praisonaiagents.trace.context_events', 'ContextTraceEmitter'),
+        'trace_context': ('praisonaiagents.trace.context_events', 'trace_context'),
+        'get_context_emitter': ('praisonaiagents.trace.context_events', 'get_context_emitter'),
+        'set_context_emitter': ('praisonaiagents.trace.context_events', 'set_context_emitter'),
+        'reset_context_emitter': ('praisonaiagents.trace.context_events', 'reset_context_emitter'),
+    },
+}
 
-    if name in ("scrub_pii_text", "enable_pii_redaction", "disable_pii_redaction"):
-        from .redact import scrub_pii_text, enable_pii_redaction, disable_pii_redaction
-        return locals()[name]
-    
-    # Context events (for replay)
-    if name in ("ContextEvent", "ContextEventType"):
-        from .context_events import ContextEvent, ContextEventType
-        return locals()[name]
-    
-    if name in ("ContextTraceSinkProtocol", "ContextTraceSink", "ContextNoOpSink", "ContextListSink"):
-        from .context_events import ContextTraceSinkProtocol, ContextTraceSink, ContextNoOpSink, ContextListSink
-        return locals()[name]
-    
-    if name == "ContextTraceEmitter":
-        from .context_events import ContextTraceEmitter
-        return ContextTraceEmitter
-    
-    if name == "trace_context":
-        from .context_events import trace_context
-        return trace_context
-    
-    if name in ("get_context_emitter", "set_context_emitter", "reset_context_emitter"):
-        from .context_events import get_context_emitter, set_context_emitter, reset_context_emitter
-        return locals()[name]
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = create_lazy_getattr_with_groups(_LAZY_GROUPS, __name__)
