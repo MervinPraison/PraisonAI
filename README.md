@@ -195,7 +195,6 @@ from praisonaiagents import Agent, ExecutionConfig
 agent = Agent(
     instructions="Fix the failing tests.",
     execution=ExecutionConfig(max_iter=30, max_budget=0.50, on_budget_exceeded="stop"),
-    reflection=True,               # completion check — the agent grades its own answer
     autonomy=True,                 # required to drive the loop with run_autonomous()
 )
 result = agent.run_autonomous("Refactor the auth module", max_iterations=5)
