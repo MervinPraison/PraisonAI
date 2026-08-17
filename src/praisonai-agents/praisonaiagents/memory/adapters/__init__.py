@@ -33,6 +33,7 @@ from .factories import (
     create_mongodb_memory_adapter,
     create_dakera_memory_adapter,
 )
+from .feedo_adapter import create_feedo_memory_adapter
 
 # Register core adapters
 register_memory_adapter("sqlite", SqliteMemoryAdapter)
@@ -43,6 +44,7 @@ register_memory_factory("mem0", create_mem0_memory_adapter)
 register_memory_factory("chroma", create_chroma_memory_adapter)
 register_memory_factory("mongodb", create_mongodb_memory_adapter)
 register_memory_factory("dakera", create_dakera_memory_adapter)
+register_memory_factory("feedo", create_feedo_memory_adapter)
 
 __all__ = [
     'SqliteMemoryAdapter',
