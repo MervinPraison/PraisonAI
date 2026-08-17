@@ -6535,6 +6535,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if callable(function_or_name):
             # Function object passed directly
             func = function_or_name
+            # If it's a BaseTool/FunctionTool instance, honour its declared schema
+            # (respects @tool name= override and excludes Injected[T] params) instead
+            # of re-deriving from the raw wrapped function's signature.
+            if hasattr(func, 'get_schema'):
+                tool_def = func.get_schema()
+                if (
+                    isinstance(tool_def, dict)
+                    and isinstance(tool_def.get("function"), dict)
+                    and isinstance(tool_def["function"].get("parameters"), dict)
+                ):
+                    tool_def = tool_def.copy()
+                    tool_def["function"] = tool_def["function"].copy()
+                    tool_def["function"]["parameters"] = self._fix_array_schemas(
+                        tool_def["function"]["parameters"]
+                    )
+                logging.debug(f"Generated tool definition from get_schema(): {tool_def}")
+                return tool_def
             function_name = func.__name__
             logging.debug(f"Generating tool definition for callable: {function_name}")
         else:
