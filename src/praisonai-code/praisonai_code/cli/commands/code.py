@@ -631,7 +631,10 @@ def _run_profiled_code(
         "name": "CodeAgent",
         "role": "Code Assistant",
         "goal": "Help with coding tasks",
-        "verbose": verbose,
+        # Verbosity is consolidated into ``output=`` on the Agent constructor;
+        # a legacy top-level ``verbose=`` kwarg is rejected. A minimal preset
+        # keeps profiler stdout clean.
+        "output": "verbose" if verbose else "minimal",
     }
     if model:
         agent_config["llm"] = model

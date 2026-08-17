@@ -303,7 +303,9 @@ def run_with_profiling(
         "name": "ProfiledAgent",
         "role": "Assistant",
         "goal": "Complete the task",
-        "verbose": verbose,
+        # Verbosity is consolidated into ``output=`` on the Agent constructor;
+        # a legacy top-level ``verbose=`` kwarg is rejected.
+        "output": "verbose" if verbose else "minimal",
     }
     if model:
         agent_config["llm"] = model
