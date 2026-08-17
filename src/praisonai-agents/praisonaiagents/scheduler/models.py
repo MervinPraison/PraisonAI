@@ -7,7 +7,7 @@ Lightweight dataclasses — no heavy dependencies.
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 @dataclass
@@ -330,6 +330,26 @@ class ScheduleJob:
                  jobs that set neither ``monitor`` nor state behave exactly as
                  today. Distinct from ``pre_run`` (a stateless go/no-go gate)
                  and ``command`` (a model-free delivery action).
+        context_from: Optional list of upstream job ids/names whose most-recent
+                 *successful* output is injected into this job's ``message`` as
+                 bounded context at fire time — turning isolated jobs into a
+                 composable pipeline (fetch → analyse → deliver) without one
+                 mega-job or out-of-band glue. The runner resolves each ref's
+                 last successful result from execution history, truncates it to
+                 ``context_max_chars``, and prepends it as clearly-delimited
+                 context. ``None`` (default) keeps the existing stateless
+                 behaviour. The core owns only the shape and pure resolution
+                 contract (``ScheduleRunner.resolve_context``); the wrapper
+                 executor injects the resolved text into the assembled prompt.
+        context_max_chars: Per-upstream truncation budget for injected context
+                 (default 4000) so a large upstream output cannot blow up the
+                 downstream prompt.
+        on_missing_context: Policy when a declared upstream has no resolvable
+                 successful output yet — ``"run"`` (default) fires anyway with
+                 whatever context resolved, ``"skip"`` records the tick as
+                 ``skipped`` (no tokens, no delivery) so a downstream never runs
+                 on empty inputs. Consistent with the existing ``skipped``
+                 outcome.
     """
 
     name: str = ""
@@ -353,6 +373,9 @@ class ScheduleJob:
     model: Optional[str] = None
     pin_model: bool = True
     monitor: Optional[Dict[str, Any]] = None
+    context_from: Optional[List[str]] = None
+    context_max_chars: int = 4000
+    on_missing_context: Literal["run", "skip"] = "run"
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -400,6 +423,15 @@ class ScheduleJob:
         # round-trips faithfully instead of silently reverting to stateless.
         if self.monitor is not None:
             d["monitor"] = self.monitor
+        # Job-to-job context chaining. Only persist when an upstream is declared
+        # so isolated jobs stay byte-for-byte unchanged; the budget and policy
+        # are persisted only when they differ from their defaults.
+        if self.context_from:
+            d["context_from"] = list(self.context_from)
+            if self.context_max_chars != 4000:
+                d["context_max_chars"] = self.context_max_chars
+            if self.on_missing_context != "run":
+                d["on_missing_context"] = self.on_missing_context
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -414,6 +446,15 @@ class ScheduleJob:
         sched_data = d.get("schedule", {})
         delivery_data = d.get("delivery")
         origin_data = d.get("origin")
+        # Accept a bare string for a single upstream (YAML/CLI ergonomics) and
+        # normalise to a list; drop empties. ``None`` stays ``None`` (stateless).
+        context_from = d.get("context_from")
+        if isinstance(context_from, str):
+            context_from = [context_from]
+        if context_from is not None:
+            context_from = [str(r).strip() for r in context_from if str(r).strip()]
+            if not context_from:
+                context_from = None
         job = cls(
             id=d.get("id", uuid.uuid4().hex[:12]),
             name=d.get("name", ""),
@@ -436,6 +477,9 @@ class ScheduleJob:
             model=d.get("model"),
             pin_model=d.get("pin_model", True),
             monitor=d.get("monitor"),
+            context_from=context_from,
+            context_max_chars=d.get("context_max_chars", 4000),
+            on_missing_context=d.get("on_missing_context", "run"),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0

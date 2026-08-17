@@ -7,7 +7,7 @@ payload is the caller's responsibility (keeping the runner lightweight).
 
 from praisonaiagents._logging import get_logger
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .models import ScheduleJob
 from .protocols import ScheduleStoreProtocol
@@ -113,6 +113,77 @@ class ScheduleRunner:
             self._store.remove(job.id)
         else:
             self._store.update(job)
+
+    # ── job-to-job context chaining ───────────────────────────────────
+
+    def resolve_context(self, job: ScheduleJob) -> Tuple[str, List[str]]:
+        """Resolve a job's upstream context from its ``context_from`` refs.
+
+        For each declared upstream (id or name) this reads the most-recent
+        *successful* output from the store's execution history and formats it as
+        clearly-delimited, bounded context ready to prepend to the job's
+        ``message`` — the job→job data-flow that turns isolated jobs into a
+        composable pipeline (fetch → analyse → deliver).
+
+        Pure and side-effect-free: the caller (a wrapper executor) decides how
+        to inject the returned text and how to honour ``on_missing_context``.
+
+        Args:
+            job: The downstream job whose upstream context to resolve.
+
+        Returns:
+            A ``(context, missing)`` tuple where ``context`` is the joined,
+            delimited upstream text (``""`` when nothing resolved) and
+            ``missing`` lists the refs that had no resolvable successful output
+            (so the caller can apply the ``on_missing_context`` policy).
+        """
+        refs = job.context_from or []
+        if not refs:
+            return "", []
+        # Clamp the budget to a non-negative bound so a misconfigured
+        # zero/negative value enforces "no injected body" rather than silently
+        # returning the full upstream output (which would break the bounded
+        # contract). Truncation is always applied.
+        budget = max(job.context_max_chars, 0)
+        parts: List[str] = []
+        missing: List[str] = []
+        for ref in refs:
+            output = self._last_successful_output(ref)
+            if not output:
+                missing.append(ref)
+                continue
+            output = output[:budget]
+            parts.append(f"### Context from '{ref}'\n{output}")
+        return "\n\n".join(parts), missing
+
+    def _last_successful_output(self, ref: str) -> Optional[str]:
+        """Return the most-recent successful result for an upstream job ref.
+
+        ``ref`` may be a job id or a human-readable name. Resolution reuses the
+        store's existing execution history (``get_history``) so no new
+        persistence surface is required — the last output is already recorded
+        there per run.
+        """
+        get_history = getattr(self._store, "get_history", None)
+        if not callable(get_history):
+            return None
+        job_id = ref
+        get = getattr(self._store, "get", None)
+        if not (callable(get) and get(ref) is not None):
+            get_by_name = getattr(self._store, "get_by_name", None)
+            if callable(get_by_name):
+                match = get_by_name(ref)
+                if match is not None:
+                    job_id = match.id
+        try:
+            records = get_history(job_id=job_id)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Failed to read history for upstream %r: %s", ref, e)
+            return None
+        for record in records or []:
+            if getattr(record, "status", None) == "succeeded" and getattr(record, "result", None):
+                return record.result
+        return None
 
     # ── internals ────────────────────────────────────────────────────
 
