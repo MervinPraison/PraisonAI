@@ -1759,6 +1759,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             return str(agent[0])
         return None
 
+    def __repr__(self):
+        """Show where this team's work happens, not just its name."""
+        from ..agent.execution_location import repr_fields
+
+        return (
+            f"AgentTeam(name={self.name!r}, agents={len(self.agents or [])}, "
+            f"{repr_fields(self, shared=True)})"
+        )
+
+    def where_does_it_run(self) -> str:
+        """Plain-English answer to "where does my code actually run?"."""
+        from ..agent.execution_location import explain
+
+        return explain(self, shared=True)
+
     def start(self, content=None, return_dict=False, output=None, **kwargs):
         """Start agent execution with verbose output (beginner-friendly).
         

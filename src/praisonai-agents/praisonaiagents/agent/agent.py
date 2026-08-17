@@ -6744,3 +6744,27 @@ Answer:"""
 
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
+
+    def __repr__(self):
+        """Show WHERE this agent works, not just what it is called.
+
+        The default object repr said nothing, so a reader had to consult docs to
+        learn whether tools ran locally or in a container. Now the object says it.
+        """
+        from .execution_location import repr_fields
+
+        return f"Agent(name={self.name!r}, {repr_fields(self)})"
+
+    def where_does_it_run(self) -> str:
+        """Plain-English answer to "where does my code actually run?".
+
+        Example::
+
+            >>> print(Agent(name="builder").where_does_it_run())
+            Thinking (the AI model calls) happens on this machine.
+            Tools run on this machine.
+            Nothing is isolated: tools you pass run in this program, with your permissions.
+        """
+        from .execution_location import explain
+
+        return explain(self)
