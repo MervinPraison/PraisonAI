@@ -326,10 +326,15 @@ class BaseCLIIntegration(ABC):
     def as_tool(self) -> callable:
         """
         Return a callable suitable for use as a PraisonAI agent tool.
-        
-        The returned function is synchronous and wraps the async execute method.
-        Uses asyncio.run() for proper event loop handling (Python 3.7+).
-        
+
+        The returned function is synchronous but safe to call from *both* sync
+        and async contexts. It routes through ``run_sync_or_offload`` so that an
+        async agent runtime (which invokes tools from inside its event loop) no
+        longer trips ``run_sync()``'s fail-loud guard.
+
+        Prefer :meth:`as_async_tool` when registering with a native async agent
+        to skip the worker-thread hop entirely.
+
         Returns:
             callable: A function that can be used as an agent tool
         """
@@ -338,14 +343,37 @@ class BaseCLIIntegration(ABC):
         
         def tool_func(query: str) -> str:
             """Execute the CLI tool with the given query."""
-            from .._async_bridge import run_sync
-            return run_sync(integration.execute(query))
+            from .._async_bridge import run_sync_or_offload
+            return run_sync_or_offload(integration.execute(query))
         
         # Set function metadata for agent tool registration
         tool_func.__name__ = f"{self.cli_command}_tool"
         tool_func.__doc__ = f"Execute {self.cli_command} for coding tasks."
         
         return tool_func
+
+    def as_async_tool(self) -> callable:
+        """
+        Return a native async callable for use as a PraisonAI agent tool.
+
+        Preferred inside async agent runtimes: it awaits ``execute`` directly on
+        the running loop with no thread hop.
+
+        Returns:
+            callable: A coroutine function usable as an async agent tool
+        """
+        # Capture self for closure
+        integration = self
+
+        async def atool_func(query: str) -> str:
+            """Execute the CLI tool with the given query (async)."""
+            return await integration.execute(query)
+
+        # Set function metadata for agent tool registration
+        atool_func.__name__ = f"{self.cli_command}_atool"
+        atool_func.__doc__ = f"Execute {self.cli_command} for coding tasks (async)."
+
+        return atool_func
     
     def get_env(self) -> Dict[str, str]:
         """
@@ -371,8 +399,8 @@ def get_available_integrations() -> Dict[str, bool]:
     # Import here to avoid circular imports
     try:
         from .registry import get_registry
-        from .._async_bridge import run_sync
-        return run_sync(get_registry().get_available())
+        from .._async_bridge import run_sync_or_offload
+        return run_sync_or_offload(get_registry().get_available())
     
     except ImportError:
         # Fallback to original implementation
