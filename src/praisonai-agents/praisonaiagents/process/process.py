@@ -348,6 +348,43 @@ class Process:
                     task_id=loop_task.id
                 )
 
+    def _build_routing_context(self, current_task: Task) -> Dict[str, Any]:
+        """Build a variable context for evaluating a task's `when` condition.
+
+        Combines the task's structured result (json_dict / pydantic fields) with
+        the raw output so expressions like ``{{score}} > 80`` can resolve, and
+        exposes the raw text as ``previous_output``.
+        """
+        context: Dict[str, Any] = {}
+        result = getattr(current_task, "result", None)
+        if result is not None:
+            try:
+                context.update(result.to_dict())
+            except Exception:
+                pass
+            context["previous_output"] = getattr(result, "raw", "")
+        return context
+
+    def _has_when_routing(self, task: Task) -> bool:
+        """True if the task uses the unified when/then_task/else_task routing."""
+        return task.when is not None or task.then_task is not None or task.else_task is not None
+
+    def _resolve_when_routing(self, current_task: Task) -> Optional[Task]:
+        """Resolve the next Task via the unified `when`/`then_task`/`else_task`
+        routing on the current task. Returns None if no such routing applies."""
+        if current_task.when is None and current_task.then_task is None and current_task.else_task is None:
+            return None
+        next_name = current_task.get_next_task(self._build_routing_context(current_task))
+        if not next_name:
+            return None
+        next_task = next((t for t in self.tasks.values() if t.name == next_name), None)
+        if next_task:
+            next_task.status = "not started"
+            logging.debug(f"Routing to {next_task.name} based on when-condition: {current_task.when}")
+        else:
+            logging.warning(f"when-routing target '{next_name}' not found among tasks")
+        return next_task
+
     def _build_task_context(self, current_task: Task) -> str:
         """Build context for a task based on its retain_full_context setting"""
         # Check if we have validation feedback to include
@@ -811,8 +848,8 @@ Subtask: {st.name}
                 yield task_id
                 visited_tasks.add(task_id)
 
-                # Only end workflow if no next_tasks AND no conditions
-                if not current_task.next_tasks and not current_task.condition and not any(
+                # Only end workflow if no next_tasks AND no conditions AND no when-routing
+                if not current_task.next_tasks and not current_task.condition and not self._has_when_routing(current_task) and not any(
                     t.task_type == "loop" and current_task.name.startswith(t.name + "_")
                     for t in self.tasks.values()
                 ):
@@ -898,6 +935,14 @@ Subtask: {st.name}
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 await self._set_workflow_finished(False)
+
+            # Unified condition routing (when/then_task/else_task) takes priority
+            # over next_tasks when configured on the current task.
+            if not next_task and current_task:
+                when_task = self._resolve_when_routing(current_task)
+                if when_task:
+                    next_task = when_task
+                    await self._set_workflow_finished(False)
 
             # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
@@ -1402,8 +1447,8 @@ Subtask: {st.name}
                 yield task_id
                 visited_tasks.add(task_id)
 
-                # Only end workflow if no next_tasks AND no conditions
-                if not current_task.next_tasks and not current_task.condition and not any(
+                # Only end workflow if no next_tasks AND no conditions AND no when-routing
+                if not current_task.next_tasks and not current_task.condition and not self._has_when_routing(current_task) and not any(
                     t.task_type == "loop" and current_task.name.startswith(t.name + "_")
                     for t in self.tasks.values()
                 ):
@@ -1487,6 +1532,14 @@ Subtask: {st.name}
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 self._set_workflow_finished_sync(False)
+
+            # Unified condition routing (when/then_task/else_task) takes priority
+            # over next_tasks when configured on the current task.
+            if not next_task and current_task:
+                when_task = self._resolve_when_routing(current_task)
+                if when_task:
+                    next_task = when_task
+                    self._set_workflow_finished_sync(False)
 
             # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:

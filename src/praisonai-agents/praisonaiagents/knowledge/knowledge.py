@@ -413,7 +413,11 @@ class Knowledge:
 
     def history(self, memory_id):
         """Get the history of changes for a memory."""
-        return self.memory.history(memory_id)
+        if hasattr(self.memory, "history"):
+            return self.memory.history(memory_id)
+        raise NotImplementedError(
+            f"{type(self.memory).__name__} does not support history()"
+        )
 
     def delete(self, memory_id):
         """Delete a memory."""
@@ -421,11 +425,21 @@ class Knowledge:
 
     def delete_all(self, user_id=None, agent_id=None, run_id=None):
         """Delete all memories."""
-        self.memory.delete_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
+        if hasattr(self.memory, "delete_all"):
+            self.memory.delete_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
+        else:
+            raise NotImplementedError(
+                f"{type(self.memory).__name__} does not support delete_all()"
+            )
 
     def reset(self):
         """Reset all memories."""
-        self.memory.reset()
+        if hasattr(self.memory, "reset"):
+            self.memory.reset()
+        else:
+            logger.warning(
+                f"{type(self.memory).__name__} does not support reset(); no-op"
+            )
 
     def normalize_content(self, content):
         """Normalize content for consistent storage."""

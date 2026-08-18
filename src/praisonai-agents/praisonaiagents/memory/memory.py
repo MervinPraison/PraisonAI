@@ -814,6 +814,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if getattr(self, "memory_adapter", None):
             if hasattr(self.memory_adapter, "reset_short_term"):
                 self.memory_adapter.reset_short_term()
+            else:
+                logger.warning(
+                    f"{type(self.memory_adapter).__name__} does not support "
+                    "reset_short_term(); short-term memory was NOT cleared"
+                )
             return
         conn = self._get_stm_conn()
         with self._write_lock:  # Serialize write operations
@@ -1199,6 +1204,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if getattr(self, "memory_adapter", None):
             if hasattr(self.memory_adapter, "reset_long_term"):
                 self.memory_adapter.reset_long_term()
+            else:
+                logger.warning(
+                    f"{type(self.memory_adapter).__name__} does not support "
+                    "reset_long_term(); long-term memory was NOT cleared"
+                )
             return
         conn = self._get_ltm_conn()
         with self._write_lock:  # Serialize write operations
