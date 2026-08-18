@@ -52,14 +52,29 @@ class SkillReviewMixin:
         return policy
 
     def _build_skill_review_tool(self):
-        """Return the restricted toolset for the review turn (skill_manage only)."""
+        """Return the restricted toolset for the review turn.
+
+        Always exposes the single skill-mutation tool (``skill_manage``). When
+        the agent has memory enabled, ``store_memory`` is added so the same
+        guarded pass can also persist a durable fact / user-model detail
+        (issue #4030) — closing the learning loop for memory, not just skills,
+        without a second review turn or a parallel knob. The set stays
+        restricted: never the agent's full toolset.
+        """
+        tools = []
         try:
             from ..tools.skill_tools import create_skill_tools
             skill_tools = create_skill_tools()
-            return [skill_tools.skill_manage]
+            tools.append(skill_tools.skill_manage)
         except Exception as e:  # pragma: no cover - defensive
             logger.debug("Could not build skill review tool: %s", e, exc_info=True)
-            return []
+        if getattr(self, "memory", None):
+            try:
+                from ..tools.memory import store_memory
+                tools.append(store_memory)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("Could not build memory review tool: %s", e, exc_info=True)
+        return tools
 
     def _skill_review_log_context(self):
         """Return (agent_name, session_id) for swallowed-failure warnings."""
