@@ -272,3 +272,104 @@ def is_configured(model: Optional[str] = None) -> bool:
         pass
 
     return False
+
+
+def ensure_configured_or_onboard(
+    *,
+    model: Optional[str] = None,
+    interactive: bool = True,
+) -> Optional[str]:
+    """Shared first-run credential gate for LLM-bound interactive commands.
+
+    Consolidates the onboarding logic previously duplicated between the bare
+    ``praisonai`` invocation (``app.py``) and ``praisonai run`` (``run.py``) so
+    every LLM-bound entrypoint (``code``, ``chat``, ``run``) routes a keyless
+    newcomer to ``setup`` consistently instead of dead-ending on a raw provider
+    error at call time.
+
+    Behaviour:
+
+    - Already configured (env key, stored credential, or resolvable endpoint) →
+      return ``model`` unchanged.
+    - Keyless but a local OpenAI-compatible endpoint (e.g. Ollama) is reachable
+      → adopt it (returns the local model id, exports ``OPENAI_BASE_URL``) so the
+      first run works before any auth. Honoured only when no explicit model was
+      requested. Emits an informational hint on stderr.
+    - Keyless + non-interactive/headless → print the actionable
+      ``Run: praisonai setup`` hint and raise ``typer.Exit(1)`` (never a raw
+      stack trace).
+    - Keyless + interactive → offer the ``setup`` wizard, re-check, and either
+      return (configured) or raise ``typer.Exit`` (declined / still unconfigured).
+
+    Args:
+        model: The requested model id, if any. An explicit model disables the
+            keyless local-first fallback (its own provider gate applies).
+        interactive: Whether a wizard prompt may be shown. Callers pass ``False``
+            for headless (``-p``, piped, ``--output json``) paths.
+
+    Returns:
+        The model id to proceed with. May be a detected local model id when the
+        keyless local-first path is taken; otherwise the ``model`` passed in.
+
+    Raises:
+        typer.Exit: When credentials cannot be established (declined wizard,
+            failed setup, or headless without a key).
+    """
+    import typer
+
+    inject_credentials_into_env()
+    if is_configured(model):
+        return model
+
+    # Keyless local-first: prefer a reachable local endpoint (e.g. Ollama) when
+    # no explicit model was requested, so the first run just works before auth.
+    local = detect_local_endpoint() if not model else None
+    if local is not None:
+        typer.echo(
+            f"No cloud key found; using local model {local.model}. "
+            "Run `praisonai setup` to add a hosted provider.",
+            err=True,
+        )
+        import os as _os
+        _os.environ.setdefault("OPENAI_BASE_URL", local.base_url)
+        return local.model
+
+    if not interactive:
+        typer.echo(
+            "Error: No API key configured. Run: praisonai setup\n"
+            "or set environment variables like OPENAI_API_KEY\n"
+            "(a running local endpoint such as Ollama would be used "
+            "automatically)",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    typer.echo(
+        f"No API key configured{f' for model {model}' if model else ''}."
+    )
+    run_setup = typer.confirm("Would you like to run the setup wizard now?")
+    if not run_setup:
+        typer.echo(
+            "To configure credentials:\n"
+            "  - Run: praisonai setup\n"
+            "  - Or set environment variables like OPENAI_API_KEY"
+        )
+        raise typer.Exit(0)
+
+    from praisonai_code.cli.commands.setup import _run_setup
+
+    exit_code = _run_setup(
+        non_interactive=False, provider=None, api_key=None, model=None
+    )
+    if exit_code != 0:
+        typer.echo("Setup failed. Exiting.", err=True)
+        raise typer.Exit(exit_code)
+
+    inject_credentials_into_env()
+    if not is_configured(model):
+        typer.echo(
+            "Setup completed but credentials still not detected.", err=True
+        )
+        raise typer.Exit(1)
+
+    return model

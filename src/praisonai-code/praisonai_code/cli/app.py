@@ -873,68 +873,28 @@ def main_callback(
 
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
-        # Check for credentials before starting TUI
-        from praisonai_code.llm.credentials import (
-            detect_local_endpoint,
-            inject_credentials_into_env,
-            is_configured,
-        )
+        # First-run credential gate before starting the TUI. Uses the shared
+        # onboarding helper (issue #4024) so the bare invocation routes a
+        # keyless newcomer to `setup` (or a detected keyless local endpoint)
+        # identically to `run`/`code`/`chat`. Headless (non-TTY / --quiet)
+        # fails fast; interactive offers the wizard and re-checks. The detected
+        # local model id (if any) is discarded here because the TUI resolves its
+        # own default via resolve_default_model below; the helper's side effect
+        # (exporting OPENAI_BASE_URL) is what enables the keyless local path.
         import sys
-        
-        inject_credentials_into_env()
-        if not is_configured():  # Check for any configured credentials
-            # Keyless local-first: if a local OpenAI-compatible endpoint is
-            # reachable (e.g. Ollama), use it as the zero-config default so the
-            # first run works before any auth. Detection is timeout-bounded.
-            local = detect_local_endpoint()
-            if local is not None:
-                typer.echo(
-                    f"No cloud key found; using local model {local.model}. "
-                    "Run `praisonai setup` to add a hosted provider.",
-                    err=True,
-                )
-                # Fall through to the TUI; no gate.
-            # In non-interactive mode, just show error
-            elif not sys.stdin.isatty() or quiet:
-                typer.echo(
-                    "Error: No API key configured. Run: praisonai setup\n"
-                    "(a running local endpoint such as Ollama would be used "
-                    "automatically)",
-                    err=True
-                )
-                raise typer.Exit(1)
-            
-            # In interactive mode, offer to run setup (non-blocking suggestion)
-            else:
-                typer.echo("No API key configured.")
-                run_setup = typer.confirm("Would you like to run the setup wizard now?")
+        from praisonai_code.llm.credentials import ensure_configured_or_onboard
+        from praisonai_code._wrapper_bridge import wrapper_available
 
-                if run_setup:
-                    # Import and run setup
-                    from .commands.setup import _run_setup
-                    exit_code = _run_setup(
-                        non_interactive=False,
-                        provider=None,
-                        api_key=None,
-                        model=None
-                    )
-                    if exit_code != 0:
-                        typer.echo("Setup failed. Exiting.", err=True)
-                        raise typer.Exit(exit_code)
+        # The bare invocation only launches the wrapper-resident interactive
+        # TUI. On a bare `pip install praisonai-code` the wrapper is absent and
+        # the TUI path fails fast with its own install hint. Running the
+        # credential gate first would preempt that hint with a raw "No API key
+        # configured" exit, so only gate onboarding when the TUI can actually
+        # start and let it surface the actionable install hint otherwise.
+        _headless = (not sys.stdin.isatty()) or quiet
+        if wrapper_available():
+            ensure_configured_or_onboard(model=None, interactive=not _headless)
 
-                    # Re-check credentials after setup
-                    inject_credentials_into_env()
-                    if not is_configured():
-                        typer.echo("Setup completed but credentials still not detected.", err=True)
-                        raise typer.Exit(1)
-
-                    # After successful setup, continue to TUI
-                    typer.echo("\nSetup complete! Starting interactive mode...\n")
-                else:
-                    typer.echo("\nTo configure credentials later, run: praisonai setup")
-                    typer.echo("or set environment variables like OPENAI_API_KEY")
-                    raise typer.Exit(0)
-        
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
         # Route the bare-TUI launch through the shared resolver so a user with

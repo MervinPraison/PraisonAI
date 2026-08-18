@@ -1229,74 +1229,18 @@ def run_main(
             # Model restore is best-effort; fall back to default resolution.
             pass
 
-    # Early credential check before any processing
+    # Early credential check before any processing. Uses the shared first-run
+    # gate (issue #4024) so `run`, `code`, `chat`, and the bare invocation route
+    # a keyless newcomer to `setup` (or a detected keyless local endpoint)
+    # identically instead of dead-ending on a raw provider error. Headless
+    # (non-TTY / --output json) fails fast with the actionable hint; interactive
+    # offers the wizard and re-checks.
     if target:  # Only check if we actually have something to run
-        from praisonai_code.llm.credentials import (
-            detect_local_endpoint,
-            inject_credentials_into_env,
-            is_configured,
-        )
         import sys
-        
-        # Check if credentials are configured (use model if provided, else check general)
-        inject_credentials_into_env()
-        if not is_configured(model):
-            # Keyless local-first: when no explicit model was requested and no
-            # cloud key is configured, prefer a reachable local endpoint (e.g.
-            # Ollama) so `praisonai run "..."` just works before any auth. An
-            # explicit --model is left to its own provider gate.
-            local = detect_local_endpoint() if not model else None
-            if local is not None:
-                output.print_info(
-                    f"No cloud key found; using local model {local.model}. "
-                    "Run `praisonai setup` to add a hosted provider."
-                )
-                # Adopt the detected local model + base URL for this run so the
-                # Agent reaches the local endpoint. An explicit env base_url,
-                # if any, is left untouched.
-                import os as _os_local
-                model = local.model
-                _os_local.environ.setdefault("OPENAI_BASE_URL", local.base_url)
-            # In non-interactive mode, show clear error
-            elif not sys.stdin.isatty() or output.is_json_mode:
-                output.print_error(
-                    "No API key configured. Run: praisonai setup\n"
-                    "or set environment variables like OPENAI_API_KEY\n"
-                    "(a running local endpoint such as Ollama would be used "
-                    "automatically)"
-                )
-                raise typer.Exit(1)
-            
-            # In interactive mode, offer to run setup
-            else:
-                typer.echo(f"No API key configured{f' for model {model}' if model else ''}.")
-                run_setup = typer.confirm("Would you like to run the setup wizard now?")
+        from praisonai_code.llm.credentials import ensure_configured_or_onboard
 
-                if run_setup:
-                    from praisonai_code.cli.commands.setup import _run_setup
-                    exit_code = _run_setup(
-                        non_interactive=False,
-                        provider=None,
-                        api_key=None,
-                        model=None
-                    )
-                    if exit_code != 0:
-                        output.print_error("Setup failed. Exiting.")
-                        raise typer.Exit(exit_code)
-
-                    output.print_success("Setup complete! Continuing with your run...")
-                    # Re-check after setup
-                    inject_credentials_into_env()
-                    if not is_configured(model):
-                        output.print_error("Setup completed but credentials still not detected.")
-                        raise typer.Exit(1)
-                else:
-                    output.print_info(
-                        "To configure credentials:\n"
-                        "  - Run: praisonai setup\n"
-                        "  - Or set environment variables like OPENAI_API_KEY"
-                    )
-                    raise typer.Exit(0)
+        _headless = (not sys.stdin.isatty()) or output.is_json_mode
+        model = ensure_configured_or_onboard(model=model, interactive=not _headless)
 
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject

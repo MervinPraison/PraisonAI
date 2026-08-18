@@ -182,12 +182,53 @@ def chat_main(
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
-    
-    # Handle profiling for single prompt mode
+
+    # First-run credential gate (issue #4024): route a keyless newcomer to the
+    # `setup` wizard (or a detected keyless local endpoint) instead of dead-
+    # ending on a raw provider error at LLM call time. Shared with `run`/`code`
+    # and the bare invocation so onboarding is entrypoint-independent. Headless
+    # paths (--json, piped stdin) fail fast with the actionable hint and a
+    # non-zero exit code rather than prompting.
+    import sys as _sys
+    from praisonai_code.llm.credentials import ensure_configured_or_onboard
+
+    # Resolve the model the TUI will actually dispatch (explicit --model >
+    # most-recently-used > provider-aware default) BEFORE the gate, so onboarding
+    # validates that exact model. Without this the gate could pass on any present
+    # key while the TUI then dispatches a recent model belonging to an
+    # unconfigured provider — re-surfacing the raw auth error the gate prevents.
+    # Resolved once here and reused for the TUI config below (single notice, no
+    # double persist).
+    try:
+        from ..configuration.model_resolver import resolve_default_model
+        resolved_model = resolve_default_model(model)
+    except Exception:
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+        resolved_model = model or DEFAULT_FALLBACK_MODEL
+
+    _headless = bool(json_output) or not _sys.stdin.isatty()
+
+    # The interactive (no-prompt) TUI is wrapper-resident: it renders through
+    # ``praisonai.cli.features.tui`` and fails fast with its own install hint
+    # (``pip install praisonai[tui]``) on a bare ``pip install praisonai-code``.
+    # Running the credential gate first would preempt that hint with a raw
+    # "No API key configured" exit, telling a keyless standalone newcomer to
+    # configure a key for a session that cannot even start. Only gate the
+    # interactive path once the wrapper is present; single-prompt mode runs
+    # in-process (no wrapper needed) and is always gated.
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if prompt or wrapper_available():
+        resolved_model = ensure_configured_or_onboard(
+            model=resolved_model, interactive=not _headless
+        )
+
+    # Handle profiling for single prompt mode. Uses the gate-validated resolved
+    # model so profiling exercises the same model the interactive session would.
     if prompt and (profile or profile_deep):
         _run_profiled_chat(
             prompt=prompt,
-            model=model,
+            model=resolved_model,
             verbose=verbose,
             profile_deep=profile_deep,
         )
@@ -230,15 +271,8 @@ def chat_main(
     # a full interactive chat session with no `praisonai` wrapper required.
     from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
-    # Resolve a provider-aware default when no model was given:
-    # explicit --model > most-recently-used > provider credentials present.
-    try:
-        from ..configuration.model_resolver import resolve_default_model
-        resolved_model = resolve_default_model(model)
-    except Exception:
-        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
-        resolved_model = model or DEFAULT_FALLBACK_MODEL
-
+    # `resolved_model` was resolved above (before the onboarding gate) so the
+    # gate validated the exact model dispatched here — no re-resolution needed.
     tui_config = AsyncTUIConfig(
         model=resolved_model,
         show_logo=not compact,
