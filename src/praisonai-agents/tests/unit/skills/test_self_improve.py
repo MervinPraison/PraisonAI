@@ -82,6 +82,29 @@ def test_run_skill_review_restricted_toolset():
     assert "skill_manage" in captured["prompt"]
 
 
+def test_review_toolset_adds_store_memory_when_memory_enabled():
+    # Issue #4030: the same guarded pass also persists durable facts when the
+    # agent has memory enabled — restricted to skill_manage + store_memory.
+    agent = Agent(instructions="x", self_improve=True, memory=True)
+    tools = agent._build_skill_review_tool()
+    names = {getattr(t, "__name__", "") for t in tools}
+    assert "skill_manage" in names
+    assert "store_memory" in names
+
+
+def test_review_toolset_excludes_store_memory_without_memory():
+    agent = Agent(instructions="x", self_improve=True)
+    tools = agent._build_skill_review_tool()
+    names = {getattr(t, "__name__", "") for t in tools}
+    assert "store_memory" not in names
+
+
+def test_review_prompt_mentions_store_memory():
+    policy = DefaultSkillReviewPolicy()
+    prompt = policy.review_prompt({"prompt": "task", "tools_used": ["shell"]})
+    assert "store_memory" in prompt
+
+
 def test_run_skill_review_reentrancy_guard():
     agent = Agent(instructions="x", self_improve=True)
     calls = []

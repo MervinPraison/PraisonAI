@@ -248,16 +248,18 @@ class DefaultSkillReviewPolicy:
         tools_str = ", ".join(str(t) for t in tools_used) if tools_used else "none"
         return (
             "You have just finished a task. Reflect ONLY on whether this "
-            "session revealed a durable, reusable technique, or exposed a "
-            "loaded skill that was wrong or incomplete.\n\n"
+            "session revealed something durable worth persisting: a reusable "
+            "technique (or a loaded skill that was wrong or incomplete), or a "
+            "lasting fact / preference / user-model detail.\n\n"
             f"Original task: {prompt}\n"
             f"Tools used: {tools_str}\n\n"
-            "If — and only if — there is a genuinely reusable capability worth "
-            "saving, call the `skill_manage` tool to create a new skill or "
-            "patch an existing one. Use a clear, hyphenated skill name and a "
-            "concise SKILL.md body capturing the reusable steps. "
-            "If nothing durable was learned, reply with exactly 'NO_SKILL' "
-            "and do not call any tool."
+            "If — and only if — a genuinely reusable capability emerged, call "
+            "the `skill_manage` tool to create a new skill or patch an existing "
+            "one (clear hyphenated name, concise SKILL.md body). If a durable "
+            "fact or preference about the user emerged and the `store_memory` "
+            "tool is available, call it to persist that detail for future "
+            "sessions. If nothing durable was learned, reply with exactly "
+            "'NO_SKILL' and do not call any tool."
         )
 
 
