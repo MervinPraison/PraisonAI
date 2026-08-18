@@ -5968,6 +5968,28 @@ class WebSocketGateway:
         return raw
 
     @staticmethod
+    def _config_bool(value: Any, default: bool = False) -> bool:
+        """Coerce a YAML/env config value to a bool, honouring string forms.
+
+        Environment substitution (e.g. ``durable_runs: ${DURABLE}``) yields
+        strings, so ``"false"``/``"0"``/``"no"``/``"off"`` must disable the flag
+        rather than being truthy under ``bool("false")``. Unknown/empty values
+        fall back to ``default``.
+        """
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            token = value.strip().lower()
+            if token in ("1", "true", "yes", "on"):
+                return True
+            if token in ("0", "false", "no", "off", ""):
+                return False
+            return default
+        return bool(value)
+
+    @staticmethod
     def _durable_runs_from_config(cfg: Optional[Dict[str, Any]]) -> bool:
         """Return the gateway-wide durable-runs opt-in (``gateway.durable_runs``).
 
@@ -5981,7 +6003,7 @@ class WebSocketGateway:
         gw_cfg = cfg.get("gateway", {})
         if not isinstance(gw_cfg, dict):
             return False
-        return bool(gw_cfg.get("durable_runs", False))
+        return WebSocketGateway._config_bool(gw_cfg.get("durable_runs"), False)
 
     def _create_agents_from_config(
         self,
@@ -6104,7 +6126,9 @@ class WebSocketGateway:
             # tool results instead of re-executing side-effecting tools or re-billing
             # LLM calls. Default-off/zero-overhead when neither flag is set; a lazy
             # import keeps the SDK cost off the hot path for non-durable gateways.
-            agent_durable = bool(agent_def.get("durable", durable_runs))
+            agent_durable = self._config_bool(
+                agent_def.get("durable"), durable_runs
+            )
             execution_cfg = None
             if agent_durable:
                 try:

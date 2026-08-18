@@ -649,6 +649,10 @@ class GatewayServerSchema(BaseModel):
     reload_drain_timeout: Optional[float] = Field(None, ge=0)
     # Single-switch reliability preset (#2531)
     reliability: Optional[str] = None
+    # Gateway-wide durable-runs opt-in (#4028). When true, gateway agents are
+    # built with ExecutionConfig(durable=True) so each turn is journalled to the
+    # core RunJournal. Default-off. Per-agent ``durable`` overrides this.
+    durable_runs: Optional[bool] = None
     # Close-the-loop on permanently-undelivered replies (#3297). Opt-in; when
     # enabled a permanent delivery failure fires MESSAGE_UNDELIVERED and
     # best-effort sends a short plain-text notice on the same channel.

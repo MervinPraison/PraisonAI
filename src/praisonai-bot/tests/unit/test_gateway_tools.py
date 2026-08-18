@@ -167,6 +167,49 @@ class TestGatewayDurableRuns:
         assert getattr(gw.get_agent("plain").execution, "durable", False) is False
         assert getattr(gw.get_agent("durable_one").execution, "durable", False) is True
 
+    def test_string_false_disables_durable_runs(self):
+        """Env-substituted string ``"false"``/``"0"`` must disable durability
+        (bool("false") is truthy, so a naive cast would wrongly enable it)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        for falsy in ("false", "False", "0", "no", "off", ""):
+            assert gw._durable_runs_from_config(
+                {"gateway": {"durable_runs": falsy}}
+            ) is False
+
+    def test_string_true_enables_durable_runs(self):
+        """String ``"true"``/``"1"`` opts in (YAML/env may render bools as str)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        for truthy in ("true", "True", "1", "yes", "on"):
+            assert gw._durable_runs_from_config(
+                {"gateway": {"durable_runs": truthy}}
+            ) is True
+
+    def test_per_agent_string_false_overrides_gateway_default(self):
+        """A per-agent ``durable: "false"`` opts out even when the gateway
+        default is enabled."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        gw._create_agents_from_config(
+            {"opted_out": {"instructions": "hi", "durable": "false"}},
+            durable_runs=True,
+        )
+        assert getattr(
+            gw.get_agent("opted_out").execution, "durable", False
+        ) is False
+
+    def test_schema_accepts_gateway_durable_runs(self):
+        """``gateway.durable_runs`` must pass the strict GatewayServerSchema
+        (``extra="forbid"``) so the documented opt-in is not rejected at load."""
+        from praisonai_bot.bots._config_schema import GatewayServerSchema
+
+        cfg = GatewayServerSchema(durable_runs=True)
+        assert cfg.durable_runs is True
+
 
 class TestGapG1ToolResolver:
     """Test ToolResolver integration."""
