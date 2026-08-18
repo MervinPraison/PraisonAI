@@ -47,15 +47,25 @@ class FeedoMemoryAdapter:
                 "feedo-sdk is not installed. Run: pip install feedo-sdk"
             ) from e
 
+        # PraisonAI's Memory class passes the user config inside a nested
+        # "config" dict (e.g. {"provider": "feedo", "config": {"usage_key": ...}}),
+        # but a direct caller may also pass the keys at the top level. Support both.
+        nested = kwargs.get("config") or {}
+
+        def _cfg(key: str, default: Any = None) -> Any:
+            if key in kwargs:
+                return kwargs[key]
+            return nested.get(key, default)
+
         self._memory = FeedoMemory(
-            usage_key=kwargs.get("usage_key"),
-            private_key=kwargs.get("private_key"),
-            did=kwargs.get("did"),
-            user_id=kwargs.get("user_id"),
-            private=kwargs.get("private", True),
-            search_seeds=kwargs.get("search_seeds"),
-            consensus_seeds=kwargs.get("consensus_seeds"),
-            storage_seeds=kwargs.get("storage_seeds"),
+            usage_key=_cfg("usage_key"),
+            private_key=_cfg("private_key"),
+            did=_cfg("did"),
+            user_id=_cfg("user_id"),
+            private=_cfg("private", True),
+            search_seeds=_cfg("search_seeds"),
+            consensus_seeds=_cfg("consensus_seeds"),
+            storage_seeds=_cfg("storage_seeds"),
         )
 
     # ------------------------------------------------------------------
