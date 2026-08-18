@@ -283,6 +283,13 @@ def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
         mr_mod, "resolve_default_model", lambda explicit=None: "gemini/gemini-1.5-pro"
     )
 
+    # The interactive (no-prompt) path only gates once the wrapper-resident TUI
+    # can start; force it available so this test exercises the gate rather than
+    # the standalone install-hint short-circuit (see chat_main).
+    import praisonai_code._wrapper_bridge as _bridge
+
+    monkeypatch.setattr(_bridge, "wrapper_available", lambda: True)
+
     seen = {"model": "unset"}
 
     def _gate(*, model=None, interactive=True):
@@ -335,3 +342,83 @@ def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
         )
 
     assert seen["model"] == "gemini/gemini-1.5-pro"
+
+
+def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monkeypatch):
+    # Regression (smoke): keyless interactive `chat` on a standalone
+    # `pip install praisonai-code` (no wrapper) must NOT be preempted by the
+    # onboarding gate. The wrapper-resident TUI surfaces its own actionable
+    # install hint (`pip install praisonai[tui]`); running the credential gate
+    # first would dead-end a newcomer with "No API key configured" for a session
+    # that cannot even start. The gate is skipped when the wrapper is absent and
+    # no prompt was given.
+    from praisonai_code.cli.commands import chat as chat_mod
+    from praisonai_code.cli.configuration import model_resolver as mr_mod
+    import praisonai_code._wrapper_bridge as _bridge
+
+    monkeypatch.setattr(
+        mr_mod, "resolve_default_model", lambda explicit=None: "gpt-4o"
+    )
+    monkeypatch.setattr(_bridge, "wrapper_available", lambda: False)
+
+    def _gate(*, model=None, interactive=True):
+        raise AssertionError("gate must not run for standalone interactive chat")
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    launched = {"tui": False}
+
+    class _StubTUI:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            launched["tui"] = True
+
+    monkeypatch.setattr(
+        "praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI
+    )
+
+    chat_mod.chat_main(
+        ctx=None,
+        prompt=None,
+        model=None,
+        verbose=False,
+        memory=None,
+        no_memory=False,
+        tools=None,
+        toolset=None,
+        user_id=None,
+        session_id=None,
+        continue_session=False,
+        file=None,
+        workspace=None,
+        no_acp=False,
+        no_lsp=False,
+        safe_mode=False,
+        autonomy=True,
+        append_system_prompt=None,
+        knowledge=None,
+        guardrails=None,
+        web=None,
+        reflection=None,
+        planning=None,
+        context=None,
+        output=None,
+        execution=None,
+        hooks=None,
+        caching=None,
+        approval=None,
+        profile=False,
+        profile_deep=False,
+        debug=False,
+        ui_backend="auto",
+        json_output=False,
+        no_color=False,
+        theme="default",
+        compact=False,
+        no_rules=False,
+        pure=False,
+    )
+
+    assert launched["tui"] is True

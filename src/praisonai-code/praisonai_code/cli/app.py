@@ -883,10 +883,18 @@ def main_callback(
         # (exporting OPENAI_BASE_URL) is what enables the keyless local path.
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
+        from praisonai_code._wrapper_bridge import wrapper_available
 
+        # The bare invocation only launches the wrapper-resident interactive
+        # TUI. On a bare `pip install praisonai-code` the wrapper is absent and
+        # the TUI path fails fast with its own install hint. Running the
+        # credential gate first would preempt that hint with a raw "No API key
+        # configured" exit, so only gate onboarding when the TUI can actually
+        # start and let it surface the actionable install hint otherwise.
         _headless = (not sys.stdin.isatty()) or quiet
-        ensure_configured_or_onboard(model=None, interactive=not _headless)
-        
+        if wrapper_available():
+            ensure_configured_or_onboard(model=None, interactive=not _headless)
+
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
         # Route the bare-TUI launch through the shared resolver so a user with

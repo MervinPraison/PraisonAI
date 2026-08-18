@@ -207,9 +207,21 @@ def chat_main(
         resolved_model = model or DEFAULT_FALLBACK_MODEL
 
     _headless = bool(json_output) or not _sys.stdin.isatty()
-    resolved_model = ensure_configured_or_onboard(
-        model=resolved_model, interactive=not _headless
-    )
+
+    # The interactive (no-prompt) TUI is wrapper-resident: it renders through
+    # ``praisonai.cli.features.tui`` and fails fast with its own install hint
+    # (``pip install praisonai[tui]``) on a bare ``pip install praisonai-code``.
+    # Running the credential gate first would preempt that hint with a raw
+    # "No API key configured" exit, telling a keyless standalone newcomer to
+    # configure a key for a session that cannot even start. Only gate the
+    # interactive path once the wrapper is present; single-prompt mode runs
+    # in-process (no wrapper needed) and is always gated.
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if prompt or wrapper_available():
+        resolved_model = ensure_configured_or_onboard(
+            model=resolved_model, interactive=not _headless
+        )
 
     # Handle profiling for single prompt mode. Uses the gate-validated resolved
     # model so profiling exercises the same model the interactive session would.
