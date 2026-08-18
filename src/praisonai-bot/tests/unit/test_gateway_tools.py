@@ -114,6 +114,60 @@ class TestGapG1GatewayToolResolution:
         assert getattr(agent, "self_reflect", False) is True
 
 
+class TestGatewayDurableRuns:
+    """Issue #4028: gateway agents opt into durable runs so a restart resumes."""
+
+    def test_agents_are_not_durable_by_default(self):
+        """Default gateway agents stay non-durable (zero-overhead)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        gw._create_agents_from_config({"a": {"instructions": "hi"}})
+
+        agent = gw.get_agent("a")
+        assert agent is not None
+        assert getattr(agent.execution, "durable", False) is False
+
+    def test_gateway_durable_runs_flag_enables_journalling(self):
+        """``gateway.durable_runs: true`` builds durable agents."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        durable = gw._durable_runs_from_config({"gateway": {"durable_runs": True}})
+        assert durable is True
+
+        gw._create_agents_from_config(
+            {"a": {"instructions": "hi"}}, durable_runs=durable,
+        )
+        agent = gw.get_agent("a")
+        assert agent is not None
+        assert getattr(agent.execution, "durable", False) is True
+
+    def test_durable_runs_flag_defaults_false(self):
+        """Missing/invalid gateway config yields a non-durable default."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        assert gw._durable_runs_from_config({}) is False
+        assert gw._durable_runs_from_config({"gateway": {}}) is False
+        assert gw._durable_runs_from_config(None) is False
+
+    def test_per_agent_durable_overrides_gateway_default(self):
+        """A per-agent ``durable: true`` opts in even when the gateway default is off."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        gw._create_agents_from_config(
+            {
+                "plain": {"instructions": "hi"},
+                "durable_one": {"instructions": "hi", "durable": True},
+            },
+            durable_runs=False,
+        )
+        assert getattr(gw.get_agent("plain").execution, "durable", False) is False
+        assert getattr(gw.get_agent("durable_one").execution, "durable", False) is True
+
+
 class TestGapG1ToolResolver:
     """Test ToolResolver integration."""
 
