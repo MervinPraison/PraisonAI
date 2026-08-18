@@ -325,25 +325,143 @@ def test_print_rejects_profile_combination():
 @pytest.mark.parametrize(
     "opt",
     [
-        ["--tools", "web_search"],
-        ["--agent", "planner"],
-        ["--plan"],
         ["--no-acp"],
         ["--no-lsp"],
     ],
 )
 def test_print_rejects_unsupported_options(opt):
-    """`-p` fails closed on options the headless path cannot honor.
+    """`-p` still fails closed on options the headless path cannot honor.
 
-    Silently dropping tool/profile/scope configuration would run a
-    tool-dependent task without the requested tools; an explicit error is
-    safer and points users to interactive mode.
+    ``--no-acp``/``--no-lsp`` toggle the resident split-pane TUI's runtime tool
+    servers, which the one-shot headless agent does not spin up, so they are
+    rejected rather than silently ignored. ``--tools``/``--agent``/``--plan``
+    are now wired into the headless branch (see their dedicated tests below).
     """
     runner = CliRunner()
     result = runner.invoke(app, ["-p", *opt, "do a thing"])
 
     assert result.exit_code == 1
     assert "does not support" in result.output
+
+
+def test_print_tools_merged_onto_headless_defaults(monkeypatch, tmp_path):
+    """`code -p --tools <name>` resolves the tool and merges it with defaults."""
+    import praisonaiagents
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "ok"
+
+    def _default_tools(*, groups, workspace):
+        return [lambda: "default"]
+
+    def _custom_tool():
+        return "custom"
+
+    def _fake_resolve_tools_arg(value, verbose=False):
+        assert value == "my_tool"
+        return [_custom_tool]
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+    monkeypatch.setattr(code_module, "_get_headless_code_tools", _default_tools)
+    from praisonai_code.cli.commands import run as run_module
+
+    monkeypatch.setattr(run_module, "_resolve_tools_arg", _fake_resolve_tools_arg)
+
+    result = CliRunner().invoke(
+        app,
+        ["-p", "--workspace", str(tmp_path), "--tools", "my_tool", "do a thing"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _custom_tool in captured["tools"]
+    # The default coding toolset is preserved alongside the custom tool.
+    assert len(captured["tools"]) >= 2
+
+
+def test_print_plan_sets_readonly_approval(monkeypatch, tmp_path):
+    """`code -p --plan` wires a non-interactive read-only approval backend."""
+    import praisonaiagents
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "plan result"
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+    monkeypatch.setattr(
+        code_module,
+        "_get_headless_code_tools",
+        lambda *, groups, workspace: [lambda: None],
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["-p", "--workspace", str(tmp_path), "--plan", "explore the repo"],
+    )
+
+    assert result.exit_code == 0, result.output
+    # An approval backend was threaded in for the read-only plan scope.
+    approval = captured.get("approval")
+    assert approval is not None
+    backend = getattr(approval, "backend", approval)
+    from praisonaiagents.permissions import PermissionMode
+
+    assert getattr(backend, "permission_mode", None) == PermissionMode.PLAN
+    assert getattr(backend, "non_interactive", False) is True
+
+
+def test_print_agent_profile_applies_instructions_and_scope(monkeypatch, tmp_path):
+    """`code -p --agent <name>` applies the profile's instructions + scope."""
+    import praisonaiagents
+
+    captured = {}
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self, *_args, **_kwargs):
+            return "ok"
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+    monkeypatch.setattr(
+        code_module,
+        "_get_headless_code_tools",
+        lambda *, groups, workspace: [lambda: None],
+    )
+
+    def _fake_load_agent(name):
+        assert name == "reviewer"
+        return {
+            "name": "reviewer",
+            "instructions": "Review carefully.",
+            "permissions": {"edit:*": "deny", "write:*": "deny"},
+        }
+
+    from praisonai_code.cli.features import custom_definitions as cd
+
+    monkeypatch.setattr(cd, "load_agent_from_name", _fake_load_agent)
+
+    result = CliRunner().invoke(
+        app,
+        ["-p", "--workspace", str(tmp_path), "--agent", "reviewer", "review"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["instructions"] == "Review carefully."
+    # The profile's permission scope is enforced via a non-interactive backend.
+    approval = captured.get("approval")
+    assert approval is not None
 
 
 def test_profiled_code_agent_kwargs_match_constructor(monkeypatch):

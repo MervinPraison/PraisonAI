@@ -5,7 +5,7 @@ Provides terminal-native code assistant mode.
 This command NEVER opens a browser - it runs entirely in the terminal.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import typer
 
@@ -116,22 +116,16 @@ def code_main(
         typer.echo("Error: -p/--print requires a task prompt", err=True)
         raise typer.Exit(1)
 
-    # Fail closed on options the headless -p path cannot honor. The full
-    # ACP/LSP tool wiring and named-profile permission scope live in the
-    # interactive path; silently dropping them (as a bare early-return would)
-    # is worse than an explicit error, since tool/profile-dependent tasks would
-    # run without the tools or scope the caller asked for. Reject rather than
-    # re-implement that heavy wiring here (keeps the command lightweight).
+    # Fail closed only on options the headless -p path genuinely cannot honor.
+    # --tools/--agent/--plan are wired into the headless branch below (parity
+    # with the interactive path) by reusing the existing resolvers, so they are
+    # no longer rejected. --no-acp/--no-lsp toggle the resident split-pane TUI's
+    # runtime tool servers, which the one-shot headless agent does not spin up,
+    # so they remain rejected rather than silently ignored.
     # Options that ARE honored in headless mode: --model, --thinking, --verbose,
-    # --workspace, --resume/--session/--continue.
+    # --workspace, --resume/--session/--continue, --tools, --agent, --plan.
     if print_mode:
         _unsupported = []
-        if tools:
-            _unsupported.append("--tools")
-        if agent:
-            _unsupported.append("--agent")
-        if plan:
-            _unsupported.append("--plan")
         if no_acp:
             _unsupported.append("--no-acp")
         if no_lsp:
@@ -227,6 +221,35 @@ def code_main(
                 err=True,
             )
             raise typer.Exit(1)
+        # Resolve the same --tools / --agent / --plan wiring the interactive
+        # path uses, so a headless run is a first-class configurable entrypoint
+        # (parity, not a re-implementation). Approvals stay non-interactive:
+        # --plan / --agent scope is a *tightening* enforced via a non-interactive
+        # backend, never an interactive prompt that would stall a scripted run.
+        from praisonai_code.cli.commands.run import _resolve_tools_arg
+        headless_tools = _resolve_tools_arg(tools, verbose=verbose)
+
+        headless_approval = None
+        if agent_profile:
+            permission_config = agent_profile.get("permissions")
+            if permission_config:
+                from praisonai_code.cli.features._approval_bridge import (
+                    resolve_approval_config,
+                )
+                headless_approval = resolve_approval_config(
+                    "console",
+                    non_interactive=True,
+                    permissions_config=permission_config,
+                )
+        # --plan overrides any profile scope with the read-only planning mode.
+        if plan:
+            from praisonai_code.cli.features._approval_bridge import (
+                resolve_approval_config,
+            )
+            headless_approval = resolve_approval_config(
+                "plan", non_interactive=True
+            )
+
         _run_print_code(
             prompt=prompt,
             model=model,
@@ -235,6 +258,9 @@ def code_main(
             thinking_budget=thinking_budget,
             session_id=session_id,
             continue_session=continue_session,
+            extra_tools=headless_tools,
+            agent_profile=agent_profile,
+            approval=headless_approval,
         )
         return
 
@@ -452,6 +478,9 @@ def _run_print_code(
     thinking_budget: Optional[int] = None,
     session_id: Optional[str] = None,
     continue_session: bool = False,
+    extra_tools: Optional[list] = None,
+    agent_profile: Optional[dict] = None,
+    approval: Optional[Any] = None,
 ):
     """Headless one-shot code run with clean stdout and a status exit code.
 
@@ -460,6 +489,12 @@ def _run_print_code(
     ``{result, session_id, usage:{in,out,cost}, status}`` to stdout. Exit code
     is 0 on success and 1 on failure (empty result or raised error), giving
     scripts/CI/benchmarks a reliable signal — parity with ``run --output json``.
+
+    ``extra_tools`` are ``--tools``-resolved callables merged onto the default
+    coding toolset; ``agent_profile`` is a ``--agent`` definition (instructions/
+    llm/tools) that overlays the defaults; ``approval`` is the non-interactive
+    backend enforcing ``--plan``/profile permission scope. All three reuse the
+    interactive path's resolvers so headless == interactive for these flags.
     """
     import json
     import os
@@ -507,6 +542,28 @@ def _run_print_code(
     if model:
         agent_config["llm"] = model
 
+    # Overlay a --agent profile's instructions/role/goal/llm so the pinned,
+    # least-privilege agent runs headlessly with the same identity it would
+    # interactively. Its declarative ``permissions`` are already resolved into
+    # the ``approval`` backend by the caller, so they are dropped here.
+    profile_tool_names: List[str] = []
+    if agent_profile:
+        for key in ("instructions", "role", "goal", "backstory"):
+            if agent_profile.get(key):
+                agent_config[key] = agent_profile[key]
+        # An explicit --model still wins over the profile's llm.
+        if not model and agent_profile.get("llm"):
+            agent_config["llm"] = agent_profile["llm"]
+        profile_tools = agent_profile.get("tools")
+        if isinstance(profile_tools, (list, tuple)):
+            profile_tool_names = [str(t) for t in profile_tools if isinstance(t, str)]
+
+    # Enforce --plan / profile permission scope on a non-interactive backend so
+    # honouring the scope is a tightening (deny/ask fails closed), never an
+    # interactive prompt that would stall a scripted run.
+    if approval is not None:
+        agent_config["approval"] = approval
+
     memory_cfg = None
     if resolved_session:
         try:
@@ -525,10 +582,31 @@ def _run_print_code(
     error_message = None
     try:
         workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
-        agent_config["tools"] = _get_headless_code_tools(
+        merged_tools = _get_headless_code_tools(
             groups=["acp", "edit", "search", "lsp"],
             workspace=workspace,
         )
+        # Merge --tools-resolved callables and a --agent profile's named tools
+        # onto the default coding toolset so a headless run can add a custom
+        # tool (e.g. github) or run under a profile's toolset. Resolution reuses
+        # the same ToolResolver as the interactive/run path (CLI == YAML ==
+        # Python). De-dupe by identity so a repeated default is not doubled.
+        additional_tools = list(extra_tools or [])
+        if profile_tool_names:
+            from praisonai_code.tool_resolver import ToolResolver
+
+            resolver = ToolResolver()
+            for name in profile_tool_names:
+                resolved = resolver.resolve(name, instantiate=True)
+                if resolved is not None:
+                    additional_tools.append(resolved)
+        if additional_tools:
+            seen = {id(t) for t in merged_tools}
+            for tool in additional_tools:
+                if id(tool) not in seen:
+                    merged_tools.append(tool)
+                    seen.add(id(tool))
+        agent_config["tools"] = merged_tools
         agent = Agent(**agent_config)
         if thinking_budget is not None:
             agent.thinking_budget = thinking_budget
