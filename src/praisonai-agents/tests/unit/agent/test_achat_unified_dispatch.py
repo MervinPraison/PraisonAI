@@ -104,6 +104,7 @@ async def test_achat_completion_resolves_basetool_without_dunder_name():
     assert not hasattr(browser_tool, "__name__")
 
     tool_call = SimpleNamespace(
+        id="legacy-tool-call-001",
         function=SimpleNamespace(name="browserbase", arguments="{}")
     )
     response = SimpleNamespace(
@@ -117,6 +118,7 @@ async def test_achat_completion_resolves_basetool_without_dunder_name():
 
     mock_exec.assert_awaited_once()
     assert mock_exec.await_args[0][0] == "browserbase"
+    assert mock_exec.await_args.kwargs["tool_call_id"] == "legacy-tool-call-001"
     assert results is not None
 
 

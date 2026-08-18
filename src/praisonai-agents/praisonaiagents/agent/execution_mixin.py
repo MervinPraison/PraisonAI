@@ -2123,3 +2123,4 @@ Write the complete compiled report:"""
         except Exception as e:
             # Don't let hook failures break retry logic
             logging.debug(f"Failed to emit async retry hook: {e}")
+
