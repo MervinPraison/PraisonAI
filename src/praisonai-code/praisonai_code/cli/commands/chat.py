@@ -192,14 +192,31 @@ def chat_main(
     import sys as _sys
     from praisonai_code.llm.credentials import ensure_configured_or_onboard
 
-    _headless = bool(json_output) or not _sys.stdin.isatty()
-    model = ensure_configured_or_onboard(model=model, interactive=not _headless)
+    # Resolve the model the TUI will actually dispatch (explicit --model >
+    # most-recently-used > provider-aware default) BEFORE the gate, so onboarding
+    # validates that exact model. Without this the gate could pass on any present
+    # key while the TUI then dispatches a recent model belonging to an
+    # unconfigured provider — re-surfacing the raw auth error the gate prevents.
+    # Resolved once here and reused for the TUI config below (single notice, no
+    # double persist).
+    try:
+        from ..configuration.model_resolver import resolve_default_model
+        resolved_model = resolve_default_model(model)
+    except Exception:
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+        resolved_model = model or DEFAULT_FALLBACK_MODEL
 
-    # Handle profiling for single prompt mode
+    _headless = bool(json_output) or not _sys.stdin.isatty()
+    resolved_model = ensure_configured_or_onboard(
+        model=resolved_model, interactive=not _headless
+    )
+
+    # Handle profiling for single prompt mode. Uses the gate-validated resolved
+    # model so profiling exercises the same model the interactive session would.
     if prompt and (profile or profile_deep):
         _run_profiled_chat(
             prompt=prompt,
-            model=model,
+            model=resolved_model,
             verbose=verbose,
             profile_deep=profile_deep,
         )
@@ -242,15 +259,8 @@ def chat_main(
     # a full interactive chat session with no `praisonai` wrapper required.
     from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
-    # Resolve a provider-aware default when no model was given:
-    # explicit --model > most-recently-used > provider credentials present.
-    try:
-        from ..configuration.model_resolver import resolve_default_model
-        resolved_model = resolve_default_model(model)
-    except Exception:
-        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
-        resolved_model = model or DEFAULT_FALLBACK_MODEL
-
+    # `resolved_model` was resolved above (before the onboarding gate) so the
+    # gate validated the exact model dispatched here — no re-resolution needed.
     tui_config = AsyncTUIConfig(
         model=resolved_model,
         show_logo=not compact,

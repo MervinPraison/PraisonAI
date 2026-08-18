@@ -215,3 +215,123 @@ def test_code_command_invokes_shared_gate(clean_env, monkeypatch):
         )
 
     assert seen["called"] is True
+
+
+def test_code_gate_receives_profile_model_not_none(clean_env, monkeypatch):
+    # Regression (greptile P1): `code --agent <profile>` (no --model) must pass
+    # the profile's llm to the gate, so onboarding validates/preserves the model
+    # the session actually dispatches instead of silently adopting a keyless
+    # local model. The gate would otherwise be handed ``None`` and could return
+    # a detected local model, shadowing the profile.
+    from praisonai_code.cli.commands import code as code_mod
+    from praisonai_code.cli.features import custom_definitions as cd_mod
+
+    monkeypatch.setattr(
+        cd_mod, "load_agent_from_name", lambda name: {"llm": "anthropic/claude-3-5-sonnet"}
+    )
+
+    seen = {"model": "unset"}
+
+    def _gate(*, model=None, interactive=True):
+        seen["model"] = model
+        raise typer.Exit(0)
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    with pytest.raises(typer.Exit):
+        code_mod.code_main(
+            ctx=None,
+            prompt=None,
+            model=None,
+            verbose=False,
+            tools=None,
+            workspace=None,
+            file=None,
+            no_acp=False,
+            no_lsp=False,
+            safe_mode=True,
+            plan=False,
+            dangerously_skip_approval=False,
+            checkpoints=False,
+            revert=None,
+            session_id=None,
+            resume=None,
+            continue_session=False,
+            agent="reviewer",
+            thinking=None,
+            autonomy=True,
+            append_system_prompt=None,
+            profile=False,
+            profile_deep=False,
+            print_mode=False,
+            output=None,
+            pure=False,
+        )
+
+    assert seen["model"] == "anthropic/claude-3-5-sonnet"
+
+
+def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
+    # Regression (greptile P1): `chat` (no --model) must resolve the model the
+    # TUI will dispatch (e.g. the most-recently-used model) BEFORE the gate, so
+    # onboarding validates that exact model rather than passing on any present
+    # key for a different provider.
+    from praisonai_code.cli.commands import chat as chat_mod
+    from praisonai_code.cli.configuration import model_resolver as mr_mod
+
+    monkeypatch.setattr(
+        mr_mod, "resolve_default_model", lambda explicit=None: "gemini/gemini-1.5-pro"
+    )
+
+    seen = {"model": "unset"}
+
+    def _gate(*, model=None, interactive=True):
+        seen["model"] = model
+        raise typer.Exit(0)
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    with pytest.raises(typer.Exit):
+        chat_mod.chat_main(
+            ctx=None,
+            prompt=None,
+            model=None,
+            verbose=False,
+            memory=None,
+            no_memory=False,
+            tools=None,
+            toolset=None,
+            user_id=None,
+            session_id=None,
+            continue_session=False,
+            file=None,
+            workspace=None,
+            no_acp=False,
+            no_lsp=False,
+            safe_mode=False,
+            autonomy=True,
+            append_system_prompt=None,
+            knowledge=None,
+            guardrails=None,
+            web=None,
+            reflection=None,
+            planning=None,
+            context=None,
+            output=None,
+            execution=None,
+            hooks=None,
+            caching=None,
+            approval=None,
+            profile=False,
+            profile_deep=False,
+            debug=False,
+            ui_backend="auto",
+            json_output=True,
+            no_color=False,
+            theme="default",
+            compact=False,
+            no_rules=False,
+            pure=False,
+        )
+
+    assert seen["model"] == "gemini/gemini-1.5-pro"

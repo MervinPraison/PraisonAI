@@ -189,8 +189,25 @@ def code_main(
     import sys as _sys
     from praisonai_code.llm.credentials import ensure_configured_or_onboard
 
+    # Resolve the agent profile's model BEFORE the gate so onboarding validates
+    # (and preserves) the model the session will actually dispatch. Without this,
+    # a keyless `code --agent <profile>` with a reachable local endpoint would be
+    # handed the detected local model, and the later `if not model` profile
+    # override (below) would no longer fire — silently using the wrong model.
+    # An explicit --model still wins over the profile's llm.
+    _effective_model = model
+    if _effective_model is None and agent_profile and agent_profile.get("llm"):
+        _effective_model = agent_profile["llm"]
+
     _headless = bool(print_mode) or not _sys.stdin.isatty()
-    model = ensure_configured_or_onboard(model=model, interactive=not _headless)
+    _gated_model = ensure_configured_or_onboard(
+        model=_effective_model, interactive=not _headless
+    )
+    # Preserve a user/profile-selected model. Only adopt the gate's return when
+    # it changed the effective model (keyless local-first path), so the profile
+    # override below still applies for the untouched-model case.
+    if _gated_model != _effective_model:
+        model = _gated_model
     
     # Set approval mode based on --safe flag.
     # Safe-by-default: dangerous tools (shell exec, file writes) are gated
