@@ -114,6 +114,103 @@ class TestGapG1GatewayToolResolution:
         assert getattr(agent, "self_reflect", False) is True
 
 
+class TestGatewayDurableRuns:
+    """Issue #4028: gateway agents opt into durable runs so a restart resumes."""
+
+    def test_agents_are_not_durable_by_default(self):
+        """Default gateway agents stay non-durable (zero-overhead)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        gw._create_agents_from_config({"a": {"instructions": "hi"}})
+
+        agent = gw.get_agent("a")
+        assert agent is not None
+        assert getattr(agent.execution, "durable", False) is False
+
+    def test_gateway_durable_runs_flag_enables_journalling(self):
+        """``gateway.durable_runs: true`` builds durable agents."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        durable = gw._durable_runs_from_config({"gateway": {"durable_runs": True}})
+        assert durable is True
+
+        gw._create_agents_from_config(
+            {"a": {"instructions": "hi"}}, durable_runs=durable,
+        )
+        agent = gw.get_agent("a")
+        assert agent is not None
+        assert getattr(agent.execution, "durable", False) is True
+
+    def test_durable_runs_flag_defaults_false(self):
+        """Missing/invalid gateway config yields a non-durable default."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        assert gw._durable_runs_from_config({}) is False
+        assert gw._durable_runs_from_config({"gateway": {}}) is False
+        assert gw._durable_runs_from_config(None) is False
+
+    def test_per_agent_durable_overrides_gateway_default(self):
+        """A per-agent ``durable: true`` opts in even when the gateway default is off."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        gw._create_agents_from_config(
+            {
+                "plain": {"instructions": "hi"},
+                "durable_one": {"instructions": "hi", "durable": True},
+            },
+            durable_runs=False,
+        )
+        assert getattr(gw.get_agent("plain").execution, "durable", False) is False
+        assert getattr(gw.get_agent("durable_one").execution, "durable", False) is True
+
+    def test_string_false_disables_durable_runs(self):
+        """Env-substituted string ``"false"``/``"0"`` must disable durability
+        (bool("false") is truthy, so a naive cast would wrongly enable it)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        for falsy in ("false", "False", "0", "no", "off", ""):
+            assert gw._durable_runs_from_config(
+                {"gateway": {"durable_runs": falsy}}
+            ) is False
+
+    def test_string_true_enables_durable_runs(self):
+        """String ``"true"``/``"1"`` opts in (YAML/env may render bools as str)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        for truthy in ("true", "True", "1", "yes", "on"):
+            assert gw._durable_runs_from_config(
+                {"gateway": {"durable_runs": truthy}}
+            ) is True
+
+    def test_per_agent_string_false_overrides_gateway_default(self):
+        """A per-agent ``durable: "false"`` opts out even when the gateway
+        default is enabled."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        gw._create_agents_from_config(
+            {"opted_out": {"instructions": "hi", "durable": "false"}},
+            durable_runs=True,
+        )
+        assert getattr(
+            gw.get_agent("opted_out").execution, "durable", False
+        ) is False
+
+    def test_schema_accepts_gateway_durable_runs(self):
+        """``gateway.durable_runs`` must pass the strict GatewayServerSchema
+        (``extra="forbid"``) so the documented opt-in is not rejected at load."""
+        from praisonai_bot.bots._config_schema import GatewayServerSchema
+
+        cfg = GatewayServerSchema(durable_runs=True)
+        assert cfg.durable_runs is True
+
+
 class TestGapG1ToolResolver:
     """Test ToolResolver integration."""
 

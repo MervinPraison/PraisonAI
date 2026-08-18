@@ -5967,12 +5967,51 @@ class WebSocketGateway:
 
         return raw
 
+    @staticmethod
+    def _config_bool(value: Any, default: bool = False) -> bool:
+        """Coerce a YAML/env config value to a bool, honouring string forms.
+
+        Environment substitution (e.g. ``durable_runs: ${DURABLE}``) yields
+        strings, so ``"false"``/``"0"``/``"no"``/``"off"`` must disable the flag
+        rather than being truthy under ``bool("false")``. Unknown/empty values
+        fall back to ``default``.
+        """
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            token = value.strip().lower()
+            if token in ("1", "true", "yes", "on"):
+                return True
+            if token in ("0", "false", "no", "off", ""):
+                return False
+            return default
+        return bool(value)
+
+    @staticmethod
+    def _durable_runs_from_config(cfg: Optional[Dict[str, Any]]) -> bool:
+        """Return the gateway-wide durable-runs opt-in (``gateway.durable_runs``).
+
+        Issue #4028: operators enable durable gateway runs by setting
+        ``gateway.durable_runs: true`` in ``gateway.yaml``. Default-off so
+        existing gateways are unchanged. Individual agents may still override
+        this default via a per-agent ``durable`` key in their config.
+        """
+        if not isinstance(cfg, dict):
+            return False
+        gw_cfg = cfg.get("gateway", {})
+        if not isinstance(gw_cfg, dict):
+            return False
+        return WebSocketGateway._config_bool(gw_cfg.get("durable_runs"), False)
+
     def _create_agents_from_config(
         self,
         agents_cfg: Dict[str, Dict[str, Any]],
         *,
         default_model: Optional[str] = None,
         guardrails_cfg: Optional[Dict[str, Any]] = None,
+        durable_runs: bool = False,
     ) -> None:
         """Create and register Agent instances from the agents section of config.
 
@@ -5993,6 +6032,13 @@ class WebSocketGateway:
             default_model: Fallback model when an agent has no ``model`` key
                            (e.g. from the ``provider.model`` section of UI config).
             guardrails_cfg: Optional ``guardrails.registry`` dict to wire per-agent.
+            durable_runs: When ``True`` (operator opt-in via ``gateway.durable_runs``),
+                          construct each agent with ``ExecutionConfig(durable=True)`` so
+                          every gateway turn is journalled to the core ``RunJournal`` and
+                          can resume after a restart — no re-execution of side-effecting
+                          tools, no re-billing of LLM calls. Default-off/zero-overhead:
+                          when unset the execution hot path is unchanged. Per-agent
+                          ``durable`` in YAML overrides this gateway-wide default.
         """
         from praisonaiagents import Agent
 
@@ -6072,6 +6118,28 @@ class WebSocketGateway:
             if temperature is not None and model and isinstance(model, str):
                 model_cfg = {"model": model, "temperature": temperature}
 
+            # Durable runs (Issue #4028): when the operator opts in via
+            # ``gateway.durable_runs`` (or per-agent ``durable: true``), build the
+            # agent with ``ExecutionConfig(durable=True)`` so every turn is
+            # journalled to the core ``RunJournal``. This engages the already-shipped
+            # resume machinery — after a restart an interrupted run replays recorded
+            # tool results instead of re-executing side-effecting tools or re-billing
+            # LLM calls. Default-off/zero-overhead when neither flag is set; a lazy
+            # import keeps the SDK cost off the hot path for non-durable gateways.
+            agent_durable = self._config_bool(
+                agent_def.get("durable"), durable_runs
+            )
+            execution_cfg = None
+            if agent_durable:
+                try:
+                    from praisonaiagents import ExecutionConfig
+                    execution_cfg = ExecutionConfig(durable=True)
+                except Exception:  # pragma: no cover - old/absent core
+                    logger.warning(
+                        "durable_runs requested but ExecutionConfig is unavailable; "
+                        "agent '%s' will run non-durably", agent_id,
+                    )
+
             # Use model= (preferred) instead of deprecated llm=
             agent = Agent(
                 name=agent_id,
@@ -6087,6 +6155,7 @@ class WebSocketGateway:
                 base_url=base_url,
                 api_key=api_key,
                 guardrails=guardrail_prompt,
+                execution=execution_cfg,
             )
 
             # Store tool_choice for later use in chat()
@@ -7992,6 +8061,7 @@ class WebSocketGateway:
                 provider_cfg = new_cfg.get("provider", {})
                 default_model = provider_cfg.get("model") if provider_cfg else None
                 guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+                durable_runs = self._durable_runs_from_config(new_cfg)
                 if agents_cfg:
                     self._agents.clear()
                     # Recreating agents invalidates id()-keyed shell clones.
@@ -8000,6 +8070,7 @@ class WebSocketGateway:
                         agents_cfg,
                         default_model=default_model,
                         guardrails_cfg=guardrails_cfg,
+                        durable_runs=durable_runs,
                     )
 
                 # Register inbound trigger hooks (Issue #2281).
@@ -8045,6 +8116,7 @@ class WebSocketGateway:
             provider_cfg = new_cfg.get("provider", {})
             default_model = provider_cfg.get("model") if provider_cfg else None
             guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+            durable_runs = self._durable_runs_from_config(new_cfg)
             if agents_cfg:
                 self._agents.clear()
                 # Recreating agents invalidates id()-keyed shell clones.
@@ -8053,6 +8125,7 @@ class WebSocketGateway:
                     agents_cfg,
                     default_model=default_model,
                     guardrails_cfg=guardrails_cfg,
+                    durable_runs=durable_runs,
                 )
             
             # Restart all channels
@@ -8067,6 +8140,7 @@ class WebSocketGateway:
                 provider_cfg = new_cfg.get("provider", {})
                 default_model = provider_cfg.get("model") if provider_cfg else None
                 guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+                durable_runs = self._durable_runs_from_config(new_cfg)
                 if agents_cfg:
                     self._agents.clear()
                     # Recreating agents invalidates id()-keyed shell clones.
@@ -8075,6 +8149,7 @@ class WebSocketGateway:
                         agents_cfg,
                         default_model=default_model,
                         guardrails_cfg=guardrails_cfg,
+                        durable_runs=durable_runs,
                     )
                 logger.info("Agents reloaded")
             
@@ -8714,11 +8789,13 @@ class WebSocketGateway:
         provider_cfg = cfg.get("provider", {})
         default_model = provider_cfg.get("model") if provider_cfg else None
         guardrails_cfg = (cfg.get("guardrails") or {}).get("registry")
+        durable_runs = self._durable_runs_from_config(cfg)
         if agents_cfg:
             self._create_agents_from_config(
                 agents_cfg,
                 default_model=default_model,
                 guardrails_cfg=guardrails_cfg,
+                durable_runs=durable_runs,
             )
 
         # Register inbound trigger hooks (Issue #2281). Hooks may live at the
