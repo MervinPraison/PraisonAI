@@ -388,11 +388,20 @@ class ChromaMemoryAdapter:
         )
 
     def reset_short_term(self) -> None:
-        """Clear short-term memory (shares the collection with long-term)."""
+        """Clear this adapter's memory.
+
+        NOTE: this adapter stores short-term and long-term in a single shared
+        collection (``store_short_term``/``search_short_term`` delegate to their
+        long-term counterparts and no ``memory_type`` tag is recorded), so
+        per-tier scoping is not possible here — resetting short-term also clears
+        long-term. Use a tier-aware backend (e.g. the Dakera adapter) if you need
+        to erase a single tier.
+        """
         self._reset_collection()
 
     def reset_long_term(self) -> None:
-        """Clear long-term memory (shares the collection with short-term)."""
+        """Clear this adapter's memory (shared with short-term; see
+        ``reset_short_term`` for the shared-collection caveat)."""
         self._reset_collection()
 
     def close(self):

@@ -709,8 +709,8 @@ def _defaults_has_any_values() -> bool:
             getattr(defaults, key, None) is not None
             for key in (
                 "model", "small_model", "base_url", "memory", "knowledge",
-                "planning", "reflection", "web", "output", "execution",
-                "caching", "autonomy",
+                "planning", "reflection", "guardrails", "web", "output",
+                "execution", "caching", "autonomy", "skills", "retry",
             )
         )
     return _defaults_has_values

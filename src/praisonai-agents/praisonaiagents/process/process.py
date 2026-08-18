@@ -938,11 +938,19 @@ Subtask: {st.name}
 
             # Unified condition routing (when/then_task/else_task) takes priority
             # over next_tasks when configured on the current task.
+            when_routing_exhausted = False
             if not next_task and current_task:
-                when_task = self._resolve_when_routing(current_task)
-                if when_task:
-                    next_task = when_task
-                    await self._set_workflow_finished(False)
+                if self._has_when_routing(current_task):
+                    when_task = self._resolve_when_routing(current_task)
+                    if when_task:
+                        next_task = when_task
+                        await self._set_workflow_finished(False)
+                    elif not current_task.next_tasks:
+                        # when-routing is authoritative: it resolved to no target
+                        # (e.g. the taken branch has no then/else_task) and there
+                        # is no next_tasks fallback, so this path ends cleanly
+                        # instead of picking an unrelated not-started task.
+                        when_routing_exhausted = True
 
             # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
@@ -960,7 +968,7 @@ Subtask: {st.name}
                     logging.debug(f"Following next_tasks to {next_task.name}")
 
             current_task = next_task
-            if not current_task:
+            if not current_task and not when_routing_exhausted:
                 current_task = self._find_next_not_started_task() # General fallback if no next task in workflow
 
 
@@ -1535,11 +1543,19 @@ Subtask: {st.name}
 
             # Unified condition routing (when/then_task/else_task) takes priority
             # over next_tasks when configured on the current task.
+            when_routing_exhausted = False
             if not next_task and current_task:
-                when_task = self._resolve_when_routing(current_task)
-                if when_task:
-                    next_task = when_task
-                    self._set_workflow_finished_sync(False)
+                if self._has_when_routing(current_task):
+                    when_task = self._resolve_when_routing(current_task)
+                    if when_task:
+                        next_task = when_task
+                        self._set_workflow_finished_sync(False)
+                    elif not current_task.next_tasks:
+                        # when-routing is authoritative: it resolved to no target
+                        # (e.g. the taken branch has no then/else_task) and there
+                        # is no next_tasks fallback, so this path ends cleanly
+                        # instead of picking an unrelated not-started task.
+                        when_routing_exhausted = True
 
             # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
@@ -1557,7 +1573,7 @@ Subtask: {st.name}
                     logging.debug(f"Following next_tasks to {next_task.name}")
 
             current_task = next_task
-            if not current_task:
+            if not current_task and not when_routing_exhausted:
                 current_task = self._find_next_not_started_task() # General fallback if no next task in workflow
 
 
