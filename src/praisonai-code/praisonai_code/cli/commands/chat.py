@@ -182,7 +182,19 @@ def chat_main(
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
-    
+
+    # First-run credential gate (issue #4024): route a keyless newcomer to the
+    # `setup` wizard (or a detected keyless local endpoint) instead of dead-
+    # ending on a raw provider error at LLM call time. Shared with `run`/`code`
+    # and the bare invocation so onboarding is entrypoint-independent. Headless
+    # paths (--json, piped stdin) fail fast with the actionable hint and a
+    # non-zero exit code rather than prompting.
+    import sys as _sys
+    from praisonai_code.llm.credentials import ensure_configured_or_onboard
+
+    _headless = bool(json_output) or not _sys.stdin.isatty()
+    model = ensure_configured_or_onboard(model=model, interactive=not _headless)
+
     # Handle profiling for single prompt mode
     if prompt and (profile or profile_deep):
         _run_profiled_chat(

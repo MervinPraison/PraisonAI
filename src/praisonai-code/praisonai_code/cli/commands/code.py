@@ -178,6 +178,19 @@ def code_main(
 
     # Enable code-specific environment
     os.environ["PRAISONAI_CODE_MODE"] = "true"
+
+    # First-run credential gate (issue #4024): route a keyless newcomer to the
+    # `setup` wizard (or a detected keyless local endpoint) instead of dead-
+    # ending on a raw provider error at LLM call time. Shared with `run`/`chat`
+    # and the bare invocation so onboarding is entrypoint-independent. Headless
+    # paths (-p/--print, piped stdin) fail fast with the actionable hint and a
+    # non-zero exit code rather than prompting. --revert exits above before we
+    # reach here, so it never triggers the gate.
+    import sys as _sys
+    from praisonai_code.llm.credentials import ensure_configured_or_onboard
+
+    _headless = bool(print_mode) or not _sys.stdin.isatty()
+    model = ensure_configured_or_onboard(model=model, interactive=not _headless)
     
     # Set approval mode based on --safe flag.
     # Safe-by-default: dangerous tools (shell exec, file writes) are gated

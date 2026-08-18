@@ -23,6 +23,19 @@ from praisonai_code.cli.commands import code as code_module
 from praisonai_code.cli.commands.code import app
 
 
+@pytest.fixture(autouse=True)
+def _satisfy_credential_gate(monkeypatch):
+    """Provide a dummy key so the first-run onboarding gate (#4024) passes.
+
+    These tests exercise the headless `-p` envelope/output mechanics with a
+    mocked Agent, not credential onboarding. Keyless `code -p` now fails fast
+    with a `Run: praisonai setup` hint (its own coverage lives in
+    ``test_onboarding_entrypoint_coverage.py``), so seed a credential here to
+    reach the Agent path under test.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy")
+
+
 def _param_names(app):
     """Collect the declared CLI option strings for a Typer callback app."""
     import inspect
