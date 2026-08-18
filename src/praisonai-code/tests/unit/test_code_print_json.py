@@ -384,6 +384,48 @@ def test_print_tools_merged_onto_headless_defaults(monkeypatch, tmp_path):
     assert len(captured["tools"]) >= 2
 
 
+def test_print_tools_resolution_failure_uses_envelope(monkeypatch, tmp_path):
+    """A failing `--tools` resolution is reported via the envelope, not a traceback.
+
+    Resolving ``--tools`` may import a user ``tools.py`` that fails at import
+    time. That failure must be captured by ``_run_print_code``'s error envelope
+    (``status=error`` + non-zero exit + machine-readable ``error``) so scripted
+    callers get the documented contract, never a raw CLI traceback.
+    """
+    import praisonaiagents
+
+    class _SpyAgent:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self, *_args, **_kwargs):  # pragma: no cover - never reached
+            return "should not run"
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SpyAgent, raising=False)
+    monkeypatch.setattr(
+        code_module,
+        "_get_headless_code_tools",
+        lambda *, groups, workspace: [lambda: None],
+    )
+
+    def _boom(value, verbose=False):
+        raise RuntimeError("bad tools.py: import failed")
+
+    from praisonai_code.cli.commands import run as run_module
+
+    monkeypatch.setattr(run_module, "_resolve_tools_arg", _boom)
+
+    result = CliRunner().invoke(
+        app,
+        ["-p", "--output", "json", "--workspace", str(tmp_path), "--tools", "bad.py", "go"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout.strip())
+    assert payload["status"] == "error"
+    assert "bad tools.py" in payload.get("error", "")
+
+
 def test_print_plan_sets_readonly_approval(monkeypatch, tmp_path):
     """`code -p --plan` wires a non-interactive read-only approval backend."""
     import praisonaiagents

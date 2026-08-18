@@ -226,9 +226,10 @@ def code_main(
         # (parity, not a re-implementation). Approvals stay non-interactive:
         # --plan / --agent scope is a *tightening* enforced via a non-interactive
         # backend, never an interactive prompt that would stall a scripted run.
-        from praisonai_code.cli.commands.run import _resolve_tools_arg
-        headless_tools = _resolve_tools_arg(tools, verbose=verbose)
-
+        # NOTE: --tools resolution (which may import a user tools.py) is deferred
+        # into _run_print_code so an import-time failure is reported through the
+        # same machine-readable JSON/text envelope as any run error, instead of
+        # escaping as a raw traceback to a scripted caller.
         headless_approval = None
         if agent_profile:
             permission_config = agent_profile.get("permissions")
@@ -258,7 +259,7 @@ def code_main(
             thinking_budget=thinking_budget,
             session_id=session_id,
             continue_session=continue_session,
-            extra_tools=headless_tools,
+            tools_arg=tools,
             agent_profile=agent_profile,
             approval=headless_approval,
         )
@@ -478,7 +479,7 @@ def _run_print_code(
     thinking_budget: Optional[int] = None,
     session_id: Optional[str] = None,
     continue_session: bool = False,
-    extra_tools: Optional[list] = None,
+    tools_arg: Optional[str] = None,
     agent_profile: Optional[dict] = None,
     approval: Optional[Any] = None,
 ):
@@ -490,10 +491,13 @@ def _run_print_code(
     is 0 on success and 1 on failure (empty result or raised error), giving
     scripts/CI/benchmarks a reliable signal — parity with ``run --output json``.
 
-    ``extra_tools`` are ``--tools``-resolved callables merged onto the default
-    coding toolset; ``agent_profile`` is a ``--agent`` definition (instructions/
-    llm/tools) that overlays the defaults; ``approval`` is the non-interactive
-    backend enforcing ``--plan``/profile permission scope. All three reuse the
+    ``tools_arg`` is the raw ``--tools`` string, resolved *inside* this run's
+    try/except (via the same ``_resolve_tools_arg``/``ToolResolver`` as the
+    interactive/run path) so an import-time failure in a user ``tools.py`` is
+    reported through the machine-readable envelope instead of escaping as a raw
+    traceback; ``agent_profile`` is a ``--agent`` definition (instructions/llm/
+    tools) that overlays the defaults; ``approval`` is the non-interactive
+    backend enforcing ``--plan``/profile permission scope. All reuse the
     interactive path's resolvers so headless == interactive for these flags.
     """
     import json
@@ -590,8 +594,14 @@ def _run_print_code(
         # onto the default coding toolset so a headless run can add a custom
         # tool (e.g. github) or run under a profile's toolset. Resolution reuses
         # the same ToolResolver as the interactive/run path (CLI == YAML ==
-        # Python). De-dupe by identity so a repeated default is not doubled.
-        additional_tools = list(extra_tools or [])
+        # Python) and runs inside this try so a failing user tools.py is
+        # surfaced via the envelope, not a raw traceback. De-dupe by identity so
+        # a repeated default is not doubled.
+        additional_tools = []
+        if tools_arg:
+            from praisonai_code.cli.commands.run import _resolve_tools_arg
+
+            additional_tools.extend(_resolve_tools_arg(tools_arg, verbose=verbose))
         if profile_tool_names:
             from praisonai_code.tool_resolver import ToolResolver
 
