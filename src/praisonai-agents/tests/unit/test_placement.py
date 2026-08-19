@@ -601,3 +601,25 @@ def test_resolver_aliases_are_accepted_at_construction(alias, resolves_to):
 
     agent = _agent(tools_run_on=alias)
     assert say_place(resolves_to) in repr(agent)
+
+
+def test_a_backend_holding_a_local_compute_object_is_not_overstated():
+    """A managed backend can carry a LocalCompute PROVIDER OBJECT, not a string.
+    Its provider_name is "local", and reading it through the sandbox vocabulary
+    let the alias table collapse it to "subprocess" -- describing the
+    unrestricted shell in the locked-down backend's words. A backend's compute
+    is a compute-registry provider, so it must be read as one."""
+    from praisonaiagents.agent.execution_location import _backend_places, say_place
+
+    class _LocalComputeObject:
+        provider_name = "local"
+
+    class _Backend:
+        _compute = _LocalComputeObject()
+
+    places = _backend_places(_Backend())
+    assert places["tools_run_on"] == say_place("local", via="compute")
+    assert "no policy" in places["tools_run_on"]
+    assert places["tools_run_on"] != say_place("subprocess"), (
+        "the unrestricted local shell must not borrow the subprocess backend's words"
+    )

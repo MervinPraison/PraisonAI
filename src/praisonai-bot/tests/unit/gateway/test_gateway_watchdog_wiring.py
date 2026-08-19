@@ -153,30 +153,44 @@ def _patch_handler(monkeypatch, captured):
     monkeypatch.setattr(features_gateway, "GatewayHandler", _StubHandler)
 
 
-def test_typer_start_forwards_watchdog_to_handler(monkeypatch):
+def _write_channelless_config(tmp_path):
+    # A channels-less config skips every start-time pre-flight (credential, tool,
+    # and verify-turn), so the command reaches the patched handler deterministically
+    # without a live LLM call. Passing it explicitly also avoids discovering the
+    # repo's ``src/praisonai-bot/gateway.yaml`` in the CI workdir (#4042/#4070).
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("agents:\n  personal:\n    instructions: hi\n    model: gpt-4o-mini\n")
+    return str(cfg)
+
+
+def test_typer_start_forwards_watchdog_to_handler(monkeypatch, tmp_path):
     from typer.testing import CliRunner
     from praisonai_bot.cli.commands import gateway as gateway_cmd
 
+    cfg = _write_channelless_config(tmp_path)
     captured = {}
     _patch_handler(monkeypatch, captured)
 
     result = CliRunner().invoke(
         gateway_cmd.app,
-        ["start", "--watchdog", "--watchdog-timeout", "20", "--no-preflight"],
+        ["start", "--config", cfg, "--watchdog", "--watchdog-timeout", "20", "--no-preflight"],
     )
     assert result.exit_code == 0
     assert captured.get("watchdog") is True
     assert captured.get("watchdog_timeout") == 20.0
 
 
-def test_typer_start_watchdog_unset_is_none(monkeypatch):
+def test_typer_start_watchdog_unset_is_none(monkeypatch, tmp_path):
     from typer.testing import CliRunner
     from praisonai_bot.cli.commands import gateway as gateway_cmd
 
+    cfg = _write_channelless_config(tmp_path)
     captured = {}
     _patch_handler(monkeypatch, captured)
 
-    result = CliRunner().invoke(gateway_cmd.app, ["start", "--no-preflight"])
+    result = CliRunner().invoke(
+        gateway_cmd.app, ["start", "--config", cfg, "--no-preflight"]
+    )
     assert result.exit_code == 0
     # Unset flag must not clobber a YAML ``gateway.watchdog.enabled: true``.
     assert captured.get("watchdog") is None

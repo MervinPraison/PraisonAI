@@ -72,11 +72,15 @@ def say_place(name: Any, *, via: str = "sandbox") -> str:
         return HERE
     if name is True:
         return _PLACE_WORDS["subprocess"]
-    if via == "compute" and isinstance(name, str) and name.lower() in _COMPUTE_ONLY_WORDS:
-        return _COMPUTE_ONLY_WORDS[name.lower()]
     if not isinstance(name, str):
-        # A configured provider instance: use its own declared name if it has one.
+        # A configured provider instance: use its own declared name if it has
+        # one. Normalise BEFORE the compute-only check, or a backend holding a
+        # LocalCompute object (provider_name="local") skips the branch and gets
+        # described in the subprocess backend's stronger words -- the exact
+        # overstatement this module exists to prevent.
         name = getattr(name, "provider_name", None) or type(name).__name__
+    if via == "compute" and name.lower() in _COMPUTE_ONLY_WORDS:
+        return _COMPUTE_ONLY_WORDS[name.lower()]
     key = str(name).lower()
     key = _ALIASES.get(key, key)
     return _PLACE_WORDS.get(key, str(name))
@@ -109,10 +113,13 @@ def _backend_places(backend: Any) -> Optional[Dict[str, str]]:
         where = say_place(provider)
         return {"thinks_on": where, "tools_run_on": where}
 
-    # Local/sandboxed agents keep the loop here and may push tools out.
+    # Local/sandboxed agents keep the loop here and may push tools out. A
+    # backend's compute object is a COMPUTE-registry provider, so it is read
+    # with the compute vocabulary: a LocalCompute here is the unrestricted
+    # shell, not the subprocess backend "local" collapses to under run_in=.
     compute = getattr(backend, "_compute", None) or getattr(backend, "compute", None)
     if compute is not None:
-        return {"thinks_on": HERE, "tools_run_on": say_place(compute)}
+        return {"thinks_on": HERE, "tools_run_on": say_place(compute, via="compute")}
     return {"thinks_on": HERE, "tools_run_on": HERE}
 
 
