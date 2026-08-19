@@ -662,6 +662,91 @@ def session_show(
     )
 
 
+@app.command("handoff")
+def session_handoff(
+    session_id: Optional[str] = typer.Argument(
+        None,
+        help="Session ID to hand off (default: most recent session)",
+    ),
+    copy: bool = typer.Option(
+        False,
+        "--copy",
+        help="Copy the continuation prompt to the clipboard (best-effort).",
+    ),
+):
+    """Print a self-contained continuation prompt assembled from durable state.
+
+    Unlike ``resume`` (which restores conversation) this is an additive,
+    read-only surface: it turns already-persisted goal/workflow/recap state into
+    the one artifact a fresh context needs — a generated continuation prompt —
+    without an LLM call.
+    """
+    output = get_output_controller()
+
+    # Default to the most recent session when no id is given, mirroring the
+    # "most recent session" default the issue asks for.
+    if session_id is None:
+        try:
+            from ..state.project_sessions import list_project_sessions
+
+            recent = list_project_sessions(limit=1)
+        except Exception:
+            recent = []
+        if not recent:
+            output.print_error(
+                "No sessions found",
+                remediation="Start a session first, or pass a session id",
+            )
+            raise typer.Exit(1)
+        session_id = recent[0].get("session_id") or recent[0].get("id")
+
+    from ..state.session_resolver import resolve_session
+
+    session = resolve_session(session_id)
+    if not session.found:
+        output.print_error(
+            f"Session not found: {session_id}",
+            remediation="Use 'praisonai session list' to see available sessions",
+        )
+        raise typer.Exit(1)
+
+    from praisonaiagents.compaction import build_recap
+    from praisonaiagents.session import build_handoff_prompt
+
+    chat_history = session.chat_history or []
+    recap_text = build_recap(chat_history) if chat_history else ""
+    goal_state = (session.metadata or {}).get("goal_state")
+    checkpoint = (session.metadata or {}).get("workflow_checkpoint")
+
+    prompt = build_handoff_prompt(
+        recap=recap_text,
+        goal_state=goal_state if isinstance(goal_state, dict) else None,
+        workflow_checkpoint=checkpoint if isinstance(checkpoint, dict) else None,
+    )
+
+    if output.is_json_mode:
+        output.print_json(
+            {
+                "session_id": session_id,
+                "handoff": prompt,
+                "has_goal": isinstance(goal_state, dict),
+                "has_checkpoint": isinstance(checkpoint, dict),
+            }
+        )
+        return
+
+    if copy:
+        try:
+            import pyperclip  # type: ignore
+
+            pyperclip.copy(prompt)
+            output.print_info("Continuation prompt copied to clipboard.")
+        except Exception:
+            output.print_info("Clipboard unavailable; printing prompt instead.")
+
+    output.print_panel(prompt, title="Session Handoff")
+
+
 def _shares_dir() -> Path:
     """Directory holding published transcripts (``~/.praisonai/shares``).
 

@@ -170,6 +170,12 @@ def __getattr__(name: str):
         _module_cache[name] = workspace_id
         return workspace_id
 
+    # Cross-context continuation prompt assembler (session handoff)
+    if name == "build_handoff_prompt":
+        from .handoff import build_handoff_prompt
+        _module_cache[name] = build_handoff_prompt
+        return build_handoff_prompt
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -201,4 +207,5 @@ __all__ = [
     "get_session_context",
     "clear_session_context",
     "workspace_id",
+    "build_handoff_prompt",
 ]

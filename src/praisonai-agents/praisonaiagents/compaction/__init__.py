@@ -37,6 +37,8 @@ __all__ = [
     "ToolResultPrunerProtocol",
     "MessageFormatterProtocol", 
     "SummaryBuilderProtocol",
+    # Default structured summary builder
+    "DefaultSummaryBuilder",
     # Read-only recap
     "build_recap",
     "MemoryFlushResult",
@@ -75,6 +77,10 @@ def __getattr__(name: str):
         from .protocols import SummaryBuilderProtocol
         return SummaryBuilderProtocol
     
+    if name == "DefaultSummaryBuilder":
+        from .summary_builder import DefaultSummaryBuilder
+        return DefaultSummaryBuilder
+
     if name == "build_recap":
         from .recap import build_recap
         return build_recap
