@@ -444,6 +444,47 @@ class YAMLConfig(BaseModel):
                         f"Available agents: {', '.join(sorted(agent_names))}"
                     )
         
+        def check_agent(name: Any, step_path: str):
+            """Flag an agent reference that isn't a defined agent."""
+            if isinstance(name, str) and name and name not in agent_names:
+                errors.append(
+                    f"Workflow {step_path} references undefined agent '{name}'. "
+                    f"Available agents: {', '.join(sorted(agent_names))}"
+                )
+
+        def validate_substep_payload(payload: Any, step_path: str):
+            """Walk a nested sub-step payload and validate ``agent:`` keys.
+
+            Used for ``parallel``/``loop``/``repeat``/``if`` bodies, whose
+            agent references only ever appear as an ``agent:`` key on a
+            sub-step dict. Non-agent scalars (e.g. ``loop: {over: topics}``,
+            where ``topics`` is a variable) are intentionally left alone.
+            """
+            if isinstance(payload, dict):
+                if 'agent' in payload:
+                    check_agent(payload.get('agent'), step_path)
+                for value in payload.values():
+                    validate_substep_payload(value, step_path)
+            elif isinstance(payload, list):
+                for item in payload:
+                    validate_substep_payload(item, step_path)
+
+        def validate_route_payload(payload: Any, step_path: str):
+            """Validate a ``route:`` mapping's agent references.
+
+            Runtime shape is ``{route_key: [agent_name, ...]}`` (scalars in
+            the value lists are agent names), so every leaf scalar is an
+            agent reference to check.
+            """
+            if isinstance(payload, dict):
+                for value in payload.values():
+                    validate_route_payload(value, step_path)
+            elif isinstance(payload, list):
+                for item in payload:
+                    validate_route_payload(item, step_path)
+            else:
+                check_agent(payload, step_path)
+
         # Validate workflow step agent references
         def validate_steps(steps: List[WorkflowStep], path: str = ""):
             for i, step in enumerate(steps or []):
@@ -451,11 +492,7 @@ class YAMLConfig(BaseModel):
 
                 # Validate agent references for both dialects (type: task and
                 # the bare ``agent:`` runtime form).
-                if step.agent and step.agent not in agent_names:
-                    errors.append(
-                        f"Workflow {step_path} references undefined agent '{step.agent}'. "
-                        f"Available agents: {', '.join(sorted(agent_names))}"
-                    )
+                check_agent(step.agent, step_path)
 
                 # Recursively check sub-steps
                 if step.steps:
@@ -465,7 +502,16 @@ class YAMLConfig(BaseModel):
                 if step.routes:
                     for route_name, route_steps in step.routes.items():
                         validate_steps(route_steps, f"{step_path}/route[{route_name}]/")
-        
+
+                # Check bare runtime-form payloads that hold agent references
+                # but aren't parsed into typed WorkflowStep objects.
+                validate_route_payload(step.route, f"{step_path}/route")
+                for key in ('parallel', 'loop', 'repeat'):
+                    validate_substep_payload(getattr(step, key, None), f"{step_path}/{key}")
+                # ``if`` is a Python keyword; it lands in pydantic extras.
+                if_payload = (step.__pydantic_extra__ or {}).get('if') if step.__pydantic_extra__ else None
+                validate_substep_payload(if_payload, f"{step_path}/if")
+
         if self.steps:
             validate_steps(self.steps)
         

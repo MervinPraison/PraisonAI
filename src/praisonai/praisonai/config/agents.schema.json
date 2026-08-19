@@ -16,9 +16,17 @@
           "type": "string"
         },
         "backstory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Agent backstory",
-          "title": "Backstory",
-          "type": "string"
+          "title": "Backstory"
         },
         "instructions": {
           "anyOf": [
@@ -948,12 +956,21 @@
       "type": "object"
     },
     "WorkflowStep": {
-      "description": "Configuration for a workflow step.",
+      "additionalProperties": true,
+      "description": "Configuration for a workflow step.\n\nAccepts both dialects the runtime understands:\n\n1. Explicit ``type``-based steps (``type: task|parallel|loop|route``), and\n2. The bare runtime forms the engine's ``YAMLWorkflowParser`` executes:\n   ``- agent:`` / ``route:`` / ``if:`` / ``loop:`` / ``repeat:`` /\n   ``parallel:`` / ``include:`` steps, where ``name``/``type`` are optional.\n\nA step is valid if it matches either dialect, so runnable example workflows\nno longer fail schema validation (and vice versa).",
       "properties": {
         "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Step name",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "type": {
           "anyOf": [
@@ -964,7 +981,7 @@
               "type": "null"
             }
           ],
-          "default": "task",
+          "default": null,
           "description": "Step type (task/route/parallel/loop)",
           "title": "Type"
         },
@@ -978,7 +995,7 @@
             }
           ],
           "default": null,
-          "description": "Agent for task steps",
+          "description": "Agent for task/agent steps",
           "title": "Agent"
         },
         "task": {
@@ -993,6 +1010,19 @@
           "default": null,
           "description": "Task description",
           "title": "Task"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Action prompt for agent steps",
+          "title": "Action"
         },
         "steps": {
           "anyOf": [
@@ -1055,11 +1085,63 @@
           "default": null,
           "description": "Loop count",
           "title": "Count"
+        },
+        "route": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Route step: mapping of key -> [agents]",
+          "title": "Route"
+        },
+        "loop": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Loop step configuration",
+          "title": "Loop"
+        },
+        "repeat": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repeat step configuration",
+          "title": "Repeat"
+        },
+        "parallel": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parallel step configuration",
+          "title": "Parallel"
+        },
+        "include": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Include another workflow file",
+          "title": "Include"
         }
       },
-      "required": [
-        "name"
-      ],
       "title": "WorkflowStep",
       "type": "object"
     }
