@@ -4218,6 +4218,21 @@ class WorkflowManager:
         # Resume from checkpoint if specified
         if resume:
             checkpoint_data = self._load_checkpoint(resume)
+            if not checkpoint_data:
+                # Fail closed: an explicit resume onto an absent/misspelled/
+                # deleted checkpoint must not silently re-run from step 1 and
+                # repeat already-completed side effects.
+                return {
+                    "error": {
+                        "success": False,
+                        "error": (
+                            f"checkpoint '{resume}' not found; refusing to resume. "
+                            "Run `workflow checkpoints` to list saved checkpoints, "
+                            "or re-run without --resume to start fresh."
+                        ),
+                        "results": [],
+                    }
+                }
             if checkpoint_data:
                 saved_fingerprint = checkpoint_data.get("definition_fingerprint")
                 if (
@@ -5008,11 +5023,17 @@ class WorkflowManager:
         """Stable content hash of a workflow's step definition.
 
         Normalised like ``managed/protocols.py`` hashes environments: it hashes
-        the ordered list of each step's identity (name / action / agent / config
-        keys), not the raw file bytes. Whitespace/comment-only edits therefore
+        the ordered list of each step's identity (name / action / agent / full
+        config), not the raw file bytes. Whitespace/comment-only edits therefore
         keep the same fingerprint, while adding, removing, reordering, or
-        changing a step's action produces a new one. Used to refuse a silent
-        resume onto a stale step index after the workflow file was edited.
+        changing a step's action or agent configuration produces a new one. Used
+        to refuse a silent resume onto a stale step index after the workflow file
+        was edited.
+
+        Config *values* (not just keys) are hashed so that semantic edits — e.g.
+        changing an agent's instructions, model, tools, condition, or routing —
+        also invalidate the checkpoint rather than silently combining a stale
+        step position with an edited definition.
         """
         import hashlib
         import json
@@ -5025,7 +5046,7 @@ class WorkflowManager:
                 "name": getattr(step, "name", None),
                 "action": getattr(step, "action", None),
                 "agent": agent_name,
-                "config_keys": sorted(str(k) for k in config.keys()),
+                "config": config,
             }
 
         payload = [_step_identity(s) for s in (workflow.steps or [])]

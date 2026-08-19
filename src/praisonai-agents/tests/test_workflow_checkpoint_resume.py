@@ -238,6 +238,48 @@ class TestDefinitionFingerprint:
             assert _ran(marker_dir, "3")
 
 
+class TestResumeFailsClosedOnMissingCheckpoint:
+    def test_resume_missing_checkpoint_does_not_run(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            _write_workflow(workspace, WORKFLOW_3_STEPS)
+            marker_dir = os.path.join(workspace, "markers")
+            os.makedirs(marker_dir)
+            manager = WorkflowManager(workspace_path=workspace)
+
+            # No checkpoint was ever saved; an explicit resume must fail closed
+            # rather than silently re-running every step from the beginning.
+            result = manager.execute(
+                "demo",
+                executor=_make_executor(marker_dir),
+                resume="does-not-exist",
+            )
+            assert result["success"] is False
+            assert "not found" in result["error"]
+            assert not _ran(marker_dir, "1")
+            assert not _ran(marker_dir, "2")
+            assert not _ran(marker_dir, "3")
+
+
+class TestConfigValueEditChangesFingerprint:
+    def test_agent_config_value_change_changes_fingerprint(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            _write_workflow(workspace, WORKFLOW_3_STEPS)
+            manager = WorkflowManager(workspace_path=workspace)
+            workflow = manager.get_workflow("demo")
+
+            fp_before = manager._definition_fingerprint(workflow)
+
+            # Same config keys, different value: a semantic edit that must
+            # invalidate the checkpoint (keys-only hashing would miss this).
+            workflow.steps[0].agent_config = {"instructions": "old"}
+            fp_key = manager._definition_fingerprint(workflow)
+            workflow.steps[0].agent_config = {"instructions": "new"}
+            fp_value = manager._definition_fingerprint(workflow)
+
+            assert fp_before != fp_key
+            assert fp_key != fp_value
+
+
 class TestCheckpointListingAndDelete:
     def test_list_and_delete_checkpoints(self):
         with tempfile.TemporaryDirectory() as workspace:
