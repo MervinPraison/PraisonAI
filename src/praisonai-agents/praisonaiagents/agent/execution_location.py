@@ -202,7 +202,8 @@ def explain(obj: Any, *, shared: bool = False) -> str:
     ):
         lines.append(
             "Note: a separate process is not a security boundary -- it can still "
-            "reach the network and read your files. Use docker or a cloud "
+            "reach the network and read your files, and its blocked-command "
+            "list can be worked around by ordinary shell syntax. Use docker or a cloud "
             "provider for untrusted code."
         )
 
