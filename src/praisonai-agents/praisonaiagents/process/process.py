@@ -74,6 +74,10 @@ class Process:
                     self._state_lock = asyncio.Lock()
         return self._state_lock
 
+    def _task_by_name(self, name):
+        """Return the task whose name matches, or None. First-match, mirrors prior inline lookup."""
+        return next((t for t in self.tasks.values() if t.name == name), None)
+
     def _create_llm_instance(self):
         """Create and return a configured LLM instance for manager tasks."""
         from ..llm import LLM
@@ -115,7 +119,7 @@ class Process:
             if current_task.previous_tasks:
                 # For validation tasks, typically validate the most recent previous task
                 prev_task_name = current_task.previous_tasks[-1]
-                validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+                validated_task = self._task_by_name(prev_task_name)
             elif current_task.context:
                 # If no previous_tasks, check context for the validated task
                 for ctx_task in reversed(current_task.context):
@@ -377,7 +381,7 @@ class Process:
         if current_task.retain_full_context:
             # Original behavior: include all previous tasks
             for prev_name in current_task.previous_tasks:
-                prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
+                prev_task = self._task_by_name(prev_name)
                 if prev_task and prev_task.result:
                     context += f"\n{prev_name}: {prev_task.result.raw}"
                     
@@ -391,7 +395,7 @@ class Process:
             if current_task.previous_tasks:
                 # Get the most recent previous task (last in the list)
                 prev_name = current_task.previous_tasks[-1]
-                prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
+                prev_task = self._task_by_name(prev_name)
                 if prev_task and prev_task.result:
                     context += f"\n{prev_name}: {prev_task.result.raw}"
                     
@@ -599,7 +603,7 @@ class Process:
         for task in self.tasks.values():
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
-                    next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                    next_task = self._task_by_name(next_task_name)
                     if next_task:
                         next_task.previous_tasks.append(task.name)
                         logging.debug(f"Added {task.name} as previous task for {next_task_name}")
@@ -770,7 +774,7 @@ Subtask: {st.name}
                             
                             target_tasks = current_task.condition.get(decision_str, []) if decision_str else []
                             task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
-                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            next_task = self._task_by_name(task_value)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
@@ -799,7 +803,7 @@ Subtask: {st.name}
                         logging.debug(f"No input file, marking {current_task.name} as completed")
                         if current_task.next_tasks:
                             next_task_name = current_task.next_tasks[0]
-                            next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                            next_task = self._task_by_name(next_task_name)
                             current_task = next_task
                         else:
                             current_task = None
@@ -870,7 +874,7 @@ Subtask: {st.name}
                         else:
                             # Find the target task by name
                             task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
-                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            next_task = self._task_by_name(task_value)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 
@@ -902,7 +906,7 @@ Subtask: {st.name}
             # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
                 next_task_name = current_task.next_tasks[0]
-                next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                next_task = self._task_by_name(next_task_name)
                 if next_task:
                     # Reset the next task to allow re-execution
                     next_task.status = "not started"
@@ -1166,7 +1170,7 @@ Provide a JSON with the structure:
         for task in self.tasks.values():
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
-                    next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                    next_task = self._task_by_name(next_task_name)
                     if next_task:
                         next_task.previous_tasks.append(task.name)
 
@@ -1361,7 +1365,7 @@ Subtask: {st.name}
                             
                             target_tasks = current_task.condition.get(decision_str, []) if decision_str else []
                             task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
-                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            next_task = self._task_by_name(task_value)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
@@ -1390,7 +1394,7 @@ Subtask: {st.name}
                         logging.debug(f"No input file, marking {current_task.name} as completed")
                         if current_task.next_tasks:
                             next_task_name = current_task.next_tasks[0]
-                            next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                            next_task = self._task_by_name(next_task_name)
                             current_task = next_task
                         else:
                             current_task = None
@@ -1459,7 +1463,7 @@ Subtask: {st.name}
                         else:
                             # Find the target task by name
                             task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
-                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            next_task = self._task_by_name(task_value)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 
@@ -1491,7 +1495,7 @@ Subtask: {st.name}
             # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
                 next_task_name = current_task.next_tasks[0]
-                next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                next_task = self._task_by_name(next_task_name)
                 if next_task:
                     # Reset the next task to allow re-execution
                     next_task.status = "not started"
