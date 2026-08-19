@@ -3473,7 +3473,9 @@ class WorkflowManager:
     
     from ..paths import DEFAULT_DIR_NAME as _DIR_NAME
     WORKFLOWS_DIR = f"{_DIR_NAME}/workflows"
-    SUPPORTED_EXTENSIONS = [".md", ".yaml", ".yml"]
+    # Only markdown is parsed by this manager; YAML workflows are handled by
+    # YAMLWorkflowParser. A discovered YAML file fails loudly in _load_workflow.
+    SUPPORTED_EXTENSIONS = [".md"]
     
     def __init__(
         self,
@@ -3785,6 +3787,17 @@ class WorkflowManager:
     
     def _load_workflow(self, file_path: Path) -> Optional[Workflow]:
         """Load a workflow from a file."""
+        # The markdown parser below cannot read YAML workflows; loading a
+        # ``.yaml``/``.yml`` here would silently produce zero steps. Fail loudly
+        # so the mismatch is visible instead of running an empty workflow.
+        if file_path.suffix.lower() in (".yaml", ".yml"):
+            logger.error(
+                "Workflow file '%s' is YAML, but WorkflowManager only parses "
+                "markdown workflows. Use YAMLWorkflowParser / 'praisonai workflow "
+                "run' for YAML workflows.",
+                file_path,
+            )
+            return None
         try:
             content = file_path.read_text(encoding="utf-8")
             frontmatter, body = self._parse_frontmatter(content)
@@ -4265,8 +4278,9 @@ class WorkflowManager:
             step = workflow.steps[current_step_idx]
             i = current_step_idx
 
-            # Check condition
-            if step.condition:
+            # Check condition (only string conditions are evaluable here; a
+            # dict condition is a routing table handled by branch logic below)
+            if step.condition and isinstance(step.condition, str):
                 condition = self._substitute_variables(step.condition, all_variables)
                 # Simple condition evaluation (could be enhanced)
                 if condition.lower() in ("false", "no", "skip", "0"):
@@ -4388,6 +4402,17 @@ class WorkflowManager:
             # Use getattr with defaults for workflow-specific attributes that may not exist on Task
             branch_condition = getattr(step, 'branch_condition', None)
             next_steps = getattr(step, 'next_steps', None)
+
+            # Unified condition syntax: Task(when=..., then_task=..., else_task=...)
+            # redirects execution by step name based on the evaluated condition.
+            if getattr(step, 'when', None) is not None:
+                when_context = dict(all_variables)
+                when_context['previous_output'] = step_result.get("output")
+                target = step.get_next_task(when_context)
+                if target and target in step_lookup:
+                    current_step_idx, _ = step_lookup[target]
+                    continue
+
             if branch_condition and step_result["output"]:
                 # Evaluate branch condition based on output
                 output_lower = str(step_result["output"]).lower()

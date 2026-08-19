@@ -589,8 +589,20 @@ class JobWorkflowExecutor:
         criteria = judge_config.get("criteria", "Output is high quality")
         threshold = float(judge_config.get("threshold", 7.0))
         model = judge_config.get("model", "gpt-4o-mini")
-        on_fail = judge_config.get("on_fail", "stop")  # stop | warn | retry
-        
+        on_fail = judge_config.get("on_fail", "stop")  # stop | warn
+
+        # 'retry' would require re-running the upstream gated step, which the
+        # judge step does not control. Reject it clearly rather than silently
+        # behaving like 'stop'.
+        if on_fail not in ("stop", "warn"):
+            return {
+                "ok": False,
+                "error": (
+                    f"Unsupported on_fail value '{on_fail}' for judge step. "
+                    "Supported values: 'stop', 'warn'."
+                ),
+            }
+
         try:
             judge = Judge(criteria=criteria, model=model)
             result = judge.evaluate(input_text)

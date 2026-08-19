@@ -52,6 +52,18 @@ def workflow_list():
     run_wrapper_command(argv, feature="workflow")
 
 
+@app.command("validate")
+def workflow_validate(
+    file: str = typer.Argument(..., help="Workflow file path"),
+):
+    """Validate a workflow file."""
+    from praisonai_code._wrapper_bridge import run_wrapper_command
+
+    argv = ['workflow', 'validate', file]
+
+    run_wrapper_command(argv, feature="workflow")
+
+
 @app.command("create")
 def workflow_create(
     name: str = typer.Argument(..., help="Workflow name"),
