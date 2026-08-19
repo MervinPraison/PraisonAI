@@ -267,6 +267,26 @@ def test_whatsapp_standalone_send(monkeypatch):
     assert headers["Authorization"] == "Bearer WATOKEN"
 
 
+def test_whatsapp_thread_id_omits_reply_context(monkeypatch):
+    # A scheduler thread_id is NOT a WhatsApp message id, so it must never be
+    # mapped to context.message_id (which the Cloud API would reject as invalid).
+    captured: list = []
+
+    def fake_post(url, payload, headers=None):
+        captured.append(payload)
+
+    monkeypatch.setattr(ss, "_post_json", fake_post)
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "WATOKEN")
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "PN123")
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="whatsapp:15551234:threadABC")))
+
+    assert result.delivered is True
+    assert captured, "expected a whatsapp send"
+    assert "context" not in captured[0]
+
+
 def test_whatsapp_missing_token_records_delivery_error(monkeypatch):
     monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN", raising=False)
 
@@ -327,6 +347,30 @@ def test_transient_failure_is_retried_then_succeeds(monkeypatch):
     assert result.delivered is True
     assert result.delivery_error is None
     assert len(calls) == 2  # first attempt failed, retry succeeded
+
+
+def test_http_date_retry_after_is_honoured():
+    # A 429 with an HTTP-date Retry-After must not be discarded: the shared
+    # server_retry_after helper parses the date form off the error's headers.
+    from email.utils import format_datetime
+    from datetime import datetime, timezone, timedelta
+
+    from praisonai_bot.bots._resilience import server_retry_after
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=45)
+    err = ss._HttpSendError(429, "too many requests", format_datetime(future))
+
+    wait = server_retry_after(err)
+    assert wait is not None
+    # Allow scheduling slack; the mandated wait is ~45s, never zero/None.
+    assert 30.0 <= wait <= 45.0
+
+
+def test_integer_retry_after_is_honoured():
+    from praisonai_bot.bots._resilience import server_retry_after
+
+    err = ss._HttpSendError(429, "slow down", "30")
+    assert server_retry_after(err) == 30.0
 
 
 def test_permanent_failure_is_not_retried(monkeypatch):

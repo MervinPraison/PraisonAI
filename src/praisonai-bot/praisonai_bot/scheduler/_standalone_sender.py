@@ -107,17 +107,22 @@ def _resolve_chat_id(
 class _HttpSendError(RuntimeError):
     """HTTP send failure that carries the status code.
 
-    Exposing ``status``/``retry_after`` lets the shared ``bots._resilience``
+    Exposing ``status``/``headers`` lets the shared ``bots._resilience``
     classifiers recognise a transient 5xx/429 (and honour a ``Retry-After``)
     even when the response body has no recognisable text, so the retry decision
-    matches the interactive path exactly.
+    matches the interactive path exactly. The raw ``Retry-After`` header is
+    preserved verbatim (rather than pre-parsed to a float) so ``server_retry_after``
+    honours both integer-seconds *and* HTTP-date forms via its own parser — a
+    plain ``float(raw)`` here would silently discard an HTTP-date delay.
     """
 
-    def __init__(self, status: int, body: str = "", retry_after: Optional[float] = None):
+    def __init__(self, status: int, body: str = "", retry_after: Optional[str] = None):
         super().__init__(f"HTTP {status}: {body}")
         self.status = status
+        # Mirror the response-header shape ``server_retry_after`` reads from, so
+        # it can parse an integer-seconds *or* HTTP-date ``Retry-After`` itself.
         if retry_after is not None:
-            self.retry_after = retry_after
+            self.headers = {"Retry-After": retry_after}
 
 
 def _post_json(url: str, payload: dict, *, headers: Optional[dict] = None) -> None:
@@ -139,13 +144,15 @@ def _post_json(url: str, payload: dict, *, headers: Optional[dict] = None) -> No
                 raise _HttpSendError(status, body)
     except urllib.error.HTTPError as e:  # 4xx/5xx
         body = e.read().decode("utf-8", "replace")[:500] if e.fp else ""
-        retry_after: Optional[float] = None
+        # Preserve the raw ``Retry-After`` verbatim so ``server_retry_after``
+        # honours both integer-seconds and HTTP-date forms; parsing to a float
+        # here would silently drop an HTTP-date delay (429 under throttling).
+        raw = None
         try:
             raw = e.headers.get("Retry-After") if e.headers else None
-            if raw is not None:
-                retry_after = float(raw)
-        except (TypeError, ValueError):
-            retry_after = None
+        except Exception:  # pragma: no cover - defensive: headers always dict-like
+            raw = None
+        retry_after = str(raw) if raw is not None else None
         raise _HttpSendError(e.code, body, retry_after) from e
 
 
@@ -326,8 +333,13 @@ async def _whatsapp_send(target: "DeliveryTarget", text: str) -> None:
             "type": "text",
             "text": {"body": part},
         }
-        if target.thread_id:
-            payload["context"] = {"message_id": str(target.thread_id)}
+        # NOTE: a scheduler ``thread_id`` is a generic conversation identifier,
+        # NOT a WhatsApp message id. WhatsApp's ``context.message_id`` requires a
+        # real inbound message id to quote-reply; feeding it a generic thread id
+        # yields an invalid id the Cloud API rejects (a permanent 4xx). The live
+        # adapter (bots/whatsapp.py) only sets ``context`` from an explicit
+        # ``reply_to`` message id, never from ``thread_id`` — so we mirror that
+        # and simply omit the context here.
         _post_json(url, payload, headers=headers)
 
     for part in _chunk(text, _WHATSAPP_LIMIT):
