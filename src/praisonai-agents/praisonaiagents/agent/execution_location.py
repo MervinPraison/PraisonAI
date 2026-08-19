@@ -43,18 +43,37 @@ HERE = "this machine"
 # a place that never executes.
 _ALIASES = {"native": "sandlock", "local": "subprocess"}
 
+# ...but only for the SANDBOX registry. "local" resolves to two different
+# backends depending on which parameter carried it:
+#   run_in="local"        -> SandboxManager collapses it to subprocess:
+#                            scrubbed environment, blocked commands and paths
+#   tools_run_on="local"  -> the wrapper's LocalCompute: a plain shell in the
+#                            current directory, full environment inherited,
+#                            no security policy at all
+# Describing the second in the first's words overstates it, which is the exact
+# failure this module exists to prevent. One word, two backends -- so the
+# phrase has to depend on where the word came from.
+_COMPUTE_ONLY_WORDS = {"local": "a plain shell on this machine (no policy applied)"}
+
 # Tiers that separate a process but do NOT contain it. Verified: under the
 # subprocess backend, outbound network still works and ~/.ssh is readable even
 # though SecurityPolicy declares them blocked.
 _NOT_A_BOUNDARY = {"subprocess", "local", "native"}
 
 
-def say_place(name: Any) -> str:
-    """Turn a provider name into a phrase a non-developer can read."""
+def say_place(name: Any, *, via: str = "sandbox") -> str:
+    """Turn a place name into a phrase a non-developer can read.
+
+    ``via`` says which registry resolved the name -- ``"compute"`` for
+    ``tools_run_on=``, ``"sandbox"`` for ``run_in=``. It only matters for names
+    that mean different backends in each (see ``_COMPUTE_ONLY_WORDS``).
+    """
     if name is None:
         return HERE
     if name is True:
         return _PLACE_WORDS["subprocess"]
+    if via == "compute" and isinstance(name, str) and name.lower() in _COMPUTE_ONLY_WORDS:
+        return _COMPUTE_ONLY_WORDS[name.lower()]
     if not isinstance(name, str):
         # A configured provider instance: use its own declared name if it has one.
         name = getattr(name, "provider_name", None) or type(name).__name__
@@ -96,7 +115,7 @@ def describe(obj: Any, *, shared: bool = False) -> Dict[str, str]:
 
         where_tools = getattr(obj, "tools_run_on", None)
         if where_tools is not None:
-            where = say_place(where_tools)
+            where = say_place(where_tools, via="compute")
             places["tools_run_on"] = f"{where} (shared)" if shared else where
 
         # run_on= puts the WHOLE agent on a managed runtime, so it moves the

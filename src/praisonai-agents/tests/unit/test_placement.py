@@ -542,3 +542,34 @@ def test_a_clone_does_not_inherit_the_source_agents_sandbox():
     finally:
         close_tools_sandbox(source)
         close_tools_sandbox(clone)
+
+
+# ── one word, two backends ───────────────────────────────────────────────────
+def test_local_is_described_by_the_backend_it_actually_gets():
+    """"local" resolves to two different things depending on the parameter:
+    run_in="local" is collapsed to the subprocess backend (scrubbed environment,
+    blocked commands), while tools_run_on="local" is the wrapper's LocalCompute
+    -- a plain shell with the full environment and no policy at all. Describing
+    the weaker one in the stronger one's words overstates it."""
+    from praisonaiagents.agent.execution_location import say_place
+
+    assert say_place("local") != say_place("local", via="compute")
+    assert "no policy" in say_place("local", via="compute")
+    assert say_place("local") == say_place("subprocess"), (
+        "run_in='local' really is the subprocess backend"
+    )
+
+
+def test_a_local_place_still_warns_that_it_is_not_a_boundary():
+    text = _agent(tools_run_on="local").where_does_it_run()
+    assert "not a security boundary" in text
+
+
+@pytest.mark.parametrize("alias,resolves_to", [("native", "sandlock")])
+def test_resolver_aliases_are_accepted_at_construction(alias, resolves_to):
+    """Validation ran before alias resolution, so a spelling the resolver
+    handles happily was rejected as "not a known place"."""
+    from praisonaiagents.agent.execution_location import say_place
+
+    agent = _agent(tools_run_on=alias)
+    assert say_place(resolves_to) in repr(agent)
