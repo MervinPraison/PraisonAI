@@ -1,8 +1,8 @@
 """
 Sandboxed Agent Backend — local agent loop with OPTIONAL tool sandboxing.
 
-Tools are sandboxed when compute= is provided (E2B, Modal, etc.).
-Without compute=, tools run locally. Agent loop always stays local.
+Tools are sandboxed when tools_run_on= is provided (E2B, Modal, etc.).
+Without it, tools run locally. Agent loop always stays local.
 
 Renamed from "LocalManagedAgent" to accurately communicate that only TOOLS
 run in sandbox — the agent loop (LLM calls, event handling, memory) stays local.
@@ -20,7 +20,7 @@ Usage::
     from praisonaiagents import Agent
 
     sandboxed = SandboxedAgent(
-        compute="e2b",  # Tools run in E2B, loop stays local
+        tools_run_on="e2b",  # Tools run in E2B, loop stays local
         config=SandboxedAgentConfig(
             model="gpt-4o",
             system="You are a coding assistant.",

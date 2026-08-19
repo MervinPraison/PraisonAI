@@ -150,6 +150,8 @@ class ServerRegistry:
     # Class-level lock for thread-safe singleton creation
     _instance_lock = threading.Lock()
     
+
+
     @staticmethod
     def get_default_instance():
         """Get default global registry for backward compatibility."""
@@ -512,6 +514,28 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         logging.debug(f"Generated tool definition: {tool_def}")
         return tool_def
 
+    @staticmethod
+    def _hosted_backend_for(provider: str):
+        """Build the managed backend that ``run_on=<provider>`` is shorthand for.
+
+        ``run_on="anthropic"`` and ``backend=HostedAgent(provider="anthropic")``
+        place the agent identically; the first is the readable spelling for the
+        common case, the second is what you reach for when the runtime needs
+        configuring (model, system prompt, its own tools).
+        """
+        try:
+            from praisonai.integrations import HostedAgent
+        except ImportError as exc:
+            raise ImportError(
+                f"Agent(run_on={provider!r}) runs the whole agent on a managed "
+                f"runtime, which ships in the wrapper package.\n"
+                f"  pip install praisonai\n"
+                f"To keep thinking on this machine and move only the tools, use "
+                f"tools_run_on= instead -- that needs no extra install for "
+                f"local places."
+            ) from exc
+        return HostedAgent(provider=provider)
+
     def __init__(
         self,
         # Core identity
@@ -568,6 +592,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
+        run_on: Optional[str] = None,  # Run the WHOLE agent on a managed runtime, e.g. "anthropic"
+        tools_run_on: Optional[Any] = None,  # Run only this agent's TOOLS elsewhere, e.g. "docker"
         runtime: Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']] = None,  # Model-scoped runtime configuration with capability validation
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
@@ -758,6 +784,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         rate_limiter = legacy_kwargs.get("rate_limiter", _legacy_defaults["rate_limiter"])
         verification_hooks = legacy_kwargs.get("verification_hooks", _legacy_defaults["verification_hooks"])
         cli_backend = legacy_kwargs.get("cli_backend", _legacy_defaults["cli_backend"])
+
+        # ── where does this agent run? ───────────────────────────────────────
+        # Resolved before anything else is built so a contradiction fails at the
+        # call site, with the parameter name the user actually wanted, instead
+        # of surfacing later as tools mysteriously running on the wrong machine.
+        from .placement import resolve_placement
+
+        _placement = resolve_placement(
+            "Agent", run_on=run_on, tools_run_on=tools_run_on, backend=backend
+        )
+        if _placement.whole is not None:
+            backend = self._hosted_backend_for(_placement.whole)
+        self.tools_run_on = _placement.tools
+        self._tools_sandbox = None
 
         # Add check at start if memory is requested.
         # Skip the probe for values that resolve to the zero-dependency FileMemory
@@ -2720,6 +2760,13 @@ Your Goal: {self.goal}
             # underscore name (never assigned) made every clone silently drop
             # its sandbox and run unisolated.
             'sandbox': getattr(self, 'sandbox_config', None),
+
+            # Where the tools run must survive cloning for the same reason the
+            # sandbox must: a gateway-channel clone that quietly drops it runs
+            # every tool on the host while its repr still claims otherwise.
+            # The clone gets its own sandbox instance -- placement is a choice,
+            # not a live connection to share.
+            'tools_run_on': getattr(self, 'tools_run_on', None),
         }
         
         # Handle deprecated parameters for backward compatibility

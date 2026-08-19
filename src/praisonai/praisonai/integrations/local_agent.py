@@ -14,7 +14,7 @@ Usage::
 
     # Local loop, tools optional-sandboxed in cloud compute
     agent = Agent(name="b", backend=LocalAgent(
-        compute="e2b",                           # or "modal", "flyio", "daytona", "docker", None
+        tools_run_on="e2b",                      # or "modal", "flyio", "daytona", "docker", None
         config=LocalAgentConfig(
             model="gpt-4o-mini",                 # LLM choice here — not provider=
             system="You are a concise assistant.",
@@ -29,7 +29,7 @@ Usage::
 Architecture:
     - Agent loop runs locally in the current process
     - LLM selection via model= (supports litellm routing like "gemini/...", "ollama/...")
-    - Optional compute= for cloud tool sandboxing (E2B, Modal, Docker, etc.)
+    - Optional tools_run_on= for cloud tool sandboxing (E2B, Modal, Docker, etc.)
     - No provider= overload — clean separation of concerns
 """
 
@@ -64,8 +64,33 @@ class LocalAgent(LocalManagedAgent):
         self,
         compute: Optional[Any] = None,
         config: Optional[Any] = None,
+        tools_run_on: Optional[Any] = None,
         **kwargs,
     ):
+        # `compute=` and `tools_run_on=` name the same thing: where this agent's
+        # shell/file tools run. `tools_run_on=` is the spelling used by Agent,
+        # AgentFlow and AgentTeam, so one word now covers every class. Kept as a
+        # FutureWarning rather than removed because `compute=` is the shipped
+        # public name here -- and FutureWarning, not DeprecationWarning, because
+        # PEP 565 hides the latter from the end users who actually wrote this
+        # call (see praisonaiagents/utils/deprecation.py for the same choice).
+        if compute is not None and tools_run_on is not None:
+            raise TypeError(
+                f"LocalAgent(compute={compute!r}, tools_run_on={tools_run_on!r}) "
+                f"names the same thing twice -- where this agent's tools run. "
+                f"Pass tools_run_on= only."
+            )
+        if compute is not None:
+            warnings.warn(
+                f"LocalAgent(compute={compute!r}) is now "
+                f"LocalAgent(tools_run_on={compute!r}). Same behaviour, and the "
+                f"same word Agent, AgentFlow and AgentTeam already use for "
+                f"'where the tools run'. compute= keeps working for now.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        elif tools_run_on is not None:
+            compute = tools_run_on
         # Reject the provider= overload pattern to force clean usage
         provider_for_routing = "local"  # Default provider for model routing
         if 'provider' in kwargs:

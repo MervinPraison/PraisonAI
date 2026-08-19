@@ -36,3 +36,21 @@ def build_argv(command: Union[str, List[str]], shell: bool = False) -> List[str]
         else:
             # Direct argv execution - no shell
             return cmd_list
+
+
+def policy_scan_parts(cmd: list) -> list:
+    """Expand a `sh -c "..."` argv into the tokens a policy check should see.
+
+    With shell=True an argv is ``["sh", "-c", "cat /etc/passwd"]``. A path scan
+    that iterates argv sees one opaque string starting with "cat", so
+    ``blocked_paths`` silently stops matching. Splitting the payload back out
+    restores the check without changing how the command runs.
+    """
+    parts = list(cmd)
+    for i, token in enumerate(cmd):
+        if token == "-c" and i + 1 < len(cmd):
+            try:
+                parts.extend(shlex.split(cmd[i + 1]))
+            except ValueError:
+                parts.extend(cmd[i + 1].split())
+    return parts

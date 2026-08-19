@@ -134,9 +134,14 @@ def test_inert_fields_are_documented_as_inert():
     from praisonaiagents.config import feature_configs
 
     assert "NOT IMPLEMENTED" in (autonomy.AutonomyConfig.__doc__ or "")
+
+    # code_sandbox_mode is gone rather than labelled. It defaulted to
+    # "sandbox" while no execution path read it, so its own default told
+    # every reader they had isolation they did not have. An inert field can
+    # be documented; a field whose default misstates a security property
+    # cannot. Real isolation is execute_code(run_in=...) or tools_run_on=.
     src = inspect.getsource(feature_configs.ExecutionConfig)
-    idx = src.find("code_sandbox_mode")
-    assert "NOT IMPLEMENTED" in src[max(0, idx - 400):idx]
+    assert "code_sandbox_mode" not in src
 
 
 # ── real agentic run: sandbox= adds no model-visible execution tools ─────────

@@ -79,9 +79,42 @@ class SandboxManager:
                 f"Unknown sandbox type: {sandbox_type!r}. {e}"
             ) from e
 
-        kwargs: Dict[str, Any] = {"config": self.config}
-        if sandbox_type == "docker":
+        # Not every backend takes a SandboxConfig: SSHSandbox and ModalSandbox
+        # carry their own connection details instead, so passing config= to them
+        # raised "unexpected keyword argument 'config'" before the sandbox was
+        # ever built. Ask the constructor what it accepts.
+        import inspect
+
+        params = inspect.signature(sandbox_cls.__init__).parameters
+        takes = lambda name: name in params or any(
+            p.kind is p.VAR_KEYWORD for p in params.values()
+        )
+
+        kwargs: Dict[str, Any] = {}
+        if takes("config"):
+            kwargs["config"] = self.config
+        if sandbox_type == "docker" and takes("image"):
             kwargs["image"] = self.config.image
+
+        # A required argument we cannot supply from a config object -- SSH needs
+        # a host. Say so instead of raising TypeError from deep inside.
+        missing = [
+            name for name, prm in params.items()
+            if name != "self"
+            and prm.default is prm.empty
+            and prm.kind not in (prm.VAR_POSITIONAL, prm.VAR_KEYWORD)
+            and name not in kwargs
+        ]
+        if missing:
+            raise TypeError(
+                f"The {sandbox_type!r} sandbox needs {', '.join(missing)}, which a "
+                f"SandboxConfig cannot carry. Build it directly and pass the "
+                f"object:\n"
+                f"    from praisonai_sandbox.{sandbox_type} import "
+                f"{sandbox_cls.__name__}\n"
+                f"    sandbox = {sandbox_cls.__name__}("
+                f"{'=..., '.join(missing)}=...)"
+            )
 
         sandbox = sandbox_cls(**kwargs)
 

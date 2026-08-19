@@ -120,6 +120,8 @@ class SharedCompute:
         """Tear down the instance and restore any agents we patched."""
         for agent, original_tools, original_backstory in self._patched:
             try:
+                if getattr(agent, "_tools_sandbox", None) is self:
+                    agent._tools_sandbox = None
                 agent.tools = original_tools
                 agent.backstory = original_backstory
                 cache = getattr(agent, "_system_prompt_cache", None)
@@ -205,17 +207,46 @@ class SharedCompute:
 
         return [execute_command, read_file, write_file, list_files]
 
-    def attach(self, agents: List[Any]) -> None:
+    def attach(self, agents: List[Any], *, override_declared: bool = False) -> None:
         """Give each agent the shared tools and tell it they exist.
 
         Agents that already carry their own managed ``backend`` are skipped --
         they have deliberately been pointed at their own runtime.
+
+        ``override_declared`` is set only by the agent's *own* placement, which
+        is this sandbox's whole reason for existing. A run-level sandbox leaves
+        it False so an agent that named its own place keeps it.
         """
         tools = self.build_tools()
         by_name = {t.__name__: t for t in tools}
 
         for agent in agents:
             if agent is None or getattr(agent, "backend", None) is not None:
+                continue
+            # An agent that named its own place, or already has a sandbox, must
+            # not be attached again. A second attach appends CAPABILITY_PROMPT
+            # twice and, if the two teardowns do not happen in LIFO order,
+            # permanently restores the wrong tools: the agent is left holding
+            # four tools bound to a shut-down instance.
+            #
+            # `tools_run_on` is checked as well as `_tools_sandbox` because of
+            # ordering: a flow attaches at the start of the run, before the
+            # agent's first chat() has created its own sandbox. Checking only
+            # the live sandbox would attach here and let the agent attach again
+            # on its first turn. An explicit per-agent choice outranks the run's
+            # default, so the flow leaves it alone.
+            declared_own = (
+                not override_declared
+                and getattr(agent, "tools_run_on", None) is not None
+            )
+            if getattr(agent, "_tools_sandbox", None) is not None or declared_own:
+                logger.debug(
+                    "[shared_compute] %r already runs its tools on %s; leaving it alone",
+                    getattr(agent, "name", agent),
+                    getattr(agent, "tools_run_on", "its own sandbox"),
+                )
+                continue
+            if any(agent is patched for patched, _, _ in self._patched):
                 continue
 
             original_tools = list(getattr(agent, "tools", None) or [])
@@ -248,4 +279,10 @@ class SharedCompute:
                 logger.warning("[shared_compute] could not attach tools to %r: %s", agent, exc)
                 continue
 
+            # Mark where this agent's tools now run, so a nested attach (or a
+            # later ensure_tools_placed) can see it is already bound.
+            try:
+                agent._tools_sandbox = self
+            except Exception:  # pragma: no cover - exotic agent objects
+                pass
             self._patched.append((agent, original_tools, original_backstory))

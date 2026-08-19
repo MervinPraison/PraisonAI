@@ -632,10 +632,17 @@ class AgentFlow:
     # REMOTE EXECUTION
     # ============================================================
     # Union[str, ComputeProviderProtocol] - where each step's shell/file tools
-    # run: "docker", "e2b", "modal", "daytona", "flyio", "tenki", "local".
-    # Every step shares ONE sandbox and /workspace, so a file written by one
-    # step is visible to later steps. Orchestration stays local. Pass a
-    # configured provider instance instead of a name to customise resources.
+    # run: "docker", "e2b", "modal", "daytona", "flyio", "tenki", "local",
+    # "subprocess", "sandlock", "ssh", "novita".
+    # Every step shares ONE sandbox and one working directory, so a file written
+    # by one step is visible to later steps. Orchestration -- routing, parallel,
+    # repeat -- stays local, and so does the thinking. Pass a configured
+    # provider instance instead of a name to customise resources.
+    tools_run_on: Optional[Any] = None
+
+    # Accepted only to fail with a useful message: on an Agent, run_on= moves
+    # the whole agent to a managed runtime, so honouring it here as a synonym
+    # for tools_run_on= would make one word mean two things.
     run_on: Optional[Any] = None
 
     # ============================================================
@@ -692,6 +699,14 @@ class AgentFlow:
 
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
+        from ..agent.placement import resolve_placement
+
+        resolve_placement(
+            "AgentFlow",
+            run_on=self.run_on,
+            tools_run_on=self.tools_run_on,
+            supports_run_on=False,
+        )
         from .workflow_configs import (
             resolve_output_config, resolve_planning_config,
             resolve_memory_config, resolve_hooks_config,
@@ -1115,7 +1130,7 @@ class AgentFlow:
                 "separate Workflow instance per concurrent run."
             )
         try:
-            if self.run_on is None:
+            if self.tools_run_on is None:
                 return self._run_impl(input, llm, verbose, stream)
             # One sandbox for the whole run; torn down even if a step raises.
             with self._shared_compute() as shared:
@@ -1152,10 +1167,10 @@ class AgentFlow:
         return explain(self, shared=True)
 
     def _shared_compute(self):
-        """Build the SharedCompute for this run (see the ``run_on=`` field)."""
+        """Build the SharedCompute for this run (see ``tools_run_on=``)."""
         from ..managed.shared_compute import SharedCompute
 
-        return SharedCompute(self.run_on)
+        return SharedCompute(self.tools_run_on)
 
     def _collect_agents(self) -> List[Any]:
         """Walk steps (including nested route/parallel/loop/repeat/if) for Agents.

@@ -2901,6 +2901,14 @@ Your Goal: {self.goal}"""
                         'required' forces the LLM to call a tool before responding.
             ...other args...
         """
+        # Tools go to their sandbox before the first model call, once per
+        # agent. Placed on chat/achat/_start_stream rather than run/start
+        # because AgentTeam and AgentFlow call these three directly -- an
+        # agent used inside a team would otherwise run its tools locally.
+        if getattr(self, 'tools_run_on', None) is not None:
+            from .tools_placement import ensure_tools_placed
+            ensure_tools_placed(self)
+
         # Slash-command invocation: /skill-name [args] renders the skill
         # body before any backend/LLM call.
         prompt = self._resolve_skill_invocation(prompt)
@@ -3586,6 +3594,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             attachments: Optional list of image/file paths that are ephemeral
                         (used for THIS turn only, NEVER stored in history).
         """
+        # Tools go to their sandbox before the first model call, once per
+        # agent. Placed on chat/achat/_start_stream rather than run/start
+        # because AgentTeam and AgentFlow call these three directly -- an
+        # agent used inside a team would otherwise run its tools locally.
+        if getattr(self, 'tools_run_on', None) is not None:
+            from .tools_placement import ensure_tools_placed
+            ensure_tools_placed(self)
+
         # Slash-command invocation: /skill-name [args] renders the skill body.
         prompt = self._resolve_skill_invocation(prompt)
 
@@ -4545,6 +4561,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Own the durable context for the complete streaming generator."""
+        # Tools go to their sandbox before the first model call, once per
+        # agent. Placed on chat/achat/_start_stream rather than run/start
+        # because AgentTeam and AgentFlow call these three directly -- an
+        # agent used inside a team would otherwise run its tools locally.
+        if getattr(self, 'tools_run_on', None) is not None:
+            from .tools_placement import ensure_tools_placed
+            ensure_tools_placed(self)
+
         durable_context = None
         durable_token = None
         try:

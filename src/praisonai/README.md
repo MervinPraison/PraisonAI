@@ -130,7 +130,7 @@ Each layer wraps the one inside it. When an agent misbehaves, the layer tells yo
 | **3 · Harness** | Can it act, and be checked? | `tools=`, `MCP()`, `guardrails=`, `approval=`, `hooks=`, `sandbox=` |
 | **4 · Loop** | When do we stop? | `execution=ExecutionConfig(...)`, `reflection=`, `autonomy=`, doom-loop detection |
 | **5 · Graph** | Who runs when, and who checks whom? | `AgentFlow`, `route()`, `parallel()`, `loop()`, `repeat()` |
-| **⬡ Managed** | *Where does it actually run?* | `run_on="docker"` — one shared remote sandbox, or a fully hosted loop |
+| **⬡ Managed** | *Where does it actually run?* | `tools_run_on="docker"` — one shared sandbox for the tools, or `run_on="anthropic"` for the whole agent |
 
 ### Layer 1 · Prompt — *Did I say it clearly?*
 
@@ -235,7 +235,7 @@ The harness is commoditising; **where** the agent executes is the next multiplie
 pip install praisonai
 ```
 
-The simplest way in is `run_on=` — one whole team or workflow shares **one** sandbox, so a file written by step 1 is there for step 2:
+The simplest way in is `tools_run_on=` — one whole team or workflow shares **one** sandbox, so a file written by step 1 is there for step 2. Thinking stays on your machine:
 
 ```python
 from praisonaiagents import Agent, AgentFlow
@@ -243,7 +243,7 @@ from praisonaiagents import Agent, AgentFlow
 writer = Agent(name="Writer", instructions="You write files.")
 reader = Agent(name="Reader", instructions="You read files.")
 
-flow = AgentFlow(run_on="docker", steps=[writer, reader])   # or e2b | modal | daytona | flyio
+flow = AgentFlow(tools_run_on="docker", steps=[writer, reader])  # or e2b | modal | daytona | flyio
 flow.run("Write 'hello' to /workspace/note.txt, then read it back")
 ```
 
@@ -251,7 +251,7 @@ Same thing with no Python at all:
 
 ```yaml
 name: remote-demo
-run_on: docker            # every step shares one sandbox
+tools_run_on: docker      # every step shares one sandbox
 agents:
   writer: {role: Writer, goal: Write files}
   reader: {role: Reader, goal: Read files}
@@ -262,20 +262,48 @@ steps:
     action: "Read /workspace/note.txt"
 ```
 
-For a single agent, pick the axis you need — remote **tools** or a remote **loop**:
+For a single agent, two words cover it — and they answer different questions:
 
 ```python
-from praisonai import Agent, LocalAgent, LocalAgentConfig, HostedAgent
+from praisonaiagents import Agent
 
-# A. Tools run in a remote sandbox; the agent loop stays local
-agent = Agent(name="builder", backend=LocalAgent(
-    compute="e2b",                     # or modal | daytona | flyio | docker | tenki
-    config=LocalAgentConfig(model="gpt-4o-mini", name="RemoteTools"),
-))
+# A. Only the TOOLS move. Thinking stays on your machine.
+agent = Agent(name="builder", instructions="You build things.",
+              tools_run_on="docker")   # docker | e2b | modal | daytona | flyio
+                                       # tenki | sandlock | ssh | novita | subprocess
 
-# B. The entire agent loop runs in the cloud (needs ANTHROPIC_API_KEY)
-agent = Agent(name="teacher", backend=HostedAgent(provider="anthropic"))
+# B. The WHOLE agent moves — model calls, loop and tools (needs ANTHROPIC_API_KEY)
+agent = Agent(name="teacher", instructions="You teach.", run_on="anthropic")
 agent.start("Write a Python script that prints the first 10 primes, then run it")
+```
+
+Ask any object where it runs, and it will tell you:
+
+```python
+>>> Agent(name="builder", instructions="x", tools_run_on="docker")
+Agent(name='builder', thinks_on='this machine', tools_run_on='a Docker container')
+
+>>> agent.where_does_it_run()
+Thinking (the AI model calls) happens on this machine.
+Tools run on a Docker container.
+Your own tools (check_db) still run on this machine -- only shell, file and
+code tools move. They read and write this machine's files.
+```
+
+Naming a place that cannot do the job is a typo, not a preference, so it says so:
+
+```python
+>>> Agent(name="x", instructions="i", run_on="docker")
+TypeError: Agent(run_on='docker') is not valid: run_on= places the whole agent
+-- model calls, loop and tools -- on a managed runtime, and 'docker' runs
+commands but cannot host an agent loop.
+  To run only the tools there:  Agent(tools_run_on='docker')
+```
+
+To run one block of code somewhere else, name the place on that call:
+
+```python
+agent.execute_code_sync("print(6 * 7)", run_in="sandlock")   # kernel-enforced
 ```
 
 See what is running and reclaim strays:

@@ -348,23 +348,30 @@ class YAMLWorkflowParser:
         # Parse history flag for execution tracing (robustness feature)
         history_enabled = data.get('history', False)
 
-        # Remote execution: `run_on: docker` gives every step's shell/file tools
-        # one shared sandbox. Validated here so a typo fails at load time with
-        # the list of valid names, rather than at first tool call.
-        run_on = data.get('run_on')
-        if run_on is not None:
-            if not isinstance(run_on, str):
+        # Remote execution: `tools_run_on: docker` gives every step's shell and
+        # file tools one shared sandbox. Validated here so a typo fails at load
+        # time with the list of valid names, rather than at first tool call.
+        #
+        # `run_on:` is accepted silently as the old spelling. Unlike the Python
+        # kwarg -- which now raises, because on an Agent run_on= means something
+        # different -- a YAML file is data someone already wrote and shipped,
+        # and there is no Agent-level run_on: key in YAML for it to be confused
+        # with. Breaking those files would buy nothing.
+        tools_run_on = data.get('tools_run_on', data.get('run_on'))
+        if tools_run_on is not None:
+            if not isinstance(tools_run_on, str):
                 raise ValueError(
-                    f"'run_on' must be a provider name string, got {type(run_on).__name__}"
+                    f"'tools_run_on' must be a provider name string, "
+                    f"got {type(tools_run_on).__name__}"
                 )
             from ..managed._compute_bridge import available_providers
 
-            if run_on.lower().strip() not in available_providers():
+            if tools_run_on.lower().strip() not in available_providers():
                 raise ValueError(
-                    f"Unknown run_on provider {run_on!r}. "
+                    f"Unknown tools_run_on place {tools_run_on!r}. "
                     f"Available: {', '.join(available_providers())}"
                 )
-            run_on = run_on.lower().strip()
+            tools_run_on = tools_run_on.lower().strip()
 
         workflow = Workflow(
             name=name,
@@ -378,7 +385,7 @@ class YAMLWorkflowParser:
             memory=memory_value,  # Pass memory config to Workflow
             context=context_value,  # Pass context management config to Workflow
             history=history_enabled,  # Enable execution history tracking (robustness)
-            run_on=run_on,  # Shared remote sandbox for every step (None = local)
+            tools_run_on=tools_run_on,  # One shared sandbox for every step (None = local)
         )
         
         # Store additional attributes for feature parity with agents.yaml

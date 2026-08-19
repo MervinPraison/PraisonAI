@@ -241,5 +241,5 @@ def test_flow_without_run_on_does_not_provision():
     from praisonaiagents import AgentFlow
 
     flow = AgentFlow(steps=[FakeAgent("A")])
-    assert flow.run_on is None
+    assert flow.tools_run_on is None
     assert flow._collect_agents()[0].tools == []

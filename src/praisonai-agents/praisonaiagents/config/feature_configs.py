@@ -847,12 +847,6 @@ class ExecutionConfig:
     code_execution: bool = False
     code_mode: str = "safe"  # "safe" or "unsafe"
     
-    # NOT IMPLEMENTED - no execution path reads this field, so setting it
-    # provides NO isolation. Do not rely on it for safety. Use
-    # Agent(sandbox=...) for local isolation, or AgentFlow(run_on="docker")
-    # to run a whole workflow in a remote sandbox.
-    code_sandbox_mode: str = "sandbox"  # "sandbox" or "direct" (inert)
-
     # Code-execution-with-tools (code mode): when True, model-generated code may
     # call the agent's registered tools directly via injected proxies, enabling
     # multi-step tool pipelines in a single turn (intermediate results stay out
@@ -995,7 +989,6 @@ class ExecutionConfig:
             "retry_jitter": self.retry_jitter,
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
-            "code_sandbox_mode": self.code_sandbox_mode,
             "code_tools": self.code_tools,
             "code_tools_allow": self.code_tools_allow,
             "context_compaction": (
@@ -1047,7 +1040,6 @@ class ExecutionConfig:
             retry_jitter=data.get("retry_jitter", 0.1),
             code_execution=data.get("code_execution", False),
             code_mode=data.get("code_mode", "safe"),
-            code_sandbox_mode=data.get("code_sandbox_mode", "sandbox"),
             code_tools=data.get("code_tools", False),
             code_tools_allow=data.get("code_tools_allow", None),
             context_compaction=context_compaction,

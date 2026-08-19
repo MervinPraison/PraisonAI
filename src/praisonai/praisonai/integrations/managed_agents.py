@@ -1114,7 +1114,7 @@ def ManagedAgent(
     elif provider in {"e2b", "modal", "flyio", "daytona", "docker", "tenki"}:
         warnings.warn(
             f"ManagedAgent(provider='{provider}') for compute providers is deprecated. "
-            f"Use LocalAgent(compute='{provider}', config=LocalAgentConfig(...)) instead.",
+            f"Use LocalAgent(tools_run_on='{provider}', config=LocalAgentConfig(...)) instead.",
             DeprecationWarning,
             stacklevel=2
         )

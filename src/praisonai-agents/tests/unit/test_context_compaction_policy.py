@@ -158,10 +158,17 @@ def test_execution_config_round_trip_preserves_retry_and_strategy():
     assert restored.compaction_strategy == ConfigCompactionStrategy.SUMMARIZE
 
 
-def test_execution_config_from_dict_defaults_sandbox_mode():
-    """Omitted code_sandbox_mode should fall back to the dataclass default 'sandbox'."""
-    restored = ExecutionConfig.from_dict({})
-    assert restored.code_sandbox_mode == "sandbox"
+def test_execution_config_from_dict_ignores_the_removed_sandbox_mode():
+    """A config persisted before code_sandbox_mode was removed must still load.
+
+    The field is gone because it read as a security control while no execution
+    path consulted it. Dropping the key silently is right here: it never did
+    anything, so ignoring it changes no behaviour -- but a stored dict
+    containing it must not fail to load.
+    """
+    restored = ExecutionConfig.from_dict({"code_sandbox_mode": "direct"})
+    assert not hasattr(restored, "code_sandbox_mode")
+    assert "code_sandbox_mode" not in restored.to_dict()
 
 
 def test_mutable_singleton_fix():
