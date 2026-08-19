@@ -1768,6 +1768,63 @@ sessions_app = typer.Typer(
 app.add_typer(sessions_app, name="sessions")
 
 
+diagnostics_app = typer.Typer(
+    help="Produce a portable, pre-sanitised support bundle for the gateway",
+    no_args_is_help=True,
+)
+app.add_typer(diagnostics_app, name="diagnostics")
+
+
+@diagnostics_app.command("export")
+def gateway_diagnostics_export(
+    config: str = typer.Option(
+        "gateway.yaml", "--config", "-c", help="Path to gateway.yaml"
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None, "--output-dir",
+        help="Directory to write the bundle (default: ~/.praisonai/diagnostics)",
+    ),
+    log_lines: int = typer.Option(
+        200, "--log-lines", help="Number of recent (redacted) log lines to include"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Write a single, pre-sanitised diagnostics archive for a bug report.
+
+    Consolidates a human-readable summary, machine-readable diagnostics, the
+    sanitised config *shape* (keys/modes only — no secrets), redacted recent
+    log summaries, best-effort health/status, and the latest forensics snapshot
+    into one ``.zip``. It runs even when the gateway is unhealthy (falling back
+    to local logs) and never includes chat text, prompts, tool outputs,
+    credentials, or raw tokens — safe to attach to an issue.
+
+    Examples:
+        praisonai gateway diagnostics export
+        praisonai gateway diagnostics export --config gateway.yaml
+        praisonai gateway diagnostics export --json
+    """
+    import json
+    import os
+
+    from praisonai_bot.gateway.diagnostics import build_diagnostics_bundle
+
+    config = _resolve_doctor_config(config)
+    config_path = config if config and os.path.exists(config) else None
+
+    result = build_diagnostics_bundle(
+        config_path, output_dir=output_dir, log_lines=log_lines
+    )
+
+    if json_output:
+        print(json.dumps({"path": result["path"], "manifest": result["manifest"]}, indent=2))
+    else:
+        print(f"Wrote diagnostics bundle: {result['path']}")
+        print(
+            "Pre-sanitised (config shape only, secrets redacted, no chat/prompt "
+            "data) — safe to attach to a bug report."
+        )
+
+
 @sessions_app.command("list")
 def gateway_sessions_list(
     platform: Optional[str] = typer.Option(None, "--platform", help="Filter by platform (e.g. slack)"),
@@ -1905,6 +1962,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]doctor[/green]      Validate channel credentials (pre-flight check)
   [green]test[/green]        One-shot readiness (probes + shell + optional turn)
   [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)
+  [green]diagnostics[/green] Export a pre-sanitised support bundle (diagnostics export)
   [green]send[/green]        Send a test message to a channel
   [green]hooks[/green]       Manage inbound trigger hooks (add | list | remove)
   [green]install[/green]     Install as OS daemon service
