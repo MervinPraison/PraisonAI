@@ -87,6 +87,21 @@ def _backend_places(backend: Any) -> Optional[Dict[str, str]]:
     if backend is None:
         return None
 
+    # Ask the backend what it is, rather than guessing from its class name.
+    # Name-matching missed any backend that did not happen to contain "Hosted"
+    # or "Anthropic" -- a self-hosted DockerManagedAgent reported that it was
+    # thinking on this machine while the whole loop ran in a container.
+    declared = getattr(backend, "provider_name", None)
+    if isinstance(declared, str):
+        try:
+            from .placement import managed_runtimes
+
+            if declared.lower() in managed_runtimes():
+                where = say_place(declared)
+                return {"thinks_on": where, "tools_run_on": where}
+        except Exception:
+            pass
+
     cls = type(backend).__name__
     # Hosted runtimes move the entire turn off this machine.
     if "Hosted" in cls or "Anthropic" in cls:

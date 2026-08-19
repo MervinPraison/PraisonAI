@@ -25,8 +25,18 @@ def _anthropic_loader() -> Type:
     return AnthropicManagedAgent
 
 
+def _docker_loader() -> Type:
+    from .docker_managed_agent import DockerManagedAgent
+    return DockerManagedAgent
+
+
 _BUILTIN_BACKENDS = {
     "anthropic": _anthropic_loader,
+    # Self-hosted: the whole agent loop runs in a local container rather than a
+    # vendor's cloud. Registering it here is all that `run_on="docker"` needs --
+    # placement resolves run_on= against this registry, so the parameter, the
+    # repr, the explanation and the conflict checks all pick it up unchanged.
+    "docker": _docker_loader,
 }
 
 

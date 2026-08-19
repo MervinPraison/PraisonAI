@@ -272,8 +272,9 @@ agent = Agent(name="builder", instructions="You build things.",
               tools_run_on="docker")   # docker | e2b | modal | daytona | flyio
                                        # tenki | sandlock | ssh | novita | subprocess
 
-# B. The WHOLE agent moves — model calls, loop and tools (needs ANTHROPIC_API_KEY)
-agent = Agent(name="teacher", instructions="You teach.", run_on="anthropic")
+# B. The WHOLE agent moves — model calls, loop and tools
+agent = Agent(name="teacher", instructions="You teach.", run_on="anthropic")  # hosted
+agent = Agent(name="builder", instructions="You build.", run_on="docker")     # self-hosted
 agent.start("Write a Python script that prints the first 10 primes, then run it")
 ```
 

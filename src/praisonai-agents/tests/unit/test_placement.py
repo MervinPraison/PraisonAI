@@ -17,6 +17,7 @@ import itertools
 import pytest
 
 from praisonaiagents import Agent, AgentFlow, AgentTeam, Task
+from praisonaiagents.agent.execution_location import describe
 from praisonaiagents.agent.placement import (
     managed_runtimes,
     resolve_placement,
@@ -29,9 +30,34 @@ def _agent(name="A", **kw):
 
 
 # ── the two registries stay disjoint in meaning ──────────────────────────────
-def test_a_managed_runtime_is_not_a_tool_place():
-    """If these sets ever overlap, every error message below becomes a lie."""
-    assert set(managed_runtimes()).isdisjoint(tool_places())
+def test_a_name_in_both_sets_is_valid_for_both_parameters():
+    """The two sets may overlap, and where they do, both spellings must work.
+
+    `docker` can host a whole agent (a container running the loop) AND run
+    tools for a local loop. That is not one word with two meanings -- it is one
+    place with two scopes, and the scope is carried by the parameter name:
+
+        run_on="docker"        the whole agent runs in a container
+        tools_run_on="docker"  only the tools do; thinking stays here
+
+    What must stay true is that a name valid for only ONE of them is refused by
+    the other, with a message naming the right parameter.
+    """
+    for name in set(managed_runtimes()) & set(tool_places()):
+        assert _agent(run_on=name) is not None, f"run_on={name!r} must work"
+        assert _agent(tools_run_on=name) is not None, f"tools_run_on={name!r} must work"
+
+
+def test_the_two_scopes_of_one_place_are_reported_differently():
+    """Overlap is only safe if the object still says which scope you chose."""
+    whole = describe(_agent(run_on="docker"))
+    tools_only = describe(_agent(tools_run_on="docker"))
+
+    assert whole["thinks_on"] == whole["tools_run_on"], "run_on moves the thinking too"
+    assert tools_only["thinks_on"] != tools_only["tools_run_on"], (
+        "tools_run_on must leave the thinking here"
+    )
+    assert whole != tools_only
 
 
 def test_the_sandbox_only_backends_are_reachable():
@@ -41,11 +67,13 @@ def test_the_sandbox_only_backends_are_reachable():
 
 
 # ── asking a place to do a job it cannot do ──────────────────────────────────
-def test_run_on_a_tool_place_names_the_right_parameter():
+def test_run_on_a_tools_only_place_names_the_right_parameter():
+    """`sandlock` runs commands but cannot host a loop, so run_on= must refuse
+    it and point at the parameter that does work."""
     with pytest.raises(TypeError) as exc:
-        _agent(run_on="docker")
+        _agent(run_on="sandlock")
     message = str(exc.value)
-    assert "tools_run_on='docker'" in message, "must name the parameter they wanted"
+    assert "tools_run_on='sandlock'" in message, "must name the parameter they wanted"
     assert "cannot host an agent loop" in message
 
 
