@@ -289,6 +289,15 @@ def test_start_preflight_soft_fails_on_ssl_only(monkeypatch, tmp_path):
     cfg = tmp_path / "gateway.yaml"
     cfg.write_text("channels:\n  telegram:\n    platform: telegram\n    token: t\n")
 
+    # The model turn pre-flight (#4042) is default-on; stub it green so this
+    # test isolates the SSL-only channel soft-fail path (#2845).
+    async def _turn_ok(config_path, channel_name=None, prompt="ping"):
+        return True, "pong"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._verify_turn_preflight", _turn_ok
+    )
+
     import praisonai.cli.features.gateway as gw_feature
 
     started = {}
@@ -357,6 +366,16 @@ def test_start_no_preflight_skips_probe(monkeypatch, tmp_path):
         raise AssertionError("probe must not run with --no-preflight")
 
     monkeypatch.setattr(Bot, "probe", _must_not_probe)
+
+    # --no-preflight skips the channel probe, but the model turn pre-flight
+    # (#4042) is governed by its OWN toggle and still runs by default; stub it
+    # green so this test isolates the channel-probe skip behaviour.
+    async def _turn_ok(config_path, channel_name=None, prompt="ping"):
+        return True, "pong"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._verify_turn_preflight", _turn_ok
+    )
 
     import praisonai.cli.features.gateway as gw_feature
 
