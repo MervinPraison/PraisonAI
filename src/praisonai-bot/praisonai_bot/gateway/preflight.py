@@ -233,11 +233,16 @@ async def run_turn_test(
     config_path: str,
     channel_name: str,
     prompt: str,
+    run_timeout: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """Simulate one inbound agent turn offline via ``BotSessionManager.chat``.
 
     Does **not** exercise Slack Bolt/socket handlers or @mention routing — only
     the BotSessionManager path after manual shell setup.
+
+    ``run_timeout`` bounds the agent round-trip (seconds). When ``None`` the
+    session default applies; preflight callers pass a short bound so a stalled
+    provider fails fast instead of hanging on the 5-minute interactive default.
     """
     import yaml
     from praisonaiagents import Agent
@@ -264,18 +269,32 @@ async def run_turn_test(
         return False, f"No agent configured for channel '{channel_name}'"
 
     acfg = agents_cfg[agent_id] or {}
-    agent = Agent(
-        name=acfg.get("name", agent_id),
-        instructions=acfg.get("instructions", ""),
-        llm=acfg.get("model") or acfg.get("llm", "gpt-4o-mini"),
-    )
+    # Pass through any per-agent provider overrides so the preflight exercises
+    # the SAME provider the live gateway will use — otherwise a valid custom
+    # base_url/api_key config tests the default provider and gives a misleading
+    # verdict (false abort, or invalid runtime creds passing).
+    agent_kwargs: Dict[str, Any] = {
+        "name": acfg.get("name", agent_id),
+        "instructions": acfg.get("instructions", ""),
+        "llm": acfg.get("model") or acfg.get("llm", "gpt-4o-mini"),
+    }
+    base_url = acfg.get("base_url") or acfg.get("api_base")
+    if base_url:
+        agent_kwargs["base_url"] = base_url
+    if acfg.get("api_key"):
+        agent_kwargs["api_key"] = acfg["api_key"]
+    agent = Agent(**agent_kwargs)
     bot_config = BotConfig()
     agent = apply_bot_smart_defaults(agent, bot_config)
     platform = str(ch_cfg.get("platform") or channel_name).lower()
     if ch_cfg.get("allow_shell"):
         agent = enable_shell_tools(agent, bot_config, ch_cfg, channel_type=platform)
 
-    mgr = BotSessionManager(platform=platform)
+    mgr = (
+        BotSessionManager(platform=platform, run_timeout=run_timeout)
+        if run_timeout is not None
+        else BotSessionManager(platform=platform)
+    )
     try:
         result = await mgr.chat(
             agent,
@@ -290,6 +309,71 @@ async def run_turn_test(
     if not text:
         return False, "Agent returned an empty response"
     return True, text[:500]
+
+
+def resolve_verify_turn(config_path: str) -> Tuple[bool, str]:
+    """Resolve the ``gateway.preflight.verify_turn`` toggle and its prompt.
+
+    Returns ``(enabled, prompt)``. Defaults to ``(True, "ping")`` so the happy
+    path proves a real agent reply at startup; operators can opt out for
+    constrained/offline environments via ``verify_turn: false``.
+    """
+    import yaml
+
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return True, "ping"
+    pre = ((cfg.get("gateway") or {}).get("preflight") or {})
+    enabled = pre.get("verify_turn", True)
+    prompt = str(pre.get("verify_turn_prompt") or "ping")
+    return bool(enabled), prompt
+
+
+VERIFY_TURN_TIMEOUT_DEFAULT = 60.0
+
+
+async def verify_turn_preflight(
+    config_path: str,
+    channel_name: Optional[str] = None,
+    prompt: str = "ping",
+    run_timeout: Optional[float] = None,
+) -> Tuple[bool, str]:
+    """Run one bounded agent turn to prove the resolved agent actually replies.
+
+    Reuses :func:`run_turn_test` against the first configured channel (or
+    ``channel_name`` when given). A missing/invalid model credential is thus
+    surfaced at setup/startup, not on the first user message.
+
+    The round-trip is bounded (default 60s, overridable via
+    ``gateway.preflight.verify_turn_timeout``) so a stalled provider fails fast
+    instead of blocking startup/onboarding on the 5-minute interactive default.
+    """
+    channels = load_channels_mapping(config_path)
+    if not channels:
+        return True, "No channels configured — skipping turn verification"
+    target = channel_name or next(iter(channels.keys()))
+    if run_timeout is None:
+        run_timeout = _resolve_verify_turn_timeout(config_path)
+    return await run_turn_test(config_path, target, prompt, run_timeout=run_timeout)
+
+
+def _resolve_verify_turn_timeout(config_path: str) -> float:
+    """Resolve ``gateway.preflight.verify_turn_timeout`` (seconds)."""
+    import yaml
+
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return VERIFY_TURN_TIMEOUT_DEFAULT
+    pre = ((cfg.get("gateway") or {}).get("preflight") or {})
+    try:
+        raw = pre.get("verify_turn_timeout")
+        return float(raw) if raw is not None else VERIFY_TURN_TIMEOUT_DEFAULT
+    except (TypeError, ValueError):
+        return VERIFY_TURN_TIMEOUT_DEFAULT
 
 
 def check_gateway_running(config_path: str, timeout: float = 5.0) -> Tuple[bool, str]:

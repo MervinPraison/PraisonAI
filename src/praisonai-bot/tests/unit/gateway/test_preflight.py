@@ -101,6 +101,165 @@ def test_run_turn_test_mocked(tmp_path, monkeypatch):
     assert message == "OK from test"
 
 
+def test_run_turn_test_passes_provider_overrides(tmp_path, monkeypatch):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: x\n"
+        "agents:\n"
+        "  assistant:\n"
+        "    name: assistant\n"
+        "    instructions: hi\n"
+        "    model: gpt-4o-mini\n"
+        "    base_url: https://proxy.example/v1\n"
+        "    api_key: sk-test\n"
+        "routing:\n  default: assistant\n"
+    )
+
+    captured = {}
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("praisonaiagents.Agent", _FakeAgent)
+    monkeypatch.setattr(
+        "praisonai_bot.bots._defaults.apply_bot_smart_defaults",
+        lambda agent, cfg: agent,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.bots._session.BotSessionManager.chat",
+        AsyncMock(return_value="pong"),
+    )
+    from praisonai_bot.gateway.preflight import run_turn_test
+
+    ok, _ = asyncio.run(run_turn_test(str(cfg), "slack", "ping"))
+    assert ok is True
+    assert captured.get("base_url") == "https://proxy.example/v1"
+    assert captured.get("api_key") == "sk-test"
+
+
+def test_resolve_verify_turn_defaults_on(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: x\n")
+    from praisonai_bot.gateway.preflight import resolve_verify_turn
+
+    enabled, prompt = resolve_verify_turn(str(cfg))
+    assert enabled is True
+    assert prompt == "ping"
+
+
+def test_resolve_verify_turn_opt_out(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  preflight:\n"
+        "    verify_turn: false\n"
+        "    verify_turn_prompt: hello\n"
+    )
+    from praisonai_bot.gateway.preflight import resolve_verify_turn
+
+    enabled, prompt = resolve_verify_turn(str(cfg))
+    assert enabled is False
+    assert prompt == "hello"
+
+
+def test_verify_turn_preflight_uses_first_channel(tmp_path, monkeypatch):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: x\n"
+        "agents:\n  assistant:\n    name: assistant\n    instructions: hi\n"
+        "routing:\n  default: assistant\n"
+    )
+
+    mock_chat = AsyncMock(return_value="pong")
+    monkeypatch.setattr(
+        "praisonai_bot.bots._session.BotSessionManager.chat",
+        mock_chat,
+    )
+    from praisonai_bot.gateway.preflight import verify_turn_preflight
+
+    ok, message = asyncio.run(verify_turn_preflight(str(cfg), prompt="ping"))
+    assert ok is True
+    assert message == "pong"
+
+
+def test_verify_turn_preflight_no_channels_skips(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("agents:\n  assistant:\n    instructions: hi\n")
+    from praisonai_bot.gateway.preflight import verify_turn_preflight
+
+    ok, message = asyncio.run(verify_turn_preflight(str(cfg)))
+    assert ok is True
+    assert "skipping" in message.lower()
+
+
+def test_verify_turn_preflight_bounds_timeout(tmp_path, monkeypatch):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: x\n"
+        "agents:\n  assistant:\n    name: assistant\n    instructions: hi\n"
+        "routing:\n  default: assistant\n"
+    )
+
+    captured = {}
+    real_init = None
+    from praisonai_bot.bots._session import BotSessionManager
+
+    real_init = BotSessionManager.__init__
+
+    def spy_init(self, *args, **kwargs):
+        captured["run_timeout"] = kwargs.get("run_timeout")
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(BotSessionManager, "__init__", spy_init)
+    monkeypatch.setattr(
+        "praisonai_bot.bots._session.BotSessionManager.chat",
+        AsyncMock(return_value="pong"),
+    )
+    from praisonai_bot.gateway.preflight import (
+        VERIFY_TURN_TIMEOUT_DEFAULT,
+        verify_turn_preflight,
+    )
+
+    ok, _ = asyncio.run(verify_turn_preflight(str(cfg), prompt="ping"))
+    assert ok is True
+    assert captured["run_timeout"] == VERIFY_TURN_TIMEOUT_DEFAULT
+
+
+def test_verify_turn_preflight_timeout_override(tmp_path, monkeypatch):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "gateway:\n  preflight:\n    verify_turn_timeout: 5\n"
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: x\n"
+        "agents:\n  assistant:\n    name: assistant\n    instructions: hi\n"
+        "routing:\n  default: assistant\n"
+    )
+
+    captured = {}
+    from praisonai_bot.bots._session import BotSessionManager
+
+    real_init = BotSessionManager.__init__
+
+    def spy_init(self, *args, **kwargs):
+        captured["run_timeout"] = kwargs.get("run_timeout")
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(BotSessionManager, "__init__", spy_init)
+    monkeypatch.setattr(
+        "praisonai_bot.bots._session.BotSessionManager.chat",
+        AsyncMock(return_value="pong"),
+    )
+    from praisonai_bot.gateway.preflight import verify_turn_preflight
+
+    ok, _ = asyncio.run(verify_turn_preflight(str(cfg), prompt="ping"))
+    assert ok is True
+    assert captured["run_timeout"] == 5.0
+
+
 def test_parse_since_window():
     from praisonai_bot.gateway.preflight import parse_since_window
 

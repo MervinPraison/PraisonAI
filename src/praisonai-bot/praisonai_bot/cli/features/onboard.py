@@ -621,6 +621,13 @@ class OnboardWizard:
             f.write(yaml_content)
         console.print(f"  [green]✓[/green] Written to [cyan]{self.config_path}[/cyan]")
 
+        # Step 5c: Verify a real agent turn (#4042). The channel probe above
+        # proves the token works; it never proves the agent's model credential
+        # is present/valid. Run one bounded turn now so a missing/invalid model
+        # key surfaces at setup, not on the first user message. Skipped when no
+        # channel has a token, and opt-out via PRAISONAI_NO_VERIFY_TURN=1.
+        self._verify_turn(console.print)
+
         # Step 6: Optional daemon install
         # Guard: refuse to install a daemon that has no tokens — it would loop
         # in a crash-restart cycle. List the channels missing tokens so the
@@ -972,6 +979,40 @@ class OnboardWizard:
         from praisonai_bot.bots import Bot
         bot = Bot(channel["platform"], token=channel["token"])
         return await bot.probe()
+
+    def _verify_turn(self, print_fn) -> None:
+        """Prove one real agent turn against the written config (#4042).
+
+        Reuses the gateway's ``verify_turn_preflight`` so onboarding and
+        ``gateway start`` share one code path. Best-effort: a failure warns with
+        a clear next step rather than aborting the wizard, since the config is
+        already written and the operator may simply need to add a model key.
+        """
+        if os.environ.get("PRAISONAI_NO_VERIFY_TURN", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            return
+        if not any(ch.get("token") for ch in self.channels.values()):
+            return
+        print_fn("\n[bold]Step 5c: Verify the agent replies[/bold]\n")
+        print_fn("  Running one test turn ('ping')...", )
+        try:
+            from praisonai_bot.gateway.preflight import verify_turn_preflight
+
+            ok, detail = asyncio.run(
+                verify_turn_preflight(self.config_path, prompt="ping")
+            )
+        except Exception as exc:  # never let verification break onboarding
+            ok, detail = False, str(exc)[:200]
+        if ok:
+            print_fn("  [green]✓[/green] Agent replied — model credentials work")
+        else:
+            print_fn(
+                f"  [yellow]⚠[/yellow] Agent did not reply: {detail}\n"
+                "  [dim]Set the model/provider API key (e.g. OPENAI_API_KEY) in "
+                "~/.praisonai/.env, then re-run [cyan]praisonai onboard[/cyan] or "
+                "[cyan]praisonai gateway test --turn ping[/cyan].[/dim]"
+            )
 
     async def _probe(self, platform: str):
         """Run a probe for a platform (legacy method for backward compatibility)."""
