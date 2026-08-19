@@ -59,6 +59,26 @@ class TestJobState:
             got["n"] = 999
             assert store.get_state("j1") == {"n": 1}
 
+    def test_get_returns_deep_copy(self):
+        # A mutated nested value in a read result must not leak into the store
+        # (bypassing set_state's size cap). Guards the copy-on-read promise.
+        with tempfile.TemporaryDirectory() as d:
+            store = ConfigYamlScheduleStore(config_path=_cfg(d))
+            store.set_state("j1", {"seen": [1, 2], "meta": {"k": "v"}})
+            got = store.get_state("j1")
+            got["seen"].append(3)
+            got["meta"]["k"] = "mutated"
+            assert store.get_state("j1") == {"seen": [1, 2], "meta": {"k": "v"}}
+
+    def test_set_snapshots_deep_copy(self):
+        # Mutating the caller's dict after set_state must not alter stored state.
+        with tempfile.TemporaryDirectory() as d:
+            store = ConfigYamlScheduleStore(config_path=_cfg(d))
+            src = {"seen": [1, 2]}
+            store.set_state("j1", src)
+            src["seen"].append(99)
+            assert store.get_state("j1") == {"seen": [1, 2]}
+
     def test_clear_state(self):
         with tempfile.TemporaryDirectory() as d:
             store = ConfigYamlScheduleStore(config_path=_cfg(d))

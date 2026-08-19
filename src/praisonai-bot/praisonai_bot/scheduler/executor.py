@@ -864,7 +864,16 @@ class ScheduledAgentExecutor:
         ``updates is None`` means "write nothing" (an error/no-op probe leaves
         prior state untouched); an empty dict likewise changes nothing. No-op
         when the store has no state support.
+
+        One-shot jobs (``delete_after_run``) are already removed from the store
+        by ``claim_due`` before the run reaches here, and their state is popped
+        with them. Persisting now would recreate an orphan ``job_state`` entry
+        that nothing ever cleans up (the schedule is gone, so ``remove`` is a
+        no-op) — and which would be injected if the same explicit id is reused.
+        A single-run job has no "next run" to read a watermark, so skip it.
         """
+        if getattr(job, "delete_after_run", False):
+            return
         if not isinstance(updates, dict) or not updates:
             return
         store = self._state_store()

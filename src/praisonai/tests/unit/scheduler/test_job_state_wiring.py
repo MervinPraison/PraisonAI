@@ -27,6 +27,7 @@ class FakeJob:
     session_target: str = "isolated"
     delivery: Any = None
     pre_run: Optional[str] = None
+    delete_after_run: bool = False
 
 
 class FakeAgent:
@@ -124,6 +125,18 @@ class TestAgentEmittedState:
         )
         _run(executor, FakeJob(message="go"))
         assert store.get_state("job1") == {"a": 1, "last_seen_pr": 2}
+
+    def test_one_shot_job_does_not_recreate_state(self):
+        # A ``delete_after_run`` job is already removed from the store (and its
+        # state popped) by claim_due before it runs; persisting agent-emitted
+        # state here would leave an orphan entry nothing cleans up.
+        store = FakeStateStore()
+        agent = FakeAgent(emit_state={"last_seen_pr": 4839})
+        executor = ScheduledAgentExecutor(
+            runner=FakeRunner(store), agent_resolver=lambda _id: agent,
+        )
+        _run(executor, FakeJob(message="go", delete_after_run=True))
+        assert store.get_state("job1") == {}
 
     def test_plain_string_result_writes_nothing(self):
         store = FakeStateStore()

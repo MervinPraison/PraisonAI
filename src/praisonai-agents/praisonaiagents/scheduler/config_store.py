@@ -7,6 +7,7 @@ other config.yaml content.
 """
 
 import contextlib
+import copy
 from praisonaiagents._logging import get_logger
 import os
 import threading
@@ -345,12 +346,13 @@ class ConfigYamlScheduleStore:
     def get_state(self, job_id: str) -> Dict:
         """Return the persisted scratchpad for ``job_id`` (``{}`` if none).
 
-        A copy is returned so a caller mutating the result cannot silently
-        alter the in-memory store without going through :meth:`set_state`.
+        A deep copy is returned so a caller mutating the result — including a
+        nested list or dict — cannot silently alter the in-memory store without
+        going through :meth:`set_state` (which enforces the size cap).
         """
         with self._lock:
             state = self._job_state.get(job_id)
-            return dict(state) if isinstance(state, dict) else {}
+            return copy.deepcopy(state) if isinstance(state, dict) else {}
 
     def set_state(self, job_id: str, state: Dict) -> None:
         """Persist ``state`` for ``job_id`` under the ``job_state`` key.
@@ -381,7 +383,7 @@ class ConfigYamlScheduleStore:
             return
         with self._lock, self._file_lock():
             self._reload_locked()
-            self._job_state[job_id] = dict(state)
+            self._job_state[job_id] = copy.deepcopy(state)
             self._save()
 
     def clear_state(self, job_id: str) -> None:
