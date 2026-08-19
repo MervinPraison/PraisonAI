@@ -311,7 +311,12 @@ def gateway_start(
     # (#4042). The channel + tool probes above prove wiring, never a model
     # round-trip. Default on via config (gateway.preflight.verify_turn); the
     # --verify-turn/--no-verify-turn flag overrides for constrained/offline use.
-    if preflight and config and os.path.exists(config):
+    #
+    # This is governed by its own toggle, NOT the channel `preflight` flag: an
+    # operator running `--no-preflight --verify-turn` still wants the model
+    # round-trip, so skipping the channel probes must not silently suppress the
+    # requested turn check.
+    if config and os.path.exists(config):
         import asyncio
 
         enabled, prompt = _resolve_verify_turn(config)
