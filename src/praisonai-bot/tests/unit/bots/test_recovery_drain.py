@@ -72,6 +72,52 @@ def test_recovery_triggers_outbox_drain():
     asyncio.run(asyncio.wait_for(scenario(), timeout=5.0))
 
 
+def test_recovery_drains_hook_on_bot_itself():
+    """Production shape: the durable adapter is supervised directly, so
+    drain_outbox() lives on the supervised object itself (not bot.adapter)."""
+
+    drained = asyncio.Event()
+
+    class _DurableAdapter:
+        platform = "slack"
+
+        def __init__(self):
+            self.drain_calls = 0
+
+        async def drain_outbox(self):
+            self.drain_calls += 1
+            drained.set()
+            return (2, 0)
+
+    bot = _DurableAdapter()
+    calls = {"n": 0}
+    running = asyncio.Event()
+
+    async def start_fn(name, b):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("connection reset by peer")
+        running.set()
+        await asyncio.Event().wait()
+
+    sup = _fast_supervisor()
+
+    async def scenario():
+        task = asyncio.create_task(sup.run("slack", bot, start_fn))
+        await asyncio.wait_for(drained.wait(), timeout=2.0)
+        await asyncio.wait_for(running.wait(), timeout=2.0)
+        assert bot.drain_calls == 1
+        assert sup.get_status("slack").state == ChannelState.RUNNING
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5.0))
+
+
 def test_clean_first_start_does_not_drain():
     """A channel that starts cleanly (no prior outage) must NOT re-drain."""
 

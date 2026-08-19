@@ -427,9 +427,18 @@ class ChannelSupervisor:
         hook are a silent no-op, and any error is swallowed so a failed re-drain
         can never wedge supervision — the outbox's own attempt-and-age policy
         still governs those messages.
+
+        The hook is resolved on the supervised object *itself* first — in the
+        gateway the durable platform adapter (``DurableAdapterMixin``) is passed
+        directly to ``run()``, so ``drain_outbox`` lives on ``bot`` — and only
+        then on a nested ``bot.adapter`` for wrapper bots that compose an
+        adapter. Checking both keeps built-in channels covered without assuming
+        a particular object shape.
         """
-        adapter = getattr(bot, "adapter", None)
-        drain = getattr(adapter, "drain_outbox", None)
+        drain = getattr(bot, "drain_outbox", None)
+        if not callable(drain):
+            adapter = getattr(bot, "adapter", None)
+            drain = getattr(adapter, "drain_outbox", None)
         if not callable(drain):
             return
         try:
