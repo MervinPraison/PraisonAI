@@ -124,6 +124,52 @@ class TestAncestorWalk:
         assert agent.role == "RootAgent"
 
 
+class TestCrossLevelPrecedence:
+    """A nearer directory must win over a more distant ancestor, even when the
+    nearer definition lives in ``.praisonai`` and the ancestor's in ``.claude``.
+    Guards the "later wins" ordering so an inherited ancestor asset never
+    silently overrides a nested project-native one.
+    """
+
+    def test_nested_praisonai_wins_over_ancestor_claude(self, project):
+        # Ancestor (repo root) .claude defines the agent...
+        _write(
+            project / ".claude", "agents", "shared.md",
+            AGENT_MD.format(role="FromAncestorClaude"),
+        )
+        # ...but a nested package's .praisonai overrides it.
+        nested = project / "packages" / "web"
+        _write(
+            nested / ".praisonai", "agents", "shared.md",
+            AGENT_MD.format(role="FromNestedPraisonai"),
+        )
+
+        import os
+        os.chdir(nested)
+
+        agent = CustomDefinitionsDiscovery().get_agent("shared")
+        assert agent.role == "FromNestedPraisonai"
+
+    def test_nested_claude_wins_over_ancestor_praisonai(self, project):
+        # Even a nested ecosystem root beats an ancestor's .praisonai, because
+        # proximity dominates: the nearer directory is the more specific one.
+        _write(
+            project / ".praisonai", "commands", "shared.md",
+            COMMAND_MD.format(desc="FromAncestorPraisonai", body="x"),
+        )
+        nested = project / "packages" / "web"
+        _write(
+            nested / ".claude", "commands", "shared.md",
+            COMMAND_MD.format(desc="FromNestedClaude", body="x"),
+        )
+
+        import os
+        os.chdir(nested)
+
+        cmd = CustomDefinitionsDiscovery().get_command("shared")
+        assert cmd.description == "FromNestedClaude"
+
+
 class TestToolsStayPraisonaiOnly:
     def test_tools_not_loaded_from_claude(self, project, monkeypatch):
         monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
