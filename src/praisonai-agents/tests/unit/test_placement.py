@@ -336,6 +336,44 @@ def test_one_teams_run_does_not_suppress_another_teams_sandbox():
     assert outer._needs_tools_scope()
 
 
+def test_two_concurrent_runs_of_one_team_each_get_their_own_scope():
+    """Two coroutines that run the SAME team under one asyncio.gather share the
+    event-loop thread. Thread-local scope state made the second see the first's
+    depth==1 and skip provisioning -- so it ran against a sandbox the first
+    could tear down mid-flight. A ContextVar is copied per task, so each run's
+    depth is its own.
+    """
+    team = _team(tools_run_on="subprocess")
+    provisioned = []
+
+    async def one_run(hold):
+        # Mirror astart()'s guard without a live model: only the scope logic.
+        if team._needs_tools_scope():
+            depths = dict(team._tools_scope_depths.get())
+            depths[id(team)] = depths.get(id(team), 0) + 1
+            token = team._tools_scope_depths.set(tuple(sorted(depths.items())))
+            try:
+                provisioned.append(id(asyncio.current_task()))
+                await asyncio.sleep(hold)
+                # Nested check inside our own scope must reuse, never re-provision.
+                assert not team._needs_tools_scope()
+            finally:
+                team._tools_scope_depths.reset(token)
+            return "own"
+        await asyncio.sleep(hold)
+        return "borrowed"
+
+    async def drive():
+        # Stagger so the first run is mid-flight when the second starts.
+        return await asyncio.gather(one_run(0.05), one_run(0.0))
+
+    results = asyncio.run(drive())
+    assert results == ["own", "own"], results
+    assert len(set(provisioned)) == 2, "each concurrent run must own its scope"
+    # The map is clean once both runs finish (no leaked depth for this team).
+    assert dict(team._tools_scope_depths.get()).get(id(team), 0) == 0
+
+
 def test_a_dropped_agent_releases_its_sandbox():
     """Gateways clone an agent per request. An agent and its SharedCompute
     referenced each other, so a dropped agent was collected as a cycle and its

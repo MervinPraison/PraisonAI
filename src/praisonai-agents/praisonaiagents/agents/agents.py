@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import contextlib
+import contextvars
 import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Dict, Optional, List, Tuple, Callable
@@ -1574,8 +1575,8 @@ class AgentTeam(SpawnAnnounceProtocol):
 
 
     # ── shared sandbox lifetime ──────────────────────────────────────────────
-    # Thread-local rather than an instance attribute: the previous version set
-    # `self.run_on = None` for the duration of the run, so a second thread
+    # A ContextVar, not an instance attribute: the previous version set
+    # `self.run_on = None` for the duration of the run, so a second caller
     # inspecting the team mid-run saw "no sandbox" and any concurrent start()
     # executed every tool on the host. Depth lives with the caller, not on the
     # shared object, so the team's declared placement is always readable.
@@ -1584,22 +1585,27 @@ class AgentTeam(SpawnAnnounceProtocol):
     # meant any team started while another team's run was on the stack saw
     # depth==1 and skipped its own sandbox entirely -- so a nested team ran on
     # the host, and a team sharing an agent with the outer run executed on the
-    # OUTER team's sandbox. Two teams in one asyncio.gather hit the same thing.
-    _tools_scope_state = threading.local()
-
-    def _scope_depths(self) -> dict:
-        """This thread's per-team scope depths, keyed by team identity."""
-        depths = getattr(self._tools_scope_state, "depths", None)
-        if depths is None:
-            depths = {}
-            self._tools_scope_state.depths = depths
-        return depths
+    # OUTER team's sandbox.
+    #
+    # ContextVar, not threading.local: two coroutines that `astart()` the SAME
+    # team under one asyncio.gather run on one thread, so thread-local state is
+    # shared between them -- the second saw the first's depth==1, skipped its
+    # own sandbox, and ran against a sandbox the first could tear down mid-flight.
+    # A ContextVar is copied per task at gather/create_task time, so each run
+    # gets its own depth map; it is also per-thread, so sync callers stay
+    # isolated too. The value is an immutable frozen mapping replaced via .set()
+    # (never mutated in place), because a copied context shares the *reference*
+    # to a mutable dict and in-place mutation would leak straight back across
+    # the tasks the copy was meant to separate.
+    _tools_scope_depths: "contextvars.ContextVar" = contextvars.ContextVar(
+        "praisonai_tools_scope_depths", default=()
+    )
 
     def _needs_tools_scope(self) -> bool:
         """True when this call should provision the team's shared sandbox."""
         if getattr(self, "tools_run_on", None) is None:
             return False
-        return self._scope_depths().get(id(self), 0) == 0
+        return dict(self._tools_scope_depths.get()).get(id(self), 0) == 0
 
     @contextlib.contextmanager
     def _shared_tools_scope(self):
@@ -1612,19 +1618,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         from ..managed.shared_compute import SharedCompute
 
-        depths = self._scope_depths()
         key = id(self)
+        depths = dict(self._tools_scope_depths.get())
         depths[key] = depths.get(key, 0) + 1
+        token = self._tools_scope_depths.set(tuple(sorted(depths.items())))
         try:
             with SharedCompute(self.tools_run_on) as shared:
                 shared.attach(list(self.agents or []))
                 yield shared
         finally:
-            depths[key] -= 1
-            if depths[key] <= 0:
-                # Drop the key so the dict cannot grow without bound across
-                # many short-lived teams on a long-lived worker thread.
-                depths.pop(key, None)
+            self._tools_scope_depths.reset(token)
 
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
