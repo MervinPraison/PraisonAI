@@ -122,7 +122,12 @@ class DockerManagedAgent:
 
     # ── ManagedBackendProtocol ───────────────────────────────────────────────
     async def execute(self, prompt: str, **kwargs) -> str:
-        return self._execute_sync(prompt, **kwargs)
+        # Docker start-up, package install and the container turn are blocking
+        # subprocess work. Run them off the event-loop thread so concurrent
+        # async callers are not stalled behind one agent's container.
+        import asyncio
+
+        return await asyncio.to_thread(self._execute_sync, prompt, **kwargs)
 
     async def stream(self, prompt: str, **kwargs):
         """Yield the result once.
@@ -131,7 +136,9 @@ class DockerManagedAgent:
         stream to forward. Yielding the finished answer keeps callers that
         expect an iterator working, rather than pretending to stream.
         """
-        yield self._execute_sync(prompt, **kwargs)
+        import asyncio
+
+        yield await asyncio.to_thread(self._execute_sync, prompt, **kwargs)
 
     def reset_session(self) -> None:
         """Drop the container; the next call starts a clean one."""
@@ -157,27 +164,33 @@ class DockerManagedAgent:
     # ── the work ─────────────────────────────────────────────────────────────
     def _execute_sync(self, prompt: str, **kwargs) -> str:
         self._ensure_container()
-        payload = json.dumps({"agent": self._config, "prompt": prompt})
+        # An ephemeral container must not outlive the call that made it, even
+        # when the turn raises. Tear it down in `finally` so a failure after
+        # start-up cannot leak a `praisonai-agent-*` container.
+        try:
+            payload = json.dumps({"agent": self._config, "prompt": prompt})
 
-        _write_file(self._container, "/tmp/praison_agent.json", payload)
-        _write_file(self._container, "/tmp/praison_runner.py", _RUNNER)
+            _write_file(self._container, "/tmp/praison_agent.json", payload)
+            _write_file(self._container, "/tmp/praison_runner.py", _RUNNER)
 
-        result = _run(
-            ["docker", "exec", self._container, "python", "/tmp/praison_runner.py"],
-            timeout=kwargs.get("timeout", 900),
-        )
-        answer = _parse(result.stdout)
-        if answer is None:
-            detail = (result.stderr or result.stdout or "").strip()[-600:]
-            raise RuntimeError(
-                f"The agent produced no result inside the container.\n{detail}"
+            result = _run(
+                ["docker", "exec", self._container, "python", "/tmp/praison_runner.py"],
+                timeout=kwargs.get("timeout", 900),
             )
-        if not answer.get("ok"):
-            raise RuntimeError(f"Agent failed inside the container: {answer['error']}")
-
-        if not self._keep_alive:
-            self.shutdown()
-        return answer["result"]
+            answer = _parse(result.stdout)
+            if answer is None:
+                detail = (result.stderr or result.stdout or "").strip()[-600:]
+                raise RuntimeError(
+                    f"The agent produced no result inside the container.\n{detail}"
+                )
+            if not answer.get("ok"):
+                raise RuntimeError(
+                    f"Agent failed inside the container: {answer['error']}"
+                )
+            return answer["result"]
+        finally:
+            if not self._keep_alive:
+                self.shutdown()
 
     def _ensure_container(self) -> None:
         if self._container and self._prepared:
