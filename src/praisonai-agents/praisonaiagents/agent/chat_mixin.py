@@ -4439,7 +4439,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # after-context aggregation) are fired once, guarded, inside
                     # execute_tool_async — no inline duplicate dispatch here.
                     # Pass the tools list to honor task-scoped tools
-                    result = await self.execute_tool_async(function_name, arguments, tools_override=tools)
+                    result = await self.execute_tool_async(
+                        function_name,
+                        arguments,
+                        tool_call_id=getattr(tool_call, "id", None),
+                        tools_override=tools,
+                    )
 
                     results.append(result)
                 except Exception as e:

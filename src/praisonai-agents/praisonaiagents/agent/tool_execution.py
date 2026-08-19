@@ -489,6 +489,7 @@ class ToolExecutionMixin:
                 run_id=getattr(self, '_current_run_id', 'unknown'),
                 session_id=getattr(self, '_session_id', None) or 'default',
                 tool_name=function_name,
+                metadata={"tool_call_id": tool_call_id},
             ),
         )
 
