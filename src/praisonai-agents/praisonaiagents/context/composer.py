@@ -242,41 +242,51 @@ class ContextComposer:
         full_history: List[Dict[str, Any]],
         tool_call_ids: set
     ) -> List[Dict[str, Any]]:
-        """Ensure tool_call/tool_result pairs are complete."""
-        # Find tool calls in result
-        result_call_ids = set()
-        result_response_ids = set()
-        
-        for msg in result:
-            if "tool_calls" in msg:
-                for tc in msg.get("tool_calls", []):
-                    if isinstance(tc, dict) and "id" in tc:
-                        result_call_ids.add(tc["id"])
-            if msg.get("tool_call_id"):
-                result_response_ids.add(msg["tool_call_id"])
-        
-        # Find missing pairs
-        missing_calls = result_response_ids - result_call_ids
-        missing_responses = result_call_ids - result_response_ids
-        
-        if not missing_calls and not missing_responses:
-            return result
-        
-        # Add missing messages from full history
-        for msg in full_history:
-            # Add missing tool calls
-            if "tool_calls" in msg:
-                for tc in msg.get("tool_calls", []):
-                    if isinstance(tc, dict) and tc.get("id") in missing_calls:
-                        if msg not in result:
-                            result.insert(0, msg)
-                        break
-            
-            # Add missing tool responses
-            if msg.get("tool_call_id") in missing_responses:
-                if msg not in result:
-                    result.append(msg)
-        
+        """Ensure tool_call/tool_result pairs are complete.
+
+        Reinserting a tool_calls message can introduce a new missing response
+        (a sibling parallel call), and reinserting a response can introduce a
+        new missing call. Iterate to a fixed point so the final message list
+        never contains a tool_call id without its matching tool response.
+        """
+        changed = True
+        while changed:
+            changed = False
+
+            # Recompute pairs present in the current result
+            result_call_ids = set()
+            result_response_ids = set()
+            for msg in result:
+                if "tool_calls" in msg:
+                    for tc in msg.get("tool_calls", []):
+                        if isinstance(tc, dict) and "id" in tc:
+                            result_call_ids.add(tc["id"])
+                if msg.get("tool_call_id"):
+                    result_response_ids.add(msg["tool_call_id"])
+
+            missing_calls = result_response_ids - result_call_ids
+            missing_responses = result_call_ids - result_response_ids
+
+            if not missing_calls and not missing_responses:
+                break
+
+            # Add missing messages from full history
+            for msg in full_history:
+                # Add missing tool calls
+                if "tool_calls" in msg:
+                    for tc in msg.get("tool_calls", []):
+                        if isinstance(tc, dict) and tc.get("id") in missing_calls:
+                            if msg not in result:
+                                result.insert(0, msg)
+                                changed = True
+                            break
+
+                # Add missing tool responses
+                if msg.get("tool_call_id") in missing_responses:
+                    if msg not in result:
+                        result.append(msg)
+                        changed = True
+
         return result
     
     def get_ledger(self) -> ContextLedger:

@@ -206,6 +206,7 @@ def enable_pii_redaction() -> str:
             event=HookEvent.BEFORE_LLM,
             func=_pii_before_llm_hook,
             name="praisonaiagents.pii_redactor",
+            sequential=True,
         )
         return _PII_HOOK_ID
 

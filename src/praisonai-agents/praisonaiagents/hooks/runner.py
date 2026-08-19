@@ -184,7 +184,19 @@ class HookRunner:
             self._execute_single(hook, event, input_data)
             for hook in hooks
         ]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+
+        # Parallel hooks cannot mutate input_data (only sequential hooks apply
+        # modified_input). Warn if a parallel hook returns modifications that
+        # will be silently discarded, so hook authors mark it sequential=True.
+        for hook, result in zip(hooks, results):
+            if result.success and result.output and result.output.modified_input:
+                logger.warning(
+                    "Parallel hook '%s' returned modified_input which is "
+                    "discarded; register it with sequential=True to apply it.",
+                    hook.name,
+                )
+        return results
     
     async def _execute_sequential(
         self,
