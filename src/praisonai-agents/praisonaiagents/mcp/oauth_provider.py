@@ -285,6 +285,12 @@ class MCPOAuthProvider:
             return False
 
         try:
+            from .oauth_discovery import _require_https
+
+            # Defense in depth: never POST a refresh token / client secret to a
+            # persisted endpoint that isn't HTTPS (or loopback).
+            _require_https(token_endpoint)
+
             import requests  # lazy import — optional dependency
 
             data = {

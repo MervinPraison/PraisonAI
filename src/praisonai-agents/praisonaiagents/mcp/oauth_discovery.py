@@ -63,7 +63,12 @@ def parse_www_authenticate(header: Optional[str]) -> Dict[str, str]:
 
 
 def _get_json(url: str, timeout: float = 10.0) -> Dict[str, Any]:
-    """Fetch and parse a JSON metadata document over HTTPS."""
+    """Fetch and parse a JSON metadata document over HTTPS.
+
+    Redirects are followed but every hop — including the final destination — is
+    re-validated with :func:`_require_https` so a redirect cannot escape the
+    HTTPS/loopback guard to an internal or plaintext endpoint (SSRF-safe).
+    """
     _require_https(url)
     import requests  # lazy import — optional dependency
 
@@ -71,7 +76,14 @@ def _get_json(url: str, timeout: float = 10.0) -> Dict[str, Any]:
         url,
         headers={"Accept": "application/json"},
         timeout=timeout,
+        allow_redirects=True,
     )
+    # Re-validate every redirect hop and the final URL: allow_redirects only
+    # checks the initial URL, so a 30x to http:// or an internal host would
+    # otherwise bypass the guard.
+    for previous in getattr(resp, "history", None) or []:
+        _require_https(previous.url)
+    _require_https(resp.url)
     resp.raise_for_status()
     return resp.json()
 
@@ -194,10 +206,23 @@ def discover_oauth_metadata(
     if not auth_meta:
         return None
 
+    # Enforce the HTTPS/loopback guard on the advertised endpoints too: an
+    # HTTPS metadata document must not be able to smuggle a plaintext
+    # authorization/token/registration endpoint that would later receive
+    # authorization codes, PKCE verifiers, refresh tokens, or client secrets
+    # over an insecure transport.
+    authorization_endpoint = auth_meta["authorization_endpoint"]
+    token_endpoint = auth_meta["token_endpoint"]
+    registration_endpoint = auth_meta.get("registration_endpoint")
+    _require_https(authorization_endpoint)
+    _require_https(token_endpoint)
+    if registration_endpoint:
+        _require_https(registration_endpoint)
+
     return {
-        "authorization_endpoint": auth_meta["authorization_endpoint"],
-        "token_endpoint": auth_meta["token_endpoint"],
-        "registration_endpoint": auth_meta.get("registration_endpoint"),
+        "authorization_endpoint": authorization_endpoint,
+        "token_endpoint": token_endpoint,
+        "registration_endpoint": registration_endpoint,
         "scopes_supported": (
             auth_meta.get("scopes_supported")
             or (resource_meta or {}).get("scopes_supported")

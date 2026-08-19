@@ -49,6 +49,72 @@ class TestWellKnownCandidates:
         assert "https://api.example.com/.well-known/openid-configuration" in candidates
 
 
+class TestEndpointHttpsValidation:
+    def test_rejects_plaintext_advertised_endpoints(self, monkeypatch):
+        from praisonaiagents.mcp import oauth_discovery
+
+        monkeypatch.setattr(
+            oauth_discovery, "discover_protected_resource",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            oauth_discovery, "discover_authorization_server",
+            lambda *a, **k: {
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": "http://auth.example.com/token",
+            },
+        )
+        with pytest.raises(ValueError):
+            oauth_discovery.discover_oauth_metadata("https://api.example.com/mcp")
+
+    def test_accepts_all_https_endpoints(self, monkeypatch):
+        from praisonaiagents.mcp import oauth_discovery
+
+        monkeypatch.setattr(
+            oauth_discovery, "discover_protected_resource",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            oauth_discovery, "discover_authorization_server",
+            lambda *a, **k: {
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": "https://auth.example.com/token",
+                "registration_endpoint": "https://auth.example.com/register",
+            },
+        )
+        meta = oauth_discovery.discover_oauth_metadata("https://api.example.com/mcp")
+        assert meta["token_endpoint"] == "https://auth.example.com/token"
+
+
+class TestRedirectRevalidation:
+    def test_rejects_redirect_to_plaintext(self, monkeypatch):
+        from praisonaiagents.mcp import oauth_discovery
+
+        class _Hop:
+            url = "http://internal.local/.well-known/x"
+
+        class _Resp:
+            url = "http://internal.local/.well-known/x"
+            history = [_Hop()]
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {}
+
+        class _Requests:
+            @staticmethod
+            def get(*a, **k):
+                return _Resp()
+
+        monkeypatch.setitem(
+            __import__("sys").modules, "requests", _Requests()
+        )
+        with pytest.raises(ValueError):
+            oauth_discovery._get_json("https://api.example.com/.well-known/x")
+
+
 class TestRegistrationGuard:
     def test_rejects_insecure_registration(self):
         from praisonaiagents.mcp.oauth_registration import register_client
