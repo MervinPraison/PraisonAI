@@ -640,10 +640,25 @@ class TestComputeProviderWiring:
         assert agent.compute_provider.provider_name == "flyio"
 
     def test_resolve_unknown_raises(self):
+        """An unknown place still raises -- and now names the valid ones.
+
+        This class used to carry its own hardcoded provider list, which is why
+        LocalAgent(tools_run_on="sandlock") failed for a place the rest of the
+        library resolves. It delegates to the merged resolver now, so the
+        message changed from "Unknown compute provider" to "Unknown place",
+        listing every place both registries offer.
+        """
         import pytest
         from praisonai.integrations.managed_local import LocalManagedAgent
-        with pytest.raises(ValueError, match="Unknown compute provider"):
+        with pytest.raises(ValueError, match="Unknown place"):
             LocalManagedAgent(provider="local", compute="unknown_provider")
+
+    def test_resolve_accepts_sandbox_only_places(self):
+        """The whole point of the merged registry: one vocabulary everywhere."""
+        from praisonai.integrations.managed_local import LocalManagedAgent
+        for place in ("sandlock", "subprocess", "novita"):
+            agent = LocalManagedAgent(provider="local", tools_run_on=place)
+            assert agent.compute_provider is not None, place
 
     def test_resolve_instance(self):
         from praisonai.integrations.managed_local import LocalManagedAgent
