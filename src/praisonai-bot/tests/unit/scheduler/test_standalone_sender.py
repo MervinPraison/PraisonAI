@@ -68,6 +68,9 @@ def test_resolver_known_and_unknown():
     assert ss.resolve_standalone_sender("telegram") is not None
     assert ss.resolve_standalone_sender("Slack") is not None
     assert ss.resolve_standalone_sender("discord") is not None
+    # Platforms with a live adapter now also have a standalone sender (#4050).
+    assert ss.resolve_standalone_sender("whatsapp") is not None
+    assert ss.resolve_standalone_sender("Signal") is not None
     assert ss.resolve_standalone_sender("irc") is None
     assert ss.resolve_standalone_sender("") is None
     assert ss.resolve_standalone_sender(None) is None  # type: ignore[arg-type]
@@ -237,3 +240,115 @@ def test_live_handler_still_wins(monkeypatch):
 
     assert result.delivered is True
     assert live == [("123", "echo:hello")]
+
+
+# ── new-platform standalone senders (#4050) ──────────────────────────
+
+
+def test_whatsapp_standalone_send(monkeypatch):
+    captured: list = []
+
+    def fake_post(url, payload, headers=None):
+        captured.append((url, payload, headers))
+
+    monkeypatch.setattr(ss, "_post_json", fake_post)
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "WATOKEN")
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "PN123")
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="whatsapp:15551234")))
+
+    assert result.delivered is True
+    assert captured, "expected a whatsapp send"
+    url, payload, headers = captured[0]
+    assert "/PN123/messages" in url
+    assert payload["to"] == "15551234"
+    assert payload["text"]["body"] == "echo:hello"
+    assert headers["Authorization"] == "Bearer WATOKEN"
+
+
+def test_whatsapp_missing_token_records_delivery_error(monkeypatch):
+    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN", raising=False)
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="whatsapp:15551234")))
+
+    assert result.status == "succeeded"
+    assert result.delivered is False
+    assert result.delivery_error is not None
+    assert "WHATSAPP_ACCESS_TOKEN" in result.delivery_error
+
+
+def test_signal_standalone_send(monkeypatch):
+    captured: list = []
+
+    def fake_post(url, payload, headers=None):
+        captured.append((url, payload))
+
+    monkeypatch.setattr(ss, "_post_json", fake_post)
+    monkeypatch.setenv("SIGNAL_ACCOUNT", "+15550000")
+    monkeypatch.setenv("SIGNAL_BRIDGE_URL", "http://bridge:9090")
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="signal:+15551234")))
+
+    assert result.delivered is True
+    assert captured, "expected a signal send"
+    url, payload = captured[0]
+    assert url == "http://bridge:9090/v2/send"
+    assert payload["number"] == "+15550000"
+    assert payload["recipients"] == ["+15551234"]
+    assert payload["message"] == "echo:hello"
+
+
+# ── bounded retry (#4050) ────────────────────────────────────────────
+
+
+async def _no_sleep(*_a, **_k):
+    # Zero-delay stand-in so the retry loop does not actually wait in tests.
+    return None
+
+
+def test_transient_failure_is_retried_then_succeeds(monkeypatch):
+    calls: list = []
+
+    def flaky_post(url, payload, headers=None):
+        calls.append(payload)
+        if len(calls) == 1:
+            raise RuntimeError("HTTP 503: service unavailable")
+
+    monkeypatch.setattr(ss, "_post_json", flaky_post)
+    monkeypatch.setattr(ss.asyncio, "sleep", _no_sleep)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T0KEN")
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="telegram:123")))
+
+    assert result.delivered is True
+    assert result.delivery_error is None
+    assert len(calls) == 2  # first attempt failed, retry succeeded
+
+
+def test_permanent_failure_is_not_retried(monkeypatch):
+    calls: list = []
+
+    def bad_post(url, payload, headers=None):
+        calls.append(payload)
+        raise RuntimeError("HTTP 403: forbidden")
+
+    slept: list = []
+
+    async def _record_sleep(*_a, **_k):
+        slept.append(True)
+
+    monkeypatch.setattr(ss, "_post_json", bad_post)
+    monkeypatch.setattr(ss.asyncio, "sleep", _record_sleep)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T0KEN")
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="telegram:123")))
+
+    assert result.delivered is False
+    assert result.delivery_error is not None
+    assert len(calls) == 1  # permanent 403 not retried
+    assert not slept
