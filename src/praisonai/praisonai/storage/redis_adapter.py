@@ -87,6 +87,12 @@ class RedisStorageAdapter:
         """Create prefixed key."""
         return f"{self.prefix}{key}"
     
+    def _scan_keys(self, pattern: str, batch: int = 500):
+        """Non-blocking cursor scan (avoids the O(N) blocking KEYS command)."""
+        client = self._get_client()
+        for k in client.scan_iter(match=pattern, count=batch):
+            yield k
+    
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
         client = self._get_client()
@@ -132,18 +138,14 @@ class RedisStorageAdapter:
     
     def list_keys(self, prefix: str = "") -> List[str]:
         """List all keys, optionally filtered by prefix."""
-        client = self._get_client()
         pattern = self._make_key(f"{prefix}*")
+        plen = len(self.prefix)
         
         try:
-            keys = []
-            for key in client.keys(pattern):
-                # Remove the prefix to return clean keys
-                key_str = key.decode('utf-8') if isinstance(key, bytes) else key
-                clean_key = key_str[len(self.prefix):]
-                keys.append(clean_key)
-            
-            return sorted(keys)
+            return sorted(
+                (k.decode('utf-8') if isinstance(k, bytes) else k)[plen:]
+                for k in self._scan_keys(pattern)
+            )
         except Exception as e:
             raise RuntimeError(f"Failed to list keys from Redis: {e}") from e
     
@@ -163,10 +165,15 @@ class RedisStorageAdapter:
         pattern = self._make_key("*")
         
         try:
-            keys = list(client.keys(pattern))
-            if keys:
-                return client.delete(*keys)
-            return 0
+            total, chunk = 0, []
+            for k in self._scan_keys(pattern):
+                chunk.append(k)
+                if len(chunk) >= 500:
+                    total += client.delete(*chunk)
+                    chunk.clear()
+            if chunk:
+                total += client.delete(*chunk)
+            return total
         except Exception as e:
             raise RuntimeError(f"Failed to clear data from Redis: {e}") from e
     

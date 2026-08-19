@@ -92,13 +92,19 @@ class MongoDBStateStore(StateStore):
         return True
     
     def keys(self, pattern: str = "*") -> List[str]:
-        """List keys matching pattern."""
+        """List keys matching a glob pattern.
+
+        The literal portions of the pattern are ``re.escape``-d before the glob
+        wildcards (``*`` -> ``.*``, ``?`` -> ``.``) are applied, so regex
+        metacharacters in a user-supplied prefix cannot trigger ReDoS or
+        unintended matches (matching the hardened MongoDBStorageAdapter).
+        """
         if pattern == "*":
             cursor = self._collection.find({}, {"_id": 1})
         else:
-            # Convert glob pattern to regex
             import re
-            regex = pattern.replace("*", ".*").replace("?", ".")
+            # Escape everything, then re-enable only glob wildcards.
+            regex = re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
             cursor = self._collection.find({"_id": {"$regex": f"^{regex}$"}}, {"_id": 1})
         
         return [doc["_id"] for doc in cursor]

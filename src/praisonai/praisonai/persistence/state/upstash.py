@@ -89,11 +89,24 @@ class UpstashStateStore(StateStore):
         return self._client.exists(self._key(key)) > 0
     
     def keys(self, pattern: str = "*") -> List[str]:
-        """List keys matching pattern."""
-        full_pattern = self._key(pattern)
-        keys = self._client.keys(full_pattern)
+        """List keys matching pattern.
+
+        Uses a cursor SCAN instead of the blocking Redis ``KEYS`` command so a
+        single read never blocks the instance.
+        """
+        match = self._key(pattern)
         prefix_len = len(self.prefix)
-        return [k[prefix_len:] if k.startswith(self.prefix) else k for k in keys]
+        out: List[str] = []
+        cursor: Any = 0
+        while True:
+            cursor, chunk = self._client.scan(cursor, match=match, count=500)
+            for k in chunk or []:
+                if isinstance(k, bytes):
+                    k = k.decode("utf-8", "replace")
+                out.append(k[prefix_len:] if k.startswith(self.prefix) else k)
+            if str(cursor) == "0":
+                break
+        return out
     
     def scan_prefix(self, prefix: str, batch: int = 500) -> List[str]:
         """Return keys under ``prefix`` using a cursor SCAN instead of KEYS.

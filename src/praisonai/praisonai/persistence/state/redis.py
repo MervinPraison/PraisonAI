@@ -124,25 +124,18 @@ class RedisStateStore(StateStore):
         return self._client.exists(self._key(key)) > 0
     
     def keys(self, pattern: str = "*") -> List[str]:
-        """List keys matching pattern."""
+        """List keys matching pattern.
+
+        Uses a non-blocking cursor SCAN instead of the O(N) ``KEYS`` command so
+        a single read never stalls other clients on the single-threaded server.
+        """
         full_pattern = self._key(pattern)
-        keys = self._client.keys(full_pattern)
-        # Remove prefix from returned keys
         prefix_len = len(self.prefix)
-        prefix_bytes = self.prefix.encode('utf-8')
         result = []
-        for k in keys:
-            # Handle both bytes and string keys
+        for k in self._client.scan_iter(match=full_pattern, count=500):
             if isinstance(k, bytes):
-                if k.startswith(prefix_bytes):
-                    result.append(k[prefix_len:].decode('utf-8'))
-                else:
-                    result.append(k.decode('utf-8'))
-            else:
-                if k.startswith(self.prefix):
-                    result.append(k[prefix_len:])
-                else:
-                    result.append(k)
+                k = k.decode('utf-8', 'replace')
+            result.append(k[prefix_len:] if k.startswith(self.prefix) else k)
         return result
     
     def scan_prefix(self, prefix: str, batch: int = 500) -> List[str]:
