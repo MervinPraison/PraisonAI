@@ -376,6 +376,18 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     if llm and hasattr(llm, 'set_current_agent'):
         llm.set_current_agent(executor_agent.display_name)
 
+    # Place the agent's tools BEFORE snapshotting them. This snapshot is passed
+    # to chat() as an explicit `tools=`, which wins over `agent.tools` -- so if
+    # the sandbox attaches later (inside chat()), the model is handed the
+    # pre-attach list and every tool runs on the host while a sandbox sits
+    # provisioned and unused. Silent, and worse than it sounds: in
+    # start_for_each() row 1 got local tools and row 2 got the bridged set,
+    # because row 1's chat() mutated agent.tools in time for row 2's snapshot.
+    if executor_agent is not None and getattr(executor_agent, "tools_run_on", None) is not None:
+        from ..agent.tools_placement import ensure_tools_placed
+
+        ensure_tools_placed(executor_agent)
+
     # Ensure tools are available from both task and agent (create copy to avoid mutation)
     tools = list(task.tools or [])
     if executor_agent and executor_agent.tools:
@@ -1561,13 +1573,27 @@ class AgentTeam(SpawnAnnounceProtocol):
     # inspecting the team mid-run saw "no sandbox" and any concurrent start()
     # executed every tool on the host. Depth lives with the caller, not on the
     # shared object, so the team's declared placement is always readable.
+    #
+    # The depth is keyed PER TEAM, not shared class-wide. A single integer here
+    # meant any team started while another team's run was on the stack saw
+    # depth==1 and skipped its own sandbox entirely -- so a nested team ran on
+    # the host, and a team sharing an agent with the outer run executed on the
+    # OUTER team's sandbox. Two teams in one asyncio.gather hit the same thing.
     _tools_scope_state = threading.local()
+
+    def _scope_depths(self) -> dict:
+        """This thread's per-team scope depths, keyed by team identity."""
+        depths = getattr(self._tools_scope_state, "depths", None)
+        if depths is None:
+            depths = {}
+            self._tools_scope_state.depths = depths
+        return depths
 
     def _needs_tools_scope(self) -> bool:
         """True when this call should provision the team's shared sandbox."""
         if getattr(self, "tools_run_on", None) is None:
             return False
-        return getattr(self._tools_scope_state, "depth", 0) == 0
+        return self._scope_depths().get(id(self), 0) == 0
 
     @contextlib.contextmanager
     def _shared_tools_scope(self):
@@ -1580,14 +1606,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         from ..managed.shared_compute import SharedCompute
 
-        state = self._tools_scope_state
-        state.depth = getattr(state, "depth", 0) + 1
+        depths = self._scope_depths()
+        key = id(self)
+        depths[key] = depths.get(key, 0) + 1
         try:
             with SharedCompute(self.tools_run_on) as shared:
                 shared.attach(list(self.agents or []))
                 yield shared
         finally:
-            state.depth -= 1
+            depths[key] -= 1
+            if depths[key] <= 0:
+                # Drop the key so the dict cannot grow without bound across
+                # many short-lived teams on a long-lived worker thread.
+                depths.pop(key, None)
 
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
