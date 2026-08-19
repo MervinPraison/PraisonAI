@@ -177,3 +177,31 @@ def test_a_locally_available_place_actually_runs_a_command(place):
 
     result = asyncio.run(run())
     assert "matrix-ok" in (result.get("stdout") or ""), result
+
+
+# ── reclaiming what we provisioned ───────────────────────────────────────────
+def test_managed_ps_polls_places_from_the_registry_not_a_literal():
+    """`_PS_PROVIDERS` was a hardcoded tuple, so a place contributed by another
+    package could be provisioned and then never listed or stopped -- and an
+    unreclaimable cloud sandbox is a bill nobody sees."""
+    pytest.importorskip("praisonai.cli.commands.managed")
+    from praisonai.cli.commands.managed import _ps_providers
+
+    polled = set(_ps_providers())
+    assert "docker" in polled
+
+    # Local places have nothing to reclaim and must not be polled.
+    assert not polled & {"local", "subprocess", "sandlock", "ssh"}
+
+    # Everything polled must be a real place.
+    assert polled <= set(tool_places())
+
+
+def test_a_contributed_place_would_be_polled(monkeypatch):
+    pytest.importorskip("praisonai.cli.commands.managed")
+    import praisonaiagents.managed._compute_bridge as bridge
+    from praisonai.cli.commands.managed import _ps_providers
+
+    monkeypatch.setattr(bridge, "available_providers",
+                        lambda: ["docker", "contributed-cloud"])
+    assert "contributed-cloud" in _ps_providers()

@@ -657,9 +657,30 @@ def ids_restore(
 # sandbox lifecycle: ps / stop
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Providers worth polling for running sandboxes. "local" is excluded: it runs
-# on this machine and has nothing to reclaim.
-_PS_PROVIDERS = ("docker", "e2b", "modal", "daytona", "flyio", "tenki")
+# Places worth polling for running sandboxes, derived from the registry rather
+# than restated here. A hardcoded tuple meant a place contributed by another
+# package could be provisioned but never listed or reclaimed -- and an
+# unreclaimable cloud sandbox is a bill nobody sees.
+#
+# Excluded on purpose: "local" and "subprocess" run on this machine and have
+# nothing to reclaim; "ssh" is someone else's machine, which is not ours to
+# stop; "sandlock" is a process, not an instance; adapter-backed places have no
+# cross-process registry to enumerate (see SandboxComputeAdapter).
+_PS_EXCLUDED = frozenset({"local", "subprocess", "sandlock", "ssh", "native", "novita"})
+
+
+def _ps_providers() -> tuple:
+    """Places that can be listed and stopped, from the live registry."""
+    try:
+        from praisonaiagents.managed._compute_bridge import available_providers
+
+        return tuple(p for p in available_providers() if p not in _PS_EXCLUDED)
+    except Exception:
+        return ("docker", "e2b", "modal", "daytona", "flyio", "tenki")
+
+
+#: Kept as a module attribute so existing imports and tests keep working.
+_PS_PROVIDERS = _ps_providers()
 
 
 def _discover_instances(provider_filter: Optional[str] = None):
