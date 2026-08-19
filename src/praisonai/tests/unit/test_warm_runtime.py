@@ -67,7 +67,6 @@ def test_get_runtime_descriptor_removes_stale_lock():
     assert not get_runtime_lock_path().exists()
 
 
-@pytest.mark.skip(reason="Test hangs indefinitely - needs investigation and proper fix")
 def test_get_runtime_descriptor_keeps_live_lock():
     desc = RuntimeDescriptor(host="127.0.0.1", port=1, token="t", pid=os.getpid())
     desc.write()
