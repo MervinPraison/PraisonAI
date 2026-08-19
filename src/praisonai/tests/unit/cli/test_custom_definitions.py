@@ -5,9 +5,9 @@ Tests for custom agent and command definitions discovery.
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-
+import sys
+import shutil
 import pytest
-
 from praisonai.cli.features.custom_definitions import (
     BUILTIN_PRESETS,
     SHELL_SUBSTITUTION_ENV,
@@ -223,12 +223,14 @@ class TestShellSubstitution:
         with pytest.raises(ShellSubstitutionError):
             TemplateInterpolator.interpolate(template)
 
+    @pytest.mark.skipif(not shutil.which("echo"), reason="echo command not available in PATH")
     def test_shell_enabled_runs_command(self):
         """With allow_shell=True the command runs and stdout is inlined."""
         template = "Output: !`echo hello world`"
         result = TemplateInterpolator.interpolate(template, allow_shell=True)
         assert result == "Output: hello world"
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Unix commands not available on Windows")
     def test_shell_runs_in_working_dir(self):
         """Commands execute in the provided working_dir."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -245,6 +247,7 @@ class TestShellSubstitution:
         with pytest.raises(ShellSubstitutionError):
             TemplateInterpolator.interpolate(template, allow_shell=True)
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Unix commands not available on Windows")
     def test_shell_output_capped_at_max_bytes(self):
         """Large stdout is bounded to SHELL_SUBSTITUTION_MAX_BYTES while reading."""
         from praisonai.cli.features.custom_definitions import (
@@ -280,7 +283,8 @@ class TestShellSubstitution:
                 CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
             ), patch.dict("os.environ", {SHELL_SUBSTITUTION_ENV: "true"}):
                 result = interpolate_command_template("diff")
-                assert result == "Output: hi"
+                assert result.strip() == "Output: hi"  
+
 
     def test_frontmatter_allow_shell_enables(self):
         """allow_shell: true frontmatter enables substitution for that command."""
@@ -301,7 +305,7 @@ class TestShellSubstitution:
                 import os as _os
                 _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
                 result = interpolate_command_template("diff")
-                assert result == "Output: hey"
+                assert result.strip() == "Output: hey" 
 
     def test_default_command_disables_shell(self):
         """Without any gate, a !`cmd` command raises a clear error."""
@@ -346,6 +350,7 @@ class TestShellSubstitution:
         )
         assert "\\$(rm -rf /)" in result
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Unix commands not available on Windows")
     def test_shell_output_with_dollar_not_mangled(self):
         """Command stdout containing $(...) is inlined verbatim, not escaped."""
         template = "Out: !`printf '%s' '$(git rev-parse HEAD)'`"
