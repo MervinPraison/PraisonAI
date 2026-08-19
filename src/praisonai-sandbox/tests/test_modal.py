@@ -273,7 +273,14 @@ class TestModalSandbox:
         sandbox = ModalSandbox()
         
         assert sandbox.gpu is None
-        assert sandbox.image == "python:3.11"
+        # The default image follows the RUNNING interpreter, not a hardcoded
+        # 3.11. A serialized Modal function is pickled locally and unpickled in
+        # the image, so a mismatch fails with "defined with Python 3.12, but
+        # its Image has 3.11" -- which is what a fixed 3.11 default caused for
+        # everyone not on 3.11.
+        import sys
+
+        assert sandbox.image == f"python:{sys.version_info.major}.{sys.version_info.minor}"
         assert sandbox.timeout == 300
         assert sandbox.app_name.startswith("praisonai-sandbox-")
     

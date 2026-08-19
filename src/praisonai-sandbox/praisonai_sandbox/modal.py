@@ -7,6 +7,7 @@ Provides serverless code execution on Modal's cloud platform.
 from __future__ import annotations
 
 import logging
+import sys
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
@@ -20,6 +21,48 @@ from praisonaiagents.sandbox import (
 logger = logging.getLogger(__name__)
 TIMEOUT_EXIT_CODE = 124
 
+
+
+def _modal_scaling_kwargs() -> dict:
+    """Scaling arguments spelled for whichever Modal SDK is installed.
+
+    ``allow_concurrent_inputs`` became ``max_concurrent_inputs`` and
+    ``keep_warm`` became ``min_containers`` on 2025-02-24. The old names now
+    raise a DeprecationError rather than warning, so hardcoding either spelling
+    breaks half the installed base.
+    """
+    import inspect
+
+    try:
+        import modal
+
+        params = inspect.signature(modal.App.function).parameters
+    except Exception:  # pragma: no cover - fall back to the current spelling
+        return {"min_containers": 1, "max_concurrent_inputs": 10}
+
+    kwargs = {}
+    kwargs["min_containers" if "min_containers" in params else "keep_warm"] = 1
+    if "max_concurrent_inputs" in params:
+        kwargs["max_concurrent_inputs"] = 10
+    elif "allow_concurrent_inputs" in params:
+        kwargs["allow_concurrent_inputs"] = 10
+    return kwargs
+
+
+def _modal_base_image(reference: str):
+    """Build the Modal image, only grafting Python on when it is missing.
+
+    ``add_python=`` installs a Python into an image that has none. Passing it
+    for an image that already ships one -- the default here is ``python:3.11``
+    -- makes the build fail, so `run_in="modal"` died during image build.
+    """
+    import modal
+
+    name = (reference or "").lower()
+    already_has_python = name.startswith("python:") or "/python:" in name
+    if already_has_python:
+        return modal.Image.from_registry(reference)
+    return modal.Image.from_registry(reference, add_python="3.11")
 
 class ModalSandbox:
     """Modal-based sandbox for serverless code execution.
@@ -40,7 +83,7 @@ class ModalSandbox:
     def __init__(
         self,
         gpu: Optional[str] = None,
-        image: str = "python:3.11",
+        image: Optional[str] = None,
         timeout: int = 300,
         app_name: Optional[str] = None,
     ):
@@ -53,11 +96,16 @@ class ModalSandbox:
             app_name: Optional Modal app name
         """
         self.gpu = gpu
-        self.image = image
+        # Default to the RUNNING interpreter's Python. A serialized function
+        # is pickled locally and unpickled in the image, so the two Pythons
+        # must match -- a hardcoded 3.11 image failed for anyone on 3.12 with
+        # "defined with Python 3.12, but its Image has 3.11".
+        self.image = image or f"python:{sys.version_info.major}.{sys.version_info.minor}"
         self.timeout = timeout
         self.app_name = app_name or f"praisonai-sandbox-{uuid.uuid4().hex[:8]}"
         
         self._app = None
+        self._app_ctx = None
         self._function = None
         self._is_running = False
     
@@ -98,15 +146,9 @@ class ModalSandbox:
                            modal.gpu.A100() if self.gpu.upper() == "A100" else \
                            modal.gpu.T4()  # Default fallback
                            
-                image = modal.Image.from_registry(
-                    self.image,
-                    add_python="3.11"
-                ).pip_install("torch", "numpy")
+                image = _modal_base_image(self.image).pip_install("torch", "numpy")
             else:
-                image = modal.Image.from_registry(
-                    self.image,
-                    add_python="3.11"
-                )
+                image = _modal_base_image(self.image)
                 gpu_config = None
             
             # Create function for code execution
@@ -114,8 +156,15 @@ class ModalSandbox:
                 image=image,
                 gpu=gpu_config,
                 timeout=self.timeout,
-                allow_concurrent_inputs=10,
-                keep_warm=1,
+                # Modal renamed these on 2025-02-24 and the old spellings now
+                # raise rather than warn, so `run_in="modal"` failed before the
+                # sandbox was ever built. Both names are passed through a
+                # compatibility shim so this works on either SDK generation.
+                # The decorated function is defined inside a method, not at
+                # module scope, which Modal only accepts when it is told to
+                # serialise it.
+                serialized=True,
+                **_modal_scaling_kwargs(),
             )
             def execute_code(code: str, language: str = "python", env_vars: Dict[str, str] = None):
                 """Execute code in Modal environment."""
@@ -196,6 +245,16 @@ class ModalSandbox:
                         )
             
             self._function = execute_code
+            # Enter the app context and hold it. A Modal function only carries
+            # the metadata it needs to run while its App is running, so
+            # defining the function and then calling .remote() outside a
+            # running app failed with "Function has not been hydrated".
+            self._app_ctx = self._app.run()
+            try:
+                await self._app_ctx.__aenter__()
+            except AttributeError:          # older SDKs expose a sync context
+                self._app_ctx.__enter__()
+
             self._is_running = True
             logger.info(f"Modal sandbox initialized with app: {self.app_name}")
             
@@ -204,6 +263,15 @@ class ModalSandbox:
     
     async def stop(self) -> None:
         """Stop/cleanup the Modal app."""
+        ctx, self._app_ctx = getattr(self, "_app_ctx", None), None
+        if ctx is not None:
+            try:
+                try:
+                    await ctx.__aexit__(None, None, None)
+                except AttributeError:
+                    ctx.__exit__(None, None, None)
+            except Exception as exc:  # pragma: no cover - teardown must be quiet
+                logger.debug("Modal app context did not close cleanly: %s", exc)
         self._app = None
         self._function = None
         self._is_running = False
