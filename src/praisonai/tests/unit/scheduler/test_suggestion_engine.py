@@ -98,6 +98,60 @@ class TestAcceptDismiss:
         assert engine.get_suggestion("nonexistent") is None
 
 
+class TestObserve:
+    """Tests for the recurrence generator observe()."""
+
+    def test_below_threshold_does_not_propose(self, engine):
+        assert engine.observe("morning-brief", slots={"hour": 8}) is None
+        assert engine.observe("morning-brief", slots={"hour": 8}) is None
+        assert engine.pending() == []
+
+    def test_threshold_auto_proposes(self, engine):
+        assert engine.observe("morning-brief", slots={"hour": 8}) is None
+        assert engine.observe("morning-brief", slots={"hour": 8}) is None
+        sug_id = engine.observe("morning-brief", slots={"hour": 8})
+        assert sug_id is not None
+        assert sug_id.startswith("sug_")
+        pending_ids = {s.id for s in engine.pending()}
+        assert sug_id in pending_ids
+
+    def test_custom_threshold(self, engine):
+        sug_id = engine.observe("morning-brief", threshold=1)
+        assert sug_id is not None
+
+    def test_distinct_slots_tracked_separately(self, engine):
+        # Two different intents, each observed twice — neither reaches 3.
+        for _ in range(2):
+            engine.observe("morning-brief", slots={"hour": 8})
+            engine.observe("morning-brief", slots={"hour": 9})
+        assert engine.pending() == []
+
+    def test_default_reason_when_omitted(self, engine):
+        sug_id = engine.observe("morning-brief", threshold=1)
+        s = engine.get_suggestion(sug_id)
+        assert "morning-brief" in s.reason
+
+    def test_counter_resets_after_firing(self, engine):
+        # First burst fires once at threshold.
+        engine.observe("morning-brief", slots={"hour": 8})
+        engine.observe("morning-brief", slots={"hour": 8})
+        first = engine.observe("morning-brief", slots={"hour": 8})
+        assert first is not None
+        # Immediately after firing, the next observation is below threshold
+        # again and the store dedups the identical intent, so no new suggestion.
+        second = engine.observe("morning-brief", slots={"hour": 8})
+        assert second is None
+
+    def test_principal_isolation(self, engine):
+        # alice recurs to threshold; bob's single observation must not ride on it.
+        engine.observe("morning-brief", principal="alice")
+        engine.observe("morning-brief", principal="alice")
+        engine.observe("morning-brief", principal="bob")
+        alice_id = engine.observe("morning-brief", principal="alice")
+        assert alice_id is not None
+        assert {s.id for s in engine.pending("bob")} == set()
+
+
 class TestPending:
     """Tests for pending()."""
 
