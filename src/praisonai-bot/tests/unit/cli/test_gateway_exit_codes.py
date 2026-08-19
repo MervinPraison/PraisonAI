@@ -158,7 +158,7 @@ def test_bot_gateway_start_command_propagates_fatal_exit_code(monkeypatch):
     assert excinfo.value.exit_code == GATEWAY_FATAL_CONFIG_EXIT_CODE
 
 
-def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch):
+def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch, tmp_path):
     import typer
 
     from praisonai_bot.cli.commands import gateway as bot_gateway_cmd
@@ -170,9 +170,16 @@ def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch):
         "praisonai_bot.cli.features.gateway.GatewayHandler.start", fake_start
     )
 
+    # Pass an explicit --agents path (single-agent mode) so the command skips
+    # config auto-discovery (#3880) and its config-gated channel/turn pre-flights
+    # (#4042). Those gates run BEFORE start() and are env/CWD-dependent (a stray
+    # gateway.yaml, or missing model creds), which would otherwise mask the one
+    # thing this test guards: that start()'s exit code is propagated verbatim.
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(typer.Exit) as excinfo:
         bot_gateway_cmd.gateway_start(
-            host="127.0.0.1", port=8765, agents=None,
+            host="127.0.0.1", port=8765,
+            agents=str(tmp_path / "agents.yaml"),
             config=None, preflight=False, openai_api=False, mcp=False,
         )
     assert excinfo.value.exit_code == GATEWAY_OK_EXIT_CODE

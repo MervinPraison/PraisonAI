@@ -153,30 +153,43 @@ def _patch_handler(monkeypatch, captured):
     monkeypatch.setattr(features_gateway, "GatewayHandler", _StubHandler)
 
 
-def test_typer_start_forwards_watchdog_to_handler(monkeypatch):
+def test_typer_start_forwards_watchdog_to_handler(monkeypatch, tmp_path):
     from typer.testing import CliRunner
     from praisonai_bot.cli.commands import gateway as gateway_cmd
 
     captured = {}
     _patch_handler(monkeypatch, captured)
 
+    # ``--agents`` (single-agent mode) skips config auto-discovery (#3880) and
+    # its config-gated channel/turn pre-flights (#4042) — those run before the
+    # handler and are env/CWD-dependent, so without this a stray gateway.yaml or
+    # missing model creds would exit non-zero before the flag ever reaches the
+    # handler. Isolating CWD keeps the check about flag forwarding, not the env.
+    monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         gateway_cmd.app,
-        ["start", "--watchdog", "--watchdog-timeout", "20", "--no-preflight"],
+        [
+            "start", "--agents", str(tmp_path / "agents.yaml"),
+            "--watchdog", "--watchdog-timeout", "20", "--no-preflight",
+        ],
     )
     assert result.exit_code == 0
     assert captured.get("watchdog") is True
     assert captured.get("watchdog_timeout") == 20.0
 
 
-def test_typer_start_watchdog_unset_is_none(monkeypatch):
+def test_typer_start_watchdog_unset_is_none(monkeypatch, tmp_path):
     from typer.testing import CliRunner
     from praisonai_bot.cli.commands import gateway as gateway_cmd
 
     captured = {}
     _patch_handler(monkeypatch, captured)
 
-    result = CliRunner().invoke(gateway_cmd.app, ["start", "--no-preflight"])
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        gateway_cmd.app,
+        ["start", "--agents", str(tmp_path / "agents.yaml"), "--no-preflight"],
+    )
     assert result.exit_code == 0
     # Unset flag must not clobber a YAML ``gateway.watchdog.enabled: true``.
     assert captured.get("watchdog") is None
