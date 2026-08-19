@@ -96,28 +96,35 @@ class ComputeManagedAgent:
 
     # ── ManagedBackendProtocol ───────────────────────────────────────────────
     async def execute(self, prompt: str, **kwargs) -> str:
-        await self._ensure()
+        # An ephemeral place (keep_alive=False) provisions a billable instance,
+        # so it must be reclaimed however this call ends -- a write, the remote
+        # run, or the parse can each raise after provisioning, and leaving the
+        # instance up is a cloud bill nobody sees. try/finally makes teardown
+        # unconditional; keep_alive=True keeps the warm instance as intended.
+        try:
+            await self._ensure()
 
-        payload = json.dumps({"agent": self._config, "prompt": prompt})
-        await self._write("/tmp/praison_agent.json", payload)
-        await self._write("/tmp/praison_runner.py", _RUNNER)
+            payload = json.dumps({"agent": self._config, "prompt": prompt})
+            await self._write("/tmp/praison_agent.json", payload)
+            await self._write("/tmp/praison_runner.py", _RUNNER)
 
-        result = await self._provider.execute(
-            self._instance, "python /tmp/praison_runner.py",
-            kwargs.get("timeout", 900),
-        )
-        answer = _parse(result.get("stdout", ""))
-        if answer is None:
-            detail = (result.get("stderr") or result.get("stdout") or "").strip()[-600:]
-            raise RuntimeError(
-                f"The agent produced no result on {self._place}.\n{detail}"
+            result = await self._provider.execute(
+                self._instance, "python /tmp/praison_runner.py",
+                kwargs.get("timeout", 900),
             )
-        if not answer.get("ok"):
-            raise RuntimeError(f"Agent failed on {self._place}: {answer['error']}")
+            answer = _parse(result.get("stdout", ""))
+            if answer is None:
+                detail = (result.get("stderr") or result.get("stdout") or "").strip()[-600:]
+                raise RuntimeError(
+                    f"The agent produced no result on {self._place}.\n{detail}"
+                )
+            if not answer.get("ok"):
+                raise RuntimeError(f"Agent failed on {self._place}: {answer['error']}")
 
-        if not self._keep_alive:
-            await self.ashutdown()
-        return answer["result"]
+            return answer["result"]
+        finally:
+            if not self._keep_alive:
+                await self.ashutdown()
 
     async def stream(self, prompt: str, **kwargs):
         """Yield the finished answer once.
