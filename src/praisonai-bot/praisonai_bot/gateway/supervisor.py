@@ -232,12 +232,23 @@ class ChannelSupervisor:
                     abort_signal.clear()
                     
                 status.state = ChannelState.RUNNING
+                recovering = monitor.attempt > 0
                 logger.info(f"Starting channel '{name}'..." + 
-                           (f" (attempt {monitor.attempt + 1})" if monitor.attempt > 0 else ""))
+                           (f" (attempt {monitor.attempt + 1})" if recovering else ""))
                 
                 # Start the bot in a task so it can be cancelled
                 bot_task = asyncio.create_task(start_fn(name, bot))
                 abort_task = asyncio.create_task(abort_signal.wait())
+                
+                # Issue #4043: the channel is coming back after a transient
+                # outage. Re-attempt anything the durable outbox held through the
+                # outage now, instead of leaving it undelivered until the next
+                # inbound chat() turn or a process restart. Scheduled as a
+                # background task (not awaited here) so it runs once the adapter
+                # has reconnected without blocking the supervision wait — bounded
+                # and best-effort, see _on_channel_recovered.
+                if recovering:
+                    asyncio.create_task(self._on_channel_recovered(name, bot))
                 
                 # Wait for either the bot to exit or abort signal
                 done, pending = await asyncio.wait(
@@ -399,6 +410,48 @@ class ChannelSupervisor:
             logger.warning(
                 f"Channel '{name}' credential refresh hook failed "
                 f"(continuing with restart): {exc}"
+            )
+
+    async def _on_channel_recovered(self, name: str, bot: Any) -> None:
+        """Re-drain the durable outbox after a channel recovers (Issue #4043).
+
+        The durable outbox deliberately *holds* deliverable replies through a
+        transient channel outage (attempt-and-age dead-letter policy) rather than
+        dropping them, but nothing re-attempted them once the channel came back —
+        they sat undelivered until the next inbound ``chat()`` turn or a process
+        restart. This closes that loop: when the supervisor observes a channel
+        transition from unhealthy back to connected, it triggers a bounded
+        re-drain of that platform's outbox so held replies go out promptly.
+
+        Duck-typed and best-effort: bots/adapters without a ``drain_outbox()``
+        hook are a silent no-op, and any error is swallowed so a failed re-drain
+        can never wedge supervision — the outbox's own attempt-and-age policy
+        still governs those messages.
+
+        The hook is resolved on the supervised object *itself* first — in the
+        gateway the durable platform adapter (``DurableAdapterMixin``) is passed
+        directly to ``run()``, so ``drain_outbox`` lives on ``bot`` — and only
+        then on a nested ``bot.adapter`` for wrapper bots that compose an
+        adapter. Checking both keeps built-in channels covered without assuming
+        a particular object shape.
+        """
+        drain = getattr(bot, "drain_outbox", None)
+        if not callable(drain):
+            adapter = getattr(bot, "adapter", None)
+            drain = getattr(adapter, "drain_outbox", None)
+        if not callable(drain):
+            return
+        try:
+            succeeded, failed = await drain()
+            if succeeded or failed:
+                logger.info(
+                    f"Channel '{name}' recovered: re-drained outbox "
+                    f"({succeeded} sent, {failed} failed)"
+                )
+        except Exception as exc:
+            logger.warning(
+                f"Channel '{name}' outbox re-drain on recovery failed "
+                f"(will retry on next drain): {exc}"
             )
 
     async def _get_channel_health(self, name: str, bot: Any) -> Any:
