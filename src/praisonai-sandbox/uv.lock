@@ -1606,7 +1606,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-sandbox"
-version = "0.0.12"
+version = "0.0.13"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1666,7 +1666,7 @@ provides-extras = ["docker", "e2b", "sandlock", "ssh", "modal", "daytona", "novi
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.167"
+version = "1.6.168"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
