@@ -122,7 +122,18 @@ class ContextCompactor:
         
         # Protocol implementations (defaults to None - no heavy implementations in core)
         self.tool_pruner = tool_pruner
-        self.message_formatter = message_formatter  
+        self.message_formatter = message_formatter
+        # Default the structured summary builder when the config asks for the
+        # phase-aware template but no builder was injected, so
+        # `_build_structured_summary` renders SUMMARY_TEMPLATE instead of the
+        # "Summary of N messages" stub. The builder is deterministic and
+        # dependency-free, so this stays offline-safe and zero-overhead.
+        if summary_builder is None and getattr(self.config, "structured_template", False):
+            from .summary_builder import DefaultSummaryBuilder
+
+            summary_builder = DefaultSummaryBuilder(
+                llm_summarize_fn=self.llm_summarize_fn
+            )
         self.summary_builder = summary_builder
         
         # Anti-thrashing state tracking
