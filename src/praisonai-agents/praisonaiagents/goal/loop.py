@@ -128,11 +128,44 @@ class GoalLoopMixin:
         if state is None or state.status != "active":
             return None
 
+        # Executable verification: run configured hooks and gate on the result.
+        # A failing BLOCKING hook short-circuits to "continue" WITHOUT spending
+        # a judge call. Passing/non-blocking results become authoritative
+        # evidence in the judge prompt.
+        verification_block: Optional[str] = None
+        if getattr(self, "_verification_hooks", None):
+            results = self._run_verification_hooks()
+            self._last_verification_results = results
+            self._record_verification_journal(results)
+            verification_block = self._verification_summary_tail(results)
+            blocking_failed = [
+                r for r in results
+                if r.get("blocking", True) and not r.get("success")
+            ]
+            if blocking_failed:
+                state.turns_used += 1
+                state.last_verdict = "continue"
+                # Carry the failing hooks' captured stdout/stderr into the
+                # continuation prompt so the next turn has the diagnostics
+                # needed to repair the failure (not just a bare label).
+                failure_detail = self._verification_summary_tail(blocking_failed)
+                reason = "verification gate failed"
+                if failure_detail:
+                    reason = f"{reason}:\n{failure_detail}"
+                state.last_reason = reason
+                if state.turns_used >= state.max_turns:
+                    state.status = "paused"
+                    self._persist_goal_state()
+                    return "budget_paused", reason
+                self._persist_goal_state()
+                return "continue", reason
+
         state.turns_used += 1
         verdict, reason = judge_goal(
             state,
             _tail(response),
             judge_model=getattr(self, "_goal_judge_model", None),
+            verification_block=verification_block,
         )
         state.last_verdict, state.last_reason = verdict, reason
 

@@ -17,6 +17,7 @@ from ..runtime.journal import (
     KIND_MODEL_DECISION,
     KIND_TOOL_CALL,
     KIND_TOOL_RESULT,
+    KIND_VERIFICATION,
     RunJournal,
 )
 
@@ -276,6 +277,26 @@ class DurableRunContext:
             iteration_index,
         )
         self.finalize("failed")
+
+    def record_verification(self, payloads: List[Dict[str, Any]]) -> None:
+        """Append verification-gate results as durable ``verification`` events.
+
+        Each payload gets its own fresh ``seq`` so the events append cleanly
+        alongside the tool-call cursor without colliding on ``(run_id, seq,
+        kind)``. Best-effort: journalling never raises into the gate.
+        """
+        if self._closed:
+            return
+        with self._lock:
+            for payload in payloads:
+                seq = self._next_seq
+                self._next_seq += 1
+                try:
+                    self.journal.append(
+                        JournalEvent(self.run_id, seq, KIND_VERIFICATION, payload)
+                    )
+                except Exception:  # pragma: no cover - journalling is best-effort
+                    pass
 
     def wrap_sync(self, execute_tool_fn: Optional[Callable]) -> Optional[Callable]:
         if execute_tool_fn is None:
