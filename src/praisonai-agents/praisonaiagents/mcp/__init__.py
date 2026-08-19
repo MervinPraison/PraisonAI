@@ -51,6 +51,12 @@ _LAZY_IMPORTS = {
     "get_redirect_url": _t("praisonaiagents.mcp.mcp_oauth_callback", "get_redirect_url"),
     "OAUTH_CALLBACK_PORT": _t("praisonaiagents.mcp.mcp_oauth_callback", "OAUTH_CALLBACK_PORT"),
     "OAUTH_CALLBACK_PATH": _t("praisonaiagents.mcp.mcp_oauth_callback", "OAUTH_CALLBACK_PATH"),
+    # Zero-config OAuth: discovery, dynamic registration, orchestration.
+    "discover_oauth_metadata": _t("praisonaiagents.mcp.oauth_discovery", "discover_oauth_metadata"),
+    "parse_www_authenticate": _t("praisonaiagents.mcp.oauth_discovery", "parse_www_authenticate"),
+    "register_client": _t("praisonaiagents.mcp.oauth_registration", "register_client"),
+    "MCPOAuthProvider": _t("praisonaiagents.mcp.oauth_provider", "MCPOAuthProvider"),
+    "InteractiveAuthRequired": _t("praisonaiagents.mcp.oauth_provider", "InteractiveAuthRequired"),
     # Protocols (lazy loaded)
     "MCPClientProtocol": _t("praisonaiagents.mcp.protocols", "MCPClientProtocol"),
     # Loader (lazy loaded)
@@ -100,4 +106,10 @@ __all__ = [
     "get_redirect_url",
     "OAUTH_CALLBACK_PORT",
     "OAUTH_CALLBACK_PATH",
+    # Zero-config OAuth (lazy loaded)
+    "discover_oauth_metadata",
+    "parse_www_authenticate",
+    "register_client",
+    "MCPOAuthProvider",
+    "InteractiveAuthRequired",
 ]
