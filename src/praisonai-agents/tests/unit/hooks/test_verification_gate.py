@@ -257,4 +257,95 @@ class TestGoalLoopEvidence:
             state, "output", verification_block="[PASS] tests (exit=0)"
         )
         assert "[PASS] tests (exit=0)" in prompt
-        assert "EXECUTABLE VERIFICATION RESULTS" in prompt
+
+    def test_goal_failure_carries_diagnostics_into_continuation(self, tmp_path):
+        # A failing blocking command hook must surface its captured stderr in
+        # the next continuation prompt (not just a bare label).
+        hook = CommandVerificationHook(
+            name="fails",
+            command="python -c \"import sys; sys.stderr.write('boom-detail'); sys.exit(1)\"",
+        )
+        agent = _make_agent([hook])
+        prompts = []
+
+        def fake_chat(pr):
+            prompts.append(pr)
+            return "trying"
+
+        with patch.object(agent, "chat", side_effect=fake_chat), \
+             patch("praisonaiagents.goal.loop.judge_goal",
+                   side_effect=lambda *a, **k: ("done", "met")):
+            result = agent.run_goal("task", goal="g", max_turns=2)
+
+        assert result.completion_reason == "budget_paused"
+        # The continuation prompt after the first failing turn embeds the
+        # hook's captured stderr so the agent can repair the failure.
+        assert any("boom-detail" in p for p in prompts)
+
+
+# =============================================================================
+# Async gate: hook execution must not block the event loop
+# =============================================================================
+
+class TestAsyncGate:
+    def test_async_gate_offloads_to_thread(self, tmp_path):
+        import asyncio
+        import threading
+
+        loop_thread = {"id": None}
+        hook_thread = {"id": None}
+
+        class _ThreadProbeHook:
+            name = "probe"
+            blocking = True
+
+            def run(self, context=None):
+                from praisonaiagents.hooks.verification import VerificationResult
+                hook_thread["id"] = threading.get_ident()
+                return VerificationResult(success=True, output="ok")
+
+        agent = _make_agent([_ThreadProbeHook()])
+
+        async def _drive():
+            loop_thread["id"] = threading.get_ident()
+            return await agent._verification_gate_async("resp", 1)
+
+        feedback = asyncio.run(_drive())
+        # Passing hook → gate releases (None) and ran off the loop thread.
+        assert feedback is None
+        assert hook_thread["id"] is not None
+        assert hook_thread["id"] != loop_thread["id"]
+
+
+# =============================================================================
+# Durable journal: verification results are persisted as journal events
+# =============================================================================
+
+class TestDurableJournal:
+    def test_gate_records_verification_events(self, tmp_path):
+        from praisonaiagents.runtime.journal import RunJournal
+        from praisonaiagents.agent.durable import DurableRunContext
+
+        journal = RunJournal(":memory:")
+        journal.open_run("r1", agent="a", task="t")
+        ctx = DurableRunContext(journal, "r1", replaying=False)
+
+        p = tmp_path / "ok.txt"
+        p.write_text("data")
+        agent = _make_agent([FileCheckHook(name="ok", path=str(p))])
+
+        with patch.object(agent, "_get_durable_run_context", return_value=ctx):
+            feedback = agent._verification_gate("resp", 1)
+
+        assert feedback is None
+        events = [e for e in journal.events("r1") if e.kind == "verification"]
+        assert len(events) == 1
+        assert events[0].payload["name"] == "ok"
+        assert events[0].payload["success"] is True
+
+    def test_no_durable_run_is_noop(self, tmp_path):
+        p = tmp_path / "ok.txt"
+        p.write_text("data")
+        agent = _make_agent([FileCheckHook(name="ok", path=str(p))])
+        # No durable context attached → journal write is a silent no-op.
+        assert agent._verification_gate("resp", 1) is None

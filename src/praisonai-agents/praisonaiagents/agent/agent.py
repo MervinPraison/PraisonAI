@@ -4537,7 +4537,7 @@ Summary:"""
                 # VERIFICATION GATE (opt-in): blocking hooks must pass before a
                 # success signal below can finalise the run. No-op when unset.
                 # ─────────────────────────────────────────────────────────────
-                _gate_feedback = self._verification_gate(response_str, iterations)
+                _gate_feedback = await self._verification_gate_async(response_str, iterations)
                 if _gate_feedback is not None:
                     prompt = _gate_feedback
                     await asyncio.sleep(0)
@@ -4964,6 +4964,32 @@ Summary:"""
         if not getattr(self, "_verification_hooks", None):
             return None
         results = self._run_verification_hooks()
+        return self._verification_gate_feedback(results)
+
+    async def _verification_gate_async(
+        self, response_str: str, iterations: int
+    ) -> Optional[str]:
+        """Async counterpart of :meth:`_verification_gate`.
+
+        Hook execution (which may shell out via :class:`CommandVerificationHook`)
+        is offloaded to a worker thread so a slow or blocking check never stalls
+        the event loop shared by other concurrent agents.
+        """
+        if not getattr(self, "_verification_hooks", None):
+            return None
+        import asyncio as _asyncio
+
+        results = await _asyncio.to_thread(self._run_verification_hooks)
+        return self._verification_gate_feedback(results)
+
+    def _verification_gate_feedback(
+        self, results: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Shared post-processing for the sync/async gates.
+
+        Persists the results, records them durably, and returns a feedback
+        prompt when a blocking hook failed (else ``None`` to allow completion).
+        """
         self._last_verification_results = results
         self._record_verification_journal(results)
         failed = [r for r in results if r.get("blocking", True) and not r.get("success")]
@@ -4999,17 +5025,25 @@ Summary:"""
     def _record_verification_journal(self, results: List[Dict[str, Any]]) -> None:
         """Best-effort durable record of gate results to the run journal.
 
-        Only runs when a run journal exposing ``record(kind, data)`` is
-        attached; otherwise this is a no-op so the default (journal-off) path
-        stays zero-overhead.
+        Only writes when an opt-in durable run is active (``Agent(...,
+        durable=True)``): the active :class:`DurableRunContext` appends each
+        result as a ``verification``-kind :class:`JournalEvent`. When no durable
+        run is active this is a no-op, so the default (journal-off) path stays
+        zero-overhead.
         """
-        journal = getattr(self, "_run_journal", None)
-        record = getattr(journal, "record", None)
-        if journal is None or not callable(record):
+        get_ctx = getattr(self, "_get_durable_run_context", None)
+        if not callable(get_ctx):
             return
         try:
-            for payload in self._verification_journal_payloads(results):
-                record(kind="verification", data=payload)
+            context = get_ctx()
+        except Exception:  # pragma: no cover - defensive
+            context = None
+        if context is None:
+            return
+        try:
+            context.record_verification(
+                self._verification_journal_payloads(results)
+            )
         except Exception:  # pragma: no cover - journalling is best-effort
             pass
 

@@ -145,13 +145,20 @@ class GoalLoopMixin:
             if blocking_failed:
                 state.turns_used += 1
                 state.last_verdict = "continue"
-                state.last_reason = "verification gate failed"
+                # Carry the failing hooks' captured stdout/stderr into the
+                # continuation prompt so the next turn has the diagnostics
+                # needed to repair the failure (not just a bare label).
+                failure_detail = self._verification_summary_tail(blocking_failed)
+                reason = "verification gate failed"
+                if failure_detail:
+                    reason = f"{reason}:\n{failure_detail}"
+                state.last_reason = reason
                 if state.turns_used >= state.max_turns:
                     state.status = "paused"
                     self._persist_goal_state()
-                    return "budget_paused", "verification gate failed"
+                    return "budget_paused", reason
                 self._persist_goal_state()
-                return "continue", "verification gate failed"
+                return "continue", reason
 
         state.turns_used += 1
         verdict, reason = judge_goal(
