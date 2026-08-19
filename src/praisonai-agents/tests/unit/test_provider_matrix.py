@@ -1,0 +1,179 @@
+"""Every provider, checked for the things that do not need a credential.
+
+Most of what breaks an integration is checkable for free: the class resolves,
+it satisfies the protocol, its methods are actually coroutines, it reports
+availability without raising, both placement parameters accept or refuse it
+correctly, and — the one that actually bites people — the failure when a
+credential is missing names the key or the install command instead of throwing
+an AttributeError from four frames down.
+
+Modal was the cautionary tale: its `run_in=` path was broken in five separate
+ways and nothing noticed, because nothing ever ran it. These tests are the
+cheap half of not repeating that. The expensive half is a CI job with real
+credentials.
+"""
+
+import inspect
+
+import pytest
+
+from praisonaiagents import Agent
+from praisonaiagents.agent.placement import managed_runtimes, tool_places
+from praisonaiagents.managed._compute_bridge import resolve_compute
+
+#: Places resolvable without any vendor account.
+LOCAL_PLACES = ("subprocess", "local", "docker")
+
+#: Every place except the two that cannot be resolved from a bare name:
+#: `ssh` needs a host object, `native` is an alias checked separately.
+ALL_PLACES = [p for p in tool_places() if p not in ("ssh", "native")]
+
+#: Words that make a credential failure actionable.
+_ACTIONABLE = (
+    "key", "token", "auth", "credential", "not available",
+    "install", "config", "login", "unauthor", "api", "host", "daemon",
+)
+
+
+@pytest.fixture(scope="module", params=ALL_PLACES)
+def place(request):
+    return request.param
+
+
+def _agent(**kw):
+    return Agent(name="p", instructions="x", **kw)
+
+
+# ── the registry ─────────────────────────────────────────────────────────────
+def test_every_place_resolves_to_a_provider(place):
+    assert resolve_compute(place) is not None
+
+
+def test_every_provider_satisfies_the_protocol(place):
+    """Everything downstream assumes these three exist."""
+    provider = resolve_compute(place)
+    for method in ("provision", "execute", "shutdown"):
+        assert hasattr(provider, method), f"{place} has no {method}()"
+
+
+def test_every_protocol_method_is_awaitable(place):
+    """A sync method here does not raise -- it returns a coroutine nobody
+    awaits, so the call silently does nothing."""
+    provider = resolve_compute(place)
+    for method in ("provision", "execute", "shutdown"):
+        fn = getattr(provider, method)
+        assert inspect.iscoroutinefunction(fn), f"{place}.{method}() is not async"
+
+
+def test_availability_can_be_answered_without_raising(place):
+    """`is_available` is consulted before anything is provisioned, so it has to
+    survive a machine with no credentials and no daemon."""
+    provider = resolve_compute(place)
+    value = getattr(provider, "is_available", None)
+    value = value() if callable(value) else value
+    assert isinstance(value, bool) or value is None
+
+
+# ── the parameters ───────────────────────────────────────────────────────────
+def test_tools_run_on_accepts_every_place(place):
+    agent = _agent(tools_run_on=place)
+    assert agent.tools_run_on == place
+
+
+def test_run_on_accepts_exactly_the_places_that_host_a_loop(place):
+    """A place that only runs commands must be refused by run_on=, and a place
+    that can host a loop must be accepted. Getting this backwards either hides
+    a capability or silently runs the agent somewhere unintended."""
+    hosts_a_loop = place in managed_runtimes()
+    if hosts_a_loop:
+        assert _agent(run_on=place).backend is not None
+    else:
+        with pytest.raises(TypeError) as exc:
+            _agent(run_on=place)
+        assert "tools_run_on" in str(exc.value), "must name the parameter that works"
+
+
+def test_the_repr_names_the_place_it_was_given(place):
+    """The repr must describe the place that was actually chosen.
+
+    A place with no phrase falls back to its own name, which is fine. What
+    would not be fine is the repr describing a different place -- so the value
+    has to match what say_place() resolves for this name, not merely be
+    non-empty. (An earlier version of this test banned the substring "this
+    machine", which wrongly failed `sandlock`: a locked-down process really is
+    on this machine.)
+    """
+    from praisonaiagents.agent.execution_location import say_place
+
+    text = repr(_agent(tools_run_on=place))
+    assert "tools_run_on=" in text
+    assert say_place(place, via="compute") in text, (
+        f"repr describes something other than {place!r}: {text}"
+    )
+
+
+# ── failure quality, which is most of the user experience ────────────────────
+def test_a_missing_credential_fails_with_something_actionable(place):
+    """The failure has to name the key, the install command, or the daemon --
+    not surface as an AttributeError from inside a vendor SDK."""
+    import asyncio
+
+    from praisonaiagents.managed.protocols import ComputeConfig
+
+    provider = resolve_compute(place)
+    available = getattr(provider, "is_available", True)
+    available = available() if callable(available) else available
+    if available:
+        pytest.skip(f"{place} is usable on this machine, so it cannot fail here")
+
+    async def attempt():
+        info = await provider.provision(ComputeConfig())
+        await provider.shutdown(getattr(info, "instance_id", info))
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(attempt())
+
+    message = f"{type(exc.value).__name__}: {exc.value}".lower()
+    assert any(word in message for word in _ACTIONABLE), (
+        f"{place} failed unhelpfully: {message[:160]}"
+    )
+
+
+# ── the places that deliberately refuse a bare name ──────────────────────────
+def test_ssh_explains_that_a_name_is_not_enough():
+    with pytest.raises(TypeError) as exc:
+        _agent(tools_run_on="ssh")
+    message = str(exc.value)
+    assert "SSHSandbox" in message and "host" in message
+
+
+def test_native_is_accepted_as_an_alias_for_sandlock():
+    from praisonaiagents.agent.execution_location import say_place
+
+    assert say_place("sandlock") in repr(_agent(tools_run_on="native"))
+
+
+# ── live, where the machine allows it ────────────────────────────────────────
+@pytest.mark.parametrize("place", LOCAL_PLACES)
+def test_a_locally_available_place_actually_runs_a_command(place):
+    """Skips loudly rather than passing quietly when the backend is absent."""
+    import asyncio
+
+    from praisonaiagents.managed.protocols import ComputeConfig
+
+    provider = resolve_compute(place)
+    available = getattr(provider, "is_available", True)
+    available = available() if callable(available) else available
+    if not available:
+        pytest.skip(f"{place} is not available on this machine")
+
+    async def run():
+        info = await provider.provision(ComputeConfig())
+        instance = getattr(info, "instance_id", info)
+        try:
+            return await provider.execute(instance, "echo matrix-ok")
+        finally:
+            await provider.shutdown(instance)
+
+    result = asyncio.run(run())
+    assert "matrix-ok" in (result.get("stdout") or ""), result
