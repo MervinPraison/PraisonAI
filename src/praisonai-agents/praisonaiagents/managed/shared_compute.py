@@ -17,6 +17,7 @@ import logging
 import shlex
 import threading
 import uuid
+import weakref
 from typing import Any, Dict, List, Optional
 
 from ._compute_bridge import resolve_compute
@@ -118,7 +119,10 @@ class SharedCompute:
 
     def shutdown(self) -> None:
         """Tear down the instance and restore any agents we patched."""
-        for agent, original_tools, original_backstory in self._patched:
+        for ref, original_tools, original_backstory in self._patched:
+            agent = ref()
+            if agent is None:
+                continue          # already collected; nothing left to restore
             try:
                 if getattr(agent, "_tools_sandbox", None) is self:
                     agent._tools_sandbox = None
@@ -246,7 +250,7 @@ class SharedCompute:
                     getattr(agent, "tools_run_on", "its own sandbox"),
                 )
                 continue
-            if any(agent is patched for patched, _, _ in self._patched):
+            if any(agent is ref() for ref, _, _ in self._patched):
                 continue
 
             original_tools = list(getattr(agent, "tools", None) or [])
@@ -285,4 +289,12 @@ class SharedCompute:
                 agent._tools_sandbox = self
             except Exception:  # pragma: no cover - exotic agent objects
                 pass
-            self._patched.append((agent, original_tools, original_backstory))
+            # Weakly: an agent points at its SharedCompute and the SharedCompute
+            # pointed back, so a dropped agent was reclaimed as a cycle and its
+            # sandbox was never shut down. Holding the agent weakly lets
+            # weakref.finalize see the agent die and release the sandbox.
+            try:
+                ref = weakref.ref(agent)
+            except TypeError:  # pragma: no cover - non-weakrefable agent
+                ref = lambda _agent=agent: _agent
+            self._patched.append((ref, original_tools, original_backstory))
