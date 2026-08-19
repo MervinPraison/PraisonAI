@@ -47,6 +47,24 @@ DEFAULT_RECURRENCE_WINDOW_SEC: float = 3600 * 24 * 7
 (default: 7 days).  Older observations are pruned."""
 
 
+def _freeze(value: Any) -> Any:
+    """Return a deterministic, hashable representation of ``value``.
+
+    Slots are typed ``Dict[str, Any]`` and the store accepts nested lists /
+    dicts / sets, so the recurrence key must survive those too.  Plain
+    ``tuple(sorted(items))`` raises ``TypeError`` on unhashable values; this
+    recursively freezes dicts, lists/tuples, and sets so any JSON-shaped slot
+    payload yields a stable, hashable key.
+    """
+    if isinstance(value, dict):
+        return tuple(sorted((k, _freeze(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(v) for v in value)
+    if isinstance(value, (set, frozenset)):
+        return tuple(sorted(_freeze(v) for v in value))
+    return value
+
+
 class SuggestionEngine:
     """Heuristic engine for proposing blueprint-based automations.
 
@@ -75,7 +93,7 @@ class SuggestionEngine:
         # is process-local, best-effort memory — the consent-first store is the
         # only durable state, so losing it merely resets the counter.
         self._observations: Dict[
-            Tuple[Optional[str], str, Tuple[Tuple[str, Any], ...]], List[float]
+            Tuple[Optional[str], str, Any], List[float]
         ] = {}
 
     # -- public API ------------------------------------------------------------
@@ -174,7 +192,7 @@ class SuggestionEngine:
         key = (
             principal,
             blueprint_name,
-            tuple(sorted((slots or {}).items())),
+            _freeze(slots or {}),
         )
 
         # Append this occurrence and prune anything outside the window so a

@@ -142,6 +142,22 @@ class TestObserve:
         second = engine.observe("morning-brief", slots={"hour": 8})
         assert second is None
 
+    def test_nested_slots_do_not_raise(self, engine):
+        # Slots are Dict[str, Any]; list/dict/set values must not raise and
+        # must still track recurrence to threshold.
+        slots = {"weekdays": ["mon", "tue"], "opts": {"tz": "UTC"}}
+        assert engine.observe("weekly-review", slots=slots) is None
+        assert engine.observe("weekly-review", slots=slots) is None
+        sug_id = engine.observe("weekly-review", slots=slots)
+        assert sug_id is not None
+
+    def test_nested_slots_distinct_tracked_separately(self, engine):
+        # Different nested payloads are distinct intents; neither hits threshold.
+        for _ in range(2):
+            engine.observe("weekly-review", slots={"weekdays": ["mon"]})
+            engine.observe("weekly-review", slots={"weekdays": ["tue"]})
+        assert engine.pending() == []
+
     def test_principal_isolation(self, engine):
         # alice recurs to threshold; bob's single observation must not ride on it.
         engine.observe("morning-brief", principal="alice")
