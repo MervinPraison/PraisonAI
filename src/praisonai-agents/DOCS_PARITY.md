@@ -39,7 +39,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Embeddings | 6 | 23 | 2049 |
 | ✅ Evaluation | 1 | 7 | 2905 |
 | ✅ Events | 1 | 2 | 749 |
-| ✅ Execution | 3 | 4 | 1562 |
+| ✅ Execution | 3 | 4 | 1565 |
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
@@ -68,7 +68,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Reflection | 3 | 3 | 680 |
 | ✅ Retrieval | 2 | 5 | 1054 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3202 |
+| ✅ Sandbox | 5 | 7 | 3248 |
 | ✅ Security | 1 | 3 | 3332 |
 | ✅ Sessions | 4 | 18 | 7158 |
 | ✅ Skills | 6 | 15 | 5638 |
