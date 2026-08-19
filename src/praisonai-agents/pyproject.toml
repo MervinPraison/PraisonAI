@@ -21,6 +21,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Isolated code execution backends (docker, sandlock, ssh, novita, e2b, modal,
+# daytona) used by Agent(tools_run_on=...) and execute_code(run_in=...).
+#
+# praisonai-sandbox depends on praisonaiagents, so this extra closes a cycle.
+# That is deliberate and safe here: it is an *optional* edge, so nothing
+# installing plain praisonaiagents ever walks it, and pip resolves the pair
+# without pinning either to the other's version. Do not promote it to a
+# hard dependency, which would make the cycle mandatory.
+sandbox = [
+    "praisonai-sandbox>=0.0.13",
+]
+
 mcp = [
     "mcp>=1.20.0",
     "fastapi>=0.115.0",
@@ -115,6 +127,7 @@ a2ui = [
 # Declarative agent UI (Google A2UI SDK — lazy loaded)
 all = [
     "praisonaiagents[memory]",
+    "praisonaiagents[sandbox]",
     "praisonaiagents[knowledge]",
     "praisonaiagents[graph]",
     "praisonaiagents[llm]",

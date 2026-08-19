@@ -52,19 +52,61 @@ class SandboxMixin:
         
         return self._sandbox_manager
     
+
+    def _manager_for(self, run_in: Optional[Union[bool, str, 'SandboxConfig']]):
+        """Return the sandbox manager for a ``run_in=`` argument.
+
+        ``run_in=`` names where a single ``execute_code()`` call runs, so the
+        place lives on the call that uses it rather than on the constructor.
+        ``Agent(sandbox=...)`` still sets the default for every call.
+
+        Managers are cached per place: a fresh ``SandboxManager`` per call would
+        start and tear down a container each time, which for Docker is seconds
+        of latency and for any backend means the previous call's files are gone.
+        """
+        if run_in is None:
+            if not self.has_sandbox:
+                raise RuntimeError(
+                    "No sandbox configured. Either name a place on the call --\n"
+                    "    agent.execute_code_sync(code, run_in='docker')\n"
+                    "or set a default for every call with Agent(sandbox='docker')."
+                )
+            return self.get_sandbox_manager()
+
+        from ..sandbox import SandboxConfig, SandboxManager
+
+        if run_in is True:
+            config = SandboxConfig.subprocess()
+        elif isinstance(run_in, str):
+            config = SandboxConfig(sandbox_type=run_in)
+        else:
+            config = run_in
+
+        key = getattr(config, "sandbox_type", None) or repr(config)
+        cache = getattr(self, "_sandbox_managers", None)
+        if cache is None:
+            cache = self._sandbox_managers = {}
+        if key not in cache:
+            cache[key] = SandboxManager(config)
+        return cache[key]
+
     async def execute_code(
         self,
         code: str,
         language: str = "python",
         check_security: bool = True,
+        run_in: Optional[Union[bool, str, 'SandboxConfig']] = None,
         **kwargs
     ) -> 'SandboxResult':
-        """Execute code safely in configured sandbox.
+        """Execute code safely in a sandbox.
         
         Args:
             code: Code to execute
             language: Programming language (python, bash, etc.)
             check_security: Whether to run security pre-checks
+            run_in: Where to run this call -- "docker", "sandlock",
+                "subprocess", a SandboxConfig, or True for the default local
+                sandbox. Overrides Agent(sandbox=...) for this call only.
             **kwargs: Additional arguments passed to sandbox.execute()
             
         Returns:
@@ -73,10 +115,7 @@ class SandboxMixin:
         Raises:
             RuntimeError: If no sandbox is configured
         """
-        if not self.has_sandbox:
-            raise RuntimeError(
-                "No sandbox configured. Set sandbox=True or provide SandboxConfig to Agent()"
-            )
+        manager = self._manager_for(run_in)
         
         # Security pre-check if enabled
         security_warnings = None
@@ -88,7 +127,6 @@ class SandboxMixin:
                 if self.verbose:
                     logger.warning(f"Security warnings for code execution:\n{warning_text}")
 
-        manager = self.get_sandbox_manager()
         result = await manager.run_code(code, language=language, **kwargs)
 
         # Attach warnings to the result rather than forwarding a `metadata`
@@ -109,6 +147,7 @@ class SandboxMixin:
         code: str,
         language: str = "python", 
         check_security: bool = True,
+        run_in: Optional[Union[bool, str, 'SandboxConfig']] = None,
         **kwargs
     ) -> 'SandboxResult':
         """Synchronous wrapper for execute_code.
@@ -123,12 +162,15 @@ class SandboxMixin:
             SandboxResult with execution details
         """
         from ..approval.utils import run_coroutine_safely
-        return run_coroutine_safely(self.execute_code(code, language, check_security, **kwargs))
+        return run_coroutine_safely(
+            self.execute_code(code, language, check_security, run_in=run_in, **kwargs)
+        )
     
     async def run_shell_command(
         self,
         command: Union[str, list],
         check_security: bool = True,
+        run_in: Optional[Union[bool, str, 'SandboxConfig']] = None,
         **kwargs
     ) -> 'SandboxResult':
         """Run a shell command in the sandbox.
@@ -141,8 +183,7 @@ class SandboxMixin:
         Returns:
             SandboxResult with execution details
         """
-        if not self.has_sandbox:
-            raise RuntimeError("No sandbox configured")
+        manager = self._manager_for(run_in)
         
         # Convert command to string for security checking
         if isinstance(command, list):
@@ -159,7 +200,7 @@ class SandboxMixin:
                 if self.verbose:
                     logger.warning(f"Security warnings for command:\n{warning_text}")
         
-        async with self.get_sandbox_manager() as sandbox:
+        async with manager as sandbox:
             return await sandbox.run_command(command, **kwargs)
     
     def get_sandbox_status(self) -> Dict[str, Any]:

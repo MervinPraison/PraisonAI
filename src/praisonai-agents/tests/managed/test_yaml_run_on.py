@@ -25,22 +25,22 @@ def _parse(extra="", name="wf"):
 
 
 def test_run_on_is_parsed():
-    assert _parse("run_on: docker\n").run_on == "docker"
+    assert _parse("run_on: docker\n").tools_run_on == "docker"
 
 
 def test_run_on_defaults_to_none():
     """Omitting run_on must leave the workflow running locally, as before."""
-    assert _parse().run_on is None
+    assert _parse().tools_run_on is None
 
 
 def test_run_on_is_case_and_space_insensitive():
-    assert _parse("run_on: DOCKER\n").run_on == "docker"
-    assert _parse('run_on: "  docker  "\n').run_on == "docker"
+    assert _parse("run_on: DOCKER\n").tools_run_on == "docker"
+    assert _parse('run_on: "  docker  "\n').tools_run_on == "docker"
 
 
 @pytest.mark.parametrize("provider", ["docker", "e2b", "modal", "daytona", "flyio", "local"])
 def test_all_known_providers_accepted(provider):
-    assert _parse(f"run_on: {provider}\n").run_on == provider
+    assert _parse(f"run_on: {provider}\n").tools_run_on == provider
 
 
 def test_unknown_provider_fails_at_load_time():
@@ -59,5 +59,5 @@ def test_non_string_run_on_rejected():
 def test_run_on_reaches_the_workflow_object():
     """The parsed value must land on the field AgentFlow.run() actually reads."""
     wf = _parse("run_on: docker\n")
-    assert "run_on" in getattr(type(wf), "__dataclass_fields__", {})
-    assert wf.run_on == "docker"
+    assert "tools_run_on" in getattr(type(wf), "__dataclass_fields__", {})
+    assert wf.tools_run_on == "docker"

@@ -149,7 +149,7 @@ class TestEnvironmentIsolation:
 class TestResourceLimits:
     """Tests for POSIX resource limits enforcement."""
 
-    def test_apply_rlimits_sets_memory_limit(self):
+    def test_apply_rlimits_sets_memory_and_file_limits(self):
         """Resource limits should be applied via setrlimit on POSIX systems."""
         if os.name != "posix":
             pytest.skip("Resource limits only supported on POSIX systems")
@@ -169,10 +169,54 @@ class TestResourceLimits:
                     with patch("resource.RLIMIT_NOFILE", 8, create=True):
                         sandbox._apply_rlimits(limits)
 
-            expected_memory = 128 * 1024 * 1024
-            mock_setrlimit.assert_any_call(9, (expected_memory, expected_memory))
-            mock_setrlimit.assert_any_call(7, (10, 10))
             mock_setrlimit.assert_any_call(8, (50, 50))
+
+            # RLIMIT_AS is skipped on macOS, where it is unlimited by default
+            # and setting it raises "current limit exceeds maximum limit".
+            # Everywhere else it carries the memory cap.
+            import sys as _sys
+
+            applied = [call.args[0] for call in mock_setrlimit.call_args_list]
+            expected_memory = 128 * 1024 * 1024
+            if _sys.platform == "darwin":
+                assert 9 not in applied, "RLIMIT_AS cannot be set on Darwin"
+            else:
+                mock_setrlimit.assert_any_call(9, (expected_memory, expected_memory))
+
+            # RLIMIT_NPROC (7) is deliberately NOT set. POSIX scopes it to the
+            # real USER ID, not the process tree, so max_processes=10 counts
+            # every process the user already has running and the sandbox cannot
+            # fork at all -- `echo a | tr a-z A-Z` dies with
+            # "sh: fork: Resource temporarily unavailable".
+            # Capping a sandbox's process count needs a cgroup or a container.
+            assert not any(
+                call.args[0] == 7 for call in mock_setrlimit.call_args_list
+            ), "RLIMIT_NPROC is per-user; setting it breaks the sandbox entirely"
+
+    def test_apply_rlimits_applies_each_limit_independently(self):
+        """One unsupported limit must not silently skip the rest.
+
+        The limits shared a single try/except, so RLIMIT_AS -- which always
+        raises on macOS -- swallowed every later setrlimit call. NOFILE was
+        never applied on Darwin as a result.
+        """
+        if os.name != "posix":
+            pytest.skip("Resource limits only supported on POSIX systems")
+
+        sandbox = SubprocessSandbox()
+        limits = ResourceLimits(memory_mb=128, timeout_seconds=30, max_open_files=50)
+
+        def fail_on_memory(which, _limits):
+            if which == 9:
+                raise ValueError("current limit exceeds maximum limit")
+
+        with patch("resource.setrlimit", side_effect=fail_on_memory) as mock_setrlimit:
+            with patch("resource.RLIMIT_AS", 9, create=True):
+                with patch("resource.RLIMIT_NOFILE", 8, create=True):
+                    sandbox._apply_rlimits(limits)
+
+            applied = [call.args[0] for call in mock_setrlimit.call_args_list]
+            assert 8 in applied, "a failing RLIMIT_AS must not skip RLIMIT_NOFILE"
 
     def test_apply_rlimits_handles_missing_resource_module(self):
         """Should handle gracefully when resource module is not available."""
@@ -390,3 +434,53 @@ class TestSecurityRegressions:
         
         # The fallback is defensive - normally start() sets _temp_dir
         # This test documents that /tmp is an acceptable fallback for HOME
+
+class TestShellPayloadScanning:
+    """blocked_paths must still match when the path is inside `sh -c`.
+
+    With shell semantics an argv is ``["sh", "-c", "cat /etc/passwd"]``. A
+    policy walk over argv sees one opaque string starting with "cat", so the
+    path check silently stopped matching -- literal `cat /etc/passwd` ran.
+    """
+
+    def test_a_shell_payload_is_expanded_for_scanning(self):
+        from praisonai_sandbox._shell import policy_scan_parts
+
+        assert "/etc/passwd" in policy_scan_parts(["sh", "-c", "cat /etc/passwd"])
+
+    def test_unbalanced_quotes_fall_back_instead_of_raising(self):
+        from praisonai_sandbox._shell import policy_scan_parts
+
+        parts = policy_scan_parts(["sh", "-c", "cat /etc/passwd 'oops"])
+        assert "/etc/passwd" in parts
+
+    def test_a_quoted_heredoc_body_is_not_scanned_as_a_command(self):
+        """A quoted heredoc body is the literal bytes of a file. Scanning it
+        rejected any file whose text merely mentioned a blocked pattern."""
+        from praisonai_sandbox._shell import strip_heredoc_bodies
+
+        command = "cat > f.txt <<'EOF'\nplease run rm -rf /tmp\nEOF"
+        assert "rm -rf" not in strip_heredoc_bodies(command)
+
+    def test_an_unquoted_heredoc_body_is_still_scanned(self):
+        """Unquoted heredocs undergo shell expansion, so their contents really
+        can execute and must stay in scope."""
+        from praisonai_sandbox._shell import strip_heredoc_bodies
+
+        command = "cat > f.txt <<EOF\nrm -rf /tmp\nEOF"
+        assert "rm -rf" in strip_heredoc_bodies(command)
+
+    @pytest.mark.asyncio
+    async def test_a_blocked_path_inside_sh_c_is_refused(self):
+        from praisonai_sandbox import SubprocessSandbox
+        from praisonaiagents.sandbox import SandboxConfig, SecurityPolicy
+
+        policy = SecurityPolicy(allow_subprocess=True, blocked_paths=["/etc/passwd"])
+        sandbox = SubprocessSandbox(config=SandboxConfig(security_policy=policy))
+        await sandbox.start()
+        try:
+            result = await sandbox.run_command("cat /etc/passwd", shell=True)
+            assert result.error, "a blocked path must be refused, not executed"
+            assert "root:" not in (result.stdout or ""), "the file was actually read"
+        finally:
+            await sandbox.stop()

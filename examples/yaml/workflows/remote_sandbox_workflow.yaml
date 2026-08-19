@@ -2,20 +2,25 @@
 #
 #   praisonai examples/yaml/workflows/remote_sandbox_workflow.yaml
 #
-# `run_on:` is the only line that differs from a normal local workflow. Every
-# step shares the same sandbox and /workspace, so the file the writer creates
-# is there for the reader. Orchestration still runs on your machine, and the
-# sandbox is torn down when the run finishes.
+# `tools_run_on:` is the only line that differs from a normal local workflow.
+# Every step shares the same sandbox and working directory, so the file the
+# writer creates is there for the reader. Thinking and orchestration still run
+# on your machine, and the sandbox is torn down when the run finishes.
 #
-# Providers: docker | e2b | modal | daytona | flyio | tenki | local
+# Places: docker | e2b | modal | daytona | flyio | tenki | local
+#         subprocess | sandlock | ssh | novita
 #   - docker needs a local Docker daemon and nothing else
 #   - e2b / modal / daytona / flyio need that provider's API key
+#   - sandlock is a kernel-enforced local boundary (Linux 6.12+)
+#   - subprocess is process separation only, NOT a security boundary
+#
+# `run_on:` is still accepted here as the old spelling for this key.
 #
 # See what is still running:  praisonai managed ps
 # Reclaim strays:             praisonai managed stop --all
 
 name: remote-sandbox-demo
-run_on: docker
+tools_run_on: docker
 
 agents:
   writer:

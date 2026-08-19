@@ -17,6 +17,7 @@ import logging
 import shlex
 import threading
 import uuid
+import weakref
 from typing import Any, Dict, List, Optional
 
 from ._compute_bridge import resolve_compute
@@ -118,8 +119,13 @@ class SharedCompute:
 
     def shutdown(self) -> None:
         """Tear down the instance and restore any agents we patched."""
-        for agent, original_tools, original_backstory in self._patched:
+        for ref, original_tools, original_backstory in self._patched:
+            agent = ref()
+            if agent is None:
+                continue          # already collected; nothing left to restore
             try:
+                if getattr(agent, "_tools_sandbox", None) is self:
+                    agent._tools_sandbox = None
                 agent.tools = original_tools
                 agent.backstory = original_backstory
                 cache = getattr(agent, "_system_prompt_cache", None)
@@ -187,9 +193,14 @@ class SharedCompute:
             # heredoc early (which would truncate the file and run the remainder
             # as shell commands). Guard against the astronomically-unlikely case
             # where the token still appears in the body.
-            delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex}__"
+            # Uppercase hex on purpose. uuid4().hex is lowercase, and the
+            # security policy substring-matches blocked_commands against the
+            # whole command -- "dd" is one of them, and appears in 9.6% of
+            # random lowercase hex strings. One write in ten failed with
+            # "Blocked command pattern: dd" for no reason the caller could see.
+            delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex.upper()}__"
             while delimiter in content:
-                delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex}__"
+                delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex.upper()}__"
             heredoc = (
                 f"mkdir -p $(dirname {quoted}) && "
                 f"cat > {quoted} <<'{delimiter}'\n{content}\n{delimiter}"
@@ -203,19 +214,56 @@ class SharedCompute:
             """List files in a directory on the shared remote sandbox."""
             return self._format(self.run_command(f"ls -la {shlex.quote(path)}"))
 
-        return [execute_command, read_file, write_file, list_files]
+        bridged = [execute_command, read_file, write_file, list_files]
+        # Tag them so Agent.clone_for_channel() drops them: each closes over
+        # THIS sandbox, so a clone inheriting them would talk to the original
+        # agent's instance and then attach a second sandbox of its own --
+        # duplicating the capability prompt and splitting its work across two
+        # machines. The clone regenerates its own on first use.
+        for tool in bridged:
+            tool._praison_sandbox_tool = True
+        return bridged
 
-    def attach(self, agents: List[Any]) -> None:
+    def attach(self, agents: List[Any], *, override_declared: bool = False) -> None:
         """Give each agent the shared tools and tell it they exist.
 
         Agents that already carry their own managed ``backend`` are skipped --
         they have deliberately been pointed at their own runtime.
+
+        ``override_declared`` is set only by the agent's *own* placement, which
+        is this sandbox's whole reason for existing. A run-level sandbox leaves
+        it False so an agent that named its own place keeps it.
         """
         tools = self.build_tools()
         by_name = {t.__name__: t for t in tools}
 
         for agent in agents:
             if agent is None or getattr(agent, "backend", None) is not None:
+                continue
+            # An agent that named its own place, or already has a sandbox, must
+            # not be attached again. A second attach appends CAPABILITY_PROMPT
+            # twice and, if the two teardowns do not happen in LIFO order,
+            # permanently restores the wrong tools: the agent is left holding
+            # four tools bound to a shut-down instance.
+            #
+            # `tools_run_on` is checked as well as `_tools_sandbox` because of
+            # ordering: a flow attaches at the start of the run, before the
+            # agent's first chat() has created its own sandbox. Checking only
+            # the live sandbox would attach here and let the agent attach again
+            # on its first turn. An explicit per-agent choice outranks the run's
+            # default, so the flow leaves it alone.
+            declared_own = (
+                not override_declared
+                and getattr(agent, "tools_run_on", None) is not None
+            )
+            if getattr(agent, "_tools_sandbox", None) is not None or declared_own:
+                logger.debug(
+                    "[shared_compute] %r already runs its tools on %s; leaving it alone",
+                    getattr(agent, "name", agent),
+                    getattr(agent, "tools_run_on", "its own sandbox"),
+                )
+                continue
+            if any(agent is ref() for ref, _, _ in self._patched):
                 continue
 
             original_tools = list(getattr(agent, "tools", None) or [])
@@ -248,4 +296,18 @@ class SharedCompute:
                 logger.warning("[shared_compute] could not attach tools to %r: %s", agent, exc)
                 continue
 
-            self._patched.append((agent, original_tools, original_backstory))
+            # Mark where this agent's tools now run, so a nested attach (or a
+            # later ensure_tools_placed) can see it is already bound.
+            try:
+                agent._tools_sandbox = self
+            except Exception:  # pragma: no cover - exotic agent objects
+                pass
+            # Weakly: an agent points at its SharedCompute and the SharedCompute
+            # pointed back, so a dropped agent was reclaimed as a cycle and its
+            # sandbox was never shut down. Holding the agent weakly lets
+            # weakref.finalize see the agent die and release the sandbox.
+            try:
+                ref = weakref.ref(agent)
+            except TypeError:  # pragma: no cover - non-weakrefable agent
+                ref = lambda _agent=agent: _agent
+            self._patched.append((ref, original_tools, original_backstory))

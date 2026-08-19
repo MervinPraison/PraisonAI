@@ -92,7 +92,12 @@ class SubprocessSandbox:
         if not cmd:
             return "Empty command"
 
-        cmd_str = " ".join(cmd)
+        from ._shell import strip_heredoc_bodies
+
+        # A quoted heredoc body is file content, not a command. Leaving it in
+        # made write_file() reject any file whose text happened to contain a
+        # blocked pattern.
+        cmd_str = strip_heredoc_bodies(" ".join(cmd))
         for blocked in policy.blocked_commands:
             if blocked and blocked in cmd_str:
                 return f"Blocked command pattern: {blocked}"
@@ -108,7 +113,11 @@ class SubprocessSandbox:
             if os.path.basename(cmd[0]) in shell_bins:
                 return "Subprocess execution is disabled by security policy"
 
-        for part in cmd:
+        # Scan the shell payload too: with shell=True the real path lives
+        # inside `sh -c "..."`, where a plain argv walk cannot see it.
+        from ._shell import policy_scan_parts
+
+        for part in policy_scan_parts([strip_heredoc_bodies(c) for c in cmd]):
             if not part.startswith(("/", "~", ".")):
                 continue
             expanded = os.path.realpath(os.path.expanduser(part))
@@ -134,18 +143,43 @@ class SubprocessSandbox:
             
         try:
             import resource
-            if limits.memory_mb and limits.memory_mb > 0:
-                bytes_ = limits.memory_mb * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_AS, (bytes_, bytes_))
-            if limits.max_processes and limits.max_processes > 0:
-                resource.setrlimit(resource.RLIMIT_NPROC, (limits.max_processes, limits.max_processes))
-            if limits.max_open_files and limits.max_open_files > 0:
-                resource.setrlimit(resource.RLIMIT_NOFILE, (limits.max_open_files, limits.max_open_files))
-            # Note: RLIMIT_CPU is process CPU time, not wall clock time - timeout is handled separately
         except ImportError:
             logger.warning("Resource module not available - resource limits not enforced")
-        except (OSError, ValueError) as e:
-            logger.warning(f"Failed to set resource limits: {e}")
+            return
+
+        import sys
+
+        # Each limit gets its own try/except. One shared block meant the first
+        # failure skipped the rest -- and RLIMIT_AS always fails on macOS, so a
+        # single unsupported limit silently voided NPROC and NOFILE too.
+        wanted = []
+        if limits.memory_mb and limits.memory_mb > 0:
+            # RLIMIT_AS is unlimited-by-default on Darwin and raises
+            # "current limit exceeds maximum limit"; skip rather than warn.
+            if sys.platform != "darwin":
+                bytes_ = limits.memory_mb * 1024 * 1024
+                wanted.append(("RLIMIT_AS", resource.RLIMIT_AS, (bytes_, bytes_)))
+        # RLIMIT_NPROC is deliberately NOT set. POSIX defines it per *real user
+        # ID*, not per process tree, so a value like max_processes=10 counts
+        # every process the user already has running -- the sandbox then cannot
+        # fork at all and even `echo a | tr a-z A-Z` dies with
+        # "sh: fork: Resource temporarily unavailable".
+        # This was latent before: RLIMIT_AS raised first and skipped the rest,
+        # so NPROC never applied. Capping a sandbox's process count needs a
+        # cgroup or a container, not setrlimit.
+        if limits.max_open_files and limits.max_open_files > 0:
+            wanted.append(("RLIMIT_NOFILE", resource.RLIMIT_NOFILE,
+                           (limits.max_open_files, limits.max_open_files)))
+        # Note: RLIMIT_CPU is process CPU time, not wall clock - timeout is separate.
+
+        for label, which, value in wanted:
+            try:
+                resource.setrlimit(which, value)
+            except (OSError, ValueError) as e:
+                # This runs inside the forked child, so a warning here lands in
+                # the sandbox's stderr and is returned to the model as tool
+                # output. Stay silent; the limit simply does not apply.
+                logger.debug("Could not set %s: %s", label, e)
     
     @property
     def is_available(self) -> bool:

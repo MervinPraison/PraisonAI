@@ -26,7 +26,7 @@ def test_agent_repr_states_where_it_runs():
 
 
 def test_flow_repr_states_shared_sandbox():
-    flow = AgentFlow(run_on="docker", steps=[_agent("W"), _agent("R")])
+    flow = AgentFlow(tools_run_on="docker", steps=[_agent("W"), _agent("R")])
     text = repr(flow)
     assert "steps=2" in text
     assert "Docker container" in text
@@ -35,7 +35,7 @@ def test_flow_repr_states_shared_sandbox():
 
 def test_team_repr_states_shared_sandbox():
     a = _agent("W")
-    team = AgentTeam(agents=[a], tasks=[Task(description="d", agent=a)], run_on="e2b")
+    team = AgentTeam(agents=[a], tasks=[Task(description="d", agent=a)], tools_run_on="e2b")
     assert "E2B" in repr(team)
     assert "shared" in repr(team)
 
@@ -59,7 +59,7 @@ def test_explain_is_plain_for_a_local_agent():
 
 
 def test_explain_mentions_shared_state_for_a_workflow():
-    flow = AgentFlow(run_on="docker", steps=[_agent()])
+    flow = AgentFlow(tools_run_on="docker", steps=[_agent()])
     text = flow.where_does_it_run()
     assert "shares that same sandbox" in text
     assert "visible to the next" in text
@@ -75,7 +75,7 @@ def test_explain_warns_that_a_subprocess_is_not_a_boundary():
 
 
 def test_explain_does_not_warn_for_a_real_boundary():
-    flow = AgentFlow(run_on="docker", steps=[_agent()])
+    flow = AgentFlow(tools_run_on="docker", steps=[_agent()])
     assert "not a security boundary" not in flow.where_does_it_run()
 
 
@@ -114,15 +114,32 @@ def test_sandbox_aliases_report_the_real_backend(alias, expected):
 
 
 # ── vocabulary gate: never reuse a word that is public API elsewhere ─────────
+#: Words the repr uses that are ALSO parameters, on purpose: you set the place
+#: with the same word the repr reports it with. That mirroring is the feature.
+_DELIBERATE_MIRRORS = {"tools_run_on", "run_on"}
+
+
 def test_no_field_name_collides_with_existing_public_api():
     """`loop` was rejected as a field name because it is already
     praisonaiagents.workflows.loop(), asyncio's event loop, and agent-loop
-    jargon. This test stops anyone reintroducing that class of collision."""
+    jargon -- one word, three meanings. This test stops that class of collision.
+
+    It deliberately exempts the placement words. `tools_run_on` appearing both
+    as a kwarg and as a repr field is the opposite failure mode: one word, one
+    meaning, in both directions --
+
+        >>> Agent(name='w', instructions='x', tools_run_on='docker')
+        Agent(name='w', thinks_on='this machine', tools_run_on='a Docker container')
+
+    A user reads the repr and knows exactly what to type. Renaming one side to
+    satisfy a blanket no-overlap rule would break that, so the rule is narrowed
+    to what it was actually protecting: words that mean something *else*.
+    """
     import praisonaiagents.workflows as wf
 
     agent_kwargs = set(inspect.signature(Agent.__init__).parameters)
     workflow_api = {n for n in dir(wf) if not n.startswith("_")}
-    taken = agent_kwargs | workflow_api
+    taken = (agent_kwargs | workflow_api) - _DELIBERATE_MIRRORS
 
     for field in describe(_agent()):
         assert field not in taken, (
@@ -131,11 +148,19 @@ def test_no_field_name_collides_with_existing_public_api():
         )
 
 
+def test_mirrored_words_mean_the_same_thing_on_both_sides():
+    """Guards the exemption above: a mirrored word must describe what the
+    parameter of that name actually does, or the exemption is being abused."""
+    agent = Agent(name="w", instructions="x", tools_run_on="docker")
+    assert describe(agent)["tools_run_on"] == say_place("docker")
+    assert "Docker" in repr(agent)
+
+
 def test_explanation_avoids_jargon():
     """The sentences are for someone who does not know the vocabulary."""
     text = " ".join([
         _agent().where_does_it_run(),
-        AgentFlow(run_on="docker", steps=[_agent()]).where_does_it_run(),
+        AgentFlow(tools_run_on="docker", steps=[_agent()]).where_does_it_run(),
     ]).lower()
     for jargon in ("harness", "provision", "orchestration", "topology", "runtime"):
         assert jargon not in text, f"{jargon!r} is jargon; say it plainly"
@@ -145,7 +170,7 @@ def test_explanation_avoids_jargon():
 def test_repl_answers_the_question_without_docs():
     """One line per topology, each stating what runs where."""
     local = repr(_agent())
-    remote = repr(AgentFlow(run_on="docker", steps=[_agent()]))
+    remote = repr(AgentFlow(tools_run_on="docker", steps=[_agent()]))
     assert local != remote
     for text in (local, remote):
         assert "thinks_on=" in text and "tools_run_on=" in text

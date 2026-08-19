@@ -2,6 +2,8 @@ import os
 import time
 import json
 import logging
+import contextlib
+import contextvars
 import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Dict, Optional, List, Tuple, Callable
@@ -375,6 +377,18 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     if llm and hasattr(llm, 'set_current_agent'):
         llm.set_current_agent(executor_agent.display_name)
 
+    # Place the agent's tools BEFORE snapshotting them. This snapshot is passed
+    # to chat() as an explicit `tools=`, which wins over `agent.tools` -- so if
+    # the sandbox attaches later (inside chat()), the model is handed the
+    # pre-attach list and every tool runs on the host while a sandbox sits
+    # provisioned and unused. Silent, and worse than it sounds: in
+    # start_for_each() row 1 got local tools and row 2 got the bridged set,
+    # because row 1's chat() mutated agent.tools in time for row 2's snapshot.
+    if executor_agent is not None and getattr(executor_agent, "tools_run_on", None) is not None:
+        from ..agent.tools_placement import ensure_tools_placed
+
+        ensure_tools_placed(executor_agent)
+
     # Ensure tools are available from both task and agent (create copy to avoid mutation)
     tools = list(task.tools or [])
     if executor_agent and executor_agent.tools:
@@ -662,9 +676,12 @@ class AgentTeam(SpawnAnnounceProtocol):
         learn: Optional[Any] = None,  # Union[bool, LearnConfig] - continuous learning
         # Union[str, ComputeProviderProtocol] - where every agent's shell/file
         # tools run: "docker", "e2b", "modal", "daytona", "flyio", "tenki",
-        # "local". The team shares ONE sandbox and /workspace, so files written
-        # by one agent are visible to the others. Orchestration stays local.
+        # "local", "subprocess", "sandlock", "ssh", "novita". The team shares
+        # ONE sandbox and one working directory, so files written by one agent
+        # are visible to the others. Orchestration and thinking stay local.
         # Pass a configured provider instance to customise resources.
+        tools_run_on: Optional[Any] = None,
+        # Accepted only to fail with a useful message -- see resolve_placement.
         run_on: Optional[Any] = None,
     ):
         """
@@ -910,7 +927,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         self.stream = _stream
         self.name = name
         # Remote execution: one shared sandbox for every agent on this team.
-        self.run_on = run_on
+        from ..agent.placement import resolve_placement
+
+        resolve_placement(
+            "AgentTeam", run_on=run_on, tools_run_on=tools_run_on,
+            supports_run_on=False,
+        )
+        self.tools_run_on = tools_run_on
+        # Kept readable rather than removed. `team.run_on` used to exist, and
+        # code doing getattr(team, "run_on", None) for introspection or
+        # serialisation would otherwise start raising AttributeError. None is
+        # the honest value: a team orchestrates locally, so nothing about it
+        # runs wholly on a managed runtime.
+        self.run_on = None
 
         # Callbacks for workflow execution
         self.on_task_start = _on_task_start
@@ -1544,6 +1573,62 @@ class AgentTeam(SpawnAnnounceProtocol):
             except StopAsyncIteration:
                 pass
 
+
+    # ── shared sandbox lifetime ──────────────────────────────────────────────
+    # A ContextVar, not an instance attribute: the previous version set
+    # `self.run_on = None` for the duration of the run, so a second caller
+    # inspecting the team mid-run saw "no sandbox" and any concurrent start()
+    # executed every tool on the host. Depth lives with the caller, not on the
+    # shared object, so the team's declared placement is always readable.
+    #
+    # The depth is keyed PER TEAM, not shared class-wide. A single integer here
+    # meant any team started while another team's run was on the stack saw
+    # depth==1 and skipped its own sandbox entirely -- so a nested team ran on
+    # the host, and a team sharing an agent with the outer run executed on the
+    # OUTER team's sandbox.
+    #
+    # ContextVar, not threading.local: two coroutines that `astart()` the SAME
+    # team under one asyncio.gather run on one thread, so thread-local state is
+    # shared between them -- the second saw the first's depth==1, skipped its
+    # own sandbox, and ran against a sandbox the first could tear down mid-flight.
+    # A ContextVar is copied per task at gather/create_task time, so each run
+    # gets its own depth map; it is also per-thread, so sync callers stay
+    # isolated too. The value is an immutable frozen mapping replaced via .set()
+    # (never mutated in place), because a copied context shares the *reference*
+    # to a mutable dict and in-place mutation would leak straight back across
+    # the tasks the copy was meant to separate.
+    _tools_scope_depths: "contextvars.ContextVar" = contextvars.ContextVar(
+        "praisonai_tools_scope_depths", default=()
+    )
+
+    def _needs_tools_scope(self) -> bool:
+        """True when this call should provision the team's shared sandbox."""
+        if getattr(self, "tools_run_on", None) is None:
+            return False
+        return dict(self._tools_scope_depths.get()).get(id(self), 0) == 0
+
+    @contextlib.contextmanager
+    def _shared_tools_scope(self):
+        """Hold one sandbox for everything nested inside.
+
+        Re-entrant by design: ``start_for_each`` opens the scope once for the
+        whole batch, so the ``start()`` call it makes per input row finds the
+        scope already open and reuses that sandbox instead of provisioning and
+        destroying one per row.
+        """
+        from ..managed.shared_compute import SharedCompute
+
+        key = id(self)
+        depths = dict(self._tools_scope_depths.get())
+        depths[key] = depths.get(key, 0) + 1
+        token = self._tools_scope_depths.set(tuple(sorted(depths.items())))
+        try:
+            with SharedCompute(self.tools_run_on) as shared:
+                shared.attach(list(self.agents or []))
+                yield shared
+        finally:
+            self._tools_scope_depths.reset(token)
+
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method.
         
@@ -1552,6 +1637,12 @@ class AgentTeam(SpawnAnnounceProtocol):
             return_dict: If True, returns the full results dictionary instead of only the final response
             **kwargs: Additional arguments
         """
+        # Same shared sandbox as start(). Without this, an async team with
+        # tools_run_on= ran every tool on the host and said nothing.
+        if self._needs_tools_scope():
+            with self._shared_tools_scope():
+                return await self.astart(content=content, return_dict=return_dict, **kwargs)
+
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
             self._telemetry.track_agent_execution(self.name, success=True, async_mode=True)
@@ -1812,19 +1903,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             ```
         """
         # Remote execution: provision ONE sandbox shared by every agent on the
-        # team, and tear it down even if execution raises. Re-enters start()
-        # with run_on cleared so the wrapper applies exactly once.
-        if getattr(self, "run_on", None) is not None:
-            from ..managed.shared_compute import SharedCompute
-
-            run_on, self.run_on = self.run_on, None
-            try:
-                with SharedCompute(run_on) as shared:
-                    shared.attach(list(self.agents or []))
-                    return self.start(content=content, return_dict=return_dict,
-                                      output=output, **kwargs)
-            finally:
-                self.run_on = run_on
+        # team, and tear it down even if execution raises.
+        if self._needs_tools_scope():
+            with self._shared_tools_scope():
+                return self.start(content=content, return_dict=return_dict,
+                                  output=output, **kwargs)
 
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
@@ -2140,6 +2223,15 @@ class AgentTeam(SpawnAnnounceProtocol):
         if on_error not in ("continue", "fail_fast"):
             raise ValueError("on_error must be 'continue' or 'fail_fast'")
 
+        # One sandbox for the whole batch. Without this the per-row start()
+        # call provisions and destroys its own, so a 50-row batch paid for 50
+        # sandboxes and no row could see what an earlier row wrote.
+        if self._needs_tools_scope():
+            with self._shared_tools_scope():
+                return self.start_for_each(
+                    inputs, on_error=on_error, output=output, **kwargs
+                )
+
         batch_id = f"batch_{uuid.uuid4().hex[:12]}"
         saved_variables = self.variables
         task_snapshot = self._snapshot_task_state()
@@ -2175,6 +2267,13 @@ class AgentTeam(SpawnAnnounceProtocol):
         """Async twin of :meth:`start_for_each` (sequential per-item execution)."""
         if on_error not in ("continue", "fail_fast"):
             raise ValueError("on_error must be 'continue' or 'fail_fast'")
+
+        # One sandbox for the whole batch -- see start_for_each.
+        if self._needs_tools_scope():
+            with self._shared_tools_scope():
+                return await self.astart_for_each(
+                    inputs, on_error=on_error, **kwargs
+                )
 
         batch_id = f"batch_{uuid.uuid4().hex[:12]}"
         saved_variables = self.variables

@@ -33,7 +33,7 @@ def _build_workflow(monkeypatch):
     wf = Workflow(
         name="temp-agent-run-on",
         steps=[Task(name="s1", action="write a file to /workspace")],
-        run_on="docker",
+        tools_run_on="docker",
     )
     monkeypatch.setattr(wf, "_shared_compute", lambda: shared)
     return wf, shared

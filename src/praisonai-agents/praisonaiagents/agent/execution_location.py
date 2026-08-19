@@ -94,10 +94,20 @@ def describe(obj: Any, *, shared: bool = False) -> Dict[str, str]:
         if from_backend:
             places.update(from_backend)
 
-        run_on = getattr(obj, "run_on", None)
-        if run_on is not None:
-            where = say_place(run_on)
+        where_tools = getattr(obj, "tools_run_on", None)
+        if where_tools is not None:
+            where = say_place(where_tools)
             places["tools_run_on"] = f"{where} (shared)" if shared else where
+
+        # run_on= puts the WHOLE agent on a managed runtime, so it moves the
+        # thinking as well. _backend_places() already reports that (run_on= is
+        # turned into a backend at construction); this only covers an object
+        # that carries the name without a built backend.
+        whole = getattr(obj, "run_on", None)
+        if whole is not None and not from_backend:
+            everywhere = say_place(whole)
+            places["thinks_on"] = everywhere
+            places["tools_run_on"] = everywhere
 
         sandbox_config = getattr(obj, "sandbox_config", None)
         if sandbox_config is not None:
@@ -107,6 +117,42 @@ def describe(obj: Any, *, shared: bool = False) -> Dict[str, str]:
     except Exception:  # pragma: no cover - description must never break callers
         pass
     return places
+
+
+def _tools_staying_here(obj: Any) -> list:
+    """Names of the object's own tools, which do NOT move to the sandbox.
+
+    Only four tool names are bridged (``execute_command``, ``read_file``,
+    ``write_file``, ``list_files``); everything else the user passed keeps
+    running in this process, against this filesystem. The capability prompt
+    tells the model the sandbox is where things happen, so anything staying
+    behind has to be said out loud.
+
+    Reads the pre-attach tool list when a sandbox is already attached: by then
+    ``agent.tools`` has been rewritten and the originals live in the sandbox's
+    restore record.
+    """
+    try:
+        from ..managed.shared_compute import BRIDGED_TOOL_NAMES
+    except Exception:
+        BRIDGED_TOOL_NAMES = ("execute_command", "read_file", "write_file", "list_files")
+
+    tools = None
+    shared = getattr(obj, "_tools_sandbox", None)
+    if shared is not None:
+        for patched, original_tools, _ in getattr(shared, "_patched", []):
+            if patched is obj:
+                tools = original_tools
+                break
+    if tools is None:
+        tools = getattr(obj, "tools", None) or []
+
+    names = []
+    for tool in tools:
+        name = getattr(tool, "__name__", None) or getattr(tool, "name", None)
+        if isinstance(name, str) and name not in BRIDGED_TOOL_NAMES:
+            names.append(name)
+    return names
 
 
 def repr_fields(obj: Any, *, shared: bool = False) -> str:
@@ -126,10 +172,18 @@ def explain(obj: Any, *, shared: bool = False) -> str:
         f"Tools run on {places['tools_run_on']}.",
     ]
 
-    if shared and getattr(obj, "run_on", None) is not None:
+    if shared and getattr(obj, "tools_run_on", None) is not None:
         lines.append(
             "Every step shares that same sandbox, so a file written by one step "
             "is visible to the next."
+        )
+
+    staying = _tools_staying_here(obj)
+    if staying and places["tools_run_on"] != places["thinks_on"]:
+        listed = ", ".join(staying[:6]) + ("..." if len(staying) > 6 else "")
+        lines.append(
+            f"Your own tools ({listed}) still run on {HERE} -- only shell, file "
+            f"and code tools move. They read and write this machine's files."
         )
 
     if "code_runs_on" in places:
@@ -139,6 +193,7 @@ def explain(obj: Any, *, shared: bool = False) -> str:
 
     # Say plainly when the chosen tier is not a security boundary.
     raw = [
+        getattr(obj, "tools_run_on", None),
         getattr(obj, "run_on", None),
         getattr(getattr(obj, "sandbox_config", None), "sandbox_type", None),
     ]
@@ -147,7 +202,8 @@ def explain(obj: Any, *, shared: bool = False) -> str:
     ):
         lines.append(
             "Note: a separate process is not a security boundary -- it can still "
-            "reach the network and read your files. Use docker or a cloud "
+            "reach the network and read your files, and its blocked-command "
+            "list can be worked around by ordinary shell syntax. Use docker or a cloud "
             "provider for untrusted code."
         )
 

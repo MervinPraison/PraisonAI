@@ -32,9 +32,18 @@ _EXTRA_HINTS = {
 }
 
 
+# Places that live only in praisonai-sandbox. They speak SandboxProtocol
+# (one object IS one environment) rather than ComputeProviderProtocol (one
+# object hands out many), so an adapter supplies the missing half.
+from ._sandbox_adapter import NEEDS_INSTANCE, SANDBOX_ONLY  # noqa: E402
+
+# Spellings users already have in their code, mapped to the canonical name.
+_ALIASES = {"native": "sandlock"}
+
+
 def available_providers() -> list:
-    """Return the compute provider names this bridge can resolve."""
-    return sorted(_PROVIDERS)
+    """Every place ``tools_run_on=`` / ``run_in=`` accepts, from both registries."""
+    return sorted(set(_PROVIDERS) | set(SANDBOX_ONLY))
 
 
 def compute_package_available() -> bool:
@@ -58,15 +67,34 @@ def resolve_compute(compute: Optional[Any]) -> Optional[Any]:
     if not isinstance(compute, str):
         if hasattr(compute, "provision") and hasattr(compute, "execute"):
             return compute
+        # A SandboxProtocol instance -- e.g. SSHSandbox(host=...) -- is adapted,
+        # which is the only way to pass connection details.
+        if hasattr(compute, "run_command") and hasattr(compute, "start"):
+            from ._sandbox_adapter import wrap_sandbox_instance
+
+            return wrap_sandbox_instance(compute)
         raise TypeError(
             f"compute= expects a provider name or a ComputeProviderProtocol "
             f"instance, got {type(compute).__name__}"
         )
 
     name = compute.lower().strip()
+    name = _ALIASES.get(name, name)
+
+    # A sandbox-only place: adapt it to the compute-provider shape.
+    if name in SANDBOX_ONLY:
+        if name in NEEDS_INSTANCE:
+            raise ValueError(
+                f"{name!r} needs connection details a bare name cannot carry. "
+                f"Instead, {NEEDS_INSTANCE[name]}"
+            )
+        from ._sandbox_adapter import SandboxComputeAdapter
+
+        return SandboxComputeAdapter(name)
+
     if name not in _PROVIDERS:
         raise ValueError(
-            f"Unknown compute provider {name!r}. "
+            f"Unknown place {name!r}. "
             f"Available: {', '.join(available_providers())}"
         )
 

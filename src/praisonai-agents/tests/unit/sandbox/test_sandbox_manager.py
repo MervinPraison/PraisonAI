@@ -218,3 +218,46 @@ class TestSandboxManager:
             await manager._create_sandbox()
 
         mock_resolve.assert_called_once_with("sandlock")
+
+
+class TestConstructorIntrospection:
+    """SandboxManager passed config= to every backend, including the two that
+    do not accept it -- so ssh and modal raised "unexpected keyword argument
+    'config'" before the sandbox was ever built."""
+
+    @pytest.mark.asyncio
+    async def test_a_backend_that_takes_no_config_is_not_handed_one(self):
+        import inspect
+
+        from praisonaiagents.sandbox._sandbox_bridge import resolve_sandbox_class
+
+        for name in ("ssh", "modal"):
+            params = inspect.signature(resolve_sandbox_class(name).__init__).parameters
+            assert "config" not in params, (
+                f"{name} grew a config= parameter; this guard can be simplified"
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_missing_required_argument_says_what_to_build(self):
+        """SSH needs a host, which a SandboxConfig cannot carry. Say that,
+        rather than raising TypeError from deep inside the constructor."""
+        from praisonaiagents.sandbox import SandboxConfig, SandboxManager
+
+        with pytest.raises(TypeError) as exc:
+            await SandboxManager(SandboxConfig(sandbox_type="ssh"))._create_sandbox()
+
+        message = str(exc.value)
+        assert "host" in message
+        assert "SSHSandbox" in message
+        assert "unexpected keyword" not in message, "the raw TypeError leaked through"
+
+    @pytest.mark.asyncio
+    async def test_a_backend_that_takes_config_still_receives_it(self):
+        from praisonaiagents.sandbox import SandboxConfig, SandboxManager
+
+        config = SandboxConfig(sandbox_type="subprocess")
+        sandbox = await SandboxManager(config)._create_sandbox()
+        try:
+            assert sandbox.config is config
+        finally:
+            await sandbox.stop()
