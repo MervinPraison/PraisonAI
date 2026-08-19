@@ -47,7 +47,11 @@ def _tail(text: str, limit: int = 4000) -> str:
     return text[-limit:]
 
 
-def _build_goal_judge_prompt(state: "GoalState", transcript_tail: str) -> str:
+def _build_goal_judge_prompt(
+    state: "GoalState",
+    transcript_tail: str,
+    verification_block: Optional[str] = None,
+) -> str:
     """Build a strict, criteria-anchored, JSON-only judge prompt."""
     lines = [
         "You are an independent completion judge for an autonomous agent.",
@@ -72,6 +76,13 @@ def _build_goal_judge_prompt(state: "GoalState", transcript_tail: str) -> str:
             lines.append(
                 "If ANY constraint is violated, you MUST answer 'continue'."
             )
+    if verification_block:
+        lines += [
+            "",
+            "EXECUTABLE VERIFICATION RESULTS (authoritative — command exit "
+            "codes and file checks; prefer this over prose claims):",
+            verification_block,
+        ]
     lines += [
         "",
         "AGENT OUTPUT (most recent):",
@@ -165,6 +176,7 @@ def judge_goal(
     transcript_tail: str,
     *,
     judge_model: Optional[str] = None,
+    verification_block: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Judge whether ``state.goal`` is met given the latest agent output.
 
@@ -180,7 +192,7 @@ def judge_goal(
     """
     from ..eval.judge import Judge
 
-    prompt = _build_goal_judge_prompt(state, transcript_tail)
+    prompt = _build_goal_judge_prompt(state, transcript_tail, verification_block)
     try:
         judge = Judge(model=judge_model or _default_judge_model(), temperature=0.0)
         litellm = judge._get_litellm()

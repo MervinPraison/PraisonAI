@@ -104,6 +104,9 @@ __all__ = [
     # Verification hooks (protocols)
     "VerificationHook",
     "VerificationResult",
+    "BaseVerificationHook",
+    "CommandVerificationHook",
+    "FileCheckHook",
     # Simplified API (beginner-friendly)
     "add_hook",
     "remove_hook",
@@ -178,6 +181,9 @@ _LAZY_GROUPS = {
     'verification': {
         'VerificationHook': ('praisonaiagents.hooks.verification', 'VerificationHook'),
         'VerificationResult': ('praisonaiagents.hooks.verification', 'VerificationResult'),
+        'BaseVerificationHook': ('praisonaiagents.hooks.verification', 'BaseVerificationHook'),
+        'CommandVerificationHook': ('praisonaiagents.hooks.verification', 'CommandVerificationHook'),
+        'FileCheckHook': ('praisonaiagents.hooks.verification', 'FileCheckHook'),
     },
     # Simplified API (beginner-friendly aliases)
     'simplified_api': {

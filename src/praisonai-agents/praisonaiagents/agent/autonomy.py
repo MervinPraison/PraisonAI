@@ -217,6 +217,13 @@ class AutonomyConfig:
                 f"Invalid autonomy level: {level!r}. "
                 f"Must be one of {sorted(VALID_AUTONOMY_LEVELS)}"
             )
+        verification_hooks = data.get("verification_hooks")
+        # Config parity: accept declarative `verification:` entries and map
+        # `command:`/`file:` shapes onto the two hook classes.
+        declarative = data.get("verification")
+        if declarative:
+            built = _build_verification_hooks(declarative)
+            verification_hooks = (verification_hooks or []) + built
         return cls(
             enabled=data.get("enabled", True),
             level=level,
@@ -227,7 +234,7 @@ class AutonomyConfig:
             observe=data.get("observe", False),
             completion_promise=data.get("completion_promise"),
             clear_context=data.get("clear_context", False),
-            verification_hooks=data.get("verification_hooks"),
+            verification_hooks=verification_hooks,
             track_changes=data.get("track_changes"),
             sandbox=data.get("sandbox"),
             snapshot_dir=data.get("snapshot_dir"),
@@ -236,6 +243,49 @@ class AutonomyConfig:
             max_tokens=data.get("max_tokens"),
             budget_action=data.get("budget_action", "pause"),
         )
+
+
+def _build_verification_hooks(entries: List[Any]) -> List[Any]:
+    """Map declarative ``verification:`` config entries onto hook instances.
+
+    Each entry is a dict with either a ``command`` key (→
+    :class:`CommandVerificationHook`) or a ``file`` key (→
+    :class:`FileCheckHook`). Unknown shapes are skipped.
+
+    Example::
+
+        verification:
+          - {name: tests, command: "python -m pytest -q"}
+          - {name: changelog, file: CHANGELOG.md, non_empty: true}
+    """
+    from ..hooks.verification import CommandVerificationHook, FileCheckHook
+
+    hooks: List[Any] = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        blocking = entry.get("blocking", True)
+        if "command" in entry:
+            hooks.append(CommandVerificationHook(
+                name=entry.get("name", "command"),
+                command=entry["command"],
+                cwd=entry.get("cwd"),
+                timeout=entry.get("timeout", 60.0),
+                blocking=blocking,
+            ))
+        elif "file" in entry:
+            hooks.append(FileCheckHook(
+                name=entry.get("name", "file"),
+                path=entry["file"],
+                exists=entry.get("exists", True),
+                non_empty=entry.get("non_empty", False),
+                contains=entry.get("contains"),
+                json_field=entry.get("json_field"),
+                equals=entry.get("equals"),
+                blocking=blocking,
+            ))
+    return hooks
+
 
 class AutonomySignal(str, Enum):
     """Signals detected from prompts for autonomy decisions.

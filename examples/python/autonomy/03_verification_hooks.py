@@ -23,6 +23,7 @@ from praisonaiagents.hooks.verification import (
     VerificationResult,
     BaseVerificationHook,
     CommandVerificationHook,
+    FileCheckHook,
 )
 
 
@@ -100,7 +101,19 @@ def main():
     print(f"   Name: {cmd_hook.name}")
     print(f"   Command: {cmd_hook.command}")
     print(f"   Timeout: {cmd_hook.timeout_seconds}s")
-    
+
+    # 6. FileCheckHook: declarative, no-shell completion gate
+    print("\n6. FileCheckHook (declarative completion gate):")
+    file_hook = FileCheckHook(
+        name="changelog", path="CHANGELOG.md", non_empty=True
+    )
+    file_result = file_hook.run()
+    print(f"   {file_hook.name}: success={file_result.success} — {file_result.output}")
+    print(
+        "   Gate wiring: when verification_hooks are configured, the autonomous "
+        "loop cannot finalise with a success outcome while a blocking hook fails."
+    )
+
     print("\n" + "=" * 60)
     print("✓ Verification hooks example completed successfully!")
     print("=" * 60)

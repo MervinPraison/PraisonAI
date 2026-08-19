@@ -78,6 +78,9 @@ KIND_TOOL_RESULT = "tool_result"
 KIND_APPROVAL = "approval"
 #: The loop iteration index, journalled so the cursor is restored exactly.
 KIND_ITERATION = "iteration"
+#: A verification/completion-gate check result: ``{"name", "success",
+#: "returncode", "command"/"path", "duration_seconds", "output_hash"}``.
+KIND_VERIFICATION = "verification"
 
 VALID_KINDS = frozenset(
     {
@@ -86,6 +89,7 @@ VALID_KINDS = frozenset(
         KIND_TOOL_RESULT,
         KIND_APPROVAL,
         KIND_ITERATION,
+        KIND_VERIFICATION,
     }
 )
 
