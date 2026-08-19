@@ -292,6 +292,44 @@ async def run_turn_test(
     return True, text[:500]
 
 
+def resolve_verify_turn(config_path: str) -> Tuple[bool, str]:
+    """Resolve the ``gateway.preflight.verify_turn`` toggle and its prompt.
+
+    Returns ``(enabled, prompt)``. Defaults to ``(True, "ping")`` so the happy
+    path proves a real agent reply at startup; operators can opt out for
+    constrained/offline environments via ``verify_turn: false``.
+    """
+    import yaml
+
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except OSError:
+        return True, "ping"
+    pre = ((cfg.get("gateway") or {}).get("preflight") or {})
+    enabled = pre.get("verify_turn", True)
+    prompt = str(pre.get("verify_turn_prompt") or "ping")
+    return bool(enabled), prompt
+
+
+async def verify_turn_preflight(
+    config_path: str,
+    channel_name: Optional[str] = None,
+    prompt: str = "ping",
+) -> Tuple[bool, str]:
+    """Run one bounded agent turn to prove the resolved agent actually replies.
+
+    Reuses :func:`run_turn_test` against the first configured channel (or
+    ``channel_name`` when given). A missing/invalid model credential is thus
+    surfaced at setup/startup, not on the first user message.
+    """
+    channels = load_channels_mapping(config_path)
+    if not channels:
+        return True, "No channels configured — skipping turn verification"
+    target = channel_name or next(iter(channels.keys()))
+    return await run_turn_test(config_path, target, prompt)
+
+
 def check_gateway_running(config_path: str, timeout: float = 5.0) -> Tuple[bool, str]:
     """Probe the gateway REST ``/info`` endpoint (advisory)."""
     import urllib.error

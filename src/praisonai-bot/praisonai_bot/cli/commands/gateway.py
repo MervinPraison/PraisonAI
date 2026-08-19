@@ -139,6 +139,14 @@ def gateway_start(
         help="Fail fast if any tool named in the config cannot be resolved. "
         "Use --no-strict-tools to skip unresolved tools and start anyway (#3553)",
     ),
+    verify_turn: Optional[bool] = typer.Option(
+        None,
+        "--verify-turn/--no-verify-turn",
+        help="Run one real agent turn before serving so a missing/invalid model "
+        "credential fails at startup, not on the first user message. Defaults to "
+        "the config's gateway.preflight.verify_turn (on). Use --no-verify-turn to "
+        "skip in constrained/offline environments (#4042)",
+    ),
     openai_api: bool = typer.Option(
         False,
         "--openai-api",
@@ -297,6 +305,30 @@ def gateway_start(
     # warn-and-continue under --no-strict-tools.
     if config and os.path.exists(config):
         _preflight_tools(config, strict_tools=strict_tools)
+
+    # Turn pre-flight: verify one real agent turn so a missing/invalid model
+    # credential fails HERE (at start), not silently on the first user message
+    # (#4042). The channel + tool probes above prove wiring, never a model
+    # round-trip. Default on via config (gateway.preflight.verify_turn); the
+    # --verify-turn/--no-verify-turn flag overrides for constrained/offline use.
+    if preflight and config and os.path.exists(config):
+        import asyncio
+
+        enabled, prompt = _resolve_verify_turn(config)
+        if verify_turn is not None:
+            enabled = verify_turn
+        channels = _load_channels(config)
+        if enabled and channels:
+            ok, detail = asyncio.run(_verify_turn_preflight(config, prompt=prompt))
+            if ok:
+                print(f"Turn pre-flight OK — agent replied to '{prompt}'.")
+            else:
+                print(
+                    f"\nTurn pre-flight failed — the agent did not produce a reply: "
+                    f"{detail}\nCheck the model/provider credentials for this agent, "
+                    "or pass --no-verify-turn to skip this check."
+                )
+                raise typer.Exit(1)
 
     handler = GatewayHandler()
     # Pass True only when the flag is set so an unset flag does not override a
@@ -599,8 +631,10 @@ from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for 
     probe_results_to_dict as _probe_results_to_dict,
     resolve_env_token as _resolve_env_token,
     resolve_platform_dlq_path as _resolve_platform_dlq_path,
+    resolve_verify_turn as _resolve_verify_turn,
     run_shell_readiness_check as _run_shell_readiness_check,
     run_turn_test as _run_gateway_turn_test,
+    verify_turn_preflight as _verify_turn_preflight,
 )
 
 

@@ -101,6 +101,62 @@ def test_run_turn_test_mocked(tmp_path, monkeypatch):
     assert message == "OK from test"
 
 
+def test_resolve_verify_turn_defaults_on(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: x\n")
+    from praisonai_bot.gateway.preflight import resolve_verify_turn
+
+    enabled, prompt = resolve_verify_turn(str(cfg))
+    assert enabled is True
+    assert prompt == "ping"
+
+
+def test_resolve_verify_turn_opt_out(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  preflight:\n"
+        "    verify_turn: false\n"
+        "    verify_turn_prompt: hello\n"
+    )
+    from praisonai_bot.gateway.preflight import resolve_verify_turn
+
+    enabled, prompt = resolve_verify_turn(str(cfg))
+    assert enabled is False
+    assert prompt == "hello"
+
+
+def test_verify_turn_preflight_uses_first_channel(tmp_path, monkeypatch):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: x\n"
+        "agents:\n  assistant:\n    name: assistant\n    instructions: hi\n"
+        "routing:\n  default: assistant\n"
+    )
+
+    mock_chat = AsyncMock(return_value="pong")
+    monkeypatch.setattr(
+        "praisonai_bot.bots._session.BotSessionManager.chat",
+        mock_chat,
+    )
+    from praisonai_bot.gateway.preflight import verify_turn_preflight
+
+    ok, message = asyncio.run(verify_turn_preflight(str(cfg), prompt="ping"))
+    assert ok is True
+    assert message == "pong"
+
+
+def test_verify_turn_preflight_no_channels_skips(tmp_path):
+    cfg = tmp_path / "bot.yaml"
+    cfg.write_text("agents:\n  assistant:\n    instructions: hi\n")
+    from praisonai_bot.gateway.preflight import verify_turn_preflight
+
+    ok, message = asyncio.run(verify_turn_preflight(str(cfg)))
+    assert ok is True
+    assert "skipping" in message.lower()
+
+
 def test_parse_since_window():
     from praisonai_bot.gateway.preflight import parse_since_window
 
