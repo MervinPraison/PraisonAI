@@ -16,10 +16,19 @@ Design notes:
   platform with no token simply has no standalone sender available.
 - Fully additive: this is only consulted as a fallback when the executor has no
   live ``delivery_handler``; the live-adapter path is unchanged.
+- Bounded retry: an ephemeral tick (cron / CI / scale-to-zero) has no persistent
+  process to drain a durable outbox, so instead of a fire-and-forget send each
+  HTTP call is retried in-process with exponential backoff, honouring a
+  server-mandated ``Retry-After`` on a 429. Only transient failures (5xx / 429 /
+  network) are retried; a permanent failure (bad token, 4xx) raises immediately
+  so the executor records ``delivery_error`` without wasting the tick. Retries
+  reuse the same battle-tested ``bots._resilience`` primitives interactive
+  replies use, so behaviour stays consistent across paths.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -95,6 +104,27 @@ def _resolve_chat_id(
     return _home_channel_from_registry(platform)
 
 
+class _HttpSendError(RuntimeError):
+    """HTTP send failure that carries the status code.
+
+    Exposing ``status``/``headers`` lets the shared ``bots._resilience``
+    classifiers recognise a transient 5xx/429 (and honour a ``Retry-After``)
+    even when the response body has no recognisable text, so the retry decision
+    matches the interactive path exactly. The raw ``Retry-After`` header is
+    preserved verbatim (rather than pre-parsed to a float) so ``server_retry_after``
+    honours both integer-seconds *and* HTTP-date forms via its own parser — a
+    plain ``float(raw)`` here would silently discard an HTTP-date delay.
+    """
+
+    def __init__(self, status: int, body: str = "", retry_after: Optional[str] = None):
+        super().__init__(f"HTTP {status}: {body}")
+        self.status = status
+        # Mirror the response-header shape ``server_retry_after`` reads from, so
+        # it can parse an integer-seconds *or* HTTP-date ``Retry-After`` itself.
+        if retry_after is not None:
+            self.headers = {"Retry-After": retry_after}
+
+
 def _post_json(url: str, payload: dict, *, headers: Optional[dict] = None) -> None:
     """POST ``payload`` as JSON to ``url``, raising on a non-2xx response.
 
@@ -111,17 +141,65 @@ def _post_json(url: str, payload: dict, *, headers: Optional[dict] = None) -> No
             status = getattr(resp, "status", 200)
             if status >= 300:
                 body = resp.read().decode("utf-8", "replace")[:500]
-                raise RuntimeError(f"HTTP {status}: {body}")
+                raise _HttpSendError(status, body)
     except urllib.error.HTTPError as e:  # 4xx/5xx
         body = e.read().decode("utf-8", "replace")[:500] if e.fp else ""
-        raise RuntimeError(f"HTTP {e.code}: {body}") from e
+        # Preserve the raw ``Retry-After`` verbatim so ``server_retry_after``
+        # honours both integer-seconds and HTTP-date forms; parsing to a float
+        # here would silently drop an HTTP-date delay (429 under throttling).
+        raw = None
+        try:
+            raw = e.headers.get("Retry-After") if e.headers else None
+        except Exception:  # pragma: no cover - defensive: headers always dict-like
+            raw = None
+        retry_after = str(raw) if raw is not None else None
+        raise _HttpSendError(e.code, body, retry_after) from e
+
+
+_MAX_ATTEMPTS = 4
 
 
 async def _run_sync(fn: Callable[[], None]) -> None:
-    """Run a blocking send ``fn`` off the event loop."""
-    import asyncio
+    """Run a blocking send ``fn`` off the event loop, retrying transient failures.
 
-    await asyncio.to_thread(fn)
+    A standalone tick has no persistent process to drain a durable outbox, so
+    durability here is a bounded in-process retry: ``fn`` is attempted up to
+    :data:`_MAX_ATTEMPTS` times with exponential backoff. A server-mandated
+    ``Retry-After`` (e.g. a Telegram/HTTP 429) is honoured over the computed
+    backoff. Only errors classified transient by the shared resilience helper
+    are retried; a permanent failure (bad token, 4xx) raises on the first
+    attempt so the executor records ``delivery_error`` promptly rather than
+    burning the whole tick on a doomed send.
+    """
+    try:
+        from ..bots._resilience import (
+            BackoffPolicy,
+            compute_backoff,
+            is_recoverable_error,
+            server_retry_after,
+        )
+    except Exception:  # pragma: no cover - defensive: helper ships in-package
+        await asyncio.to_thread(fn)
+        return
+
+    policy = BackoffPolicy(initial_ms=1000, max_ms=20000, factor=2.0, jitter=0.2)
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            await asyncio.to_thread(fn)
+            return
+        except Exception as e:  # noqa: BLE001 — classify then re-raise/retry
+            if attempt >= _MAX_ATTEMPTS or not is_recoverable_error(e):
+                raise
+            wait = server_retry_after(e)
+            if wait is None:
+                wait = compute_backoff(policy, attempt)
+            logger.warning(
+                "Standalone delivery attempt %d/%d failed (%s); retrying in %.1fs",
+                attempt, _MAX_ATTEMPTS, e, wait,
+            )
+            await asyncio.sleep(wait)
 
 
 def _chunk(text: str, max_length: int) -> list:
@@ -149,6 +227,8 @@ def _chunk(text: str, max_length: int) -> list:
 _TELEGRAM_LIMIT = 4096
 _SLACK_LIMIT = 39000
 _DISCORD_LIMIT = 2000
+_WHATSAPP_LIMIT = 4096
+_SIGNAL_LIMIT = 2000
 
 
 async def _telegram_send(target: "DeliveryTarget", text: str) -> None:
@@ -230,12 +310,67 @@ async def _discord_send(target: "DeliveryTarget", text: str) -> None:
         await _run_sync(lambda p=payload: _post_json(url, p, headers=headers))
 
 
+async def _whatsapp_send(target: "DeliveryTarget", text: str) -> None:
+    # WhatsApp Cloud API: same token/phone-number-id env the live adapter uses
+    # (see bots/whatsapp.py). The chat id is the recipient phone number, resolved
+    # via the standard target/env/registry order like every other platform.
+    token = _env("WHATSAPP_ACCESS_TOKEN")
+    if not token:
+        raise RuntimeError("WHATSAPP_ACCESS_TOKEN not set for standalone delivery")
+    phone_number_id = _env("WHATSAPP_PHONE_NUMBER_ID")
+    if not phone_number_id:
+        raise RuntimeError("WHATSAPP_PHONE_NUMBER_ID not set for standalone delivery")
+    to = _resolve_chat_id(target, "whatsapp", "WHATSAPP_HOME_CHANNEL")
+    if not to:
+        raise RuntimeError("no recipient for whatsapp standalone delivery")
+    url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _send(part: str) -> None:
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "text",
+            "text": {"body": part},
+        }
+        # NOTE: a scheduler ``thread_id`` is a generic conversation identifier,
+        # NOT a WhatsApp message id. WhatsApp's ``context.message_id`` requires a
+        # real inbound message id to quote-reply; feeding it a generic thread id
+        # yields an invalid id the Cloud API rejects (a permanent 4xx). The live
+        # adapter (bots/whatsapp.py) only sets ``context`` from an explicit
+        # ``reply_to`` message id, never from ``thread_id`` — so we mirror that
+        # and simply omit the context here.
+        _post_json(url, payload, headers=headers)
+
+    for part in _chunk(text, _WHATSAPP_LIMIT):
+        await _run_sync(lambda p=part: _send(p))
+
+
+async def _signal_send(target: "DeliveryTarget", text: str) -> None:
+    # Signal via a signal-cli-rest-api bridge (see bots/signal.py). The bridge
+    # url and sender account come from the same env the live adapter uses; the
+    # target channel id is the recipient number/group.
+    account = _env("SIGNAL_ACCOUNT")
+    if not account:
+        raise RuntimeError("SIGNAL_ACCOUNT not set for standalone delivery")
+    bridge = _env("SIGNAL_BRIDGE_URL") or "http://localhost:8080"
+    recipient = _resolve_chat_id(target, "signal", "SIGNAL_HOME_CHANNEL")
+    if not recipient:
+        raise RuntimeError("no recipient for signal standalone delivery")
+    url = f"{bridge.rstrip('/')}/v2/send"
+    for part in _chunk(text, _SIGNAL_LIMIT):
+        payload = {"number": account, "message": part, "recipients": [recipient]}
+        await _run_sync(lambda p=payload: _post_json(url, p))
+
+
 # Platform → standalone sender. Keyed by the same lowercase platform names the
 # adapter registry uses so a ``deliver: telegram`` target resolves uniformly.
 _STANDALONE_SENDERS: dict = {
     "telegram": _telegram_send,
     "slack": _slack_send,
     "discord": _discord_send,
+    "whatsapp": _whatsapp_send,
+    "signal": _signal_send,
 }
 
 
