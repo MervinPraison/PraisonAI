@@ -279,7 +279,7 @@ steps:
         return "workflow"
     
     def get_actions(self) -> List[str]:
-        return ["run", "validate", "list", "create", "auto", "help"]
+        return ["run", "validate", "list", "create", "auto", "checkpoints", "help"]
     
     def get_help_text(self) -> str:
         return """
@@ -349,6 +349,81 @@ Example:
             if arg.endswith(('.yaml', '.yml')) and not arg.startswith('--'):
                 return arg
         return None
+
+    _CHECKPOINT_FLAGS = {"--resume", "--rebase-checkpoint"}
+    _CHECKPOINT_VALUE_FLAGS = {"--checkpoint", "--var", "--model", "-m"}
+
+    def _get_markdown_target_from_args(self, args: List[str]) -> Optional[str]:
+        """Return the first positional token (a .md file or a workflow name).
+
+        Skips known flags and their values so ``run release-notes.md --resume``
+        and ``run "Release Notes" --checkpoint foo`` both resolve correctly.
+        """
+        skip_next = False
+        for arg in args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg in self._CHECKPOINT_VALUE_FLAGS:
+                skip_next = True
+                continue
+            if arg.startswith('--') or arg in ('-v',):
+                continue
+            return arg
+        return None
+
+    def _parse_checkpoint_flags(self, args: List[str], default_name: str):
+        """Extract (checkpoint_name, resume, rebase_checkpoint) from run args."""
+        checkpoint_name = None
+        resume = False
+        rebase = False
+        for idx, arg in enumerate(args):
+            if arg == '--checkpoint' and idx + 1 < len(args):
+                checkpoint_name = args[idx + 1]
+            elif arg == '--resume':
+                resume = True
+            elif arg == '--rebase-checkpoint':
+                rebase = True
+        if not checkpoint_name:
+            checkpoint_name = default_name
+        return checkpoint_name, resume, rebase
+
+    def _run_markdown_workflow(self, target: str, args: List[str]) -> Any:
+        """Run a markdown workflow by name (with checkpoint/resume support)."""
+        manager = self._get_manager()
+        if not manager:
+            return None
+
+        # Resolve a .md path to its workflow name (stem); names pass through.
+        workflow_name = target
+        if target.endswith('.md'):
+            workflow_name = os.path.splitext(os.path.basename(target))[0]
+
+        variables = self._parse_variables(args)
+        verbose = '--verbose' in args or '-v' in args
+        checkpoint_name, resume, rebase = self._parse_checkpoint_flags(args, workflow_name)
+
+        self.print_status(f"Running workflow: {workflow_name}", "info")
+        try:
+            result = manager.execute(
+                workflow_name,
+                variables=variables or {},
+                verbose=1 if verbose else 0,
+                checkpoint=checkpoint_name,
+                resume=checkpoint_name if resume else None,
+                rebase_checkpoint=rebase,
+            )
+        except Exception as e:
+            self.print_status(f"Workflow failed: {e}", "error")
+            return None
+
+        if not result.get("success"):
+            self.print_status(f"Workflow failed: {result.get('error', 'Unknown error')}", "error")
+            return result
+        if result.get("resumed_from_step") is not None:
+            self.print_status(f"Resumed from step {result['resumed_from_step'] + 1}", "info")
+        self.print_status("Workflow completed!", "success")
+        return result
     
     def action_run(self, args: List[str], **kwargs) -> Any:
         """
@@ -366,6 +441,11 @@ Example:
         """
         file_path = self._get_file_from_args(args)
         if not file_path:
+            # Markdown workflows are referenced by name/path and run through the
+            # WorkflowManager (which supports checkpoint/resume), unlike YAML.
+            md_target = self._get_markdown_target_from_args(args)
+            if md_target:
+                return self._run_markdown_workflow(md_target, args)
             self.print_status("Usage: praisonai workflow run <file.yaml>", "error")
             return None
         
@@ -438,7 +518,49 @@ Example:
         except Exception as e:
             self.print_status(f"Workflow failed: {e}", "error")
             return None
-    
+
+    def action_checkpoints(self, args: List[str], **kwargs) -> Any:
+        """List saved workflow checkpoints, or delete one with --delete <name>."""
+        manager = self._get_manager()
+        if not manager:
+            return None
+
+        delete_name = None
+        for idx, arg in enumerate(args):
+            if arg == '--delete' and idx + 1 < len(args):
+                delete_name = args[idx + 1]
+
+        if delete_name:
+            if manager.delete_checkpoint(delete_name):
+                self.print_status(f"Deleted checkpoint: {delete_name}", "success")
+            else:
+                self.print_status(f"Checkpoint not found: {delete_name}", "warning")
+            return None
+
+        checkpoints = manager.list_checkpoints()
+        if not checkpoints:
+            self.print_status("No checkpoints found.", "info")
+            return checkpoints
+
+        from rich import print as rprint
+        from rich.table import Table
+        table = Table(title="Workflow Checkpoints")
+        table.add_column("Name", style="cyan")
+        table.add_column("Workflow", style="white")
+        table.add_column("Completed Steps", style="green")
+        table.add_column("Fingerprint", style="magenta")
+        table.add_column("Saved At", style="white")
+        for cp in checkpoints:
+            table.add_row(
+                str(cp.get("name", "")),
+                str(cp.get("workflow", "")),
+                str(cp.get("completed_steps", 0)),
+                str(cp.get("definition_fingerprint") or "-"),
+                str(cp.get("saved_at", "")),
+            )
+        rprint(table)
+        return checkpoints
+
     def action_validate(self, args: List[str], **kwargs) -> bool:
         """
         Validate a YAML workflow file.
