@@ -87,8 +87,11 @@ class AgentConfig(BaseModel):
     # Required fields
     role: str = Field(..., description="Agent role")
     goal: str = Field(..., description="Agent goal")
-    backstory: str = Field(..., description="Agent backstory")
-    
+    # Optional at the schema level: the runtime treats 'instructions' as an
+    # alias for 'backstory', so an agent needs only one of the two. The
+    # model_validator below enforces "at least one is present".
+    backstory: Optional[str] = Field(default=None, description="Agent backstory")
+
     # Optional fields
     instructions: Optional[str] = Field(default=None, description="Additional instructions (alias for backstory)")
     tools: Optional[List[str]] = Field(default=None, description="List of tools the agent can use")
@@ -160,6 +163,19 @@ class AgentConfig(BaseModel):
         if isinstance(data, dict) and 'streaming' not in data and 'stream' in data:
             data['streaming'] = data['stream']
         return data
+
+    @model_validator(mode='after')
+    def require_backstory_or_instructions(self):
+        """Require at least one of 'backstory'/'instructions' (they are aliases).
+
+        The runtime accepts either field, so validation must too — otherwise
+        runnable workflows using only 'instructions' fail validation.
+        """
+        if not self.backstory and not self.instructions:
+            raise ValueError(
+                f"Agent '{self.role}' requires either 'backstory' or 'instructions'."
+            )
+        return self
     
     @model_validator(mode='after')
     def normalize_config_objects(self):
@@ -248,38 +264,88 @@ class TaskConfig(BaseModel):
 
 
 class WorkflowStep(BaseModel):
-    """Configuration for a workflow step."""
-    name: str = Field(..., description="Step name")
-    type: Optional[str] = Field(default="task", description="Step type (task/route/parallel/loop)")
-    agent: Optional[str] = Field(default=None, description="Agent for task steps")
+    """Configuration for a workflow step.
+
+    Accepts both dialects the runtime understands:
+
+    1. Explicit ``type``-based steps (``type: task|parallel|loop|route``), and
+    2. The bare runtime forms the engine's ``YAMLWorkflowParser`` executes:
+       ``- agent:`` / ``route:`` / ``if:`` / ``loop:`` / ``repeat:`` /
+       ``parallel:`` / ``include:`` steps, where ``name``/``type`` are optional.
+
+    A step is valid if it matches either dialect, so runnable example workflows
+    no longer fail schema validation (and vice versa).
+    """
+    # Optional in the runtime dialect (bare agent/route/if/... steps omit them).
+    name: Optional[str] = Field(default=None, description="Step name")
+    type: Optional[str] = Field(default=None, description="Step type (task/route/parallel/loop)")
+    agent: Optional[str] = Field(default=None, description="Agent for task/agent steps")
     task: Optional[str] = Field(default=None, description="Task description")
+    action: Optional[str] = Field(default=None, description="Action prompt for agent steps")
     steps: Optional[List['WorkflowStep']] = Field(default=None, description="Sub-steps for complex types")
     condition: Optional[str] = Field(default=None, description="Condition for step execution")
     routes: Optional[Dict[str, List['WorkflowStep']]] = Field(default=None, description="Routes for routing steps")
     count: Optional[int] = Field(default=None, ge=1, description="Loop count")
-    
+
+    # Runtime-dialect step keys (any one of these marks the step form).
+    route: Optional[Any] = Field(default=None, description="Route step: mapping of key -> [agents]")
+    loop: Optional[Any] = Field(default=None, description="Loop step configuration")
+    repeat: Optional[Any] = Field(default=None, description="Repeat step configuration")
+    parallel: Optional[Any] = Field(default=None, description="Parallel step configuration")
+    include: Optional[Any] = Field(default=None, description="Include another workflow file")
+
+    class Config:
+        # ``if:`` is a Python keyword; allow it (and any other engine keys)
+        # through by name so runtime workflows validate without renaming.
+        extra = "allow"
+
+    # Keys that identify a bare runtime-dialect step (no explicit ``type``).
+    _RUNTIME_STEP_KEYS = ('agent', 'route', 'loop', 'repeat', 'parallel', 'include', 'if')
+
+    def _has_runtime_form(self) -> bool:
+        for key in self._RUNTIME_STEP_KEYS:
+            if getattr(self, key, None) is not None:
+                return True
+            # ``if`` is not a declared field; read from extras.
+            if key == 'if' and (self.__pydantic_extra__ or {}).get('if') is not None:
+                return True
+        return False
+
     @model_validator(mode='after')
     def validate_step_type(self):
-        """Validate step configuration based on type."""
-        allowed = {'task', 'parallel', 'loop', 'route'}
+        """Validate step configuration for whichever dialect is used."""
+        label = self.name or "<unnamed>"
+
+        # Runtime dialect (bare agent/route/if/loop/repeat/parallel/include):
+        # accept as-is; the engine's YAMLWorkflowParser owns its structure.
+        if self.type is None:
+            if self._has_runtime_form():
+                return self
+            raise ValueError(
+                f"Step '{label}' must declare a 'type' or one of "
+                f"{', '.join(self._RUNTIME_STEP_KEYS)}."
+            )
+
+        # Explicit type-based dialect.
+        allowed = {'task', 'parallel', 'loop', 'route', 'agent'}
         if self.type not in allowed:
             raise ValueError(
-                f"Step '{self.name}' has invalid type '{self.type}'. "
+                f"Step '{label}' has invalid type '{self.type}'. "
                 f"Allowed values: {', '.join(sorted(allowed))}"
             )
-        
+
         if self.type == 'task':
             if not self.agent or not self.task:
-                raise ValueError(f"Task step '{self.name}' requires both 'agent' and 'task' fields")
+                raise ValueError(f"Task step '{label}' requires both 'agent' and 'task' fields")
         elif self.type in ('parallel', 'loop'):
             if not self.steps:
-                raise ValueError(f"{self.type.capitalize()} step '{self.name}' requires 'steps' field")
+                raise ValueError(f"{self.type.capitalize()} step '{label}' requires 'steps' field")
             if self.type == 'loop' and self.count is None:
-                raise ValueError(f"Loop step '{self.name}' requires 'count' field")
+                raise ValueError(f"Loop step '{label}' requires 'count' field")
         elif self.type == 'route':
-            if not self.routes:
-                raise ValueError(f"Route step '{self.name}' requires 'routes' field")
-        
+            if not self.routes and not self.route:
+                raise ValueError(f"Route step '{label}' requires 'routes' field")
+
         return self
 
 
@@ -378,18 +444,56 @@ class YAMLConfig(BaseModel):
                         f"Available agents: {', '.join(sorted(agent_names))}"
                     )
         
+        def check_agent(name: Any, step_path: str):
+            """Flag an agent reference that isn't a defined agent."""
+            if isinstance(name, str) and name and name not in agent_names:
+                errors.append(
+                    f"Workflow {step_path} references undefined agent '{name}'. "
+                    f"Available agents: {', '.join(sorted(agent_names))}"
+                )
+
+        def validate_substep_payload(payload: Any, step_path: str):
+            """Walk a nested sub-step payload and validate ``agent:`` keys.
+
+            Used for ``parallel``/``loop``/``repeat``/``if`` bodies, whose
+            agent references only ever appear as an ``agent:`` key on a
+            sub-step dict. Non-agent scalars (e.g. ``loop: {over: topics}``,
+            where ``topics`` is a variable) are intentionally left alone.
+            """
+            if isinstance(payload, dict):
+                if 'agent' in payload:
+                    check_agent(payload.get('agent'), step_path)
+                for value in payload.values():
+                    validate_substep_payload(value, step_path)
+            elif isinstance(payload, list):
+                for item in payload:
+                    validate_substep_payload(item, step_path)
+
+        def validate_route_payload(payload: Any, step_path: str):
+            """Validate a ``route:`` mapping's agent references.
+
+            Runtime shape is ``{route_key: [agent_name, ...]}`` (scalars in
+            the value lists are agent names), so every leaf scalar is an
+            agent reference to check.
+            """
+            if isinstance(payload, dict):
+                for value in payload.values():
+                    validate_route_payload(value, step_path)
+            elif isinstance(payload, list):
+                for item in payload:
+                    validate_route_payload(item, step_path)
+            else:
+                check_agent(payload, step_path)
+
         # Validate workflow step agent references
         def validate_steps(steps: List[WorkflowStep], path: str = ""):
             for i, step in enumerate(steps or []):
-                step_path = f"{path}step[{i+1}]({step.name})"
-                
-                if step.type == 'task' and step.agent:
-                    if step.agent not in agent_names:
-                        errors.append(
-                            f"Workflow {step_path} references undefined agent '{step.agent}'. "
-                            f"Available agents: {', '.join(sorted(agent_names))}"
-                        )
-                
+                step_path = f"{path}step[{i+1}]({step.name or '<unnamed>'})"
+
+                # Validate agent references for both dialects (type: task and
+                # the bare ``agent:`` runtime form).
+                check_agent(step.agent, step_path)
+
                 # Recursively check sub-steps
                 if step.steps:
                     validate_steps(step.steps, f"{step_path}/")
@@ -398,7 +502,16 @@ class YAMLConfig(BaseModel):
                 if step.routes:
                     for route_name, route_steps in step.routes.items():
                         validate_steps(route_steps, f"{step_path}/route[{route_name}]/")
-        
+
+                # Check bare runtime-form payloads that hold agent references
+                # but aren't parsed into typed WorkflowStep objects.
+                validate_route_payload(step.route, f"{step_path}/route")
+                for key in ('parallel', 'loop', 'repeat'):
+                    validate_substep_payload(getattr(step, key, None), f"{step_path}/{key}")
+                # ``if`` is a Python keyword; it lands in pydantic extras.
+                if_payload = (step.__pydantic_extra__ or {}).get('if') if step.__pydantic_extra__ else None
+                validate_substep_payload(if_payload, f"{step_path}/if")
+
         if self.steps:
             validate_steps(self.steps)
         

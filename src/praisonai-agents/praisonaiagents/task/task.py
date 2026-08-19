@@ -281,9 +281,20 @@ class Task:
                 self.on_error = on_error
         else:
             self.on_error = on_error
+        # Workflow-engine routing surfaces (read by WorkflowManager executor).
+        # Default to None so the executor's getattr() reads have real attributes.
+        self.branch_condition = None
+        self.next_steps = None
         # Handle routing parameter - use routing if provided, else fall back to condition
         if routing is not None:
-            self.condition = routing
+            # TaskRoutingConfig consolidates branch/next_steps for markdown
+            # workflows. Unpack it onto the attributes the executor reads
+            # instead of clobbering self.condition (which must stay a dict/str).
+            if hasattr(routing, 'branches') or hasattr(routing, 'next_steps'):
+                self.branch_condition = getattr(routing, 'branches', None)
+                self.next_steps = getattr(routing, 'next_steps', None)
+            else:
+                self.condition = routing
         self.routing = self.condition  # Alias for backward compat
         self.output_config = output_config
         # ============================================================

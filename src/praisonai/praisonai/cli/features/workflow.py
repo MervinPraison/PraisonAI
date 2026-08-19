@@ -692,23 +692,29 @@ Example:
     
     def action_list(self, args: List[str], **kwargs) -> List[str]:
         """
-        List available workflows in .praison/workflows/ directory.
+        List available workflows in the project workflows directory.
         
         Returns:
             List of workflow file names
         """
-        workflows_dir = Path(".praison/workflows")
+        # Use the same directory the engine loads from (.praisonai/workflows).
+        try:
+            from praisonaiagents.paths import DEFAULT_DIR_NAME
+            workflows_subdir = f"{DEFAULT_DIR_NAME}/workflows"
+        except ImportError:
+            workflows_subdir = ".praisonai/workflows"
+        workflows_dir = Path(workflows_subdir)
         
         if not workflows_dir.exists():
-            self.print_status("No .praison/workflows/ directory found", "warning")
-            self.print_status("Create one with: mkdir -p .praison/workflows", "info")
+            self.print_status(f"No {workflows_subdir}/ directory found", "warning")
+            self.print_status(f"Create one with: mkdir -p {workflows_subdir}", "info")
             return []
         
         # Find all YAML files
         yaml_files = list(workflows_dir.glob("*.yaml")) + list(workflows_dir.glob("*.yml"))
         
         if not yaml_files:
-            self.print_status("No workflow files found in .praison/workflows/", "warning")
+            self.print_status(f"No workflow files found in {workflows_subdir}/", "warning")
             return []
         
         from rich import print as rprint
