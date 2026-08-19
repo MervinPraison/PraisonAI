@@ -79,7 +79,23 @@ def say_place(name: Any, *, via: str = "sandbox") -> str:
         name = getattr(name, "provider_name", None) or type(name).__name__
     key = str(name).lower()
     key = _ALIASES.get(key, key)
-    return _PLACE_WORDS.get(key, str(name))
+
+    known = _PLACE_WORDS.get(key)
+    if known:
+        return known
+
+    # A place contributed by another package can name itself; the bare name is
+    # the last resort rather than the only option, because the phrase table is
+    # a literal that cannot know about packages installed later.
+    try:
+        from ..managed._compute_bridge import contributed_display_name
+
+        declared = contributed_display_name(key)
+        if declared:
+            return declared
+    except Exception:
+        pass
+    return str(name)
 
 
 def _backend_places(backend: Any) -> Optional[Dict[str, str]]:
