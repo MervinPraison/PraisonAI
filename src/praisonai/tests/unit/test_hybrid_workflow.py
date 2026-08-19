@@ -3,9 +3,8 @@ TDD Tests for Hybrid Workflow Executor (Strategy 6).
 
 Tests the HybridWorkflowExecutor that combines job and agent workflow capabilities.
 """
-
+import sys
 import pytest
-
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -141,6 +140,7 @@ class TestHybridWorkflowDryRun:
 class TestHybridWorkflowExecution:
     """Test actual execution of hybrid workflow steps."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="echo command not available on Windows")
     def test_execute_shell_step(self):
         """Shell step should execute correctly."""
         from praisonai.cli.features.hybrid_workflow import HybridWorkflowExecutor
@@ -157,6 +157,7 @@ class TestHybridWorkflowExecution:
         assert result["ok"] is True
         assert result["results"][0]["status"] == "ok"
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="echo command not available on Windows")
     def test_execute_parallel_shell_steps(self):
         """Parallel shell steps should execute correctly."""
         from praisonai.cli.features.hybrid_workflow import HybridWorkflowExecutor
@@ -178,6 +179,7 @@ class TestHybridWorkflowExecution:
         
         assert result["ok"] is True
         assert result["results"][0]["status"] == "ok"
+
 
     def test_execute_agent_step_with_mock(self):
         """Agent step should execute with mocked Agent."""
