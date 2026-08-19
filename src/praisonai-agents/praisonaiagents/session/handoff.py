@@ -80,16 +80,29 @@ def _recent_actions(recap_text: str) -> List[str]:
     return ["RECENT ACTIONS (recap-derived):", recap_text]
 
 
-def _cap(text: str, max_chars: int) -> str:
-    """Tail-bias the prompt to ``max_chars`` so the NEXT instruction survives.
+_ELLIPSIS = "\n…\n"
+
+
+def _cap(text: str, tail: str, max_chars: int) -> str:
+    """Cap the prompt to ``max_chars`` while preserving the ``NEXT:`` tail.
 
     The closing ``NEXT:`` guidance is the most actionable line for a resuming
-    context, so when trimming we keep the head (goal/progress) and the tail
-    (next steps) and drop from the middle recap block.
+    context, so a naive head-truncation would silently drop it. Instead we keep
+    the head (preamble/goal/progress) and the ``tail`` verbatim, and trim from
+    the middle recap block. Only if the tail alone already exceeds the budget do
+    we fall back to a plain truncation.
     """
     if max_chars <= 0 or len(text) <= max_chars:
         return text
-    return text[: max_chars - 1].rstrip() + "…"
+    tail = tail.strip()
+    # If even the tail cannot fit, fall back to a plain head-truncation.
+    if not tail or len(tail) + len(_ELLIPSIS) >= max_chars:
+        return text[: max_chars - 1].rstrip() + "…"
+    # Preserve the tail verbatim; spend the remaining budget on the head, then
+    # bridge the trimmed middle with an ellipsis marker.
+    head_budget = max_chars - len(tail) - len(_ELLIPSIS)
+    head = text[:head_budget].rstrip()
+    return f"{head}{_ELLIPSIS}{tail}"
 
 
 def build_handoff_prompt(
@@ -142,9 +155,10 @@ def build_handoff_prompt(
         if seen:
             sections.append("KEY FILES: " + ", ".join(seen))
 
-    sections.append(
+    next_tail = (
         "NEXT: continue toward the remaining work. First verify the current "
         "state on disk before acting."
     )
+    sections.append(next_tail)
 
-    return _cap("\n".join(sections).strip(), max_chars)
+    return _cap("\n".join(sections).strip(), next_tail, max_chars)

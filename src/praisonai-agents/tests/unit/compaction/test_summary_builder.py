@@ -60,6 +60,20 @@ def test_captures_active_task_and_tool_call():
     assert "read_file" in out
 
 
+def test_assistant_question_is_pending_not_completed():
+    # A proposing/asking assistant turn is unexecuted work: it belongs under
+    # "Pending Questions", never "Completed Actions" (else a resumed agent would
+    # skip work that was only discussed).
+    builder = DefaultSummaryBuilder()
+    out = builder.build_structured_summary(_conversation())
+    completed = out.split("## Completed Actions", 1)[1].split("##", 1)[0]
+    pending = out.split("## Pending Questions", 1)[1].split("##", 1)[0]
+    assert "Should I also update tests/test_main.py?" in pending
+    assert "Should I also update tests/test_main.py?" not in completed
+    # Executed work (the tool call) is still recorded as completed.
+    assert "read_file" in completed
+
+
 def test_never_raises_falls_back_to_plain_summary():
     builder = DefaultSummaryBuilder()
     # Malformed messages (None content, non-dict entries) must not raise.

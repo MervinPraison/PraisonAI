@@ -113,7 +113,11 @@ class DefaultSummaryBuilder:
             if role == "user" and body.strip() and not active_task:
                 active_task = _clip(body)
 
-            # Assistant tool calls / assistant turns are completed actions.
+            # Executed work — tool calls and tool results — is *completed*.
+            # An assistant turn that merely proposes or *asks* about work has
+            # not been executed, so it must not be recorded as completed (it is
+            # captured under "Pending Questions" / "In Progress" instead);
+            # only a substantive, non-questioning assistant turn is completed.
             tool_calls = msg.get("tool_calls")
             if isinstance(tool_calls, list) and tool_calls:
                 for tc in tool_calls:
@@ -121,7 +125,7 @@ class DefaultSummaryBuilder:
                         continue
                     name = (tc.get("function", {}) or {}).get("name", "tool")
                     completed.append(f"Called `{name}`")
-            elif role == "assistant" and body.strip():
+            elif role == "assistant" and body.strip() and "?" not in body:
                 completed.append(_clip(body))
             elif role == "tool" and body.strip():
                 completed.append(_clip(f"tool result: {body}"))

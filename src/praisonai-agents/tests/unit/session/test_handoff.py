@@ -72,6 +72,20 @@ def test_char_cap_enforced():
     assert len(out) <= 500
 
 
+def test_char_cap_preserves_next_tail():
+    # An oversized recap must not truncate away the actionable NEXT: guidance;
+    # the cap trims the middle recap block and keeps the tail verbatim.
+    big = "recap " * 5000
+    out = build_handoff_prompt(
+        recap=big, goal_state=_goal_state(), max_chars=800
+    )
+    assert len(out) <= 800
+    assert out.startswith("You are resuming an interrupted run")
+    assert "GOAL: Ship the logging refactor" in out
+    assert "NEXT: continue toward the remaining work" in out
+    assert out.rstrip().endswith("before acting.")
+
+
 def test_determinism_no_llm_and_stable():
     # Two identical calls produce identical output (pure assembly, no LLM).
     args = dict(recap="same", goal_state=_goal_state())
