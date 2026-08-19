@@ -223,3 +223,29 @@ def test_an_unknown_place_still_falls_back_to_its_name():
     from praisonaiagents.agent.execution_location import say_place
 
     assert say_place("some-new-cloud") == "some-new-cloud"
+
+
+def test_sandbox_backends_from_plugins_are_selectable():
+    """`SANDBOX_ONLY` was a hardcoded tuple, so a sandbox contributed by another
+    package worked with run_in= and was invisible to tools_run_on=. `capsule`
+    was the live example: it ships from praisonai-plugins."""
+    from praisonaiagents.managed._sandbox_adapter import sandbox_only_names
+
+    names = set(sandbox_only_names())
+    assert {"subprocess", "sandlock", "ssh", "novita"} <= names, "the floor must hold"
+
+    # Anything the compute registry already provides keeps its richer
+    # implementation rather than being downgraded to the one-instance adapter.
+    from praisonaiagents.managed._compute_bridge import _PROVIDERS
+
+    assert not names & set(_PROVIDERS)
+
+
+def test_a_plugin_sandbox_reaches_both_parameters(monkeypatch):
+    import praisonaiagents.managed._sandbox_adapter as adapter
+
+    monkeypatch.setattr(adapter, "sandbox_only_names",
+                        lambda: ("subprocess", "contributed-box"))
+    from praisonaiagents.managed._compute_bridge import available_providers
+
+    assert "contributed-box" in available_providers()

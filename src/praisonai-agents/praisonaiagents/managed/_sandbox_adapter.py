@@ -26,8 +26,58 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Backends that exist only as SandboxProtocol implementations.
-SANDBOX_ONLY = ("subprocess", "sandlock", "ssh", "novita")
+# Backends that exist only as SandboxProtocol implementations. The literal is
+# the floor, not the ceiling: the sandbox registry accepts plugins by entry
+# point, so a hardcoded tuple silently withheld contributed backends from
+# tools_run_on=. `capsule` was the live example -- it ships from
+# praisonai-plugins, worked with run_in=, and was invisible to tools_run_on=.
+_SANDBOX_ONLY_FLOOR = ("subprocess", "sandlock", "ssh", "novita")
+
+
+def sandbox_only_names() -> tuple:
+    """Sandbox backends with no compute-registry equivalent.
+
+    Anything the compute registry already provides is excluded, so a name that
+    exists in both (docker, e2b, modal, daytona) keeps its richer compute
+    implementation rather than being downgraded to the one-instance adapter.
+    """
+    names = set(_SANDBOX_ONLY_FLOOR)
+    try:
+        from ..sandbox._sandbox_bridge import get_sandbox_registry
+
+        registry = get_sandbox_registry()
+        registry = registry.default() if isinstance(registry, type) else registry
+        names |= {str(n).lower() for n in registry.list_all_names()}
+    except Exception:  # pragma: no cover - discovery must never break resolution
+        pass
+
+    try:
+        from ._compute_bridge import _PROVIDERS
+
+        names -= set(_PROVIDERS)
+    except Exception:
+        pass
+    return tuple(sorted(names))
+
+
+class _SandboxOnly(tuple):
+    """A tuple that re-reads the registry, so `in` sees plugins installed later.
+
+    Kept as a tuple subclass because SANDBOX_ONLY is imported and iterated in
+    several places that predate this.
+    """
+
+    def __contains__(self, item):
+        return item in sandbox_only_names()
+
+    def __iter__(self):
+        return iter(sandbox_only_names())
+
+    def __len__(self):
+        return len(sandbox_only_names())
+
+
+SANDBOX_ONLY = _SandboxOnly(_SANDBOX_ONLY_FLOOR)
 
 # Names that need connection details no bare string can carry.
 NEEDS_INSTANCE = {
