@@ -12,6 +12,7 @@ with the parameter name the user actually wanted.
 """
 
 import asyncio
+import gc
 import itertools
 
 import pytest
@@ -495,6 +496,13 @@ def _counting_provider(monkeypatch):
     # "subprocess" is a real place, so construction-time validation passes;
     # only the resolver underneath is swapped for the counting fake.
     monkeypatch.setattr(sc, "resolve_compute", lambda place: Counting(f"inst-{next(seq)}"))
+
+    # Run pending finalizers before the counting window opens. Agents from
+    # earlier tests release their sandbox when collected, and that collection
+    # can otherwise land mid-measurement and make an exact count flaky.
+    gc.collect()
+    provisioned.clear()
+    shut.clear()
     return provisioned, shut
 
 
