@@ -90,3 +90,22 @@ def test_bundle_survives_missing_config(tmp_path):
     with zipfile.ZipFile(result["path"]) as zf:
         shape = json.loads(zf.read("config_shape.json"))
     assert "error" in shape
+
+
+def test_rapid_exports_do_not_overwrite(tmp_path, monkeypatch):
+    # Pin the second-resolution stamp so both exports would collide without the
+    # uniqueness guard, proving neither bundle is silently truncated (Greptile
+    # P1).
+    monkeypatch.setattr(
+        "praisonai_bot.gateway.diagnostics._now_stamp",
+        lambda: "20260101-000000",
+    )
+
+    first = build_diagnostics_bundle(None, output_dir=str(tmp_path))
+    second = build_diagnostics_bundle(None, output_dir=str(tmp_path))
+
+    assert first["path"] != second["path"]
+    import os
+
+    assert os.path.exists(first["path"])
+    assert os.path.exists(second["path"])

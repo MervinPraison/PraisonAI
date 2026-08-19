@@ -54,6 +54,26 @@ def _now_stamp() -> str:
     return _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _unique_bundle_path(out_dir: str) -> str:
+    """A collision-free archive path in ``out_dir``.
+
+    ``_now_stamp()`` is second-resolution, so two exports into the same
+    directory within one second would otherwise resolve to the same path and
+    the second truncating write would silently destroy the first bundle
+    (Greptile P1). Keep the human-friendly timestamped name but append a ``-N``
+    suffix when that exact name already exists so every export is preserved.
+    """
+    stamp = _now_stamp()
+    candidate = os.path.join(out_dir, f"praisonai-diagnostics-{stamp}.zip")
+    counter = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(
+            out_dir, f"praisonai-diagnostics-{stamp}-{counter}.zip"
+        )
+        counter += 1
+    return candidate
+
+
 def _redact(text: str) -> str:
     """Pass text through the shared secret-redaction registry (best-effort)."""
     try:
@@ -215,7 +235,7 @@ def build_diagnostics_bundle(
         "diagnostics",
     )
     os.makedirs(out_dir, exist_ok=True)
-    bundle_path = os.path.join(out_dir, f"praisonai-diagnostics-{_now_stamp()}.zip")
+    bundle_path = _unique_bundle_path(out_dir)
 
     manifest["files"] = []
     buffer = io.BytesIO()
