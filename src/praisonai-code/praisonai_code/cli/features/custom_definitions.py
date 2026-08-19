@@ -7,9 +7,18 @@ directories:
 - .praisonai/commands/*.md - Reusable named commands with template interpolation
 - .praisonai/tools/*.py - Project-local Python tools (auto-loaded)
 
+For agents and commands, the conventional ecosystem locations ``.claude/`` and
+``.agents/`` are also honoured (mirroring skills/rules discovery), so existing
+project assets are reusable with zero migration:
+- .claude/agents/*.md|*.yaml, .agents/agents/*.md|*.yaml
+- .claude/commands/*.md, .agents/commands/*.md
+Tools stay ``.praisonai``-only because loading them executes user code.
+
 Discovery order (later wins on name collision):
 1. User-global: ~/.praisonai/{agents,commands,tools}/
-2. Project-level: ./.praisonai/{agents,commands,tools}/ (walk up to repo root)
+2. Project-level (walk up to repo root): ``.claude`` and ``.agents`` first,
+   then ``.praisonai`` last so project-native definitions take precedence over
+   imported ones on a name collision.
 """
 
 import inspect
@@ -308,7 +317,15 @@ class CustomDefinitionsDiscovery:
         return Path.home() / ".praisonai"
     
     def _find_project_dirs(self) -> List[Path]:
-        """Find project-level .praisonai directories by walking up."""
+        """Find project-level asset directories by walking up.
+
+        Enumerates the conventional ecosystem roots ``.claude`` and ``.agents``
+        in addition to ``.praisonai`` (mirroring skills/rules discovery) so
+        existing project agents/commands are reusable with zero migration. At
+        each level ``.praisonai`` is yielded last so, under the "later wins"
+        discovery order, project-native definitions take precedence over
+        imported ``.claude``/``.agents`` ones on a name collision.
+        """
         dirs = []
         current = Path.cwd()
         
@@ -317,9 +334,11 @@ class CustomDefinitionsDiscovery:
         stop_at = git_root if git_root else Path("/")
         
         while current != current.parent:
-            praisonai_dir = current / ".praisonai"
-            if praisonai_dir.exists() and praisonai_dir.is_dir():
-                dirs.append(praisonai_dir)
+            # ``.praisonai`` last so it wins on name collision.
+            for root in (".claude", ".agents", ".praisonai"):
+                candidate = current / root
+                if candidate.exists() and candidate.is_dir():
+                    dirs.append(candidate)
             
             if current == stop_at:
                 break
@@ -350,8 +369,15 @@ class CustomDefinitionsDiscovery:
         # Discover tools (project-local Python modules). Loading executes
         # user code, so it is gated by the same PRAISONAI_ALLOW_LOCAL_TOOLS
         # opt-in the rest of the wrapper enforces via load_user_module.
+        # Only ``.praisonai/tools`` is honoured: imported ecosystem roots
+        # (``.claude``/``.agents``) contribute agents/commands but never
+        # auto-executed code, so a drop-in checkout cannot run arbitrary tools.
         tools_dir = base_dir / "tools"
-        if tools_dir.exists() and tools_dir.is_dir():
+        if (
+            base_dir.name == ".praisonai"
+            and tools_dir.exists()
+            and tools_dir.is_dir()
+        ):
             for file_path in sorted(tools_dir.iterdir()):
                 if file_path.suffix == ".py" and not file_path.name.startswith("_"):
                     for tool in self._load_tools(file_path, source):
@@ -919,7 +945,11 @@ def count_project_tool_files() -> Tuple[int, int]:
     """
     discovery = CustomDefinitionsDiscovery()
     user_dir = discovery._get_user_dir()
-    project_dirs = discovery._find_project_dirs()
+    # Only ``.praisonai`` roots carry auto-loaded tools (mirrors
+    # _discover_from_dir), so ignore imported ``.claude``/``.agents`` roots here.
+    project_dirs = [
+        d for d in discovery._find_project_dirs() if d.name == ".praisonai"
+    ]
 
     seen: set = set()
 
