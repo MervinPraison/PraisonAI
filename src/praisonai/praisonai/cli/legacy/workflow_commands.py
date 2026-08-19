@@ -67,6 +67,26 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
                 self._run_yaml_workflow(workflow_name, action_args, variables, args)
                 return
             
+            # Parse checkpoint/resume flags from the run args. These live in
+            # action_args because the markdown run path forwards raw flags.
+            checkpoint_name = None
+            resume_flag = False
+            rebase_checkpoint = False
+            for idx, arg in enumerate(action_args):
+                if arg == '--checkpoint' and idx + 1 < len(action_args):
+                    checkpoint_name = action_args[idx + 1]
+                elif arg == '--resume':
+                    resume_flag = True
+                elif arg == '--rebase-checkpoint':
+                    rebase_checkpoint = True
+            # A checkpoint name defaults to the workflow name so plain --resume
+            # works without the user having to name the checkpoint.
+            if resume_flag and not checkpoint_name:
+                checkpoint_name = workflow_name
+            # Always checkpoint under the resolved name so a later --resume works.
+            if not checkpoint_name:
+                checkpoint_name = workflow_name
+
             # Use global flags (--llm, --tools, --planning, --memory, --save, --verbose)
             workflow_llm = getattr(args, 'llm', None) if args else None
             workflow_tools_str = getattr(args, 'tools', None) if args else None
@@ -114,9 +134,14 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
                 memory=memory,
                 planning=workflow_planning,
                 verbose=1 if workflow_verbose else 0,
+                checkpoint=checkpoint_name,
+                resume=checkpoint_name if resume_flag else None,
+                rebase_checkpoint=rebase_checkpoint,
                 on_step=lambda step, i: print(f"[cyan]  → Step {i+1}: {step.name}[/cyan]"),
                 on_result=lambda step, output: print(f"[green]  ✓ Completed: {step.name}[/green]")
             )
+            if result.get("resumed_from_step") is not None:
+                print(f"[cyan]Resumed from step {result['resumed_from_step'] + 1}[/cyan]")
             
             if result.get("success"):
                 print("[green]✅ Workflow completed successfully![/green]")
@@ -212,7 +237,39 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
         elif action == 'auto':
             # Auto-generate workflow from topic
             self._auto_generate_workflow(action_args)
-            
+
+        elif action == 'checkpoints':
+            # Manage saved workflow checkpoints (list / delete).
+            delete_name = None
+            for idx, arg in enumerate(action_args):
+                if arg == '--delete' and idx + 1 < len(action_args):
+                    delete_name = action_args[idx + 1]
+            if delete_name:
+                if manager.delete_checkpoint(delete_name):
+                    print(f"[green]✅ Deleted checkpoint: {delete_name}[/green]")
+                else:
+                    print(f"[yellow]Checkpoint not found: {delete_name}[/yellow]")
+            else:
+                checkpoints = manager.list_checkpoints()
+                if checkpoints:
+                    table = Table(title="Workflow Checkpoints")
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Workflow", style="white")
+                    table.add_column("Completed Steps", style="green")
+                    table.add_column("Fingerprint", style="magenta")
+                    table.add_column("Saved At", style="white")
+                    for cp in checkpoints:
+                        table.add_row(
+                            str(cp.get("name", "")),
+                            str(cp.get("workflow", "")),
+                            str(cp.get("completed_steps", 0)),
+                            str(cp.get("definition_fingerprint") or "-"),
+                            str(cp.get("saved_at", "")),
+                        )
+                    console.print(table)
+                else:
+                    print("[yellow]No checkpoints found.[/yellow]")
+
         elif action == 'help' or action == '--help':
             print("[bold]Workflow Commands:[/bold]")
             print("  praisonai workflow list                  - List available workflows")
@@ -223,6 +280,8 @@ def handle_workflow_command(self, action: str, action_args: list, variables: dic
             print("  praisonai workflow validate <file.yaml>  - Validate a YAML workflow")
             print("  praisonai workflow template <name>       - Create from template")
             print('  praisonai workflow auto "topic"          - Auto-generate workflow')
+            print("  praisonai workflow checkpoints           - List saved checkpoints")
+            print("  praisonai workflow checkpoints --delete <name> - Delete a checkpoint")
             print("\n[bold]Templates:[/bold]")
             print("  simple, routing, parallel, loop, evaluator-optimizer")
             print("\n[bold]Options (uses global flags):[/bold]")
