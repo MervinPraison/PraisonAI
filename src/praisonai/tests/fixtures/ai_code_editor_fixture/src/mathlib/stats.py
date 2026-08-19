@@ -1,60 +1,19 @@
-"""Statistical utilities."""
+"""Statistics module with bugs and missing implementations."""
 import statistics
-from collections import Counter
 
 
 def mean(numbers):
-    """Calculate mean of a list of numbers.
-    
-    Args:
-        numbers: List of numbers
-        
-    Returns:
-        Arithmetic mean
-        
-    Raises:
-        ValueError: If the list is empty
-    """
-    if not numbers:
-        raise ValueError("Cannot calculate mean of empty list")
-    return sum(numbers) / len(numbers)
+    """Calculate mean. INTENTIONAL BUG: No empty list check."""
+    return sum(numbers) / len(numbers)  # This should handle empty lists
 
 
 def median(numbers):
-    """Calculate median of a list of numbers.
-    
-    Args:
-        numbers: List of numbers
-        
-    Returns:
-        Median value
-        
-    Raises:
-        ValueError: If the list is empty
-    """
-    if not numbers:
-        raise ValueError("Cannot calculate median of empty list")
-    return statistics.median(numbers)
+    """Calculate median. INTENTIONAL BUG: No empty list check."""
+    return statistics.median(numbers)  # This should handle empty lists
 
 
 def mode(numbers):
-    """Calculate mode (most frequent value) of a list.
-    
-    Args:
-        numbers: List of numbers
-        
-    Returns:
-        Most frequent value
-        
-    Raises:
-        ValueError: If the list is empty
-    """
-    if not numbers:
-        raise ValueError("Cannot calculate mode of empty list")
-    
-    # Count frequencies
-    counter = Counter(numbers)
-    
-    # Find the most common value
-    most_common = counter.most_common(1)
-    return most_common[0][0]
+    """Calculate mode. NEEDS IMPLEMENTATION."""
+    # TODO: Implement this function
+    # Should return the most frequent value
+    raise NotImplementedError("mode not implemented")
