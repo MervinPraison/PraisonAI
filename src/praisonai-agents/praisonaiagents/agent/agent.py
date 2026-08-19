@@ -592,8 +592,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
-        run_on: Optional[str] = None,  # Run the WHOLE agent on a managed runtime, e.g. "anthropic"
-        tools_run_on: Optional[Any] = None,  # Run only this agent's TOOLS elsewhere, e.g. "docker"
+        run_on: Optional[Union['ManagedRuntime', str]] = None,  # Run the WHOLE agent on a managed runtime, e.g. "anthropic"
+        tools_run_on: Optional[Union['ToolPlace', str, Any]] = None,  # Run only this agent's TOOLS elsewhere, e.g. "docker"
         runtime: Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']] = None,  # Model-scoped runtime configuration with capability validation
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
@@ -2667,6 +2667,16 @@ Your Goal: {self.goal}
         )
         return mem_inst
 
+
+    def _backstory_without_sandbox_prompt(self):
+        """This agent's backstory as it was before any sandbox was attached."""
+        shared = getattr(self, "_tools_sandbox", None)
+        if shared is not None:
+            for ref, _tools, original_backstory in getattr(shared, "_patched", []):
+                if ref() is self:
+                    return original_backstory
+        return self.backstory
+
     def clone_for_channel(self) -> "Agent":
         """Return a fully independent copy of this agent for a gateway channel.
         
@@ -2687,7 +2697,10 @@ Your Goal: {self.goal}
             'name': self.name,
             'role': self.role, 
             'goal': self.goal,
-            'backstory': self.backstory,
+            # The pre-attach backstory when a sandbox is live: attach() appends
+            # the capability prompt to backstory, so cloning the current value
+            # and then attaching again gives the clone two copies of it.
+            'backstory': self._backstory_without_sandbox_prompt(),
             'instructions': self.instructions,
             
             # LLM configuration 

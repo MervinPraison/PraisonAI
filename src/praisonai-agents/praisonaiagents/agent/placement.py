@@ -26,12 +26,24 @@ naming the parameter the user actually wanted, not a silent fallback.
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple, Optional
+from typing import Any, Literal, NamedTuple, Optional, Union
 
 # Runtimes that can host an entire agent loop. Resolved from the wrapper's
 # entry-point registry when it is installed so third-party backends work with
 # `run_on=` too; the literal is the floor, not the ceiling.
 _FALLBACK_MANAGED = ("anthropic",)
+
+# Static spellings so editors can autocomplete and type-checkers can reject a
+# typo at the call site rather than at the first model turn. The runtime
+# functions below stay the authority for validation -- these exist for tooling,
+# which cannot call a function to learn a set.
+# Keep in sync with _compute_bridge._PROVIDERS | _sandbox_adapter.SANDBOX_ONLY.
+ManagedRuntime = Literal["anthropic"]
+
+ToolPlace = Literal[
+    "local", "subprocess", "sandlock", "docker", "e2b",
+    "modal", "daytona", "flyio", "tenki", "novita", "ssh",
+]
 
 
 def managed_runtimes() -> tuple:
@@ -124,6 +136,31 @@ def resolve_placement(
             f"hosts an entire agent, not individual tools.\n"
             f"  Did you mean:  {owner}(run_on={tools_run_on!r})"
         )
+
+    # A typo here used to survive construction and only surface on the first
+    # model turn -- after the prompt was built and, for a real run, after the
+    # API spend. run_on= validates at the call site and YAML validates at load
+    # time; this is the same standard for the third spelling.
+    if tools_name is not None and tools_name not in places:
+        raise TypeError(
+            f"{owner}(tools_run_on={tools_run_on!r}) is not a known place.\n"
+            f"  Places that can run tools: {_quote_list(places)}\n"
+            f"  Runtimes that host a whole agent: {_quote_list(managed)} "
+            f"(pass those as run_on=)"
+        )
+
+    # Names that cannot work as a bare string, because the connection details
+    # live in the object. Catch it now rather than at first use.
+    if tools_name is not None:
+        try:
+            from ..managed._sandbox_adapter import NEEDS_INSTANCE
+        except Exception:
+            NEEDS_INSTANCE = {}
+        if tools_name in NEEDS_INSTANCE:
+            raise TypeError(
+                f"{owner}(tools_run_on={tools_run_on!r}) needs more than a name: "
+                f"{NEEDS_INSTANCE[tools_name]}"
+            )
 
     # ── two names for the same thing ─────────────────────────────────────────
     if run_on is not None and backend is not None:

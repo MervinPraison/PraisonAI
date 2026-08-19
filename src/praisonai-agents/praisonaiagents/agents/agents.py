@@ -933,6 +933,12 @@ class AgentTeam(SpawnAnnounceProtocol):
             supports_run_on=False,
         )
         self.tools_run_on = tools_run_on
+        # Kept readable rather than removed. `team.run_on` used to exist, and
+        # code doing getattr(team, "run_on", None) for introspection or
+        # serialisation would otherwise start raising AttributeError. None is
+        # the honest value: a team orchestrates locally, so nothing about it
+        # runs wholly on a managed runtime.
+        self.run_on = None
 
         # Callbacks for workflow execution
         self.on_task_start = _on_task_start

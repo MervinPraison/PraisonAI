@@ -220,6 +220,7 @@ class LocalManagedAgent:
         on_tool_confirmation: Optional[Callable[[Dict[str, Any]], bool]] = None,
         on_custom_tool: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
         compute: Optional[Any] = None,
+        tools_run_on: Optional[Any] = None,
         session_store: Optional[Any] = None,
         db: Optional[Any] = None,
     ):
@@ -272,8 +273,20 @@ class LocalManagedAgent:
         # Custom tool definitions from Anthropic-format config
         self._custom_tool_defs: List[Dict[str, Any]] = []
 
+        # Where this agent's tools run. `tools_run_on=` is the spelling the
+        # rest of the library uses; `compute=` is the older name for the same
+        # thing and still works. LocalAgent (the subclass) warns on compute=;
+        # this base class is reached directly by older code, so it accepts both
+        # quietly rather than adding a second warning to the same call.
+        if compute is not None and tools_run_on is not None:
+            raise TypeError(
+                f"compute={compute!r} and tools_run_on={tools_run_on!r} name the "
+                f"same thing -- where this agent's tools run. Pass tools_run_on= only."
+            )
         # Compute provider (optional — for remote tool execution)
-        self._compute = self._resolve_compute(compute)
+        self._compute = self._resolve_compute(
+            tools_run_on if compute is None else compute
+        )
         self._compute_instance_id: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -1037,42 +1050,22 @@ class LocalManagedAgent:
     # ------------------------------------------------------------------
     @staticmethod
     def _resolve_compute(compute: Optional[Any]) -> Optional[Any]:
-        """Resolve a compute provider from a string name or instance.
+        """Resolve a place from a name or an instance.
 
-        Accepts:
-        - None → no remote compute
-        - A string: ``"local"``, ``"docker"``, ``"e2b"``, ``"modal"``,
-          ``"daytona"``, ``"flyio"``, ``"tenki"``
-        - An already-instantiated compute provider object
+        Delegates to the core SDK's merged resolver so this class accepts
+        exactly what ``Agent(tools_run_on=...)`` accepts. It used to carry its
+        own hardcoded if/elif chain over seven names, which is why
+        ``LocalAgent(tools_run_on="sandlock")`` raised "Unknown compute
+        provider" for a place the rest of the library resolves happily -- the
+        same word with a smaller vocabulary, which is the drift this whole
+        change exists to remove.
         """
         if compute is None:
             return None
-        if isinstance(compute, str):
-            name = compute.lower()
-            if name == "local":
-                from praisonai.integrations.compute.local import LocalCompute
-                return LocalCompute()
-            elif name == "docker":
-                from praisonai.integrations.compute.docker import DockerCompute
-                return DockerCompute()
-            elif name == "e2b":
-                from praisonai.integrations.compute.e2b import E2BCompute
-                return E2BCompute()
-            elif name == "modal":
-                from praisonai.integrations.compute.modal_compute import ModalCompute
-                return ModalCompute()
-            elif name == "daytona":
-                from praisonai.integrations.compute.daytona import DaytonaCompute
-                return DaytonaCompute()
-            elif name == "flyio":
-                from praisonai.integrations.compute.flyio import FlyioCompute
-                return FlyioCompute()
-            elif name == "tenki":
-                from praisonai.integrations.compute.tenki import TenkiCompute
-                return TenkiCompute()
-            else:
-                raise ValueError(f"Unknown compute provider: {name}")
-        return compute  # Already an instance
+
+        from praisonaiagents.managed._compute_bridge import resolve_compute
+
+        return resolve_compute(compute)
 
     @property
     def compute_provider(self) -> Optional[Any]:

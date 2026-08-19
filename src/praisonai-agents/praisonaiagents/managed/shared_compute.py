@@ -214,7 +214,15 @@ class SharedCompute:
             """List files in a directory on the shared remote sandbox."""
             return self._format(self.run_command(f"ls -la {shlex.quote(path)}"))
 
-        return [execute_command, read_file, write_file, list_files]
+        bridged = [execute_command, read_file, write_file, list_files]
+        # Tag them so Agent.clone_for_channel() drops them: each closes over
+        # THIS sandbox, so a clone inheriting them would talk to the original
+        # agent's instance and then attach a second sandbox of its own --
+        # duplicating the capability prompt and splitting its work across two
+        # machines. The clone regenerates its own on first use.
+        for tool in bridged:
+            tool._praison_sandbox_tool = True
+        return bridged
 
     def attach(self, agents: List[Any], *, override_declared: bool = False) -> None:
         """Give each agent the shared tools and tell it they exist.

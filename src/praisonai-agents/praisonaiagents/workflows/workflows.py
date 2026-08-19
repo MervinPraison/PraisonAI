@@ -638,7 +638,7 @@ class AgentFlow:
     # by one step is visible to later steps. Orchestration -- routing, parallel,
     # repeat -- stays local, and so does the thinking. Pass a configured
     # provider instance instead of a name to customise resources.
-    tools_run_on: Optional[Any] = None
+    tools_run_on: Optional[Union['ToolPlace', str, Any]] = None
 
     # Accepted only to fail with a useful message: on an Agent, run_on= moves
     # the whole agent to a managed runtime, so honouring it here as a synonym

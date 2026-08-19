@@ -11,6 +11,9 @@ that cannot do the job asked of it is a typo, not a preference, so it raises
 with the parameter name the user actually wanted.
 """
 
+import asyncio
+import itertools
+
 import pytest
 
 from praisonaiagents import Agent, AgentFlow, AgentTeam, Task
@@ -281,3 +284,223 @@ def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
         close_tools_sandbox(own)
 
     assert own.tools == [] and plain.tools == []
+
+
+# ── regressions found by adversarial validation ──────────────────────────────
+def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
+    """The sandbox was provisioned and the model never saw it.
+
+    AgentTeam snapshots agent.tools and passes it to chat() as an explicit
+    `tools=`, which wins over agent.tools. Placing after that snapshot meant
+    every tool ran on the host while a real sandbox sat unused.
+    """
+    from praisonaiagents.agent.agent import Agent as _A
+
+    def mytool(x: str) -> str:
+        """A local tool."""
+        return x
+
+    seen = []
+    original = _A.chat
+    _A.chat = lambda self, prompt, *a, **k: (
+        seen.append(sorted(getattr(t, "__name__", str(t)) for t in (k.get("tools") or []))),
+        "done",
+    )[1]
+    try:
+        agent = _agent("TA", tools=[mytool], tools_run_on="subprocess")
+        team = AgentTeam(
+            agents=[agent],
+            tasks=[Task(name="t", description="d", expected_output="o", agent=agent)],
+        )
+        team.start()
+    finally:
+        _A.chat = original
+
+    assert seen, "chat() was never reached"
+    assert "mytool" in seen[0], "the agent's own tool must survive"
+    for bridged in ("execute_command", "read_file", "write_file", "list_files"):
+        assert bridged in seen[0], f"{bridged} never reached the model"
+
+
+def test_one_teams_run_does_not_suppress_another_teams_sandbox():
+    """The scope depth was a single class-level integer, so any team started
+    while another team's run was on the stack saw depth==1 and silently skipped
+    its own sandbox."""
+    outer = _team(tools_run_on="subprocess")
+    inner = _team(tools_run_on="subprocess")
+
+    assert inner._needs_tools_scope()
+    with outer._shared_tools_scope():
+        assert not outer._needs_tools_scope(), "outer must not re-enter its own scope"
+        assert inner._needs_tools_scope(), "a different team still needs its own sandbox"
+    assert outer._needs_tools_scope()
+
+
+def test_a_dropped_agent_releases_its_sandbox():
+    """Gateways clone an agent per request. An agent and its SharedCompute
+    referenced each other, so a dropped agent was collected as a cycle and its
+    sandbox was never shut down -- one orphaned container per request."""
+    import gc
+
+    from praisonaiagents.agent.tools_placement import ensure_tools_placed
+
+    agent = _agent("throwaway", tools_run_on="subprocess")
+    ensure_tools_placed(agent)
+    shared = agent._tools_sandbox
+    {t.__name__: t for t in agent.tools}["execute_command"]("true")   # force provisioning
+    assert shared.instance_id is not None
+
+    del agent
+    gc.collect()
+    assert shared.instance_id is None, "the sandbox outlived the agent that owned it"
+
+
+@pytest.mark.parametrize("bad", ["dokcer", "sandbox", "ec2"])
+def test_an_unknown_tools_place_fails_at_construction(bad):
+    """It used to construct fine and only fail on the first model turn -- after
+    the prompt was built and, in a real run, after the API spend."""
+    with pytest.raises(TypeError) as exc:
+        _agent(tools_run_on=bad)
+    assert "known place" in str(exc.value)
+
+
+def test_ssh_says_it_needs_more_than_a_name():
+    with pytest.raises(TypeError) as exc:
+        _agent(tools_run_on="ssh")
+    assert "SSHSandbox" in str(exc.value)
+
+
+def test_writing_a_file_that_mentions_a_blocked_pattern_still_works():
+    """The policy substring-scanned the heredoc BODY, which is file content --
+    so saving a tutorial containing "rm -rf" was rejected as running it."""
+    from praisonaiagents.managed.shared_compute import SharedCompute
+
+    with SharedCompute("subprocess") as shared:
+        tools = {t.__name__: t for t in shared.build_tools()}
+        for body in ("never run rm -rf / at home", "/etc/passwd lists users", "dd if=/dev/zero"):
+            assert tools["write_file"]("/tmp/praison_policy_test.txt", body).startswith("Wrote")
+        # ...and the boundary still holds for actual commands
+        assert "blocked" in tools["execute_command"]("cat /etc/passwd").lower()
+        assert "blocked" in tools["execute_command"]("rm -rf /").lower()
+
+
+def test_the_write_delimiter_cannot_trip_a_blocked_pattern():
+    """uuid4().hex is lowercase and contains "dd" in ~9.6% of cases; "dd" is a
+    blocked command, so one write in ten failed for no visible reason."""
+    from praisonaiagents.managed.shared_compute import SharedCompute
+
+    with SharedCompute("subprocess") as shared:
+        write = {t.__name__: t for t in shared.build_tools()}["write_file"]
+        for i in range(40):
+            assert write("/tmp/praison_delim_test.txt", f"payload {i}").startswith("Wrote")
+
+
+# ── the paths that actually move work ────────────────────────────────────────
+# Mutation testing showed the earlier tests covered argument validation and repr
+# strings well, and every path that actually moves work to a sandbox not at all:
+# deleting the ensure_tools_placed() call sites, or reverting the AgentTeam
+# provisioning fixes, left the whole suite green. These bite instead.
+
+def _counting_provider(monkeypatch):
+    """Install a fake place and return the list of provisioned instance ids."""
+    import praisonaiagents.managed.shared_compute as sc
+    from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
+
+    provisioned, shut = [], []
+
+    class Counting:
+        provider_name = "counting"
+
+        def __init__(self, ident):
+            self.ident = ident
+
+        async def provision(self, config):
+            provisioned.append(self.ident)
+            return InstanceInfo(instance_id=self.ident, status=InstanceStatus.RUNNING,
+                                provider="counting")
+
+        async def execute(self, instance_id, command, timeout=None):
+            return {"stdout": "", "stderr": "", "exit_code": 0}
+
+        async def shutdown(self, instance_id):
+            shut.append(self.ident)
+
+    seq = itertools.count(1)
+    # "subprocess" is a real place, so construction-time validation passes;
+    # only the resolver underneath is swapped for the counting fake.
+    monkeypatch.setattr(sc, "resolve_compute", lambda place: Counting(f"inst-{next(seq)}"))
+    return provisioned, shut
+
+
+@pytest.mark.parametrize("drive", [
+    pytest.param(lambda a: a.chat("hi"), id="chat"),
+    pytest.param(lambda a: asyncio.run(a.achat("hi")), id="achat"),
+    pytest.param(lambda a: next(iter(a._start_stream("hi")), None), id="_start_stream"),
+])
+def test_every_entry_point_places_tools_before_the_first_turn(drive):
+    """Deleting the ensure_tools_placed() call sites left the suite green.
+
+    Whatever happens downstream -- no API key, a stubbed model, an outright
+    error -- the hook runs at the top, so the sandbox must exist afterwards.
+    """
+    from praisonaiagents.agent.tools_placement import close_tools_sandbox
+
+    agent = _agent("driver", tools_run_on="subprocess")
+    try:
+        try:
+            drive(agent)
+        except Exception:
+            pass          # the turn itself may fail; placement must not
+        assert agent._tools_sandbox is not None, "this entry point never placed the tools"
+        assert "execute_command" in [t.__name__ for t in agent.tools]
+    finally:
+        close_tools_sandbox(agent)
+
+
+def test_a_team_run_provisions_exactly_one_sandbox(monkeypatch):
+    """Reverting the AgentTeam.start() provisioning changed nothing in the
+    suite, because the old test only poked the private _needs_tools_scope()."""
+    provisioned, shut = _counting_provider(monkeypatch)
+    team = _team(tools_run_on="subprocess")
+    team.start()
+    assert len(provisioned) == 1, f"expected one sandbox, got {provisioned}"
+    assert shut == provisioned, "the sandbox must be torn down with the run"
+
+
+def test_an_async_team_run_provisions_its_sandbox(monkeypatch):
+    """astart() used to provision nothing at all -- every tool ran on the host
+    and nothing said so."""
+    provisioned, _ = _counting_provider(monkeypatch)
+    team = _team(tools_run_on="subprocess")
+    asyncio.run(team.astart())
+    assert len(provisioned) == 1, f"astart() provisioned {provisioned}"
+
+
+def test_a_batch_shares_one_sandbox_across_every_row(monkeypatch):
+    """start_for_each() provisioned one per row: a 50-row batch paid for 50,
+    and no row could see what an earlier row wrote."""
+    provisioned, _ = _counting_provider(monkeypatch)
+    team = _team(tools_run_on="subprocess")
+    team.start_for_each([{"i": 1}, {"i": 2}, {"i": 3}])
+    assert len(provisioned) == 1, f"expected one sandbox for the batch, got {provisioned}"
+
+
+def test_a_clone_does_not_inherit_the_source_agents_sandbox():
+    """The clone got tools bound to the ORIGINAL's instance and then attached
+    its own, ending up with two copies of the capability prompt and its work
+    split across two machines."""
+    from praisonaiagents.agent.tools_placement import close_tools_sandbox, ensure_tools_placed
+
+    source = _agent("source", tools_run_on="subprocess")
+    ensure_tools_placed(source)
+    clone = source.clone_for_channel()
+    try:
+        assert (clone.backstory or "").count("REMOTE Linux sandbox") == 0
+        assert not [t for t in (clone.tools or []) if t.__name__ == "execute_command"]
+
+        ensure_tools_placed(clone)
+        assert (clone.backstory or "").count("REMOTE Linux sandbox") == 1
+        assert clone._tools_sandbox is not source._tools_sandbox
+    finally:
+        close_tools_sandbox(source)
+        close_tools_sandbox(clone)
