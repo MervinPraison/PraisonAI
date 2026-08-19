@@ -1,5 +1,6 @@
 """Shared utilities for safe shell command handling across sandbox backends."""
 
+import re
 import shlex
 from typing import List, Union
 
@@ -54,3 +55,20 @@ def policy_scan_parts(cmd: list) -> list:
             except ValueError:
                 parts.extend(cmd[i + 1].split())
     return parts
+
+
+def strip_heredoc_bodies(command: str) -> str:
+    """Remove ``<<'DELIM' ... DELIM`` bodies from a command before policy checks.
+
+    A quoted heredoc body is never executed -- it is the literal bytes of a
+    file. Scanning it as if it were a command means you cannot write a file
+    that merely *mentions* a blocked pattern: saving a shell tutorial
+    containing "rm -rf" was rejected as an attempt to run it, and a file whose
+    text contained "/etc/passwd" was rejected as an attempt to read it.
+
+    Only the quoted form (``<<'EOF'``) is stripped. An unquoted heredoc still
+    undergoes shell expansion, so its contents can execute and must stay in
+    scope for the checks.
+    """
+    pattern = re.compile(r"<<'([^']+)'\n.*?\n\1", re.DOTALL)
+    return pattern.sub("<<'HEREDOC'", command)

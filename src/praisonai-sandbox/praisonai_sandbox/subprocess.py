@@ -92,7 +92,12 @@ class SubprocessSandbox:
         if not cmd:
             return "Empty command"
 
-        cmd_str = " ".join(cmd)
+        from ._shell import strip_heredoc_bodies
+
+        # A quoted heredoc body is file content, not a command. Leaving it in
+        # made write_file() reject any file whose text happened to contain a
+        # blocked pattern.
+        cmd_str = strip_heredoc_bodies(" ".join(cmd))
         for blocked in policy.blocked_commands:
             if blocked and blocked in cmd_str:
                 return f"Blocked command pattern: {blocked}"
@@ -112,7 +117,7 @@ class SubprocessSandbox:
         # inside `sh -c "..."`, where a plain argv walk cannot see it.
         from ._shell import policy_scan_parts
 
-        for part in policy_scan_parts(cmd):
+        for part in policy_scan_parts([strip_heredoc_bodies(c) for c in cmd]):
             if not part.startswith(("/", "~", ".")):
                 continue
             expanded = os.path.realpath(os.path.expanduser(part))

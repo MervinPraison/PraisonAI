@@ -193,9 +193,14 @@ class SharedCompute:
             # heredoc early (which would truncate the file and run the remainder
             # as shell commands). Guard against the astronomically-unlikely case
             # where the token still appears in the body.
-            delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex}__"
+            # Uppercase hex on purpose. uuid4().hex is lowercase, and the
+            # security policy substring-matches blocked_commands against the
+            # whole command -- "dd" is one of them, and appears in 9.6% of
+            # random lowercase hex strings. One write in ten failed with
+            # "Blocked command pattern: dd" for no reason the caller could see.
+            delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex.upper()}__"
             while delimiter in content:
-                delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex}__"
+                delimiter = f"__PRAISON_EOF_{uuid.uuid4().hex.upper()}__"
             heredoc = (
                 f"mkdir -p $(dirname {quoted}) && "
                 f"cat > {quoted} <<'{delimiter}'\n{content}\n{delimiter}"
