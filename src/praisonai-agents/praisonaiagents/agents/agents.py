@@ -3145,9 +3145,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         console.print(f"[dim]Progress: [{'█' * 30}] 100%[/dim]")
         console.print(f"[green]Completed {completed_count}/{len(self.tasks)} tasks![/green]\n")
         
-        # Restore original tasks reference for result retrieval
-        self._plan_tasks = self.tasks.copy()
-        # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
+        # Keep plan-step tasks/results under _plan_tasks for introspection,
+        # then restore the user's original task set as the canonical self.tasks.
+        self._plan_tasks = self.tasks
+        self.tasks = original_tasks
+        with self._task_id_lock:
+            self.task_id_counter = (
+                max(original_tasks.keys()) + 1 if original_tasks else 0
+            )
 
     # Resource Lifecycle Management
     def close(self) -> None:
