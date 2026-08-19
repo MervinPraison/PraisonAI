@@ -623,3 +623,47 @@ def test_a_backend_holding_a_local_compute_object_is_not_overstated():
     assert places["tools_run_on"] != say_place("subprocess"), (
         "the unrestricted local shell must not borrow the subprocess backend's words"
     )
+
+# ── extending the registry from outside ──────────────────────────────────────
+def test_a_place_can_be_contributed_by_another_package(monkeypatch):
+    """Adding a compute provider used to mean editing core in several files.
+
+    The sandbox and managed-backend registries already discovered plugins by
+    entry point; the compute registry was the one hardcoded dict. A provider
+    can now ship in its own distribution and be selected by name.
+    """
+    import praisonaiagents.managed._compute_bridge as bridge
+
+    class Contributed:
+        provider_name = "contributed"
+
+    class FakeEntryPoint:
+        name = "contributed"
+
+        def load(self):
+            return Contributed
+
+    monkeypatch.setattr(bridge, "_entry_point_providers",
+                        lambda: {"contributed": FakeEntryPoint()})
+
+    assert "contributed" in bridge.available_providers()
+    assert isinstance(bridge.resolve_compute("contributed"), Contributed)
+
+
+def test_a_broken_plugin_cannot_break_places_that_do_not_name_it(monkeypatch):
+    """Providers load on demand, so an installed-but-broken plugin only fails
+    for the caller that actually asks for it."""
+    import praisonaiagents.managed._compute_bridge as bridge
+
+    class Exploding:
+        name = "exploding"
+
+        def load(self):
+            raise ImportError("this plugin is broken")
+
+    monkeypatch.setattr(bridge, "_entry_point_providers",
+                        lambda: {"exploding": Exploding()})
+
+    assert bridge.resolve_compute("subprocess") is not None   # unaffected
+    with pytest.raises(ImportError):
+        bridge.resolve_compute("exploding")
