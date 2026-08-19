@@ -158,10 +158,19 @@ def test_bot_gateway_start_command_propagates_fatal_exit_code(monkeypatch):
     assert excinfo.value.exit_code == GATEWAY_FATAL_CONFIG_EXIT_CODE
 
 
-def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch):
+def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch, tmp_path):
     import typer
 
     from praisonai_bot.cli.commands import gateway as bot_gateway_cmd
+
+    # Pass an explicit channel-less config so this test asserts ONLY exit-code
+    # propagation. With config=None it would auto-discover a ``./gateway.yaml``
+    # and run the verify-turn pre-flight (a real agent turn) before the patched
+    # start(); a channels-less config skips every pre-flight and reaches it
+    # deterministically, in any cwd, without a live LLM call (#4042/#4070).
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("agents:\n  personal:\n    instructions: hi\n    model: gpt-4o-mini\n")
+    monkeypatch.chdir(tmp_path)
 
     def fake_start(self, **kwargs):
         return GATEWAY_OK_EXIT_CODE
@@ -173,6 +182,6 @@ def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch):
     with pytest.raises(typer.Exit) as excinfo:
         bot_gateway_cmd.gateway_start(
             host="127.0.0.1", port=8765, agents=None,
-            config=None, preflight=False, openai_api=False, mcp=False,
+            config=str(cfg), preflight=False, openai_api=False, mcp=False,
         )
     assert excinfo.value.exit_code == GATEWAY_OK_EXIT_CODE
