@@ -205,3 +205,21 @@ def test_a_contributed_place_would_be_polled(monkeypatch):
     monkeypatch.setattr(bridge, "available_providers",
                         lambda: ["docker", "contributed-cloud"])
     assert "contributed-cloud" in _ps_providers()
+
+
+def test_a_contributed_place_can_name_itself(monkeypatch):
+    """The phrase table is a literal, so it cannot know about a package
+    installed later. Rather than always printing a bare name, a contributed
+    provider may declare `display_name` and have it used."""
+    import praisonaiagents.managed._compute_bridge as bridge
+    from praisonaiagents.agent.execution_location import say_place
+
+    monkeypatch.setitem(bridge._DISPLAY_NAMES, "contributed", "a Contributed cloud sandbox")
+    assert say_place("contributed") == "a Contributed cloud sandbox"
+
+
+def test_an_unknown_place_still_falls_back_to_its_name():
+    """Declaring a phrase is optional; the fallback must stay graceful."""
+    from praisonaiagents.agent.execution_location import say_place
+
+    assert say_place("some-new-cloud") == "some-new-cloud"

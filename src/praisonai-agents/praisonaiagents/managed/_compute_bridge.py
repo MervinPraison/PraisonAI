@@ -118,6 +118,10 @@ def resolve_compute(compute: Optional[Any]) -> Optional[Any]:
 
     external = _entry_point_providers()
     if name in external and name not in _PROVIDERS:
+        # Let a contributed place describe itself. Without this the repr falls
+        # back to the bare name, because the phrase table is a literal that
+        # cannot know about packages installed later.
+        _remember_display_name(name, external[name])
         # A place contributed by another package. Loaded on demand, so an
         # installed-but-broken plugin cannot break anything that never names it.
         return external[name].load()()
@@ -136,3 +140,23 @@ def resolve_compute(compute: Optional[Any]) -> Optional[Any]:
         raise ImportError(f"compute={name!r} requires {module_name}. {hint}") from exc
 
     return getattr(module, attr)()
+
+
+#: Display phrases contributed by external providers, filled in on resolve.
+_DISPLAY_NAMES: dict = {}
+
+
+def _remember_display_name(name: str, entry_point) -> None:
+    """Record a contributed provider's own phrase, if it declares one."""
+    try:
+        cls = entry_point.load()
+        phrase = getattr(cls, "display_name", None)
+        if isinstance(phrase, str) and phrase:
+            _DISPLAY_NAMES[name] = phrase
+    except Exception:  # pragma: no cover - naming must never break resolution
+        pass
+
+
+def contributed_display_name(name: str):
+    """The phrase a contributed place declared for itself, if any."""
+    return _DISPLAY_NAMES.get((name or "").lower())
