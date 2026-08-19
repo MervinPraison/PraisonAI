@@ -60,11 +60,17 @@ def managed_runtimes() -> tuple:
 
 
 def tool_places() -> list:
-    """Names that ``tools_run_on=`` accepts -- places that can run a command."""
-    try:
-        from ..managed._compute_bridge import available_providers
+    """Names that ``tools_run_on=`` accepts -- places that can run a command.
 
-        return available_providers()
+    Includes the resolver's aliases. Validation runs before resolution, so
+    leaving them out rejected spellings the resolver handles happily:
+    ``tools_run_on="native"`` raised "not a known place" while
+    ``resolve_compute("native")`` returned a working sandlock adapter.
+    """
+    try:
+        from ..managed._compute_bridge import _ALIASES, available_providers
+
+        return sorted(set(available_providers()) | set(_ALIASES))
     except Exception:
         return ["local", "docker"]
 

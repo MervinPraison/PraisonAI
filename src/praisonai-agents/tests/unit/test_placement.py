@@ -17,6 +17,7 @@ import itertools
 import pytest
 
 from praisonaiagents import Agent, AgentFlow, AgentTeam, Task
+from praisonaiagents.agent.execution_location import describe
 from praisonaiagents.agent.placement import (
     managed_runtimes,
     resolve_placement,
@@ -29,9 +30,34 @@ def _agent(name="A", **kw):
 
 
 # ── the two registries stay disjoint in meaning ──────────────────────────────
-def test_a_managed_runtime_is_not_a_tool_place():
-    """If these sets ever overlap, every error message below becomes a lie."""
-    assert set(managed_runtimes()).isdisjoint(tool_places())
+def test_a_name_in_both_sets_is_valid_for_both_parameters():
+    """The two sets may overlap, and where they do, both spellings must work.
+
+    `docker` can host a whole agent (a container running the loop) AND run
+    tools for a local loop. That is not one word with two meanings -- it is one
+    place with two scopes, and the scope is carried by the parameter name:
+
+        run_on="docker"        the whole agent runs in a container
+        tools_run_on="docker"  only the tools do; thinking stays here
+
+    What must stay true is that a name valid for only ONE of them is refused by
+    the other, with a message naming the right parameter.
+    """
+    for name in set(managed_runtimes()) & set(tool_places()):
+        assert _agent(run_on=name) is not None, f"run_on={name!r} must work"
+        assert _agent(tools_run_on=name) is not None, f"tools_run_on={name!r} must work"
+
+
+def test_the_two_scopes_of_one_place_are_reported_differently():
+    """Overlap is only safe if the object still says which scope you chose."""
+    whole = describe(_agent(run_on="docker"))
+    tools_only = describe(_agent(tools_run_on="docker"))
+
+    assert whole["thinks_on"] == whole["tools_run_on"], "run_on moves the thinking too"
+    assert tools_only["thinks_on"] != tools_only["tools_run_on"], (
+        "tools_run_on must leave the thinking here"
+    )
+    assert whole != tools_only
 
 
 def test_the_sandbox_only_backends_are_reachable():
@@ -41,11 +67,13 @@ def test_the_sandbox_only_backends_are_reachable():
 
 
 # ── asking a place to do a job it cannot do ──────────────────────────────────
-def test_run_on_a_tool_place_names_the_right_parameter():
+def test_run_on_a_tools_only_place_names_the_right_parameter():
+    """`sandlock` runs commands but cannot host a loop, so run_on= must refuse
+    it and point at the parameter that does work."""
     with pytest.raises(TypeError) as exc:
-        _agent(run_on="docker")
+        _agent(run_on="sandlock")
     message = str(exc.value)
-    assert "tools_run_on='docker'" in message, "must name the parameter they wanted"
+    assert "tools_run_on='sandlock'" in message, "must name the parameter they wanted"
     assert "cannot host an agent loop" in message
 
 
@@ -542,3 +570,34 @@ def test_a_clone_does_not_inherit_the_source_agents_sandbox():
     finally:
         close_tools_sandbox(source)
         close_tools_sandbox(clone)
+
+
+# ── one word, two backends ───────────────────────────────────────────────────
+def test_local_is_described_by_the_backend_it_actually_gets():
+    """"local" resolves to two different things depending on the parameter:
+    run_in="local" is collapsed to the subprocess backend (scrubbed environment,
+    blocked commands), while tools_run_on="local" is the wrapper's LocalCompute
+    -- a plain shell with the full environment and no policy at all. Describing
+    the weaker one in the stronger one's words overstates it."""
+    from praisonaiagents.agent.execution_location import say_place
+
+    assert say_place("local") != say_place("local", via="compute")
+    assert "no policy" in say_place("local", via="compute")
+    assert say_place("local") == say_place("subprocess"), (
+        "run_in='local' really is the subprocess backend"
+    )
+
+
+def test_a_local_place_still_warns_that_it_is_not_a_boundary():
+    text = _agent(tools_run_on="local").where_does_it_run()
+    assert "not a security boundary" in text
+
+
+@pytest.mark.parametrize("alias,resolves_to", [("native", "sandlock")])
+def test_resolver_aliases_are_accepted_at_construction(alias, resolves_to):
+    """Validation ran before alias resolution, so a spelling the resolver
+    handles happily was rejected as "not a known place"."""
+    from praisonaiagents.agent.execution_location import say_place
+
+    agent = _agent(tools_run_on=alias)
+    assert say_place(resolves_to) in repr(agent)

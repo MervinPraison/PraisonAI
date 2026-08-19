@@ -272,8 +272,9 @@ agent = Agent(name="builder", instructions="You build things.",
               tools_run_on="docker")   # docker | e2b | modal | daytona | flyio
                                        # tenki | sandlock | ssh | novita | subprocess
 
-# B. The WHOLE agent moves — model calls, loop and tools (needs ANTHROPIC_API_KEY)
-agent = Agent(name="teacher", instructions="You teach.", run_on="anthropic")
+# B. The WHOLE agent moves — model calls, loop and tools
+agent = Agent(name="teacher", instructions="You teach.", run_on="anthropic")  # hosted
+agent = Agent(name="builder", instructions="You build.", run_on="docker")     # self-hosted
 agent.start("Write a Python script that prints the first 10 primes, then run it")
 ```
 
@@ -293,11 +294,11 @@ code tools move. They read and write this machine's files.
 Naming a place that cannot do the job is a typo, not a preference, so it says so:
 
 ```python
->>> Agent(name="x", instructions="i", run_on="docker")
-TypeError: Agent(run_on='docker') is not valid: run_on= places the whole agent
--- model calls, loop and tools -- on a managed runtime, and 'docker' runs
+>>> Agent(name="x", instructions="i", run_on="e2b")
+TypeError: Agent(run_on='e2b') is not valid: run_on= places the whole agent
+-- model calls, loop and tools -- on a managed runtime, and 'e2b' runs
 commands but cannot host an agent loop.
-  To run only the tools there:  Agent(tools_run_on='docker')
+  To run only the tools there:  Agent(tools_run_on='e2b')
 ```
 
 To run one block of code somewhere else, name the place on that call:
