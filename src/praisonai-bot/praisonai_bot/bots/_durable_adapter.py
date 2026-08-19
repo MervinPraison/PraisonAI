@@ -121,9 +121,13 @@ class DurableAdapterMixin:
     
     async def drain_outbox(self) -> tuple[int, int]:
         """Drain pending messages from the outbox.
-        
-        Should be called on adapter startup.
-        
+
+        Called on adapter startup and, per Issue #4043, whenever the channel
+        supervisor observes the channel recover from a transient outage — so
+        replies the outbox held through the outage are re-attempted promptly
+        instead of waiting for the next inbound ``chat()`` turn or a restart.
+        Idempotent and bounded by the outbox's own attempt-and-age policy.
+
         Returns:
             Tuple of (succeeded, failed) counts
         """
