@@ -344,6 +344,23 @@ class ScheduledAgentExecutor:
         Split out from :meth:`_dispatch` so the run-scoped model pin can be
         restored in a single ``finally`` around every exit path below.
         """
+        # Cross-run memory: load the job's persisted scratchpad (cursor /
+        # watermark / last-seen hash) so both the pre-run gate and the model
+        # turn can do *incremental* work — "only what's new since last run".
+        # ``prior`` is ``{}`` when the store has no per-job state support or the
+        # job has none, preserving today's stateless behaviour exactly.
+        prior_state = self._get_job_state(job)
+        # The unmodified baseline used when persisting after the run so a
+        # merge that only re-adds an already-present gate watermark is still
+        # detected as a change and written (``prior_state`` below gets the gate
+        # watermark folded in for the notepad, so it can't serve as the base).
+        original_state = dict(prior_state)
+        # Accumulates state to persist after the run — a monitor gate's
+        # watermark and/or state the agent emits. Kept separate from
+        # ``prior_state`` so we only ever *write* when something actually
+        # changed (an empty accumulator → no write, today's behaviour).
+        pending_updates: Dict[str, Any] = {}
+
         # Pre-run condition gate (cost/efficiency): a cheap, deterministic
         # check that decides whether the (expensive) model turn is warranted.
         # When it reports "nothing to do" the tick is recorded as ``skipped`` —
@@ -351,12 +368,20 @@ class ScheduledAgentExecutor:
         # any context it produced is appended to the message before the turn.
         gate = self._resolve_condition(job)
         if gate is not None:
+            # Only pass ``state=`` to a gate that opts into it — a legacy
+            # stateless gate (``should_run(self, job)``) would raise TypeError.
+            pass_state = self._gate_accepts_state(gate)
             try:
                 # Run off the event loop: the default gate shells out via
                 # subprocess.run(), which would otherwise block every other
                 # tick / delivery / health-check coroutine for the gate's
                 # timeout. Mirrors the agent.chat() offload below.
-                decision = await asyncio.to_thread(gate.should_run, job)
+                if pass_state:
+                    decision = await asyncio.to_thread(
+                        gate.should_run, job, state=prior_state,
+                    )
+                else:
+                    decision = await asyncio.to_thread(gate.should_run, job)
             except Exception as e:  # pragma: no cover - defensive
                 logger.warning(
                     "Pre-run gate raised for job '%s': %s; running anyway",
@@ -366,6 +391,12 @@ class ScheduledAgentExecutor:
             if decision is not None and not getattr(decision, "run", True):
                 reason = getattr(decision, "reason", None) or "pre-run gate: nothing to do"
                 logger.info("Job '%s' skipped by pre-run gate: %s", job.id, reason)
+                # A monitor gate may carry a watermark forward even on a
+                # suppressed tick (e.g. ``no_change`` recording the last-seen
+                # hash). Persist it so the *next* tick sees the advance.
+                self._persist_job_state(
+                    job, prior_state, getattr(decision, "state_updates", None),
+                )
                 duration = time.time() - started
                 self._runner.mark_run(
                     job, status="skipped", error=reason, duration=duration,
@@ -377,6 +408,18 @@ class ScheduledAgentExecutor:
                 context = getattr(decision, "context", None)
                 if context:
                     message = f"{message}\n\n{context}"
+                # Fold any gate watermark into the state visible to this run
+                # (so the notepad reflects the latest cursor) AND queue it for
+                # persistence after the run — a go-path gate watermark must land
+                # too, not only a skip-path one.
+                updates = getattr(decision, "state_updates", None)
+                if isinstance(updates, dict) and updates:
+                    prior_state = {**prior_state, **updates}
+                    pending_updates.update(updates)
+
+        # Give the model turn memory of the last run by injecting a compact,
+        # clearly-delimited notepad. No-op when there is no prior state.
+        message = self._with_notepad(message, prior_state)
 
         # Run-scoped policy: scan the *untrusted* portion of the run before it
         # reaches the model — the user message plus any runtime-loaded skill or
@@ -474,6 +517,16 @@ class ScheduledAgentExecutor:
             duration=duration,
         )
         await asyncio.to_thread(self._audit_output, job, job_result)
+
+        # Persist cross-run memory: any gate watermark queued above plus any
+        # state the agent emitted (a ``state`` / ``state_updates`` mapping on a
+        # rich chat result) are merged onto the original baseline and written,
+        # keyed by job id and size-bounded by the store. No-op for stores
+        # without ``set_state`` or when nothing changed — today's behaviour.
+        agent_updates = self._agent_state_updates(result)
+        if isinstance(agent_updates, dict):
+            pending_updates.update(agent_updates)
+        self._persist_job_state(job, original_state, pending_updates)
 
         # Honour the core intentional-silence contract: a run whose whole
         # output is an exact silence marker (NO_REPLY / [SILENT] / SILENT) means
@@ -748,6 +801,125 @@ class ScheduledAgentExecutor:
             return None
         from .condition_gate import ShellConditionGate
         return ShellConditionGate()
+
+    @staticmethod
+    def _gate_accepts_state(gate: Any) -> bool:
+        """Whether ``gate.should_run`` opts into a keyword-only ``state=``.
+
+        A legacy stateless gate (``should_run(self, job)``) must never be
+        passed ``state=`` — it would raise ``TypeError`` and break every tick.
+        We detect the capability by signature (an explicit ``state`` parameter
+        or ``**kwargs``) so stateless gates keep working unchanged.
+        """
+        should_run = getattr(gate, "should_run", None)
+        if should_run is None:
+            return False
+        try:
+            params = inspect.signature(should_run).parameters
+        except (TypeError, ValueError):  # pragma: no cover - C-callable
+            return False
+        if "state" in params:
+            return True
+        return any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
+    # ── cross-run state helpers (JobStateStoreProtocol) ───────────────
+
+    def _state_store(self) -> Optional[Any]:
+        """Return the backing store if it supports per-job state, else ``None``.
+
+        Reuses the runner's existing schedule store when it implements the core
+        :class:`JobStateStoreProtocol` (``get_state`` / ``set_state``). Detected
+        with ``hasattr`` so a store without state support (or an older runner)
+        transparently yields ``None`` — the stateless behaviour of today.
+        """
+        store = getattr(self._runner, "_store", None)
+        if store is None:
+            return None
+        if hasattr(store, "get_state") and hasattr(store, "set_state"):
+            return store
+        return None
+
+    def _get_job_state(self, job: "ScheduleJob") -> Dict[str, Any]:
+        """Load the job's persisted scratchpad (``{}`` when unsupported/empty)."""
+        store = self._state_store()
+        if store is None:
+            return {}
+        try:
+            state = store.get_state(job.id)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Could not read state for job '%s': %s", job.id, e)
+            return {}
+        return dict(state) if isinstance(state, dict) else {}
+
+    def _persist_job_state(
+        self,
+        job: "ScheduleJob",
+        prior: Dict[str, Any],
+        updates: Optional[Dict[str, Any]],
+    ) -> None:
+        """Merge ``updates`` onto ``prior`` and persist, if anything changed.
+
+        ``updates is None`` means "write nothing" (an error/no-op probe leaves
+        prior state untouched); an empty dict likewise changes nothing. No-op
+        when the store has no state support.
+
+        One-shot jobs (``delete_after_run``) are already removed from the store
+        by ``claim_due`` before the run reaches here, and their state is popped
+        with them. Persisting now would recreate an orphan ``job_state`` entry
+        that nothing ever cleans up (the schedule is gone, so ``remove`` is a
+        no-op) — and which would be injected if the same explicit id is reused.
+        A single-run job has no "next run" to read a watermark, so skip it.
+        """
+        if getattr(job, "delete_after_run", False):
+            return
+        if not isinstance(updates, dict) or not updates:
+            return
+        store = self._state_store()
+        if store is None:
+            return
+        merged = {**prior, **updates}
+        if merged == prior:
+            return
+        try:
+            store.set_state(job.id, merged)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Could not persist state for job '%s': %s", job.id, e)
+
+    @staticmethod
+    def _agent_state_updates(result: Any) -> Optional[Dict[str, Any]]:
+        """Extract a state mapping the agent emitted on a rich chat result.
+
+        Most agents return a plain string (no state) — this returns ``None``
+        then, so nothing is written. A richer result object MAY expose a
+        ``state_updates`` or ``state`` mapping to carry a watermark forward.
+        """
+        for attr in ("state_updates", "state"):
+            value = getattr(result, attr, None)
+            if isinstance(value, dict) and value:
+                return value
+        return None
+
+    @staticmethod
+    def _with_notepad(message: str, state: Dict[str, Any]) -> str:
+        """Prepend a compact, delimited "state since last run" notepad.
+
+        Returns ``message`` unchanged when there is no prior state so a
+        stateless job's prompt is byte-for-byte what it was before. The block
+        is rendered as sorted ``key=value`` lines so the agent can pick up a
+        cursor / watermark and do incremental work.
+        """
+        if not state:
+            return message
+        try:
+            lines = "\n".join(
+                f"{k}={state[k]}" for k in sorted(state, key=str)
+            )
+        except Exception:  # pragma: no cover - defensive
+            lines = str(state)
+        notepad = f"Notepad (state since last run):\n{lines}"
+        return f"{notepad}\n\n{message}"
 
     # ── model pin / drift helpers ────────────────────────────────────
 

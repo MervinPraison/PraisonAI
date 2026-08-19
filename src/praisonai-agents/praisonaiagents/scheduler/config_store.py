@@ -7,6 +7,7 @@ other config.yaml content.
 """
 
 import contextlib
+import copy
 from praisonaiagents._logging import get_logger
 import os
 import threading
@@ -21,6 +22,11 @@ logger = get_logger(__name__)
 _HISTORY_FILE = "run_history.yaml"
 _LOCK_FILE = "config.schedules.lock"
 _MAX_HISTORY = 200
+# Hard cap on a single job's persisted per-run scratchpad. A watermark /
+# cursor / last-seen hash is tiny; this only exists so a runaway ``set_state``
+# cannot grow config.yaml unbounded. Oversized writes are rejected (prior
+# state kept) rather than silently truncated.
+_MAX_STATE_BYTES = 16 * 1024
 
 class ConfigYamlScheduleStore:
     """CRUD store backed by ``config.yaml``.
@@ -41,6 +47,9 @@ class ConfigYamlScheduleStore:
         self._max_history = max_history
         self._lock = threading.RLock()
         self._jobs: Dict[str, ScheduleJob] = {}
+        # Per-job durable scratchpad (cursors / watermarks / last-seen hash),
+        # persisted under the ``job_state`` key alongside ``schedules``.
+        self._job_state: Dict[str, Dict] = {}
         self._history: List[RunRecord] = []
         # In-memory record of leases we currently hold, so ``complete`` can
         # release them. Cross-process leases live in the persisted job
@@ -126,6 +135,8 @@ class ConfigYamlScheduleStore:
             self._reload_locked()
             if job_id in self._jobs:
                 del self._jobs[job_id]
+                # Drop any per-job scratchpad so a deleted job leaves no state.
+                self._job_state.pop(job_id, None)
                 self._save()
                 return True
             return False
@@ -145,6 +156,7 @@ class ConfigYamlScheduleStore:
                     if principal is not None and job.principal != principal:
                         continue
                     del self._jobs[jid]
+                    self._job_state.pop(jid, None)
                     self._save()
                     return True
             return False
@@ -199,6 +211,7 @@ class ConfigYamlScheduleStore:
                 if job.delete_after_run:
                     # One-shot: remove now so no competitor re-claims it.
                     del self._jobs[job.id]
+                    self._job_state.pop(job.id, None)
             if changed:
                 if not self._save():
                     # The lease/last_run_at advance was NOT persisted (full
@@ -283,6 +296,7 @@ class ConfigYamlScheduleStore:
         a job already claimed/leased by another process is observed.
         """
         self._jobs = {}
+        self._job_state = {}
         self._load()
 
     # ── execution history ─────────────────────────────────────────────
@@ -327,6 +341,59 @@ class ConfigYamlScheduleStore:
             records = [r for r in records if r.job_id == job_id]
         return records[:limit]
 
+    # ── per-job state (JobStateStoreProtocol) ─────────────────────────
+
+    def get_state(self, job_id: str) -> Dict:
+        """Return the persisted scratchpad for ``job_id`` (``{}`` if none).
+
+        A deep copy is returned so a caller mutating the result — including a
+        nested list or dict — cannot silently alter the in-memory store without
+        going through :meth:`set_state` (which enforces the size cap).
+        """
+        with self._lock:
+            state = self._job_state.get(job_id)
+            return copy.deepcopy(state) if isinstance(state, dict) else {}
+
+    def set_state(self, job_id: str, state: Dict) -> None:
+        """Persist ``state`` for ``job_id`` under the ``job_state`` key.
+
+        Size-capped: a serialised state larger than ``_MAX_STATE_BYTES`` is
+        rejected (prior state kept) so a runaway write cannot grow config.yaml
+        unbounded. An empty/falsy ``state`` clears the entry.
+        """
+        if not state:
+            self.clear_state(job_id)
+            return
+        if not isinstance(state, dict):
+            logger.warning(
+                "Ignoring non-dict state for job '%s' (%s)", job_id, type(state).__name__,
+            )
+            return
+        try:
+            import yaml
+            size = len(yaml.safe_dump(state).encode("utf-8"))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Could not size state for job '%s': %s", job_id, e)
+            return
+        if size > _MAX_STATE_BYTES:
+            logger.warning(
+                "Rejecting oversized state for job '%s' (%d > %d bytes); keeping prior",
+                job_id, size, _MAX_STATE_BYTES,
+            )
+            return
+        with self._lock, self._file_lock():
+            self._reload_locked()
+            self._job_state[job_id] = copy.deepcopy(state)
+            self._save()
+
+    def clear_state(self, job_id: str) -> None:
+        """Drop any persisted scratchpad for ``job_id`` (no-op if absent)."""
+        with self._lock, self._file_lock():
+            self._reload_locked()
+            if job_id in self._job_state:
+                del self._job_state[job_id]
+                self._save()
+
     # ── persistence ──────────────────────────────────────────────────
 
     def _load(self) -> None:
@@ -353,6 +420,11 @@ class ConfigYamlScheduleStore:
                         job_data.setdefault("id", job_id)
                         job = ScheduleJob.from_dict(job_data)
                         self._jobs[job.id] = job
+            job_state = data.get("job_state", {})
+            if isinstance(job_state, dict):
+                for job_id, state in job_state.items():
+                    if isinstance(state, dict):
+                        self._job_state[str(job_id)] = state
         except ValueError:
             raise
         except Exception as e:
@@ -380,6 +452,15 @@ class ConfigYamlScheduleStore:
             for job in self._jobs.values():
                 schedules[job.id] = job.to_dict()
             data["schedules"] = schedules
+
+            # Persist per-job scratchpad alongside; drop the key entirely when
+            # empty so config.yaml stays clean for the stateless common case.
+            if self._job_state:
+                data["job_state"] = {
+                    jid: state for jid, state in self._job_state.items()
+                }
+            else:
+                data.pop("job_state", None)
 
             # Atomic write
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
