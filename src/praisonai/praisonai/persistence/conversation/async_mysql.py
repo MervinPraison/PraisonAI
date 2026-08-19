@@ -8,6 +8,7 @@ Install: pip install aiomysql
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import List, Optional
 
@@ -71,6 +72,8 @@ class AsyncMySQLConversationStore(ConversationStore):
         self.pool_size = pool_size
         self._pool = None
         self._initialized = False
+        self._init_lock = None
+        self._lock_creation_lock = threading.Lock()
         
         if url:
             self._parse_url(url)
@@ -86,31 +89,43 @@ class AsyncMySQLConversationStore(ConversationStore):
         self.password = parsed.password or ""
     
     async def init(self):
-        """Initialize connection pool and create tables."""
+        """Initialize connection pool and create tables (idempotent, race-safe)."""
         if self._initialized:
             return
         
-        try:
-            import aiomysql
-        except ImportError:
-            raise ImportError(
-                "aiomysql is required for async MySQL support. "
-                "Install with: pip install aiomysql"
+        # Bind the asyncio.Lock to the running loop the first caller sees, using
+        # double-checked locking so concurrent cold-start callers never build
+        # (and leak) two pools.
+        if self._init_lock is None:
+            with self._lock_creation_lock:
+                if self._init_lock is None:
+                    self._init_lock = asyncio.Lock()
+        
+        async with self._init_lock:
+            if self._initialized:
+                return
+            
+            try:
+                import aiomysql
+            except ImportError as err:
+                raise ImportError(
+                    "aiomysql is required for async MySQL support. "
+                    "Install with: pip install aiomysql"
+                ) from err
+            
+            self._pool = await aiomysql.create_pool(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                db=self.database,
+                minsize=1,
+                maxsize=self.pool_size,
+                autocommit=True
             )
-        
-        self._pool = await aiomysql.create_pool(
-            host=self.host,
-            port=self.port,
-            user=self.user,
-            password=self.password,
-            db=self.database,
-            minsize=1,
-            maxsize=self.pool_size,
-            autocommit=True
-        )
-        
-        await self._create_tables()
-        self._initialized = True
+            
+            await self._create_tables()
+            self._initialized = True
     
     async def _create_tables(self):
         """Create required tables if they don't exist."""
