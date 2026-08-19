@@ -1561,6 +1561,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "or pass a validator via guardrails=... / GuardrailConfig(validator=...)."
                 )
 
+        # Apply [defaults].guardrails from config when not explicitly provided,
+        # mirroring the memory/web/caching/etc. resolution above so a config-wide
+        # guardrail safety net is actually honoured instead of silently ignored.
+        if guardrails is None:
+            guardrails = apply_config_defaults("guardrails", None, GuardrailConfig)
+
         # Fast path: None/False -> no guardrails (skip resolve() call)
         if guardrails is None or guardrails is False:
             _guardrails_config = None

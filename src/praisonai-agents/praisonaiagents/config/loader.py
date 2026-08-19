@@ -49,7 +49,6 @@ VALID_DEFAULTS_KEYS = {
     "model": (str,),
     "small_model": (str,),
     "base_url": (str,),
-    "api_key": (str,),
     # Feature flags
     "allow_delegation": (bool,),
     "allow_code_execution": (bool,),
@@ -66,9 +65,7 @@ VALID_DEFAULTS_KEYS = {
     "caching": (dict, bool),
     "autonomy": (dict, bool),
     "skills": (dict, list),
-    "context": (dict, bool),
-    "hooks": (dict, list),
-    "templates": (dict,),
+    "retry": (dict, bool),
 }
 
 VALID_ROOT_KEYS = {"plugins", "defaults"}
@@ -158,12 +155,14 @@ class DefaultsConfig:
     knowledge: Optional[Dict[str, Any]] = None
     planning: Optional[Dict[str, Any]] = None
     reflection: Optional[Dict[str, Any]] = None
+    guardrails: Optional[Dict[str, Any]] = None
     web: Optional[Dict[str, Any]] = None
     output: Optional[Dict[str, Any]] = None
     execution: Optional[Dict[str, Any]] = None
     caching: Optional[Dict[str, Any]] = None
     autonomy: Optional[Dict[str, Any]] = None
     skills: Optional[Dict[str, Any]] = None
+    retry: Optional[Dict[str, Any]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -177,12 +176,14 @@ class DefaultsConfig:
             "knowledge": self.knowledge,
             "planning": self.planning,
             "reflection": self.reflection,
+            "guardrails": self.guardrails,
             "web": self.web,
             "output": self.output,
             "execution": self.execution,
             "caching": self.caching,
             "autonomy": self.autonomy,
             "skills": self.skills,
+            "retry": self.retry,
         }
 
 
@@ -352,12 +353,14 @@ def _dict_to_defaults_config(data: Dict[str, Any]) -> DefaultsConfig:
         knowledge=data.get("knowledge"),
         planning=data.get("planning"),
         reflection=data.get("reflection"),
+        guardrails=data.get("guardrails"),
         web=data.get("web"),
         output=data.get("output"),
         execution=data.get("execution"),
         caching=data.get("caching"),
         autonomy=data.get("autonomy"),
         skills=data.get("skills"),
+        retry=data.get("retry"),
     )
 
 
@@ -706,8 +709,8 @@ def _defaults_has_any_values() -> bool:
             getattr(defaults, key, None) is not None
             for key in (
                 "model", "small_model", "base_url", "memory", "knowledge",
-                "planning", "reflection", "web", "output", "execution",
-                "caching", "autonomy",
+                "planning", "reflection", "guardrails", "web", "output",
+                "execution", "caching", "autonomy", "skills", "retry",
             )
         )
     return _defaults_has_values

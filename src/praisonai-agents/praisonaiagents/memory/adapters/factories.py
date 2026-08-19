@@ -371,6 +371,39 @@ class ChromaMemoryAdapter:
                 sanitized[k] = str(v)
         return sanitized
     
+    def _reset_collection(self) -> None:
+        """Delete and recreate this adapter's collection, wiping stored memory.
+
+        Short-term and long-term share one collection in this adapter, so both
+        resets route here. Scoped to this adapter's own collection to avoid
+        wiping other collections in the shared persistent store.
+        """
+        try:
+            self.client.delete_collection(name=self.collection_name)
+        except Exception:
+            pass
+        self.collection = self.client.create_collection(
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine"}
+        )
+
+    def reset_short_term(self) -> None:
+        """Clear this adapter's memory.
+
+        NOTE: this adapter stores short-term and long-term in a single shared
+        collection (``store_short_term``/``search_short_term`` delegate to their
+        long-term counterparts and no ``memory_type`` tag is recorded), so
+        per-tier scoping is not possible here — resetting short-term also clears
+        long-term. Use a tier-aware backend (e.g. the Dakera adapter) if you need
+        to erase a single tier.
+        """
+        self._reset_collection()
+
+    def reset_long_term(self) -> None:
+        """Clear this adapter's memory (shared with short-term; see
+        ``reset_short_term`` for the shared-collection caveat)."""
+        self._reset_collection()
+
     def close(self):
         """Clean up ChromaDB resources."""
         # ChromaDB PersistentClient has no explicit close; release references.
