@@ -308,6 +308,15 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         ("OLLAMA_HOST", "ollama/llama3.2"),
     )
 
+    # Default model per subscription auth provider, used only when the caller
+    # gave `auth=` without a model. A subscription seat is tied to one vendor,
+    # so the plain OpenAI default would ship the OAuth token to the wrong
+    # endpoint. Overridable by passing model=/llm=.
+    _AUTH_DEFAULT_MODELS = {
+        "claude-code": "anthropic/claude-sonnet-4-5",
+        "qwen-cli": "openai/qwen3-coder-plus",
+    }
+
     @classmethod
     def _resolve_default_model(cls):
         """Resolve a provider-aware default model from present credentials.
@@ -1855,6 +1864,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             else:
                 llm = model  # model= takes precedence
         
+        # Resolve the subscription auth provider eagerly. `auth=` is opt-in, so
+        # this costs nothing for everyone else, and a user who asked to be
+        # billed against a subscription must never be silently downgraded to
+        # API-key billing: an unknown id, an unusable provider or missing
+        # credentials all have to fail at construction, not at request time
+        # where the surrounding error handling turns them into a None result.
+        if auth is not None:
+            from ..auth import resolve_subscription_credentials
+            resolve_subscription_credentials(auth)
+            # A subscription seat is tied to one vendor, so the OpenAI default
+            # model would ship the provider's OAuth token to the wrong endpoint.
+            if llm is None:
+                llm = self._AUTH_DEFAULT_MODELS.get(auth) or llm
+        
         # Store rate limiter (optional, zero overhead when None).
         # Auto-build a RateLimiter from max_rpm when no explicit limiter is
         # provided so ExecutionConfig(max_rpm=N) actually throttles requests.
@@ -1870,9 +1893,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self._openai_base_url = base_url
         self.__openai_client = None
         
-        # Expose base_url and api_key as properties for tests
+        # Expose base_url, api_key and auth as properties for tests and for
+        # clone_for_channel(), which serialises them back into the constructor.
         self.base_url = base_url
         self.api_key = api_key
+        self.auth = auth
 
         # Resolve Agent(retry=...) into LLM init kwargs so the custom-LLM path
         # (any "provider/model", dict, or base_url config) honours it, instead of
@@ -1988,7 +2013,26 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
-            self.llm = llm or Agent._get_default_model()
+            model_name = llm or Agent._get_default_model()
+            if auth:
+                # A subscription auth provider only takes effect inside LLM
+                # (which injects the resolved OAuth credentials), so a bare
+                # model name plus auth= must still build an LLM instance rather
+                # than falling through to the plain OpenAI client.
+                llm_params = {'model': model_name, 'auth': auth}
+                if api_key:
+                    llm_params['api_key'] = api_key
+                llm_params['metrics'] = metrics
+                llm_params['web_search'] = web_search
+                llm_params['web_fetch'] = web_fetch
+                llm_params['prompt_caching'] = prompt_caching
+                llm_params['claude_memory'] = claude_memory
+                llm_params['max_iter'] = max_iter
+                if _retry_init_params:
+                    llm_params.update(_retry_init_params)
+                self._llm_init_params = llm_params
+                self._using_custom_llm = True
+            self.llm = model_name
         
         # Store fallback models for resilience (defensive copy to avoid external mutations)
         self.fallback_models = list(fallback_models) if fallback_models else []

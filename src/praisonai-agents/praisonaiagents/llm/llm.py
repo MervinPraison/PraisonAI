@@ -6021,6 +6021,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self.timeout:
             params["timeout"] = self.timeout
 
+        # ── Subscription credentials ────────────────────────────────────
+        # Mirror _build_completion_params: without this the Responses API
+        # transport silently ignores auth= and bills the plain API key.
+        creds = self._resolve_subscription_creds()
+        if creds:
+            params["api_key"] = creds.api_key
+            if creds.base_url:
+                params["base_url"] = creds.base_url
+            if creds.headers:
+                extra_headers = dict(params.get("extra_headers") or {})
+                extra_headers.update(creds.headers)
+                params["extra_headers"] = extra_headers
+
         # ── Structured output ───────────────────────────────────────────
         output_json = kwargs.pop("output_json", None)
         output_pydantic = kwargs.pop("output_pydantic", None)
