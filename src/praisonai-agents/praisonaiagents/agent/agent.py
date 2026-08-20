@@ -347,6 +347,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             return
         self.llm = model
         self._llm_instance = None
+        # A used agent caches a dispatcher (chat_mixin) bound to the old model --
+        # the OpenAI path bakes model= into it, the custom path wraps the old
+        # llm_instance. Drop it so the next chat rebuilds against the new model.
+        if getattr(self, '_unified_dispatcher', None) is not None:
+            self._unified_dispatcher = None
         if self._llm_init_params is not None:
             # base_url path: keep the connection settings, swap the model.
             self._llm_init_params = {**self._llm_init_params, 'model': model}

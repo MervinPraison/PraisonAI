@@ -66,3 +66,23 @@ def test_team_and_flow_agree():
     for agent in flow._collect_agents():
         agent._apply_default_llm(flow.llm)
     assert a.llm == b.llm == TEAM_MODEL
+
+
+def test_applying_default_invalidates_cached_dispatcher():
+    # A used agent caches a dispatcher bound to the previous model. Applying a
+    # container default must drop it so the next chat rebuilds with the new one.
+    member = Agent(name="m", instructions="x")
+    member._unified_dispatcher = object()  # simulate a prior execution
+    member._apply_default_llm(TEAM_MODEL)
+    assert member.llm == TEAM_MODEL
+    assert getattr(member, "_unified_dispatcher", None) is None
+
+
+def test_pinned_agent_keeps_its_dispatcher():
+    # An explicit model is never overridden, so its dispatcher must be left alone.
+    pinned = Agent(name="p", instructions="x", llm="gpt-4o")
+    sentinel = object()
+    pinned._unified_dispatcher = sentinel
+    pinned._apply_default_llm(TEAM_MODEL)
+    assert pinned.llm == "gpt-4o"
+    assert pinned._unified_dispatcher is sentinel
