@@ -254,6 +254,20 @@ class ScheduledAgentExecutor:
         # so a deterministic watchdog (``df -h``, ``uptime``, a health-check
         # ``curl``) costs no tokens and cannot be reformatted by a model.
         command = str(getattr(job, "command", "") or "").strip()
+        # Defensive: a persisted job carrying BOTH model-free actions is
+        # ambiguous — fail loudly instead of silently preferring one. (The CLI
+        # rejects this combination at creation; this guards hand-edited or
+        # legacy store payloads.)
+        if command and str(getattr(job, "backend", "") or "").strip():
+            err = (
+                "Job configures both 'command' and 'backend'; exactly one "
+                "model-free action is allowed. Remove one and re-save."
+            )
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            return JobResult(job=job, status="failed", error=err, duration=duration)
         if command:
             return await self._execute_command(job, command, started)
 
@@ -609,6 +623,50 @@ class ScheduledAgentExecutor:
         """
         options = dict(getattr(job, "backend_options", None) or {})
         cwd = options.pop("cwd", None)
+
+        # Pre-run condition gate: backend turns are real (expensive) turns, so
+        # they honour the same cheap go/no-go gate as native-agent jobs. On
+        # "nothing to do" the tick is recorded ``skipped`` with no subprocess
+        # spawned; gate context is appended to the prompt like the agent path.
+        gate = self._resolve_condition(job)
+        if gate is not None:
+            try:
+                decision = await asyncio.to_thread(gate.should_run, job)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "Pre-run gate raised for backend job '%s': %s; running anyway",
+                    job.id, e,
+                )
+                decision = None
+            if decision is not None and not getattr(decision, "run", True):
+                reason = getattr(decision, "reason", None) or "pre-run gate: nothing to do"
+                logger.info("Backend job '%s' skipped by pre-run gate: %s", job.id, reason)
+                duration = time.time() - started
+                self._runner.mark_run(job, status="skipped", error=reason, duration=duration)
+                return JobResult(job=job, status="skipped", error=reason, duration=duration)
+            if decision is not None:
+                context = getattr(decision, "context", None)
+                if context:
+                    message = f"{message}\n\n{context}"
+
+        # Run-scoped policy: the message is the untrusted portion of a backend
+        # turn (there is no in-process agent whose skills could load content),
+        # so scan it with the same policy as native-agent jobs.
+        if self._run_policy is not None:
+            scan = self._run_policy.scan_prompt(message)
+            if not scan.ok:
+                err = f"Blocked by run policy: {scan.reason}"
+                logger.warning(
+                    "Backend job '%s' blocked by run policy: %s", job.id, scan.reason,
+                )
+                duration = time.time() - started
+                self._runner.mark_run(job, status="failed", error=err, duration=duration)
+                if self._on_failure:
+                    self._on_failure(job, err)
+                result = JobResult(job=job, status="failed", error=err, duration=duration)
+                self._audit_output(job, result)
+                await self._maybe_deliver_failure(job, result)
+                return result
 
         try:
             from praisonai_bot._code_bridge import import_code_module

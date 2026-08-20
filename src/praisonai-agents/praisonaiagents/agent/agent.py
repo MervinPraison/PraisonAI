@@ -6699,6 +6699,24 @@ Answer:"""
             if started_sessions is None:
                 started_sessions = set()
                 self._cli_backend_sessions_started = started_sessions
+            # Serialise session establishment per session id: without the
+            # lock, concurrent turns could both observe "not started" and
+            # spawn two fresh CLI conversations for one session.
+            session_locks = getattr(self, '_cli_backend_session_locks', None)
+            if session_locks is None:
+                session_locks = {}
+                self._cli_backend_session_locks = session_locks
+            session_lock = session_locks.setdefault(session_id, asyncio.Lock())
+            try:
+                await session_lock.acquire()
+            except RuntimeError:
+                # The stored lock is bound to a previous (closed) event loop —
+                # common when sync callers wrap each turn in its own loop.
+                # Re-key a fresh lock for this loop; cross-loop turns are
+                # serial by construction, so mutual exclusion is preserved.
+                session_lock = asyncio.Lock()
+                session_locks[session_id] = session_lock
+                await session_lock.acquire()
             session_binding = CliSessionBinding(
                 session_id=session_id,
                 is_resume=session_id in started_sessions,
@@ -6760,6 +6778,7 @@ Answer:"""
             # A successful turn establishes the CLI-side session; subsequent
             # turns under the same session_id are resumes.
             started_sessions.add(session_id)
+            session_lock.release()
 
             # Update chat history with the exchange
             if hasattr(self, '_append_to_chat_history'):
@@ -6776,6 +6795,13 @@ Answer:"""
             return result.content if result else None
             
         except Exception as e:
+            # Release the per-session lock on any failure path; ``session_lock``
+            # may be unbound when the exception preceded its assignment.
+            try:
+                if session_lock.locked():
+                    session_lock.release()
+            except (NameError, UnboundLocalError, RuntimeError):
+                pass
             await self._emit_cli_backend_hook(
                 backend=backend,
                 session_id=session_id,

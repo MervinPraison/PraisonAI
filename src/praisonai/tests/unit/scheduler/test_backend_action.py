@@ -211,3 +211,16 @@ def test_backend_resolution_failure_is_audited(monkeypatch):
     result = _run(ex._execute_one(_backend_job()))
     assert result.status == "failed"
     assert audited and audited[0].error == result.error
+
+
+def test_command_and_backend_conflict_fails(fake_backend):
+    """A persisted job with both model-free actions fails loudly."""
+    backend, _ = fake_backend
+    delivered: list = []
+    ex = _executor(delivered)
+    job = _backend_job()
+    job.command = "df -h"
+    result = _run(ex._execute_one(job))
+    assert result.status == "failed"
+    assert "exactly one" in result.error
+    assert backend.calls == []

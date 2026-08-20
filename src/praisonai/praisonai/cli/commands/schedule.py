@@ -74,6 +74,12 @@ def schedule_add_cmd(
         praisonai schedule add "nightly-refactor" -s "cron:0 2 * * *" -m "tidy utils.py, run tests" --backend claude-code --backend-cwd ~/proj --deliver telegram
     """
     output = get_output_controller()
+    if command and backend:
+        output.print_error(
+            "--command and --backend are mutually exclusive: a job runs exactly "
+            "one model-free action. Configure one or the other."
+        )
+        raise typer.Exit(1)
     try:
         from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
 
