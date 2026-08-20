@@ -124,3 +124,54 @@ def test_on_error_continue_reports_failed_but_keeps_going():
 
     assert result["status"] == "failed"
     assert not any("kaboom" in prompt for _, prompt in calls)
+
+
+@pytest.mark.parametrize("wrap", ["loop", "when", "repeat", "route"])
+def test_nested_stop_halts_the_outer_workflow(wrap):
+    """A nested step with the default on_error='stop' must terminate the whole
+    workflow, not merely its own pattern iteration: a following top-level step
+    must never run."""
+    calls = []
+
+    def boom(ctx: WorkflowContext) -> StepResult:
+        calls.append("boom")
+        raise RuntimeError("boom")
+
+    def after(ctx: WorkflowContext) -> StepResult:
+        calls.append("after")
+        return StepResult(output="after-out")
+
+    inner = [Task(name="boom", handler=boom, max_retries=0)]
+    if wrap == "loop":
+        pattern = loop(steps=inner, over="items")
+    elif wrap == "when":
+        pattern = when("{{go}} == 1", then_steps=inner)
+    elif wrap == "repeat":
+        pattern = repeat(loop(steps=inner, over="items"), max_iterations=1)
+    else:
+        pattern = route({"go": inner}, default=inner)
+
+    after_step = Task(name="after", handler=after, max_retries=0)
+    result = Workflow(steps=[pattern, after_step],
+                      variables={"items": ["only"], "go": 1}).start("go")
+
+    assert result["status"] == "failed"
+    assert "after" not in calls, (
+        f"pattern '{wrap}' ran a later top-level step despite on_error='stop'"
+    )
+
+
+def test_parallel_fail_fast_does_not_mask_failure_with_typeerror():
+    """A nested step surfaces its error as a string; the parallel fail_fast path
+    must not `raise ... from <str>` (which would itself raise TypeError). The run
+    must simply report failed."""
+    def boom(ctx: WorkflowContext) -> StepResult:
+        raise RuntimeError("boom")
+
+    inner = [Task(name="boom", handler=boom, max_retries=0)]
+    wf = Workflow(steps=[parallel([loop(steps=inner, over="items")],
+                                  on_failure="fail_fast")],
+                  variables={"items": ["only"]})
+    result = wf.start("go")
+
+    assert result["status"] == "failed"
