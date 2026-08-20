@@ -497,3 +497,27 @@ def test_modal_honours_a_non_default_image_from_the_registry(monkeypatch):
     assert recorded.get("debian_slim") and "from_registry" not in recorded, (
         "the default image must keep Modal on debian_slim"
     )
+
+
+def test_the_two_docker_implementations_agree_on_their_image():
+    """`docker` has an implementation in each package, and they drifted: one
+    defaulted to python:3.11-slim and the other to 3.12-slim, so
+    tools_run_on="docker" and run_in="docker" handed you different Pythons for
+    the same word. Nobody chose that, which is exactly why it needs a test.
+
+    Both sides are read as the *effective runtime default* -- the value a caller
+    actually gets when they name no image -- not a docstring or a comment. An
+    earlier version scanned the DockerCompute docstring for `image="python:`,
+    which would keep passing even after the real default drifted, because the
+    example is prose the provisioning path never consults.
+    """
+    from praisonaiagents.managed.protocols import ComputeConfig
+    from praisonaiagents.sandbox import SandboxConfig
+
+    sandbox_default = SandboxConfig.docker().image
+    compute_default = ComputeConfig().image
+
+    assert sandbox_default == compute_default, (
+        f"the two docker implementations disagree: sandbox={sandbox_default!r} "
+        f"compute={compute_default!r} -- same name, different container"
+    )

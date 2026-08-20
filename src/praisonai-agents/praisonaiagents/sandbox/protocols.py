@@ -206,7 +206,7 @@ class SandboxProtocol(Protocol):
 
         from praisonai_sandbox import DockerSandbox
         
-        sandbox = DockerSandbox(image="python:3.11-slim")
+        sandbox = DockerSandbox(image="python:3.12-slim")
         result = await sandbox.execute("print('Hello, World!')")
         print(result.stdout)
     """

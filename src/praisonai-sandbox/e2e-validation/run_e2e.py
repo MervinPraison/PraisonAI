@@ -115,7 +115,7 @@ async def _check_docker() -> Result:
     try:
         from praisonai_sandbox import DockerSandbox
 
-        sandbox = DockerSandbox(image="python:3.11-slim")
+        sandbox = DockerSandbox(image="python:3.12-slim")
         # Pulling the image can stall (slow/unavailable registry); bound it so
         # the optional check never hangs the whole run.
         await asyncio.wait_for(sandbox.start(), timeout=_DOCKER_TIMEOUT)

@@ -14,7 +14,7 @@ pip install praisonai-sandbox[docker]
 from praisonai_sandbox import DockerSandbox
 from praisonaiagents.sandbox import SandboxConfig
 
-config = SandboxConfig.docker("python:3.11-slim")
+config = SandboxConfig.docker("python:3.12-slim")
 sandbox = DockerSandbox(image=config.image, config=config)
 ```
 

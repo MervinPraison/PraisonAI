@@ -106,7 +106,11 @@ class SandboxConfig:
     """
     
     sandbox_type: str = "subprocess"
-    image: str = "python:3.11-slim"
+    # Kept in step with the compute-side DockerCompute default. The two
+    # implementations of "docker" disagreed -- 3.11 here, 3.12 there -- so
+    # tools_run_on="docker" and run_in="docker" handed you different Pythons
+    # for the same word. Nobody chose that; they drifted apart.
+    image: str = "python:3.12-slim"
     working_dir: str = "/workspace"
     env: Dict[str, str] = field(default_factory=dict)
     resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
@@ -133,7 +137,7 @@ class SandboxConfig:
         }
     
     @classmethod
-    def docker(cls, image: str = "python:3.11-slim") -> "SandboxConfig":
+    def docker(cls, image: str = "python:3.12-slim") -> "SandboxConfig":
         """Create a Docker sandbox configuration."""
         return cls(
             sandbox_type="docker",

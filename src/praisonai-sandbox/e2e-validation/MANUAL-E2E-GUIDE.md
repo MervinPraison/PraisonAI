@@ -63,7 +63,7 @@ Expected stdout: `manager-ok`.
 
 ## 4. Docker path (optional)
 
-Requires a running Docker daemon and the `python:3.11-slim` image.
+Requires a running Docker daemon and the `python:3.12-slim` image.
 
 ```python
 import asyncio
@@ -71,7 +71,7 @@ from praisonai_sandbox import DockerSandbox
 
 
 async def main():
-    sandbox = DockerSandbox(image="python:3.11-slim")
+    sandbox = DockerSandbox(image="python:3.12-slim")
     await sandbox.start()
     try:
         result = await sandbox.execute("print('docker-ok')")

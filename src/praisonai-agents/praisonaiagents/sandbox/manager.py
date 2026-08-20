@@ -29,7 +29,7 @@ class SandboxManager:
     Example:
         from praisonaiagents.sandbox import SandboxManager, SandboxConfig
 
-        config = SandboxConfig.docker("python:3.11-slim")
+        config = SandboxConfig.docker("python:3.12-slim")
         manager = SandboxManager(config)
         result = await manager.run_code("print('Hello, World!')")
     """

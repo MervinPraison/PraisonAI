@@ -41,7 +41,8 @@ def test_hosted_agent_rejects_unregistered_providers():
     docker, flyio, ...) are registered managed runtimes via the backend
     registry, so ``HostedAgent(provider=...)`` resolves them. The guarantee
     that still matters is that a provider with no registered backend (an LLM
-    routing name like ``openai``/``gemini``) raises a helpful ``ValueError``.
+    routing name like ``openai``/``gemini``/``ollama``) raises a helpful
+    ``ValueError`` pointing the caller at ``LocalAgent``.
     """
     from praisonai.integrations import HostedAgent, HostedAgentConfig
     from praisonai.integrations.backend_registry import get_backend_registry
@@ -55,8 +56,8 @@ def test_hosted_agent_rejects_unregistered_providers():
     assert registry.is_available("modal")
     assert registry.is_available("e2b")
 
-    # Providers with no registered backend must still raise a helpful error
-    for provider in ("openai", "gemini"):
+    # LLM-routing providers have no registered backend -> raise and point at LocalAgent.
+    for provider in ("openai", "gemini", "ollama"):
         assert not registry.is_available(provider)
         with pytest.raises(ValueError) as exc_info:
             HostedAgent(provider=provider)
