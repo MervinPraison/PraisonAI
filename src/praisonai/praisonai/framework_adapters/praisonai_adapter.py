@@ -387,10 +387,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # Agent-level ``cli_backend`` in YAML delegates this agent's turns
             # to an external coding CLI. Core Agent refuses raw string ids, so
             # resolve to an instance here in the wrapper layer.
-            if 'cli_backend' in details:
+            cli_backend_config = details.get('cli_backend')
+            if cli_backend_config is not None:
                 from praisonai.agents_generator import _resolve_yaml_cli_backend
                 resolved_backend = _resolve_yaml_cli_backend(
-                    details.get('cli_backend'), logger
+                    cli_backend_config, logger
                 )
                 if resolved_backend is None:
                     # Fail closed: an explicitly requested backend that cannot
@@ -398,7 +399,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     # LLM path (different tools, credentials, and billing).
                     raise ValueError(
                         f"Agent {role_filled!r} requests cli_backend="
-                        f"{details.get('cli_backend')!r} but it could not be "
+                        f"{cli_backend_config!r} but it could not be "
                         "resolved. Install praisonai-code and use an id from "
                         "'praisonai backends', or remove the cli_backend field."
                     )

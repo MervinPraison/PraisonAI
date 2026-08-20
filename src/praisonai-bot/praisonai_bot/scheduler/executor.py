@@ -664,7 +664,7 @@ class ScheduledAgentExecutor:
                 if self._on_failure:
                     self._on_failure(job, err)
                 result = JobResult(job=job, status="failed", error=err, duration=duration)
-                self._audit_output(job, result)
+                await asyncio.to_thread(self._audit_output, job, result)
                 await self._maybe_deliver_failure(job, result)
                 return result
 
@@ -685,7 +685,7 @@ class ScheduledAgentExecutor:
             if self._on_failure:
                 self._on_failure(job, err)
             result = JobResult(job=job, status="failed", error=err, duration=duration)
-            self._audit_output(job, result)
+            await asyncio.to_thread(self._audit_output, job, result)
             await self._maybe_deliver_failure(job, result)
             return result
 
@@ -724,7 +724,7 @@ class ScheduledAgentExecutor:
             if self._on_failure:
                 self._on_failure(job, err)
             result = JobResult(job=job, status="failed", error=err, duration=duration)
-            self._audit_output(job, result)
+            await asyncio.to_thread(self._audit_output, job, result)
             await self._maybe_deliver_failure(job, result)
             return result
         except Exception as e:
@@ -735,7 +735,7 @@ class ScheduledAgentExecutor:
             if self._on_failure:
                 self._on_failure(job, err)
             result = JobResult(job=job, status="failed", error=err, duration=duration)
-            self._audit_output(job, result)
+            await asyncio.to_thread(self._audit_output, job, result)
             await self._maybe_deliver_failure(job, result)
             return result
 
@@ -796,7 +796,7 @@ class ScheduledAgentExecutor:
             delivered=delivered,
             delivery_error=delivery_error,
         )
-        self._audit_output(job, result)
+        await asyncio.to_thread(self._audit_output, job, result)
         if not succeeded:
             await self._maybe_deliver_failure(job, result)
         return result
