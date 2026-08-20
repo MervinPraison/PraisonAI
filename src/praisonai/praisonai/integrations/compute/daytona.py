@@ -88,7 +88,13 @@ class DaytonaCompute:
         except ImportError:
             raise ImportError("Daytona SDK required. Install with: pip install daytona-sdk")
 
-        resources = Resources(cpu=config.cpu, memory=config.memory_mb)
+        # Daytona's Resources.memory is in GiB, not MB -- "Amount of memory in
+        # GiB to allocate" per the SDK. Passing megabytes straight through
+        # asked for 1024 GiB of RAM on the default config, which fails to
+        # provision. The sandbox-side implementation already converted; this
+        # one never learned the unit.
+        memory_gib = max(1, round((config.memory_mb or 1024) / 1024))
+        resources = Resources(cpu=config.cpu, memory=memory_gib)
 
         params = CreateSandboxFromImageParams(
             image=config.image,
@@ -199,7 +205,10 @@ class DaytonaCompute:
         try:
             with open(local_path, "rb") as f:
                 content = f.read()
-            info["sandbox"].fs.upload_file(remote_path, content)
+            # upload_file(src, dst) -- content first, destination second.
+            # These were the wrong way round, so an upload wrote the path into
+            # a file named after the content.
+            info["sandbox"].fs.upload_file(content, remote_path)
             return True
         except Exception as e:
             logger.error("[daytona_compute] upload failed: %s", e)
