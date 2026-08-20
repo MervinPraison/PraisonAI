@@ -577,12 +577,21 @@ class ScheduledAgentExecutor:
             )
         elif delivery and self._can_deliver(delivery):
             try:
-                await self._dispatch_delivery(delivery, result_str)
-                delivered = True
-                logger.info(
-                    "Delivered job '%s' result to %s:%s",
-                    job.id, delivery.channel, delivery.channel_id,
-                )
+                delivered = await self._dispatch_delivery(delivery, result_str)
+                if delivered:
+                    logger.info(
+                        "Delivered job '%s' result to %s:%s",
+                        job.id, delivery.channel, delivery.channel_id,
+                    )
+                else:
+                    delivery_error = (
+                        f"delivery to {delivery.channel}:{delivery.channel_id} "
+                        "did not complete"
+                    )
+                    logger.warning(
+                        "Delivery did not complete for job '%s' to %s:%s",
+                        job.id, delivery.channel, delivery.channel_id,
+                    )
             except Exception as e:
                 delivery_error = str(e)
                 logger.warning(
@@ -785,12 +794,20 @@ class ScheduledAgentExecutor:
         delivery = getattr(job, "delivery", None)
         if succeeded and text and not silent and delivery and self._can_deliver(delivery):
             try:
-                await self._dispatch_delivery(delivery, text)
-                delivered = True
-                logger.info(
-                    "Delivered backend job '%s' output to %s:%s",
-                    job.id, delivery.channel, delivery.channel_id,
-                )
+                delivered = await self._dispatch_delivery(delivery, text)
+                if delivered:
+                    logger.info(
+                        "Delivered backend job '%s' output to %s:%s",
+                        job.id, delivery.channel, delivery.channel_id,
+                    )
+                else:
+                    delivery_error = (
+                        f"delivery to {delivery.channel}:{delivery.channel_id} "
+                        "did not complete"
+                    )
+                    logger.warning(
+                        "Delivery did not complete for backend job '%s'", job.id,
+                    )
             except Exception as e:
                 delivery_error = str(e)
                 logger.warning(
@@ -874,12 +891,20 @@ class ScheduledAgentExecutor:
         delivery = getattr(job, "delivery", None)
         if text and delivery and self._can_deliver(delivery):
             try:
-                await self._dispatch_delivery(delivery, text)
-                delivered = True
-                logger.info(
-                    "Delivered command job '%s' output to %s:%s",
-                    job.id, delivery.channel, delivery.channel_id,
-                )
+                delivered = await self._dispatch_delivery(delivery, text)
+                if delivered:
+                    logger.info(
+                        "Delivered command job '%s' output to %s:%s",
+                        job.id, delivery.channel, delivery.channel_id,
+                    )
+                else:
+                    delivery_error = (
+                        f"delivery to {delivery.channel}:{delivery.channel_id} "
+                        "did not complete"
+                    )
+                    logger.warning(
+                        "Delivery did not complete for command job '%s'", job.id,
+                    )
             except Exception as e:
                 delivery_error = str(e)
                 logger.warning(
@@ -1392,7 +1417,7 @@ class ScheduledAgentExecutor:
 
     async def _dispatch_delivery(
         self, delivery: "DeliveryTarget", text: str,
-    ) -> None:
+    ) -> bool:
         """Deliver ``text`` to ``delivery``, preferring the live adapter.
 
         When a live ``delivery_handler`` is wired (a running gateway) it is used
@@ -1402,12 +1427,19 @@ class ScheduledAgentExecutor:
         so scheduled delivery works without a persistent gateway. If neither is
         available the send raises, so the caller records ``delivery_error``
         exactly as it does for any other delivery failure.
+
+        Returns whether the payload actually reached the target. A handler that
+        signals a non-raising failure by returning ``False`` (issue #4193) is
+        propagated so the caller does not record a failed delivery as
+        ``delivered``; a handler that returns ``None`` is treated as delivered,
+        preserving the prior behaviour of adapters that report success by not
+        raising.
         """
         if self._deliver is not None:
-            coro = self._deliver(delivery, text)
-            if inspect.isawaitable(coro):
-                await coro
-            return
+            result = self._deliver(delivery, text)
+            if inspect.isawaitable(result):
+                result = await result
+            return result is not False
         from ._standalone_sender import resolve_standalone_sender
 
         sender = resolve_standalone_sender(getattr(delivery, "channel", ""))
@@ -1416,7 +1448,8 @@ class ScheduledAgentExecutor:
                 "no live adapter and no standalone sender for channel "
                 f"{getattr(delivery, 'channel', '')!r}"
             )
-        await sender(delivery, text)
+        result = await sender(delivery, text)
+        return result is not False
 
     async def _maybe_deliver_failure(
         self, job: "ScheduleJob", result: JobResult,
@@ -1437,8 +1470,17 @@ class ScheduledAgentExecutor:
             f"{result.error or 'unknown error'}"
         )
         try:
-            await self._dispatch_delivery(delivery, summary)
-            logger.info("Delivered failure summary for job '%s'", job.id)
+            if await self._dispatch_delivery(delivery, summary):
+                logger.info("Delivered failure summary for job '%s'", job.id)
+            else:
+                result.delivery_error = (
+                    f"failure-summary delivery to {delivery.channel}:"
+                    f"{delivery.channel_id} did not complete"
+                )
+                logger.warning(
+                    "Failure-summary delivery did not complete for job '%s'",
+                    job.id,
+                )
         except Exception as e:
             result.delivery_error = str(e)
             logger.warning(
