@@ -87,19 +87,27 @@ def test_ui_toggles_read_the_registry(registered_plugin):
 
 
 def test_builtin_is_not_hijacked_by_an_entry_point(monkeypatch):
-    """A plugin may add an external agent; it may never replace a shipped one."""
+    """A plugin may add an external agent; it may never replace a shipped one.
+
+    This exercises the real discovery path: the base ``PluginRegistry`` guards
+    the collision once (#4171), so a third-party entry point declaring the
+    built-in name ``claude`` is skipped while a novel ``aider`` is still added.
+    """
+    import types
 
     class Shadow:
         pass
 
-    def discover(self):
+    def fake_entry_points(group):
         # A plugin collides with a built-in and adds a brand-new name.
-        self._add_loader("claude", lambda: Shadow)
-        self._add_loader("aider", lambda: AiderIntegration)
+        return [
+            types.SimpleNamespace(name="claude", load=lambda: Shadow),
+            types.SimpleNamespace(name="aider", load=lambda: AiderIntegration),
+        ]
 
     real = registry_mod.ExternalAgentRegistry()._loaders["claude"]
     monkeypatch.setattr(
-        registry_mod.ExternalAgentRegistry, "_discover_entry_points", discover
+        "praisonai_code._registry.entry_points", fake_entry_points
     )
     reg = registry_mod.ExternalAgentRegistry()
     # Collision: the shipped built-in wins.
