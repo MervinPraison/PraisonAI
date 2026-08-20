@@ -60,3 +60,13 @@ def test_unknown_provider_raises_instead_of_silently_using_mem0():
     k = Knowledge(config={"vector_store": {"provider": "definitely_not_a_store"}})
     with pytest.raises(ValueError, match="definitely_not_a_store"):
         k.memory
+
+
+@pytest.mark.parametrize("bad_provider", ["", None])
+def test_explicit_falsey_provider_raises_instead_of_silently_using_mem0(bad_provider):
+    """An explicitly supplied empty/null provider is a misconfiguration and must
+    raise, rather than being treated as the implicit default and degrading to Mem0.
+    """
+    k = Knowledge(config={"vector_store": {"provider": bad_provider}})
+    with pytest.raises(ValueError):
+        k.memory

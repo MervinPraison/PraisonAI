@@ -207,8 +207,11 @@ class Knowledge:
         # configured backend degrades (see issue #2972 / PR #2982 review).
         # ``self.config`` is always merged with defaults, so use the raw
         # user-supplied ``_config`` to detect whether the provider was chosen.
-        provider_explicit = bool(
-            (self._config or {}).get("vector_store", {}).get("provider")
+        # Presence of the key (not truthiness) marks an explicit choice, so an
+        # explicitly empty/null provider is treated as a misconfiguration and
+        # surfaces the preset error instead of silently degrading to Mem0.
+        provider_explicit = "provider" in (
+            (self._config or {}).get("vector_store", {}) or {}
         )
         provider = self.config.get("vector_store", {}).get("provider", "mem0")
         self._log(f"Requested knowledge provider: {provider}")
