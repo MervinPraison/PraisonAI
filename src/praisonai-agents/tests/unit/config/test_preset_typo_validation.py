@@ -156,6 +156,24 @@ def test_no_preset_dict_has_hyphen_underscore_collision():
         assert len(canon) == len(set(canon))
 
 
+def test_every_preset_key_is_already_canonical():
+    """Resolution does a direct dict.get(canonical_preset_key(value)), so any
+    key that is NOT already canonical (e.g. 'full-auto', ' Full_Auto ') would
+    pass validation yet miss the lookup and silently fall back to the disabled
+    default. Enforce that every resolver preset key equals its own canonical
+    form, so a future non-canonical key is caught here instead of at runtime."""
+    from praisonaiagents.config.parse_utils import canonical_preset_key
+    from praisonaiagents.config.presets import (
+        CONTEXT_PRESETS, AUTONOMY_PRESETS, OUTPUT_PRESETS, EXECUTION_PRESETS,
+    )
+    for presets in (CONTEXT_PRESETS, AUTONOMY_PRESETS, OUTPUT_PRESETS, EXECUTION_PRESETS):
+        for key in presets:
+            assert key == canonical_preset_key(key), (
+                f"preset key {key!r} is not canonical "
+                f"(would resolve to {canonical_preset_key(key)!r} and miss the lookup)"
+            )
+
+
 @pytest.mark.parametrize("value", [" agentic ", "AGENTIC", "propose", " PROPOSE "])
 def test_learn_case_whitespace_not_silently_disabled(value):
     """learn= with a valid-but-unnormalized string must still enable learning."""
