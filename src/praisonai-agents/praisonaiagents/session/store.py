@@ -66,7 +66,7 @@ def __getattr__(name: str):
     working, but resolves the value at access time instead of at import time.
     """
     if name == "DEFAULT_SESSION_DIR":
-        return str(get_sessions_dir())
+        return _resolve_default_session_dir()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Default limits
@@ -2260,12 +2260,17 @@ class DefaultSessionStore:
 _default_store: Optional[DefaultSessionStore] = None
 _store_lock = threading.Lock()
 
-# Identity + directory of the store this module auto-created, so a store that
-# was injected by a caller (``store._default_store = my_store`` -- a widely used
-# test/embedding hook) is never second-guessed, while one we created ourselves
-# is rebuilt when the resolved session directory changes.
-_autocreated_store: Optional[DefaultSessionStore] = None
-_autocreated_dir: Optional[str] = None
+# Attribute stamped on any store this module auto-created, recording the session
+# directory it was built for. A store injected by a caller
+# (``store._default_store = my_store`` -- a widely used test/embedding hook)
+# never carries this marker and so is honoured verbatim, while one we created
+# ourselves is rebuilt when the resolved session directory changes.
+#
+# The marker lives on the *instance* rather than a single module-level identity
+# pointer so a partial teardown that restores ``_default_store`` without also
+# restoring an out-of-band tracking variable cannot misclassify a previously
+# auto-created store as caller-injected (and pin it to a stale directory).
+_AUTOCREATED_DIR_ATTR = "_praison_autocreated_session_dir"
 
 def get_default_session_store() -> DefaultSessionStore:
     """Get the global default session store instance.
@@ -2277,7 +2282,7 @@ def get_default_session_store() -> DefaultSessionStore:
     - ``PRAISONAI_SESSION_RETENTION``: ``compact`` | ``truncate`` | ``keep_all``
     - ``PRAISONAI_SESSION_ACTIVE_WINDOW``: int, recent turns kept live
     """
-    global _default_store, _autocreated_store, _autocreated_dir
+    global _default_store
 
     # The singleton is keyed on the *currently* resolved session directory. A
     # process that changes PRAISONAI_HOME (or a test that repoints
@@ -2288,10 +2293,14 @@ def get_default_session_store() -> DefaultSessionStore:
     def _usable(candidate: Optional["DefaultSessionStore"]) -> bool:
         if candidate is None:
             return False
-        # Injected by a caller: honour it verbatim.
-        if candidate is not _autocreated_store:
+        # A store we auto-created carries a marker recording the directory it
+        # was built for; only rebuild when that directory no longer matches.
+        # Any store without the marker was injected by a caller -- honour it
+        # verbatim (never second-guess an explicit ``_default_store = ...``).
+        autocreated_dir = getattr(candidate, _AUTOCREATED_DIR_ATTR, None)
+        if autocreated_dir is None:
             return True
-        return _autocreated_dir == resolved_dir
+        return autocreated_dir == resolved_dir
 
     store = _default_store
     if _usable(store):
@@ -2328,7 +2337,9 @@ def get_default_session_store() -> DefaultSessionStore:
                 session_dir=resolved_dir,
                 active_window=active_window,
             )
-        _autocreated_store = _default_store
-        _autocreated_dir = resolved_dir
+        # Stamp the auto-created store with the directory it was built for so a
+        # later resolved-dir change rebuilds it, while a caller-injected store
+        # (which never carries this marker) is always honoured verbatim.
+        setattr(_default_store, _AUTOCREATED_DIR_ATTR, resolved_dir)
 
     return _default_store

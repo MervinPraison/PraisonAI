@@ -38,11 +38,19 @@ def test_explicit_module_override_still_wins(tmp_path, monkeypatch):
     """Assigning DEFAULT_SESSION_DIR keeps working for existing callers."""
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(store_module, "_default_store", None, raising=False)
-    monkeypatch.setattr(
-        store_module, "DEFAULT_SESSION_DIR", str(tmp_path / "pinned"), raising=False
-    )
-
-    assert store_module.DefaultSessionStore().session_dir == str(tmp_path / "pinned")
+    # ``DEFAULT_SESSION_DIR`` is served lazily via a module ``__getattr__`` and
+    # is not a real attribute, so ``monkeypatch.setattr`` would mistake the
+    # computed value for the "original" and restore it as a real global on
+    # teardown (leaking the override into later tests). Manage the real global
+    # directly and delete it in a finally instead.
+    store_module.DEFAULT_SESSION_DIR = str(tmp_path / "pinned")
+    try:
+        assert (
+            store_module.DefaultSessionStore().session_dir
+            == str(tmp_path / "pinned")
+        )
+    finally:
+        del store_module.DEFAULT_SESSION_DIR
 
 
 def test_injected_default_store_is_never_replaced(tmp_path, monkeypatch):
@@ -51,3 +59,34 @@ def test_injected_default_store_is_never_replaced(tmp_path, monkeypatch):
     monkeypatch.setattr(store_module, "_default_store", injected, raising=False)
 
     assert store_module.get_default_session_store() is injected
+
+
+def test_restored_autocreated_store_still_follows_the_dir(tmp_path, monkeypatch):
+    """A partial teardown that restores only ``_default_store`` must not pin it.
+
+    A test/embedding may save the auto-created singleton, reset it to ``None``,
+    rebuild a different one via ``get_default_session_store()``, then restore
+    the original ``_default_store`` without touching any out-of-band tracking
+    state. The restored store must still be recognised as auto-created and
+    rebuilt on the next directory change -- not misclassified as caller-injected
+    and pinned to a stale directory (regression for the identity-tracking gap).
+    """
+    monkeypatch.setattr(store_module, "_default_store", None, raising=False)
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "a"))
+    original = store_module.get_default_session_store()
+    assert original.session_dir == str(tmp_path / "a" / "sessions")
+
+    # A helper rebuilds a *different* auto-created store, then teardown restores
+    # only the original singleton reference.
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "temp"))
+    store_module._default_store = None
+    store_module.get_default_session_store()
+    store_module._default_store = original
+
+    # The restored store is still recognised as auto-created and follows the
+    # resolved directory when it changes.
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "b"))
+    rebuilt = store_module.get_default_session_store()
+    assert rebuilt is not original
+    assert rebuilt.session_dir == str(tmp_path / "b" / "sessions")
