@@ -195,7 +195,12 @@ class Knowledge:
     def memory(self):
         """Initialize knowledge adapter using protocol-driven approach."""
         # Import registry functions
-        from .adapters import get_knowledge_adapter, get_first_available_knowledge_adapter
+        from .adapters import (
+            get_knowledge_adapter,
+            get_first_available_knowledge_adapter,
+            has_knowledge_adapter,
+            list_knowledge_adapters,
+        )
         
         # Determine provider preference. Distinguish an explicit user choice from
         # the implicit default so fallback diagnostics are only loud when a
@@ -208,15 +213,25 @@ class Knowledge:
         provider = self.config.get("vector_store", {}).get("provider", "mem0")
         self._log(f"Requested knowledge provider: {provider}")
         
-        # Map legacy provider names to adapter names
+        # Legacy provider aliases. Anything else is looked up in the adapter
+        # registry, so adapters added with register_knowledge_adapter() are
+        # reachable; only genuinely unknown names fall back (and say so).
         provider_mapping = {
-            "chroma": "chroma",
-            "mongodb": "mongodb", 
-            "mem0": "mem0",
-            "sqlite": "sqlite"
+            "chromadb": "chroma",
+            "rag": "chroma",
         }
-        
-        adapter_name = provider_mapping.get(provider, "mem0")
+
+        adapter_name = provider_mapping.get(provider, provider)
+        if not has_knowledge_adapter(adapter_name):
+            from ..config.parse_utils import make_preset_error
+            err = make_preset_error(
+                "knowledge vector_store provider", provider,
+                sorted(set(list_knowledge_adapters()) | set(provider_mapping)),
+            )
+            if provider_explicit:
+                raise err
+            self._log(f"{err} Falling back to 'mem0'.")
+            adapter_name = "mem0"
         
         # Try to get preferred adapter, fallback to available ones
         try:
