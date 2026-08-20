@@ -388,12 +388,12 @@ class TestReportGenerator:
         md_path = generator.generate_markdown(report)
         
         assert md_path.exists()
-        content = md_path.read_text()
+        content = md_path.read_text(encoding='utf-8')  # ← Add encoding='utf-8' here
         
         assert "# Examples Run Report" in content
         assert "test1.py" in content
         assert "passed" in content.lower()
-    
+
     def test_save_log_files(self, tmp_path):
         """Test log files are saved correctly."""
         from praisonai.cli.features.examples import ReportGenerator, ExampleResult, RunReport

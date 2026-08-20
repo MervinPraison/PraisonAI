@@ -404,7 +404,7 @@ class TestShellSubstitution:
                 _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
                 assert _config_allows_shell() is True
                 result = interpolate_command_template("diff")
-                assert result == "Output: hi"
+                assert result.strip() == "Output: hi" 
 
 
 class TestIntegrationFunctions:

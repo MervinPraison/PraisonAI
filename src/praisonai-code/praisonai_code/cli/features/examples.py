@@ -541,7 +541,7 @@ class ReportGenerator:
                 lines.append("")
         
         md_path = self.output_dir / "report.md"
-        md_path.write_text('\n'.join(lines))
+        md_path.write_text('\n'.join(lines), encoding='utf-8')
         return md_path
     
     def save_logs(self, report: RunReport) -> Path:
