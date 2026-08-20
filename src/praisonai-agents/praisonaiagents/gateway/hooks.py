@@ -86,7 +86,12 @@ def _lookup(path: str, payload: Dict[str, Any]) -> Any:
     return current
 
 
-def render_template(template: Optional[str], payload: Dict[str, Any]) -> str:
+def render_template(
+    template: Optional[str],
+    payload: Dict[str, Any],
+    *,
+    fence_values: bool = False,
+) -> str:
     """Render ``template`` against ``payload`` with no external dependencies.
 
     Supports ``{{ payload.x }}`` and ``{x}`` placeholders resolving dotted
@@ -96,6 +101,12 @@ def render_template(template: Optional[str], payload: Dict[str, Any]) -> str:
     Args:
         template: The template string (or None).
         payload: The decoded JSON request body.
+        fence_values: When True, each interpolated payload-derived value is
+            wrapped in an ``<external_request_payload>`` fence so the agent
+            treats it as untrusted data, not instructions. The operator's own
+            static template text stays outside the fence. Used for the agent
+            message (see :meth:`HookConfig.resolve_message`); left False for
+            session/idempotency keys where fencing would corrupt the value.
 
     Returns:
         The rendered string.
@@ -103,11 +114,17 @@ def render_template(template: Optional[str], payload: Dict[str, Any]) -> str:
     if not template:
         return ""
 
+    wrap = None
+    if fence_values:
+        from praisonaiagents.tools.trust import wrap_request_payload as wrap
+
     def _resolve(match: "re.Match[str]") -> str:
         # group(1) is the ``{{ ... }}`` body, group(2) the ``{ ... }`` body.
         expr = match.group(1) if match.group(1) is not None else match.group(2)
         value = _lookup(expr, payload)
-        return "" if value is None else str(value)
+        if value is None:
+            return ""
+        return wrap(str(value)) if wrap is not None else str(value)
 
     return _PLACEHOLDER.sub(_resolve, template)
 
@@ -376,8 +393,13 @@ class HookConfig:
         )
 
     def resolve_message(self, payload: Dict[str, Any]) -> str:
-        """Render the agent message for ``payload``."""
-        return render_template(self.message, payload)
+        """Render the agent message for ``payload``.
+
+        Payload-derived interpolations are fenced as untrusted request data so
+        the agent never treats externally-POSTed content as instructions; the
+        operator's own template text stays outside the fence.
+        """
+        return render_template(self.message, payload, fence_values=True)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a dictionary (hides the auth/signing secrets)."""

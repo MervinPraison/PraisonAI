@@ -123,23 +123,44 @@ class WebhookRoute:
         )
 
 
-def render_prompt(template: Optional[str], event: Mapping[str, Any]) -> str:
+def render_prompt(
+    template: Optional[str],
+    event: Mapping[str, Any],
+    *,
+    route_name: str = "",
+) -> str:
     """Render a ``{{ dotted.path }}`` prompt template against an event.
 
     Missing paths render as an empty string (fail-safe). When ``template`` is
-    None, the raw JSON payload is returned so a route with no ``prompt`` still
-    yields a usable agent input.
+    None, the raw JSON payload is used so a route with no ``prompt`` still yields
+    a usable agent input.
+
+    Externally-POSTed payload content reaches the agent as untrusted data, so
+    the payload-derived portion is delimiter-fenced (via
+    :func:`praisonaiagents.tools.trust.wrap_request_payload`) — the model is
+    instructed to treat it as data, not instructions. For a route with no
+    ``prompt``, a fixed operator line is prefixed *outside* the fence so the
+    model never sees attacker-controlled text as its sole instruction.
     """
+    from praisonaiagents.tools.trust import wrap_request_payload
+
     if template is None:
         payload = event.get("payload")
         try:
-            return json.dumps(payload, ensure_ascii=False, default=str)
+            rendered = json.dumps(payload, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
-            return str(payload)
+            rendered = str(payload)
+        prefix = (
+            f"An external event was received on route {route_name}; "
+            "the payload follows."
+            if route_name
+            else "An external event was received; the payload follows."
+        )
+        return f"{prefix}\n\n{wrap_request_payload(rendered)}"
 
     def _sub(match: "re.Match[str]") -> str:
         value = resolve_field(event, match.group(1).strip())
-        return "" if value is None else str(value)
+        return "" if value is None else wrap_request_payload(str(value))
 
     return _TEMPLATE_RE.sub(_sub, template)
 
@@ -370,7 +391,7 @@ class WebhookBot:
             logger.warning("Webhook channel has no agent configured")
             return
 
-        prompt = render_prompt(route.prompt, event)
+        prompt = render_prompt(route.prompt, event, route_name=self._path)
         message_id = self._message_id_for(event, raw_body)
         user_id = f"webhook:{self._path}"
         await self._session_mgr.chat(
