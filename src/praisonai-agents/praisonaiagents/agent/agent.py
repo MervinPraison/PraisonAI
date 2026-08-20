@@ -6156,12 +6156,28 @@ Answer:"""
 
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
-        if not self.handoffs:
-            return
-            
         # Import here to avoid circular imports
         from .handoff import Handoff
-        
+
+        # as_tool() returns a Handoff, and its own docstring passes the result in
+        # tools=[...]. tools= stores objects verbatim, so an unconverted Handoff
+        # is invisible to both the LLM tool schema and execute_tool(). Convert in
+        # place here -- the first point where the parent agent that
+        # to_tool_function() needs actually exists.
+        if isinstance(self.tools, list):
+            for index, tool_item in enumerate(self.tools):
+                if isinstance(tool_item, Handoff):
+                    try:
+                        self.tools[index] = tool_item.to_tool_function(self)
+                    except Exception as e:
+                        logging.error(
+                            f"Failed to convert as_tool()/handoff {tool_item} "
+                            f"passed in tools=: {e}"
+                        )
+
+        if not self.handoffs:
+            return
+
         for handoff_item in self.handoffs:
             try:
                 if isinstance(handoff_item, Handoff):
