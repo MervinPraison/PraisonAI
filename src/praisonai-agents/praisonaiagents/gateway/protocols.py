@@ -30,6 +30,8 @@ from typing import (
     Iterator,
     List,
     Literal,
+    Mapping,
+    MutableMapping,
     Optional,
     Protocol,
     Sequence,
@@ -4922,6 +4924,26 @@ class GatewayTraceHook(Protocol):
             session=sid,
         ):
             reply = await agent.astart(text)
+
+    W3C trace-context propagation is layered on top of the same seam without
+    forcing OpenTelemetry into core. ``stage`` accepts an optional
+    ``parent_carrier`` (a header mapping such as an inbound request's
+    ``{"traceparent": ..., "tracestate": ...}``) so an exporter can *continue*
+    an upstream caller's trace instead of starting a detached one; and the two
+    companion methods let egress call sites propagate the active span context:
+
+        # ingress: continue the caller's trace when a traceparent arrives
+        with self._trace.stage("agent.run", parent_carrier=inbound.headers):
+            ...
+
+        # egress: write the active traceparent onto an outbound request.
+        # Seed with provider headers first, then inject last so the active
+        # trace context always wins over any stale traceparent/tracestate.
+        headers = dict(provider_headers)
+        self._trace.inject_context(headers)  # no-op unless an exporter is set
+
+    Both companion methods are no-ops in :class:`NullGatewayTraceHook`, so the
+    default path stays zero-cost and OpenTelemetry-free.
     """
 
     def stage(
@@ -4929,6 +4951,7 @@ class GatewayTraceHook(Protocol):
         name: str,
         *,
         correlation_id: "Optional[str]" = None,
+        parent_carrier: "Optional[Mapping[str, str]]" = None,
         **attrs: Any,
     ) -> "AbstractContextManager[Any]":
         """Open a tracing scope for pipeline stage ``name``.
@@ -4938,11 +4961,38 @@ class GatewayTraceHook(Protocol):
                 span name.
             correlation_id: The inbound turn's correlation id, attached as a
                 span attribute so spans and logs share a key.
+            parent_carrier: Optional inbound header mapping carrying W3C
+                trace-context (``traceparent``/``tracestate``). When present and
+                an exporter is attached, the stage is entered *under* the
+                extracted parent context so the span nests within the caller's
+                distributed trace instead of starting a new root.
             **attrs: Extra span attributes (e.g. ``session``, ``model``,
                 ``tool``, ``channel``).
 
         Returns:
             A context manager delimiting the span's lifetime.
+        """
+        ...
+
+    def inject_context(self, carrier: "MutableMapping[str, str]") -> None:
+        """Write the active span context into ``carrier`` as W3C headers.
+
+        Called at an egress boundary (LLM / MCP / HTTP-tool request) so the
+        downstream service's spans nest under the current agent turn. A no-op
+        when no exporter is attached, leaving ``carrier`` untouched.
+        """
+        ...
+
+    def extract_carrier(
+        self, carrier: "Mapping[str, str]"
+    ) -> "Optional[Mapping[str, str]]":
+        """Return a propagation carrier extracted from inbound ``carrier``.
+
+        Reads W3C trace-context (``traceparent``/``tracestate``) from an
+        inbound header mapping and returns a normalized carrier suitable to pass
+        as ``stage(..., parent_carrier=...)``, or ``None`` when no usable
+        context is present. A no-op returning ``None`` when no exporter is
+        attached.
         """
         ...
 
@@ -4967,10 +5017,21 @@ class NullGatewayTraceHook:
         name: str,
         *,
         correlation_id: "Optional[str]" = None,
+        parent_carrier: "Optional[Mapping[str, str]]" = None,
         **attrs: Any,
     ) -> "AbstractContextManager[Any]":
         """Return a no-op context manager, ignoring all arguments."""
         return self._null_scope()
+
+    def inject_context(self, carrier: "MutableMapping[str, str]") -> None:
+        """No-op: leave ``carrier`` untouched when tracing is disabled."""
+        return None
+
+    def extract_carrier(
+        self, carrier: "Mapping[str, str]"
+    ) -> "Optional[Mapping[str, str]]":
+        """No-op: no parent context to continue when tracing is disabled."""
+        return None
 
 
 # Shared singleton: the default no-op hook is stateless, so one instance is
