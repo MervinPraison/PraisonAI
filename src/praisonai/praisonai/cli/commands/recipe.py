@@ -163,8 +163,8 @@ def recipe_runs(
     """List recipe run history.
 
     Shows the durable record of past recipe executions (name, version, status,
-    time, session, and trace id) so you can see what happened the last few times
-    a recipe ran. Use the trace id with `praisonai recipe judge <trace_id>`.
+    time, session, and run id) so you can see what happened the last few times
+    a recipe ran. Use the run id with `praisonai recipe judge <run_id>`.
 
     Examples:
         praisonai recipe runs
@@ -199,7 +199,7 @@ def recipe_runs(
     table.add_column("Status")
     table.add_column("When", style="dim")
     table.add_column("Session", style="cyan")
-    table.add_column("Trace ID", style="magenta")
+    table.add_column("Run ID", style="magenta")
 
     status_style = {"success": "green", "failed": "red", "policy_denied": "yellow", "timeout": "yellow"}
     for run in runs:
@@ -215,7 +215,7 @@ def recipe_runs(
         )
 
     console.print(table)
-    console.print("[dim]Tip: judge a run with `praisonai recipe judge <trace-id>`[/dim]")
+    console.print("[dim]Tip: judge a run with `praisonai recipe judge <run-id>`[/dim]")
 
 
 @app.command("info")

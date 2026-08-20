@@ -1324,7 +1324,7 @@ class PraisonAI:
                     recipe_args.append('--memory')
                 from praisonai_code._wrapper_bridge import import_wrapper_module
                 _recipe_mod = import_wrapper_module('praisonai.cli.features.recipe')
-                handle_recipe_command = getattr(_recipe_mod, 'handle_recipe_command')
+                handle_recipe_command = _recipe_mod.handle_recipe_command
                 exit_code = handle_recipe_command(recipe_args)
                 sys.exit(exit_code)
             

@@ -141,10 +141,42 @@ class TestRunsIndependentOfRegistry:
         assert runs[0]["recipe"] == "gone-recipe"
 
 
+class TestStreamPersistsHistory:
+    """run_stream() should also persist a terminal RecipeResult."""
+
+    def test_stream_success_is_recorded(self, tmp_path):
+        from praisonai.recipe import core
+        from praisonai.recipe.history import RunHistory
+
+        history = RunHistory(path=tmp_path / "runs")
+
+        class _Cfg:
+            name = "stream-recipe"
+            version = "2.0.0"
+            defaults = {}
+
+        with patch("praisonai.recipe.history.get_history", return_value=history), \
+             patch.object(core, "_load_recipe", return_value=_Cfg()), \
+             patch.object(core, "_check_dependencies", return_value={"all_satisfied": True}), \
+             patch.object(core, "_check_tool_policy", return_value=None), \
+             patch.object(core, "_execute_recipe", return_value={"reply": "ok"}):
+            events = list(core.run_stream("stream-recipe", input={"topic": "AI"}))
+
+        assert any(e.event_type == "completed" for e in events)
+        runs = history.list_runs(recipe="stream-recipe")
+        assert len(runs) == 1
+        assert runs[0]["status"] == "success"
+        assert runs[0]["version"] == "2.0.0"
+
+
 class TestLegacyImportClean:
-    """The legacy praison_ai module imports cleanly with the recipe branch wired."""
+    """The legacy praison_ai recipe branch resolves its handler cleanly."""
 
     def test_wrapper_bridge_resolves_recipe_handler(self):
-        # The real handle_recipe_command lives in the wrapper package.
-        from praisonai.cli.features.recipe import handle_recipe_command
-        assert callable(handle_recipe_command)
+        # Exercise the exact bridge path the legacy recipe branch uses to
+        # resolve the real handler in the wrapper package (see
+        # praisonai_code/cli/legacy/praison_ai.py recipe branch).
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+
+        recipe_mod = import_wrapper_module("praisonai.cli.features.recipe")
+        assert callable(recipe_mod.handle_recipe_command)
