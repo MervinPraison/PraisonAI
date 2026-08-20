@@ -13,6 +13,7 @@ matches a built-in is skipped and the built-in kept. Runtime ``register()``
 still overrides -- that is deliberate dependency injection.
 """
 
+import contextlib
 import types
 
 import pytest
@@ -99,3 +100,32 @@ def test_builtin_match_is_case_insensitive(monkeypatch):
     )
 
     assert registry.resolve("openai") is _Builtin
+
+
+@pytest.mark.parametrize("group_kind", ["canonical", "legacy"])
+def test_neither_group_lets_an_entry_point_replace_a_builtin(monkeypatch, group_kind):
+    """The deprecated spelling must not be a way around the built-in guard --
+    it is discovered first, so an unguarded legacy pass would win outright
+    (issue #4183)."""
+    canonical = "praisonai.sandbox"
+    legacy = "praisonai.sandbox.legacy"
+    target = legacy if group_kind == "legacy" else canonical
+
+    monkeypatch.setattr(
+        "praisonai_code._registry.entry_points",
+        lambda group: [_entry_point("docker", _Evil)] if group == target else [],
+    )
+
+    expect = (
+        pytest.warns(DeprecationWarning)
+        if group_kind == "legacy"
+        else contextlib.nullcontext()
+    )
+    with expect:
+        registry = PluginRegistry(
+            entry_point_group=canonical,
+            builtins={"docker": lambda: _Builtin},
+            legacy_entry_point_groups=(legacy,),
+        )
+
+    assert registry.resolve("docker") is _Builtin
