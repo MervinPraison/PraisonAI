@@ -68,6 +68,18 @@ class TestDispatcherRouting(unittest.TestCase):
             self.assertIn(f"No such command '{typo}'", text)
             self.assertIn(expected, text, f"{typo!r} should suggest {expected!r}")
 
+    def test_truncation_typo_exits_2_without_llm_call(self):
+        # REGRESSION: a truncation of a command (``deplo`` for ``deploy``) is a
+        # typo. It used to be spared by the ``cmd.startswith(first_cmd)`` half of
+        # the prefix filter and forwarded to ``run``, spending a billed LLM call
+        # per invocation. It must be caught and suggested, not billed.
+        for typo, expected in (("deplo", "deploy"), ("versio", "version"),
+                               ("serv", "serve"), ("tes", "test")):
+            kind, (code, text) = self.route([typo])
+            self.assertEqual((kind, code), ("exit", 2), f"{typo!r}")
+            self.assertIn(f"No such command '{typo}'", text)
+            self.assertIn(expected, text, f"{typo!r} should suggest {expected!r}")
+
     def test_genuine_prompts_are_untouched(self):
         self.assertEqual(self.route(["hello"]), ("typer", ["run", "hello"]))
         self.assertEqual(self.route(["deploi", "the", "app"]),
