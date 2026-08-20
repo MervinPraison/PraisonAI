@@ -225,19 +225,32 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
     if hasattr(agent, '_telemetry_instrumented'):
         return agent
     
-    # Store original methods. Only chat() and execute_tool() are wrapped;
-    # run()/start() delegate to chat() and wrapping them too double-counts.
+    # Wrap the three sync entry points (run/start/chat) behind a single
+    # re-entrancy guard so each logical execution is counted exactly once.
+    #
+    # We cannot wrap chat() alone: start(stream=True) funnels through
+    # _start_stream() and backend-backed run()/start() funnel through
+    # _delegate_to_backend(), neither of which calls chat(), so those paths
+    # would emit no telemetry. We cannot wrap all three naively either, because
+    # the common path (run()/start() -> chat()) would then count one execution
+    # two or three times. The guard below records on the OUTERMOST instrumented
+    # call only, giving exactly one event per run()/start()/chat() regardless of
+    # which internal path (chat, stream, or backend) actually runs.
     original_chat = agent.chat if hasattr(agent, 'chat') else None
+    original_run = agent.run if hasattr(agent, 'run') else None
+    original_start = agent.start if hasattr(agent, 'start') else None
     original_execute_tool = agent.execute_tool if hasattr(agent, 'execute_tool') else None
-    
-    # Wrap chat method if it exists (this is the main method called by workflow)
-    if original_chat:
-        @wraps(original_chat)
-        def instrumented_chat(*args, **kwargs):
+
+    def _make_instrumented_execution(original_method):
+        @wraps(original_method)
+        def wrapper(*args, **kwargs):
+            # Only the outermost of run/start/chat records the execution.
+            reentrant = getattr(agent, '_telemetry_in_execution', False)
+            if not reentrant:
+                agent._telemetry_in_execution = True
             try:
-                result = original_chat(*args, **kwargs)
-                # Queue telemetry event for batch processing instead of creating threads
-                if not performance_mode:
+                result = original_method(*args, **kwargs)
+                if not reentrant and not performance_mode:
                     _queue_telemetry_event({
                         'type': 'agent_execution',
                         'agent_name': getattr(agent, 'name', 'unknown'),
@@ -245,8 +258,7 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
                     })
                 return result
             except Exception as e:
-                # Queue error event
-                if not performance_mode:
+                if not reentrant and not performance_mode:
                     _queue_telemetry_event({
                         'type': 'agent_execution',
                         'agent_name': getattr(agent, 'name', 'unknown'),
@@ -257,15 +269,17 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
                         'error_type': type(e).__name__
                     })
                 raise
-        
-        agent.chat = instrumented_chat
-    
-    # NOTE: run() and start() are intentionally NOT instrumented. Both delegate
-    # to chat() (Agent.run -> self.chat; Agent.start -> chat/_start_with_planning
-    # -> chat), so wrapping them in addition to chat() counted one logical
-    # execution twice and one failure as two errors. chat() is the single inner
-    # entry point every sync path funnels through, so instrumenting it alone
-    # yields exactly one execution per run()/start()/chat() call.
+            finally:
+                if not reentrant:
+                    agent._telemetry_in_execution = False
+        return wrapper
+
+    if original_chat:
+        agent.chat = _make_instrumented_execution(original_chat)
+    if original_run:
+        agent.run = _make_instrumented_execution(original_run)
+    if original_start:
+        agent.start = _make_instrumented_execution(original_start)
 
     # Wrap execute_tool method
     if original_execute_tool:
