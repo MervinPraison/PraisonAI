@@ -158,11 +158,38 @@ class BotPlatformRegistry(PluginRegistry):
                 continue
         return paths
 
+    @staticmethod
+    def _is_project_local_channel(path) -> bool:
+        """True when ``path`` is reached via ``./.praisonai/channels/``.
+
+        The trust gate must fire on *how the file was reached*, not on where a
+        symlink ultimately points — a repository-controlled
+        ``.praisonai/channels/evil.py -> /tmp/evil.py`` is still
+        project-controlled code. Mirrors ``plugins.discovery._is_project_local``
+        but scoped to the *channels* directory: resolve only the parent dirs
+        (so a symlinked ``channels`` dir is still recognised) while keeping the
+        file's own name un-resolved (so a symlinked file cannot slip the gate).
+        """
+        try:
+            from praisonaiagents.paths import get_project_data_dir
+
+            project_channels = (get_project_data_dir() / "channels").resolve()
+        except Exception:
+            return False
+        try:
+            located = path.expanduser()
+            candidate = located.parent.resolve() / located.name
+            candidate.relative_to(project_channels)
+            return True
+        except Exception:
+            return False
+
     def _load_channel_file(self, path) -> None:
         """Import one channel drop-in file and register its adapter classes.
 
-        Reuses the plugin trust gate for project-local files so a cloned repo
-        cannot silently run a malicious drop-in adapter until the user opts in.
+        Project-local files are gated behind ``PRAISONAI_ALLOW_PROJECT_PLUGINS``
+        (see ``_is_project_local_channel``) so a cloned repo cannot silently run
+        a malicious drop-in adapter until the user opts in.
         """
         import importlib.util
         import inspect
@@ -172,14 +199,15 @@ class BotPlatformRegistry(PluginRegistry):
         logger = logging.getLogger(__name__)
 
         # Trust gate: project-local drop-ins share the single-file plugin
-        # opt-in flag; user-global drop-ins are trusted.
+        # opt-in flag; user-global drop-ins are trusted. NOTE: the plugins
+        # helper ``_is_project_local`` is scoped to ``.praisonai/plugins`` and
+        # would wrongly classify a ``.praisonai/channels`` file as non-project,
+        # so we compute project-locality against the *channels* directory here
+        # (reusing only the shared env-flag helper).
         try:
-            from praisonaiagents.plugins.discovery import (
-                _is_project_local,
-                _project_plugins_allowed,
-            )
+            from praisonaiagents.plugins.discovery import _project_plugins_allowed
 
-            if _is_project_local(path) and not _project_plugins_allowed():
+            if self._is_project_local_channel(path) and not _project_plugins_allowed():
                 logger.warning(
                     "Refusing to load project channel %s: set "
                     "PRAISONAI_ALLOW_PROJECT_PLUGINS=true to enable.",

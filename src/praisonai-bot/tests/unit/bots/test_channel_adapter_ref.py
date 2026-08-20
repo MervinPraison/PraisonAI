@@ -159,3 +159,130 @@ def test_drop_in_channel_file_discovered(tmp_path, monkeypatch):
     for mod in list(sys.modules):
         if mod.startswith("praison_channel_mydrop_"):
             sys.modules.pop(mod, None)
+
+
+def _write_dropin(channels_dir, platform_name="proj_chat"):
+    channels_dir.mkdir(parents=True, exist_ok=True)
+    (channels_dir / "projdrop.py").write_text(
+        textwrap.dedent(
+            f'''
+            from praisonaiagents.bots import BasePlatformAdapter
+
+            class ProjDropBot(BasePlatformAdapter):
+                platform_name = "{platform_name}"
+
+                async def connect(self, *, is_reconnect=False):
+                    return True
+
+                async def disconnect(self):
+                    return None
+
+                async def send_message(self, *a, **k):
+                    return None
+
+                async def listen(self, *a, **k):
+                    return None
+            '''
+        )
+    )
+
+
+def _cleanup_dropin_modules():
+    for mod in list(sys.modules):
+        if mod.startswith("praison_channel_projdrop_"):
+            sys.modules.pop(mod, None)
+
+
+def test_project_dropin_blocked_without_optin(tmp_path, monkeypatch):
+    """A project ``.praisonai/channels`` file must NOT load without the flag.
+
+    Regression for the trust-gate bypass: the gate previously checked the
+    ``.praisonai/plugins`` dir, so project channel files ran unconditionally.
+    """
+    project = tmp_path / "project"
+    _write_dropin(project / ".praisonai" / "channels")
+
+    import praisonaiagents.paths as paths
+
+    monkeypatch.setattr(paths, "get_plugins_dir", lambda: tmp_path / "nouser" / "plugins")
+    monkeypatch.setattr(
+        paths, "get_project_data_dir", lambda *a, **k: project / ".praisonai"
+    )
+    monkeypatch.delenv("PRAISONAI_ALLOW_PROJECT_PLUGINS", raising=False)
+
+    try:
+        reg = R.BotPlatformRegistry()
+        assert "proj_chat" not in reg.list_names()
+    finally:
+        _cleanup_dropin_modules()
+
+
+def test_project_dropin_allowed_with_optin(tmp_path, monkeypatch):
+    """Setting the opt-in flag lets the project channel file load."""
+    project = tmp_path / "project"
+    _write_dropin(project / ".praisonai" / "channels")
+
+    import praisonaiagents.paths as paths
+
+    monkeypatch.setattr(paths, "get_plugins_dir", lambda: tmp_path / "nouser" / "plugins")
+    monkeypatch.setattr(
+        paths, "get_project_data_dir", lambda *a, **k: project / ".praisonai"
+    )
+    monkeypatch.setenv("PRAISONAI_ALLOW_PROJECT_PLUGINS", "true")
+
+    try:
+        reg = R.BotPlatformRegistry()
+        assert "proj_chat" in reg.list_names()
+    finally:
+        _cleanup_dropin_modules()
+
+
+def test_adapter_field_not_forwarded_to_constructor():
+    """The loader-only ``adapter`` YAML key must not reach the adapter ctor.
+
+    Regression: ``adapter:`` is a real channel field, so a naive pass-through
+    of channel config into ``adapter_cls(**init_kwargs)`` raised ``TypeError``
+    for adapters whose ``__init__`` does not accept an ``adapter`` kwarg.
+    """
+    from praisonaiagents.bots import BasePlatformAdapter
+
+    captured = {}
+
+    class StrictBot(BasePlatformAdapter):
+        def __init__(self, token=None, agent=None, config=None, routes=None):
+            captured["init"] = True
+
+        async def connect(self, *, is_reconnect=False):
+            return True
+
+        async def disconnect(self):
+            return None
+
+        async def send(self, chat_id, content, *, reply_to=None, metadata=None):
+            return None
+
+        async def get_chat_info(self, chat_id):
+            return {}
+
+    module = types.ModuleType("fake_strict_mod")
+    module.StrictBot = StrictBot
+    sys.modules["fake_strict_mod"] = module
+
+    ch_cfg = {
+        "platform": "strict_chan",
+        "token": "tok",
+        "adapter": "fake_strict_mod:StrictBot",
+        "routes": {"default": "support"},
+    }
+    init_kwargs = {"token": "tok", "agent": None, "config": None}
+    for key, value in ch_cfg.items():
+        if key in ("platform", "token", "adapter"):
+            continue
+        init_kwargs[key] = value
+
+    try:
+        StrictBot(**init_kwargs)
+        assert captured.get("init") is True
+        assert "adapter" not in init_kwargs
+    finally:
+        sys.modules.pop("fake_strict_mod", None)
