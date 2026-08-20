@@ -57,11 +57,29 @@ def _resolve_catalog_fn():
 def _catalog() -> Dict[str, Dict[str, Any]]:
     """Live view of the external-agent registry (lazy: ``praisonai`` is optional).
 
-    When the wrapper is not installed this degrades to an empty catalog instead
-    of raising, so every registry-backed surface stays usable standalone.
+    Degrades to an empty catalog when the wrapper is unavailable (absent) *or*
+    too old, so passive listing surfaces (``--help`` choices, UI toggles) never
+    raise. The execution path uses :func:`_require_catalog` instead, which
+    surfaces a too-old wrapper as an error rather than a misleading empty list.
     """
     fn, _error = _resolve_catalog_fn()
     if fn is None:
+        return {}
+    return fn()
+
+
+def _require_catalog() -> Dict[str, Dict[str, Any]]:
+    """Resolve the catalog for the *execution* path (issue #4167 defect 3).
+
+    Unlike :func:`_catalog`, a wrapper that is present but predates
+    ``external_agent_catalog`` raises the version-skew error so the user sees the
+    upgrade guidance instead of a misleading "Unknown integration". An absent
+    wrapper still degrades to an empty catalog (standalone stays usable).
+    """
+    fn, error = _resolve_catalog_fn()
+    if fn is None:
+        if error is not None:
+            raise RuntimeError(error)
         return {}
     return fn()
 
@@ -155,7 +173,7 @@ class ExternalAgentsHandler(FlagHandler):
         Raises:
             ValueError: If integration name is invalid
         """
-        catalog = _catalog()
+        catalog = _require_catalog()
         if name not in catalog:
             raise ValueError(f"Unknown integration: {name}. Available: {list(catalog)}")
         
@@ -286,6 +304,11 @@ class ExternalAgentsHandler(FlagHandler):
                 return None
                 
         except ValueError as e:
+            self.print_status(str(e), "error")
+            return None
+        except RuntimeError as e:
+            # Version-skewed wrapper (issue #4167): surface the upgrade guidance
+            # instead of a misleading "Unknown integration" error.
             self.print_status(str(e), "error")
             return None
     

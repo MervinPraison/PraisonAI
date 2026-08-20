@@ -120,9 +120,13 @@ def test_argparse_choices_and_the_handler_agree_about_a_broken_plugin(broken_plu
     assert "broken" not in list_external_agents()
 
 
-def test_registry_does_not_configure_the_root_logger(broken_plugin):
+def test_registry_does_not_configure_the_root_logger(broken_plugin, monkeypatch):
     import logging
 
-    logging.getLogger().handlers.clear()
+    # Replace (not permanently clear) the process-global root logger handlers so
+    # later tests keep their logging/capture handlers. monkeypatch restores the
+    # original list on teardown.
+    root_logger = logging.getLogger()
+    monkeypatch.setattr(root_logger, "handlers", [])
     registry_mod.external_agent_catalog()
-    assert logging.getLogger().handlers == []
+    assert root_logger.handlers == []

@@ -9,6 +9,7 @@ import pytest
 
 from praisonai_code.cli.features.external_agents import (
     ExternalAgentsHandler,
+    _require_catalog,
     _resolve_catalog_fn,
 )
 
@@ -58,3 +59,24 @@ def test_missing_wrapper_degrades_quietly(wrapper_missing):
     fn, error = _resolve_catalog_fn()
     assert fn is None
     assert error is None
+
+
+def test_old_wrapper_execution_path_reports_too_old_not_unknown(old_wrapper):
+    """Direct execution against an old wrapper must surface the upgrade guidance.
+
+    Regression for #4167: ``get_integration``/``execute`` previously discarded
+    the version-skew diagnostic and reported a misleading "Unknown integration"
+    (empty catalog). ``_require_catalog`` now raises the too-old error instead.
+    """
+    with pytest.raises(RuntimeError, match="too old"):
+        _require_catalog()
+
+    with pytest.raises(RuntimeError, match="too old"):
+        ExternalAgentsHandler().get_integration("claude")
+
+
+def test_missing_wrapper_execution_path_stays_empty(wrapper_missing):
+    """An absent wrapper still degrades quietly on the execution path."""
+    assert _require_catalog() == {}
+    with pytest.raises(ValueError, match="Unknown integration"):
+        ExternalAgentsHandler().get_integration("claude")
