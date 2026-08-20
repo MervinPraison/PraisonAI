@@ -98,7 +98,17 @@ class TruncateOptimizer(BaseOptimizer):
                 if msg.get("role") != "system":
                     result.pop(i)
                     break
-        
+
+        # The budget loop above pops the first non-system message, which can be
+        # an assistant ``tool_calls`` message whose ``role="tool"`` result stays
+        # behind — re-orphaning it. Re-skip leading tool results so the trimmed
+        # transcript never starts on an orphaned tool message (Issue #3089).
+        system_msgs = [m for m in result if m.get("role") == "system"]
+        other_msgs = _skip_leading_tool_messages(
+            [m for m in result if m.get("role") != "system"]
+        )
+        result = system_msgs + other_msgs
+
         optimized_tokens = estimate_messages_tokens(result)
         
         return result, OptimizationResult(
