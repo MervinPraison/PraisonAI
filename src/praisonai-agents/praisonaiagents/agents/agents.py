@@ -1461,6 +1461,73 @@ class AgentTeam(SpawnAnnounceProtocol):
                 raise result
         return results
 
+    def _depends_on_pending(self, task, pending):
+        """True if ``task`` depends on a task still pending in the batch.
+
+        ``pending`` is a list of ``(task_id, coroutine)`` pairs already queued
+        for parallel execution. If one of the task's dependencies is in that
+        set, its result isn't available yet, so the batch must be flushed before
+        queuing this task (otherwise the dependent builds its prompt from an
+        empty result for the still-in-progress dependency).
+
+        Two dependency edges are checked, since ``_build_task_context`` reads
+        from both:
+          - ``task.context``: explicit context tasks (by object ``id``).
+          - ``task.previous_tasks``: workflow ``next_tasks`` edges, stored as
+            task *names*; without this a workflow successor could be queued in
+            the same async batch as its predecessor and read an empty result.
+        """
+        if not pending:
+            return False
+        pending_ids = {tid for tid, _ in pending}
+
+        deps = getattr(task, 'context', None) or []
+        if any(getattr(dep, 'id', None) in pending_ids for dep in deps):
+            return True
+
+        previous = getattr(task, 'previous_tasks', None) or []
+        if previous:
+            pending_names = {
+                self.tasks[tid].name
+                for tid in pending_ids
+                if tid in self.tasks
+            }
+            if any(name in pending_names for name in previous):
+                return True
+
+        return False
+
+    def _deps_failed(self, task_id):
+        """True if any dependency of ``task_id`` finished in a failed state.
+
+        asequential()/aworkflow() run their own failure check inside the
+        generator, but async tasks are buffered and drained later, so an
+        upstream async task may not have failed yet when the generator yielded
+        the dependent. Re-checking here — after pending async tasks are flushed
+        — makes the failure cascade fire for the async_execution path too, for
+        both dependency edges ``_build_task_context`` reads (context tasks and
+        workflow ``previous_tasks``).
+        """
+        task = self.tasks.get(task_id)
+        if task is None:
+            return False
+
+        for dep in getattr(task, 'context', None) or []:
+            dep_id = getattr(dep, 'id', None)
+            if dep_id in self.tasks and self.tasks[dep_id].status == "failed":
+                return True
+
+        previous = getattr(task, 'previous_tasks', None) or []
+        if previous:
+            by_name = {t.name: t for t in self.tasks.values()}
+            if any(
+                name in by_name and by_name[name].status == "failed"
+                for name in previous
+            ):
+                return True
+
+        return False
+
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
         process = Process(
@@ -1472,14 +1539,26 @@ class AgentTeam(SpawnAnnounceProtocol):
         )
         
         if self.process == "workflow":
-            tasks_to_run = []
+            tasks_to_run = []  # list of (task_id, coroutine)
             async for task_id in process.aworkflow():
-                if self.tasks[task_id].async_execution:
-                    tasks_to_run.append(self.arun_task(task_id))
+                task = self.tasks[task_id]
+                if task.async_execution:
+                    # If this async task depends on another async task still
+                    # pending in the current batch, flush first so its context
+                    # is available before this one reads it.
+                    if self._depends_on_pending(task, tasks_to_run):
+                        await self._gather_with_isolation([c for _, c in tasks_to_run])
+                        tasks_to_run = []
+                        # A just-flushed prerequisite may now be failed; don't
+                        # queue a dependent that would run with missing context.
+                        if self._deps_failed(task_id):
+                            self.tasks[task_id].status = "failed"
+                            continue
+                    tasks_to_run.append((task_id, self.arun_task(task_id)))
                 else:
                     # If we encounter a sync task, we must wait for the previous async tasks to finish.
                     if tasks_to_run:
-                        await self._gather_with_isolation(tasks_to_run)
+                        await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
                     
                     # Run sync task in an executor to avoid blocking the event loop
@@ -1489,46 +1568,40 @@ class AgentTeam(SpawnAnnounceProtocol):
                     await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
 
             if tasks_to_run:
-                await self._gather_with_isolation(tasks_to_run)
+                await self._gather_with_isolation([c for _, c in tasks_to_run])
                 
         elif self.process == "sequential":
-            async_tasks_to_run = []
+            async_tasks_to_run = []  # list of (task_id, coroutine)
             
             async def flush_async_tasks():
                 """Execute all pending async tasks"""
                 nonlocal async_tasks_to_run
                 if async_tasks_to_run:
-                    await self._gather_with_isolation(async_tasks_to_run)
+                    await self._gather_with_isolation([c for _, c in async_tasks_to_run])
                     async_tasks_to_run = []
 
-            def _deps_failed(task_id):
-                """Re-check dependency failure at consumption time.
-
-                asequential() runs this check inside the generator, but async
-                tasks are buffered and drained later, so an upstream async task
-                may not have failed yet when the generator yielded the dependent.
-                Re-checking here — after pending async tasks are flushed — makes
-                the failure cascade fire for the async_execution path too.
-                """
-                task = self.tasks[task_id]
-                if getattr(task, 'context', None):
-                    return any(
-                        self.tasks[dep.id].status == "failed"
-                        for dep in task.context
-                        if hasattr(dep, 'id') and dep.id in self.tasks
-                    )
-                return False
-
             async for task_id in process.asequential():
-                if self.tasks[task_id].async_execution:
+                task = self.tasks[task_id]
+                if task.async_execution:
+                    # If this async task depends on another async task still
+                    # pending in the current batch, flush first so its context
+                    # is available before this one reads it (avoids a same-batch
+                    # race that silently substitutes empty dependency context).
+                    if self._depends_on_pending(task, async_tasks_to_run):
+                        await flush_async_tasks()
+                        # A just-flushed prerequisite may now be failed; don't
+                        # queue a dependent that would run with missing context.
+                        if self._deps_failed(task_id):
+                            self.tasks[task_id].status = "failed"
+                            continue
                     # Collect async tasks to run in parallel
-                    async_tasks_to_run.append(self.arun_task(task_id))
+                    async_tasks_to_run.append((task_id, self.arun_task(task_id)))
                 else:
                     # Before running a sync task, execute all pending async tasks
                     await flush_async_tasks()
                     # A just-flushed async prerequisite may now be failed; skip
                     # the dependent so we don't run it with missing upstream context.
-                    if _deps_failed(task_id):
+                    if self._deps_failed(task_id):
                         self.tasks[task_id].status = "failed"
                         continue
                     # Run sync task in an executor to avoid blocking the event loop

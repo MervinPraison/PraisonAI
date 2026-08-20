@@ -1766,7 +1766,11 @@ Respond with ONLY a valid JSON tool call in this format:
                 
         except (KeyError, json.JSONDecodeError, TypeError) as e:
             logging.error(f"Error parsing tool call arguments: {e}")
-            function_name = tool_call.get("name", "unknown_function")
+            function_name = (
+                tool_call.get("function", {}).get("name")
+                if isinstance(tool_call.get("function"), dict)
+                else None
+            ) or tool_call.get("name", "unknown_function")
             arguments = {}
             tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
             
