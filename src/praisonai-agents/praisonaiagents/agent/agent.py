@@ -1677,9 +1677,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # guardrail, instead of storing something that never runs. Silently
         # dropping a validator the caller explicitly asked for is a "safe by
         # default" violation, same rationale as the policy-string guard above.
+        # An empty list/tuple resolves to None (no validator was actually
+        # supplied), which the resolver already treated as a no-op on main -
+        # keep that backward-compatible instead of raising on an empty opt-in.
+        _is_empty_guardrails = (
+            isinstance(guardrails, (list, tuple)) and len(guardrails) == 0
+        )
         if (
             guardrails is not None
             and guardrails is not False
+            and not _is_empty_guardrails
             and not (
                 callable(_guardrails_config)
                 or isinstance(_guardrails_config, (GuardrailConfig, str))

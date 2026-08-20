@@ -93,6 +93,13 @@ class TestExistingShapesUnchanged:
         assert _agent(False)._guardrail_fn is None
         assert _agent(True)._guardrail_fn is None
 
+    def test_empty_list_or_tuple_is_a_noop(self):
+        # An empty opt-in resolved to None on main; it must stay a no-op and
+        # not trip the new fail-loud TypeError guard.
+        assert _agent([])._guardrail_fn is None
+        assert _agent(())._guardrail_fn is None
+        assert _agent([])._tool_call_guardrails == []
+
     def test_plain_callable_passthrough(self):
         a = _agent(fn_guard)
         assert a._guardrail_fn is fn_guard
