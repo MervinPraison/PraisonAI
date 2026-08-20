@@ -521,3 +521,47 @@ def test_the_two_docker_implementations_agree_on_their_image():
         f"the two docker implementations disagree: sandbox={sandbox_default!r} "
         f"compute={compute_default!r} -- same name, different container"
     )
+
+
+def test_every_install_hint_names_an_extra_that_exists():
+    """The hints told users to run `pip install praisonai[e2b]`, which did not
+    exist, and `praisonai[daytona]`, which existed but was empty. Following the
+    official advice installed nothing and produced the identical failure -- the
+    worst kind of error message, because it looks like it is helping."""
+    from pathlib import Path
+
+    try:
+        import tomllib  # Python 3.11+
+    except ModuleNotFoundError:  # Python 3.10 ships no stdlib TOML parser
+        tomllib = pytest.importorskip(
+            "tomli", reason="need a TOML parser (stdlib tomllib or tomli) to read pyproject"
+        )
+
+    from praisonaiagents.managed._compute_bridge import _EXTRA_HINTS
+
+    root = Path(__file__).resolve().parents[4]
+    tables = {}
+    for pkg, rel in (("praisonai-sandbox", "src/praisonai-sandbox/pyproject.toml"),
+                     ("praisonai", "src/praisonai/pyproject.toml")):
+        path = root / rel
+        if path.exists():
+            tables[pkg] = tomllib.load(path.open("rb"))["project"].get(
+                "optional-dependencies", {}
+            )
+    if not tables:
+        pytest.skip("running against installed packages, not the source tree")
+
+    for place, hint in _EXTRA_HINTS.items():
+        if "pip install" not in hint:
+            continue                     # a credential hint, not an install
+        spec = hint.split("'")[1] if "'" in hint else hint.split()[-1]
+        base, _, extra = spec.partition("[")
+        extra = extra.rstrip("]")
+        assert base in tables, (
+            f"the hint for {place!r} says `{hint}`, but {base!r} is not one of "
+            f"the packages whose extras were resolved ({sorted(tables)})"
+        )
+        assert tables[base].get(extra), (
+            f"the hint for {place!r} says `{hint}`, but {base}[{extra}] is "
+            f"missing or empty -- following it installs nothing"
+        )
