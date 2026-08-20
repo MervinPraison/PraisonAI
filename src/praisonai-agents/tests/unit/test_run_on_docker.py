@@ -57,7 +57,9 @@ def test_docker_is_also_a_tool_place():
 
 def test_run_on_docker_builds_the_self_hosted_backend():
     backend = _agent(run_on="docker").backend
-    assert type(backend).__name__ == "DockerManagedAgent"
+    # docker goes through the same generic backend as every other place; the
+    # bespoke one was deleted because its containers could not be reclaimed.
+    assert backend.provider_name == "docker"
     assert backend.provider_name == "docker"
 
 
@@ -88,7 +90,7 @@ def test_naming_both_is_still_a_conflict():
 def test_the_agent_is_rebuilt_from_serialisable_config_only():
     """A Python callable cannot be reconstructed in the container, so it is not
     sent. The limitation is real; the test pins it so it stays deliberate."""
-    from praisonai.integrations.docker_managed_agent import _as_dict
+    from praisonai.integrations.compute_managed_agent import _as_dict
 
     def local_tool(x: str) -> str:
         return x
@@ -102,7 +104,7 @@ def test_the_agent_is_rebuilt_from_serialisable_config_only():
 
 def test_hosted_config_spellings_are_translated():
     """HostedAgentConfig says system/model where Agent says instructions/llm."""
-    from praisonai.integrations.docker_managed_agent import _as_dict
+    from praisonai.integrations.compute_managed_agent import _as_dict
 
     out = _as_dict({"system": "you are terse", "model": "gpt-4o-mini"})
     assert out["instructions"] == "you are terse"
@@ -111,7 +113,7 @@ def test_hosted_config_spellings_are_translated():
 
 
 def test_an_empty_config_still_produces_a_valid_agent():
-    from praisonai.integrations.docker_managed_agent import _as_dict
+    from praisonai.integrations.compute_managed_agent import _as_dict
 
     assert _as_dict(None)["instructions"]
 
@@ -119,7 +121,7 @@ def test_an_empty_config_still_produces_a_valid_agent():
 def test_the_result_is_read_from_a_marked_line():
     """pip warnings and telemetry share stdout with the answer, so the result
     is marked rather than assumed to be the last line."""
-    from praisonai.integrations.docker_managed_agent import _parse
+    from praisonai.integrations.compute_managed_agent import _parse
 
     noisy = (
         "WARNING: Running pip as root\n"
@@ -132,15 +134,17 @@ def test_the_result_is_read_from_a_marked_line():
 
 # ── failure is reported, not swallowed ───────────────────────────────────────
 def test_a_missing_daemon_says_what_to_do():
-    from praisonai.integrations.docker_managed_agent import DockerManagedAgent
+    import asyncio
 
-    backend = DockerManagedAgent()
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    backend = ComputeManagedAgent("docker")
     if backend.is_available:
         pytest.skip("Docker is running, so this path cannot be exercised")
     with pytest.raises(RuntimeError) as exc:
-        backend._ensure_container()
+        asyncio.run(backend._ensure())
     message = str(exc.value)
-    assert "Docker daemon" in message
+    assert "docker" in message
     assert "tools_run_on='docker'" in message, "offer the alternative that needs no daemon"
 
 
@@ -149,31 +153,35 @@ def test_a_missing_daemon_says_what_to_do():
 def test_the_whole_agent_really_runs_in_a_container():
     """Proves the loop moved: the agent reports the container's platform, not
     the host's. Needs a model key, so it asserts placement rather than output."""
-    from praisonai.integrations.docker_managed_agent import DockerManagedAgent
+    import asyncio
 
-    backend = DockerManagedAgent(config={"instructions": "be brief"})
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    backend = ComputeManagedAgent("docker", config={"instructions": "be brief"})
     try:
-        backend._ensure_container()
-        assert backend._container, "no container was started"
+        asyncio.run(backend._ensure())
+        assert backend._instance, "no container was started"
         probe = subprocess.run(
-            ["docker", "exec", backend._container, "python", "-c",
+            ["docker", "exec", f"praisonai_{backend._instance}", "python", "-c",
              "import platform, praisonaiagents; print(platform.system())"],
             capture_output=True, text=True, timeout=300,
         )
         assert probe.returncode == 0, probe.stderr[-400:]
         assert probe.stdout.strip() == "Linux", "the loop is not in a Linux container"
     finally:
-        backend.shutdown()
+        asyncio.run(backend.ashutdown())
 
 
 @needs_docker
 def test_the_container_is_removed_afterwards():
-    from praisonai.integrations.docker_managed_agent import DockerManagedAgent
+    import asyncio
 
-    backend = DockerManagedAgent()
-    backend._ensure_container()
-    name = backend._container
-    backend.shutdown()
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    backend = ComputeManagedAgent("docker")
+    asyncio.run(backend._ensure())
+    name = f"praisonai_{backend._instance}"
+    asyncio.run(backend.ashutdown())
 
     remaining = subprocess.run(
         ["docker", "ps", "-aq", "--filter", f"name={name}"],
@@ -221,3 +229,58 @@ def test_the_remote_agent_is_rebuilt_without_callables():
     out = _as_dict({"instructions": "be brief", "tools": [local_tool]})
     assert "tools" not in out, "callables cannot be rebuilt remotely"
     assert out["instructions"] == "be brief"
+
+
+@needs_docker
+def test_a_whole_agent_container_can_be_reclaimed():
+    """It could be listed but not stopped.
+
+    The bespoke Docker backend named its containers `praisonai-agent-<hex>`,
+    while DockerCompute's lookup expects `praisonai_<instance_id>`. So
+    `praisonai managed ps` showed the container and `praisonai managed stop`
+    raised "No docker container found" -- the worst combination, because the
+    user can see the thing they cannot reclaim. Routing through the provider
+    fixes it by construction.
+    """
+    import asyncio
+
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+    from praisonaiagents.managed._compute_bridge import resolve_compute
+
+    backend = ComputeManagedAgent("docker")
+    asyncio.run(backend._ensure())
+    instance = backend._instance
+    try:
+        provider = resolve_compute("docker")
+        listed = [i.instance_id for i in asyncio.run(provider.list_instances())]
+        assert instance in listed, "managed ps cannot see the container"
+
+        # the half that used to fail
+        asyncio.run(provider.shutdown(instance))
+    except Exception:
+        asyncio.run(backend.ashutdown())
+        raise
+
+    remaining = subprocess.run(
+        ["docker", "ps", "-aq", "--filter", f"name=praisonai_{instance}"],
+        capture_output=True, text=True, timeout=120,
+    ).stdout.strip()
+    assert remaining == "", "managed stop reported success but left the container"
+
+
+def test_the_generic_backend_honours_a_requested_image():
+    """`image=` used to fall into **kwargs and be silently ignored, so asking
+    for a specific image quietly got the provider's default."""
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    backend = ComputeManagedAgent("docker", image="python:3.11-slim")
+    assert backend._image == "python:3.11-slim"
+
+
+def test_docker_is_no_longer_a_special_case():
+    """Every place that can host a loop now uses one backend. Docker was the
+    lone exception, and the exception is what carried the reclaim bug."""
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    for place in ("docker", "modal", "e2b"):
+        assert isinstance(_agent(run_on=place).backend, ComputeManagedAgent)

@@ -7,6 +7,7 @@ Requires: ``pip install daytona-sdk``
 Environment: ``DAYTONA_API_KEY``, ``DAYTONA_API_URL``, ``DAYTONA_TARGET``
 """
 
+from ._sync_base import SyncComputeProvider
 import logging
 import os
 import time
@@ -16,7 +17,7 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 
-class DaytonaCompute:
+class DaytonaCompute(SyncComputeProvider):
     """Daytona cloud sandbox compute provider.
 
     Satisfies ``ComputeProviderProtocol`` (Core SDK).
@@ -72,10 +73,6 @@ class DaytonaCompute:
     def is_available(self) -> bool:
         return bool(self._api_key)
 
-    async def provision(self, config) -> Any:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._provision_sync, config)
 
     def _provision_sync(self, config) -> Any:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
@@ -159,17 +156,6 @@ class DaytonaCompute:
             created_at=info.get("created_at", 0),
         )
 
-    async def execute(
-        self,
-        instance_id: str,
-        command: str,
-        timeout: int = 300,
-    ) -> Dict[str, Any]:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._execute_sync, instance_id, command, timeout,
-        )
 
     def _execute_sync(
         self, instance_id: str, command: str, timeout: int,
@@ -189,14 +175,6 @@ class DaytonaCompute:
         except Exception as e:
             return {"stdout": "", "stderr": str(e), "exit_code": -1}
 
-    async def upload_file(
-        self, instance_id: str, local_path: str, remote_path: str,
-    ) -> bool:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._upload_sync, instance_id, local_path, remote_path,
-        )
 
     def _upload_sync(self, instance_id: str, local_path: str, remote_path: str) -> bool:
         info = self._sandboxes.get(instance_id)
@@ -214,14 +192,6 @@ class DaytonaCompute:
             logger.error("[daytona_compute] upload failed: %s", e)
             return False
 
-    async def download_file(
-        self, instance_id: str, remote_path: str, local_path: str,
-    ) -> bool:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._download_sync, instance_id, remote_path, local_path,
-        )
 
     def _download_sync(self, instance_id: str, remote_path: str, local_path: str) -> bool:
         info = self._sandboxes.get(instance_id)

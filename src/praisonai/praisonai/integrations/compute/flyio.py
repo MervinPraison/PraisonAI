@@ -13,6 +13,7 @@ Fly.io Machines API:
 - Built-in regions worldwide
 """
 
+from ._sync_base import SyncComputeProvider
 import logging
 import os
 import time
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 FLY_API_BASE = "https://api.machines.dev/v1"
 
 
-class FlyioCompute:
+class FlyioCompute(SyncComputeProvider):
     """Fly.io Machines-based compute provider.
 
     Satisfies ``ComputeProviderProtocol`` (Core SDK).

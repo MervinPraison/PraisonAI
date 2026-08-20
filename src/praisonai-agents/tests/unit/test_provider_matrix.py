@@ -344,3 +344,156 @@ def test_daytona_uploads_content_then_destination(monkeypatch, tmp_path):
 
     assert calls["src"] == b"real-content", "file content must be the src argument"
     assert calls["dst"] == "/remote/dest.txt", "remote path must be the dst argument"
+
+
+# ── conformance: the four vendors implemented twice must agree ───────────────
+# Docker-only parity is what let Daytona rot. Three defects — a Python version
+# split, memory in the wrong unit, and reversed upload arguments — were all the
+# same shape: one of two implementations of a vendor learned a convention and
+# the other never did, and nothing compared them.
+
+SHARED_VENDORS = ("docker", "e2b", "modal", "daytona")
+
+
+@pytest.mark.parametrize("vendor", SHARED_VENDORS)
+def test_both_implementations_of_a_vendor_exist_and_are_distinct(vendor):
+    """Establishes the premise the rest of this section rests on."""
+    from praisonaiagents.managed._compute_bridge import _PROVIDERS
+    from praisonaiagents.sandbox._sandbox_bridge import resolve_sandbox_class
+
+    assert vendor in _PROVIDERS, f"{vendor} should have a compute implementation"
+    assert resolve_sandbox_class(vendor), f"{vendor} should have a sandbox implementation"
+
+
+@pytest.mark.parametrize("vendor", SHARED_VENDORS)
+def test_neither_implementation_passes_megabytes_where_gib_is_wanted(vendor):
+    """Daytona's SDK documents memory in GiB. One side converted, the other
+    passed ComputeConfig.memory_mb straight through and asked for 1024 GiB."""
+    import inspect
+
+    from praisonaiagents.sandbox._sandbox_bridge import resolve_sandbox_class
+
+    sources = []
+    try:
+        from praisonaiagents.managed._compute_bridge import _PROVIDERS
+
+        module, attr = _PROVIDERS[vendor]
+        sources.append(getattr(__import__(module, fromlist=[attr]), attr))
+    except Exception:
+        pass
+    try:
+        sources.append(resolve_sandbox_class(vendor))
+    except Exception:
+        pass
+
+    for cls in sources:
+        try:
+            src = inspect.getsource(cls)
+        except Exception:
+            continue
+        assert "memory=config.memory_mb" not in src, (
+            f"{cls.__name__} passes megabytes into a field whose SDK wants GiB"
+        )
+        assert "memory=self.memory_mb" not in src, (
+            f"{cls.__name__} passes megabytes into a field whose SDK wants GiB"
+        )
+
+
+# ── an explicitly requested image must reach the provider, not be dropped ─────
+# The generic ComputeManagedAgent forwards `image=` only through
+# ComputeConfig.image. Docker/Daytona/Fly read that field; E2B and Modal chose
+# their own base and ignored it, so `run_on='e2b', image=...` silently booted
+# the default. Same shape of drift as the memory-unit bug: assert the value the
+# vendor SDK actually receives, not the source that produces it.
+def test_e2b_honours_a_non_default_image_as_its_template(monkeypatch):
+    pytest.importorskip("praisonai.integrations.compute.e2b")
+    import sys
+    import types
+
+    from praisonaiagents.managed.protocols import ComputeConfig
+
+    recorded = {}
+
+    class _Sandbox:
+        sandbox_id = "sbx-1"
+
+        @staticmethod
+        def create(template=None, **kw):
+            recorded["template"] = template
+            return _Sandbox()
+
+    fake = types.ModuleType("e2b")
+    fake.Sandbox = _Sandbox
+    monkeypatch.setitem(sys.modules, "e2b", fake)
+
+    from praisonai.integrations.compute.e2b import E2BCompute
+
+    provider = E2BCompute(api_key="test-key")
+
+    provider._provision_sync(ComputeConfig(image="my-custom-template"))
+    assert recorded["template"] == "my-custom-template", (
+        "an explicitly requested image must reach E2B as the template"
+    )
+
+    provider._provision_sync(ComputeConfig())
+    assert recorded["template"] is None, (
+        "the default image must not be forced onto E2B as a template"
+    )
+
+
+def test_modal_honours_a_non_default_image_from_the_registry(monkeypatch):
+    pytest.importorskip("praisonai.integrations.compute.modal_compute")
+    import sys
+    import types
+
+    from praisonaiagents.managed.protocols import ComputeConfig
+
+    recorded = {}
+
+    class _Image:
+        def pip_install(self, *a, **k):
+            return self
+
+        def apt_install(self, *a, **k):
+            return self
+
+    class _ImageFactory:
+        @staticmethod
+        def from_registry(ref, **kw):
+            recorded["from_registry"] = ref
+            return _Image()
+
+        @staticmethod
+        def debian_slim(**kw):
+            recorded["debian_slim"] = True
+            return _Image()
+
+    class _Sandbox:
+        object_id = "mdl-1"
+
+        @staticmethod
+        def create(*a, **k):
+            return _Sandbox()
+
+    fake = types.ModuleType("modal")
+    fake.Image = _ImageFactory
+    fake.Sandbox = _Sandbox
+    fake.Secret = types.SimpleNamespace(from_dict=lambda d: object())
+    monkeypatch.setitem(sys.modules, "modal", fake)
+
+    from praisonai.integrations.compute.modal_compute import ModalCompute
+
+    provider = ModalCompute()
+    monkeypatch.setattr(provider, "_get_app", lambda: object())
+
+    recorded.clear()
+    provider._provision_sync(ComputeConfig(image="ghcr.io/acme/base:1"))
+    assert recorded.get("from_registry") == "ghcr.io/acme/base:1", (
+        "an explicitly requested image must reach Modal via from_registry"
+    )
+
+    recorded.clear()
+    provider._provision_sync(ComputeConfig())
+    assert recorded.get("debian_slim") and "from_registry" not in recorded, (
+        "the default image must keep Modal on debian_slim"
+    )
