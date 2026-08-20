@@ -62,6 +62,9 @@ def test_tool_call_parsing():
     print("✓ Alternative format parsing works")
     
     # Test 3: Error handling - malformed JSON
+    # The real tool name is preserved from tool_call["function"]["name"] so the
+    # model receives the failure for the correct tool and can retry, instead of
+    # aborting the turn with a fabricated name. Arguments fall back to empty.
     tool_call_bad = {
         "function": {
             "name": "hello_world",
@@ -69,9 +72,20 @@ def test_tool_call_parsing():
         }
     }
     name, args, id = llm._parse_tool_call_arguments(tool_call_bad, is_ollama=False)
-    assert name == "unknown_function", f"Expected 'unknown_function' for malformed JSON, got '{name}'"
+    assert name == "hello_world", f"Expected real tool name 'hello_world' preserved on malformed JSON, got '{name}'"
     assert args == {}, f"Expected empty dict, got {args}"
     print("✓ Error handling works")
+
+    # Test 3b: malformed JSON with no recoverable name falls back to unknown_function
+    tool_call_nameless = {
+        "function": {
+            "arguments": 'invalid json'
+        }
+    }
+    name, args, id = llm._parse_tool_call_arguments(tool_call_nameless, is_ollama=False)
+    assert name == "unknown_function", f"Expected 'unknown_function' when no name is recoverable, got '{name}'"
+    assert args == {}, f"Expected empty dict, got {args}"
+    print("✓ Nameless fallback works")
 
 def test_agent_tool_parameter_logic():
     """Test the fixed tool parameter logic in Agent"""
