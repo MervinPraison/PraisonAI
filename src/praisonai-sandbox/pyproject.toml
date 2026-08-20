@@ -46,7 +46,7 @@ novita = [
     "novita-sandbox>=2.0.0",
 ]
 all = [
-    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal,daytona,novita]",
+    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal,daytona,novita,tenki,flyio]",
 ]
 
 [project.urls]
