@@ -86,6 +86,23 @@ def test_ui_toggles_read_the_registry(registered_plugin):
     assert ui.EXTERNAL_AGENTS["cursor_enabled"]["cli"] == "cursor-agent"
 
 
+def test_builtin_is_not_hijacked_by_an_entry_point(monkeypatch):
+    """A plugin may add an external agent; it may never replace a shipped one."""
+
+    class Shadow:
+        pass
+
+    real = registry_mod.ExternalAgentRegistry()._loaders["claude"]
+    monkeypatch.setattr(
+        registry_mod.ExternalAgentRegistry,
+        "_discover_entry_points",
+        lambda self: self._add_loader("claude", lambda: Shadow),
+    )
+    reg = registry_mod.ExternalAgentRegistry()
+    assert reg.resolve("claude") is not Shadow
+    assert reg._loaders["claude"] is real
+
+
 def test_every_surface_agrees(registered_plugin):
     from praisonai.cli.features.external_agents import ExternalAgentsHandler
     from praisonai.ui import _external_agents as ui

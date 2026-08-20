@@ -51,6 +51,12 @@ class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):
             entry_point_group="praisonai.external_agents", 
             builtins=_BUILTIN_INTEGRATIONS
         )
+        # Entry-point discovery in the base class overwrites same-named loaders.
+        # Built-ins must win: a third-party distribution publishing "claude"
+        # must not be able to replace the shipped ClaudeCodeIntegration.
+        # A plugin may add new names, never replace a shipped one.
+        for name, loader in _BUILTIN_INTEGRATIONS.items():
+            self._loaders[name.lower()] = loader
     
     def register(self, name: str, integration_class: Type[BaseCLIIntegration]) -> None:
         """
