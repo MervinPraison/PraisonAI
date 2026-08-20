@@ -98,3 +98,36 @@ def test_untagged_legacy_child_restores_only_when_opted_in(
 
     monkeypatch.setenv(LEGACY_AGENT_KEYS_ENV, "1")
     assert session._restore_agent_chat_history("support:agent") == REAL
+
+
+def test_tagged_legacy_child_restored_even_when_partially_migrated(store, session):
+    """A tagged legacy agent must resume even if the parent already holds
+    a *different* agent in the current format (partial migration)."""
+    # Agent A already migrated into the parent's own record.
+    store.update_session_metadata("chat", **{AGENT_HISTORY_KEY: {"a:agent": SUB}})
+    # Agent B still lives only in a tagged legacy record.
+    store.set_chat_history("chat_support:agent", REAL)
+    store.update_session_metadata(
+        "chat_support:agent", parent_session_id="chat", agent_key="support:agent"
+    )
+
+    assert session._restore_agent_chat_history("support:agent") == REAL
+
+    session._restore_agent_chat_histories()
+    assert session._agents["a:agent"]["chat_history"] == SUB
+    assert session._agents["support:agent"]["chat_history"] == REAL
+
+
+def test_concurrent_save_preserves_other_agents(store, session):
+    """A second writer under the same parent must not drop the first's entry."""
+    session._agents["a:agent"] = {"agent": None, "chat_history": REAL}
+    session._save_agent_chat_histories()
+
+    from praisonaiagents.session.api import Session
+
+    other = Session(session_id="chat")
+    other._agents["b:agent"] = {"agent": None, "chat_history": SUB}
+    other._save_agent_chat_histories()
+
+    stored = store.get_session("chat").metadata[AGENT_HISTORY_KEY]
+    assert stored == {"a:agent": REAL, "b:agent": SUB}

@@ -320,6 +320,19 @@ class Session:
             return {}
         return {k: v for k, v in histories.items() if isinstance(v, list) and v}
 
+    def _merged_agent_histories(self, session_store) -> Dict[str, List[Dict[str, Any]]]:
+        """All known sub-agent transcripts: legacy records under current ones.
+
+        Legacy per-agent records are read *underneath* the parent's current
+        ``metadata[AGENT_HISTORY_KEY]`` so a partially-migrated parent (one
+        agent already in the current format) still surfaces a *different*
+        agent that only exists in a tagged legacy record. Current-format
+        entries always win on key collisions.
+        """
+        merged = dict(self._legacy_agent_histories(session_store))
+        merged.update(self._stored_agent_histories(session_store))
+        return merged
+
     def _restore_agent_chat_history(self, agent_key: str) -> List[Dict[str, Any]]:
         """
         Restore agent chat history from memory.
@@ -335,15 +348,11 @@ class Session:
 
         session_store = self._get_session_store()
 
-        # Current format: inside this session's own record.
-        stored = self._stored_agent_histories(session_store)
-        if agent_key in stored:
-            return stored[agent_key]
-        if not stored:
-            # Not migrated yet: fall back to the legacy per-agent records.
-            legacy = self._legacy_agent_histories(session_store)
-            if agent_key in legacy:
-                return legacy[agent_key]
+        # Current format first, then any (tagged / opted-in) legacy per-agent
+        # record — even when the parent is only partially migrated.
+        merged = self._merged_agent_histories(session_store)
+        if agent_key in merged:
+            return merged[agent_key]
 
         results = self.memory.search_short_term(
             query="Agent chat history for",
@@ -431,13 +440,10 @@ class Session:
 
         session_store = self._get_session_store()
 
-        # Current format first, then the legacy per-agent session records.
-        stored = self._stored_agent_histories(session_store)
-        for agent_key, messages in stored.items():
+        # Current-format records win; legacy (tagged / opted-in) ones fill the
+        # gaps so a partially-migrated parent still recovers every agent.
+        for agent_key, messages in self._merged_agent_histories(session_store).items():
             self._agents[agent_key] = {"agent": None, "chat_history": messages}
-        if not stored:
-            for agent_key, messages in self._legacy_agent_histories(session_store).items():
-                self._agents[agent_key] = {"agent": None, "chat_history": messages}
 
         results = self.memory.search_short_term(
             query="Agent chat history for",
@@ -460,18 +466,39 @@ class Session:
     def _store_agent_history(
         self, session_store, agent_key: str, messages: List[Dict[str, Any]]
     ) -> bool:
-        """Persist one sub-agent transcript onto this session's own record."""
+        """Persist one sub-agent transcript onto this session's own record.
+
+        The store replaces the whole ``AGENT_HISTORY_KEY`` map per write, so a
+        naive read-then-replace would let a concurrent writer (another agent
+        under the same parent) clobber this agent's entry, or vice versa. We
+        re-read the freshest map immediately before each write and confirm no
+        *other* key changed underneath us, retrying a bounded number of times.
+        Legacy per-agent records are always merged in (they stay on disk).
+        """
         update_meta = getattr(session_store, "update_session_metadata", None)
         if not callable(update_meta):
             return False
-        histories = self._stored_agent_histories(session_store)
-        # First write after upgrading: carry the legacy per-agent records
-        # forward (they are left on disk untouched).
-        histories = dict(histories) if histories else dict(
-            self._legacy_agent_histories(session_store)
+        legacy = self._legacy_agent_histories(session_store)
+        for _ in range(5):
+            current = self._stored_agent_histories(session_store)
+            merged = dict(legacy)
+            merged.update(current)
+            merged[agent_key] = messages
+            if not update_meta(self.session_id, **{AGENT_HISTORY_KEY: merged}):
+                return False
+            # Verify a concurrent writer did not drop another agent between our
+            # read and write; if the persisted map matches what we wrote, we win.
+            persisted = self._stored_agent_histories(session_store)
+            if persisted.get(agent_key) == messages and all(
+                persisted.get(k) == v for k, v in current.items()
+            ):
+                return True
+        logger.warning(
+            "Session %r: sub-agent history for %r may have raced with a "
+            "concurrent writer after retries.",
+            self.session_id, agent_key,
         )
-        histories[agent_key] = messages
-        return bool(update_meta(self.session_id, **{AGENT_HISTORY_KEY: histories}))
+        return True
 
     def _save_agent_chat_histories(self) -> None:
         """Save all agent chat histories.
