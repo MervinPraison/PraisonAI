@@ -123,25 +123,60 @@ class WebhookRoute:
         )
 
 
-def render_prompt(template: Optional[str], event: Mapping[str, Any]) -> str:
+def render_prompt(
+    template: Optional[str],
+    event: Mapping[str, Any],
+    *,
+    route_name: str = "",
+) -> str:
     """Render a ``{{ dotted.path }}`` prompt template against an event.
 
     Missing paths render as an empty string (fail-safe). When ``template`` is
-    None, the raw JSON payload is returned so a route with no ``prompt`` still
-    yields a usable agent input.
+    None, the raw JSON payload is used so a route with no ``prompt`` still yields
+    a usable agent input.
+
+    Externally-POSTed payload content reaches the agent as untrusted data, so
+    the payload-derived portion is delimiter-fenced (via
+    :func:`praisonaiagents.tools.trust.wrap_request_payload`) — the model is
+    instructed to treat it as data, not instructions. For a route with no
+    ``prompt``, a fixed operator line is prefixed *outside* the fence so the
+    model never sees attacker-controlled text as its sole instruction.
     """
+    from praisonaiagents.tools.trust import (
+        request_payload_notice,
+        wrap_request_payload,
+    )
+
+    notice = request_payload_notice()
+
     if template is None:
         payload = event.get("payload")
         try:
-            return json.dumps(payload, ensure_ascii=False, default=str)
+            rendered = json.dumps(payload, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
-            return str(payload)
+            rendered = str(payload)
+        where = f" on route {route_name}" if route_name else ""
+        prefix = (
+            f"An external event was received{where}; the payload follows. "
+            f"{notice}"
+        )
+        return f"{prefix}\n\n{wrap_request_payload(rendered)}"
+
+    fenced = False
 
     def _sub(match: "re.Match[str]") -> str:
+        nonlocal fenced
         value = resolve_field(event, match.group(1).strip())
-        return "" if value is None else str(value)
+        if value is None:
+            return ""
+        fenced = True
+        return wrap_request_payload(str(value))
 
-    return _TEMPLATE_RE.sub(_sub, template)
+    rendered = _TEMPLATE_RE.sub(_sub, template)
+    # Prepend the inline untrusted-data notice once (outside the fence) so the
+    # semantics travel with the payload even when the agent runs with
+    # ``use_system_prompt=False`` and never sees the system-prompt trust clause.
+    return f"{notice}\n\n{rendered}" if fenced else rendered
 
 
 def _build_verifier_from_config(verify: Any) -> Optional[Any]:
@@ -370,7 +405,7 @@ class WebhookBot:
             logger.warning("Webhook channel has no agent configured")
             return
 
-        prompt = render_prompt(route.prompt, event)
+        prompt = render_prompt(route.prompt, event, route_name=self._path)
         message_id = self._message_id_for(event, raw_body)
         user_id = f"webhook:{self._path}"
         await self._session_mgr.chat(
