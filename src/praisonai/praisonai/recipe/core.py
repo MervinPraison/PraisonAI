@@ -139,6 +139,26 @@ def reload_registry():
 _recipe_cache: Dict[str, Any] = {}
 
 
+def _history_enabled() -> bool:
+    """Whether recipe run history persistence is enabled (default: on)."""
+    value = os.environ.get("PRAISONAI_RECIPE_HISTORY", "true").strip().lower()
+    return value not in ("0", "false", "no", "off")
+
+
+def _persist_history(result: RecipeResult, input_data: Any) -> None:
+    """Persist a RecipeResult to run history. Never raises."""
+    if not _history_enabled():
+        return
+    try:
+        from . import history
+
+        payload = input_data if isinstance(input_data, dict) else {"input": input_data}
+        history.store_run(result, input_data=payload or None)
+    except Exception as e:  # pragma: no cover - defensive, must not fail the run
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to persist recipe run history: {e}")
+
+
 def run(
     name: str,
     input: Union[str, Dict[str, Any]] = None,
@@ -172,6 +192,19 @@ def run(
         >>> if result.ok:
         ...     print(result.output["reply"])
     """
+    result = _run_impl(name, input=input, config=config, session_id=session_id, options=options)
+    _persist_history(result, input)
+    return result
+
+
+def _run_impl(
+    name: str,
+    input: Union[str, Dict[str, Any]] = None,
+    config: Optional[Dict[str, Any]] = None,
+    session_id: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None,
+) -> RecipeResult:
+    """Internal recipe execution (history persistence handled by run())."""
     options = options or {}
     config = config or {}
     input = input or {}
