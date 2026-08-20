@@ -24,6 +24,11 @@ from praisonaiagents.sandbox import (
 
 logger = logging.getLogger(__name__)
 
+#: Where the sandbox's directory appears inside the container. Files written
+#: with write_file() land here, and commands run here by default, so a write
+#: followed by a read sees the same file -- and so does the next command.
+SANDBOX_ROOT = "/sandbox"
+
 
 class DockerSandbox:
     """Docker-based sandbox for safe code execution.
@@ -263,8 +268,15 @@ class DockerSandbox:
         # Generate container name for timeout cleanup
         container_name = f"praisonai-{execution_id}"
         
+        # Mount the sandbox directory. write_file() writes into self._temp_dir
+        # on the HOST, and `docker run` never mounted it -- so a write reported
+        # success, the file landed outside the container, and reading it back
+        # failed. Nothing carried between commands either, because each one got
+        # a fresh --rm container with no shared storage.
         docker_cmd = [
             "docker", "run", "--rm", "--name", container_name,
+            "-v", f"{self._temp_dir}:{SANDBOX_ROOT}",
+            "-w", SANDBOX_ROOT,
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
         ]
@@ -276,7 +288,7 @@ class DockerSandbox:
             for key, value in env.items():
                 docker_cmd.extend(["-e", f"{key}={value}"])
         
-        if working_dir:
+        if working_dir and working_dir != SANDBOX_ROOT:
             docker_cmd.extend(["-w", working_dir])
         
         docker_cmd.extend([self._image, "sh", "-c", cmd_str])
@@ -396,13 +408,21 @@ class DockerSandbox:
             return []
         
         try:
+            # Resolve both sides before comparing. On macOS the sandbox dir
+            # comes back as /var/folders/... while os.walk reports
+            # /private/var/folders/... -- /var being a symlink -- so relpath
+            # produced "../../../../../../private/var/..." and leaked the real
+            # host path to the caller instead of a sandbox-relative one.
+            root_dir = os.path.realpath(self._temp_dir)
             files = []
-            for root, dirs, filenames in os.walk(full_path):
+            for root, dirs, filenames in os.walk(os.path.realpath(full_path)):
                 for filename in filenames:
                     rel_path = os.path.relpath(
                         os.path.join(root, filename),
-                        self._temp_dir,
+                        root_dir,
                     )
+                    if rel_path.startswith(".."):
+                        continue          # outside the sandbox; never report it
                     files.append("/" + rel_path)
             return files
         except Exception:
