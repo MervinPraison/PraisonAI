@@ -1,7 +1,7 @@
 [project]
 name = "praisonai-sandbox"
 version = "0.0.13"
-description = "Isolated agent code execution for PraisonAI — Docker, E2B, Modal, Novita, Sandlock, SSH backends extracted from the praisonai wrapper."
+description = "Where PraisonAI agents run code — Docker, E2B, Modal, Daytona, Fly.io, Tenki, Novita, Sandlock, SSH and subprocess, as both single sandboxes and multi-instance compute providers."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10,<3.15"
