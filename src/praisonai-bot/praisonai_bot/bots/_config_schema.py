@@ -322,6 +322,12 @@ class ChannelConfigSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     platform: Optional[str] = None
+    # Zero-code custom channel (Issue #4104): point a channel at an adapter
+    # class by dotted import string (``"pkg.mod:AdapterClass"``) so a custom
+    # platform is reachable from YAML/CLI with no packaging or bootstrap Python.
+    # When set and ``platform`` is not already registered, the adapter is
+    # lazily imported, validated, and self-registered before startup.
+    adapter: Optional[str] = None
     # Credential fields accept plaintext, a ``${ENV}`` reference, or the
     # additive secret-reference form ``{source: file|env|exec, id: ...}``
     # (Issue #3102). The reference form is resolved by the core secret
@@ -803,6 +809,13 @@ class GatewayConfigSchema(BaseModel):
                 "(telegram, discord, slack, whatsapp) to your config"
             )
             
+        # Zero-code custom channels (Issue #4104): a channel may point at an
+        # adapter class by dotted import string (``adapter: "pkg.mod:Class"``).
+        # Lazily import and self-register any such adapter before validation so
+        # the YAML/CLI surface can add a custom platform with no packaging or
+        # bootstrap Python. No-op when no channel declares ``adapter``.
+        self._register_adapter_refs()
+
         # Validate platform names against the platform registry (single source
         # of truth). This includes built-in platforms, entry-point discovered
         # channels (``praisonai.channels`` / ``praisonai.bots``), and any
@@ -868,6 +881,112 @@ class GatewayConfigSchema(BaseModel):
                     channel.apply_channel_descriptor(descriptor)
 
         return self
+
+    def _register_adapter_refs(self) -> None:
+        """Import & self-register any channel declaring an ``adapter:`` ref.
+
+        Restores the CLI/YAML surface for custom channels (Issue #4104): a
+        channel whose ``adapter`` is a dotted ``"module:Class"`` import string
+        is lazily imported, validated against the core ``BasePlatformAdapter``
+        protocol, and registered under the channel key (using the class's own
+        descriptor when it self-describes) before platform validation runs.
+
+        Backward compatible: channels without ``adapter`` are untouched, and an
+        adapter whose ``platform`` name is already registered is left as-is so
+        an explicit ``platform:`` still wins.
+        """
+        for name, channel in self.channels.items():
+            ref = getattr(channel, "adapter", None)
+            if not ref:
+                continue
+            platform = (channel.platform or name).lower()
+            try:
+                from ._registry import (
+                    list_platforms,
+                    register_platform,
+                    resolve_adapter,
+                )
+            except Exception:  # pragma: no cover - registry always in-tree
+                return
+            # Respect an already-registered platform (built-in, entry point, or
+            # prior programmatic registration) — don't let an import string
+            # shadow it.
+            try:
+                if platform in {p.lower() for p in list_platforms()}:
+                    continue
+            except Exception:
+                pass
+
+            adapter_cls = self._import_adapter_ref(ref)
+            descriptor = None
+            candidate = getattr(adapter_cls, "channel_descriptor", None)
+            if candidate is not None:
+                try:
+                    descriptor = candidate() if callable(candidate) else candidate
+                except Exception:
+                    descriptor = None
+            register_platform(platform, adapter_cls, descriptor=descriptor)
+            # Make sure the channel carries the resolved platform name so the
+            # rest of validation/startup resolves the freshly-registered class.
+            channel.platform = platform
+            # Sanity-check the registration is now resolvable (surfaces a broken
+            # loader immediately rather than at startup).
+            try:
+                resolve_adapter(platform)
+            except Exception as exc:  # pragma: no cover - defensive
+                raise ValueError(
+                    f"Channel '{name}' adapter '{ref}' failed to register: {exc}"
+                ) from exc
+
+    @staticmethod
+    def _import_adapter_ref(ref: str):
+        """Import a ``"module:Class"`` adapter ref and validate the protocol.
+
+        Raises a clear ``ValueError`` on a malformed ref, a missing module or
+        attribute, or a class that is not a ``BasePlatformAdapter`` subclass.
+        """
+        if not isinstance(ref, str) or ":" not in ref:
+            raise ValueError(
+                f"Invalid channel adapter ref {ref!r}: expected dotted "
+                "'module.path:ClassName'."
+            )
+        module_path, _, class_name = ref.partition(":")
+        module_path = module_path.strip()
+        class_name = class_name.strip()
+        if not module_path or not class_name:
+            raise ValueError(
+                f"Invalid channel adapter ref {ref!r}: expected dotted "
+                "'module.path:ClassName'."
+            )
+        import importlib
+
+        try:
+            module = importlib.import_module(module_path)
+        except ImportError as exc:
+            raise ValueError(
+                f"Channel adapter module '{module_path}' could not be "
+                f"imported: {exc}"
+            ) from exc
+        try:
+            adapter_cls = getattr(module, class_name)
+        except AttributeError as exc:
+            raise ValueError(
+                f"Channel adapter class '{class_name}' not found in "
+                f"module '{module_path}'."
+            ) from exc
+        try:
+            from praisonaiagents.bots import BasePlatformAdapter
+        except Exception:  # pragma: no cover - core always present in-tree
+            BasePlatformAdapter = None
+        if (
+            BasePlatformAdapter is not None
+            and isinstance(adapter_cls, type)
+            and not issubclass(adapter_cls, BasePlatformAdapter)
+        ):
+            raise ValueError(
+                f"Channel adapter '{ref}' must subclass BasePlatformAdapter."
+            )
+        return adapter_cls
 
     def _validate_route_targets(self) -> None:
         """Fail fast when a route/binding names an undeclared agent (#3468).
