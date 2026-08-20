@@ -34,7 +34,7 @@ class DockerSandbox:
     Example:
         from praisonai_sandbox import DockerSandbox
         
-        sandbox = DockerSandbox(image="python:3.11-slim")
+        sandbox = DockerSandbox(image="python:3.12-slim")
         result = await sandbox.execute("print('Hello, World!')")
         print(result.stdout)  # Hello, World!
     
@@ -43,7 +43,11 @@ class DockerSandbox:
     
     def __init__(
         self,
-        image: str = "python:3.11-slim",
+        # Kept in step with the compute-side DockerCompute default. The two
+        # implementations of "docker" disagreed -- 3.11 here, 3.12 there -- so
+        # tools_run_on="docker" and run_in="docker" handed you different
+        # Pythons for the same word. Nobody chose that; they drifted.
+        image: str = "python:3.12-slim",
         config: Optional[SandboxConfig] = None,
     ):
         """Initialize the Docker sandbox.
