@@ -227,7 +227,12 @@ def external_agent_catalog() -> Dict[str, Dict[str, Any]]:
     for name in list_external_agents():
         try:
             cls = registry.resolve(name)
-        except ValueError:
+        except Exception as exc:  # noqa: BLE001 - isolate faulty optional plugins
+            # A third-party entry point may raise anything (not just ValueError)
+            # while loading. One broken optional plugin must not blank out the
+            # catalog for every surface (argparse/CLI/UI); skip it and log.
+            import logging
+            logging.warning("Skipping external agent %r: failed to load (%s)", name, exc)
             continue
         try:
             cli = cls().cli_command

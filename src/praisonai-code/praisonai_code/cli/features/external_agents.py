@@ -20,8 +20,20 @@ from .base import FlagHandler
 
 
 def _catalog() -> Dict[str, Dict[str, Any]]:
-    """Live view of the external-agent registry (lazy: ``praisonai`` is optional)."""
-    from praisonai.integrations.registry import external_agent_catalog
+    """Live view of the external-agent registry (lazy: ``praisonai`` is optional).
+
+    Routed through ``_wrapper_bridge`` so ``praisonai-code`` keeps its C7/C8
+    import boundary (no direct ``from praisonai.*`` reverse import); when the
+    wrapper is not installed this degrades to an empty catalog instead of
+    raising, so every registry-backed surface stays usable standalone.
+    """
+    from praisonai_code._wrapper_bridge import optional_wrapper_attr
+
+    external_agent_catalog = optional_wrapper_attr(
+        "praisonai.integrations.registry", "external_agent_catalog"
+    )
+    if external_agent_catalog is None:
+        return {}
     return external_agent_catalog()
 
 
