@@ -254,6 +254,23 @@ class ScheduledAgentExecutor:
         # so a deterministic watchdog (``df -h``, ``uptime``, a health-check
         # ``curl``) costs no tokens and cannot be reformatted by a model.
         command = str(getattr(job, "command", "") or "").strip()
+        # Defensive: a persisted job carrying BOTH model-free actions is
+        # ambiguous — fail loudly instead of silently preferring one. (The CLI
+        # rejects this combination at creation; this guards hand-edited or
+        # legacy store payloads.)
+        if command and str(getattr(job, "backend", "") or "").strip():
+            err = (
+                "Job configures both 'command' and 'backend'; exactly one "
+                "model-free action is allowed. Remove one and re-save."
+            )
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await asyncio.to_thread(self._audit_output, job, result)
+            await self._maybe_deliver_failure(job, result)
+            return result
         if command:
             return await self._execute_command(job, command, started)
 
@@ -275,6 +292,15 @@ class ScheduledAgentExecutor:
                 error="No message configured",
                 duration=duration,
             )
+
+        # Model-free external-backend action: when the job names a CLI
+        # backend, the message runs as one headless turn through that backend
+        # — no native agent is resolved and no in-process model turn is taken.
+        # Checked after the empty-message guard (the message IS the prompt)
+        # and before agent resolution, mirroring the ``command`` action.
+        backend_id = str(getattr(job, "backend", "") or "").strip()
+        if backend_id:
+            return await self._execute_backend(job, backend_id, message, started)
 
         # Resolve the agent
         try:
@@ -583,6 +609,224 @@ class ScheduledAgentExecutor:
         return job_result
 
     # ── command-action helpers ───────────────────────────────────────
+
+    async def _execute_backend(
+        self, job: "ScheduleJob", backend_id: str, message: str, started: float,
+    ) -> JobResult:
+        """Run the job's message as one headless turn through a CLI backend.
+
+        Resolution goes through the sanctioned ``_code_bridge`` seam so the bot
+        package never hard-depends on ``praisonai-code``; when the optional
+        code package is unavailable the tick is recorded as ``failed`` with a
+        clear remediation instead of crashing the ticker. The job's pinned
+        ``model`` is passed straight to the backend (the pin is an input here,
+        not a drift guard — there is no in-process agent to compare against),
+        output is bounded like command output, and failures flow through the
+        same run-record, audit, and failure-delivery plumbing as agent turns.
+        """
+        options = dict(getattr(job, "backend_options", None) or {})
+        cwd = options.pop("cwd", None)
+
+        # Pre-run condition gate: backend turns are real (expensive) turns, so
+        # they honour the same cheap go/no-go gate as native-agent jobs. On
+        # "nothing to do" the tick is recorded ``skipped`` with no subprocess
+        # spawned; gate context is appended to the prompt like the agent path.
+        pending_state_updates = None
+        gate = self._resolve_condition(job)
+        if gate is not None:
+            # State-aware like the native-agent path: a monitor gate's cursor /
+            # watermark must be loaded, passed when the gate supports it, and
+            # persisted on the skip path; go-path updates are held back until
+            # the backend turn succeeds (see below).
+            prior_state = self._get_job_state(job)
+            try:
+                if self._gate_accepts_state(gate):
+                    decision = await asyncio.to_thread(
+                        gate.should_run, job, state=prior_state,
+                    )
+                else:
+                    decision = await asyncio.to_thread(gate.should_run, job)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "Pre-run gate raised for backend job '%s': %s; running anyway",
+                    job.id, e,
+                )
+                decision = None
+            if decision is not None and not getattr(decision, "run", True):
+                reason = getattr(decision, "reason", None) or "pre-run gate: nothing to do"
+                logger.info("Backend job '%s' skipped by pre-run gate: %s", job.id, reason)
+                self._persist_job_state(
+                    job, prior_state, getattr(decision, "state_updates", None),
+                )
+                duration = time.time() - started
+                self._runner.mark_run(job, status="skipped", error=reason, duration=duration)
+                return JobResult(job=job, status="skipped", error=reason, duration=duration)
+            if decision is not None:
+                context = getattr(decision, "context", None)
+                if context:
+                    message = f"{message}\n\n{context}"
+                # Defer go-path watermark persistence until the backend turn
+                # actually succeeds — persisting here would advance the cursor
+                # past unprocessed work when the run is later blocked by
+                # policy, fails to resolve, times out, or errors.
+                updates = getattr(decision, "state_updates", None)
+                if isinstance(updates, dict) and updates:
+                    pending_state_updates = updates
+
+        # Run-scoped policy: the message is the untrusted portion of a backend
+        # turn (there is no in-process agent whose skills could load content),
+        # so scan it with the same policy as native-agent jobs.
+        if self._run_policy is not None:
+            scan = self._run_policy.scan_prompt(message)
+            if not scan.ok:
+                err = f"Blocked by run policy: {scan.reason}"
+                logger.warning(
+                    "Backend job '%s' blocked by run policy: %s", job.id, scan.reason,
+                )
+                duration = time.time() - started
+                self._runner.mark_run(job, status="failed", error=err, duration=duration)
+                if self._on_failure:
+                    self._on_failure(job, err)
+                result = JobResult(job=job, status="failed", error=err, duration=duration)
+                await asyncio.to_thread(self._audit_output, job, result)
+                await self._maybe_deliver_failure(job, result)
+                return result
+
+        try:
+            from praisonai_bot._code_bridge import import_code_module
+            backends_mod = import_code_module("praisonai_code.cli_backends")
+            spec = {"id": backend_id, "overrides": options} if options else backend_id
+            backend = backends_mod.resolve_cli_backend_config(spec)
+        except Exception as e:
+            err = (
+                f"CLI backend {backend_id!r} unavailable: {e}. "
+                "Backend jobs require the praisonai-code package "
+                "(pip install praisonai-code)."
+            )
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await asyncio.to_thread(self._audit_output, job, result)
+            await self._maybe_deliver_failure(job, result)
+            return result
+
+        try:
+            from praisonaiagents.cli_backend.protocols import CliSessionBinding
+            session = CliSessionBinding(session_id=f"cron_{job.id}")
+        except Exception:  # pragma: no cover - core primitive always present
+            session = None
+
+        # Belt-and-braces bound on top of the backend's own timeout_ms
+        # enforcement, so a wedged subprocess can never stall the ticker.
+        timeout_ms = getattr(getattr(backend, "config", None), "timeout_ms", 300_000)
+        try:
+            timeout_s = float(timeout_ms) / 1000.0
+            if not math.isfinite(timeout_s) or timeout_s <= 0:
+                timeout_s = 300.0
+        except (TypeError, ValueError):
+            timeout_s = 300.0
+
+        exec_kwargs: Dict[str, Any] = {"session": session}
+        if cwd:
+            exec_kwargs["cwd"] = str(cwd)
+        model = getattr(job, "model", None)
+        if model:
+            exec_kwargs["model"] = model
+
+        try:
+            result_obj = await asyncio.wait_for(
+                backend.execute(message, **exec_kwargs), timeout=timeout_s + 30.0,
+            )
+        except asyncio.TimeoutError:
+            err = f"backend turn timed out after {timeout_s + 30.0:.0f}s"
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await asyncio.to_thread(self._audit_output, job, result)
+            await self._maybe_deliver_failure(job, result)
+            return result
+        except Exception as e:
+            err = f"backend turn failed to launch: {e}"
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await asyncio.to_thread(self._audit_output, job, result)
+            await self._maybe_deliver_failure(job, result)
+            return result
+
+        duration = time.time() - started
+        error = getattr(result_obj, "error", None)
+        text = str(getattr(result_obj, "content", "") or "")
+        if len(text) > _MAX_COMMAND_OUTPUT_CHARS:
+            text = text[:_MAX_COMMAND_OUTPUT_CHARS] + "\n…[output truncated]"
+        succeeded = not error
+
+        # Honour the intentional-silence contract like agent turns do: the
+        # backend ran fine but chose to say nothing worth delivering.
+        silent = False
+        if succeeded:
+            try:
+                from praisonaiagents.bots.silence import is_intentional_silence_response
+                silent = is_intentional_silence_response(text)
+            except Exception:  # pragma: no cover - core primitive always present
+                silent = False
+
+        delivered = False
+        delivery_error: Optional[str] = None
+        delivery = getattr(job, "delivery", None)
+        if succeeded and text and not silent and delivery and self._can_deliver(delivery):
+            try:
+                await self._dispatch_delivery(delivery, text)
+                delivered = True
+                logger.info(
+                    "Delivered backend job '%s' output to %s:%s",
+                    job.id, delivery.channel, delivery.channel_id,
+                )
+            except Exception as e:
+                delivery_error = str(e)
+                logger.warning(
+                    "Delivery failed for backend job '%s': %s", job.id, e,
+                )
+
+        if succeeded and pending_state_updates:
+            self._persist_job_state(job, prior_state, pending_state_updates)
+
+        status = "succeeded" if succeeded else "failed"
+        self._runner.mark_run(
+            job,
+            status=status,
+            result=text if succeeded else None,
+            error=None if succeeded else str(error),
+            duration=duration,
+            delivered=delivered,
+        )
+        if succeeded and self._on_success:
+            self._on_success(job, text)
+        elif not succeeded and self._on_failure:
+            self._on_failure(job, str(error))
+
+        result = JobResult(
+            job=job,
+            result=text if succeeded else None,
+            status=status,
+            error=None if succeeded else str(error),
+            duration=duration,
+            delivered=delivered,
+            delivery_error=delivery_error,
+        )
+        await asyncio.to_thread(self._audit_output, job, result)
+        if not succeeded:
+            await self._maybe_deliver_failure(job, result)
+        return result
 
     async def _execute_command(
         self, job: "ScheduleJob", command: str, started: float,

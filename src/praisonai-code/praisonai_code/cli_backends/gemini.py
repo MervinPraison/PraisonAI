@@ -8,6 +8,8 @@ import os
 import subprocess
 from typing import AsyncIterator, List, Optional
 
+from ._errors import called_process_error_message
+
 try:
     from praisonaiagents import (
         CliBackendConfig,
@@ -57,7 +59,7 @@ class GeminiBackend:
             **kwargs,
         )
         try:
-            content = await self._execute_subprocess(cmd)
+            content = await self._execute_subprocess(cmd, cwd=kwargs.get("cwd"))
             return CliBackendResult(
                 content=content.strip(),
                 session_id=session.session_id if session else None,
@@ -66,8 +68,14 @@ class GeminiBackend:
         except subprocess.CalledProcessError as exc:
             return CliBackendResult(
                 content="",
-                error=f"Gemini CLI failed: {exc}",
+                error=f"Gemini CLI failed: {called_process_error_message(exc)}",
                 metadata={"command": cmd, "return_code": getattr(exc, "returncode", -1)},
+            )
+        except TimeoutError as exc:
+            return CliBackendResult(
+                content="",
+                error=f"Gemini CLI failed: {exc}",
+                metadata={"command": cmd, "timeout_ms": self.config.timeout_ms},
             )
 
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[CliBackendDelta]:
@@ -88,6 +96,10 @@ class GeminiBackend:
     ) -> List[str]:
         cmd = [self.config.command, *self.config.args]
 
+        model = kwargs.get("model")
+        if model:
+            cmd.extend(["-m", str(model)])
+
         if session and session.session_id and getattr(session, "is_resume", False):
             cmd.extend(["--resume", session.session_id])
 
@@ -97,12 +109,12 @@ class GeminiBackend:
         cmd.extend(["-p", prompt])
         return cmd
 
-    async def _execute_subprocess(self, cmd: List[str]) -> str:
+    async def _execute_subprocess(self, cmd: List[str], cwd: Optional[str] = None) -> str:
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=os.getcwd(),
+            cwd=cwd or os.getcwd(),
             env=self._get_env(),
         )
         try:

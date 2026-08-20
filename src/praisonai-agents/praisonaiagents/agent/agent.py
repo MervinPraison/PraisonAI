@@ -6685,14 +6685,46 @@ Answer:"""
         backend = cli_backend or self._cli_backend
         if not backend:
             raise RuntimeError("CLI backend not configured")
-        
+
+        # Bound before the try so the failure hook can carry the backend's
+        # result (and its audit metadata) when execution returned an error.
+        result = None
         try:
             # Import backend types
             from ..cli_backend import CliSessionBinding
             
-            # Build session binding for state management
+            # Build session binding for state management. A session the agent
+            # has already delegated a turn for is a resume: the backend then
+            # continues the CLI-side conversation (and skips re-sending the
+            # system prompt where configured) instead of starting fresh.
             session_id = getattr(self, '_session_id', None) or f"agent-{self.agent_id}"
-            session_binding = CliSessionBinding(session_id=session_id)
+            started_sessions = getattr(self, '_cli_backend_sessions_started', None)
+            if started_sessions is None:
+                started_sessions = set()
+                self._cli_backend_sessions_started = started_sessions
+            # Serialise session establishment per session id: without the
+            # lock, concurrent turns could both observe "not started" and
+            # spawn two fresh CLI conversations for one session.
+            session_locks = getattr(self, '_cli_backend_session_locks', None)
+            if session_locks is None:
+                session_locks = {}
+                self._cli_backend_session_locks = session_locks
+            session_lock = session_locks.setdefault(session_id, asyncio.Lock())
+            try:
+                await session_lock.acquire()
+            except RuntimeError:
+                # The stored lock is bound to a previous (closed) event loop —
+                # common when sync callers wrap each turn in its own loop.
+                # Re-key a fresh lock for this loop; cross-loop turns are
+                # serial by construction, so mutual exclusion is preserved.
+                session_lock = asyncio.Lock()
+                session_locks[session_id] = session_lock
+                await session_lock.acquire()
+            lock_held = True
+            session_binding = CliSessionBinding(
+                session_id=session_id,
+                is_resume=session_id in started_sessions,
+            )
             
             # Get system prompt from agent configuration
             system_prompt = None
@@ -6729,13 +6761,9 @@ Answer:"""
                 system_prompt=system_prompt
             )
 
-            await self._emit_cli_backend_hook(
-                backend=backend,
-                session_id=session_id,
-                result=result,
-            )
-            
-            # Check for CLI backend errors
+            # Check for CLI backend errors BEFORE the (cancellable) hook and
+            # before marking the session started, so a failed turn never
+            # records a resumable session.
             if result is None:
                 raise RuntimeError(
                     f"CLI backend returned no result for agent={self.display_name!r}, "
@@ -6746,26 +6774,73 @@ Answer:"""
                     f"CLI backend failed for agent={self.display_name!r}, "
                     f"session_id={session_id!r}: {result.error}"
                 )
-            
-            # Update chat history with the exchange
-            if hasattr(self, '_append_to_chat_history'):
-                self._append_to_chat_history({
-                    "role": "user", 
-                    "content": prompt
-                })
-                if result.content:
+
+            # A successful turn establishes the CLI-side session; subsequent
+            # turns under the same session_id are resumes. Recorded (and the
+            # lock released) BEFORE the hook await: cancellation during the
+            # hook must not lose the resume state or hold the lock.
+            started_sessions.add(session_id)
+            session_lock.release()
+            lock_held = False
+
+            # The external command has completed at this point. Hook emission
+            # and history bookkeeping failures are contained here so they are
+            # never reported as backend-execution failures — that mislabel
+            # invites callers to retry work the CLI already finished.
+            try:
+                await self._emit_cli_backend_hook(
+                    backend=backend,
+                    session_id=session_id,
+                    result=result,
+                )
+
+                # Update chat history with the exchange
+                if hasattr(self, '_append_to_chat_history'):
                     self._append_to_chat_history({
-                        "role": "assistant", 
-                        "content": result.content
+                        "role": "user",
+                        "content": prompt
                     })
-            
-            return result.content if result else None
-            
+                    if result.content:
+                        self._append_to_chat_history({
+                            "role": "assistant",
+                            "content": result.content
+                        })
+            except Exception as post_exc:
+                logging.warning(
+                    f"Post-execution bookkeeping failed after successful CLI "
+                    f"backend turn (agent={self.display_name!r}, "
+                    f"session_id={session_id!r}): {post_exc}"
+                )
+
+            return result.content
+
+        except asyncio.CancelledError:
+            # Cancellation is BaseException: it bypasses ``except Exception``,
+            # so release here or later turns on this session block forever.
+            # ``lock_held`` guards against releasing a lock a concurrent turn
+            # has since acquired; names may be unbound if cancellation preceded
+            # their assignment.
+            try:
+                if lock_held and session_lock.locked():
+                    session_lock.release()
+            except (NameError, UnboundLocalError, RuntimeError):
+                pass
+            raise
         except Exception as e:
+            # Release the per-session lock on any failure path; ``session_lock``
+            # may be unbound when the exception preceded its assignment.
+            try:
+                if lock_held and session_lock.locked():
+                    session_lock.release()
+            except (NameError, UnboundLocalError, RuntimeError):
+                pass
+            # ``result`` carries the backend's error result (and its audit
+            # metadata) when execution completed with an error; it is None when
+            # the failure preceded execution.
             await self._emit_cli_backend_hook(
                 backend=backend,
                 session_id=session_id,
-                result=None,
+                result=result,
                 error=str(e),
             )
             raise RuntimeError(

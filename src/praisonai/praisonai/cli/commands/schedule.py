@@ -6,6 +6,8 @@ Provides scheduler management.
 
 from typing import Optional
 
+import math
+
 import typer
 
 from ..output.console import get_output_controller
@@ -53,6 +55,9 @@ def schedule_add_cmd(
     condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
     command: str = typer.Option("", "--command", "--script", help="No-LLM action: run this shell command on schedule and deliver its stdout verbatim (no agent, no model turn)"),
     command_timeout: float = typer.Option(60.0, "--command-timeout", help="Max seconds the --command may run before it is killed (default 60)"),
+    backend: str = typer.Option("", "--backend", help="External coding-CLI backend action: run the message as one headless turn via a registered backend (see 'praisonai backends'), e.g. claude-code, codex-cli. No native agent, no in-process model turn"),
+    backend_cwd: str = typer.Option("", "--backend-cwd", help="Working directory for the --backend turn (default: the scheduler process cwd)"),
+    backend_timeout: float = typer.Option(0.0, "--backend-timeout", help="Max seconds the --backend turn may run (default: the backend's own timeout, 300s)"),
     model: str = typer.Option("", "--model", help="Pin this job to a specific model (e.g. 'openai/gpt-4o-mini'). Snapshotted so unattended runs stay stable and drift fails closed. Pass an explicit model to capture a snapshot"),
     pin: bool = typer.Option(True, "--pin/--no-pin", help="Enforce the model snapshot so drift fails closed (default; only takes effect once a snapshot exists via --model). --no-pin follows whatever the default becomes"),
     once: bool = typer.Option(False, "--once", help="One-shot job: auto-remove after its single fire (maps to delete_after_run). Ideal for 'at:'/'in ...' reminders"),
@@ -68,8 +73,25 @@ def schedule_add_cmd(
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
         praisonai schedule add "inbox-watch" -s "*/5m" -m "Summarise new emails" --pre-run "scripts/new_mail.sh" --deliver telegram
         praisonai schedule add "disk-watch" -s hourly --command "df -h /" --deliver telegram:-100123
+        praisonai schedule add "nightly-refactor" -s "cron:0 2 * * *" -m "tidy utils.py, run tests" --backend claude-code --backend-cwd ~/proj --deliver telegram
     """
     output = get_output_controller()
+    if (
+        backend
+        and isinstance(backend_timeout, (int, float))
+        and backend_timeout
+        and not (math.isfinite(backend_timeout) and backend_timeout >= 0)
+    ):
+        output.print_error(
+            "--backend-timeout must be a finite, non-negative number of seconds."
+        )
+        raise typer.Exit(1)
+    if command and backend:
+        output.print_error(
+            "--command and --backend are mutually exclusive: a job runs exactly "
+            "one model-free action. Configure one or the other."
+        )
+        raise typer.Exit(1)
     try:
         from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
 
@@ -101,16 +123,21 @@ def schedule_add_cmd(
             **delivery_kwargs
         )
 
-        # ``pre_run``/``condition``/``command`` run an arbitrary host shell
-        # command, so they are NOT part of the LLM-callable schedule_add
+        # ``pre_run``/``condition``/``command``/``backend`` run an arbitrary
+        # host process, so they are NOT part of the LLM-callable schedule_add
         # surface. The CLI is a trusted, human-driven surface, so set them on
         # the stored job here. A ``--command`` job runs verbatim with no agent
         # and no model turn, delivering its stdout to the delivery target.
         # ``--model``/``--no-pin`` snapshot the model/pin policy onto the job so
         # an unattended run stays pinned and drift fails closed. A model-free
         # ``--command`` job takes no model turn, so pinning is skipped for it.
+        # Only apply trusted post-add options when THIS invocation actually
+        # created the job. A duplicate-name response ("already exists") is a
+        # rejection: mutating the existing job here would let a rejected add
+        # reconfigure a live schedule (e.g. attach a new --command/--backend).
+        job_created = f"Schedule '{name}' added" in result
         want_pin_update = bool(model) or (not pin and not command)
-        if (pre_run or condition or command or want_pin_update) and "Error" not in result:
+        if (pre_run or condition or command or backend or want_pin_update) and job_created:
             try:
                 from praisonaiagents.tools.schedule_tools import _get_store
                 store = _get_store()
@@ -121,6 +148,23 @@ def schedule_add_cmd(
                     job.command = command or None
                     if command:
                         job.command_timeout = command_timeout
+                    if backend:
+                        job.backend = backend
+                        backend_options = {}
+                        if backend_cwd:
+                            backend_options["cwd"] = backend_cwd
+                        if backend_timeout and backend_timeout > 0:
+                            # Round up so a positive sub-millisecond value stays
+                            # positive instead of collapsing to 0 (which the
+                            # executor would replace with the 300s default).
+                            backend_options["timeout_ms"] = max(
+                                1, round(backend_timeout * 1000)
+                            )
+                        job.backend_options = backend_options
+                        # A backend turn uses the pinned model as an input
+                        # (passed to the CLI), not as a drift guard.
+                        if model:
+                            job.model = model
                     if not command:
                         if model:
                             job.model = model
@@ -130,11 +174,20 @@ def schedule_add_cmd(
                 output.print_error(f"Failed to set command/pre-run gate: {e}")
                 raise typer.Exit(1)
 
+        # A rejected add (duplicate name or error) must exit non-zero so
+        # scripts/CI never treat it as success. Detect failure as the absence
+        # of the producer-owned success confirmation rather than substring
+        # matching on error words — a schedule *named* "Error monitor" or
+        # "already exists" appears inside the success message and must not be
+        # misclassified as a failure.
+        add_failed = not job_created
         if json_output:
             import json as _json
             print(_json.dumps({"result": result}))
+            if add_failed:
+                raise typer.Exit(1)
         else:
-            if "Error" in result:
+            if add_failed:
                 output.print_error(result)
                 raise typer.Exit(1)
             else:

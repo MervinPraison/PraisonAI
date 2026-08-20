@@ -126,7 +126,8 @@ class ClaudeCodeBackend:
             # Use execute mode (not streaming)
             result = await self._execute_subprocess(
                 cmd,
-                stdin_data=prompt if self.config.input == "stdin" else None
+                stdin_data=prompt if self.config.input == "stdin" else None,
+                cwd=kwargs.get("cwd"),
             )
             
             # Parse result based on output format
@@ -174,6 +175,12 @@ class ClaudeCodeBackend:
                 content="",
                 error=f"Claude CLI failed: {error_msg}",
                 metadata={"command": cmd, "return_code": getattr(e, 'returncode', -1)}
+            )
+        except TimeoutError as e:
+            return CliBackendResult(
+                content="",
+                error=f"Claude CLI failed: {e}",
+                metadata={"command": cmd, "timeout_ms": self.config.timeout_ms}
             )
     
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[CliBackendDelta]:
@@ -325,13 +332,15 @@ class ClaudeCodeBackend:
         
         return cmd
     
-    async def _execute_subprocess(self, cmd: List[str], stdin_data: Optional[str] = None) -> str:
+    async def _execute_subprocess(self, cmd: List[str], stdin_data: Optional[str] = None,
+                                  cwd: Optional[str] = None) -> str:
         """Execute subprocess and return stdout."""
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
             env=self._get_env()
         )
         

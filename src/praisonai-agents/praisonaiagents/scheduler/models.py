@@ -298,6 +298,21 @@ class ScheduleJob:
                  killed (with its process group on POSIX) and the tick is
                  recorded as ``failed``. Bounds the action so a hung command
                  cannot stall the ticker. Defaults to 60s.
+        backend: Optional external coding-CLI backend id (e.g.
+                 ``"claude-code"``, ``"codex-cli"``). When set, the job's
+                 ``message`` is executed as one headless turn through the
+                 named backend from the backend registry — no native agent is
+                 resolved and no in-process model turn is taken. Like
+                 ``command``, this is a trusted operator-configured action:
+                 it spawns a host CLI subprocess and is deliberately not
+                 exposed on the LLM-callable scheduling tools. Additive and
+                 backward-compatible: jobs without a ``backend`` are
+                 unchanged.
+        backend_options: Optional mapping of overrides for the backend run.
+                 Recognised keys are validated by the executor/backend (e.g.
+                 ``cwd`` for the working directory, ``timeout_ms`` for the
+                 subprocess bound); unknown config overrides are rejected at
+                 resolution time rather than silently ignored.
         provider: Optional model *provider* snapshotted when the job was
                  created (e.g. ``"openai"``). Advisory metadata paired with
                  ``model`` so a drift check can report both. ``None`` means no
@@ -376,6 +391,8 @@ class ScheduleJob:
     context_from: Optional[List[str]] = None
     context_max_chars: int = 4000
     on_missing_context: Literal["run", "skip"] = "run"
+    backend: Optional[str] = None
+    backend_options: Dict[str, Any] = field(default_factory=dict)
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -432,6 +449,13 @@ class ScheduleJob:
                 d["context_max_chars"] = self.context_max_chars
             if self.on_missing_context != "run":
                 d["on_missing_context"] = self.on_missing_context
+        # External CLI backend action. Only persist when configured so agent
+        # and command jobs stay byte-for-byte unchanged; options are opaque to
+        # the core (the executor validates them against the backend registry).
+        if self.backend is not None:
+            d["backend"] = self.backend
+            if self.backend_options:
+                d["backend_options"] = dict(self.backend_options)
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -480,6 +504,12 @@ class ScheduleJob:
             context_from=context_from,
             context_max_chars=d.get("context_max_chars", 4000),
             on_missing_context=d.get("on_missing_context", "run"),
+            backend=d.get("backend"),
+            backend_options=(
+                dict(d["backend_options"])
+                if isinstance(d.get("backend_options"), dict)
+                else {}
+            ),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0
