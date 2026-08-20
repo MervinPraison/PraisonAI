@@ -131,3 +131,87 @@ def test_yaml_backend_resolution_failure_fails_closed(monkeypatch):
     # omitting the kwarg (full generator run needs YAML fixtures; the guard
     # clause is the unit under test).
     assert "could not be" in source and "raise ValueError" in source
+
+
+def test_workflow_yaml_cli_backend_rejected():
+    """A workflow YAML that declares cli_backend must fail fast: the workflow
+    engine builds agents natively and would silently drop the field."""
+    from praisonai.agents_generator import AgentsGenerator
+
+    gen = AgentsGenerator.__new__(AgentsGenerator)
+    gen.framework = "praisonai"
+    gen.config_list = []
+    config = {
+        "framework": "praisonai",
+        "process": "workflow",
+        "name": "wf",
+        "agents": {
+            "coder": {"instructions": "write code", "cli_backend": "claude-code"},
+        },
+        "steps": [{"agent": "coder", "action": "do the thing"}],
+    }
+    with pytest.raises(ValueError, match="cli_backend"):
+        gen._build_yaml_workflow(config)
+
+
+class _SucceedingBackend:
+    def __init__(self):
+        from praisonaiagents.cli_backend.protocols import CliBackendConfig
+        self.config = CliBackendConfig(command="fake")
+
+    def capabilities(self):  # pragma: no cover - protocol completeness
+        return None
+
+    async def execute(self, prompt, *, session=None, **kwargs):
+        from praisonaiagents.cli_backend.protocols import CliBackendResult
+        return CliBackendResult(content="ok", metadata={"command": ["fake"]})
+
+    async def stream(self, prompt, **kwargs):  # pragma: no cover
+        yield None
+
+
+def test_post_execution_hook_failure_does_not_fail_turn():
+    """Once the external command has completed, a failing success hook must not
+    be reported as a backend-execution failure (that invites retries of
+    finished work) and must not fire the failure hook."""
+    from praisonaiagents.agent import Agent
+
+    agent = Agent(name="t", role="t", goal="t", backstory="t", llm="openai/gpt-4o-mini")
+    hook_calls = []
+
+    async def exploding_hook(**hook_kwargs):
+        hook_calls.append(hook_kwargs)
+        raise RuntimeError("hook exploded")
+
+    agent._emit_cli_backend_hook = exploding_hook
+    out = _run(agent._chat_via_cli_backend("go", cli_backend=_SucceedingBackend()))
+    assert out == "ok"
+    assert len(hook_calls) == 1
+    assert "error" not in hook_calls[0]
+
+
+def test_backend_error_result_reaches_failure_hook():
+    """A backend-returned error result keeps its audit metadata: the failure
+    hook receives the result itself, not None."""
+    from praisonaiagents.agent import Agent
+
+    class ErroringBackend(_SucceedingBackend):
+        async def execute(self, prompt, *, session=None, **kwargs):
+            from praisonaiagents.cli_backend.protocols import CliBackendResult
+            return CliBackendResult(
+                content="", error="boom", metadata={"command": ["fake"]}
+            )
+
+    agent = Agent(name="t", role="t", goal="t", backstory="t", llm="openai/gpt-4o-mini")
+    hook_calls = []
+
+    async def recording_hook(**hook_kwargs):
+        hook_calls.append(hook_kwargs)
+
+    agent._emit_cli_backend_hook = recording_hook
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(agent._chat_via_cli_backend("go", cli_backend=ErroringBackend()))
+    assert len(hook_calls) == 1
+    assert hook_calls[0]["result"] is not None
+    assert hook_calls[0]["result"].metadata == {"command": ["fake"]}
+    assert "boom" in hook_calls[0]["error"]

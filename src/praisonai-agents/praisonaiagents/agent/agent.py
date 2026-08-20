@@ -6685,7 +6685,10 @@ Answer:"""
         backend = cli_backend or self._cli_backend
         if not backend:
             raise RuntimeError("CLI backend not configured")
-        
+
+        # Bound before the try so the failure hook can carry the backend's
+        # result (and its audit metadata) when execution returned an error.
+        result = None
         try:
             # Import backend types
             from ..cli_backend import CliSessionBinding
@@ -6780,26 +6783,37 @@ Answer:"""
             session_lock.release()
             lock_held = False
 
-            await self._emit_cli_backend_hook(
-                backend=backend,
-                session_id=session_id,
-                result=result,
-            )
+            # The external command has completed at this point. Hook emission
+            # and history bookkeeping failures are contained here so they are
+            # never reported as backend-execution failures — that mislabel
+            # invites callers to retry work the CLI already finished.
+            try:
+                await self._emit_cli_backend_hook(
+                    backend=backend,
+                    session_id=session_id,
+                    result=result,
+                )
 
-            # Update chat history with the exchange
-            if hasattr(self, '_append_to_chat_history'):
-                self._append_to_chat_history({
-                    "role": "user", 
-                    "content": prompt
-                })
-                if result.content:
+                # Update chat history with the exchange
+                if hasattr(self, '_append_to_chat_history'):
                     self._append_to_chat_history({
-                        "role": "assistant", 
-                        "content": result.content
+                        "role": "user",
+                        "content": prompt
                     })
-            
-            return result.content if result else None
-            
+                    if result.content:
+                        self._append_to_chat_history({
+                            "role": "assistant",
+                            "content": result.content
+                        })
+            except Exception as post_exc:
+                logging.warning(
+                    f"Post-execution bookkeeping failed after successful CLI "
+                    f"backend turn (agent={self.display_name!r}, "
+                    f"session_id={session_id!r}): {post_exc}"
+                )
+
+            return result.content
+
         except asyncio.CancelledError:
             # Cancellation is BaseException: it bypasses ``except Exception``,
             # so release here or later turns on this session block forever.
@@ -6820,10 +6834,13 @@ Answer:"""
                     session_lock.release()
             except (NameError, UnboundLocalError, RuntimeError):
                 pass
+            # ``result`` carries the backend's error result (and its audit
+            # metadata) when execution completed with an error; it is None when
+            # the failure preceded execution.
             await self._emit_cli_backend_hook(
                 backend=backend,
                 session_id=session_id,
-                result=None,
+                result=result,
                 error=str(e),
             )
             raise RuntimeError(

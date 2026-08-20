@@ -1399,6 +1399,29 @@ class AgentsGenerator:
         # 'praisonai'.
         self._validate_cli_backend_compatibility(config, workflow_framework or 'praisonai')
 
+        # The framework-level check above passes for 'praisonai' because the
+        # sequential/hierarchical adapter does support cli_backend — but
+        # workflow YAMLs run through YAMLWorkflowParser, which builds agents
+        # natively and has no cli_backend wiring. Fail fast instead of
+        # silently executing on the native LLM path with different tools,
+        # credentials, and workspace behavior than the declared backend.
+        workflow_entities = {
+            **(config.get('roles') or {}),
+            **(config.get('agents') or {}),
+        }
+        cli_backend_entities = sorted(
+            name
+            for name, details in workflow_entities.items()
+            if isinstance(details, dict) and details.get('cli_backend')
+        )
+        if cli_backend_entities:
+            raise ValueError(
+                f"cli_backend (declared by: {', '.join(cli_backend_entities)}) is not "
+                "supported for 'process: workflow' YAMLs; the workflow engine runs "
+                "agents natively. Remove cli_backend or convert to a "
+                "sequential/hierarchical process."
+            )
+
         # tool_timeout is enforced by _wrap_tool_with_timeout on the
         # sequential/hierarchical path via tools_dict. The native workflow engine
         # resolves its own tools by name, so that wrapper hook does not apply
