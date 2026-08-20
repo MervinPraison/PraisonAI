@@ -156,7 +156,7 @@ def test_schedule_add_cli_passes_timezone(monkeypatch):
 
     def fake_add(**kwargs):
         captured.update(kwargs)
-        return "Schedule added"
+        return f"Schedule '{kwargs['name']}' added (id: 1)"
 
     monkeypatch.setattr(tools, "schedule_add", fake_add)
     result = CliRunner().invoke(
