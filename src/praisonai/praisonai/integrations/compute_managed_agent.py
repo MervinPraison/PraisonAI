@@ -7,9 +7,12 @@ is just running one more command. Nothing about ``e2b`` or ``modal`` makes them
 unable to host a loop -- there simply was no backend written for them.
 
 So instead of one bespoke backend per vendor, this wraps *any*
-``ComputeProviderProtocol`` and gets the whole set at once. The specialised
-``DockerManagedAgent`` remains because it can talk to the daemon directly and
-skip a provisioning layer; everything else routes through here.
+``ComputeProviderProtocol`` and gets the whole set at once -- including
+``docker``, which briefly had a bespoke backend of its own. That one talked to
+the daemon directly and named its containers in a shape ``DockerCompute``'s
+lookup did not recognise, so ``praisonai managed ps`` listed them while
+``praisonai managed stop`` could not stop them. Going through the provider is
+both less code and more correct.
 
 The limitations are the same ones every hosted runtime has, and worth stating
 plainly rather than discovering later:
@@ -68,12 +71,17 @@ class ComputeManagedAgent:
         config: Optional[Any] = None,
         *,
         provider: Optional[str] = None,
+        image: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         keep_alive: bool = True,
         pip_packages: Optional[List[str]] = None,
         **_ignored: Any,
     ):
         del provider                      # implied by `place`
+        # `image` used to fall into **_ignored, so asking for a specific image
+        # silently got the provider's default -- a real capability the bespoke
+        # Docker backend had and this one did not.
+        self._image = image
         self._place = place
         self._config = _as_dict(config)
         self._extra_env = dict(env or {})
@@ -167,10 +175,24 @@ class ComputeManagedAgent:
         from praisonaiagents.managed.protocols import ComputeConfig
 
         provider = self._resolve()
+        available = getattr(provider, "is_available", True)
+        available = available() if callable(available) else available
+        if available is False:
+            raise RuntimeError(
+                f"run_on={self._place!r} cannot start: {self._place} is not "
+                f"available on this machine.\n"
+                f"  For docker, check the daemon is running (`docker info`).\n"
+                f"  For a cloud place, check its credential is set.\n"
+                f"  To keep the loop here and move only the tools, use "
+                f"tools_run_on={self._place!r} instead."
+            )
         env = {k: os.environ[k] for k in _KEY_VARS if os.environ.get(k)}
         env.update(self._extra_env)
 
-        info = await provider.provision(ComputeConfig(env=env))
+        config = ComputeConfig(env=env)
+        if self._image:
+            config.image = self._image
+        info = await provider.provision(config)
         self._instance = getattr(info, "instance_id", info)
         logger.info("[compute_managed] provisioned %s on %s", self._instance, self._place)
 

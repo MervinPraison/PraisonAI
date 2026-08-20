@@ -25,11 +25,6 @@ def _anthropic_loader() -> Type:
     return AnthropicManagedAgent
 
 
-def _docker_loader() -> Type:
-    from .docker_managed_agent import DockerManagedAgent
-    return DockerManagedAgent
-
-
 def _compute_backed() -> dict:
     """Every compute place, able to host a whole agent.
 
@@ -54,7 +49,16 @@ def _compute_backed() -> dict:
     except Exception:
         return {}
 
-    skip = {"docker", "ssh", "local", "native", "subprocess", "sandlock"}
+    # `docker` used to be excluded here in favour of a bespoke backend that
+    # talked to the daemon directly. That backend named its containers in a
+    # shape DockerCompute's lookup did not recognise, so `praisonai managed ps`
+    # listed them and `praisonai managed stop` could not stop them. The generic
+    # path goes through DockerCompute, so reclaim works.
+    #
+    # Still excluded: `ssh` needs an object rather than a name; `local` would
+    # run the agent in your own shell, which is what you get by passing
+    # nothing; the local sandboxes isolate tools rather than host a runtime.
+    skip = {"ssh", "local", "native", "subprocess", "sandlock"}
     return {name: make_loader(name) for name in places if name not in skip}
 
 
@@ -64,7 +68,6 @@ _BUILTIN_BACKENDS = {
     # vendor's cloud. Registering it here is all that `run_on="docker"` needs --
     # placement resolves run_on= against this registry, so the parameter, the
     # repr, the explanation and the conflict checks all pick it up unchanged.
-    "docker": _docker_loader,
     **_compute_backed(),
 }
 

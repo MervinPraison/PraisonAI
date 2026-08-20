@@ -344,3 +344,56 @@ def test_daytona_uploads_content_then_destination(monkeypatch, tmp_path):
 
     assert calls["src"] == b"real-content", "file content must be the src argument"
     assert calls["dst"] == "/remote/dest.txt", "remote path must be the dst argument"
+
+
+# ── conformance: the four vendors implemented twice must agree ───────────────
+# Docker-only parity is what let Daytona rot. Three defects — a Python version
+# split, memory in the wrong unit, and reversed upload arguments — were all the
+# same shape: one of two implementations of a vendor learned a convention and
+# the other never did, and nothing compared them.
+
+SHARED_VENDORS = ("docker", "e2b", "modal", "daytona")
+
+
+@pytest.mark.parametrize("vendor", SHARED_VENDORS)
+def test_both_implementations_of_a_vendor_exist_and_are_distinct(vendor):
+    """Establishes the premise the rest of this section rests on."""
+    from praisonaiagents.managed._compute_bridge import _PROVIDERS
+    from praisonaiagents.sandbox._sandbox_bridge import resolve_sandbox_class
+
+    assert vendor in _PROVIDERS, f"{vendor} should have a compute implementation"
+    assert resolve_sandbox_class(vendor), f"{vendor} should have a sandbox implementation"
+
+
+@pytest.mark.parametrize("vendor", SHARED_VENDORS)
+def test_neither_implementation_passes_megabytes_where_gib_is_wanted(vendor):
+    """Daytona's SDK documents memory in GiB. One side converted, the other
+    passed ComputeConfig.memory_mb straight through and asked for 1024 GiB."""
+    import inspect
+
+    from praisonaiagents.sandbox._sandbox_bridge import resolve_sandbox_class
+
+    sources = []
+    try:
+        from praisonaiagents.managed._compute_bridge import _PROVIDERS
+
+        module, attr = _PROVIDERS[vendor]
+        sources.append(getattr(__import__(module, fromlist=[attr]), attr))
+    except Exception:
+        pass
+    try:
+        sources.append(resolve_sandbox_class(vendor))
+    except Exception:
+        pass
+
+    for cls in sources:
+        try:
+            src = inspect.getsource(cls)
+        except Exception:
+            continue
+        assert "memory=config.memory_mb" not in src, (
+            f"{cls.__name__} passes megabytes into a field whose SDK wants GiB"
+        )
+        assert "memory=self.memory_mb" not in src, (
+            f"{cls.__name__} passes megabytes into a field whose SDK wants GiB"
+        )

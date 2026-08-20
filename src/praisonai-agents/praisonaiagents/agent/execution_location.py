@@ -109,7 +109,7 @@ def _backend_places(backend: Any) -> Optional[Dict[str, str]]:
 
     # Ask the backend what it is, rather than guessing from its class name.
     # Name-matching missed any backend that did not happen to contain "Hosted"
-    # or "Anthropic" -- a self-hosted DockerManagedAgent reported that it was
+    # or "Anthropic" -- a self-hosted docker backend reported that it was
     # thinking on this machine while the whole loop ran in a container.
     declared = getattr(backend, "provider_name", None)
     if isinstance(declared, str):
