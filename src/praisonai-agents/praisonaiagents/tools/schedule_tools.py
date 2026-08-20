@@ -107,6 +107,7 @@ def schedule_add(
     continuable: bool = True,
     principal: str = "",
     tz: str = "",
+    once: bool = False,
 ) -> str:
     """Add a new scheduled job.
 
@@ -143,6 +144,10 @@ def schedule_add(
         tz: Optional IANA timezone for cron and naive one-shot timestamps
             (for example ``America/New_York``). If omitted, the instance
             default ``PRAISONAI_SCHEDULE_TIMEZONE`` is used, then UTC.
+        once: When True the job is a one-shot — it is removed automatically
+            after its single successful fire (maps to ``delete_after_run``).
+            Useful for ``at:`` / ``in ...`` reminders so a spent job does not
+            linger in listings.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -210,6 +215,7 @@ def schedule_add(
             delivery=delivery,
             origin=origin,  # Set origin for "origin" token resolution
             principal=owner,
+            delete_after_run=once,
         )
 
         store = _get_store()
@@ -321,6 +327,120 @@ def schedule_remove(name: str, principal: str = "") -> str:
     except Exception as e:
         logger.error("schedule_remove failed: %s", e, exc_info=True)
         return f"Error removing schedule: {e}"
+
+def schedule_pause(name: str, principal: str = "") -> str:
+    """Pause a scheduled job by name (keeps it, stops it firing).
+
+    Sets ``enabled=False`` so every due-check skips the job without deleting
+    it — the counterpart to :func:`schedule_resume`. History is retained.
+
+    Args:
+        name: The name of the schedule to pause.
+        principal: Resolved canonical identity of the caller. When omitted it
+            defaults from the per-turn session context so a multi-user gateway
+            only pauses the caller's job. Empty ⇒ no identity ⇒ matches by name
+            across all jobs (single-tenant / CLI behaviour).
+
+    Returns:
+        Confirmation or not-found message.
+    """
+    try:
+        store = _get_store()
+        owner = _caller_principal(principal)
+        job = store.get_by_name(name, principal=owner)
+        if job is None:
+            return f"Schedule '{name}' not found."
+        if not job.enabled:
+            return f"Schedule '{name}' is already paused."
+        job.enabled = False
+        store.update(job)
+        return f"Schedule '{name}' paused."
+    except Exception as e:
+        logger.error("schedule_pause failed: %s", e, exc_info=True)
+        return f"Error pausing schedule: {e}"
+
+def schedule_resume(name: str, principal: str = "") -> str:
+    """Resume a paused scheduled job by name.
+
+    Sets ``enabled=True`` so the job fires again on its next due tick — the
+    counterpart to :func:`schedule_pause`.
+
+    Args:
+        name: The name of the schedule to resume.
+        principal: Resolved canonical identity of the caller (see
+            :func:`schedule_pause`).
+
+    Returns:
+        Confirmation or not-found message.
+    """
+    try:
+        store = _get_store()
+        owner = _caller_principal(principal)
+        job = store.get_by_name(name, principal=owner)
+        if job is None:
+            return f"Schedule '{name}' not found."
+        if job.enabled:
+            return f"Schedule '{name}' is already active."
+        job.enabled = True
+        store.update(job)
+        return f"Schedule '{name}' resumed."
+    except Exception as e:
+        logger.error("schedule_resume failed: %s", e, exc_info=True)
+        return f"Error resuming schedule: {e}"
+
+def schedule_update(
+    name: str,
+    schedule: str = "",
+    message: str = "",
+    tz: str = "",
+    principal: str = "",
+) -> str:
+    """Update an existing scheduled job's cadence and/or message.
+
+    Changing a cadence no longer requires remove + re-add. Only the fields you
+    pass are changed; empty values leave the current value untouched.
+
+    Args:
+        name: The name of the schedule to update.
+        schedule: New schedule expression (same formats as ``schedule_add``).
+            Empty leaves the cadence unchanged.
+        message: New prompt / reminder text. Empty leaves it unchanged.
+        tz: Optional IANA timezone applied when re-parsing ``schedule``.
+        principal: Resolved canonical identity of the caller (see
+            :func:`schedule_pause`).
+
+    Returns:
+        Confirmation or not-found / error message.
+    """
+    try:
+        store = _get_store()
+        owner = _caller_principal(principal)
+        job = store.get_by_name(name, principal=owner)
+        if job is None:
+            return f"Schedule '{name}' not found."
+        changed = []
+        if schedule:
+            from ..scheduler.parser import parse_schedule
+            job.schedule = parse_schedule(schedule, tz=tz or None)
+            # A new cadence must be evaluated fresh: a stale ``last_run_at``
+            # from the previous schedule would make an ``at:`` one-shot look
+            # already-fired (never runs) and would offset ``every``/``cron``
+            # from the old last-run instead of the new cadence. Clearing it
+            # restarts the schedule from now.
+            job.last_run_at = None
+            changed.append(f"schedule={schedule}")
+        if message:
+            job.message = message
+            changed.append("message")
+        if not changed:
+            return f"Schedule '{name}' unchanged (nothing to update)."
+        store.update(job)
+        return f"Schedule '{name}' updated ({', '.join(changed)})."
+    except ValueError as e:
+        return f"Error updating schedule: {e}"
+    except Exception as e:
+        logger.error("schedule_update failed: %s", e, exc_info=True)
+        return f"Error updating schedule: {e}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

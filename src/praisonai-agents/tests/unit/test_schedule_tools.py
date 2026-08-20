@@ -277,6 +277,115 @@ class TestScheduleTools:
         assert "no schedule" in result.lower() or "empty" in result.lower() or "0" in result
 
 
+# ─── 4b. Manage Tool Tests (pause/resume/update/once) ────────────────────────
+
+class TestScheduleManageTools:
+    """Test schedule_pause, schedule_resume, schedule_update, and once."""
+
+    def _store(self, tmp_path):
+        from praisonaiagents.scheduler.store import FileScheduleStore
+        return FileScheduleStore(store_dir=str(tmp_path))
+
+    def test_pause_sets_disabled(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_pause
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="brief", schedule="daily", message="x")
+            result = schedule_pause(name="brief")
+        assert "paused" in result.lower()
+        assert store.get_by_name("brief").enabled is False
+
+    def test_resume_sets_enabled(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import (
+            schedule_add, schedule_pause, schedule_resume,
+        )
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="brief", schedule="daily", message="x")
+            schedule_pause(name="brief")
+            result = schedule_resume(name="brief")
+        assert "resumed" in result.lower()
+        assert store.get_by_name("brief").enabled is True
+
+    def test_paused_job_not_due(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_pause
+        from praisonaiagents.scheduler.runner import ScheduleRunner
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="tick", schedule="*/1s", message="x")
+            job = store.get_by_name("tick")
+            job.last_run_at = time.time() - 10
+            store.update(job)
+            assert len(ScheduleRunner(store=store).get_due_jobs()) == 1
+            schedule_pause(name="tick")
+        assert len(ScheduleRunner(store=store).get_due_jobs()) == 0
+
+    def test_update_changes_cadence(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_update
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="brief", schedule="cron:0 7 * * *", message="x")
+            result = schedule_update(name="brief", schedule="cron:0 8 * * 1-5")
+        assert "updated" in result.lower()
+        assert store.get_by_name("brief").schedule.cron_expr == "0 8 * * 1-5"
+
+    def test_update_changes_message_only(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_update
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="brief", schedule="daily", message="old")
+            schedule_update(name="brief", message="new")
+        assert store.get_by_name("brief").message == "new"
+
+    def test_update_nonexistent(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import schedule_update
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            result = schedule_update(name="ghost", schedule="daily")
+        assert "not found" in result.lower()
+
+    def test_update_cadence_resets_last_run(self, tmp_path):
+        """A cadence change clears last_run_at so the new schedule runs fresh.
+
+        Regression: a previously-run recurring job updated to an ``at:`` one-shot
+        kept its non-null last_run_at, so is_due treated it as already fired and
+        it never ran again.
+        """
+        import time
+        from datetime import datetime, timedelta
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_update
+        from praisonaiagents.scheduler.due import is_due
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="brief", schedule="daily", message="x")
+            job = store.get_by_name("brief")
+            job.last_run_at = time.time() - 10
+            store.update(job)
+            future = (datetime.now() + timedelta(minutes=1)).replace(microsecond=0)
+            schedule_update(name="brief", schedule=f"at:{future.isoformat()}")
+        updated = store.get_by_name("brief")
+        assert updated.last_run_at is None
+        assert is_due(updated, now=future.timestamp() + 1) is True
+
+    def test_once_maps_to_delete_after_run(self, tmp_path):
+        from praisonaiagents.tools.schedule_tools import schedule_add
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="reminder", schedule="in 5 minutes", message="x", once=True)
+        assert store.get_by_name("reminder").delete_after_run is True
+
+    def test_manage_tools_registered(self):
+        from praisonaiagents.tools import TOOL_MAPPINGS
+        for key in ('schedule_pause', 'schedule_resume', 'schedule_update'):
+            assert key in TOOL_MAPPINGS
+            assert TOOL_MAPPINGS[key][0] == '.schedule_tools'
+
+    def test_manage_tools_lazy_loadable(self):
+        from praisonaiagents import tools
+        for name in ('schedule_pause', 'schedule_resume', 'schedule_update'):
+            assert callable(getattr(tools, name))
+
+
 # ─── 5. Runner Tests ─────────────────────────────────────────────────────────
 
 class TestScheduleRunner:

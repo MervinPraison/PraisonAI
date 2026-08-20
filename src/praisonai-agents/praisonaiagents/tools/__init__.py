@@ -189,6 +189,9 @@ TOOL_MAPPINGS = {
     'schedule_add': ('.schedule_tools', None),
     'schedule_list': ('.schedule_tools', None),
     'schedule_remove': ('.schedule_tools', None),
+    'schedule_pause': ('.schedule_tools', None),
+    'schedule_resume': ('.schedule_tools', None),
+    'schedule_update': ('.schedule_tools', None),
     'schedule_tools': ('.schedule_tools', None),
 
     # Computer Use Tools (agent-centric screen control - Issue #516)
