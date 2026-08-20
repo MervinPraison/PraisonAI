@@ -14,7 +14,7 @@ Expected Output:
     Agent responds with state persisted to Redis
 """
 
-from praisonaiagents import Agent
+from praisonaiagents import Agent, MemoryConfig
 from praisonaiagents.db import db
 
 print("=== Redis State Store (Agent-First) ===")
@@ -28,8 +28,7 @@ my_db = db(
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant.",
-    memory=my_db,
-    session_id="redis-state-example"
+    memory=MemoryConfig(db=my_db, session_id="redis-state-example"),
 )
 
 # Chat - state is automatically managed via Redis

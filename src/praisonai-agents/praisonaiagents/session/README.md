@@ -129,14 +129,13 @@ store = DefaultSessionStore(
 When a DB adapter is provided, it takes precedence over JSON persistence:
 
 ```python
-from praisonaiagents import Agent, MemoryConfig
-from praisonai.db import PostgresAdapter
+from praisonaiagents import Agent, MemoryConfig, db
 
 agent = Agent(
     name="Assistant",
     memory=MemoryConfig(
         session_id="my-session",
-        db=PostgresAdapter(connection_string="..."),
+        db=db(database_url="postgresql://localhost/mydb"),
     ),
 )
 ```
@@ -183,7 +182,7 @@ Anthropic path.
 class DefaultSessionStore:
     def __init__(
         self,
-        session_dir: Optional[str] = None,  # Default: ~/.praison/sessions/
+        session_dir: Optional[str] = None,  # Default: ~/.praisonai/sessions/
         max_messages: int = 100,
         lock_timeout: float = 5.0,
     ): ...

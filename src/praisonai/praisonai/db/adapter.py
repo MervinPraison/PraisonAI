@@ -23,12 +23,15 @@ class PraisonAIDB:
     Implements the DbAdapter protocol expected by praisonaiagents.Agent.
     
     Example:
-        from praisonaiagents import Agent
+        from praisonaiagents import Agent, MemoryConfig
         from praisonai.db import PraisonAIDB
-        
+
         # Simple usage with PostgreSQL
         db = PraisonAIDB(database_url="postgresql://localhost/mydb")
-        agent = Agent(name="Assistant", db=db, session_id="my-session")
+        agent = Agent(
+            name="Assistant",
+            memory=MemoryConfig(db=db, session_id="my-session"),
+        )
         agent.chat("Hello!")
         
         # With multiple backends
