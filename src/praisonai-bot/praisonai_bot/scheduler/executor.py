@@ -1457,8 +1457,10 @@ class ScheduledAgentExecutor:
         """Fail-closed delivery: send a compact failure summary on failure.
 
         Active only when the run policy sets ``deliver_on_failure`` and the job
-        has a delivery target.  Records any delivery error on the result
-        separately from the execution ``error``.
+        has a delivery target.  When the summary reaches the channel the result
+        is marked ``delivered`` (the payload arrived, so run history and
+        delivery monitoring stay accurate); a non-arriving summary records a
+        ``delivery_error`` separately from the execution ``error``.
         """
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
@@ -1471,6 +1473,7 @@ class ScheduledAgentExecutor:
         )
         try:
             if await self._dispatch_delivery(delivery, summary):
+                result.delivered = True
                 logger.info("Delivered failure summary for job '%s'", job.id)
             else:
                 result.delivery_error = (
