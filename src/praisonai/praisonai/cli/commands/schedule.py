@@ -113,8 +113,13 @@ def schedule_add_cmd(
         # ``--model``/``--no-pin`` snapshot the model/pin policy onto the job so
         # an unattended run stays pinned and drift fails closed. A model-free
         # ``--command`` job takes no model turn, so pinning is skipped for it.
+        # Only apply trusted post-add options when THIS invocation actually
+        # created the job. A duplicate-name response ("already exists") is a
+        # rejection: mutating the existing job here would let a rejected add
+        # reconfigure a live schedule (e.g. attach a new --command/--backend).
+        job_created = f"Schedule '{name}' added" in result
         want_pin_update = bool(model) or (not pin and not command)
-        if (pre_run or condition or command or backend or want_pin_update) and "Error" not in result:
+        if (pre_run or condition or command or backend or want_pin_update) and job_created:
             try:
                 from praisonaiagents.tools.schedule_tools import _get_store
                 store = _get_store()

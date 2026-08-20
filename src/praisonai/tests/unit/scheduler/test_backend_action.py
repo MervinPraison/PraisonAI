@@ -194,3 +194,20 @@ def test_backendless_job_payload_unchanged():
     restored = ScheduleJob.from_dict(data)
     assert restored.backend is None
     assert restored.backend_options == {}
+
+
+def test_backend_resolution_failure_is_audited(monkeypatch):
+    """Early failures (resolution/timeout/launch) must hit the audit path."""
+    import praisonai_bot._code_bridge as bridge
+
+    def broken_import(name):
+        raise ImportError("praisonai-code not installed")
+
+    monkeypatch.setattr(bridge, "import_code_module", broken_import)
+    delivered: list = []
+    ex = _executor(delivered)
+    audited: list = []
+    ex._audit_output = lambda job, result: audited.append(result)
+    result = _run(ex._execute_one(_backend_job()))
+    assert result.status == "failed"
+    assert audited and audited[0].error == result.error

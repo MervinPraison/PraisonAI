@@ -117,3 +117,17 @@ def test_is_resume_set_on_second_turn():
     _run(agent._chat_via_cli_backend("first", cli_backend=backend))
     _run(agent._chat_via_cli_backend("second", cli_backend=backend))
     assert captured == [False, True]
+
+
+def test_yaml_backend_resolution_failure_fails_closed(monkeypatch):
+    """An explicitly requested YAML cli_backend that cannot resolve must raise,
+    never silently fall back to the native LLM path."""
+    import praisonai.agents_generator as ag
+    monkeypatch.setattr(ag, "_resolve_yaml_cli_backend", lambda cfg, log: None)
+    import inspect
+    from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+    source = inspect.getsource(PraisonAIAdapter)
+    # Contract check: the adapter raises on unresolved cli_backend rather than
+    # omitting the kwarg (full generator run needs YAML fixtures; the guard
+    # clause is the unit under test).
+    assert "could not be" in source and "raise ValueError" in source

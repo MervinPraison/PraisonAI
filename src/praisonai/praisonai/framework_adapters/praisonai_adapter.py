@@ -392,8 +392,17 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 resolved_backend = _resolve_yaml_cli_backend(
                     details.get('cli_backend'), logger
                 )
-                if resolved_backend is not None:
-                    agent_kwargs['cli_backend'] = resolved_backend
+                if resolved_backend is None:
+                    # Fail closed: an explicitly requested backend that cannot
+                    # be resolved must not silently fall back to the native
+                    # LLM path (different tools, credentials, and billing).
+                    raise ValueError(
+                        f"Agent {role_filled!r} requests cli_backend="
+                        f"{details.get('cli_backend')!r} but it could not be "
+                        "resolved. Install praisonai-code and use an id from "
+                        "'praisonai backends', or remove the cli_backend field."
+                    )
+                agent_kwargs['cli_backend'] = resolved_backend
             
             # Forward agent-level fields that core Agent already accepts as-is
             # so CLI/YAML flags (--planning, --web, --autonomy, ...) are
