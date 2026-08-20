@@ -252,13 +252,16 @@ def test_backend_resolution_failure_is_audited(monkeypatch):
 
 
 def test_command_and_backend_conflict_fails(fake_backend):
-    """A persisted job with both model-free actions fails loudly."""
+    """A persisted job with both model-free actions fails loudly and is audited."""
     backend, _ = fake_backend
     delivered: list = []
     ex = _executor(delivered)
+    audited: list = []
+    ex._audit_output = lambda job, result: audited.append(result)
     job = _backend_job()
     job.command = "df -h"
     result = _run(ex._execute_one(job))
     assert result.status == "failed"
     assert "exactly one" in result.error
     assert backend.calls == []
+    assert audited and audited[0].error == result.error

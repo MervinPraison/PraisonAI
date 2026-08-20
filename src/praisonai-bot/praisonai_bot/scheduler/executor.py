@@ -267,7 +267,10 @@ class ScheduledAgentExecutor:
             self._runner.mark_run(job, status="failed", error=err, duration=duration)
             if self._on_failure:
                 self._on_failure(job, err)
-            return JobResult(job=job, status="failed", error=err, duration=duration)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await asyncio.to_thread(self._audit_output, job, result)
+            await self._maybe_deliver_failure(job, result)
+            return result
         if command:
             return await self._execute_command(job, command, started)
 
