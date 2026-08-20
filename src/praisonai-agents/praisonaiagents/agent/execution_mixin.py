@@ -1825,18 +1825,26 @@ Write the complete compiled report:"""
             logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
             return {"error": f"Error in execute_tool_async: {str(e)}"}
 
-    def launch(self, path: str = '/', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
+    def launch(self, path: str = '/', port: int = 8000, host: str = '127.0.0.1', debug: bool = False, protocol: str = "http"):
         """
         Launch the agent as an HTTP API endpoint or MCP server.
         
         This method now delegates to protocol-based launchers to follow
         the protocol-driven architecture. Heavy implementations (FastAPI/uvicorn)
         are only imported when needed through lazy loading.
-        
+
+        Request authorisation matches ``PraisonAIAgents.launch``: when
+        ``PRAISONAI_LAUNCH_AUTH_TOKEN`` is set, every HTTP route requires that
+        bearer token (401 otherwise). When it is unset and ``host`` is
+        non-loopback, a one-time token is generated and printed rather than
+        serving an unauthenticated endpoint on all interfaces.
+
         Args:
             path: API endpoint path (default: '/') for HTTP, or base path for MCP.
             port: Server port (default: 8000)
-            host: Server host (default: '0.0.0.0')
+            host: Server host (default: '127.0.0.1'; changed from '0.0.0.0' to
+                avoid binding all interfaces by default — pass '0.0.0.0'
+                explicitly to expose externally).
             debug: Enable debug mode (default: False)
             protocol: "http" to launch as FastAPI, "mcp" to launch as MCP server.
             
@@ -1859,6 +1867,8 @@ Write the complete compiled report:"""
         For now, it maintains backward compatibility while following lazy import patterns.
         """
         global _server_started, _registered_agents, _shared_apps, _server_lock
+
+        from .launch_security import authorise_launch_request, resolve_launch_host
 
         # Try to import FastAPI dependencies - lazy loading
         try:
@@ -1884,7 +1894,15 @@ Write the complete compiled report:"""
             print("\nOr install all API dependencies with:")
             print("pip install 'praisonaiagents[api]'")
             return None
-                
+
+        # Fail-closed bind guard: refuse to serve keyless on a non-loopback host
+        # (auto-generates and prints a one-time token instead). Matches the
+        # serve/jobs precedent and keeps this path in lock-step with
+        # PraisonAIAgents.launch. Applied only after the dependency guard above
+        # so a launch that bails out (missing deps) cannot mutate the
+        # process-wide launch token and retroactively 401 a running endpoint.
+        host = resolve_launch_host(host)
+
         should_start = False
         with _server_lock:
             # Initialize port-specific collections if needed (once per port)
@@ -1937,6 +1955,8 @@ Write the complete compiled report:"""
             # Define the endpoint handler
             @_shared_apps[port].post(path)
             async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
+                if not authorise_launch_request(request):
+                    raise HTTPException(status_code=401, detail="Unauthorized")
                 # Handle both direct JSON with query field and form data
                 if query_data is None:
                     try:

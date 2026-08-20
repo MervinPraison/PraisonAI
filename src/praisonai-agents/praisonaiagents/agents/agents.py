@@ -43,18 +43,13 @@ class TaskStatus(Enum):
 logger = get_logger(__name__)
 
 
-def _launch_auth_token() -> Optional[str]:
-    return os.environ.get("PRAISONAI_LAUNCH_AUTH_TOKEN")
-
-
-def _authorise_launch_request(request) -> bool:
-    token = _launch_auth_token()
-    if not token:
-        return True
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and auth[7:] == token:
-        return True
-    return request.headers.get("X-Auth-Token") == token
+# Request authorisation + fail-closed bind guard are shared with Agent.launch
+# so the single-agent and multi-agent serving paths cannot drift apart.
+from ..agent.launch_security import (
+    launch_auth_token as _launch_auth_token,
+    authorise_launch_request as _authorise_launch_request,
+    resolve_launch_host as _resolve_launch_host,
+)
 
 
 # Agent server registry for thread-safe server management
@@ -2556,7 +2551,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         print("="*50 + "\n")
         
-    def launch(self, path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
+    def launch(self, path: str = '/agents', port: int = 8000, host: str = '127.0.0.1', debug: bool = False, protocol: str = "http"):
         """
         Launch all agents as a single API endpoint (HTTP) or an MCP server. 
         In HTTP mode, the endpoint accepts a query and processes it through all agents in sequence.
@@ -2567,7 +2562,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         Args:
             path: API endpoint path (default: '/agents') for HTTP. Ignored in MCP mode.
             port: Server port (default: 8000)
-            host: Server host (default: '0.0.0.0')
+            host: Server host (default: '127.0.0.1'; changed from '0.0.0.0' to
+                avoid binding all interfaces by default — pass '0.0.0.0'
+                explicitly to expose externally). Binding a non-loopback host
+                without ``PRAISONAI_LAUNCH_AUTH_TOKEN`` set auto-generates and
+                prints a one-time bearer token.
             debug: Enable debug mode for uvicorn (default: False)
             protocol: "http" to launch as FastAPI, "mcp" to serve over MCP via
                 ``praisonai-mcp`` (install with ``pip install praisonai-mcp``).
@@ -2577,7 +2576,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         if protocol == "http":
             # Use centralized server registry
-            
+
             if not self.agents:
                 logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
                 return
@@ -2606,6 +2605,13 @@ class AgentTeam(SpawnAnnounceProtocol):
                 print("\nOr install all API dependencies with:")
                 print("pip install 'praisonaiagents[api]'")
                 return None
+
+            # Fail-closed bind guard shared with Agent.launch: never serve
+            # keyless on a non-loopback host. Applied only after the no-agents
+            # and dependency guards above, so a launch that bails out cannot
+            # mutate the process-wide launch token (which every route reads per
+            # request) and retroactively 401 an already-running endpoint.
+            host = _resolve_launch_host(host)
             
             # Thread-safe initialization of FastAPI app
             app, is_new = _server_registry.get_or_create_app(
