@@ -20,6 +20,7 @@ class _RecordingOutput:
         self.results = []
         self.errors = []
         self.printed_errors = []
+        self.warnings = []
         self.is_json_mode = False
 
     def emit_result(self, message=None, data=None):
@@ -30,6 +31,9 @@ class _RecordingOutput:
 
     def print_error(self, message, code=None, remediation=None):
         self.printed_errors.append((message, code, remediation))
+
+    def print_warning(self, message):
+        self.warnings.append(message)
 
 
 @pytest.mark.parametrize(
@@ -45,6 +49,69 @@ class _RecordingOutput:
 )
 def test_run_succeeded_classification(result, expected):
     assert run_cmd._run_succeeded(result) is expected
+
+
+class _StopReasonAgent:
+    """Minimal agent exposing a ``last_stop_reason`` like the core Agent."""
+
+    def __init__(self, reason):
+        self.last_stop_reason = reason
+
+
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("max_steps", True),
+        ("completed", False),
+        ("error", False),
+        (None, False),
+    ],
+)
+def test_run_was_truncated_classification(reason, expected):
+    assert run_cmd._run_was_truncated(_StopReasonAgent(reason)) is expected
+
+
+def test_run_was_truncated_handles_missing_or_raising_agent():
+    # No agent, or an accessor that raises, must be treated as not-truncated so
+    # the completed/failed contract is preserved unchanged.
+    assert run_cmd._run_was_truncated(None) is False
+
+    class _Raising:
+        @property
+        def last_stop_reason(self):
+            raise RuntimeError("boom")
+
+    assert run_cmd._run_was_truncated(_Raising()) is False
+
+
+def test_report_run_truncated_exits_two_and_emits_truncated_status():
+    output = _RecordingOutput()
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._report_run_truncated(output, "partial summary")
+
+    # Distinct from a hard failure (exit 1) and a clean completion (exit 0).
+    assert exc.value.exit_code == 2
+
+    # Machine-readable truncated object that preserves the summary text.
+    assert output.results, "expected a result event"
+    _, result_data = output.results[-1]
+    assert result_data.get("status") == "truncated"
+    assert result_data.get("result") == "partial summary"
+
+    # An interactive (non-JSON) user gets a one-line notice that the answer is
+    # a wrap-up, not a finished task.
+    assert output.warnings, "expected a human-facing truncation notice"
+
+
+def test_report_run_truncated_warns_only_in_non_json_mode():
+    output = _RecordingOutput()
+    output.is_json_mode = True
+    with pytest.raises(typer.Exit):
+        run_cmd._report_run_truncated(output, "partial summary")
+    # JSON consumers get the machine-readable status but no human warning noise.
+    _, result_data = output.results[-1]
+    assert result_data.get("status") == "truncated"
+    assert not output.warnings, "JSON mode must not print a human warning"
 
 
 def test_report_run_failure_exits_nonzero_and_emits_status():
