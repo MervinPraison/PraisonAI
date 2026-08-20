@@ -44,10 +44,15 @@ def _a2u_loader():
 
 
 def _openai_compat_loader():
-    # Returns the provider class; ``EndpointProviderRegistry.resolve`` adapts it
-    # to the CLI dispatch signature.
-    from praisonai.endpoints.providers.openai_compat import OpenAICompatProvider
-    return OpenAICompatProvider
+    # ``openai-compat`` is a wrapper-only provider class. Reach it through the
+    # sanctioned wrapper bridge (dynamic import) rather than a static
+    # ``from praisonai...`` so the standalone ``praisonai-code`` hot path keeps
+    # its C7 import-direction guarantee. ``EndpointProviderRegistry.resolve``
+    # adapts the returned class to the CLI dispatch signature.
+    from ..._wrapper_bridge import import_wrapper_module
+
+    module = import_wrapper_module("praisonai.endpoints.providers.openai_compat")
+    return module.OpenAICompatProvider
 
 
 # Built-in endpoint types with lazy loading
@@ -84,18 +89,43 @@ def _adapt_provider_class(provider_cls):
             base_url=parsed.get("url") or handler.base_url,
             api_key=parsed.get("api_key") or handler.api_key,
         )
-        result = provider.invoke(
-            endpoint_name,
-            input_data,
-            config,
-            stream=bool(parsed.get("stream")),
-        )
+        # Streaming has a dedicated provider entry point. ``invoke(stream=True)``
+        # returns a single terminal ``InvokeResult`` whose ``data`` is the raw
+        # streaming object (e.g. a LiteLLM generator), which the non-stream
+        # result handler cannot render; ``invoke_stream`` yields SSE-shaped
+        # events instead. Route ``--stream`` through it so provider streaming
+        # implementations are honoured rather than silently collapsed.
+        if parsed.get("stream"):
+            return _consume_provider_stream(
+                handler, provider, endpoint_name, input_data, config, parsed
+            )
+        result = provider.invoke(endpoint_name, input_data, config)
         payload = {"status": 200 if result.ok else 500, "data": result.data}
         if result.error:
             payload["error"] = {"message": result.error}
         return handler._handle_invoke_result(payload, endpoint_name, parsed)
 
     return invoke
+
+
+def _consume_provider_stream(handler, provider, endpoint_name, input_data, config, parsed):
+    """Drive ``BaseProvider.invoke_stream`` and print events like the CLI's own
+    streaming handlers, returning the matching exit code.
+    """
+    import json as _json
+
+    for event in provider.invoke_stream(endpoint_name, input_data, config):
+        event_type = event.get("event", "message")
+        data = event.get("data", {})
+        if event_type == "error":
+            message = data.get("error") if isinstance(data, dict) else data
+            handler._print_error(str(message))
+            return handler.EXIT_RUNTIME_ERROR
+        if parsed.get("json"):
+            print(_json.dumps({"event": event_type, "data": data}, default=str))
+        else:
+            print(f"  [{event_type}] {data}")
+    return handler.EXIT_SUCCESS
 
 
 class EndpointProviderRegistry(PluginRegistry):

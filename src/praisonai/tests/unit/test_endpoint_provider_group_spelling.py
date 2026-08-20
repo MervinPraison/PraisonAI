@@ -41,7 +41,13 @@ class AcmeProvider(BaseProvider):
         return EndpointInfo(name=name, provider_type="acme")
 
     def invoke(self, name, input_data=None, config=None, stream=False):
+        if stream:
+            raise AssertionError("streaming must route through invoke_stream")
         return InvokeResult(ok=True, data={"acme": True, "endpoint": name})
+
+    def invoke_stream(self, name, input_data=None, config=None):
+        yield {"event": "data", "data": {"chunk": 1}}
+        yield {"event": "done", "data": "[DONE]"}
 
     def health(self):
         return HealthResult(healthy=True, provider_type="acme")
@@ -122,6 +128,19 @@ def test_invoke_routes_to_the_plugin(published):
 def test_unknown_type_errors_instead_of_running_a_recipe():
     handler, http = _handler()
     assert handler.cmd_invoke(["x", "--type", "bogus"]) == handler.EXIT_VALIDATION_ERROR
+    assert http == []
+
+
+def test_stream_routes_through_provider_invoke_stream(published):
+    """``--stream`` must consume ``BaseProvider.invoke_stream`` rather than
+    calling ``invoke(stream=True)`` (whose result the CLI cannot render)."""
+    handler, http = _handler()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        rc = handler.cmd_invoke(["acme-echo", "--type", "acme", "--stream"])
+    # AcmeProvider.invoke raises if reached with stream=True; reaching here with
+    # a success code proves invoke_stream drove the output instead.
+    assert rc == handler.EXIT_SUCCESS
     assert http == []
 
 
