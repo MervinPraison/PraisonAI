@@ -7,6 +7,7 @@ sandbox execution. Supports auto-shutdown after idle timeout.
 Requires: ``pip install docker``
 """
 
+from ._sync_base import SyncComputeProvider
 import asyncio
 import contextlib
 import json
@@ -17,6 +18,17 @@ import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
+
+#: Environment variables treated as secrets: forwarded into a container so the
+#: agent can reach its model, and scrubbed back out of any image committed from
+#: that container. Keep in step with ComputeManagedAgent._KEY_VARS.
+_FORWARDED_SECRETS = frozenset({
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+    "GROQ_API_KEY", "MISTRAL_API_KEY", "COHERE_API_KEY", "OPENROUTER_API_KEY",
+    "DEEPSEEK_API_KEY", "XAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE",
+    "E2B_API_KEY", "DAYTONA_API_KEY", "NOVITA_API_KEY", "TENKI_API_KEY",
+    "FLY_API_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET",
+})
 
 # Local image namespace for post-setup captures (``docker commit``).
 _CAPTURE_IMAGE = "praisonai-env"
@@ -102,7 +114,7 @@ def _update_registry(
         _save_registry(registry)
 
 
-class DockerCompute:
+class DockerCompute(SyncComputeProvider):
     """Docker container-based compute provider.
 
     Satisfies ``ComputeProviderProtocol`` (Core SDK).
@@ -156,7 +168,7 @@ class DockerCompute:
 
     async def provision(self, config) -> Any:
         loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, self._provision_sync, config)
+        info = await self._offload(self._provision_sync, config)
         return info
 
     def _provision_sync(self, config) -> Any:
@@ -313,7 +325,23 @@ class DockerCompute:
             return None
         try:
             repository, _, tag = ref.partition(":")
-            info["container"].commit(repository=repository, tag=tag or "latest")
+            # Scrub every forwarded env value out of the committed image.
+            # `docker commit` preserves Config.Env, so anything handed to the
+            # container -- a model API key, or an arbitrary secret the caller
+            # put in ComputeConfig.env -- was baked into an image that persists
+            # for days, readable by anyone who can run `docker inspect`. The
+            # capture is meant to reuse the installed *packages*, not the
+            # credentials that happened to be in the environment when they were
+            # installed. The known-secret set is only a floor; the config's own
+            # env names are the values actually injected into THIS container, so
+            # scrub their union rather than trusting a fixed list to be complete.
+            config = info.get("config")
+            config_env = getattr(config, "env", None) or {}
+            names = _FORWARDED_SECRETS | {str(name) for name in config_env}
+            scrub = [f"ENV {name}=" for name in sorted(names)]
+            info["container"].commit(
+                repository=repository, tag=tag or "latest", changes=scrub
+            )
         except Exception as e:
             logger.warning(
                 "[docker_compute] capture failed for %s (ephemeral fallback): %s",
@@ -390,7 +418,7 @@ class DockerCompute:
 
     async def shutdown(self, instance_id: str) -> None:
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._shutdown_sync, instance_id)
+        await self._offload(self._shutdown_sync, instance_id)
 
     def _find_container(self, instance_id: str):
         """Look up a container by name, for instances this process didn't start.
@@ -469,10 +497,7 @@ class DockerCompute:
         command: str,
         timeout: int = 300,
     ) -> Dict[str, Any]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._execute_sync, instance_id, command, timeout,
-        )
+        return await self._offload(self._execute_sync, instance_id, command, timeout)
 
     def _execute_sync(
         self, instance_id: str, command: str, timeout: int,
@@ -618,7 +643,7 @@ class DockerCompute:
 
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, _list_sync)
+            return await self._offload(_list_sync)
         except Exception as exc:
             logger.debug("[docker_compute] list_instances failed: %s", exc)
             return []

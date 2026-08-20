@@ -71,8 +71,12 @@ def _shutdown_orphan(shared: Any, name: str) -> None:
     try:
         shared.shutdown()
         logger.debug("[tools_placement] released the sandbox belonging to %s", name)
-    except Exception:  # pragma: no cover - teardown must stay quiet
-        logger.debug("[tools_placement] could not release the sandbox for %s", name)
+    except Exception as exc:  # pragma: no cover - teardown must stay quiet
+        # Loud enough to notice: a failed release means a container, or a
+        # billed cloud instance, is still running after the agent is gone.
+        logger.warning(
+            "[tools_placement] could not release the sandbox for %s: %s", name, exc
+        )
 
 
 def ensure_tools_placed(agent: Any) -> None:

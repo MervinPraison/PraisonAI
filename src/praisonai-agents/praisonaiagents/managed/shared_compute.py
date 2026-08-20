@@ -142,6 +142,8 @@ class SharedCompute:
             logger.info("[shared_compute] shut down instance %s", self.instance_id)
         except Exception as exc:  # pragma: no cover - teardown must not mask errors
             logger.warning("[shared_compute] shutdown failed for %s: %s", self.instance_id, exc)
+            self.instance_id = None
+            raise            # the caller logs whether the sandbox was released
         finally:
             self.instance_id = None
 

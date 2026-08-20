@@ -29,6 +29,30 @@ logger = logging.getLogger(__name__)
 #: followed by a read sees the same file -- and so does the next command.
 SANDBOX_ROOT = "/sandbox"
 
+#: Lowest pids cap a container can run a shell under. Below roughly this,
+#: `docker run` dies before the command starts rather than limiting it.
+MIN_CONTAINER_PIDS = 128
+
+
+
+def _sandbox_relative(path: str) -> str:
+    """Accept both spellings of a sandbox path.
+
+    The directory is mounted at SANDBOX_ROOT, so that is the path a user sees
+    from inside the container and the one they naturally type. But the file API
+    treats "/" as the sandbox root, so "/sandbox/report.txt" was joined onto the
+    root again and landed at "/sandbox/sandbox/report.txt" -- write_file
+    returned True, and `cat /sandbox/report.txt` could not find it.
+
+    Both spellings now mean the same file. Only the exact prefix is stripped, so
+    a genuine subdirectory that happens to be called "sandbox" still works.
+    """
+    if path == SANDBOX_ROOT:
+        return "/"
+    prefix = SANDBOX_ROOT + "/"
+    if path.startswith(prefix):
+        return "/" + path[len(prefix):]
+    return path
 
 class DockerSandbox:
     """Docker-based sandbox for safe code execution.
@@ -285,6 +309,22 @@ class DockerSandbox:
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
         ]
+
+        # max_processes was accepted and ignored here while the other execution
+        # path applied it, so a fork bomb ran unbounded through the bridged
+        # execute_command tool. Docker enforces pids per CONTAINER, so unlike
+        # setrlimit's per-user RLIMIT_NPROC it means what it says.
+        #
+        # The floor matters though. max_processes defaults to 10, a number
+        # chosen for the rlimit world, and `--pids-limit 10` kills the
+        # container before the shell finishes starting -- `docker run` exits
+        # 125 with "No such container". A shell, its pipeline and the command
+        # itself need more than that, so the cap is raised to something a
+        # container can actually live within. It still bounds a fork bomb,
+        # which is the point; it just stops the bound from being the bug.
+        if limits.max_processes and limits.max_processes > 0:
+            pids = max(limits.max_processes, MIN_CONTAINER_PIDS)
+            docker_cmd.extend(["--pids-limit", str(pids)])
         
         if not limits.network_enabled:
             docker_cmd.extend(["--network", "none"])
@@ -363,52 +403,65 @@ class DockerSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file to the sandbox."""
-        from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
-        if full_path is None:
+        """Write a file to the sandbox.
+
+        Opened through open_in_sandbox rather than by path string: the sandbox
+        directory is bind-mounted into the container, so anything that
+        validates a name and then re-opens it can be raced by code inside.
+        """
+        from ._compat import makedirs_in_sandbox, open_in_sandbox
+
+        path = _sandbox_relative(path)
+
+        if not makedirs_in_sandbox(self._temp_dir, path):
             return False
-        
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        
+
+        payload = content if isinstance(content, bytes) else content.encode()
+        fd = open_in_sandbox(
+            self._temp_dir, path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        )
+        if fd is None:
+            return False
         try:
-            mode = "wb" if isinstance(content, bytes) else "w"
-            with open(full_path, mode) as f:
-                f.write(content)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
             return True
-        except Exception as e:
-            logger.error(f"Failed to write file: {e}")
+        except OSError as exc:
+            logger.warning("Failed to write %s in sandbox: %s", path, exc)
             return False
-    
+
     async def read_file(
         self,
         path: str,
     ) -> Optional[Union[str, bytes]]:
-        """Read a file from the sandbox."""
-        from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
-        if full_path is None or not os.path.exists(full_path):
+        """Read a file from the sandbox.
+
+        Symlink-proof for the same reason as write_file: a name validated a
+        moment ago can point somewhere else by the time it is opened.
+        """
+        from ._compat import open_in_sandbox
+
+        fd = open_in_sandbox(self._temp_dir, _sandbox_relative(path), os.O_RDONLY)
+        if fd is None:
             return None
-        
         try:
-            with open(full_path, "r") as f:
-                return f.read()
-        except UnicodeDecodeError:
-            with open(full_path, "rb") as f:
-                return f.read()
-        except Exception:
+            with os.fdopen(fd, "rb") as handle:
+                raw = handle.read()
+        except OSError:
             return None
-    
+        try:
+            return raw.decode()
+        except UnicodeDecodeError:
+            return raw
+
     async def list_files(
         self,
         path: str = "/",
     ) -> List[str]:
         """List files in a sandbox directory."""
         from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
+
+        full_path = safe_sandbox_path(self._temp_dir, _sandbox_relative(path))
         if full_path is None or not os.path.exists(full_path):
             return []
         
@@ -474,8 +527,17 @@ class DockerSandbox:
             "-v", f"{self._temp_dir}:{SANDBOX_ROOT}",
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
-            "--pids-limit", str(limits.max_processes),
         ]
+
+        # Same floor as run_command(): --pids-limit is per CONTAINER, and the
+        # default max_processes of 10 was chosen for setrlimit's per-user world.
+        # A raw 10 here kills the container before python even starts (exit 125),
+        # so raise it to something a container can live within. Still bounds a
+        # fork bomb; just stops the bound from being the bug.
+        if limits.max_processes and limits.max_processes > 0:
+            docker_cmd.extend(
+                ["--pids-limit", str(max(limits.max_processes, MIN_CONTAINER_PIDS))]
+            )
         
         if not limits.network_enabled:
             docker_cmd.extend(["--network", "none"])
