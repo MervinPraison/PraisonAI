@@ -56,10 +56,22 @@ _FICTIONAL_IMPORTS = ("PostgresAdapter",)
 
 
 def _example_files():
+    """Collect every ``Agent(`` example under the known roots.
+
+    A missing root is a *hard* error rather than an empty parametrization:
+    if a root is renamed/moved the guard would otherwise silently stop
+    examining those examples and let the very regression it exists to catch
+    slip back in (issue #4161).
+    """
+    missing = [str(root) for root in _EXAMPLE_ROOTS if not root.exists()]
+    if missing:
+        raise RuntimeError(
+            "Session-doc example root(s) not found: "
+            + ", ".join(missing)
+            + " — update _EXAMPLE_ROOTS so coverage is not silently lost."
+        )
     files = []
     for root in _EXAMPLE_ROOTS:
-        if not root.exists():
-            continue
         for path in sorted(root.rglob("*.py")):
             if "Agent(" in path.read_text():
                 files.append(path)
