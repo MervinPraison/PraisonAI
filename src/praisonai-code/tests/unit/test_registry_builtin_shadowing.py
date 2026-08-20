@@ -162,12 +162,19 @@ def _load_vendored_fallback(module_path, bridge_path):
     stub.code_available = lambda: False
     stub.import_code_module = real_bridge.import_code_module
 
+    prior_module = sys.modules.get(module_path)
     with mock.patch.dict(sys.modules, {bridge_path: stub}):
         sys.modules.pop(module_path, None)
         try:
             module = importlib.import_module(module_path)
         finally:
-            sys.modules.pop(module_path, None)
+            # Restore the pre-existing module (or clear it if it was absent) so
+            # this forced re-import never leaks the vendored fallback into later
+            # tests that expect the bridged canonical class.
+            if prior_module is not None:
+                sys.modules[module_path] = prior_module
+            else:
+                sys.modules.pop(module_path, None)
 
     assert module.PluginRegistry.__module__ == module_path, (
         f"expected the vendored {module_path} class, got "
