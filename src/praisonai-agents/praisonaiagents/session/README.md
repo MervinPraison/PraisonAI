@@ -153,21 +153,27 @@ Multiple processes can safely read/write to the same session.
 
 ## Context Caching
 
-Prompt caching is applied automatically for models that support it — there is
-no `prompt_caching` parameter. `Agent` checks
-`praisonaiagents.llm.model_capabilities.supports_prompt_caching(model)` and, for
-providers that need explicit breakpoints (Anthropic), injects `cache_control`
-markers itself:
+Prompt caching is opt-in via `caching=CachingConfig(prompt_caching=True)` — there
+is no top-level `prompt_caching` parameter on `Agent`. When enabled, `Agent`
+checks `praisonaiagents.llm.model_capabilities.supports_prompt_caching(model)`
+and, for providers that need explicit breakpoints (Anthropic), injects
+`cache_control` markers itself. OpenAI/Gemini use automatic prefix caching, so no
+markers are emitted:
 
 ```python
+from praisonaiagents import Agent, MemoryConfig, CachingConfig
+
 agent = Agent(
     name="Assistant",
     llm="anthropic/claude-sonnet-4-5",
     memory=MemoryConfig(session_id="my-session"),
+    caching=CachingConfig(prompt_caching=True),
 )
 ```
 
 This caches the system prompt, reducing token costs for repeated conversations.
+Without `prompt_caching=True`, no `cache_control` breakpoints are injected on the
+Anthropic path.
 
 ## API Reference
 
