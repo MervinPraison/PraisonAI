@@ -279,11 +279,18 @@ class MemoryConfig:
 
 
 class ChunkingStrategy(str, Enum):
-    """Knowledge chunking strategies."""
+    """Knowledge chunking strategies.
+
+    Every member must resolve to a chunker via
+    ``praisonaiagents.knowledge.chunking.normalize_chunker_type``. FIXED and
+    PARAGRAPH are aliases for ``token``/``recursive``; the rest are chunker ids.
+    """
     FIXED = "fixed"
+    PARAGRAPH = "paragraph"
+    TOKEN = "token"
+    RECURSIVE = "recursive"
     SEMANTIC = "semantic"
     SENTENCE = "sentence"
-    PARAGRAPH = "paragraph"
 
 
 @dataclass
@@ -322,10 +329,12 @@ class KnowledgeConfig:
     embedder: str = "openai"
     embedder_config: Optional[Dict[str, Any]] = None
     
-    # Chunking (direct fields)
-    chunking_strategy: Union[str, ChunkingStrategy] = ChunkingStrategy.SEMANTIC
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
+    # Chunking (direct fields). Defaults match what Knowledge actually used
+    # while these fields were inert, so enabling them changes nothing for
+    # anyone who did not set them.
+    chunking_strategy: Union[str, ChunkingStrategy] = ChunkingStrategy.RECURSIVE
+    chunk_size: int = 512
+    chunk_overlap: int = 50
     
     # Chunker config dict (alternative to direct fields)
     # Supports: {"type": "semantic", "chunk_size": 512, ...}
