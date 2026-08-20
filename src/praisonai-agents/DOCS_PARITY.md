@@ -30,7 +30,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ CLI | 5 | 122 | 36622 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4818 |
+| ✅ Code Execution | 2 | 14 | 4851 |
 | ✅ Conditions | 1 | 3 | 1321 |
 | ✅ Configuration | 3 | 8 | 3138 |
 | ✅ Context Management | 16 | 36 | 13886 |
@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3483 |
 | ✅ Security | 1 | 3 | 3343 |
-| ✅ Sessions | 4 | 19 | 7565 |
+| ✅ Sessions | 4 | 19 | 7567 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
