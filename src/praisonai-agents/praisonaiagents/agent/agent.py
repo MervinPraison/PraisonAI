@@ -2001,11 +2001,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # Single tool name string - resolve from registry
             self.tools = self._resolve_tool_names([tools])
         elif isinstance(tools, (list, tuple)):
-            # Check if list contains strings (tool names) that need resolution
-            if tools and all(isinstance(t, str) for t in tools):
-                self.tools = self._resolve_tool_names(tools)
-            else:
-                self.tools = list(tools)
+            # Resolve tool-name strings PER ELEMENT. An all-or-nothing `all(...)`
+            # test silently left every name unresolved as soon as one callable
+            # was present, so `tools=[my_tool, 'read_file']` dropped 'read_file'.
+            self.tools = self._resolve_tools_list(tools)
         else:
             self.tools = tools or []
         

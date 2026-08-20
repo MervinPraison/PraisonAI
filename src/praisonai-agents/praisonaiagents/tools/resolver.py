@@ -144,17 +144,43 @@ def resolve_tool_names(
         on_unknown: Optional callback ``(unknown, suggestions)`` invoked for
             unresolved names in non-strict mode instead of the default report.
     """
+    return resolve_tools_list(names, strict=strict, on_unknown=on_unknown)
+
+
+def resolve_tools_list(
+    items: List[Any],
+    *,
+    strict: Optional[bool] = None,
+    on_unknown: Optional[Callable[[List[str], Dict[str, List[str]]], None]] = None,
+) -> List[Any]:
+    """Resolve the name strings inside a possibly-mixed ``tools=`` list.
+
+    Non-string entries (callables, bound methods, tool instances, MCP handles,
+    ...) pass through in place and untouched. Unknown names are reported once,
+    as a batch, exactly as an all-strings list would report them.
+
+    Args:
+        items: Tools list, any mix of name strings and tool objects.
+        strict: If True, raise ``ToolResolutionError`` when any name is unknown.
+            Defaults to the ``PRAISONAI_STRICT_TOOLS`` environment variable
+            (falsey by default for backward compatibility).
+        on_unknown: Optional callback ``(unknown, suggestions)`` invoked for
+            unresolved names in non-strict mode instead of the default report.
+    """
     if strict is None:
         strict = os.getenv("PRAISONAI_STRICT_TOOLS", "").strip().lower() in ("1", "true", "yes")
 
     resolved: List[Any] = []
     unknown: List[str] = []
-    for name in names:
-        tool = resolve_tool_name(name)
+    for item in items:
+        if not isinstance(item, str):
+            resolved.append(item)
+            continue
+        tool = resolve_tool_name(item)
         if tool is not None:
             resolved.append(tool)
         else:
-            unknown.append(name)
+            unknown.append(item)
 
     if unknown:
         suggestions = {name: _closest_names(name) for name in unknown}

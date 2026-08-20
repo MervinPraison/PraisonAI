@@ -374,6 +374,12 @@ class ToolExecutionMixin:
 
         return resolve_tool_names(tool_names)
 
+    def _resolve_tools_list(self, tools):
+        """Resolve any tool-name strings inside a mixed ``tools=`` list."""
+        from ..tools.resolver import resolve_tools_list
+
+        return resolve_tools_list(tools)
+
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
         if not callable(func) or not arguments:
