@@ -192,8 +192,18 @@ def _ensure_atexit():
     ])
     
     if not telemetry_disabled:
-        # Register atexit handler to properly shutdown telemetry on exit
-        atexit.register(lambda: get_telemetry().shutdown())
+        # Register atexit handler to properly shutdown telemetry on exit.
+        # IMPORTANT: only shut down an already-constructed instance. Calling
+        # get_telemetry() here would construct a fresh client at interpreter
+        # shutdown (resurrecting an opted-out/shut-down instance and emitting a
+        # phantom session), so we consult the module state directly instead.
+        def _atexit_shutdown():
+            from . import telemetry as _telemetry_module
+            instance = _telemetry_module._telemetry_instance
+            if instance is not None:
+                instance.shutdown()
+
+        atexit.register(_atexit_shutdown)
         _atexit_registered = True
 
 

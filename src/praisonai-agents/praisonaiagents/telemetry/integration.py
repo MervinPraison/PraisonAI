@@ -225,10 +225,9 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
     if hasattr(agent, '_telemetry_instrumented'):
         return agent
     
-    # Store original methods
+    # Store original methods. Only chat() and execute_tool() are wrapped;
+    # run()/start() delegate to chat() and wrapping them too double-counts.
     original_chat = agent.chat if hasattr(agent, 'chat') else None
-    original_start = agent.start if hasattr(agent, 'start') else None
-    original_run = agent.run if hasattr(agent, 'run') else None
     original_execute_tool = agent.execute_tool if hasattr(agent, 'execute_tool') else None
     
     # Wrap chat method if it exists (this is the main method called by workflow)
@@ -261,100 +260,13 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
         
         agent.chat = instrumented_chat
     
-    # Wrap start method if it exists
-    if original_start:
-        @wraps(original_start)
-        def instrumented_start(*args, **kwargs):
-            import types
-            
-            try:
-                result = original_start(*args, **kwargs)
-                
-                # Check if result is a generator (streaming mode)
-                if isinstance(result, types.GeneratorType):
-                    # For streaming, defer telemetry tracking to avoid blocking
-                    def streaming_wrapper():
-                        try:
-                            for chunk in result:
-                                yield chunk
-                            # Track success only after streaming completes
-                            if not performance_mode:
-                                _queue_telemetry_event({
-                                    'type': 'agent_execution',
-                                    'agent_name': getattr(agent, 'name', 'unknown'),
-                                    'success': True
-                                })
-                        except Exception as e:
-                            # Track error immediately
-                            if not performance_mode:
-                                _queue_telemetry_event({
-                                    'type': 'agent_execution',
-                                    'agent_name': getattr(agent, 'name', 'unknown'),
-                                    'success': False
-                                })
-                                _queue_telemetry_event({
-                                    'type': 'error',
-                                    'error_type': type(e).__name__
-                                })
-                            raise
-                    
-                    return streaming_wrapper()
-                else:
-                    # For non-streaming, track immediately via queue
-                    if not performance_mode:
-                        _queue_telemetry_event({
-                            'type': 'agent_execution',
-                            'agent_name': getattr(agent, 'name', 'unknown'),
-                            'success': True
-                        })
-                    return result
-                    
-            except Exception as e:
-                # Track error via queue
-                if not performance_mode:
-                    _queue_telemetry_event({
-                        'type': 'agent_execution',
-                        'agent_name': getattr(agent, 'name', 'unknown'),
-                        'success': False
-                    })
-                    _queue_telemetry_event({
-                        'type': 'error',
-                        'error_type': type(e).__name__
-                    })
-                raise
-        
-        agent.start = instrumented_start
-    
-    # Wrap run method if it exists
-    if original_run:
-        @wraps(original_run)
-        def instrumented_run(*args, **kwargs):
-            try:
-                result = original_run(*args, **kwargs)
-                # Track success via queue
-                if not performance_mode:
-                    _queue_telemetry_event({
-                        'type': 'agent_execution',
-                        'agent_name': getattr(agent, 'name', 'unknown'),
-                        'success': True
-                    })
-                return result
-            except Exception as e:
-                # Track error via queue
-                if not performance_mode:
-                    _queue_telemetry_event({
-                        'type': 'agent_execution',
-                        'agent_name': getattr(agent, 'name', 'unknown'),
-                        'success': False
-                    })
-                    _queue_telemetry_event({
-                        'type': 'error',
-                        'error_type': type(e).__name__
-                    })
-                raise
-        
-        agent.run = instrumented_run
-    
+    # NOTE: run() and start() are intentionally NOT instrumented. Both delegate
+    # to chat() (Agent.run -> self.chat; Agent.start -> chat/_start_with_planning
+    # -> chat), so wrapping them in addition to chat() counted one logical
+    # execution twice and one failure as two errors. chat() is the single inner
+    # entry point every sync path funnels through, so instrumenting it alone
+    # yields exactly one execution per run()/start()/chat() call.
+
     # Wrap execute_tool method
     if original_execute_tool:
         @wraps(original_execute_tool)

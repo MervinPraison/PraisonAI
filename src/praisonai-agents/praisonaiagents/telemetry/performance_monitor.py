@@ -51,20 +51,13 @@ class PerformanceMonitor:
         Args:
             max_entries: Maximum number of performance entries to keep in memory
         """
-        # Check if performance monitoring is disabled
-        from .telemetry import _is_monitoring_disabled
-        self._monitoring_disabled = _is_monitoring_disabled()
-        
-        # If monitoring is disabled, use minimal initialization
-        if self._monitoring_disabled:
-            self.max_entries = 0
-            self._lock = None
-            self._function_stats = {}
-            self._api_calls = {}
-            self._function_flow = []
-            self._active_calls = {}
-            self._telemetry = None
-            return
+        # NOTE: monitoring-disabled state is intentionally NOT cached here.
+        # The global performance_monitor is constructed at import time, so a
+        # later disable_telemetry() must still take effect. `_monitoring_disabled`
+        # is a property that consults the shared telemetry state on every call.
+        #
+        # Data structures are always initialised so that re-enabling telemetry
+        # at runtime does not hit missing attributes.
         self.max_entries = max_entries
         self._lock = threading.RLock()
         
@@ -99,7 +92,21 @@ class PerformanceMonitor:
                 self._telemetry = MinimalTelemetry()
             except Exception as e:
                 logger.debug(f"Could not initialize telemetry integration: {e}")
-    
+
+    @property
+    def _monitoring_disabled(self) -> bool:
+        """Consult the shared telemetry state on every access.
+
+        Reading this live (rather than caching at construction time) is what
+        makes a later disable_telemetry() actually stop the import-time global
+        performance_monitor from recording further events.
+        """
+        try:
+            from .telemetry import _is_monitoring_disabled
+            return _is_monitoring_disabled()
+        except Exception:
+            return True
+
     def monitor_function(self, func_name: Optional[str] = None):
         """
         Decorator to monitor function performance.
