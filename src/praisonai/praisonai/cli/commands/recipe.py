@@ -152,6 +152,72 @@ def recipe_run(
 
 
 
+@app.command("runs")
+def recipe_runs(
+    name: str = typer.Argument(None, help="Recipe name to filter runs (optional)"),
+    status: str = typer.Option(None, "--status", help="Filter by status (e.g. success, failed)"),
+    session: str = typer.Option(None, "--session", "-s", help="Filter by session ID"),
+    limit: int = typer.Option(20, "--limit", help="Maximum number of runs to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
+):
+    """List recipe run history.
+
+    Shows the durable record of past recipe executions (name, version, status,
+    time, session, and run id) so you can see what happened the last few times
+    a recipe ran. Use the run id with `praisonai recipe judge <run_id>`.
+
+    Examples:
+        praisonai recipe runs
+        praisonai recipe runs ai-url-blog-generator
+        praisonai recipe runs ai-url-blog-generator --status failed --limit 10
+    """
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+
+    try:
+        from praisonai.recipe.history import list_runs
+    except ImportError as e:
+        console.print(f"[red]Run history unavailable: {e}[/red]")
+        raise typer.Exit(1)
+
+    runs = list_runs(recipe=name, status=status, session_id=session, limit=limit)
+
+    if json_output:
+        import json as _json
+        console.print(_json.dumps({"runs": runs, "count": len(runs)}, indent=2))
+        return
+
+    if not runs:
+        console.print("[dim]No recipe runs found.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Recipe", style="green")
+    table.add_column("Version", style="dim")
+    table.add_column("Status")
+    table.add_column("When", style="dim")
+    table.add_column("Session", style="cyan")
+    table.add_column("Run ID", style="magenta")
+
+    status_style = {"success": "green", "failed": "red", "policy_denied": "yellow", "timeout": "yellow"}
+    for run in runs:
+        run_status = run.get("status", "unknown")
+        styled_status = f"[{status_style.get(run_status, 'white')}]{run_status}[/]"
+        table.add_row(
+            run.get("recipe", "unknown"),
+            run.get("version", "-"),
+            styled_status,
+            run.get("stored_at", "-"),
+            run.get("session_id") or "-",
+            run.get("run_id", "-"),
+        )
+
+    console.print(table)
+    console.print("[dim]Tip: judge a run with `praisonai recipe judge <run-id>`[/dim]")
+
+
 @app.command("info")
 def recipe_info(
     name: str = typer.Argument(..., help="Recipe name"),

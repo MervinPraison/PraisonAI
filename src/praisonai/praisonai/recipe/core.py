@@ -139,6 +139,26 @@ def reload_registry():
 _recipe_cache: Dict[str, Any] = {}
 
 
+def _history_enabled() -> bool:
+    """Whether recipe run history persistence is enabled (default: on)."""
+    value = os.environ.get("PRAISONAI_RECIPE_HISTORY", "true").strip().lower()
+    return value not in ("0", "false", "no", "off")
+
+
+def _persist_history(result: RecipeResult, input_data: Any) -> None:
+    """Persist a RecipeResult to run history. Never raises."""
+    if not _history_enabled():
+        return
+    try:
+        from . import history
+
+        payload = input_data if isinstance(input_data, dict) else {"input": input_data}
+        history.store_run(result, input_data=payload or None)
+    except Exception as e:  # pragma: no cover - defensive, must not fail the run
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to persist recipe run history: {e}")
+
+
 def run(
     name: str,
     input: Union[str, Dict[str, Any]] = None,
@@ -172,6 +192,19 @@ def run(
         >>> if result.ok:
         ...     print(result.output["reply"])
     """
+    result = _run_impl(name, input=input, config=config, session_id=session_id, options=options)
+    _persist_history(result, input)
+    return result
+
+
+def _run_impl(
+    name: str,
+    input: Union[str, Dict[str, Any]] = None,
+    config: Optional[Dict[str, Any]] = None,
+    session_id: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None,
+) -> RecipeResult:
+    """Internal recipe execution (history persistence handled by run())."""
     options = options or {}
     config = config or {}
     input = input or {}
@@ -444,6 +477,22 @@ def run_stream(
     trace_id = _generate_trace_id()
     session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
     
+    trace = {"run_id": run_id, "trace_id": trace_id, "session_id": session_id}
+
+    def _record(recipe_name, version, status, error=None, output=None):
+        _persist_history(
+            RecipeResult(
+                run_id=run_id,
+                recipe=recipe_name,
+                version=version,
+                status=status,
+                output=output,
+                error=error,
+                trace=trace,
+            ),
+            input,
+        )
+
     # Started event
     yield RecipeEvent(
         event_type="started",
@@ -465,6 +514,7 @@ def run_stream(
         recipe_config = _load_recipe(name, offline=options.get("offline", False))
         
         if recipe_config is None:
+            _record(name, "unknown", RecipeStatus.FAILED, error=f"Recipe not found: {name}")
             yield RecipeEvent(
                 event_type="error",
                 data={"code": "not_found", "message": f"Recipe not found: {name}"},
@@ -481,6 +531,12 @@ def run_stream(
             dep_result = _check_dependencies(recipe_config)
             if not dep_result["all_satisfied"]:
                 missing = _format_missing_deps(dep_result)
+                _record(
+                    recipe_config.name,
+                    recipe_config.version,
+                    RecipeStatus.MISSING_DEPS,
+                    error=f"Missing dependencies: {', '.join(missing)}",
+                )
                 yield RecipeEvent(
                     event_type="error",
                     data={
@@ -494,6 +550,12 @@ def run_stream(
         if not options.get("allow_dangerous_tools", False):
             policy_error = _check_tool_policy(recipe_config, options)
             if policy_error:
+                _record(
+                    recipe_config.name,
+                    recipe_config.version,
+                    RecipeStatus.POLICY_DENIED,
+                    error=policy_error,
+                )
                 yield RecipeEvent(
                     event_type="error",
                     data={"code": "policy_denied", "message": policy_error},
@@ -502,6 +564,7 @@ def run_stream(
         
         # Dry run
         if options.get("dry_run", False):
+            _record(recipe_config.name, recipe_config.version, RecipeStatus.DRY_RUN)
             yield RecipeEvent(
                 event_type="completed",
                 data={
@@ -528,6 +591,13 @@ def run_stream(
         output = _execute_recipe(recipe_config, merged_config, session_id, options)
         duration = time.time() - start_time
         
+        _record(
+            recipe_config.name,
+            recipe_config.version,
+            RecipeStatus.SUCCESS,
+            output=output,
+        )
+
         # Output event
         yield RecipeEvent(
             event_type="output",
@@ -545,6 +615,7 @@ def run_stream(
         )
         
     except Exception as e:
+        _record(name, "unknown", RecipeStatus.FAILED, error=str(e))
         yield RecipeEvent(
             event_type="error",
             data={"code": "execution_error", "message": str(e)},
