@@ -338,3 +338,25 @@ def test_an_explicit_shutdown_cancels_the_finalizer():
     backend._finalizer = type("F", (), {"detach": lambda self: None})()
     asyncio.run(backend.ashutdown())
     assert backend._finalizer is None
+
+
+def test_release_reclaims_even_on_an_event_loop_thread():
+    """Collection can land on a thread that already drives a loop (GC inside
+    async workflow code). A bare asyncio.run() there raises before the shutdown
+    ever runs, silently leaking the instance -- so _release must bridge the loop
+    the way SharedCompute does, not call asyncio.run() directly."""
+    import asyncio
+
+    from praisonai.integrations.compute_managed_agent import _release
+
+    released = []
+
+    class Fake:
+        async def shutdown(self, instance_id):
+            released.append(instance_id)
+
+    async def collect_on_the_loop():
+        _release(Fake(), "inst-loop", "docker")
+
+    asyncio.run(collect_on_the_loop())
+    assert released == ["inst-loop"], "an instance leaked when GC ran on a live loop"

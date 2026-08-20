@@ -537,14 +537,18 @@ class DockerSandbox:
         The script lives in the mounted sandbox dir (SANDBOX_ROOT), so execute()
         shares the same storage as write_file() and run_command().
         """
-        # Named and labelled so a timeout can kill the container rather than
-        # just the docker client, and so `praisonai managed ps` can find one
-        # that outlived its process. Without these a timed-out run left a
-        # container with a random Docker name that nothing could reclaim.
+        # Named so a timeout can kill the container by name rather than just the
+        # docker client -- without --name a timed-out run left a container with a
+        # random Docker name that nothing could reach. Labelled `praisonai=sandbox-exec`,
+        # deliberately NOT `praisonai=managed`: these are ephemeral per-execution
+        # `--rm` containers, not managed instances, and `praisonai=managed` is the
+        # sole input to DockerCompute.list_instances(). Tagging them managed made
+        # `praisonai managed ps` list a `praisonai-<uuid>` name that `managed stop`
+        # (which resolves `praisonai_<id>`) could never reclaim.
         docker_cmd = [
             "docker", "run", "--rm",
             "--name", container_name,
-            "--label", "praisonai=managed",
+            "--label", "praisonai=sandbox-exec",
             "-v", f"{self._temp_dir}:{SANDBOX_ROOT}",
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),

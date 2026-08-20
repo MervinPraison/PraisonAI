@@ -254,11 +254,27 @@ def _release(provider, instance_id: str, place: str) -> None:
     Registered with weakref.finalize, so it runs when the backend is collected
     *and* at interpreter exit. It must not close over the backend itself --
     that would keep it alive and prevent the very collection it waits for.
+
+    Collection can happen on a thread that already drives an event loop (GC
+    inside async workflow code), where a bare ``asyncio.run`` raises before the
+    shutdown ever runs and the instance leaks. Bridge through the same
+    loop-safe helper ``SharedCompute`` uses so teardown survives either case.
     """
     import asyncio
 
+    async def _shutdown():
+        await provider.shutdown(instance_id)
+
     try:
-        asyncio.run(provider.shutdown(instance_id))
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_shutdown())
+        else:
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(asyncio.run, _shutdown()).result()
         logger.debug("[compute_managed] released %s on %s", instance_id, place)
     except Exception as exc:  # pragma: no cover - teardown stays quiet
         logger.warning(
