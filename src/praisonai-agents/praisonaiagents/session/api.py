@@ -382,8 +382,15 @@ class Session:
 
         prefix = f"{self.session_id}_"
         allow_untagged = self._legacy_agent_keys_enabled()
+        # Migration must consider every stored session, not the 50 most recent:
+        # a legacy per-agent record is by definition older than anything written
+        # after the upgrade, so list_sessions()'s default window silently
+        # excludes it (regression from #4126).
         try:
-            entries = list_sessions() or []
+            try:
+                entries = list_sessions(limit=None) or []
+            except TypeError:  # stores whose limit is not optional
+                entries = list_sessions(limit=10**9) or []
         except Exception:
             return histories
 
