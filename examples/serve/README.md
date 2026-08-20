@@ -24,7 +24,7 @@ Examples for all PraisonAI server types and the unified endpoints CLI.
 | `praisonai serve unified --port 8765` | Start unified server |
 | `praisonai serve agents --file agents.yaml --port 8000` | Start agents API |
 | `praisonai serve recipe --port 8765` | Start recipe server |
-| `praisonai serve mcp --transport http --port 8080` | Start MCP server |
+| `praisonai mcp serve --transport http-stream --port 8080` | Start MCP server |
 | `praisonai serve tools --port 8081` | Start tools MCP server |
 | `praisonai serve a2a --port 8082` | Start A2A server |
 | `praisonai serve a2u --port 8083` | Start A2U server |

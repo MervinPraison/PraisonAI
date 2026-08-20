@@ -13,7 +13,7 @@ Usage:
     python mcp_http_server.py
     
     # Or use CLI:
-    praisonai serve mcp --transport http --port 8080
+    praisonai mcp serve --transport http-stream --port 8080
     
     # Test with curl:
     curl http://localhost:8080/mcp/tools
