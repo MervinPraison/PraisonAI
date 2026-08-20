@@ -298,7 +298,9 @@ class DeployHandler:
                     console.print(f"  Image: {config.docker.image_name}:{config.docker.tag}")
                     console.print(f"  Ports: {config.docker.expose}")
                 elif config.type.value == "cloud":
-                    console.print(f"  Provider: {config.cloud.provider.value}")
+                    provider = config.cloud.provider
+                    provider_name = provider.value if hasattr(provider, "value") else provider
+                    console.print(f"  Provider: {provider_name}")
                     console.print(f"  Region: {config.cloud.region}")
                     console.print(f"  Service: {config.cloud.service_name}")
         

@@ -103,3 +103,28 @@ def test_yaml_with_plugin_provider_validates_and_runs(plugin_provider, tmp_path)
     assert get_provider(config.cloud).deploy() == {
         "ok": True, "provider": "hetzner", "region": "fsn1",
     }
+
+
+def test_validate_command_prints_plugin_provider(plugin_provider, tmp_path, capsys):
+    """The validate command must not crash on a plugin provider (plain str)."""
+    import argparse
+
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+
+    path = tmp_path / "agents.yaml"
+    path.write_text(YAML)
+    args = argparse.Namespace(file=str(path), json=False)
+    DeployHandler().handle_validate(args)
+    out = capsys.readouterr().out
+    assert "hetzner" in out
+    assert "Configuration is valid" in out
+
+
+def test_sample_generation_preserves_plugin_provider(plugin_provider):
+    """generate_sample_yaml must emit the requested plugin, not fall back to aws."""
+    from praisonai_deploy.models import DeployType
+    from praisonai_deploy.schema import generate_sample_yaml
+
+    text = generate_sample_yaml(DeployType.CLOUD, coerce_cloud_provider("hetzner"))
+    assert "provider: hetzner" in text
+    assert "provider: aws" not in text

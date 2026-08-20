@@ -188,11 +188,20 @@ agents:
     max_instances: 10
     # image: gcr.io/your-project-id/praisonai-app:latest
 """
-        else:
+        elif provider is None:
             deploy_yaml = """deploy:
   type: cloud
   cloud:
     provider: aws  # or azure, gcp
+    region: us-east-1
+    service_name: praisonai-service
+"""
+        else:
+            provider_name = getattr(provider, "value", provider)
+            deploy_yaml = f"""deploy:
+  type: cloud
+  cloud:
+    provider: {provider_name}
     region: us-east-1
     service_name: praisonai-service
 """
