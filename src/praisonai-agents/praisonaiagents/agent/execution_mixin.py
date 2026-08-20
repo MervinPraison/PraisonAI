@@ -1868,12 +1868,7 @@ Write the complete compiled report:"""
         """
         global _server_started, _registered_agents, _shared_apps, _server_lock
 
-        # Fail-closed bind guard: refuse to serve keyless on a non-loopback host
-        # (auto-generates and prints a one-time token instead). Matches the
-        # serve/jobs precedent and keeps this path in lock-step with
-        # PraisonAIAgents.launch.
         from .launch_security import authorise_launch_request, resolve_launch_host
-        host = resolve_launch_host(host)
 
         # Try to import FastAPI dependencies - lazy loading
         try:
@@ -1899,7 +1894,15 @@ Write the complete compiled report:"""
             print("\nOr install all API dependencies with:")
             print("pip install 'praisonaiagents[api]'")
             return None
-                
+
+        # Fail-closed bind guard: refuse to serve keyless on a non-loopback host
+        # (auto-generates and prints a one-time token instead). Matches the
+        # serve/jobs precedent and keeps this path in lock-step with
+        # PraisonAIAgents.launch. Applied only after the dependency guard above
+        # so a launch that bails out (missing deps) cannot mutate the
+        # process-wide launch token and retroactively 401 a running endpoint.
+        host = resolve_launch_host(host)
+
         should_start = False
         with _server_lock:
             # Initialize port-specific collections if needed (once per port)

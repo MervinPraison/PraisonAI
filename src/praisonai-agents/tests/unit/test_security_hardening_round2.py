@@ -69,9 +69,11 @@ def test_bind_guard_loopback_keyless_allowed(monkeypatch):
 
 
 def test_bind_guard_non_loopback_keyless_generates_token(monkeypatch, capsys):
+    import praisonaiagents.agent.launch_security as ls
     from praisonaiagents.agent.launch_security import resolve_launch_host
 
     monkeypatch.delenv("PRAISONAI_LAUNCH_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(ls, "_GENERATED_TOKEN", None, raising=False)
     host = resolve_launch_host("0.0.0.0")
     # Host still honoured (explicit exposure), but now a token is enforced.
     assert host == "0.0.0.0"
@@ -80,6 +82,26 @@ def test_bind_guard_non_loopback_keyless_generates_token(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert token in out
     monkeypatch.delenv("PRAISONAI_LAUNCH_AUTH_TOKEN", raising=False)
+
+
+def test_bind_guard_reuses_generated_token_across_launches(monkeypatch):
+    """A later non-loopback launch must not mint a fresh token and lock out an
+    endpoint already serving with the previously generated one (issue #4083)."""
+    import praisonaiagents.agent.launch_security as ls
+
+    monkeypatch.delenv("PRAISONAI_LAUNCH_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(ls, "_GENERATED_TOKEN", None, raising=False)
+
+    ls.resolve_launch_host("0.0.0.0")
+    first = os.environ.get("PRAISONAI_LAUNCH_AUTH_TOKEN")
+    assert first
+
+    # Second non-loopback launch in the same process reuses the same token.
+    ls.resolve_launch_host("0.0.0.0")
+    assert os.environ.get("PRAISONAI_LAUNCH_AUTH_TOKEN") == first
+
+    monkeypatch.delenv("PRAISONAI_LAUNCH_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(ls, "_GENERATED_TOKEN", None, raising=False)
 
 
 def test_bind_guard_preexisting_token_unchanged(monkeypatch):

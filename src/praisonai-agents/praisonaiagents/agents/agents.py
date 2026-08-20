@@ -2577,10 +2577,6 @@ class AgentTeam(SpawnAnnounceProtocol):
         if protocol == "http":
             # Use centralized server registry
 
-            # Fail-closed bind guard shared with Agent.launch: never serve
-            # keyless on a non-loopback host.
-            host = _resolve_launch_host(host)
-
             if not self.agents:
                 logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
                 return
@@ -2609,6 +2605,13 @@ class AgentTeam(SpawnAnnounceProtocol):
                 print("\nOr install all API dependencies with:")
                 print("pip install 'praisonaiagents[api]'")
                 return None
+
+            # Fail-closed bind guard shared with Agent.launch: never serve
+            # keyless on a non-loopback host. Applied only after the no-agents
+            # and dependency guards above, so a launch that bails out cannot
+            # mutate the process-wide launch token (which every route reads per
+            # request) and retroactively 401 an already-running endpoint.
+            host = _resolve_launch_host(host)
             
             # Thread-safe initialization of FastAPI app
             app, is_new = _server_registry.get_or_create_app(

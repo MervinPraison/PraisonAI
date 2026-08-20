@@ -24,6 +24,11 @@ __all__ = [
 # Hosts that are safe to serve keyless on: loopback only.
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+# One auto-generated token per process, reused across launches so a later
+# non-loopback launch cannot mint a fresh token and lock out an endpoint that
+# is already serving with the previously generated one.
+_GENERATED_TOKEN: Optional[str] = None
+
 
 def launch_auth_token() -> Optional[str]:
     """Return the configured launch bearer token, if any."""
@@ -62,15 +67,22 @@ def resolve_launch_host(host: str) -> str:
 
     Returns the host to bind (unchanged; the guard acts on the token, not the
     host, so an explicit ``0.0.0.0`` is still honoured — just never keyless).
+
+    A generated token is reused for the lifetime of the process: repeated
+    non-loopback launches share the one token rather than each minting a fresh
+    one, so a later launch cannot invalidate an already-running endpoint's
+    clients.
     """
     if launch_auth_token() or _is_loopback(host):
         return host
 
-    generated = _secrets.token_urlsafe(32)
-    os.environ["PRAISONAI_LAUNCH_AUTH_TOKEN"] = generated
-    print(
-        f"🔐 launch() bound to non-loopback host {host!r} without "
-        f"PRAISONAI_LAUNCH_AUTH_TOKEN set. Generated a one-time bearer token "
-        f"(set PRAISONAI_LAUNCH_AUTH_TOKEN to override): {generated}"
-    )
+    global _GENERATED_TOKEN
+    if _GENERATED_TOKEN is None:
+        _GENERATED_TOKEN = _secrets.token_urlsafe(32)
+        print(
+            f"🔐 launch() bound to non-loopback host {host!r} without "
+            f"PRAISONAI_LAUNCH_AUTH_TOKEN set. Generated a one-time bearer token "
+            f"(set PRAISONAI_LAUNCH_AUTH_TOKEN to override): {_GENERATED_TOKEN}"
+        )
+    os.environ["PRAISONAI_LAUNCH_AUTH_TOKEN"] = _GENERATED_TOKEN
     return host
