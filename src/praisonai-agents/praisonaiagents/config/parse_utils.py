@@ -204,9 +204,12 @@ def validate_preset_string(
     Raise a helpful error when a string does not name a known preset.
 
     Non-string values pass through untouched, so callers can hand this the raw
-    parameter without pre-checking the type. Matching is case-insensitive and
-    ignores surrounding whitespace, mirroring the preset lookups performed by
-    the parameter resolvers.
+    parameter without pre-checking the type. Matching is case-insensitive,
+    ignores surrounding whitespace, and treats ``-``/``_`` as interchangeable,
+    mirroring the preset lookups performed by the parameter resolvers (e.g.
+    ``PermissionMode.resolve`` accepts both ``accept_edits`` and
+    ``accept-edits``). This keeps the guard from rejecting spellings the
+    downstream resolver would happily accept.
 
     Args:
         param_name: Name of the parameter (for the error message)
@@ -219,10 +222,13 @@ def validate_preset_string(
     if not isinstance(value, str):
         return
 
-    normalized = value.strip().lower()
+    def _canonical(s: str) -> str:
+        return s.strip().lower().replace("-", "_")
+
+    normalized = _canonical(value)
     presets_list = list(presets)
     for preset in presets_list:
-        if preset.strip().lower() == normalized:
+        if _canonical(preset) == normalized:
             return
 
     raise make_preset_error(param_name, value, presets_list)

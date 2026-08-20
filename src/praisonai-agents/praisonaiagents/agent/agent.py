@@ -1438,13 +1438,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             elif isinstance(learn, dict):
                 _learn_config = LearnConfig(**learn)
             elif isinstance(learn, str):
-                # String mode: "disabled", "agentic", "propose"
+                # String mode: "disabled", "agentic", "propose".
+                # Normalise case/whitespace so this branch agrees with the
+                # closed-set validation in _validate_preset_params (which
+                # already accepted "AGENTIC"/" agentic "); otherwise a validated
+                # value would fall through to the else and silently disable.
                 from ..memory.learn.protocols import LearnMode
-                if learn == "disabled":
+                _learn_mode = learn.strip().lower()
+                if _learn_mode == "disabled":
                     _learn_config = None
-                elif learn == "agentic":
+                elif _learn_mode == "agentic":
                     _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
-                elif learn == "propose":
+                elif _learn_mode == "propose":
                     _learn_config = LearnConfig(mode=LearnMode.PROPOSE)
                 else:
                     # Unknown string mode, disable learning
@@ -2294,7 +2299,13 @@ Your Goal: {self.goal}
             # unchanged; anything else falls through to the canonical
             # PermissionMode resolver, so all spellings share one model.
             from ..approval.registry import PERMISSION_PRESETS
-            preset_deny = PERMISSION_PRESETS.get(approval.strip().lower())
+            # Normalise -/_ too so "read-only" hits the deny-set preset instead
+            # of falling through to PermissionMode.resolve (which returns None
+            # for deny-set names), which would silently produce an EMPTY deny
+            # set — the exact read-only-sandbox bypass this validation prevents.
+            preset_deny = PERMISSION_PRESETS.get(
+                approval.strip().lower().replace("-", "_")
+            )
             self._approval_backend = None
             self._approve_all_tools = False
             self._approval_timeout = 0
