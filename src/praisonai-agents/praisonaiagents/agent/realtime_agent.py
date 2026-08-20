@@ -57,7 +57,8 @@ class RealtimeAgent:
     def __init__(
         self,
         name: str = "RealtimeAgent",
-        llm: Optional[str] = None,
+        llm: Optional[str] = None,  # Deprecated alias for model=
+        model: Optional[str] = None,
         realtime: Optional[Union[bool, Dict, RealtimeConfig]] = None,
         instructions: Optional[str] = None,
         verbose: bool = True,
@@ -67,14 +68,16 @@ class RealtimeAgent:
         
         Args:
             name: Agent name
-            llm: LLM model (default: gpt-4o-realtime-preview)
+            llm: Deprecated alias for model=. Passing both raises TypeError.
+            model: Model to use (default: gpt-4o-realtime-preview)
             realtime: Realtime configuration (bool, dict, or RealtimeConfig)
             instructions: System instructions
             verbose: Enable verbose output
             **kwargs: Additional arguments
         """
+        from ..utils.model_alias import resolve_model_name
         self.name = name
-        self.llm = llm or "gpt-4o-realtime-preview"
+        self.llm = resolve_model_name(llm, model, "RealtimeAgent") or "gpt-4o-realtime-preview"
         self.instructions = instructions
         self.verbose = verbose
         

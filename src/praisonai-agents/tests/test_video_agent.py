@@ -83,12 +83,13 @@ class TestVideoAgentInit:
         agent = VideoAgent(model="azure/sora-2")
         assert agent.llm == "azure/sora-2"
     
-    def test_llm_takes_precedence_over_model(self):
-        """Test that llm= takes precedence over model=."""
+    def test_passing_both_llm_and_model_is_refused(self):
+        """llm= and model= are one parameter; passing both is ambiguous."""
+        import pytest
         from praisonaiagents import VideoAgent
-        
-        agent = VideoAgent(llm="openai/sora-2-pro", model="openai/sora-2")
-        assert agent.llm == "openai/sora-2-pro"
+
+        with pytest.raises(TypeError, match="both llm= and model="):
+            VideoAgent(llm="openai/sora-2-pro", model="openai/sora-2")
     
     def test_with_name_and_instructions(self):
         """Test initialization with custom name and instructions."""
