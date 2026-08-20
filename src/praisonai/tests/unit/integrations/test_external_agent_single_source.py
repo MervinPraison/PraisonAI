@@ -27,11 +27,32 @@ class AiderIntegration(BaseCLIIntegration):
 
 @pytest.fixture
 def registered_plugin(monkeypatch):
-    """Register a plugin in a throwaway registry and make it the default."""
-    reg = registry_mod.ExternalAgentRegistry()
+    """Register a plugin in a throwaway registry and make it the default.
+
+    Every external-agent surface reads the *process-default* registry, some
+    directly (``registry_mod._default_registry``) and some through the
+    ``praisonai-code`` handler bridge, which resolves the registry lazily. To
+    make the fixture immune to test ordering under ``pytest -n --dist loadfile``
+    (where hundreds of files share one worker), we also clear the per-class
+    ``PluginRegistry.default()`` cache so no sibling test's cached instance can
+    shadow ours, and restore it afterwards.
+    """
+    cls = registry_mod.ExternalAgentRegistry
+    saved_default = cls.__dict__.get("_default_instance")
+    if "_default_instance" in cls.__dict__:
+        delattr(cls, "_default_instance")
+
+    reg = cls()
     reg.register("aider", AiderIntegration)
     monkeypatch.setattr(registry_mod, "_default_registry", reg)
-    return reg
+    setattr(cls, "_default_instance", reg)
+    try:
+        yield reg
+    finally:
+        if saved_default is not None:
+            setattr(cls, "_default_instance", saved_default)
+        elif "_default_instance" in cls.__dict__:
+            delattr(cls, "_default_instance")
 
 
 def test_registry_lists_the_plugin_after_the_builtins(registered_plugin):
@@ -87,20 +108,38 @@ def test_ui_toggles_read_the_registry(registered_plugin):
 
 
 def test_builtin_is_not_hijacked_by_an_entry_point(monkeypatch):
-    """A plugin may add an external agent; it may never replace a shipped one."""
+    """A plugin may add an external agent; it may never replace a shipped one.
+
+    This exercises the real discovery path: the base ``PluginRegistry`` guards
+    the collision once (#4171), so a third-party entry point declaring the
+    built-in name ``claude`` is skipped while a novel ``aider`` is still added.
+    """
+    import types
 
     class Shadow:
         pass
 
-    def discover(self):
+    def fake_entry_points(*args, **kwargs):
         # A plugin collides with a built-in and adds a brand-new name.
-        self._add_loader("claude", lambda: Shadow)
-        self._add_loader("aider", lambda: AiderIntegration)
+        # Accept ``group`` positionally or by keyword so we match the base
+        # registry's ``entry_points(group=...)`` call regardless of Python
+        # version.
+        return [
+            types.SimpleNamespace(name="claude", load=lambda: Shadow),
+            types.SimpleNamespace(name="aider", load=lambda: AiderIntegration),
+        ]
 
     real = registry_mod.ExternalAgentRegistry()._loaders["claude"]
-    monkeypatch.setattr(
-        registry_mod.ExternalAgentRegistry, "_discover_entry_points", discover
-    )
+    # Patch ``entry_points`` on the exact module the ``ExternalAgentRegistry``
+    # class discovers through. Using the class's defining module (rather than a
+    # re-imported ``praisonai_code._registry`` name) makes this immune to any
+    # duplicate-module identity that editable installs + coverage can create on
+    # CI, where a re-imported copy would leave the real discovery path unpatched
+    # and silently drop the ``aider`` plugin.
+    import sys
+
+    base_module = sys.modules[registry_mod.ExternalAgentRegistry.__mro__[1].__module__]
+    monkeypatch.setattr(base_module, "entry_points", fake_entry_points)
     reg = registry_mod.ExternalAgentRegistry()
     # Collision: the shipped built-in wins.
     assert reg.resolve("claude") is not Shadow

@@ -61,11 +61,19 @@ class PluginRegistry(Generic[T]):
         self._items: Dict[str, Type[T]] = {}  # resolved cache
         self._aliases: Dict[str, str] = {}  # alias -> canonical name
         self._lock = threading.RLock()  # Use RLock for re-entrant access
+        # Names this package ships as builtins. Entry-point discovery must never
+        # replace one: an installed third-party distribution declaring a built-in
+        # name would otherwise take over that name on every surface, with no
+        # warning (the loaders behind ``sandbox``/``managed_backends`` decide
+        # where user code runs). Runtime ``register()`` may still override — that
+        # is deliberate dependency injection, not silent registration order.
+        self._builtin_names: set[str] = set()
         
         # Store built-in loaders (normalized) without calling them
         if builtins:
             for name, loader in builtins.items():
                 self._add_loader(name, loader)
+                self._builtin_names.add(name.lower())
         
         if discover_entry_points:
             # Legacy groups first so the canonical spelling wins on a clash.
@@ -81,6 +89,17 @@ class PluginRegistry(Generic[T]):
         """Discover entry point loaders without loading them."""
         try:
             for ep in entry_points(group=self._entry_point_group):
+                if ep.name.lower() in self._builtin_names:
+                    # Packages legitimately re-declare their own builtins as
+                    # entry points for external discoverability, so a collision
+                    # here is expected on a stock install -> DEBUG, not WARNING.
+                    logger.debug(
+                        "Entry point %r in group %s matches a built-in loader; "
+                        "keeping the built-in.",
+                        ep.name,
+                        self._entry_point_group,
+                    )
+                    continue
                 self._add_loader(ep.name, ep.load)
         except Exception:
             # entry_points() might not be available in older Python versions
