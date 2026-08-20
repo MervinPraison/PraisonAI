@@ -633,8 +633,18 @@ class ScheduledAgentExecutor:
         # spawned; gate context is appended to the prompt like the agent path.
         gate = self._resolve_condition(job)
         if gate is not None:
+            # State-aware like the native-agent path: a monitor gate's cursor /
+            # watermark must be loaded, passed when the gate supports it, and
+            # persisted on both the skip and go paths — otherwise a backend
+            # monitor job re-reads the same "new" items every tick.
+            prior_state = self._get_job_state(job)
             try:
-                decision = await asyncio.to_thread(gate.should_run, job)
+                if self._gate_accepts_state(gate):
+                    decision = await asyncio.to_thread(
+                        gate.should_run, job, state=prior_state,
+                    )
+                else:
+                    decision = await asyncio.to_thread(gate.should_run, job)
             except Exception as e:  # pragma: no cover - defensive
                 logger.warning(
                     "Pre-run gate raised for backend job '%s': %s; running anyway",
@@ -644,6 +654,9 @@ class ScheduledAgentExecutor:
             if decision is not None and not getattr(decision, "run", True):
                 reason = getattr(decision, "reason", None) or "pre-run gate: nothing to do"
                 logger.info("Backend job '%s' skipped by pre-run gate: %s", job.id, reason)
+                self._persist_job_state(
+                    job, prior_state, getattr(decision, "state_updates", None),
+                )
                 duration = time.time() - started
                 self._runner.mark_run(job, status="skipped", error=reason, duration=duration)
                 return JobResult(job=job, status="skipped", error=reason, duration=duration)
@@ -651,6 +664,9 @@ class ScheduledAgentExecutor:
                 context = getattr(decision, "context", None)
                 if context:
                     message = f"{message}\n\n{context}"
+                updates = getattr(decision, "state_updates", None)
+                if isinstance(updates, dict) and updates:
+                    self._persist_job_state(job, prior_state, updates)
 
         # Run-scoped policy: the message is the untrusted portion of a backend
         # turn (there is no in-process agent whose skills could load content),

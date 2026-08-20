@@ -142,7 +142,12 @@ def schedule_add_cmd(
                         if backend_cwd:
                             backend_options["cwd"] = backend_cwd
                         if backend_timeout and backend_timeout > 0:
-                            backend_options["timeout_ms"] = int(backend_timeout * 1000)
+                            # Round up so a positive sub-millisecond value stays
+                            # positive instead of collapsing to 0 (which the
+                            # executor would replace with the 300s default).
+                            backend_options["timeout_ms"] = max(
+                                1, int(round(backend_timeout * 1000))
+                            )
                         job.backend_options = backend_options
                         # A backend turn uses the pinned model as an input
                         # (passed to the CLI), not as a drift guard.

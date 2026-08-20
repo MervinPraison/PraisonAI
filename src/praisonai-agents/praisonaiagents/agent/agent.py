@@ -6717,6 +6717,7 @@ Answer:"""
                 session_lock = asyncio.Lock()
                 session_locks[session_id] = session_lock
                 await session_lock.acquire()
+            lock_held = True
             session_binding = CliSessionBinding(
                 session_id=session_id,
                 is_resume=session_id in started_sessions,
@@ -6779,6 +6780,7 @@ Answer:"""
             # turns under the same session_id are resumes.
             started_sessions.add(session_id)
             session_lock.release()
+            lock_held = False
 
             # Update chat history with the exchange
             if hasattr(self, '_append_to_chat_history'):
@@ -6794,11 +6796,23 @@ Answer:"""
             
             return result.content if result else None
             
+        except asyncio.CancelledError:
+            # Cancellation is BaseException: it bypasses ``except Exception``,
+            # so release here or later turns on this session block forever.
+            # ``lock_held`` guards against releasing a lock a concurrent turn
+            # has since acquired; names may be unbound if cancellation preceded
+            # their assignment.
+            try:
+                if lock_held and session_lock.locked():
+                    session_lock.release()
+            except (NameError, UnboundLocalError, RuntimeError):
+                pass
+            raise
         except Exception as e:
             # Release the per-session lock on any failure path; ``session_lock``
             # may be unbound when the exception preceded its assignment.
             try:
-                if session_lock.locked():
+                if lock_held and session_lock.locked():
                     session_lock.release()
             except (NameError, UnboundLocalError, RuntimeError):
                 pass
