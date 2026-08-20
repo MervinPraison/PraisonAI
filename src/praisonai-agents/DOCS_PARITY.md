@@ -18,52 +18,52 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 53 | 16755 |
+| ✅ Agent | 22 | 53 | 16964 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
-| ✅ Approval | 1 | 5 | 2611 |
+| ✅ Approval | 1 | 5 | 2658 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3542 |
-| ✅ Autonomy | 3 | 7 | 2759 |
+| ✅ Autonomy | 3 | 7 | 2763 |
 | ✅ Bots | 7 | 31 | 13403 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 36622 |
-| ✅ Chunking | 2 | 2 | 385 |
+| ✅ CLI | 5 | 122 | 36654 |
+| ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4851 |
 | ✅ Conditions | 1 | 3 | 1321 |
-| ✅ Configuration | 3 | 8 | 3138 |
-| ✅ Context Management | 16 | 36 | 13886 |
+| ✅ Configuration | 3 | 8 | 3139 |
+| ✅ Context Management | 16 | 36 | 13890 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
 | ✅ Evaluation | 1 | 7 | 2905 |
 | ✅ Events | 1 | 2 | 749 |
-| ✅ Execution | 3 | 4 | 1574 |
+| ✅ Execution | 3 | 4 | 1586 |
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
 | ✅ Gateway | 7 | 78 | 28577 |
-| ✅ Guardrails | 4 | 4 | 2036 |
+| ✅ Guardrails | 4 | 4 | 2205 |
 | ✅ Handoffs | 11 | 6 | 2567 |
 | ✅ Hooks | 2 | 9 | 4488 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 16 | 4942 |
 | ✅ LLM | 3 | 15 | 5296 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 61 | 14132 |
-| ✅ Memory | 6 | 18 | 7094 |
+| ✅ MCP | 1 | 61 | 14135 |
+| ✅ Memory | 6 | 18 | 7130 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1242 |
+| ✅ Output | 3 | 5 | 1246 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1605 |
-| ✅ Plugins | 8 | 4 | 2858 |
+| ✅ Plugins | 8 | 5 | 3094 |
 | ✅ Prompts | 2 | 9 | 1971 |
-| ✅ Providers | 1 | 56 | 7772 |
+| ✅ Providers | 1 | 56 | 7781 |
 | ✅ Query | 1 | 2 | 736 |
-| ✅ RAG | 5 | 15 | 3003 |
+| ✅ RAG | 5 | 15 | 3118 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 683 |
 | ✅ Retrieval | 2 | 5 | 1054 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 42629 |
+| ✅ Tools | 12 | 144 | 42712 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
