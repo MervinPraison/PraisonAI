@@ -63,7 +63,7 @@ def test_typo_does_not_open_a_listening_socket(transport_calls, typo):
     assert transport_calls == [], (
         f"--transport {typo!r} started the {transport_calls} transport"
     )
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     # The error names the values the user could have meant.
     assert "stdio" in result.output and "sse" in result.output
 
@@ -72,8 +72,9 @@ def test_http_stream_is_rejected_not_aliased_to_sse(transport_calls):
     """http-stream is advertised but unimplemented here; reject it loudly."""
     result = _invoke("http-stream")
     assert transport_calls == [], "http-stream silently ran the SSE transport"
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "http-stream" in result.output
+    assert "praisonai mcp serve --transport http-stream" in result.output
 
 
 def test_help_does_not_advertise_an_unsupported_transport():
@@ -84,3 +85,4 @@ def test_help_does_not_advertise_an_unsupported_transport():
     # Strip Rich's line wrapping before matching.
     flat = " ".join(result.output.split())
     assert "http-stream" not in flat
+    assert "stdio, sse" in flat
