@@ -50,7 +50,10 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         include_directories: Additional directories to include in context
         sandbox: Whether to run in sandbox mode
     """
-    
+
+    display_label = "Gemini CLI (analysis, search)"
+    install_hint = "npm install -g @anthropic-ai/gemini-cli"
+
     def __init__(
         self,
         workspace: str = ".",

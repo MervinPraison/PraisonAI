@@ -45,7 +45,10 @@ class CursorCLIIntegration(BaseCLIIntegration):
         stream_partial: Whether to stream partial output
         resume_session: Session ID to resume
     """
-    
+
+    display_label = "Cursor CLI (IDE tasks)"
+    install_hint = "Download from cursor.com"
+
     def __init__(
         self,
         workspace: str = ".",

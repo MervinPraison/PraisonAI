@@ -59,7 +59,10 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         disallowed_tools: List of disallowed tools
         use_sdk: Whether to use the SDK instead of subprocess
     """
-    
+
+    display_label = "Claude Code (coding, file edits)"
+    install_hint = "npm install -g @anthropic-ai/claude-code"
+
     def __init__(
         self,
         workspace: str = ".",

@@ -61,6 +61,13 @@ class BaseCLIIntegration(ABC):
                     yield line
     """
     
+    # Presentation metadata used by every surface that lists external agents
+    # (``--external-agent`` choices, the UI settings toggles, install hints).
+    # Third-party integrations may override these; sensible defaults are
+    # derived from the registered name when they are left as None.
+    display_label: Optional[str] = None
+    install_hint: Optional[str] = None
+
     # Class-level cache for availability checks (shared across instances).
     # Access is guarded by _availability_cache_lock for thread-safety.
     _availability_cache: Dict[str, bool] = {}

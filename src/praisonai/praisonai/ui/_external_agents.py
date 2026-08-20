@@ -6,23 +6,37 @@ Single source of truth for:
 - Building the tools list from enabled agents
 """
 
-from functools import lru_cache
-from typing import Any, Dict, List
-
-# Map of UI toggle id → (integration class path, pretty label)
-EXTERNAL_AGENTS: Dict[str, Dict[str, str]] = {
-    "claude_enabled": {"module": "claude_code", "cls": "ClaudeCodeIntegration",
-                       "label": "Claude Code (coding, file edits)", "cli": "claude"},
-    "gemini_enabled": {"module": "gemini_cli", "cls": "GeminiCLIIntegration",
-                       "label": "Gemini CLI (analysis, search)", "cli": "gemini"},
-    "codex_enabled":  {"module": "codex_cli",  "cls": "CodexCLIIntegration",
-                       "label": "Codex CLI (refactoring)",       "cli": "codex"},
-    "cursor_enabled": {"module": "cursor_cli", "cls": "CursorCLIIntegration",
-                       "label": "Cursor CLI (IDE tasks)",        "cli": "cursor-agent"},
-}
+from collections.abc import Mapping
+from typing import Any, Dict, Iterator, List
 
 
-@lru_cache(maxsize=1)
+class _RegistryAgents(Mapping):
+    """Live map of UI toggle id -> integration metadata, from the registry.
+
+    Was a hand-written copy of the four built-in names, so an agent published
+    under the "praisonai.external_agents" entry-point group never reached the
+    UI. Kept as a Mapping so existing `in` / iteration / `[]` usage is unchanged.
+    """
+
+    @staticmethod
+    def _catalog() -> Dict[str, Dict[str, Any]]:
+        from praisonai.integrations.registry import external_agent_catalog
+        return {f"{name}_enabled": meta
+                for name, meta in external_agent_catalog().items()}
+
+    def __getitem__(self, key: str) -> Dict[str, Any]:
+        return self._catalog()[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._catalog())
+
+    def __len__(self) -> int:
+        return len(self._catalog())
+
+
+EXTERNAL_AGENTS: Mapping = _RegistryAgents()
+
+
 def installed_external_agents() -> List[str]:
     """Return toggle ids of external agents whose CLI is on PATH."""
     import shutil
@@ -32,15 +46,13 @@ def installed_external_agents() -> List[str]:
 
 def external_agent_tools(settings: Dict[str, Any], workspace: str = ".") -> list:
     """Build tools list from settings dict of toggle_id → bool."""
-    import importlib
     tools = []
     for toggle_id, enabled in settings.items():
         if not enabled or toggle_id not in EXTERNAL_AGENTS:
             continue
         meta = EXTERNAL_AGENTS[toggle_id]
         try:
-            mod = importlib.import_module(f"praisonai.integrations.{meta['module']}")
-            integration = getattr(mod, meta["cls"])(workspace=workspace)
+            integration = meta["cls"](workspace=workspace)
             if integration.is_available:
                 tools.append(integration.as_tool())
         except (ImportError, AttributeError):

@@ -195,3 +195,53 @@ def create_integration(name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]
     """
     registry = get_default_registry()
     return registry.try_create(name, **kwargs)
+
+
+def list_external_agents() -> List[str]:
+    """Names of every registered external agent (built-ins + plugins).
+
+    This is the single source of truth for every surface that has to *list*
+    external agents: the ``--external-agent`` argparse choices, the CLI
+    handler and the UI settings toggles. Do not hand-maintain a second copy.
+
+    Built-ins keep their declaration order (claude, gemini, codex, cursor) so
+    help text and UI toggles are unchanged on a default install; plugins are
+    appended in sorted order behind them.
+    """
+    names = set(get_default_registry().list_names())
+    ordered = [n for n in _BUILTIN_INTEGRATIONS if n in names]
+    ordered += sorted(names.difference(ordered))
+    return ordered
+
+
+def external_agent_catalog() -> Dict[str, Dict[str, Any]]:
+    """Presentation metadata for every registered external agent.
+
+    Returns a mapping of registered name -> ``{"cls", "label", "cli", "install"}``.
+    ``cli`` is the executable probed for availability; it falls back to the
+    registered name when the integration cannot be introspected (for example a
+    third-party class whose constructor needs arguments).
+    """
+    registry = get_default_registry()
+    catalog: Dict[str, Dict[str, Any]] = {}
+    for name in list_external_agents():
+        try:
+            cls = registry.resolve(name)
+        except Exception as exc:  # noqa: BLE001 - isolate faulty optional plugins
+            # A third-party entry point may raise anything (not just ValueError)
+            # while loading. One broken optional plugin must not blank out the
+            # catalog for every surface (argparse/CLI/UI); skip it and log.
+            import logging
+            logging.warning("Skipping external agent %r: failed to load (%s)", name, exc)
+            continue
+        try:
+            cli = cls().cli_command
+        except Exception:  # noqa: BLE001 - metadata must never break listing
+            cli = name
+        catalog[name] = {
+            "cls": cls,
+            "label": getattr(cls, "display_label", None) or f"{name} CLI",
+            "cli": cli,
+            "install": getattr(cls, "install_hint", None) or "See documentation",
+        }
+    return catalog
