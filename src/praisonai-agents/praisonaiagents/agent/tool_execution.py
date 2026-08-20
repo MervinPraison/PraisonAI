@@ -803,7 +803,12 @@ class ToolExecutionMixin:
                                         _progress_active.clear()
                                     future.cancel()
                                     logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                                    result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                                    # Tag as an OUTER wall-clock timeout: unlike an
+                                    # inner-loop timeout (already retried to
+                                    # exhaustion), the body ran once here and the
+                                    # inner budget never saw it, so this one still
+                                    # earns an outer retry pass under the single budget.
+                                    result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True, "_outer_timeout": True}
                                     # The timed-out thread cannot be reclaimed. Retire this
                                     # executor so the next call gets a fresh worker instead of
                                     # queuing behind a permanently stuck one — but bound how many
@@ -822,44 +827,36 @@ class ToolExecutionMixin:
                         
                         # Check if the result indicates a retryable error
                         if isinstance(result, dict) and result.get("error"):
-                            # Check if this is a circuit breaker error (always retryable)
-                            if result.get("circuit_open"):
-                                raise ToolExecutionError(
-                                    result["error"],
-                                    tool_name=function_name,
-                                    agent_id=self.name,
-                                    is_retryable=True,
-                                )
-                            # Check if this is a timeout error (retryable)
-                            elif result.get("timeout"):
-                                raise ToolExecutionError(
-                                    result["error"],
-                                    tool_name=function_name,
-                                    agent_id=self.name,
-                                    is_retryable=True,
-                                )
-                            # For other error dicts: approval/permission denials are legitimate
-                            # non-retryable outcomes; everything else represents a tool failure
-                            # that should engage the outer retry/backoff loop.
-                            elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error") or result.get("policy_denied") or result.get("guardrail_denied"):
+                            # Approval/permission/policy/guardrail denials are
+                            # legitimate non-retryable outcomes: stop immediately.
+                            if result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error") or result.get("policy_denied") or result.get("guardrail_denied"):
                                 break
+                            # ONE budget: the inner loop
+                            # (_execute_tool_with_circuit_breaker) already retries
+                            # its retry_on error types (timeout/rate_limit/
+                            # connection_error) to exhaustion before returning here,
+                            # so re-escalating them as retryable would restart the
+                            # whole inner budget on every outer attempt and run the
+                            # tool up to max_attempts² times. Only escalate error
+                            # types the inner loop does NOT retry so they get one
+                            # outer pass. circuit_open is returned by the inner loop
+                            # without a body run and is not in retry_on, so it still
+                            # engages one outer backoff pass as before.
+                            error_type = self._classify_error_type(result, None)
+                            inner_policy = self._get_tool_retry_policy(function_name)
+                            # An outer wall-clock timeout (see _outer_timeout tag)
+                            # was produced by this loop's own guard, not the inner
+                            # budget, so it still deserves one outer retry pass.
+                            if result.get("_outer_timeout"):
+                                is_retryable = True
                             else:
-                                # Avoid compounding with the inner retry loop in
-                                # _execute_tool_with_circuit_breaker: error types it already
-                                # retries (e.g. timeout/rate_limit/connection_error) are
-                                # exhausted by the time they reach here, so escalating them as
-                                # retryable would re-run the entire inner loop from scratch on
-                                # every outer attempt. Only escalate error types the inner loop
-                                # does NOT retry (e.g. "unknown") so they get one outer pass.
-                                error_type = self._classify_error_type(result, None)
-                                inner_policy = self._get_tool_retry_policy(function_name)
                                 is_retryable = error_type not in inner_policy.retry_on
-                                raise ToolExecutionError(
-                                    result.get("error", f"Tool '{function_name}' failed"),
-                                    tool_name=function_name,
-                                    agent_id=self.name,
-                                    is_retryable=is_retryable,
-                                )
+                            raise ToolExecutionError(
+                                result.get("error", f"Tool '{function_name}' failed"),
+                                tool_name=function_name,
+                                agent_id=self.name,
+                                is_retryable=is_retryable,
+                            )
                         else:
                             # Success path - return the result
                             break
@@ -3006,10 +3003,17 @@ class ToolExecutionMixin:
         key = (max_retry_limit, initial_delay_s, backoff_factor, jitter_fraction)
         if cached is not None and cached[0] == key:
             return cached[1]
+        # Reproduce BackoffPolicy.delay's 60s base cap so ExecutionConfig users
+        # keep the exact same delay ceiling they had before this consolidation
+        # (RetryPolicy defaults to a 30s cap). initial_delay_ms must not exceed
+        # max_delay_ms per RetryPolicy validation, so lift the cap to whichever
+        # is larger.
+        initial_delay_ms = int(initial_delay_s * 1000)
         policy = RetryPolicy(
             max_attempts=max(1, max_retry_limit + 1),
             backoff_factor=max(1.0, backoff_factor),
-            initial_delay_ms=int(initial_delay_s * 1000),
+            initial_delay_ms=initial_delay_ms,
+            max_delay_ms=max(60000, initial_delay_ms),
             jitter=jitter_fraction > 0,
             jitter_factor=min(max(jitter_fraction, 0.0), 1.0),
         )
