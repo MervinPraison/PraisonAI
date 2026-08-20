@@ -2,25 +2,31 @@
 Session persistence module for PraisonAI Agents.
 
 Provides automatic session persistence with zero configuration.
-When a session_id is provided to an Agent, conversation history
+When a session_id is configured on an Agent, conversation history
 is automatically persisted to disk and restored on subsequent runs.
 
+The session_id is set through the Agent's memory configuration; Agent itself
+has no top-level session_id parameter.
+
 Usage:
-    from praisonaiagents import Agent
-    
+    from praisonaiagents import Agent, MemoryConfig
+
     # With session persistence (auto-enabled)
     agent = Agent(
         name="Assistant",
-        session_id="my-session-123"
+        memory=MemoryConfig(session_id="my-session-123"),
     )
     agent.start("Hello")
-    
+
     # Later, new process - history is restored
     agent = Agent(
-        name="Assistant", 
-        session_id="my-session-123"
+        name="Assistant",
+        memory=MemoryConfig(session_id="my-session-123"),
     )
     agent.start("What did I say before?")  # Remembers!
+
+    # The plain-dict spelling is equivalent:
+    #   Agent(name="Assistant", memory={"session_id": "my-session-123"})
 
 Default storage: ~/.praisonai/sessions/{session_id}.json
 """
