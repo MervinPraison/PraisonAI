@@ -2839,9 +2839,16 @@ Your Goal: {self.goal}
             # Drop framework-generated sandbox tools: they close over the source
             # agent, so the constructor must regenerate clone-bound replacements
             # (see the sandbox wiring below). User tools with colliding names
-            # lack the tag and are preserved.
+            # lack the tag and are preserved. as_tool() handoff closures also
+            # close over the source agent; swap each back for its source Handoff
+            # so the clone's _process_handoffs rebinds it to the clone instead of
+            # delegating with the original agent's history/tools/memory.
             'tools': (
-                [t for t in self.tools if not getattr(t, "_praison_sandbox_tool", False)]
+                [
+                    getattr(t, "_praison_handoff_source", t)
+                    for t in self.tools
+                    if not getattr(t, "_praison_sandbox_tool", False)
+                ]
                 if self.tools else None
             ),
             
@@ -6303,12 +6310,36 @@ Answer:"""
 
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
-        if not self.handoffs:
-            return
-            
         # Import here to avoid circular imports
         from .handoff import Handoff
-        
+
+        # as_tool() returns a Handoff, and its own docstring passes the result in
+        # tools=[...]. tools= stores objects verbatim, so an unconverted Handoff
+        # is invisible to both the LLM tool schema and execute_tool(). Convert in
+        # place here -- the first point where the parent agent that
+        # to_tool_function() needs actually exists.
+        if isinstance(self.tools, list):
+            for index, tool_item in enumerate(self.tools):
+                if isinstance(tool_item, Handoff):
+                    try:
+                        tool_func = tool_item.to_tool_function(self)
+                        # Retain the source Handoff so clone_for_channel() can
+                        # rebind it to the clone. The generated closure captures
+                        # THIS agent (its chat_history/tools/memory); a shallow
+                        # clone that copied the closure verbatim would delegate
+                        # using the original agent's state, leaking one channel's
+                        # context into another.
+                        tool_func._praison_handoff_source = tool_item
+                        self.tools[index] = tool_func
+                    except Exception as e:
+                        logging.error(
+                            f"Failed to convert as_tool()/handoff {tool_item} "
+                            f"passed in tools=: {e}"
+                        )
+
+        if not self.handoffs:
+            return
+
         for handoff_item in self.handoffs:
             try:
                 if isinstance(handoff_item, Handoff):
