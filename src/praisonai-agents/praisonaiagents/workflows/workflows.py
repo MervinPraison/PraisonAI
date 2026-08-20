@@ -602,7 +602,11 @@ class AgentFlow:
     
     # Default configuration for all steps
     default_agent_config: Optional[Dict[str, Any]] = None  # Default agent for all steps
-    llm: Optional[str] = None  # Default LLM model (renamed from default_llm for consistency)
+    # Default model for steps that did not name one. A ready-made Agent step
+    # constructed with its own llm=/model=/auth= keeps it -- same rule as
+    # AgentTeam(llm=). manager_llm below is separate: it is the hierarchical
+    # manager's model and never touches the steps.
+    llm: Optional[str] = None  # (renamed from default_llm for consistency)
     
     # Process type: "sequential" (default) or "hierarchical" (manager-based validation)
     process: str = "sequential"  # "sequential", "hierarchical"
@@ -1253,7 +1257,20 @@ class AgentFlow:
         # Use default LLM if not specified
         model = llm or self.llm or "gpt-4o-mini"
         logger.debug(f"Workflow using model: {model} (llm={llm}, default_llm={self.llm})")
-        
+
+        # Agents the flow builds itself already receive the default via
+        # llm=config.get("llm", model). Ready-made Agent steps were skipped, so
+        # AgentFlow(llm=...) silently did nothing for them. Apply the same rule
+        # here: fill in agents that never named a model, leave the rest alone.
+        # The "gpt-4o-mini" fallback above is deliberately not propagated -- it
+        # is not a caller's choice, and Agent has its own env-aware default.
+        _default_model = llm or self.llm
+        if _default_model:
+            for _agent in self._collect_agents():
+                _apply = getattr(_agent, "_apply_default_llm", None)
+                if callable(_apply):
+                    _apply(_default_model)
+
         # Use workflow verbose setting if not overridden
         verbose = verbose or self.verbose
         
