@@ -180,3 +180,44 @@ def test_the_container_is_removed_afterwards():
         capture_output=True, text=True, timeout=120,
     ).stdout.strip()
     assert remaining == "", f"container {name} outlived the backend"
+
+
+# ── run_on= across every place that can host a loop ──────────────────────────
+def test_run_on_covers_the_cloud_places_too():
+    """run_on= accepted two names while tools_run_on= accepted twelve. That gap
+    was an implementation detail -- no backend had been written for the rest --
+    not a fact about the places. One generic backend closed it."""
+    from praisonaiagents.agent.placement import managed_runtimes
+
+    runtimes = set(managed_runtimes())
+    for place in ("anthropic", "docker", "modal", "e2b", "daytona", "flyio", "tenki", "novita"):
+        assert place in runtimes, f"run_on={place!r} should host a whole agent"
+
+
+@pytest.mark.parametrize("place", ["modal", "e2b", "daytona"])
+def test_a_cloud_place_builds_its_own_backend_class(place):
+    """HostedAgent's factory calls issubclass() on whatever the registry
+    returns, so a loader must hand back a class, not a factory function."""
+    backend = _agent(run_on=place).backend
+    assert backend.provider_name == place
+    assert type(backend).__name__.lower().startswith(place[:4].lower())
+
+
+@pytest.mark.parametrize("place", ["local", "subprocess", "sandlock", "ssh"])
+def test_places_that_cannot_host_a_loop_are_still_refused(place):
+    """`local` would run the agent in your own shell, which is what you get by
+    passing nothing; `ssh` needs an object; the local sandboxes isolate tools
+    rather than host a runtime."""
+    with pytest.raises(TypeError):
+        _agent(run_on=place)
+
+
+def test_the_remote_agent_is_rebuilt_without_callables():
+    from praisonai.integrations.compute_managed_agent import _as_dict
+
+    def local_tool(x: str) -> str:
+        return x
+
+    out = _as_dict({"instructions": "be brief", "tools": [local_tool]})
+    assert "tools" not in out, "callables cannot be rebuilt remotely"
+    assert out["instructions"] == "be brief"

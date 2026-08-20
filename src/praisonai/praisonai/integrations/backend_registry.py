@@ -30,6 +30,34 @@ def _docker_loader() -> Type:
     return DockerManagedAgent
 
 
+def _compute_backed() -> dict:
+    """Every compute place, able to host a whole agent.
+
+    run_on= accepted two names while tools_run_on= accepted twelve, which was
+    an implementation detail leaking into the vocabulary: a place that can run
+    a command can run the agent loop, which is just one more command. There was
+    simply no backend written for the rest. One generic backend covers them
+    all rather than eleven near-identical ones.
+
+    `docker` keeps its specialised backend -- it can talk to the daemon
+    directly and skip a provisioning layer -- so it is not overridden here.
+    Places that cannot host a loop are excluded: `ssh` needs an object rather
+    than a name, and `local` would run the agent in your own shell, which is
+    what you already get by not passing run_on= at all.
+    """
+    from .compute_managed_agent import make_loader
+
+    try:
+        from praisonaiagents.managed._compute_bridge import available_providers
+
+        places = available_providers()
+    except Exception:
+        return {}
+
+    skip = {"docker", "ssh", "local", "native", "subprocess", "sandlock"}
+    return {name: make_loader(name) for name in places if name not in skip}
+
+
 _BUILTIN_BACKENDS = {
     "anthropic": _anthropic_loader,
     # Self-hosted: the whole agent loop runs in a local container rather than a
@@ -37,6 +65,7 @@ _BUILTIN_BACKENDS = {
     # placement resolves run_on= against this registry, so the parameter, the
     # repr, the explanation and the conflict checks all pick it up unchanged.
     "docker": _docker_loader,
+    **_compute_backed(),
 }
 
 
