@@ -49,3 +49,26 @@ def test_handoffs_param_is_unaffected():
     coder = Agent(name="Coder", instructions="Write Python code")
     writer = Agent(name="Writer", handoffs=[coder])
     assert _llm_tool_names(writer) == ["transfer_to_coder"]
+
+
+def test_clone_rebinds_as_tool_handoff_to_the_clone():
+    """A channel clone must delegate with its own state, not the origin's.
+
+    The converted closure captures the source agent (chat_history/tools/memory),
+    so a shallow clone that copied it verbatim would leak one channel's context
+    into another. clone_for_channel() must swap it back for the source Handoff so
+    the clone rebinds it to itself.
+    """
+    coder = Agent(name="Coder", instructions="Write Python code")
+    writer = Agent(name="Writer", tools=[coder.as_tool("Write code")])
+
+    clone = writer.clone_for_channel()
+
+    assert _llm_tool_names(clone) == ["invoke_coder"]
+    assert not any(isinstance(t, Handoff) for t in clone.tools)
+
+    clone_tool = next(t for t in clone.tools if getattr(t, "__name__", "") == "invoke_coder")
+    assert clone_tool.__closure__ is not None
+    bound = [c.cell_contents for c in clone_tool.__closure__]
+    assert clone in bound
+    assert writer not in bound
