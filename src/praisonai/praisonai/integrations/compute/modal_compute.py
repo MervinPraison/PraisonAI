@@ -8,6 +8,7 @@ Requires: ``pip install modal``
 Authentication: ``modal token set`` or ``MODAL_TOKEN_ID`` + ``MODAL_TOKEN_SECRET``
 """
 
+from ._sync_base import SyncComputeProvider
 import logging
 import os
 import time
@@ -17,7 +18,7 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 
-class ModalCompute:
+class ModalCompute(SyncComputeProvider):
     """Modal serverless sandbox compute provider.
 
     Satisfies ``ComputeProviderProtocol`` (Core SDK).
@@ -75,10 +76,6 @@ class ModalCompute:
         except Exception:
             return False
 
-    async def provision(self, config) -> Any:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._provision_sync, config)
 
     def _provision_sync(self, config) -> Any:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
@@ -172,17 +169,6 @@ class ModalCompute:
             created_at=info.get("created_at", 0),
         )
 
-    async def execute(
-        self,
-        instance_id: str,
-        command: str,
-        timeout: int = 300,
-    ) -> Dict[str, Any]:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._execute_sync, instance_id, command, timeout,
-        )
 
     def _execute_sync(
         self, instance_id: str, command: str, timeout: int,
@@ -205,14 +191,6 @@ class ModalCompute:
         except Exception as e:
             return {"stdout": "", "stderr": str(e), "exit_code": -1}
 
-    async def upload_file(
-        self, instance_id: str, local_path: str, remote_path: str,
-    ) -> bool:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._upload_sync, instance_id, local_path, remote_path,
-        )
 
     def _upload_sync(self, instance_id: str, local_path: str, remote_path: str) -> bool:
         info = self._sandboxes.get(instance_id)
@@ -231,14 +209,6 @@ class ModalCompute:
             logger.error("[modal_compute] upload failed: %s", e)
             return False
 
-    async def download_file(
-        self, instance_id: str, remote_path: str, local_path: str,
-    ) -> bool:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._download_sync, instance_id, remote_path, local_path,
-        )
 
     def _download_sync(self, instance_id: str, remote_path: str, local_path: str) -> bool:
         info = self._sandboxes.get(instance_id)
