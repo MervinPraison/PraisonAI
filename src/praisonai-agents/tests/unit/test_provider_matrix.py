@@ -397,3 +397,103 @@ def test_neither_implementation_passes_megabytes_where_gib_is_wanted(vendor):
         assert "memory=self.memory_mb" not in src, (
             f"{cls.__name__} passes megabytes into a field whose SDK wants GiB"
         )
+
+
+# ── an explicitly requested image must reach the provider, not be dropped ─────
+# The generic ComputeManagedAgent forwards `image=` only through
+# ComputeConfig.image. Docker/Daytona/Fly read that field; E2B and Modal chose
+# their own base and ignored it, so `run_on='e2b', image=...` silently booted
+# the default. Same shape of drift as the memory-unit bug: assert the value the
+# vendor SDK actually receives, not the source that produces it.
+def test_e2b_honours_a_non_default_image_as_its_template(monkeypatch):
+    pytest.importorskip("praisonai.integrations.compute.e2b")
+    import sys
+    import types
+
+    from praisonaiagents.managed.protocols import ComputeConfig
+
+    recorded = {}
+
+    class _Sandbox:
+        sandbox_id = "sbx-1"
+
+        @staticmethod
+        def create(template=None, **kw):
+            recorded["template"] = template
+            return _Sandbox()
+
+    fake = types.ModuleType("e2b")
+    fake.Sandbox = _Sandbox
+    monkeypatch.setitem(sys.modules, "e2b", fake)
+
+    from praisonai.integrations.compute.e2b import E2BCompute
+
+    provider = E2BCompute(api_key="test-key")
+
+    provider._provision_sync(ComputeConfig(image="my-custom-template"))
+    assert recorded["template"] == "my-custom-template", (
+        "an explicitly requested image must reach E2B as the template"
+    )
+
+    provider._provision_sync(ComputeConfig())
+    assert recorded["template"] is None, (
+        "the default image must not be forced onto E2B as a template"
+    )
+
+
+def test_modal_honours_a_non_default_image_from_the_registry(monkeypatch):
+    pytest.importorskip("praisonai.integrations.compute.modal_compute")
+    import sys
+    import types
+
+    from praisonaiagents.managed.protocols import ComputeConfig
+
+    recorded = {}
+
+    class _Image:
+        def pip_install(self, *a, **k):
+            return self
+
+        def apt_install(self, *a, **k):
+            return self
+
+    class _ImageFactory:
+        @staticmethod
+        def from_registry(ref, **kw):
+            recorded["from_registry"] = ref
+            return _Image()
+
+        @staticmethod
+        def debian_slim(**kw):
+            recorded["debian_slim"] = True
+            return _Image()
+
+    class _Sandbox:
+        object_id = "mdl-1"
+
+        @staticmethod
+        def create(*a, **k):
+            return _Sandbox()
+
+    fake = types.ModuleType("modal")
+    fake.Image = _ImageFactory
+    fake.Sandbox = _Sandbox
+    fake.Secret = types.SimpleNamespace(from_dict=lambda d: object())
+    monkeypatch.setitem(sys.modules, "modal", fake)
+
+    from praisonai.integrations.compute.modal_compute import ModalCompute
+
+    provider = ModalCompute()
+    monkeypatch.setattr(provider, "_get_app", lambda: object())
+
+    recorded.clear()
+    provider._provision_sync(ComputeConfig(image="ghcr.io/acme/base:1"))
+    assert recorded.get("from_registry") == "ghcr.io/acme/base:1", (
+        "an explicitly requested image must reach Modal via from_registry"
+    )
+
+    recorded.clear()
+    provider._provision_sync(ComputeConfig())
+    assert recorded.get("debian_slim") and "from_registry" not in recorded, (
+        "the default image must keep Modal on debian_slim"
+    )

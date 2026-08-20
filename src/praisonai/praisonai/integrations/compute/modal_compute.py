@@ -88,8 +88,17 @@ class ModalCompute(SyncComputeProvider):
         instance_id = f"modal_{uuid.uuid4().hex[:12]}"
         app = self._get_app()
 
-        # Build Modal Image from config
-        image = modal.Image.debian_slim(python_version="3.12")
+        # Build Modal Image from config. A caller who set `image=` to something
+        # other than the provider-agnostic default is asking for that specific
+        # base; honour it via from_registry rather than silently booting Modal's
+        # debian_slim default. The default value stays on debian_slim so the
+        # unset case is unchanged.
+        from praisonaiagents.managed.protocols import ComputeConfig as _CC
+
+        if config.image and config.image != _CC.image:
+            image = modal.Image.from_registry(config.image)
+        else:
+            image = modal.Image.debian_slim(python_version="3.12")
 
         # Install pip packages into the image
         pip_pkgs = config.packages.get("pip", []) if config.packages else []

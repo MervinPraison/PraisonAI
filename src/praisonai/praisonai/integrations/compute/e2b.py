@@ -64,8 +64,16 @@ class E2BCompute(SyncComputeProvider):
 
         instance_id = f"e2b_{uuid.uuid4().hex[:12]}"
 
-        # E2B uses templates, not images — use 'base' for default
+        # E2B uses named templates, not Docker image refs. An explicit
+        # `metadata["e2b_template"]` wins; failing that, a caller who set
+        # `image=` to something other than the provider-agnostic default is
+        # asking for a specific environment, so honour it as the template
+        # rather than silently booting E2B's default.
+        from praisonaiagents.managed.protocols import ComputeConfig as _CC
+
         template = config.metadata.get("e2b_template") if config.metadata else None
+        if not template and config.image and config.image != _CC.image:
+            template = config.image
 
         sandbox = Sandbox.create(
             template=template,
