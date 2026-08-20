@@ -5480,6 +5480,8 @@ Summary:"""
                 "to persist/share memory across runs.", mem_user_id,
             )
         
+        from ..memory.adapters.registry import resolve_memory_adapter_name as _resolve_memory_adapter_name
+
         if memory is True or memory == "file":
             # Use FileMemory (zero dependencies)
             from ..memory.file_memory import FileMemory
@@ -5487,11 +5489,15 @@ Summary:"""
                 user_id=mem_user_id,
                 verbose=1 if getattr(self, 'verbose', False) else 0
             )
-        elif isinstance(memory, str) and memory in ("sqlite", "chromadb", "mem0", "mongodb", "redis", "postgres"):
-            # Use full Memory class with specific provider
+        elif isinstance(memory, str) and _resolve_memory_adapter_name(memory):
+            # Full Memory class, backend name passed through untouched.
+            # Rewriting "sqlite" -> "rag" here made memory="sqlite" build a
+            # ChromaDB store while Memory({"provider": "sqlite"}) built a real
+            # SQLite one. The accepted set now comes from the registry, so
+            # register_memory_adapter() backends are reachable from here.
             try:
                 from ..memory.memory import Memory
-                config = {"provider": memory if memory != "sqlite" else "rag"}
+                config = {"provider": _resolve_memory_adapter_name(memory)}
                 self._memory_instance = Memory(config)
             except ImportError:
                 logging.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")

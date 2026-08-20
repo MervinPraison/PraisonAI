@@ -263,7 +263,7 @@ class TestConfigDrivenDefaults:
         clear_config_cache()
         
         # When user passes explicit config, should preserve it
-        explicit_config = MemoryConfig(backend="postgres")
+        explicit_config = MemoryConfig(backend="mongodb")
         result = apply_config_defaults("memory", explicit_config, MemoryConfig)
         assert result == explicit_config
 

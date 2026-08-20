@@ -26,6 +26,7 @@ from .registry import (
     list_memory_adapters,
     get_first_available_memory_adapter,
     has_memory_adapter,
+    resolve_memory_adapter_name,
 )
 from .factories import (
     create_mem0_memory_adapter,
@@ -53,4 +54,5 @@ __all__ = [
     'list_memory_adapters',
     'get_first_available_memory_adapter',
     'has_memory_adapter',
+    'resolve_memory_adapter_name',
 ]
