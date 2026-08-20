@@ -296,7 +296,16 @@ class RetrievalConfig:
         if self.rerank:
             config["reranker"] = {"enabled": True, "default_rerank": True}
             if self.rerank_model:
-                config["reranker"]["config"] = {"model": self.rerank_model}
+                # mem0's RerankerConfig needs a provider to instantiate the
+                # reranker; a config with only {"model": ...} is dropped by
+                # Knowledge._prepare_mem0_config and the request is silently
+                # lost. Derive the provider from a "provider/model" prefix
+                # (e.g. "cohere/rerank-v3" -> provider "cohere") so the model
+                # is actionable; fall back to the model string as provider.
+                model = self.rerank_model
+                provider = model.split("/", 1)[0] if "/" in model else model
+                config["reranker"]["provider"] = provider
+                config["reranker"]["config"] = {"model": model}
 
         # Chunking must reach Knowledge, which otherwise hardcodes
         # recursive/512/50 and ignores the user's chunk settings entirely.

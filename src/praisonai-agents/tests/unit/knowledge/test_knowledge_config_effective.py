@@ -84,3 +84,19 @@ def test_retrieval_config_round_trips_the_new_fields():
     back = RetrievalConfig.from_dict(cfg.to_dict())
     assert (back.rerank_model, back.chunking_strategy, back.chunk_size,
             back.chunk_overlap) == ("m", "token", 999, 11)
+
+
+def test_rerank_model_emits_provider_for_knowledge():
+    """rerank_model must reach Knowledge with a provider (mem0 needs one)."""
+    from praisonaiagents.rag.retrieval_config import RetrievalConfig
+    cfg = RetrievalConfig(rerank=True, rerank_model="cohere/rerank-v3")
+    reranker = cfg.to_knowledge_config()["reranker"]
+    assert reranker["provider"] == "cohere"
+    assert reranker["config"] == {"model": "cohere/rerank-v3"}
+
+
+def test_rerank_model_without_slash_uses_model_as_provider():
+    from praisonaiagents.rag.retrieval_config import RetrievalConfig
+    cfg = RetrievalConfig(rerank=True, rerank_model="simple")
+    reranker = cfg.to_knowledge_config()["reranker"]
+    assert reranker["provider"] == "simple"
