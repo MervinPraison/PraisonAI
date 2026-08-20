@@ -1074,7 +1074,7 @@ PraisonAI's reliability engineering rests on three pillars — **C**ontext, **H*
 > **Evaluator status.** The `ContextEvaluator` / `HarnessEvaluator` / `LoopEvaluator` classes named in the rubric are **planned follow-ups** (PA-CHL-001–004), not yet in the repo. Until they land, the equivalent checks are covered by existing modules:
 >
 > - **Context** — `context/tokens.py` and `eval/tokens.py` (`estimate_tokens` / `count_tokens`) for budget; `compaction/compactor.py` (`ContextCompactor`) for compaction/retention.
-> - **Harness** — `runtime/turn_context.py` for turn-context parity; `runtime/example_harness.py` and `tests/` for harness/artifact checks.
+> - **Harness** — `runtime/turn_context.py` for turn-context parity; `examples/runtime/example_harness.py` and `tests/` for harness/artifact checks.
 > - **Loop** — `eval/loop.py` (`EvaluationLoop`) and `agent/autonomy.py` for convergence and doom-loop guards.
 >
 > Keep terminology consistent with the `agent/context_agent.py` (`ContextAgent`) PRP methodology.

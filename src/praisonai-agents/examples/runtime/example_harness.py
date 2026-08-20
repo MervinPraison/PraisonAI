@@ -14,16 +14,16 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from .turn_context import (
+from praisonaiagents.runtime.turn_context import (
     PreparedTurnContext,
-    TurnRuntimeProtocol,
     RuntimeMode,
 )
-from .context_builder import default_context_builder
-from ..streaming.events import StreamEvent, StreamEventType
+from praisonaiagents.runtime.protocols import TurnRuntimeProtocol
+from praisonaiagents.runtime.context_builder import default_context_builder
+from praisonaiagents.streaming.events import StreamEvent, StreamEventType
 
 if TYPE_CHECKING:
-    from ..agent.protocols import AgentProtocol
+    from praisonaiagents.agent.protocols import AgentProtocol
 
 logger = logging.getLogger(__name__)
 
