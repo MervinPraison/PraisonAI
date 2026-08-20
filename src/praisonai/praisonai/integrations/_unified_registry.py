@@ -5,16 +5,19 @@ This replaces the manual __getattr__ ladder with a data-driven registry approach
 supporting CLI tools, managed agents, framework adapters, and RAG components.
 """
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 from .._registry import PluginRegistry
 
 
 class IntegrationRegistry(PluginRegistry[Any]):
     """Registry for all integration types with lazy loading."""
-    
+
     def __init__(self):
+        # ``super().__init__`` discovers third-party ``praisonai.integrations``
+        # entry points into ``self._loaders``. Do NOT reassign ``self._loaders``
+        # here: that silently discards every discovered plugin. Builtins are
+        # registered afterwards and therefore take precedence on name clashes.
         super().__init__(entry_point_group="praisonai.integrations")
-        self._loaders: Dict[str, Callable[[], Any]] = {}
         self._register_builtin_integrations()
 
     def register_lazy(
