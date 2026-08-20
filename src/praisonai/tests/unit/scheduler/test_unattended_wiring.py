@@ -90,21 +90,34 @@ def test_default_denied_toolsets_downscope_unattended_run():
 # ── Defect 2: host-app bridge does not discard due jobs ──────────────────
 
 
-def test_bridge_on_trigger_leaves_job_due_without_executor():
+def test_bridge_leaves_jobs_due_when_no_executor(monkeypatch):
+    # When no executor can be built the poll loop must NOT start: the canonical
+    # store claims jobs atomically (advancing last_run_at at claim time), so a
+    # started loop would consume the occurrence even if the trigger raised.
+    # Leaving the loop unstarted keeps every job genuinely due.
     import praisonai.integration.bridges.schedules_runner as sr
 
-    sr._executor = None
+    monkeypatch.setattr(sr, "_runner_started", False, raising=False)
+    monkeypatch.setattr(sr, "_loop", None, raising=False)
+    monkeypatch.setattr(sr, "_build_executor", lambda store: None)
 
-    def on_trigger(job):
-        if sr._executor is None:
-            raise RuntimeError("no scheduler executor available; leaving job due")
+    started = {"loop": False}
 
-    raised = False
-    try:
-        on_trigger(object())
-    except RuntimeError:
-        raised = True
-    assert raised, "on_trigger must raise so last_run_at is not advanced"
+    class _NoStartLoop:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, *a, **k):
+            started["loop"] = True
+
+    monkeypatch.setattr(
+        "praisonaiagents.scheduler.ScheduleLoop", _NoStartLoop
+    )
+
+    sr.ensure_schedule_runner()
+
+    assert started["loop"] is False, "loop must not start without an executor"
+    assert sr._runner_started is False, "runner must remain unstarted"
 
 
 def test_bridge_builds_executor_with_policy():

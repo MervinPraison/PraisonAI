@@ -14,13 +14,17 @@ _executor = None
 def _build_executor(store):
     """Construct a ``ScheduledAgentExecutor`` for host-app embedding.
 
-    Resolution: the host embedding has no gateway agent registry, so jobs are
-    executed against agents resolved by ``agent_id`` from the process-global
-    registry when available. Delivery uses the standalone sender fallback
-    (``delivery_handler=None``) so a job's own delivery target still receives
-    output with no live gateway. A default :class:`RunPolicy` guards the run.
+    The host embedding has no gateway agent registry, so ``agent_id`` cannot be
+    resolved to a live agent here — message jobs are surfaced by the executor as
+    a recorded ``failed`` run with a clear reason rather than crashing the tick,
+    while ``command`` jobs (which take no model turn) execute normally. Delivery
+    uses the standalone sender fallback (``delivery_handler=None``) so a job's
+    own delivery target still receives output with no live gateway. A default
+    :class:`RunPolicy` guards the run.
+
     Returns ``None`` when the executor cannot be constructed — the caller then
-    leaves the job due rather than silently absorbing it.
+    does **not** start the poll loop, so due jobs are left genuinely due (never
+    claimed/consumed) until an executor is available.
     """
     try:
         from praisonaiagents.scheduler import ScheduleRunner
@@ -38,6 +42,10 @@ def _build_executor(store):
         log.debug("RunPolicy unavailable for host embedding: %s", exc)
 
     def _resolve_agent(agent_id):
+        # No process-global agent registry exists in the host embedding; a
+        # message job's ``agent_id`` therefore resolves to nothing here. The
+        # executor records this as a ``failed`` run (auditable) instead of
+        # silently dropping it; ``command`` jobs never reach this resolver.
         return None
 
     return ScheduledAgentExecutor(
@@ -58,15 +66,22 @@ def ensure_schedule_runner() -> None:
         store = get_default_store()
         _executor = _build_executor(store)
 
+        # Only poll when we can actually execute. The canonical store claims a
+        # due job *atomically* — advancing ``last_run_at`` and deleting one-shot
+        # jobs at claim time (before the trigger runs). If we started the loop
+        # with no executor and let ``on_trigger`` raise, ``fire_due`` would still
+        # have consumed the occurrence (the claim persisted the advance), losing
+        # one-shot and long-interval work. So when no executor can be built we
+        # leave the loop unstarted — nothing is claimed, every job stays truly
+        # due until a later start finds an executor (issue #4079, Defect 2).
+        if _executor is None:
+            log.debug(
+                "Schedule executor unavailable; poll loop not started "
+                "(jobs left due, none claimed)"
+            )
+            return
+
         def on_trigger(job):
-            # Actually execute the due job. If no executor could be constructed
-            # in this embedding, raise so ScheduleLoop.fire_due does NOT advance
-            # last_run_at — the job stays due rather than being silently
-            # absorbed (issue #4079, Defect 2).
-            if _executor is None:
-                raise RuntimeError(
-                    "no scheduler executor available; leaving job due"
-                )
             log.info("Schedule triggered: %s", getattr(job, "name", job))
             asyncio.run(_executor._execute_one(job))
 

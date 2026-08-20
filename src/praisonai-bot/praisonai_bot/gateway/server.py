@@ -5448,7 +5448,21 @@ class WebSocketGateway:
                 delivery_handler=self._deliver_scheduled_result,
                 run_policy=self._build_run_policy(),
             )
-            await executor.run_loop(interval=interval)
+            # Refresh the policy each tick from the (possibly hot-reloaded)
+            # config so a live change to the ``scheduler:`` block — delivery,
+            # prompt scan, denied toolsets, audit dir — applies on the next tick
+            # without a process restart. ``_build_run_policy`` reads the current
+            # ``_loaded_config``; rebuilding is cheap (a small dataclass) and
+            # keeps a long-lived gateway from pinning stale unattended-run
+            # settings. Falls back to ``run_loop`` when the executor predates
+            # per-tick policy refresh.
+            try:
+                while True:
+                    executor._run_policy = self._build_run_policy()
+                    await executor.tick_all()
+                    await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                pass
 
         self._scheduler_task = asyncio.create_task(_run())
         logger.info("Scheduler tick started (interval=15s)")
