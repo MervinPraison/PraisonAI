@@ -186,10 +186,10 @@ def _mistyped_command_suggestions(argv, first_cmd):
     A high difflib ratio is necessary but not sufficient: a legitimate plural or
     extension of a command word (``tests`` for ``test``, ``runs`` for ``run``,
     ``server`` for ``serve``) also scores >= 0.8, yet is a valid prompt, not a
-    typo. These are distinguished structurally — an extension *contains the full
-    command as a prefix* (or vice-versa), whereas a genuine typo does not
-    (``deploi`` is not a prefix-extension of ``deploy``). Any such prefix-related
-    match is therefore dropped so real prompts reach ``run`` untouched.
+    typo. An extension *contains the full command as a prefix* and is therefore
+    dropped so real prompts reach ``run`` untouched. A *truncation* (``deplo``
+    for ``deploy``, ``versio`` for ``version``) is the opposite — a typo — so it
+    is kept and suggested rather than forwarded to (and billed by) the model.
     """
     import os
 
@@ -220,15 +220,12 @@ def _mistyped_command_suggestions(argv, first_cmd):
     import difflib
 
     matches = difflib.get_close_matches(first_cmd, sorted(commands), n=3, cutoff=0.8)
-    # Drop prefix-related matches: a plural/extension of a command (``tests`` for
-    # ``test``, ``server`` for ``serve``) shares the command as a prefix and is a
-    # legitimate prompt, not a typo. Genuine typos (``deploi`` vs ``deploy``) do
-    # not exhibit this prefix relationship, so they survive.
-    matches = [
-        cmd
-        for cmd in matches
-        if not (first_cmd.startswith(cmd) or cmd.startswith(first_cmd))
-    ]
+    # Spare only EXTENSIONS of a command: a plural/extension (``tests`` for
+    # ``test``, ``server`` for ``serve``) contains the command as a prefix and
+    # is a legitimate prompt, not a typo. A TRUNCATION (``deplo`` for ``deploy``,
+    # ``versio`` for ``version``) is a typo — keeping it here means it is
+    # suggested, not forwarded to the model and billed as a mistaken prompt.
+    matches = [cmd for cmd in matches if not first_cmd.startswith(cmd)]
     return matches
 
 
