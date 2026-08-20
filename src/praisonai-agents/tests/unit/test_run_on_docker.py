@@ -284,3 +284,57 @@ def test_docker_is_no_longer_a_special_case():
 
     for place in ("docker", "modal", "e2b"):
         assert isinstance(_agent(run_on=place).backend, ComputeManagedAgent)
+
+
+def test_a_hosted_backend_reclaims_its_instance_when_collected():
+    """run_on= keeps its instance alive across calls on purpose -- keep_alive
+    defaults to True -- but it should not outlive the process. There was no
+    finalizer at all, so a docker container survived every script and a cloud
+    instance kept billing until the provider's own idle timer noticed, which
+    docker and flyio do not have."""
+    import gc
+
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    released = []
+
+    class Fake:
+        provider_name = "fake"
+
+        async def provision(self, config):
+            from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
+
+            return InstanceInfo(instance_id="inst-1", status=InstanceStatus.RUNNING,
+                                provider="fake")
+
+        async def execute(self, instance_id, command, timeout=None):
+            return {"stdout": "", "stderr": "", "exit_code": 0}
+
+        async def shutdown(self, instance_id):
+            released.append(instance_id)
+
+    import asyncio
+
+    backend = ComputeManagedAgent("docker")
+    backend._provider = Fake()
+    asyncio.run(backend._ensure())
+    assert backend._instance == "inst-1"
+    assert backend._finalizer is not None, "nothing would reclaim this instance"
+
+    del backend
+    gc.collect()
+    assert released == ["inst-1"], "the instance outlived the backend that owned it"
+
+
+def test_an_explicit_shutdown_cancels_the_finalizer():
+    """Reclaiming twice should not happen; the finalizer stands down when the
+    caller shuts down deliberately."""
+    import asyncio
+
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+
+    backend = ComputeManagedAgent("docker")
+    backend._instance = "inst-2"
+    backend._finalizer = type("F", (), {"detach": lambda self: None})()
+    asyncio.run(backend.ashutdown())
+    assert backend._finalizer is None
