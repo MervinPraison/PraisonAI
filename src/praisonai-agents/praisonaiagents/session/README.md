@@ -5,26 +5,35 @@ This module provides automatic session persistence with zero configuration.
 ## Quick Start
 
 ```python
-from praisonaiagents import Agent
+from praisonaiagents import Agent, MemoryConfig
 
 # With session persistence (auto-enabled)
 agent = Agent(
     name="Assistant",
-    session_id="my-session-123"
+    memory=MemoryConfig(session_id="my-session-123"),
 )
 agent.start("Hello, my name is Alice")
 
 # Later, in a new process - history is restored automatically
 agent = Agent(
-    name="Assistant", 
-    session_id="my-session-123"
+    name="Assistant",
+    memory=MemoryConfig(session_id="my-session-123"),
 )
 agent.start("What is my name?")  # Agent remembers: "Alice"
 ```
 
+The `session_id` is part of the Agent's memory configuration. `Agent` itself has
+no top-level `session_id` parameter — passing one raises
+`TypeError: Agent.__init__() got unexpected keyword argument(s): session_id`.
+A plain dict is accepted as shorthand for `MemoryConfig`:
+
+```python
+agent = Agent(name="Assistant", memory={"session_id": "my-session-123"})
+```
+
 ## How It Works
 
-When you provide a `session_id` to an Agent:
+When you configure a `session_id` on an Agent:
 
 1. **Automatic Persistence**: Conversation history is automatically saved to disk
 2. **Automatic Restoration**: When a new Agent is created with the same `session_id`, history is restored
@@ -74,8 +83,8 @@ Fields are persisted in session JSON `metadata` and mirrored at root on save. Po
 
 | Scenario | Behavior |
 |----------|----------|
-| `session_id` provided, no DB | JSON persistence (auto) |
-| `session_id` provided, with DB | DB adapter used |
+| `memory=MemoryConfig(session_id=...)`, no DB | JSON persistence (auto) |
+| `memory=MemoryConfig(session_id=..., db=...)` | DB adapter used |
 | No `session_id`, same Agent instance | In-memory only |
 | No `session_id`, new Agent instance | No history |
 
@@ -120,13 +129,15 @@ store = DefaultSessionStore(
 When a DB adapter is provided, it takes precedence over JSON persistence:
 
 ```python
-from praisonaiagents import Agent
+from praisonaiagents import Agent, MemoryConfig
 from praisonai.db import PostgresAdapter
 
 agent = Agent(
     name="Assistant",
-    session_id="my-session",
-    db=PostgresAdapter(connection_string="...")
+    memory=MemoryConfig(
+        session_id="my-session",
+        db=PostgresAdapter(connection_string="..."),
+    ),
 )
 ```
 
@@ -142,17 +153,27 @@ Multiple processes can safely read/write to the same session.
 
 ## Context Caching
 
-For cost optimization, use `prompt_caching=True` with Anthropic models:
+Prompt caching is opt-in via `caching=CachingConfig(prompt_caching=True)` — there
+is no top-level `prompt_caching` parameter on `Agent`. When enabled, `Agent`
+checks `praisonaiagents.llm.model_capabilities.supports_prompt_caching(model)`
+and, for providers that need explicit breakpoints (Anthropic), injects
+`cache_control` markers itself. OpenAI/Gemini use automatic prefix caching, so no
+markers are emitted:
 
 ```python
+from praisonaiagents import Agent, MemoryConfig, CachingConfig
+
 agent = Agent(
     name="Assistant",
-    session_id="my-session",
-    prompt_caching=True,  # Enables Anthropic prompt caching
+    llm="anthropic/claude-sonnet-4-5",
+    memory=MemoryConfig(session_id="my-session"),
+    caching=CachingConfig(prompt_caching=True),
 )
 ```
 
 This caches the system prompt, reducing token costs for repeated conversations.
+Without `prompt_caching=True`, no `cache_control` breakpoints are injected on the
+Anthropic path.
 
 ## API Reference
 
