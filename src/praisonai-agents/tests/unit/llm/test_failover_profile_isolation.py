@@ -117,3 +117,74 @@ class TestFailoverRetryUsesProfileCredentials:
         assert llm.api_key == "sk-primary"
         assert llm.base_url is None
         assert llm.model == "gpt-4o-mini"
+
+
+class TestFailoverBookkeepingIsPerCall:
+    """Concurrent calls must not corrupt each other's failover bookkeeping.
+
+    A rotation in one call must not move the shared ``_current_profile`` that a
+    second in-flight call reads for its own ``mark_failure``/``mark_success``.
+    """
+
+    def test_rotation_does_not_mutate_shared_current_profile(self):
+        """A failure-driven rotation leaves ``self._current_profile`` intact."""
+        llm, _ = _make_llm_with_profiles()
+        llm._max_retries = 2
+        llm._retry_delay = 0.01
+        initial_profile = llm._current_profile
+
+        mock_func = Mock(
+            side_effect=[
+                Exception("AuthenticationError: 401 Unauthorized"),
+                "ok",
+            ]
+        )
+
+        with patch("time.sleep"):
+            llm._call_with_retry(mock_func, model="gpt-4o-mini", api_key="sk-primary")
+
+        # The shared pointer still references the initial profile: rotation was
+        # a per-call local, so a concurrent call would not observe the switch.
+        assert llm._current_profile is initial_profile
+        assert llm._current_profile.name == "primary"
+
+    def test_success_marks_the_call_local_profile_after_rotation(self):
+        """mark_success targets the rotated profile that served the call."""
+        llm, manager = _make_llm_with_profiles()
+        llm._max_retries = 2
+        llm._retry_delay = 0.01
+        # Spy without replacing behaviour: the real health tracking must still
+        # run so get_next_profile() rotates to the backup.
+        manager.mark_success = Mock(wraps=manager.mark_success)
+        manager.mark_failure = Mock(wraps=manager.mark_failure)
+
+        mock_func = Mock(
+            side_effect=[
+                Exception("AuthenticationError: 401 Unauthorized"),
+                "ok",
+            ]
+        )
+
+        with patch("time.sleep"):
+            llm._call_with_retry(mock_func, model="gpt-4o-mini", api_key="sk-primary")
+
+        # Failure marked the primary; success marked the rotated backup, not
+        # whatever the shared pointer happened to be.
+        assert manager.mark_failure.call_args_list[0].args[0].name == "primary"
+        assert manager.mark_success.call_args.args[0].name == "backup"
+
+
+class TestTokenTrackingFollowsServingModel:
+    """Token usage is attributed to the model that actually served the call."""
+
+    def test_tracking_uses_response_model_not_shared_profile(self):
+        """A rotated call tracks the serving model from the response."""
+        llm, _ = _make_llm_with_profiles()
+        response = Mock(model="backup-model")
+        assert llm._response_model_for_tracking(response) == "backup-model"
+
+    def test_tracking_falls_back_to_self_model(self):
+        """Responses without a model fall back to the instance model."""
+        llm, _ = _make_llm_with_profiles()
+        response = Mock(spec=[])  # no ``model`` attribute
+        assert llm._response_model_for_tracking(response) == llm.model
