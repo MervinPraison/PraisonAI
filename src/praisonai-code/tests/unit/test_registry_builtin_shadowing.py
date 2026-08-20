@@ -129,3 +129,83 @@ def test_neither_group_lets_an_entry_point_replace_a_builtin(monkeypatch, group_
         )
 
     assert registry.resolve("docker") is _Builtin
+
+
+# Three copies of ``PluginRegistry`` exist: the canonical one above, and two
+# vendored fallbacks that run when ``praisonai-sandbox`` / ``praisonai-deploy``
+# are installed standalone (issue #4180). A guard in only one of them protects
+# nobody who installed the other two on their own. Parametrise over the *vendored
+# copies* -- not the group-name strings the #4171 test varied, which all drove
+# the single canonical class -- and force the standalone import path so the
+# fallback ``class`` is the one under test rather than the bridged canonical one.
+def _load_vendored_fallback(module_path, bridge_path):
+    """Import ``module_path`` with its praisonai-code bridge stubbed out, so the
+    ``except ImportError`` branch defines the vendored ``PluginRegistry``.
+
+    In the monorepo the bridge makes praisonai-code importable, so a plain import
+    hands back the canonical class and the vendored copy is never exercised. We
+    stub ``code_available`` -> False and re-import to reach the fallback.
+    """
+    import importlib
+
+    try:
+        importlib.import_module(bridge_path)
+    except ImportError:
+        pytest.skip(f"{bridge_path} not importable")
+
+    import sys
+    import types
+    from unittest import mock
+
+    real_bridge = sys.modules[bridge_path]
+    stub = types.ModuleType(bridge_path)
+    stub.code_available = lambda: False
+    stub.import_code_module = real_bridge.import_code_module
+
+    with mock.patch.dict(sys.modules, {bridge_path: stub}):
+        sys.modules.pop(module_path, None)
+        try:
+            module = importlib.import_module(module_path)
+        finally:
+            sys.modules.pop(module_path, None)
+
+    assert module.PluginRegistry.__module__ == module_path, (
+        f"expected the vendored {module_path} class, got "
+        f"{module.PluginRegistry.__module__}"
+    )
+    return module, module.PluginRegistry
+
+
+@pytest.mark.parametrize(
+    "module_path,bridge_path,builtin",
+    [
+        (
+            "praisonai_sandbox._plugin_registry",
+            "praisonai_sandbox._code_bridge",
+            "docker",
+        ),
+        (
+            "praisonai_deploy._plugin_registry",
+            "praisonai_deploy._code_bridge",
+            "aws",
+        ),
+    ],
+    ids=["sandbox-standalone", "deploy-standalone"],
+)
+def test_fallback_entry_point_cannot_replace_a_builtin(
+    monkeypatch, module_path, bridge_path, builtin
+):
+    module, registry_cls = _load_vendored_fallback(module_path, bridge_path)
+
+    monkeypatch.setattr(
+        module,
+        "entry_points",
+        lambda group: [_entry_point(builtin, _Evil)],
+    )
+
+    registry = registry_cls(
+        entry_point_group="praisonai.sandbox",
+        builtins={builtin: lambda: _Builtin},
+    )
+
+    assert registry.resolve(builtin) is _Builtin

@@ -48,14 +48,27 @@ except ImportError:
             self._loaders: Dict[str, Callable[[], Type[T]]] = {}
             self._items: Dict[str, Type[T]] = {}
             self._lock = threading.RLock()
+            # Mirrors praisonai_code._registry: an installed distribution must
+            # never replace a built-in via entry-point discovery. These loaders
+            # decide where user code executes, so shadowing matters most here.
+            self._builtin_names: set[str] = set()
 
             if builtins:
                 for name, loader in builtins.items():
                     self._loaders[name.lower()] = loader
+                    self._builtin_names.add(name.lower())
 
             if discover_entry_points:
                 try:
                     for ep in entry_points(group=self._entry_point_group):
+                        if ep.name.lower() in self._builtin_names:
+                            logger.debug(
+                                "Entry point %r in group %s matches a built-in "
+                                "loader; keeping the built-in.",
+                                ep.name,
+                                self._entry_point_group,
+                            )
+                            continue
                         self._loaders[ep.name.lower()] = ep.load
                 except Exception:
                     logger.debug(
