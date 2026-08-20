@@ -147,12 +147,17 @@ class DockerSandbox:
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
-        code_file = os.path.join(self._temp_dir, f"code_{execution_id}.py")
+        # Drop the script inside the mounted sandbox dir rather than a private
+        # /code mount. That way execute() sees files written by write_file() or
+        # a prior run_command(), and anything it writes survives for the next
+        # call -- the same shared storage every entry point already uses.
+        script_name = f"code_{execution_id}.py"
+        code_file = os.path.join(self._temp_dir, script_name)
         with open(code_file, "w") as f:
             f.write(code)
         
         docker_cmd = self._build_docker_command(
-            code_file=code_file,
+            script_name=script_name,
             language=language,
             limits=limits,
             env=env,
@@ -453,15 +458,20 @@ class DockerSandbox:
     
     def _build_docker_command(
         self,
-        code_file: str,
+        script_name: str,
         language: str,
         limits: ResourceLimits,
         env: Optional[Dict[str, str]] = None,
         working_dir: Optional[str] = None,
     ) -> List[str]:
-        """Build the Docker run command."""
+        """Build the Docker run command.
+
+        The script lives in the mounted sandbox dir (SANDBOX_ROOT), so execute()
+        shares the same storage as write_file() and run_command().
+        """
         docker_cmd = [
             "docker", "run", "--rm",
+            "-v", f"{self._temp_dir}:{SANDBOX_ROOT}",
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
             "--pids-limit", str(limits.max_processes),
@@ -470,21 +480,18 @@ class DockerSandbox:
         if not limits.network_enabled:
             docker_cmd.extend(["--network", "none"])
         
-        docker_cmd.extend(["-v", f"{code_file}:/code/script.py:ro"])
-        
         if env:
             for key, value in env.items():
                 docker_cmd.extend(["-e", f"{key}={value}"])
         
-        docker_cmd.extend(["-w", working_dir or "/code"])
+        docker_cmd.extend(["-w", working_dir or SANDBOX_ROOT])
         
         docker_cmd.append(self._image)
         
-        if language == "python":
-            docker_cmd.extend(["python", "/code/script.py"])
-        elif language == "bash":
-            docker_cmd.extend(["bash", "/code/script.py"])
+        script_path = f"{SANDBOX_ROOT}/{script_name}"
+        if language == "bash":
+            docker_cmd.extend(["bash", script_path])
         else:
-            docker_cmd.extend(["python", "/code/script.py"])
+            docker_cmd.extend(["python", script_path])
         
         return docker_cmd

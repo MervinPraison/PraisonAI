@@ -88,6 +88,25 @@ def test_listing_files_does_not_reveal_the_host_path():
 
 
 @needs_docker
+def test_execute_shares_storage_with_write_file():
+    """run_in="docker" goes through execute(), which used to mount only its own
+    script under /code -- so it could not see files write_file() produced, and
+    anything it wrote vanished with the container."""
+
+    async def check(sandbox):
+        await sandbox.write_file("seed.txt", "seen")
+        wrote = await sandbox.execute(
+            "open('/sandbox/made.txt', 'w').write(open('/sandbox/seed.txt').read())"
+        )
+        read_back = await sandbox.run_command("cat made.txt")
+        return wrote, read_back
+
+    wrote, read_back = _run(_with_sandbox(check))
+    assert wrote.exit_code == 0, "execute() could not read the written file"
+    assert (read_back.stdout or "").strip() == "seen", "execute() output did not persist"
+
+
+@needs_docker
 def test_the_container_is_still_isolated_from_the_host():
     """Mounting one directory must not turn into mounting the host."""
 
