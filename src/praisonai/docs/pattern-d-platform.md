@@ -20,9 +20,9 @@ Pattern D connects PraisonAIUI dashboard pages to a **PraisonAI Platform** serve
 
 ## agent_id linking
 
-Three registries may coexist:
+Several agent registries coexist in a full install; the three relevant to correlation here are:
 
-1. **Platform roster** — cloud tenant agents (`/api/v1/agents`)
+1. **Platform roster** — workspace-scoped agents (`/api/v1/workspaces/{workspace_id}/agents`)
 2. **Gateway registry** — WebSocket `/ws` agent ids
 3. **aiui SDKAgentRegistry** — YAML CRUD + local `Agent` instances
 
