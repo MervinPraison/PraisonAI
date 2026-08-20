@@ -84,7 +84,32 @@ def set_recent_model(model: Optional[str]) -> bool:
 
 
 def _provider_for_model(model: str) -> Optional[str]:
-    """Best-effort map a model id to the credential env var that explains it."""
+    """Best-effort map a model id to the credential env var that explains it.
+
+    Resolves against the canonical ``PROVIDER_ENV_CATALOGUE`` so every
+    catalogued provider (OpenRouter, Mistral, DeepSeek, xAI, …) is covered by
+    one source of truth rather than a hand-maintained if-ladder that drifts.
+    When a provider declares multiple credential env-vars, prefer whichever the
+    user actually set so the notice names the live key. Falls back to the
+    historical eight-provider ladder only when the catalogue import is
+    unavailable (offline/degraded), exactly as the credential path does.
+    """
+    try:
+        from praisonai_code.llm.catalogue import (
+            provider_for_model,
+            env_vars_for_provider,
+        )
+
+        provider = provider_for_model(model)
+        if provider:
+            vars_ = env_vars_for_provider(provider)
+            if vars_:
+                return next(
+                    (var for var in vars_ if os.environ.get(var)), vars_[0]
+                )
+    except Exception:
+        pass
+
     m = model.lower()
     if m.startswith("anthropic/") or m.startswith("claude"):
         return "ANTHROPIC_API_KEY"

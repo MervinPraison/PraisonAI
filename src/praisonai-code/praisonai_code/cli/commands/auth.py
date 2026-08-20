@@ -21,32 +21,79 @@ from ..configuration.credentials import CredentialStore, redact_key, validate_ap
 app = typer.Typer(help="Manage API credentials")
 
 
-# Provider id -> environment variable holding its API key. Used to fold active
-# env-sourced credentials into `auth list`/`status` so users can tell which
-# credential is live (env vs stored).
-_PROVIDER_ENV_KEYS = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "google": "GOOGLE_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "xai": "XAI_API_KEY",
-    "cohere": "COHERE_API_KEY",
-    "together": "TOGETHER_API_KEY",
-    "perplexity": "PERPLEXITYAI_API_KEY",
-}
+# Provider id -> tuple of environment variable(s) holding its API key. Used to
+# fold active env-sourced credentials into `auth list`/`status` so users can
+# tell which credential is live (env vs stored).
+#
+# Derived from the canonical PROVIDER_ENV_CATALOGUE so this surface can no
+# longer diverge from key auto-detection, provider inference, and env mapping;
+# adding a provider is a single catalogue edit. ALL of a provider's credential
+# env-vars are retained (not just the canonical first) so providers with
+# multiple spellings (e.g. TOGETHER_API_KEY / TOGETHERAI_API_KEY,
+# FIREWORKS_API_KEY / FIREWORKS_AI_API_KEY) are recognised here exactly as the
+# runtime recognises them — otherwise `auth status` would report "not found"
+# for a credential the runtime happily accepts. Falls back to the historical
+# literal map if the catalogue import is unavailable (offline/degraded),
+# exactly as credentials.py does.
+def _build_provider_env_keys() -> dict:
+    try:
+        from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+
+        return {
+            provider: tuple(env_vars)
+            for provider, (env_vars, _model, _prefix) in PROVIDER_ENV_CATALOGUE.items()
+            if env_vars
+        }
+    except Exception:
+        return {
+            "openai": ("OPENAI_API_KEY",),
+            "anthropic": ("ANTHROPIC_API_KEY",),
+            "google": ("GOOGLE_API_KEY",),
+            "gemini": ("GEMINI_API_KEY",),
+            "groq": ("GROQ_API_KEY",),
+            "openrouter": ("OPENROUTER_API_KEY",),
+            "mistral": ("MISTRAL_API_KEY",),
+            "deepseek": ("DEEPSEEK_API_KEY",),
+            "xai": ("XAI_API_KEY",),
+            "cohere": ("COHERE_API_KEY",),
+            "together": ("TOGETHER_API_KEY", "TOGETHERAI_API_KEY"),
+            "perplexity": ("PERPLEXITYAI_API_KEY",),
+            "fireworks": ("FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY"),
+        }
+
+
+_PROVIDER_ENV_KEYS = _build_provider_env_keys()
+
+
+def _active_env_var(provider: str) -> Optional[str]:
+    """Return the credential env-var a provider is live from, or ``None``.
+
+    Prefers whichever alias the user actually set so providers with multiple
+    spellings resolve the key in effect; falls back to the canonical (first)
+    env-var name when none is set (used only for display of the expected var).
+    """
+    env_vars = _PROVIDER_ENV_KEYS.get(provider.lower())
+    if not env_vars:
+        return None
+    for var in env_vars:
+        if os.environ.get(var):
+            return var
+    return env_vars[0]
 
 
 def _env_credentials() -> dict[str, tuple[str, str]]:
-    """Return ``{provider: (env_var, api_key)}`` for env-sourced keys present."""
+    """Return ``{provider: (env_var, api_key)}`` for env-sourced keys present.
+
+    Scans every credential alias a provider declares (not just the canonical
+    first) so a key set under a secondary spelling is still surfaced.
+    """
     found = {}
-    for provider, env_var in _PROVIDER_ENV_KEYS.items():
-        value = os.environ.get(env_var)
-        if value:
-            found[provider] = (env_var, value)
+    for provider, env_vars in _PROVIDER_ENV_KEYS.items():
+        for env_var in env_vars:
+            value = os.environ.get(env_var)
+            if value:
+                found[provider] = (env_var, value)
+                break
     return found
 
 
@@ -549,8 +596,9 @@ def auth_status(
             if not cred:
                 # Fall back to an active environment-variable key so the user
                 # can tell the credential is live from the env, not just missing
-                # from the store.
-                env_var = _PROVIDER_ENV_KEYS.get(provider.lower())
+                # from the store. Scans every alias the provider declares so a
+                # secondary spelling (e.g. TOGETHERAI_API_KEY) is still found.
+                env_var = _active_env_var(provider)
                 env_value = os.environ.get(env_var) if env_var else None
                 if env_value:
                     format_valid, format_msg = validate_api_key(provider, env_value)
@@ -592,7 +640,8 @@ def auth_status(
             # A live env var overrides the stored credential at runtime. When
             # both exist, validate/report the env key (the credential actually
             # in effect) so status never claims the wrong secret is active.
-            env_var = _PROVIDER_ENV_KEYS.get(provider.lower())
+            # Uses the alias the user actually set so secondary spellings win.
+            env_var = _active_env_var(provider)
             env_value = os.environ.get(env_var) if env_var else None
             active_from_env = bool(env_value) and not cred.is_oauth()
             # Zero-disk mode: the store itself is sourced from
