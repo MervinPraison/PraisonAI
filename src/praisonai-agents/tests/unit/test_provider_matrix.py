@@ -252,35 +252,95 @@ def test_a_plugin_sandbox_reaches_both_parameters(monkeypatch):
 
 
 # ── the two implementations must agree on vendor CONVENTIONS, not just names ──
-def test_daytona_asks_for_memory_in_the_unit_the_sdk_documents():
+#
+# These exercise the SDK boundary rather than reading source text: a wrong
+# conversion or a reversed upload with different phrasing would still slip past
+# a substring check, and a harmless refactor could fail one. We mock the vendor
+# SDK and assert the value Daytona actually receives.
+def _daytona_with_recorded_provision(monkeypatch, config):
+    """Provision against a fake Daytona SDK and return the Resources it built."""
+    import sys
+    import types
+
+    recorded = {}
+
+    class _Resources:
+        def __init__(self, cpu=None, memory=None, **kw):
+            recorded["cpu"] = cpu
+            recorded["memory"] = memory
+
+    class _CreateParams:
+        def __init__(self, **kw):
+            recorded["params"] = kw
+
+    class _Sandbox:
+        id = "sbx-1"
+        class process:
+            @staticmethod
+            def exec(*a, **k):
+                return types.SimpleNamespace(exit_code=0, result="")
+
+    class _Client:
+        def create(self, params, timeout=120):
+            return _Sandbox()
+
+    fake = types.ModuleType("daytona_sdk")
+    fake.Daytona = lambda cfg: _Client()
+    fake.DaytonaConfig = lambda **kw: None
+    fake.Resources = _Resources
+    fake.CreateSandboxFromImageParams = _CreateParams
+    monkeypatch.setitem(sys.modules, "daytona_sdk", fake)
+
+    from praisonai.integrations.compute.daytona import DaytonaCompute
+
+    provider = DaytonaCompute(api_key="test-key")
+    provider._provision_sync(config)
+    return recorded
+
+
+def test_daytona_asks_for_memory_in_the_unit_the_sdk_documents(monkeypatch):
     """Daytona's Resources.memory is GiB. The compute side passed megabytes
     straight through, so the default config asked for 1024 GiB of RAM and
-    could not provision. The sandbox side had learned the unit; the compute
-    side never did -- which is what two implementations of one vendor costs."""
-    import inspect
-
+    could not provision. Assert the actual value handed to the SDK, not the
+    source that produces it."""
     pytest.importorskip("praisonai.integrations.compute.daytona")
-    from praisonai.integrations.compute.daytona import DaytonaCompute
+    from praisonaiagents.managed.protocols import ComputeConfig
 
-    source = inspect.getsource(DaytonaCompute)
-    assert "memory_gib" in source or "/ 1024" in source, (
-        "the compute side must convert MB to GiB before calling Daytona"
+    recorded = _daytona_with_recorded_provision(
+        monkeypatch, ComputeConfig(memory_mb=2048)
     )
-    assert "memory=config.memory_mb" not in source, (
-        "megabytes are being passed where the SDK documents GiB"
+    assert recorded["memory"] == 2, (
+        f"2048 MB must become 2 GiB, got {recorded['memory']}"
+    )
+
+    recorded = _daytona_with_recorded_provision(
+        monkeypatch, ComputeConfig(memory_mb=512)
+    )
+    assert recorded["memory"] == 1, (
+        f"sub-GiB requests must floor to 1 GiB, not 0, got {recorded['memory']}"
     )
 
 
-def test_daytona_uploads_content_then_destination():
+def test_daytona_uploads_content_then_destination(monkeypatch, tmp_path):
     """`FileSystem.upload_file(src, dst)` -- content first. The arguments were
     reversed on the compute side, so an upload wrote the path into a file
-    named after the content."""
-    import inspect
-
+    named after the content. Assert the order the SDK actually receives."""
     pytest.importorskip("praisonai.integrations.compute.daytona")
     from praisonai.integrations.compute.daytona import DaytonaCompute
 
-    source = inspect.getsource(DaytonaCompute)
-    assert "upload_file(remote_path, content)" not in source, (
-        "upload_file takes (src, dst): content first, path second"
-    )
+    calls = {}
+
+    class _FS:
+        def upload_file(self, src, dst, timeout=1800):
+            calls["src"] = src
+            calls["dst"] = dst
+
+    provider = DaytonaCompute(api_key="test-key")
+    provider._sandboxes["i"] = {"sandbox": type("S", (), {"fs": _FS()})()}
+
+    local = tmp_path / "payload.txt"
+    local.write_bytes(b"real-content")
+    assert provider._upload_sync("i", str(local), "/remote/dest.txt") is True
+
+    assert calls["src"] == b"real-content", "file content must be the src argument"
+    assert calls["dst"] == "/remote/dest.txt", "remote path must be the dst argument"
