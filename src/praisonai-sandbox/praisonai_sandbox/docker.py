@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 #: followed by a read sees the same file -- and so does the next command.
 SANDBOX_ROOT = "/sandbox"
 
+#: Lowest pids cap a container can run a shell under. Below roughly this,
+#: `docker run` dies before the command starts rather than limiting it.
+MIN_CONTAINER_PIDS = 128
+
 
 class DockerSandbox:
     """Docker-based sandbox for safe code execution.
@@ -285,6 +289,22 @@ class DockerSandbox:
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
         ]
+
+        # max_processes was accepted and ignored here while the other execution
+        # path applied it, so a fork bomb ran unbounded through the bridged
+        # execute_command tool. Docker enforces pids per CONTAINER, so unlike
+        # setrlimit's per-user RLIMIT_NPROC it means what it says.
+        #
+        # The floor matters though. max_processes defaults to 10, a number
+        # chosen for the rlimit world, and `--pids-limit 10` kills the
+        # container before the shell finishes starting -- `docker run` exits
+        # 125 with "No such container". A shell, its pipeline and the command
+        # itself need more than that, so the cap is raised to something a
+        # container can actually live within. It still bounds a fork bomb,
+        # which is the point; it just stops the bound from being the bug.
+        if limits.max_processes and limits.max_processes > 0:
+            pids = max(limits.max_processes, MIN_CONTAINER_PIDS)
+            docker_cmd.extend(["--pids-limit", str(pids)])
         
         if not limits.network_enabled:
             docker_cmd.extend(["--network", "none"])
@@ -363,44 +383,55 @@ class DockerSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file to the sandbox."""
-        from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
-        if full_path is None:
+        """Write a file to the sandbox.
+
+        Opened through open_in_sandbox rather than by path string: the sandbox
+        directory is bind-mounted into the container, so anything that
+        validates a name and then re-opens it can be raced by code inside.
+        """
+        from ._compat import makedirs_in_sandbox, open_in_sandbox
+
+        if not makedirs_in_sandbox(self._temp_dir, path):
             return False
-        
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        
+
+        payload = content if isinstance(content, bytes) else content.encode()
+        fd = open_in_sandbox(
+            self._temp_dir, path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        )
+        if fd is None:
+            return False
         try:
-            mode = "wb" if isinstance(content, bytes) else "w"
-            with open(full_path, mode) as f:
-                f.write(content)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
             return True
-        except Exception as e:
-            logger.error(f"Failed to write file: {e}")
+        except OSError as exc:
+            logger.warning("Failed to write %s in sandbox: %s", path, exc)
             return False
-    
+
     async def read_file(
         self,
         path: str,
     ) -> Optional[Union[str, bytes]]:
-        """Read a file from the sandbox."""
-        from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
-        if full_path is None or not os.path.exists(full_path):
+        """Read a file from the sandbox.
+
+        Symlink-proof for the same reason as write_file: a name validated a
+        moment ago can point somewhere else by the time it is opened.
+        """
+        from ._compat import open_in_sandbox
+
+        fd = open_in_sandbox(self._temp_dir, path, os.O_RDONLY)
+        if fd is None:
             return None
-        
         try:
-            with open(full_path, "r") as f:
-                return f.read()
-        except UnicodeDecodeError:
-            with open(full_path, "rb") as f:
-                return f.read()
-        except Exception:
+            with os.fdopen(fd, "rb") as handle:
+                raw = handle.read()
+        except OSError:
             return None
-    
+        try:
+            return raw.decode()
+        except UnicodeDecodeError:
+            return raw
+
     async def list_files(
         self,
         path: str = "/",

@@ -34,9 +34,25 @@ class SyncComputeProvider:
     """
 
     async def _offload(self, fn, *args):
-        """Run a blocking SDK call without stalling the event loop."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, fn, *args)
+        """Run a blocking SDK call without stalling the event loop.
+
+        Falls back to calling inline when the default executor is gone.
+        Teardown often runs during interpreter shutdown -- a weakref finalizer
+        reclaiming a sandbox as the process ends -- and by then
+        concurrent.futures has already set its own atexit flag, so
+        run_in_executor raises "cannot schedule new futures after interpreter
+        shutdown". That failure was swallowed and logged as a successful
+        release, so every run leaked its container while reporting otherwise.
+
+        Blocking is fine on that path: there is no event loop left to starve.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, fn, *args)
+        except RuntimeError as exc:
+            if "interpreter shutdown" not in str(exc) and "no running event loop" not in str(exc):
+                raise
+            return fn(*args)
 
     # ── the protocol, in terms of the sync half ──────────────────────────────
     async def provision(self, config) -> Any:

@@ -58,7 +58,11 @@ _COMPUTE_ONLY_WORDS = {"local": "a plain shell on this machine (no policy applie
 # Tiers that separate a process but do NOT contain it. Verified: under the
 # subprocess backend, outbound network still works and ~/.ssh is readable even
 # though SecurityPolicy declares them blocked.
-_NOT_A_BOUNDARY = {"subprocess", "local", "native"}
+# `native` is deliberately absent: it aliases sandlock, which applies Landlock,
+# seccomp, a scrubbed environment and deny-all networking. Listing it here made
+# tools_run_on="native" and tools_run_on="sandlock" -- the same backend --
+# disagree about whether they contain anything.
+_NOT_A_BOUNDARY = {"subprocess", "local"}
 
 
 def say_place(name: Any, *, via: str = "sandbox") -> str:
