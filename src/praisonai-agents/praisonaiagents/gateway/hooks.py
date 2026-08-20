@@ -115,18 +115,34 @@ def render_template(
         return ""
 
     wrap = None
+    notice = None
     if fence_values:
-        from praisonaiagents.tools.trust import wrap_request_payload as wrap
+        from praisonaiagents.tools.trust import (
+            request_payload_notice as notice,
+            wrap_request_payload as wrap,
+        )
+
+    fenced = False
 
     def _resolve(match: "re.Match[str]") -> str:
+        nonlocal fenced
         # group(1) is the ``{{ ... }}`` body, group(2) the ``{ ... }`` body.
         expr = match.group(1) if match.group(1) is not None else match.group(2)
         value = _lookup(expr, payload)
         if value is None:
             return ""
-        return wrap(str(value)) if wrap is not None else str(value)
+        if wrap is None:
+            return str(value)
+        fenced = True
+        return wrap(str(value))
 
-    return _PLACEHOLDER.sub(_resolve, template)
+    rendered = _PLACEHOLDER.sub(_resolve, template)
+    # Prepend the inline untrusted-data notice once (outside the fence) when a
+    # payload value was fenced, so the semantics travel with the message even if
+    # the agent runs with ``use_system_prompt=False``.
+    if fenced and notice is not None:
+        return f"{notice()}\n\n{rendered}"
+    return rendered
 
 
 def compute_idempotency_key(
@@ -392,14 +408,22 @@ class HookConfig:
             self.idempotency_key, payload, path=self.path
         )
 
-    def resolve_message(self, payload: Dict[str, Any]) -> str:
-        """Render the agent message for ``payload``.
+    def resolve_message(self, payload: Dict[str, Any], *, fence: bool = True) -> str:
+        """Render the hook message for ``payload``.
 
         Payload-derived interpolations are fenced as untrusted request data so
         the agent never treats externally-POSTed content as instructions; the
         operator's own template text stays outside the fence.
+
+        Args:
+            payload: The decoded request body.
+            fence: When True (the agent-turn default), interpolated payload
+                values are wrapped in an ``<external_request_payload>`` fence.
+                Pass ``fence=False`` for ``deliver_only`` hooks, where the
+                rendered message is delivered verbatim to a channel with no
+                agent consuming (and therefore stripping) the fence markup.
         """
-        return render_template(self.message, payload, fence_values=True)
+        return render_template(self.message, payload, fence_values=fence)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a dictionary (hides the auth/signing secrets)."""

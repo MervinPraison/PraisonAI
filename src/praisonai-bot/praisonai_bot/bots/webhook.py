@@ -142,7 +142,12 @@ def render_prompt(
     ``prompt``, a fixed operator line is prefixed *outside* the fence so the
     model never sees attacker-controlled text as its sole instruction.
     """
-    from praisonaiagents.tools.trust import wrap_request_payload
+    from praisonaiagents.tools.trust import (
+        request_payload_notice,
+        wrap_request_payload,
+    )
+
+    notice = request_payload_notice()
 
     if template is None:
         payload = event.get("payload")
@@ -150,19 +155,28 @@ def render_prompt(
             rendered = json.dumps(payload, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
             rendered = str(payload)
+        where = f" on route {route_name}" if route_name else ""
         prefix = (
-            f"An external event was received on route {route_name}; "
-            "the payload follows."
-            if route_name
-            else "An external event was received; the payload follows."
+            f"An external event was received{where}; the payload follows. "
+            f"{notice}"
         )
         return f"{prefix}\n\n{wrap_request_payload(rendered)}"
 
-    def _sub(match: "re.Match[str]") -> str:
-        value = resolve_field(event, match.group(1).strip())
-        return "" if value is None else wrap_request_payload(str(value))
+    fenced = False
 
-    return _TEMPLATE_RE.sub(_sub, template)
+    def _sub(match: "re.Match[str]") -> str:
+        nonlocal fenced
+        value = resolve_field(event, match.group(1).strip())
+        if value is None:
+            return ""
+        fenced = True
+        return wrap_request_payload(str(value))
+
+    rendered = _TEMPLATE_RE.sub(_sub, template)
+    # Prepend the inline untrusted-data notice once (outside the fence) so the
+    # semantics travel with the payload even when the agent runs with
+    # ``use_system_prompt=False`` and never sees the system-prompt trust clause.
+    return f"{notice}\n\n{rendered}" if fenced else rendered
 
 
 def _build_verifier_from_config(verify: Any) -> Optional[Any]:

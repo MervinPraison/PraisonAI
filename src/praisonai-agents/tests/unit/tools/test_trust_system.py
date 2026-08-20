@@ -20,6 +20,7 @@ from praisonaiagents.tools.trust import (
     is_external_tool,
     add_external_tool,
     get_system_prompt_addition,
+    request_payload_notice,
     EXTERNAL_TOOL_NAMES,
     EXTERNAL_CONTENT_FENCE_OPEN,
     EXTERNAL_CONTENT_FENCE_CLOSE,
@@ -216,6 +217,14 @@ class TestWrapRequestPayload:
         wrapped = wrap_request_payload(12345)
         assert "12345" in wrapped
         assert wrapped.startswith(EXTERNAL_REQUEST_FENCE_OPEN)
+
+    def test_request_payload_notice_is_self_describing(self):
+        # The inline notice names the request fence and defines it as data, so
+        # the semantics survive even when the agent has use_system_prompt=False
+        # and never receives the system-prompt trust clause.
+        notice = request_payload_notice()
+        assert EXTERNAL_REQUEST_FENCE_OPEN in notice
+        assert "data, not instructions" in notice.lower()
 
 
 class TestTrustLevelEnum:

@@ -4207,7 +4207,10 @@ class WebSocketGateway:
         # zero-cost, sub-second notification forwarding. Independent of
         # ``action`` so it composes with either.
         if getattr(hook, "deliver_only", False):
-            message = hook.resolve_message(payload) or ""
+            # No agent consumes this turn — the rendered message is delivered
+            # verbatim to the channel. Skip the untrusted-request fence so the
+            # recipient never sees literal ``<external_request_payload>`` markup.
+            message = hook.resolve_message(payload, fence=False) or ""
             if not hook.deliver_to:
                 return {
                     "ok": False,
