@@ -249,3 +249,38 @@ def test_a_plugin_sandbox_reaches_both_parameters(monkeypatch):
     from praisonaiagents.managed._compute_bridge import available_providers
 
     assert "contributed-box" in available_providers()
+
+
+# ── the two implementations must agree on vendor CONVENTIONS, not just names ──
+def test_daytona_asks_for_memory_in_the_unit_the_sdk_documents():
+    """Daytona's Resources.memory is GiB. The compute side passed megabytes
+    straight through, so the default config asked for 1024 GiB of RAM and
+    could not provision. The sandbox side had learned the unit; the compute
+    side never did -- which is what two implementations of one vendor costs."""
+    import inspect
+
+    pytest.importorskip("praisonai.integrations.compute.daytona")
+    from praisonai.integrations.compute.daytona import DaytonaCompute
+
+    source = inspect.getsource(DaytonaCompute)
+    assert "memory_gib" in source or "/ 1024" in source, (
+        "the compute side must convert MB to GiB before calling Daytona"
+    )
+    assert "memory=config.memory_mb" not in source, (
+        "megabytes are being passed where the SDK documents GiB"
+    )
+
+
+def test_daytona_uploads_content_then_destination():
+    """`FileSystem.upload_file(src, dst)` -- content first. The arguments were
+    reversed on the compute side, so an upload wrote the path into a file
+    named after the content."""
+    import inspect
+
+    pytest.importorskip("praisonai.integrations.compute.daytona")
+    from praisonai.integrations.compute.daytona import DaytonaCompute
+
+    source = inspect.getsource(DaytonaCompute)
+    assert "upload_file(remote_path, content)" not in source, (
+        "upload_file takes (src, dst): content first, path second"
+    )
