@@ -283,7 +283,7 @@ class TestShellSubstitution:
                 CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
             ), patch.dict("os.environ", {SHELL_SUBSTITUTION_ENV: "true"}):
                 result = interpolate_command_template("diff")
-                assert result.strip() == "Output: hi"  
+                assert result.strip("\r\n") == "Output: hi"
 
 
     def test_frontmatter_allow_shell_enables(self):
@@ -407,7 +407,7 @@ class TestShellSubstitution:
                 _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
                 assert _config_allows_shell() is True
                 result = interpolate_command_template("diff")
-                assert result.strip() == "Output: hi" 
+                assert result.strip("\r\n") == "Output: hi"
 
 
 class TestIntegrationFunctions:
