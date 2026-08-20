@@ -124,6 +124,7 @@ from ..config.param_resolver import resolve, ArrayMode
 from ..config.presets import (
     OUTPUT_PRESETS, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
     WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, CACHING_PRESETS,
+    CONTEXT_PRESETS, AUTONOMY_PRESETS,
     DEFAULT_OUTPUT_MODE,
 )
 from ..config.feature_configs import (
@@ -137,6 +138,64 @@ from ..config.feature_configs import (
 # Single source of truth defined in config.feature_configs and imported here
 # (re-exported for backward compatibility) so OutputConfig.tool_output_limit,
 # ToolConfig.output_limit, and this constant cannot drift apart.
+
+# ============================================================================
+# Preset-string validation
+# ============================================================================
+# Agent params whose string form must name a preset from a CLOSED set. Each
+# entry maps the param name to a zero-arg callable returning the accepted
+# names, so registries outside praisonaiagents.config stay lazily imported —
+# the table is only consulted when the caller actually passed a string.
+#
+# Deliberately NOT listed (their string form is free-form, not a preset):
+#   knowledge= (source path/URL), guardrails= (LLM validator prompt),
+#   skills= (skill path/name), runtime= (open plugin registry), auth= (open
+#   provider registry validated loudly at use time).
+def _approval_preset_names():
+    """Accepted approval= strings: deny-set presets + PermissionMode aliases."""
+    from ..approval.registry import PERMISSION_PRESETS
+    from ..permissions.rules import _MODE_ALIASES
+    # "true"/"false" are legacy stringified bools accepted by the branch below.
+    return set(PERMISSION_PRESETS) | set(_MODE_ALIASES) | {"true", "false"}
+
+
+_PRESET_STRING_PARAMS = {
+    "output": lambda: OUTPUT_PRESETS.keys(),
+    "execution": lambda: EXECUTION_PRESETS.keys(),
+    "context": lambda: CONTEXT_PRESETS.keys(),
+    "autonomy": lambda: AUTONOMY_PRESETS.keys(),
+    "approval": _approval_preset_names,
+    # Mirrors the LearnMode branch in __init__.
+    "learn": lambda: ("disabled", "agentic", "propose"),
+    # Mirrors the self-improve mode branch in __init__.
+    "self_improve": lambda: (
+        "inline", "blocking", "sync", "background", "async",
+        "true", "on", "yes", "1", "false", "off", "no", "0",
+    ),
+}
+
+
+def _validate_preset_params(params):
+    """Fail loudly on a typo'd preset name instead of silently using defaults.
+
+    Args:
+        params: Mapping of param name -> raw value. Non-string values are
+            ignored; string values must name a preset from the closed set
+            declared in ``_PRESET_STRING_PARAMS``.
+
+    Raises:
+        ValueError: With a "Did you mean ...?" suggestion and the valid names.
+    """
+    from ..config.parse_utils import validate_preset_string
+
+    for name, value in params.items():
+        if not isinstance(value, str):
+            continue
+        # output= doubles as an output-file path (output="report.md").
+        if name == "output" and _is_file_path(value):
+            continue
+        validate_preset_string(name, value, _PRESET_STRING_PARAMS[name]())
+
 
 class ServerRegistry:
     """Registry for API server state per-port."""
@@ -981,7 +1040,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Uses unified resolver: Instance > Config > Array > String > Bool > Default
         # Note: Imports moved to module level for performance
         # ============================================================
-        
+        # Reject a typo'd preset name (e.g. output="streem", approval="read_onl")
+        # before any of the fast paths below silently fall back to defaults.
+        # memory/planning/reflection/web/caching/tool_search already raise via
+        # their own resolvers; this covers the params that did not.
+        _validate_preset_params({
+            "output": output,
+            "execution": execution,
+            "context": context,
+            "autonomy": autonomy,
+            "approval": approval,
+            "learn": learn,
+            "self_improve": self_improve,
+        })
+
         # Initialize extracted values with defaults
         user_id = None
         session_id = None
@@ -1402,13 +1474,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             elif isinstance(learn, dict):
                 _learn_config = LearnConfig(**learn)
             elif isinstance(learn, str):
-                # String mode: "disabled", "agentic", "propose"
+                # String mode: "disabled", "agentic", "propose".
+                # Normalise case/whitespace so this branch agrees with the
+                # closed-set validation in _validate_preset_params (which
+                # already accepted "AGENTIC"/" agentic "); otherwise a validated
+                # value would fall through to the else and silently disable.
                 from ..memory.learn.protocols import LearnMode
-                if learn == "disabled":
+                _learn_mode = learn.strip().lower()
+                if _learn_mode == "disabled":
                     _learn_config = None
-                elif learn == "agentic":
+                elif _learn_mode == "agentic":
                     _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
-                elif learn == "propose":
+                elif _learn_mode == "propose":
                     _learn_config = LearnConfig(mode=LearnMode.PROPOSE)
                 else:
                     # Unknown string mode, disable learning
@@ -2395,7 +2472,13 @@ Your Goal: {self.goal}
             # unchanged; anything else falls through to the canonical
             # PermissionMode resolver, so all spellings share one model.
             from ..approval.registry import PERMISSION_PRESETS
-            preset_deny = PERMISSION_PRESETS.get(approval.strip().lower())
+            # Normalise -/_ too so "read-only" hits the deny-set preset instead
+            # of falling through to PermissionMode.resolve (which returns None
+            # for deny-set names), which would silently produce an EMPTY deny
+            # set — the exact read-only-sandbox bypass this validation prevents.
+            preset_deny = PERMISSION_PRESETS.get(
+                approval.strip().lower().replace("-", "_")
+            )
             self._approval_backend = None
             self._approve_all_tools = False
             self._approval_timeout = 0

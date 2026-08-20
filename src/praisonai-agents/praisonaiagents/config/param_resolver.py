@@ -314,10 +314,14 @@ def _resolve_string(
     
     # Check for preset
     if presets:
-        # Case-insensitive lookup
-        value_lower = value.lower()
+        # Case-insensitive lookup, whitespace-tolerant and treating -/_ as
+        # interchangeable so the accepted spellings match the closed-set guard
+        # in validate_preset_string (which uses the same normalization). Without
+        # this, a value that passed construction-time validation (e.g.
+        # " sliding_window " or "sliding-window") would be rejected here.
+        value_norm = value.strip().lower().replace("-", "_")
         for preset_key in presets:
-            if preset_key.lower() == value_lower:
+            if preset_key.strip().lower().replace("-", "_") == value_norm:
                 return _apply_preset(preset_key, presets, config_class)
         
         # Not a valid preset - raise helpful error
