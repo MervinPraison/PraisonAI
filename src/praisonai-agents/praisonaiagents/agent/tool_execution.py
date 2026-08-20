@@ -1995,6 +1995,12 @@ class ToolExecutionMixin:
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
             logging.warning(error_msg)
+            feedback = getattr(decision, "feedback", None)
+            if feedback:
+                error_msg = (
+                    f"Tool '{function_name}' was denied by the user. "
+                    f"Do not retry it as-is. User guidance: {feedback}"
+                )
             return {"error": error_msg, "approval_denied": True}
         
         if decision.modified_args:
@@ -2028,6 +2034,12 @@ class ToolExecutionMixin:
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
             logging.warning(error_msg)
+            feedback = getattr(decision, "feedback", None)
+            if feedback:
+                error_msg = (
+                    f"Tool '{function_name}' was denied by the user. "
+                    f"Do not retry it as-is. User guidance: {feedback}"
+                )
             return {"error": error_msg, "approval_denied": True}
         
         if decision.modified_args:

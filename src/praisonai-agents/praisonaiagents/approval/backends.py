@@ -81,12 +81,14 @@ class ConsoleBackend:
     """Interactive Rich terminal prompt.  Default for CLI usage."""
 
     def _prompt_user(self, request: ApprovalRequest):
-        """Show Rich panel and ask once/session/always/no.
+        """Show Rich panel and ask once/session/always/no/deny-with-guidance.
 
-        Returns a ``(approved, scope, scope_pattern)`` tuple where ``scope`` is
-        one of ``"once"`` / ``"session"`` / ``"always"`` and ``scope_pattern``
-        is the reusable target to persist for ``always`` (``None`` otherwise).
-        A denial returns ``(False, "once", None)``.
+        Returns a ``(approved, scope, scope_pattern, feedback)`` tuple where
+        ``scope`` is one of ``"once"`` / ``"session"`` / ``"always"`` and
+        ``scope_pattern`` is the reusable target to persist for ``always``
+        (``None`` otherwise). ``feedback`` carries optional free-text guidance
+        captured by the "deny & redirect" choice (``None`` otherwise).
+        A plain denial returns ``(False, "once", None, None)``.
         """
         Console = _get_rich_console()
         Panel = _get_rich_panel()
@@ -126,28 +128,35 @@ class ConsoleBackend:
         try:
             console.print(
                 f"[{risk_color}]Allow {request.tool_name}?[/{risk_color}]  "
-                f"[o] once   [s] this session   [a] {always_label}   [n] no"
+                f"[o] once   [s] this session   [a] {always_label}   "
+                f"[n] no   [d] deny & redirect"
             )
             choice = Prompt.ask(
                 "Choice",
-                choices=["o", "s", "a", "n"],
+                choices=["o", "s", "a", "n", "d"],
                 default="n",
             )
         except (KeyboardInterrupt, EOFError):
-            return (False, "once", None)
+            return (False, "once", None, None)
 
         if choice == "n":
-            return (False, "once", None)
+            return (False, "once", None, None)
+        if choice == "d":
+            try:
+                feedback = Prompt.ask("What should the agent do instead?").strip()
+            except (KeyboardInterrupt, EOFError):
+                feedback = ""
+            return (False, "once", None, feedback or None)
         if choice == "s":
-            return (True, "session", None)
+            return (True, "session", None, None)
         if choice == "a":
-            return (True, "always", suggested or None)
-        return (True, "once", None)
+            return (True, "always", suggested or None, None)
+        return (True, "once", None, None)
 
     def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
         """Synchronous approval via Rich console prompt."""
         try:
-            approved, scope, scope_pattern = self._prompt_user(request)
+            approved, scope, scope_pattern, feedback = self._prompt_user(request)
             if approved:
                 return ApprovalDecision(
                     approved=True,
@@ -156,7 +165,13 @@ class ConsoleBackend:
                     scope=scope,
                     scope_pattern=scope_pattern,
                 )
-            return ApprovalDecision(approved=False, reason="User denied", approver="console")
+            reason = f"User denied: {feedback}" if feedback else "User denied"
+            return ApprovalDecision(
+                approved=False,
+                reason=reason,
+                approver="console",
+                feedback=feedback,
+            )
         except Exception as e:
             logger.error("Console approval error: %s", e)
             return ApprovalDecision(approved=False, reason=f"Approval error: {e}")

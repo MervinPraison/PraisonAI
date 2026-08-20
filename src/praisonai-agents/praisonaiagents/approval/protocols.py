@@ -65,6 +65,12 @@ class ApprovalDecision:
                        ``session``/``always`` scopes (e.g. ``"bash:git status *"``
                        or ``"edit:src/app.py"``). When ``None`` the registry
                        derives one from the tool call.
+        feedback:      Optional free-text guidance supplied by the user when
+                       denying a tool call ("deny with guidance"). When present
+                       on a denial it is surfaced back to the model as a
+                       course-correction for the next turn instead of a bare
+                       "denied" result. ``None`` (default) keeps today's
+                       terminal-deny semantics.
     """
 
     approved: bool
@@ -74,6 +80,7 @@ class ApprovalDecision:
     metadata: Dict[str, Any] = field(default_factory=dict)
     scope: str = "once"
     scope_pattern: Optional[str] = None
+    feedback: Optional[str] = None
 
 
 @dataclass

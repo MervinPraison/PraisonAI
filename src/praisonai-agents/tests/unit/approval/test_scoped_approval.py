@@ -258,6 +258,49 @@ class TestConsoleBackendScope:
         assert decision.scope == "always"
         assert decision.scope_pattern == "bash:git status *"
 
+    def test_deny_with_guidance_captures_feedback(self):
+        from praisonaiagents.approval.backends import ConsoleBackend
+
+        backend = ConsoleBackend()
+        request = self._make_request()
+
+        with patch(
+            "praisonaiagents.approval.backends._get_rich_console"
+        ), patch(
+            "praisonaiagents.approval.backends._get_rich_panel"
+        ), patch(
+            "praisonaiagents.approval.backends._get_rich_prompt"
+        ) as mock_prompt:
+            mock_prompt.return_value.ask.side_effect = [
+                "d",
+                "edit tests/app.py instead",
+            ]
+            decision = backend.request_approval_sync(request)
+
+        assert decision.approved is False
+        assert decision.feedback == "edit tests/app.py instead"
+        assert "edit tests/app.py instead" in decision.reason
+
+    def test_plain_deny_has_no_feedback(self):
+        from praisonaiagents.approval.backends import ConsoleBackend
+
+        backend = ConsoleBackend()
+        request = self._make_request()
+
+        with patch(
+            "praisonaiagents.approval.backends._get_rich_console"
+        ), patch(
+            "praisonaiagents.approval.backends._get_rich_panel"
+        ), patch(
+            "praisonaiagents.approval.backends._get_rich_prompt"
+        ) as mock_prompt:
+            mock_prompt.return_value.ask.return_value = "n"
+            decision = backend.request_approval_sync(request)
+
+        assert decision.approved is False
+        assert decision.feedback is None
+        assert decision.reason == "User denied"
+
 
 # ── Registry → PermissionManager bridge ─────────────────────────────────────
 

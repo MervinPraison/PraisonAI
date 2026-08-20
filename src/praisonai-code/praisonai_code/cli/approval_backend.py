@@ -361,6 +361,7 @@ class InteractiveCLIApprovalBackend:
             reason=reason_text,
             approver="user",
             metadata=metadata,
+            feedback=deny_reason if not approved else None,
         )
     
     def set_permission_mode(self, mode: PermissionMode):
