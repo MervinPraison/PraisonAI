@@ -114,6 +114,7 @@ store.delete_session("session-123")
 
 ### Custom Session Directory
 
+<!-- praisonai: skip=true -->
 ```python
 from praisonaiagents.session import DefaultSessionStore
 
