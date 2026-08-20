@@ -118,6 +118,22 @@ def test_tagged_legacy_child_restored_even_when_partially_migrated(store, sessio
     assert session._agents["support:agent"]["chat_history"] == REAL
 
 
+def test_tagged_legacy_child_migrated_even_when_not_recently_updated(store, session):
+    """A legacy per-agent record is older than everything written after the
+    upgrade, so the migration must not inherit ``list_sessions()``'s 50-record
+    window (regression from #4126)."""
+    store.set_chat_history("chat_support:agent", REAL)
+    store.update_session_metadata(
+        "chat_support:agent", parent_session_id="chat", agent_key="support:agent"
+    )
+    # Bury the legacy record well outside the default 50-session window with
+    # strictly newer sessions.
+    for i in range(60):
+        store.set_chat_history(f"other-{i:04d}", SUB)
+
+    assert session._restore_agent_chat_history("support:agent") == REAL
+
+
 def test_concurrent_save_preserves_other_agents(store, session):
     """A second writer under the same parent must not drop the first's entry."""
     session._agents["a:agent"] = {"agent": None, "chat_history": REAL}

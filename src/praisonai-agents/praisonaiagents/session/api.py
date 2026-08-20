@@ -126,6 +126,7 @@ class Session:
             self._knowledge = None
             self._agents_instance = None
             self._agents = {}
+            self._legacy_histories_cache = None
         else:
             self.memory_config = {}
             self.knowledge_config = {}
@@ -133,6 +134,7 @@ class Session:
             self._knowledge = None
             self._agents_instance = None
             self._agents = {}
+            self._legacy_histories_cache = None
 
     def _get_session_dir(self):
         """Get session-specific directory using centralized paths."""
@@ -375,15 +377,34 @@ class Session:
         Never deletes them: an untagged candidate may in fact be a real user
         session that merely sanitises to the same name.
         """
+        # Legacy per-agent records are a frozen migration artefact: nothing
+        # writes them after the upgrade and neither save nor restore mutates
+        # them. Memoise the full-disk scan per Session so a save pass over N
+        # agents doesn't re-enumerate every stored session N times (and once
+        # migrated, the common case, the scan collapses to a single hit).
+        # Key the cache on the opt-in flag: the untagged-restore env toggle
+        # changes what the scan yields, so each mode caches independently.
+        allow_untagged = self._legacy_agent_keys_enabled()
+        cached = getattr(self, "_legacy_histories_cache", None)
+        if cached is not None and cached[0] == allow_untagged:
+            return cached[1]
+
         histories: Dict[str, List[Dict[str, Any]]] = {}
         list_sessions = getattr(session_store, "list_sessions", None)
         if session_store is None or not callable(list_sessions):
+            self._legacy_histories_cache = (allow_untagged, histories)
             return histories
 
         prefix = f"{self.session_id}_"
-        allow_untagged = self._legacy_agent_keys_enabled()
+        # Migration must consider every stored session, not the 50 most recent:
+        # a legacy per-agent record is by definition older than anything written
+        # after the upgrade, so list_sessions()'s default window silently
+        # excludes it (regression from #4126).
         try:
-            entries = list_sessions() or []
+            try:
+                entries = list_sessions(limit=None) or []
+            except TypeError:  # stores whose limit is not optional
+                entries = list_sessions(limit=10**9) or []
         except Exception:
             return histories
 
@@ -431,6 +452,7 @@ class Session:
             if agent_key and messages:
                 histories[agent_key] = messages
 
+        self._legacy_histories_cache = (allow_untagged, histories)
         return histories
 
     def _restore_agent_chat_histories(self) -> None:
