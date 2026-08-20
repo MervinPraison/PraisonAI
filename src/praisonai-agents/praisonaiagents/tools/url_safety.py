@@ -6,18 +6,26 @@ import ipaddress
 import os
 import socket
 import urllib.parse
-from typing import Optional, Set
+from typing import FrozenSet, Optional, Set
 
 
-def _allowlist_hosts() -> Set[str]:
+def _env_allowlist() -> Set[str]:
     raw = os.environ.get("SEARXNG_URL_ALLOWLIST", "")
-    hosts = {h.strip().lower() for h in raw.split(",") if h.strip()}
-    hosts.update({"localhost", "127.0.0.1", "::1"})
-    return hosts
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
-def is_safe_http_url(url: str, *, allow_local: Optional[bool] = None) -> bool:
-    """Return True when *url* is safe for server-side HTTP requests."""
+def is_safe_http_url(
+    url: str,
+    *,
+    allow_local: Optional[bool] = None,
+    allowlist: FrozenSet[str] = frozenset(),
+) -> bool:
+    """Return True when *url* is safe for server-side HTTP requests.
+
+    *allowlist* is an explicit per-call-site override. It is deliberately
+    consulted *after* the IP-class checks so an allowlist entry from one
+    caller can never become a blanket loopback exemption for every caller.
+    """
     try:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -25,11 +33,11 @@ def is_safe_http_url(url: str, *, allow_local: Optional[bool] = None) -> bool:
         hostname = parsed.hostname
         if not hostname:
             return False
-        if hostname.lower() in _allowlist_hosts():
-            return True
         if allow_local is None:
             allow_local = os.environ.get("ALLOW_LOCAL_CRAWL") == "true"
         if allow_local:
+            return True
+        if hostname.lower() in allowlist:
             return True
         for info in socket.getaddrinfo(hostname, None):
             ip = ipaddress.ip_address(info[4][0])
@@ -47,9 +55,14 @@ def is_safe_http_url(url: str, *, allow_local: Optional[bool] = None) -> bool:
 
 
 def validate_searxng_url(url: str) -> Optional[str]:
-    """Return normalised URL or None if blocked."""
+    """Return normalised URL or None if blocked.
+
+    SearXNG is legitimately self-hosted on loopback, so this call site opts
+    into the loopback allowlist explicitly (unlike the web crawler).
+    """
     if not url:
         return None
-    if not is_safe_http_url(url):
+    allowlist = frozenset(_env_allowlist() | {"localhost", "127.0.0.1", "::1"})
+    if not is_safe_http_url(url, allowlist=allowlist):
         return None
     return url
