@@ -1952,15 +1952,21 @@ def _run_prompt(
                 detach_bridge(agent, bridge)
 
             succeeded = _run_succeeded(result)
+            # A non-empty finalisation summary from a step-limit-truncated run
+            # is not a genuine completion: classify it *before* emitting the
+            # terminal stream event so a `--output stream-json` consumer never
+            # receives a contradictory ``run.result {ok: true}`` ahead of the
+            # ``status: "truncated"`` outcome (exit 2) reported below.
+            truncated = succeeded and _run_was_truncated(agent)
             if bridge is not None:
-                bridge.emit_run_result(result, ok=succeeded)
+                bridge.emit_run_result(result, ok=succeeded and not truncated)
             _record_session_usage(session_id or auto_save_name, model, output)
             if not succeeded:
                 _report_run_failure(output)
-            # A non-empty finalisation summary from a step-limit-truncated run
-            # is reported distinctly (exit 2 + status "truncated") so CI/users
-            # don't mistake wrapped-up partial work for a completed task.
-            if _run_was_truncated(agent):
+            # Report the truncated run distinctly (exit 2 + status "truncated")
+            # so CI/users don't mistake wrapped-up partial work for a completed
+            # task.
+            if truncated:
                 _report_run_truncated(output, result)
             output.emit_result(
                 message="Prompt completed",
@@ -2523,17 +2529,22 @@ def _run_custom_agent(
             detach_bridge(agent, bridge)
 
         succeeded = _run_succeeded(result)
+        # Classify a step-limit-truncated run *before* the terminal stream
+        # event so a `--output stream-json` consumer never receives a
+        # contradictory ``run.result {ok: true}`` ahead of the ``truncated``
+        # outcome (exit 2) reported below.
+        truncated = succeeded and _run_was_truncated(agent)
         if bridge is not None:
-            bridge.emit_run_result(result, ok=succeeded)
+            bridge.emit_run_result(result, ok=succeeded and not truncated)
         _record_session_usage(session_id or auto_save_name, model, output)
         if not succeeded:
             _report_run_failure(output)
         if result and not output.is_json_mode:
             print(result)
-        # Surface a step-limit-truncated run distinctly (exit 2 + status
-        # "truncated") after the summary is shown, so the wrap-up text is still
-        # visible but its incomplete status is not masked as success.
-        if _run_was_truncated(agent):
+        # Surface the truncated run distinctly (exit 2 + status "truncated")
+        # after the summary is shown, so the wrap-up text is still visible but
+        # its incomplete status is not masked as success.
+        if truncated:
             _report_run_truncated(output, result)
         output.emit_result(
             message="Agent completed",
