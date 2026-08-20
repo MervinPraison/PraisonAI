@@ -33,6 +33,25 @@ def test_web_crawl_rejects_redirect_to_loopback():
     assert _is_safe_crawl_url("http://example.com/") is True
 
 
+def test_searxng_may_use_loopback_but_the_crawler_may_not():
+    """One predicate, two callers, opposite requirements. Pin both."""
+    from praisonaiagents.tools.url_safety import validate_searxng_url
+    from praisonaiagents.tools.web_crawl_tools import _is_safe_crawl_url
+
+    assert validate_searxng_url("http://localhost:32768/search") is not None
+    assert _is_safe_crawl_url("http://localhost:32768/search") is False
+
+
+def test_searxng_allowlist_cannot_reach_link_local_metadata(monkeypatch):
+    """An allowlist entry may only exempt loopback, never link-local/private."""
+    monkeypatch.setenv("SEARXNG_URL_ALLOWLIST", "169.254.169.254")
+    from importlib import reload
+    from praisonaiagents.tools import url_safety
+
+    reload(url_safety)
+    assert url_safety.validate_searxng_url("http://169.254.169.254/latest/meta-data/") is None
+
+
 def test_spider_blocks_rebound_hostname():
     from praisonaiagents.tools.spider_tools import _host_is_blocked
 
