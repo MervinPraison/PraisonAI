@@ -208,12 +208,17 @@ def _extract_tool_call_name_and_args(tool_call):
     caught exception otherwise. Callers keep their own failure handling.
     """
     tool_call_id = tool_call.id if hasattr(tool_call, 'id') else tool_call.get('id')
+    function_name = None
     try:
         if isinstance(tool_call, ToolCall):
-            return tool_call.function["name"], json.loads(tool_call.function["arguments"]), tool_call_id, None
-        return tool_call.function.name, json.loads(tool_call.function.arguments), tool_call_id, None
+            function_name = tool_call.function["name"]
+            raw_arguments = tool_call.function["arguments"]
+        else:
+            function_name = tool_call.function.name
+            raw_arguments = tool_call.function.arguments
+        return function_name, json.loads(raw_arguments), tool_call_id, None
     except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
-        return None, None, tool_call_id, e
+        return function_name, None, tool_call_id, e
 
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
