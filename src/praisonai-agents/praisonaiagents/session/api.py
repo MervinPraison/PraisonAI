@@ -494,11 +494,11 @@ class Session:
             ):
                 return True
         logger.warning(
-            "Session %r: sub-agent history for %r may have raced with a "
-            "concurrent writer after retries.",
-            self.session_id, agent_key,
+            "Session %r: could not persist sub-agent history for %r after %d "
+            "attempts; the write was not verified.",
+            self.session_id, agent_key, 5,
         )
-        return True
+        return False
 
     def _save_agent_chat_histories(self) -> None:
         """Save all agent chat histories.

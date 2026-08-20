@@ -404,3 +404,34 @@ class TestG3PerTurnPersist:
         
         # Verify SessionStore was used
         mock_store.add_user_message.assert_called_once_with("test_session", "Hello")
+
+
+class TestStoreAgentHistoryFailureReporting:
+    """Regression #4165: _store_agent_history must report failure honestly.
+
+    When the verify loop exhausts, nothing was persisted. Returning True made
+    the caller's 'history was lost' branch unreachable.
+    """
+
+    def test_store_agent_history_reports_failure_when_the_write_never_lands(self):
+        from types import SimpleNamespace
+        from praisonaiagents.session import Session
+
+        class _StoreThatAcceptsWritesAndDropsThem:
+            """update_session_metadata says yes but persists nothing."""
+
+            def update_session_metadata(self, session_id, **metadata):
+                return True
+
+            def get_session(self, session_id):
+                return SimpleNamespace(metadata={})
+
+        store = _StoreThatAcceptsWritesAndDropsThem()
+        session = Session(session_id="parent")
+
+        result = session._store_agent_history(
+            store, "helper", [{"role": "user", "content": "hi"}]
+        )
+
+        assert result is False
+        assert store.get_session("parent").metadata.get("agent_histories", {}) == {}
