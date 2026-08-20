@@ -2,7 +2,7 @@ import os
 import logging
 from praisonaiagents._logging import get_logger
 from datetime import datetime
-from .chunking import Chunking
+from .chunking import Chunking, normalize_chunker_type
 from functools import cached_property
 
 
@@ -162,6 +162,10 @@ class Knowledge:
             # Merge graph_store config if provided (for graph memory support)
             if "graph_store" in self._config:
                 base_config["graph_store"] = self._config["graph_store"]
+
+            # Merge chunker config if provided (consumed by self.chunker)
+            if "chunker" in self._config:
+                base_config["chunker"] = self._config["chunker"]
         return base_config
 
     def _prepare_mem0_config(self, config):
@@ -305,10 +309,13 @@ class Knowledge:
 
     @cached_property
     def chunker(self):
+        # Read from config; the previous hardcoded recursive/512/50 made
+        # KnowledgeConfig.chunk_size / chunking_strategy / chunker inert.
+        chunker_cfg = self.config.get("chunker") or {}
         return Chunking(
-            chunker_type='recursive',
-            chunk_size=512,
-            chunk_overlap=50
+            chunker_type=normalize_chunker_type(chunker_cfg.get("type", "recursive")),
+            chunk_size=chunker_cfg.get("chunk_size", 512),
+            chunk_overlap=chunker_cfg.get("chunk_overlap", 50),
         )
 
     def _log(self, message, level=2):

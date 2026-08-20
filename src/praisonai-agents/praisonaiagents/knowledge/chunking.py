@@ -2,6 +2,30 @@ from typing import List, Union, Optional, Dict, Any
 from functools import cached_property
 import importlib
 
+#: Names accepted for a chunking strategy that are not chunker ids themselves.
+#: ``ChunkingStrategy.FIXED`` and ``.PARAGRAPH`` had no chunker at all, so they
+#: silently did nothing; they now map onto the chunkers that implement them.
+CHUNKER_ALIASES = {
+    "fixed": "token",
+    "paragraph": "recursive",
+}
+
+
+def normalize_chunker_type(name: str) -> str:
+    """Map a user-facing chunking strategy name onto a chunker id."""
+    if not name:
+        return "recursive"
+    key = str(name).strip().lower()
+    key = CHUNKER_ALIASES.get(key, key)
+    if key not in Chunking.CHUNKER_PARAMS:
+        from ..config.parse_utils import make_preset_error
+        raise make_preset_error(
+            "chunking strategy", name,
+            sorted(set(Chunking.CHUNKER_PARAMS) | set(CHUNKER_ALIASES)),
+        )
+    return key
+
+
 class Chunking:
     """A unified class for text chunking with various chunking strategies."""
     

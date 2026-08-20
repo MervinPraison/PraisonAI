@@ -1504,15 +1504,40 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 knowledge = _knowledge_config
             elif isinstance(_knowledge_config, KnowledgeConfig):
                 embedder_config = _knowledge_config.embedder_config
-                if _knowledge_config.config:
-                    retrieval_config = _knowledge_config.config
-                else:
-                    retrieval_config = {
-                        'top_k': _knowledge_config.retrieval_k,
-                        'threshold': _knowledge_config.retrieval_threshold,
-                        'rerank': _knowledge_config.rerank,
-                        'rerank_model': _knowledge_config.rerank_model,
-                    }
+                # Every declared field is forwarded. Previously only top_k /
+                # rerank survived: 'threshold' was spelled 'min_score' by
+                # RetrievalConfig.from_dict, 'rerank_model' had no field at
+                # all, and chunking + vector_store were never forwarded, so
+                # those settings were silently inert.
+                _chunker = _knowledge_config.chunker or {}
+                _strategy = _knowledge_config.chunking_strategy
+                _strategy = getattr(_strategy, 'value', _strategy)
+                _vector_store = _knowledge_config.vector_store or {}
+                retrieval_config = {
+                    'enabled': _knowledge_config.auto_retrieve,
+                    'top_k': _knowledge_config.retrieval_k,
+                    'min_score': _knowledge_config.retrieval_threshold,
+                    'rerank': _knowledge_config.rerank,
+                    'rerank_model': _knowledge_config.rerank_model,
+                    'chunking_strategy': _chunker.get('type', _strategy),
+                    'chunk_size': _chunker.get('chunk_size', _knowledge_config.chunk_size),
+                    'chunk_overlap': _chunker.get(
+                        'chunk_overlap', _knowledge_config.chunk_overlap),
+                }
+                if _vector_store:
+                    _vs = dict(_vector_store)
+                    _vs_provider = _vs.pop('provider', None)
+                    if _vs_provider:
+                        retrieval_config['vector_store_provider'] = _vs_provider
+                    _vs_inner = _vs.pop('config', None)
+                    if isinstance(_vs_inner, dict):
+                        _vs.update(_vs_inner)
+                    if 'collection_name' in _vs:
+                        retrieval_config['collection_name'] = _vs.pop('collection_name')
+                    if 'path' in _vs:
+                        retrieval_config['persist_path'] = _vs.pop('path')
+                    if _vs:
+                        retrieval_config['vector_store_config'] = _vs
                 # Forward embedder settings so they reach Knowledge (mem0).
                 # embedder is a provider shorthand (e.g. "gemini"); embedder_config
                 # is the full mem0 embedder dict. Only override when explicitly set.
@@ -1520,6 +1545,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     retrieval_config.setdefault('embedder_provider', _knowledge_config.embedder)
                 if _knowledge_config.embedder_config:
                     retrieval_config.setdefault('embedder_config', _knowledge_config.embedder_config)
+                # `config=` is an escape hatch for keys the dataclass does not
+                # model. It now overrides the resolved values instead of
+                # replacing the whole dict, which silently reset retrieval_k.
+                if _knowledge_config.config:
+                    retrieval_config.update(_knowledge_config.config)
                 knowledge = _knowledge_config.sources if _knowledge_config.sources else None
             elif isinstance(_knowledge_config, list):
                 knowledge = _knowledge_config

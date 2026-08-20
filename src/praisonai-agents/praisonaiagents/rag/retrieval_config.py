@@ -67,6 +67,7 @@ class RetrievalConfig:
     min_score: float = 0.0
     max_context_tokens: int = 4000
     rerank: bool = False
+    rerank_model: Optional[str] = None
     hybrid: bool = False
     citations: bool = True
     citations_mode: CitationsMode = CitationsMode.APPEND
@@ -88,6 +89,11 @@ class RetrievalConfig:
     exclude_glob: Optional[list] = None  # Glob patterns to exclude
     path_filter: Optional[str] = None  # Regex for path filtering
     
+    # Chunking configuration (applied when documents are ingested)
+    chunking_strategy: str = "recursive"
+    chunk_size: int = 512
+    chunk_overlap: int = 50
+
     # Vector store configuration
     vector_store_provider: str = "chroma"
     vector_store_config: Dict[str, Any] = field(default_factory=dict)
@@ -176,6 +182,7 @@ class RetrievalConfig:
             "min_score": self.min_score,
             "max_context_tokens": self.max_context_tokens,
             "rerank": self.rerank,
+            "rerank_model": self.rerank_model,
             "hybrid": self.hybrid,
             "citations": self.citations,
             "citations_mode": self.citations_mode.value if isinstance(self.citations_mode, CitationsMode) else self.citations_mode,
@@ -188,6 +195,9 @@ class RetrievalConfig:
             "include_glob": self.include_glob,
             "exclude_glob": self.exclude_glob,
             "path_filter": self.path_filter,
+            "chunking_strategy": self.chunking_strategy,
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
             "vector_store_provider": self.vector_store_provider,
             "vector_store_config": self.vector_store_config,
             "collection_name": self.collection_name,
@@ -225,6 +235,7 @@ class RetrievalConfig:
             min_score=data.get("min_score", 0.0),
             max_context_tokens=data.get("max_context_tokens", 4000),
             rerank=data.get("rerank", False),
+            rerank_model=data.get("rerank_model"),
             hybrid=data.get("hybrid", False),
             citations=data.get("citations", True),
             citations_mode=citations_mode,
@@ -237,6 +248,9 @@ class RetrievalConfig:
             include_glob=data.get("include_glob"),
             exclude_glob=data.get("exclude_glob"),
             path_filter=data.get("path_filter"),
+            chunking_strategy=data.get("chunking_strategy", "recursive"),
+            chunk_size=data.get("chunk_size", 512),
+            chunk_overlap=data.get("chunk_overlap", 50),
             vector_store_provider=data.get("vector_store_provider", "chroma"),
             vector_store_config=data.get("vector_store_config", {}),
             collection_name=data.get("collection_name"),
@@ -281,7 +295,26 @@ class RetrievalConfig:
         
         if self.rerank:
             config["reranker"] = {"enabled": True, "default_rerank": True}
-        
+            if self.rerank_model:
+                # mem0's RerankerConfig needs a provider to instantiate the
+                # reranker; a config with only {"model": ...} is dropped by
+                # Knowledge._prepare_mem0_config and the request is silently
+                # lost. Derive the provider from a "provider/model" prefix
+                # (e.g. "cohere/rerank-v3" -> provider "cohere") so the model
+                # is actionable; fall back to the model string as provider.
+                model = self.rerank_model
+                provider = model.split("/", 1)[0] if "/" in model else model
+                config["reranker"]["provider"] = provider
+                config["reranker"]["config"] = {"model": model}
+
+        # Chunking must reach Knowledge, which otherwise hardcodes
+        # recursive/512/50 and ignores the user's chunk settings entirely.
+        config["chunker"] = {
+            "type": self.chunking_strategy,
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
+        }
+
         return config
     
     def to_rag_config(self) -> Dict[str, Any]:
