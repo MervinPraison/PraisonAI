@@ -48,7 +48,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Handoffs | 11 | 6 | 2567 |
 | ✅ Hooks | 2 | 9 | 4488 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 15 | 4656 |
+| ✅ Knowledge | 4 | 16 | 4948 |
 | ✅ LLM | 3 | 15 | 5296 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14132 |
@@ -75,9 +75,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 42563 |
+| ✅ Tools | 12 | 144 | 42629 |
 | ✅ Tracing | 3 | 2 | 139 |
-| ✅ Vector Store | 1 | 12 | 1211 |
+| ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 9 | 2484 |
