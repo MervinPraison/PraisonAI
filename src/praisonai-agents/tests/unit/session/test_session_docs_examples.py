@@ -22,9 +22,62 @@ import pytest
 import praisonaiagents.session as session_pkg
 from praisonaiagents import Agent, MemoryConfig
 
-# ``Agent(`` ... ``session_id=`` with no *nested* call in between, so
-# ``Agent(memory=MemoryConfig(session_id=...))`` is correctly not matched.
-TOP_LEVEL_KWARG = r"Agent\((?:[^()]|\([^()]*\))*?\b{name}="
+_IDENT = re.compile(r"[A-Za-z_]\w*")
+
+
+def _top_level_agent_kwargs(text):
+    """Yield the kwarg names passed at depth 1 of every ``Agent(`` in *text*.
+
+    A hand-rolled scanner rather than a regex. A regex cannot balance arbitrary
+    nesting, so the previous single-level pattern missed a rejected kwarg placed
+    after a *two*-level nested call — the realistic
+    ``Agent(memory=MemoryConfig(db=db(...)), session_id=...)`` — letting the
+    #4178 bug slip back in with the suite green (greptile). Walking a paren-depth
+    counter attributes each ``name=`` to the call that encloses it, so only
+    ``Agent``'s own top-level kwargs are yielded, at any nesting depth.
+
+    String literals and ``#`` comments are skipped so a dict *key*
+    (``memory={"session_id": ...}``) or a comment (``# session_id = resume``)
+    is never mistaken for an ``Agent`` kwarg — a value name followed by ``=``
+    inside a quote or comment is text, not a keyword argument. Prose outside an
+    ``Agent(`` call never reaches depth 1, and ``==`` comparisons are excluded.
+    This also lets the check run on raw docstrings/markdown, which is the only
+    coverage a fenceless ``session/__init__.py`` example has.
+    """
+    for match in re.finditer(r"\bAgent\(", text):
+        depth = 1
+        i, n = match.end(), len(text)
+        while i < n and depth > 0:
+            char = text[i]
+            if char in "\"'":
+                quote = char
+                i += 1
+                while i < n and text[i] != quote:
+                    if text[i] == "\\":
+                        i += 1
+                    i += 1
+                i += 1
+            elif char == "#":
+                while i < n and text[i] != "\n":
+                    i += 1
+            elif char == "(":
+                depth += 1
+                i += 1
+            elif char == ")":
+                depth -= 1
+                i += 1
+            elif depth == 1 and (char.isalpha() or char == "_"):
+                word = _IDENT.match(text, i)
+                end = word.end()
+                k = end
+                while k < n and text[k] in " \t":
+                    k += 1
+                if k < n and text[k] == "=" and (k + 1 >= n or text[k + 1] != "="):
+                    yield word.group(0)
+                i = end
+            else:
+                i += 1
+
 
 DOCS = (
     Path(session_pkg.__file__).parent / "__init__.py",
@@ -339,16 +392,93 @@ def _example_files():
 _EXAMPLE_FILES = _example_files()
 
 
-@pytest.mark.parametrize("path", _EXAMPLE_FILES, ids=lambda p: p.name)
-@pytest.mark.parametrize("name", ["session_id", "db", "user_id"])
-def test_example_files_do_not_pass_rejected_kwargs_to_agent(path, name):
-    """Neither docstrings nor runnable examples may show a rejected kwarg.
+def _text_checked_paths():
+    """Every path the textual guard must cover, without duplicates.
 
-    The textual session-doc guard only covered two files; the identical broken
-    spelling shipped in the db package docstrings and the redis example too.
+    ``DOCS`` is included even though the executing guard already runs its
+    ```python fences: ``session/__init__.py`` documents the quick start in an
+    *indented docstring* with no fence, so the executor never reaches it, and a
+    README block excluded by ``_is_self_contained`` is not executed either. The
+    text check is the only guard those two forms have — dropping ``DOCS`` from
+    it (as #4179 did) lets the #4178 bug be reintroduced with the suite green.
     """
-    hit = re.search(TOP_LEVEL_KWARG.format(name=name), path.read_text())
-    assert hit is None, f"{path.name} shows Agent({name}=...): {hit.group(0)!r}"
+    seen, ordered = set(), []
+    for path in [*_EXAMPLE_FILES, *DOCS]:
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
+
+
+@pytest.mark.parametrize("path", _text_checked_paths(), ids=lambda p: p.name)
+@pytest.mark.parametrize("name", ["session_id", "db", "user_id"])
+def test_docs_do_not_pass_rejected_kwargs_to_agent(path, name):
+    """No doc or example file may show ``Agent(<rejected-kwarg>=...)``.
+
+    Restored from the pre-#4179 suite and widened to ``DOCS``. The executing
+    guard cannot see files with no python fences (``session/__init__.py``) or
+    blocks excluded by ``_is_self_contained``, so the textual check still has to
+    cover them. ``_top_level_agent_kwargs`` inspects only ``Agent``'s own
+    depth-1 kwargs, so prose discussing ``session_id=`` does not trip it and a
+    rejected kwarg after any nested call (``MemoryConfig(db=db(...))``) is still
+    caught (greptile) — a plain regex only balanced one level.
+    """
+    passed = set(_top_level_agent_kwargs(path.read_text()))
+    assert name not in passed, f"{path.name} shows Agent({name}=...)"
+
+
+def test_the_guard_still_sees_a_file_with_no_python_fences(tmp_path, monkeypatch):
+    """``session/__init__.py`` has no fences. An executor-only guard is blind to
+    it, which is how the original #4178 bug could be reintroduced. The text
+    guard must fail on a fenceless docstring that shows the rejected kwarg.
+    """
+    doc = tmp_path / "__init__.py"
+    doc.write_text('"""\nagent = Agent(name="A", session_id="s")\n"""\n')
+    with pytest.raises(AssertionError):
+        test_docs_do_not_pass_rejected_kwargs_to_agent(doc, "session_id")
+
+
+def test_guard_catches_rejected_kwarg_after_a_nested_call():
+    """A top-level rejected kwarg after a *nested* call must still be caught.
+
+    The realistic documentation regression is not a flat ``Agent(session_id=)``
+    but ``Agent(memory=MemoryConfig(db=db(...)), session_id=...)`` — a rejected
+    kwarg following a two-level nested call. A single-level regex balances only
+    one level of parentheses and misses this (greptile). The depth-aware scanner
+    attributes each kwarg to its enclosing call, so ``session_id`` is reported as
+    Agent's own while the legitimately-nested ``session_id``/``db`` are not.
+    """
+    good = 'Agent(name="A", memory=MemoryConfig(session_id="x", db=db("u")))'
+    assert set(_top_level_agent_kwargs(good)) == {"name", "memory"}
+
+    bad = 'Agent(name="A", memory=MemoryConfig(db=db("u")), session_id="x")'
+    assert "session_id" in set(_top_level_agent_kwargs(bad))
+
+
+def test_guard_does_not_flag_session_id_in_prose():
+    """Prose mentioning ``session_id=`` outside an ``Agent(`` call is not a hit."""
+    prose = "The session_id= is set on memory; Agent() has no top-level one."
+    assert set(_top_level_agent_kwargs(prose)) == set()
+
+
+def test_guard_ignores_dict_keys_and_comments():
+    """A dict *key* or a ``#`` comment naming a rejected kwarg is not a hit.
+
+    ``memory={"session_id": ...}`` is the *supported* spelling and
+    ``# session_id = resume`` is documentation — neither is an ``Agent`` kwarg.
+    Skipping string literals and comments keeps these real examples green while
+    still catching a genuine top-level ``Agent(session_id=...)``.
+    """
+    dict_key = 'Agent(name="A", memory={"session_id": "x", "db": d})'
+    assert set(_top_level_agent_kwargs(dict_key)) == {"name", "memory"}
+
+    with_comment = (
+        'Agent(\n'
+        '    name="A",\n'
+        '    memory={"session_id": "x"},  # session_id = resume conversation\n'
+        ')'
+    )
+    assert set(_top_level_agent_kwargs(with_comment)) == {"name", "memory"}
 
 
 @pytest.mark.parametrize(

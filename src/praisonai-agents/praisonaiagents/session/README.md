@@ -130,7 +130,8 @@ store = DefaultSessionStore(
 When a DB adapter is provided, it takes precedence over JSON persistence:
 
 ```python
-from praisonaiagents import Agent, MemoryConfig, db
+from praisonaiagents import Agent, MemoryConfig
+from praisonaiagents.db import db
 
 agent = Agent(
     name="Assistant",

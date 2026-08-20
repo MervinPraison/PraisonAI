@@ -53,6 +53,40 @@ class AcmeProvider(BaseProvider):
         return HealthResult(healthy=True, provider_type="acme")
 
 
+def _reset_cli_registry_default(monkeypatch):
+    """``EndpointProviderRegistry.default()`` caches a process-wide singleton in
+    the subclass ``__dict__``. Any earlier test in the full suite warms it, after
+    which the monkeypatched ``entry_points`` below is never re-scanned - the CLI
+    then resolves ``acme`` against a stale cache, falls through to the recipe
+    path and posts to ``/v1/recipes/run`` (the ``assert 2 == 0`` failure seen
+    only in the full CI run, not in isolation).
+
+    Crucially there are *two* class objects: ``cmd_invoke`` imports the registry
+    as ``praisonai.cli.features._endpoint_registry`` (the compatibility shim
+    re-exports ``praisonai_code``'s module under the ``praisonai`` namespace via
+    ``__path__``), while this test imports it as
+    ``praisonai_code.cli.features._endpoint_registry``. They are distinct classes
+    with *independent* ``default()`` caches, so resetting only the one this test
+    imports leaves the handler's stale. Drop the cached instance on every such
+    class so the next ``default()`` rediscovers under the patched entry points;
+    ``monkeypatch`` restores the originals on teardown, keeping other tests
+    unaffected.
+    """
+    registry_classes = {cli_registry.EndpointProviderRegistry}
+    try:  # the exact class ``cmd_invoke`` resolves through the shim namespace
+        from praisonai.cli.features._endpoint_registry import (
+            EndpointProviderRegistry as _handler_registry,
+        )
+
+        registry_classes.add(_handler_registry)
+    except Exception:  # pragma: no cover - shim always importable in this suite
+        pass
+
+    for registry_cls in registry_classes:
+        if "_default_instance" in registry_cls.__dict__:
+            monkeypatch.delattr(registry_cls, "_default_instance", raising=False)
+
+
 def _publish(monkeypatch, group, name="acme"):
     ep = EntryPoint(name=name, value="x:y", group=group)
     monkeypatch.setattr(ep.__class__, "load", lambda self: AcmeProvider, raising=False)
@@ -60,6 +94,7 @@ def _publish(monkeypatch, group, name="acme"):
         base_registry, "entry_points", lambda *, group: [ep] if group == _publish.group else []
     )
     _publish.group = group
+    _reset_cli_registry_default(monkeypatch)
 
 
 @pytest.fixture(params=[CANONICAL, LEGACY], ids=["canonical", "legacy"])
