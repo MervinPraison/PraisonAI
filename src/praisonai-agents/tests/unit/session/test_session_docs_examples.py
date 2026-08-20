@@ -64,6 +64,26 @@ _SKIP_DIRECTIVE = re.compile(
 # escape hatch (a missing optional dependency is not an API-shape mistake).
 _WRAPPER_BACKED = re.compile(r"\bdb\s*\(|\bdb\.\w+\s*\(")
 
+# Packages we ship. An ImportError naming one of these is a doc advertising a
+# symbol we no longer export (or never did) — a regression to fail on — rather
+# than a missing optional third-party dependency to skip.
+_FIRST_PARTY = ("praisonaiagents", "praisonai")
+
+
+def _is_first_party_import_error(exc):
+    """True if *exc* came from importing one of our own packages.
+
+    ``from praisonaiagents import Gone`` raises ``ImportError`` whose ``name``
+    is the module (``praisonaiagents``); ``import praisonai.gone`` raises
+    ``ModuleNotFoundError`` whose ``name`` is the dotted target. Both must fail
+    the guard, so we match the top-level package of ``exc.name`` and fall back
+    to scanning the message when ``name`` is unset (older tracebacks).
+    """
+    module = getattr(exc, "name", None)
+    if module:
+        return module.split(".")[0] in _FIRST_PARTY
+    return any(pkg in str(exc) for pkg in _FIRST_PARTY)
+
 
 def _python_blocks(text):
     """Yield the source of every ```python fenced block in *text*.
@@ -93,17 +113,36 @@ def _python_blocks(text):
     return blocks
 
 
-def _is_self_contained(code):
-    """True if every name the block reads is bound within it or a builtin.
+# Names that legitimately appear free in an *excluded* block: symbols an API
+# reference stub type-annotates against (``Optional``/``List`` etc.) and objects
+# a documentation walkthrough binds in an earlier fence and reuses in a later
+# continuation snippet (``Agent``/``MemoryConfig``). A free name outside this
+# set means a *typo* in an otherwise-complete example — an omitted import or a
+# misspelled identifier — which must surface as a failure rather than silently
+# dropping the block from execution (greptile #4179).
+_ALLOWED_FREE_NAMES = frozenset(
+    {
+        # typing / dataclass vocabulary used only in reference stubs
+        "Optional", "List", "Dict", "Any", "dataclass",
+        # doc-local classes referenced by the reference stubs
+        "SessionData", "SessionMessage",
+        # objects a prior fence binds and a continuation snippet reuses
+        "Agent", "MemoryConfig", "store",
+    }
+)
 
-    Uses ``ast`` rather than regex so snippet fragments (a bare ``Agent(...)``
-    with no import) and REPL/class-stub transcripts drop out automatically:
-    ``used - bound - builtins == set()``.
+
+def _free_names(code):
+    """Names *code* reads that it neither binds nor inherits from builtins.
+
+    Returns ``None`` for a block that does not parse. Uses ``ast`` rather than
+    regex so snippet fragments (a bare ``Agent(...)`` with no import) and
+    class-stub transcripts are identifiable by their leftover free names.
     """
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return False
+        return None
 
     bound = set()
     used = set()
@@ -124,19 +163,39 @@ def _is_self_contained(code):
             else:
                 used.add(node.id)
 
-    return not (used - bound - set(dir(_builtins)))
+    return used - bound - set(dir(_builtins))
 
 
-def _self_contained_python_blocks(*docs):
-    blocks = []
+def _is_self_contained(code):
+    """True if every name the block reads is bound within it or a builtin.
+
+    Snippet fragments (a bare ``Agent(...)`` with no import) and class-stub
+    transcripts drop out automatically: ``used - bound - builtins == set()``.
+    """
+    return _free_names(code) == set()
+
+
+def _partition_python_blocks(*docs):
+    """Split every non-empty python fence into (runnable, excluded).
+
+    A block is runnable when it is self-contained; otherwise it is excluded and
+    carried with the free names that excluded it, so a later test can prove the
+    exclusion was a known documentation idiom and not a silent-dropped typo.
+    """
+    runnable, excluded = [], []
     for doc in docs:
         for index, code in enumerate(_python_blocks(doc.read_text())):
-            if code.strip() and _is_self_contained(code):
-                blocks.append((doc.name, index, code))
-    return blocks
+            if not code.strip():
+                continue
+            free = _free_names(code)
+            if free == set():
+                runnable.append((doc.name, index, code))
+            elif free:  # None (syntax error) or non-empty free-name set
+                excluded.append((doc.name, index, code, free))
+    return runnable, excluded
 
 
-_DOC_BLOCKS = _self_contained_python_blocks(*DOCS)
+_DOC_BLOCKS, _EXCLUDED_BLOCKS = _partition_python_blocks(*DOCS)
 
 
 def _block_id(block):
@@ -167,7 +226,38 @@ def test_documented_example_runs(block, monkeypatch):
         exec(compile(code, f"<{_block_id(block)}>", "exec"),
              {"__name__": "__doc_example__"})
     except ImportError as exc:
+        # A missing *optional* dependency is an environment gap, not a broken
+        # doc, so it skips. But an import that fails from our own packages
+        # (``praisonaiagents``/``praisonai``) is a real API regression — a
+        # renamed/removed symbol the doc still advertises — and must *fail*,
+        # not hide behind the optional-dependency escape hatch (greptile #4179).
+        if _is_first_party_import_error(exc):
+            raise
         pytest.skip(f"optional dependency missing: {exc}")
+
+
+@pytest.mark.parametrize(
+    "block", _EXCLUDED_BLOCKS, ids=lambda b: f"{b[0]}#{b[1]}"
+)
+def test_excluded_block_is_a_known_idiom_not_a_typo(block):
+    """A block dropped from execution must be dropped for a *known* reason.
+
+    ``_is_self_contained`` filters snippet fragments and API-reference stubs so
+    they are not exec'd. But the same filter would silently swallow an
+    otherwise-complete example ruined by a typo (``Agnet(...)``) or an omitted
+    import, leaving exactly that documentation mistake outside the guard
+    (greptile #4179). Pinning every free name to ``_ALLOWED_FREE_NAMES`` turns
+    such a mistake into a failure: the new free name is not a recognised
+    documentation idiom, so this test — not silence — reports it.
+    """
+    name, index, _, free = block
+    unexpected = free - _ALLOWED_FREE_NAMES
+    assert not unexpected, (
+        f"{name}#{index} was excluded from execution because of unexpected "
+        f"free name(s) {sorted(unexpected)!r}. If this is a real example, fix "
+        f"the typo/import so it runs; if it is a deliberate fragment, add the "
+        f"name(s) to _ALLOWED_FREE_NAMES."
+    )
 
 
 # ---------------------------------------------------------------------------
