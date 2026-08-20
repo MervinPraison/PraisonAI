@@ -91,9 +91,18 @@ ssh = [
 modal = [
     "praisonai-sandbox[modal]",
 ]
+
+# Vendor SDKs for the compute path. They delegate to praisonai-sandbox, which
+# already pins each one correctly -- rather than a second, drifting grid.
+e2b = [
+    "praisonai-sandbox[e2b]",
+]
+
+docker = [
+    "praisonai-sandbox[docker]",
+]
 daytona = [
-    # Note: daytona package not yet available on PyPI
-    # Install via: pip install git+https://github.com/daytonaio/daytona-python
+    "praisonai-sandbox[daytona]",
 ]
 tenki = [
     "tenki>=0.5.4",

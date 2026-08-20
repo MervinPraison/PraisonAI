@@ -25,10 +25,32 @@ _PROVIDERS = {
     "tenki": ("praisonai.integrations.compute.tenki", "TenkiCompute"),
 }
 
+# What to actually type when a provider is missing. Every name here must point
+# at an extra that EXISTS and installs something -- three of these used to name
+# extras that were absent or empty, so a user followed the official hint, waited
+# for the install, and hit the identical failure again.
+#
+# For a compute provider in _PROVIDERS the failing import is
+# `praisonai.integrations.compute.*`, so the fix has to deliver the `praisonai`
+# wrapper itself: `praisonai[<vendor>]` pulls in the wrapper AND delegates to
+# `praisonai-sandbox[<vendor>]` for the vendor SDK, whereas
+# `praisonai-sandbox[<vendor>]` alone would install the SDK but not the module,
+# leaving the next resolve failing the same way. Sandbox-only places
+# (novita/sandlock/ssh) resolve through the SandboxComputeAdapter instead and
+# only need `praisonai-sandbox`.
 _EXTRA_HINTS = {
-    "e2b": "pip install praisonai[e2b]",
-    "modal": "pip install praisonai[modal]",
-    "daytona": "pip install praisonai[daytona]",
+    "e2b": "pip install 'praisonai[e2b]'",
+    "modal": "pip install 'praisonai[modal]'",
+    "daytona": "pip install 'praisonai[daytona]'",
+    "docker": "pip install 'praisonai[docker]'",
+    "novita": "pip install 'praisonai-sandbox[novita]'",
+    "sandlock": "pip install 'praisonai-sandbox[sandlock]'",
+    "ssh": "pip install 'praisonai-sandbox[ssh]'",
+    # flyio and tenki need a credential rather than an SDK; flyio speaks plain
+    # HTTP through aiohttp, which praisonaiagents already requires. Export the
+    # variable so a child process inherits it -- a bare assignment would not.
+    "flyio": "export FLY_API_TOKEN=... (see https://fly.io/docs/flyctl/auth-token)",
+    "tenki": "export TENKI_API_KEY=... (or TENKI_AUTH_TOKEN=...)",
 }
 
 
