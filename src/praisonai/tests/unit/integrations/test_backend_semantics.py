@@ -34,27 +34,34 @@ def test_local_agent_imports():
     assert TopLevelLocalAgentConfig is not None
 
 
-def test_hosted_agent_only_accepts_anthropic():
-    """Test that HostedAgent only accepts 'anthropic' as provider."""
+def test_hosted_agent_rejects_unregistered_providers():
+    """HostedAgent resolves registered runtimes and rejects unregistered ones.
+
+    Since the ``run_on=`` placement feature, compute backends (modal, e2b,
+    docker, flyio, ...) are registered managed runtimes via the backend
+    registry, so ``HostedAgent(provider=...)`` resolves them. The guarantee
+    that still matters is that a provider with no registered backend (an LLM
+    routing name like ``openai``/``gemini``) raises a helpful ``ValueError``.
+    """
     from praisonai.integrations import HostedAgent, HostedAgentConfig
-    
-    # Should work
+    from praisonai.integrations.backend_registry import get_backend_registry
+
+    # anthropic remains the builtin hosted runtime
     hosted = HostedAgent(provider="anthropic")
     assert hosted.provider == "anthropic"
-    
-    # Should raise ValueError for non-existent managed runtimes
-    with pytest.raises(ValueError) as exc_info:
-        HostedAgent(provider="modal")
-    assert "not yet available" in str(exc_info.value)
-    assert "LocalAgent" in str(exc_info.value)
-    
-    with pytest.raises(ValueError) as exc_info:
-        HostedAgent(provider="e2b")
-    assert "not yet available" in str(exc_info.value)
-    
-    with pytest.raises(ValueError) as exc_info:
-        HostedAgent(provider="openai")
-    assert "not yet available" in str(exc_info.value)
+
+    # Registered compute runtimes resolve rather than raise (placement feature)
+    registry = get_backend_registry()
+    assert registry.is_available("modal")
+    assert registry.is_available("e2b")
+
+    # Providers with no registered backend must still raise a helpful error
+    for provider in ("openai", "gemini"):
+        assert not registry.is_available(provider)
+        with pytest.raises(ValueError) as exc_info:
+            HostedAgent(provider=provider)
+        assert "not yet available" in str(exc_info.value)
+        assert "LocalAgent" in str(exc_info.value)
 
 
 def test_local_agent_rejects_provider_overload():
