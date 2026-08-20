@@ -27,7 +27,14 @@ def __getattr__(name):
     elif name == 'get_provider':
         from .base import get_provider
         return get_provider
+    elif name == 'list_cloud_providers':
+        from ._registry import list_cloud_providers
+        return list_cloud_providers
+    elif name == 'CloudProviderRegistry':
+        from ._registry import CloudProviderRegistry
+        return CloudProviderRegistry
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ['BaseProvider', 'AWSProvider', 'AzureProvider', 'GCPProvider', 'get_provider']
+__all__ = ['BaseProvider', 'AWSProvider', 'AzureProvider', 'GCPProvider', 'get_provider',
+           'CloudProviderRegistry', 'list_cloud_providers']

@@ -61,3 +61,17 @@ class CloudProviderRegistry(PluginRegistry):
             entry_point_group="praisonai.deploy.providers",
             builtins=_BUILTIN_CLOUDS
         )
+
+
+def list_cloud_providers() -> list[str]:
+    """Every deployable provider name: built-ins plus entry-point plugins.
+
+    This is the *authority* on which providers exist. ``models.CloudProvider``
+    only names the built-ins and must never be used as the validation gate.
+
+    Built-ins keep their declaration order; plugins are appended sorted.
+    """
+    names = set(CloudProviderRegistry.default().list_names())
+    ordered = [n for n in _BUILTIN_CLOUDS if n in names]
+    ordered += sorted(names.difference(ordered))
+    return ordered

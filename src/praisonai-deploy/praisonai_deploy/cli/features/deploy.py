@@ -30,7 +30,14 @@ def _configure_stdio() -> None:
 
 def _build_deploy_config_from_args(args):
     """Build DeployConfig from CLI flags, merging YAML deploy section when present."""
-    from praisonai_deploy.models import DeployConfig, DeployType, CloudProvider, APIConfig, DockerConfig, CloudConfig
+    from praisonai_deploy.models import (
+        DeployConfig,
+        DeployType,
+        APIConfig,
+        DockerConfig,
+        CloudConfig,
+        coerce_cloud_provider,
+    )
     from praisonai_deploy.schema import validate_agents_yaml
 
     deploy_type = DeployType(args.type)
@@ -67,7 +74,7 @@ def _build_deploy_config_from_args(args):
         api = yaml_config.api if yaml_config else None
         return DeployConfig(type=deploy_type, docker=docker, api=api)
 
-    provider = CloudProvider(args.provider)
+    provider = coerce_cloud_provider(args.provider)
     cloud = yaml_config.cloud.model_copy() if yaml_config and yaml_config.cloud else CloudConfig(
         provider=provider,
         region=getattr(args, 'region', None) or 'us-east-1',
@@ -232,10 +239,10 @@ class DeployHandler:
         """
         try:
             from praisonai_deploy.schema import save_sample_yaml
-            from praisonai_deploy.models import DeployType, CloudProvider
+            from praisonai_deploy.models import DeployType, coerce_cloud_provider
             
             deploy_type = DeployType(args.type) if args.type else DeployType.API
-            provider = CloudProvider(args.provider) if hasattr(args, 'provider') and args.provider else None
+            provider = coerce_cloud_provider(args.provider) if hasattr(args, 'provider') and args.provider else None
             
             console.print(f"\n[bold blue]📝 Generating sample agents.yaml...[/bold blue]\n")
             
@@ -291,7 +298,9 @@ class DeployHandler:
                     console.print(f"  Image: {config.docker.image_name}:{config.docker.tag}")
                     console.print(f"  Ports: {config.docker.expose}")
                 elif config.type.value == "cloud":
-                    console.print(f"  Provider: {config.cloud.provider.value}")
+                    provider = config.cloud.provider
+                    provider_name = provider.value if hasattr(provider, "value") else provider
+                    console.print(f"  Provider: {provider_name}")
                     console.print(f"  Region: {config.cloud.region}")
                     console.print(f"  Service: {config.cloud.service_name}")
         
@@ -497,13 +506,13 @@ class DeployHandler:
         Returns a ``DoctorReport`` when the provider is registered, otherwise ``None``.
         """
         try:
-            from praisonai_deploy.models import CloudConfig, CloudProvider
+            from praisonai_deploy.models import CloudConfig, coerce_cloud_provider
             from praisonai_deploy.providers import get_provider
         except Exception:
             return None
         try:
             config = CloudConfig(
-                provider=CloudProvider(provider),
+                provider=coerce_cloud_provider(provider),
                 region='us-east-1',
                 service_name='praisonai-service',
             )
