@@ -4936,10 +4936,11 @@ class GatewayTraceHook(Protocol):
         with self._trace.stage("agent.run", parent_carrier=inbound.headers):
             ...
 
-        # egress: write the active traceparent onto an outbound request
-        headers = {}
+        # egress: write the active traceparent onto an outbound request.
+        # Seed with provider headers first, then inject last so the active
+        # trace context always wins over any stale traceparent/tracestate.
+        headers = dict(provider_headers)
         self._trace.inject_context(headers)  # no-op unless an exporter is set
-        headers.update(provider_headers)
 
     Both companion methods are no-ops in :class:`NullGatewayTraceHook`, so the
     default path stays zero-cost and OpenTelemetry-free.
