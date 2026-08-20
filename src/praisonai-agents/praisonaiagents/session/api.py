@@ -17,6 +17,16 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
+# Sub-agent transcripts live *inside* the parent session's own record, under
+# ``SessionData.metadata[AGENT_HISTORY_KEY][agent_key]``.
+AGENT_HISTORY_KEY = "agent_histories"
+
+# Opt-in restore of sub-agent transcripts written by older versions as separate
+# top-level sessions named ``"{parent}_{name}:{role}"`` *without* parentage
+# tags. Such an id is indistinguishable from a real user session of the same
+# sanitised name, so it is not restored unless this is explicitly set.
+LEGACY_AGENT_KEYS_ENV = "PRAISONAI_SESSION_LEGACY_AGENT_KEYS"
+
 if TYPE_CHECKING:
     from ..memory.memory import Memory
     from ..knowledge.knowledge import Knowledge
@@ -274,6 +284,42 @@ class Session:
 
         return {}
 
+    def _get_session_store(self):
+        """Return the default session store, or ``None`` if unavailable."""
+        try:
+            from . import get_default_session_store
+            return get_default_session_store()
+        except ImportError:
+            return None
+
+    @staticmethod
+    def _legacy_agent_keys_enabled() -> bool:
+        """Whether to restore *untagged* legacy sub-agent records.
+
+        Records written before the ``parent_session_id``/``agent_key`` tags
+        existed carry no parentage, so ``"{parent}_{agent_key}"`` cannot be told
+        apart from a real user session of the same sanitised name. Restoring one
+        can silently pull an unrelated transcript into an agent, so it is
+        opt-in.
+        """
+        return os.environ.get(LEGACY_AGENT_KEYS_ENV, "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+
+    def _stored_agent_histories(self, session_store) -> Dict[str, List[Dict[str, Any]]]:
+        """Sub-agent transcripts held inside this session's own record."""
+        if session_store is None or not hasattr(session_store, "get_session"):
+            return {}
+        try:
+            data = session_store.get_session(self.session_id)
+        except Exception as exc:
+            logger.debug(f"Cannot read agent histories for {self.session_id}: {exc}")
+            return {}
+        histories = (getattr(data, "metadata", None) or {}).get(AGENT_HISTORY_KEY)
+        if not isinstance(histories, dict):
+            return {}
+        return {k: v for k, v in histories.items() if isinstance(v, list) and v}
+
     def _restore_agent_chat_history(self, agent_key: str) -> List[Dict[str, Any]]:
         """
         Restore agent chat history from memory.
@@ -287,19 +333,17 @@ class Session:
         if self.is_remote:
             return []
 
-        # G-2 FIX: mirror the save path priority — read SessionStore first so
-        # history persisted by _save_agent_chat_histories() is actually found.
-        session_store = None
-        try:
-            from . import get_default_session_store
-            session_store = get_default_session_store()
-        except ImportError:
-            pass
+        session_store = self._get_session_store()
 
-        if session_store is not None and hasattr(session_store, "get_chat_history"):
-            messages = session_store.get_chat_history(f"{self.session_id}_{agent_key}")
-            if messages:
-                return messages
+        # Current format: inside this session's own record.
+        stored = self._stored_agent_histories(session_store)
+        if agent_key in stored:
+            return stored[agent_key]
+        if not stored:
+            # Not migrated yet: fall back to the legacy per-agent records.
+            legacy = self._legacy_agent_histories(session_store)
+            if agent_key in legacy:
+                return legacy[agent_key]
 
         results = self.memory.search_short_term(
             query="Agent chat history for",
@@ -316,54 +360,84 @@ class Session:
         
         return []
 
+    def _legacy_agent_histories(self, session_store) -> Dict[str, List[Dict[str, Any]]]:
+        """Sub-agent transcripts older versions wrote as top-level sessions.
+
+        Never deletes them: an untagged candidate may in fact be a real user
+        session that merely sanitises to the same name.
+        """
+        histories: Dict[str, List[Dict[str, Any]]] = {}
+        list_sessions = getattr(session_store, "list_sessions", None)
+        if session_store is None or not callable(list_sessions):
+            return histories
+
+        prefix = f"{self.session_id}_"
+        allow_untagged = self._legacy_agent_keys_enabled()
+        try:
+            entries = list_sessions() or []
+        except Exception:
+            return histories
+
+        for entry in entries:
+            if isinstance(entry, dict):
+                stored_id = entry.get("session_id")
+                # Prefer the explicit parent/agent_key tags written on save;
+                # this disambiguates overlapping composite ids (e.g.
+                # "chat"+"support_agent" vs "chat_support"+"agent").
+                tagged_parent = entry.get("parent_session_id")
+                tagged_key = entry.get("agent_key")
+            else:
+                stored_id, tagged_parent, tagged_key = entry, None, None
+            if not isinstance(stored_id, str):
+                continue
+
+            if tagged_parent == self.session_id and tagged_key:
+                agent_key = tagged_key
+            elif (
+                tagged_parent is None
+                and tagged_key is None
+                and stored_id.startswith(prefix)
+                and len(stored_id) > len(prefix)
+            ):
+                # Saved before the tags existed: the id alone is ambiguous.
+                agent_key = stored_id[len(prefix):]
+                logger.warning(
+                    "Session %r: untagged session %r %s as sub-agent %r history "
+                    "(ambiguous id; %s).",
+                    self.session_id, stored_id,
+                    "restored" if allow_untagged else "ignored",
+                    agent_key,
+                    f"{LEGACY_AGENT_KEYS_ENV}=1" if allow_untagged
+                    else f"set {LEGACY_AGENT_KEYS_ENV}=1 to restore it",
+                )
+                if not allow_untagged:
+                    continue
+            else:
+                continue
+
+            try:
+                messages = session_store.get_chat_history(stored_id)
+            except Exception:
+                continue
+            if agent_key and messages:
+                histories[agent_key] = messages
+
+        return histories
+
     def _restore_agent_chat_histories(self) -> None:
-        """Restore all agent chat histories from memory."""
+        """Restore all agent chat histories."""
         if self.is_remote:
             return
 
-        # G-2 FIX: read SessionStore first (where save_state now writes), then
-        # fall back to Memory for backward compatibility.
-        session_store = None
-        try:
-            from . import get_default_session_store
-            session_store = get_default_session_store()
-        except ImportError:
-            pass
+        session_store = self._get_session_store()
 
-        if session_store is not None and hasattr(session_store, "get_chat_history"):
-            prefix = f"{self.session_id}_"
-            list_sessions = getattr(session_store, "list_sessions", None)
-            if callable(list_sessions):
-                for entry in list_sessions():
-                    if isinstance(entry, dict):
-                        stored_id = entry.get("session_id")
-                        # Prefer the explicit parent/agent_key tags written on
-                        # save; this disambiguates overlapping composite ids
-                        # (e.g. "chat"+"support_agent" vs "chat_support"+"agent").
-                        tagged_parent = entry.get("parent_session_id")
-                        tagged_key = entry.get("agent_key")
-                        if tagged_parent == self.session_id and tagged_key:
-                            agent_key = tagged_key
-                        elif (
-                            tagged_parent is None
-                            and isinstance(stored_id, str)
-                            and stored_id.startswith(prefix)
-                        ):
-                            # Legacy sessions saved before the tag existed.
-                            agent_key = stored_id[len(prefix):]
-                        else:
-                            continue
-                    else:
-                        stored_id = entry
-                        if not (isinstance(stored_id, str) and stored_id.startswith(prefix)):
-                            continue
-                        agent_key = stored_id[len(prefix):]
-                    messages = session_store.get_chat_history(stored_id)
-                    if agent_key and messages:
-                        self._agents[agent_key] = {
-                            "agent": None,
-                            "chat_history": messages
-                        }
+        # Current format first, then the legacy per-agent session records.
+        stored = self._stored_agent_histories(session_store)
+        for agent_key, messages in stored.items():
+            self._agents[agent_key] = {"agent": None, "chat_history": messages}
+        if not stored:
+            for agent_key, messages in self._legacy_agent_histories(session_store).items():
+                self._agents[agent_key] = {"agent": None, "chat_history": messages}
 
         results = self.memory.search_short_term(
             query="Agent chat history for",
@@ -383,12 +457,29 @@ class Session:
                         "chat_history": chat_history
                     }
 
+    def _store_agent_history(
+        self, session_store, agent_key: str, messages: List[Dict[str, Any]]
+    ) -> bool:
+        """Persist one sub-agent transcript onto this session's own record."""
+        update_meta = getattr(session_store, "update_session_metadata", None)
+        if not callable(update_meta):
+            return False
+        histories = self._stored_agent_histories(session_store)
+        # First write after upgrading: carry the legacy per-agent records
+        # forward (they are left on disk untouched).
+        histories = dict(histories) if histories else dict(
+            self._legacy_agent_histories(session_store)
+        )
+        histories[agent_key] = messages
+        return bool(update_meta(self.session_id, **{AGENT_HISTORY_KEY: histories}))
+
     def _save_agent_chat_histories(self) -> None:
         """Save all agent chat histories.
-        
-        G-2 FIX: Routes to SessionStore instead of Memory.store_short_term() to
-        maintain clean separation between conversation history (SessionStore)
-        and semantic memory (Memory). Falls back to Memory for backward compat.
+
+        Sub-agent transcripts go into the parent session's own record, under
+        ``metadata[AGENT_HISTORY_KEY][agent_key]``. Nothing is written into the
+        global session-id namespace, so a sub-agent can no longer overwrite an
+        unrelated user session. Falls back to Memory for backward compat.
         """
         if self.is_remote:
             return
@@ -404,17 +495,10 @@ class Session:
                 chat_history = agent_data.get("chat_history")
             
             if chat_history is not None:
-                # G-2 FIX: Try SessionStore first for clean separation
-                session_store = None
-                try:
-                    from . import get_default_session_store
-                    session_store = get_default_session_store()
-                except ImportError:
-                    pass
+                session_store = self._get_session_store()
                 
                 if session_store is not None:
                     # Replace atomically to avoid duplicate appends on repeated save_state()
-                    session_id = f"{self.session_id}_{agent_key}"
                     messages = [
                         {
                             "role": msg.get("role", "user"),
@@ -424,32 +508,18 @@ class Session:
                         if isinstance(msg, dict)
                     ]
                     if not messages:
-                        logging.debug(f"No chat history to persist for session {session_id}")
-                    elif hasattr(session_store, "set_chat_history"):
-                        session_store.set_chat_history(session_id, messages)
-                        # Tag the child session so bulk restore can resolve the
-                        # exact agent_key without ambiguous composite-key prefix
-                        # parsing (e.g. "chat" + "support_agent" vs "chat_support"
-                        # + "agent" both collapse to "chat_support_agent").
-                        update_meta = getattr(session_store, "update_session_metadata", None)
-                        if callable(update_meta):
-                            update_meta(
-                                session_id,
-                                parent_session_id=self.session_id,
-                                agent_key=agent_key,
-                            )
-                    else:
-                        # Fallback to add_message - may create duplicates on repeated calls
-                        logging.warning(
-                            f"Session store lacks 'set_chat_history' method. Using fallback "
-                            f"'add_message' which may create duplicates on repeated save_state() calls."
+                        logging.debug(
+                            f"No chat history to persist for agent {agent_key} "
+                            f"in session {self.session_id}"
                         )
-                        for msg in messages:
-                            session_store.add_message(
-                                session_id,
-                                role=msg["role"],
-                                content=msg["content"],
-                            )
+                    elif not self._store_agent_history(
+                        session_store, agent_key, messages
+                    ):
+                        logging.warning(
+                            f"Session store {type(session_store).__name__} cannot "
+                            f"persist sub-agent history; chat history for "
+                            f"{agent_key} in session {self.session_id} was lost."
+                        )
                 else:
                     # Fallback to Memory.store_short_term() for backward compatibility
                     history_text = f"Agent chat history for {agent_key}"
