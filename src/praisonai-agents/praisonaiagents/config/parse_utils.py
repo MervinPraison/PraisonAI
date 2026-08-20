@@ -195,6 +195,39 @@ def make_preset_error(
     return ValueError(" ".join(msg_parts))
 
 
+def validate_preset_string(
+    param_name: str,
+    value: Any,
+    presets: Iterable[str],
+) -> None:
+    """
+    Raise a helpful error when a string does not name a known preset.
+
+    Non-string values pass through untouched, so callers can hand this the raw
+    parameter without pre-checking the type. Matching is case-insensitive and
+    ignores surrounding whitespace, mirroring the preset lookups performed by
+    the parameter resolvers.
+
+    Args:
+        param_name: Name of the parameter (for the error message)
+        value: Raw parameter value
+        presets: Valid preset names
+
+    Raises:
+        ValueError: If value is a string that is not a known preset
+    """
+    if not isinstance(value, str):
+        return
+
+    normalized = value.strip().lower()
+    presets_list = list(presets)
+    for preset in presets_list:
+        if preset.strip().lower() == normalized:
+            return
+
+    raise make_preset_error(param_name, value, presets_list)
+
+
 def is_policy_string(value: str) -> bool:
     """
     Check if a string is a policy specification. O(1) operation.
