@@ -48,7 +48,11 @@ class _FakeContainer:
             return 0, (b"", b"")
         return 0, b""
 
-    def commit(self, repository=None, tag=None):
+    def commit(self, repository=None, tag=None, changes=None, **kwargs):
+        # Mirror docker-py's Container.commit signature: extra Dockerfile
+        # instructions arrive via ``changes`` (used to scrub secret ENV lines
+        # on capture). The fake records the ref just as before; the presence of
+        # ``changes`` must not turn a successful commit into an ephemeral one.
         if self._client.commit_fails:
             raise RuntimeError("commit boom")
         self._client.images._store.add(f"{repository}:{tag}")
