@@ -747,26 +747,21 @@ class ToolExecutionMixin:
             if blocked_result is not None:
                 result = blocked_result
             else:
-                # Apply tool retry logic with exponential backoff
-                execution_config = getattr(self, '_execution_config', None)
-                if execution_config is None:
-                    # Fall back to reading individual config attributes for backward compatibility
-                    max_retry_limit = getattr(self, 'max_retry_limit', 2)
-                    retry_initial_delay = 1.0
-                    retry_backoff_factor = 2.0
-                    retry_jitter = 0.1
-                else:
-                    max_retry_limit = execution_config.max_retry_limit
-                    retry_initial_delay = execution_config.retry_initial_delay
-                    retry_backoff_factor = execution_config.retry_backoff_factor
-                    retry_jitter = execution_config.retry_jitter
-                
+                # Apply tool retry logic with exponential backoff.
+                # ONE vocabulary: the effective RetryPolicy caps how many times
+                # the tool body may run, whichever of the two loops does the
+                # retrying, and owns the backoff. ExecutionConfig.max_retry_limit
+                # / retry_* are translated into it (see
+                # _effective_tool_retry_policy) rather than run as a second,
+                # independent budget in different units.
+                retry_policy = self._effective_tool_retry_policy(function_name)
+                max_attempts = retry_policy.max_attempts
+
                 result = None
                 last_exception = None
-                
-                # max_retry_limit is the number of retries (not total attempts)
-                # So total attempts = 1 (initial) + max_retry_limit (retries)
-                for attempt in range(1, max_retry_limit + 2):
+
+                # max_attempts is the total number of tool-body runs.
+                for attempt in range(1, max_attempts + 1):
                     try:
                         # P8/G11: Apply tool timeout if configured
                         tool_timeout = getattr(self, '_tool_timeout', None)
@@ -871,15 +866,15 @@ class ToolExecutionMixin:
                             
                     except ToolExecutionError as e:
                         last_exception = e
-                        # Only retry if the error is marked as retryable and we have retries left
-                        # attempt starts at 1, so (attempt - 1) gives us the retry count
-                        if not e.is_retryable or (attempt - 1) >= max_retry_limit:
+                        # Only retry if the error is marked as retryable and the
+                        # policy still has attempts left.
+                        if not e.is_retryable or attempt >= max_attempts:
                             raise e
-                        
-                        # Calculate delay for exponential backoff
-                        delay = BackoffPolicy.delay(attempt, retry_initial_delay, retry_backoff_factor, retry_jitter)
+
+                        # Calculate delay for exponential backoff (policy owns it)
+                        delay = retry_policy.get_delay_ms(attempt - 1) / 1000.0
                         logging.warning(
-                            f"Tool {function_name} failed (attempt {attempt}/{max_retry_limit + 1}): {e}. "
+                            f"Tool {function_name} failed (attempt {attempt}/{max_attempts}): {e}. "
                             f"Retrying in {delay:.2f}s..."
                         )
                         time.sleep(delay)
@@ -895,15 +890,14 @@ class ToolExecutionMixin:
                             is_retryable=is_retryable,
                         )
                         last_exception = tool_error
-                        
-                        # attempt starts at 1, so (attempt - 1) gives us the retry count
-                        if not is_retryable or (attempt - 1) >= max_retry_limit:
+
+                        if not is_retryable or attempt >= max_attempts:
                             raise tool_error from e
-                        
-                        # Calculate delay for exponential backoff
-                        delay = BackoffPolicy.delay(attempt, retry_initial_delay, retry_backoff_factor, retry_jitter)
+
+                        # Calculate delay for exponential backoff (policy owns it)
+                        delay = retry_policy.get_delay_ms(attempt - 1) / 1000.0
                         logging.warning(
-                            f"Tool {function_name} failed (attempt {attempt}/{max_retry_limit + 1}): {e}. "
+                            f"Tool {function_name} failed (attempt {attempt}/{max_attempts}): {e}. "
                             f"Retrying in {delay:.2f}s..."
                         )
                         time.sleep(delay)
@@ -2954,15 +2948,33 @@ class ToolExecutionMixin:
 
     def _get_tool_retry_policy(self, tool_name):
         """Get retry policy for a tool (tool-level > agent-level > default).
-        
+
+        Kept as the historical name; both retry loops now go through
+        ``_effective_tool_retry_policy`` so they share one policy object.
+
         Args:
             tool_name: Name of the tool to get retry policy for
             
         Returns:
             RetryPolicy instance
         """
+        return self._effective_tool_retry_policy(tool_name)
+
+    def _effective_tool_retry_policy(self, tool_name):
+        """The one RetryPolicy that governs every retry of ``tool_name``.
+
+        Precedence: per-tool ``.retry_policy`` > agent-level
+        ``ToolConfig(retry_policy=...)`` > a policy translated from the
+        ExecutionConfig spelling of the same knobs.
+
+        ``ExecutionConfig`` speaks a second vocabulary for the same thing --
+        ``max_retry_limit`` counts *retries* (so total runs = limit + 1),
+        ``retry_initial_delay`` is in *seconds*, and ``retry_jitter`` is a
+        *fraction*. Translating it here, once, is what keeps the two retry loops
+        from running two independent budgets in two different units.
+        """
         from ..tools.retry import RetryPolicy
-        
+
         # Check for tool-level retry policy first
         tools = getattr(self, 'tools', [])
         # Handle non-iterable tools (e.g., single MCP instance)
@@ -2973,16 +2985,36 @@ class ToolExecutionMixin:
             tool_policy = getattr(tool, 'retry_policy', None) if hasattr(tool, 'retry_policy') else None
             if tool_name_attr == tool_name and tool_policy is not None:
                 return tool_policy
-        
+
         # Check for agent-level retry policy
         agent_policy = getattr(self, '_tool_retry_policy', None)
         if agent_policy is not None:
             return agent_policy
-        
-        # Return default retry policy (cached class-level instance)
-        if not hasattr(ToolExecutionMixin, '_default_retry_policy'):
-            ToolExecutionMixin._default_retry_policy = RetryPolicy()
-        return ToolExecutionMixin._default_retry_policy
+
+        # Translate the ExecutionConfig spelling into the RetryPolicy vocabulary.
+        execution_config = getattr(self, '_execution_config', None)
+        if execution_config is None:
+            max_retry_limit = getattr(self, 'max_retry_limit', 2)
+            initial_delay_s, backoff_factor, jitter_fraction = 1.0, 2.0, 0.1
+        else:
+            max_retry_limit = execution_config.max_retry_limit
+            initial_delay_s = execution_config.retry_initial_delay
+            backoff_factor = execution_config.retry_backoff_factor
+            jitter_fraction = execution_config.retry_jitter
+
+        cached = getattr(self, '_translated_retry_policy', None)
+        key = (max_retry_limit, initial_delay_s, backoff_factor, jitter_fraction)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        policy = RetryPolicy(
+            max_attempts=max(1, max_retry_limit + 1),
+            backoff_factor=max(1.0, backoff_factor),
+            initial_delay_ms=int(initial_delay_s * 1000),
+            jitter=jitter_fraction > 0,
+            jitter_factor=min(max(jitter_fraction, 0.0), 1.0),
+        )
+        self._translated_retry_policy = (key, policy)
+        return policy
 
     def _classify_error_type(self, error_dict, exception):
         """Classify error type for retry policy matching.
