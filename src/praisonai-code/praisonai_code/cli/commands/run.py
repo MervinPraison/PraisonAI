@@ -39,6 +39,26 @@ def _run_succeeded(result: Any) -> bool:
     return True
 
 
+def _run_was_truncated(agent: Any) -> bool:
+    """Whether the agent's last run stopped by hitting the step/iteration limit.
+
+    A non-empty finalisation summary is still returned when a run exhausts its
+    ``max_steps``/``max_iter`` budget, so string-emptiness alone reports a
+    *truncated* run as success. The core already records the terminal reason on
+    the agent via ``last_stop_reason`` (``"max_steps"`` on truncation), so
+    consult it to distinguish a genuine completion from a wrapped-up one.
+
+    Best-effort: any agent without the accessor (or a raising one) is treated as
+    not-truncated so the completed/failed contract is preserved unchanged.
+    """
+    if agent is None:
+        return False
+    try:
+        return getattr(agent, "last_stop_reason", None) == "max_steps"
+    except Exception:
+        return False
+
+
 def _report_run_failure(output: Any) -> None:
     """Report an agent-run failure and exit non-zero.
 
@@ -62,6 +82,30 @@ def _report_run_failure(output: Any) -> None:
         ),
     )
     raise typer.Exit(1)
+
+
+def _report_run_truncated(output: Any, result: Any) -> None:
+    """Report a step-limit-truncated run distinctly from a genuine completion.
+
+    The finalisation summary is a real (non-empty) answer, so it is preserved in
+    the emitted result; only the *status* changes to ``"truncated"`` so
+    ``--output json`` consumers and CI can branch on an incomplete run. A
+    one-line stderr notice tells an interactive user the answer is a wrap-up, not
+    a finished task. Exits with code 2 to distinguish truncation (exit 2) from a
+    hard failure (exit 1) and a clean completion (exit 0).
+    """
+    text = str(result) if result else None
+    output.emit_result(
+        message="Run truncated: hit the step/iteration limit before completing.",
+        data={"status": "truncated", "result": text},
+    )
+    if not getattr(output, "is_json_mode", False):
+        output.print_warning(
+            "Run hit the step/iteration limit; the answer above is a summary of "
+            "partial progress, not a completed task. Re-run with a higher "
+            "--max-iter/max_steps to finish."
+        )
+    raise typer.Exit(2)
 
 
 def _is_yaml_file(target: Optional[str]) -> bool:
@@ -1908,11 +1952,22 @@ def _run_prompt(
                 detach_bridge(agent, bridge)
 
             succeeded = _run_succeeded(result)
+            # A non-empty finalisation summary from a step-limit-truncated run
+            # is not a genuine completion: classify it *before* emitting the
+            # terminal stream event so a `--output stream-json` consumer never
+            # receives a contradictory ``run.result {ok: true}`` ahead of the
+            # ``status: "truncated"`` outcome (exit 2) reported below.
+            truncated = succeeded and _run_was_truncated(agent)
             if bridge is not None:
-                bridge.emit_run_result(result, ok=succeeded)
+                bridge.emit_run_result(result, ok=succeeded and not truncated)
             _record_session_usage(session_id or auto_save_name, model, output)
             if not succeeded:
                 _report_run_failure(output)
+            # Report the truncated run distinctly (exit 2 + status "truncated")
+            # so CI/users don't mistake wrapped-up partial work for a completed
+            # task.
+            if truncated:
+                _report_run_truncated(output, result)
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
@@ -2474,18 +2529,27 @@ def _run_custom_agent(
             detach_bridge(agent, bridge)
 
         succeeded = _run_succeeded(result)
+        # Classify a step-limit-truncated run *before* the terminal stream
+        # event so a `--output stream-json` consumer never receives a
+        # contradictory ``run.result {ok: true}`` ahead of the ``truncated``
+        # outcome (exit 2) reported below.
+        truncated = succeeded and _run_was_truncated(agent)
         if bridge is not None:
-            bridge.emit_run_result(result, ok=succeeded)
+            bridge.emit_run_result(result, ok=succeeded and not truncated)
         _record_session_usage(session_id or auto_save_name, model, output)
         if not succeeded:
             _report_run_failure(output)
+        if result and not output.is_json_mode:
+            print(result)
+        # Surface the truncated run distinctly (exit 2 + status "truncated")
+        # after the summary is shown, so the wrap-up text is still visible but
+        # its incomplete status is not masked as success.
+        if truncated:
+            _report_run_truncated(output, result)
         output.emit_result(
             message="Agent completed",
             data={"result": str(result) if result else None}
         )
-        
-        if result and not output.is_json_mode:
-            print(result)
     
     except typer.Exit:
         raise
@@ -2623,3 +2687,7 @@ def _run_prompt_profiled(
     # emitted after the profiling output so the profile is still shown).
     if not _run_succeeded(response):
         _report_run_failure(get_output_controller())
+    # A step-limit-truncated run is reported distinctly (exit 2 + status
+    # "truncated"), after the profile so the timing breakdown is still shown.
+    if _run_was_truncated(agent):
+        _report_run_truncated(get_output_controller(), response)
