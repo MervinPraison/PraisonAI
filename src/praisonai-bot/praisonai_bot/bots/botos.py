@@ -725,6 +725,12 @@ class BotOS:
             logger.debug(f"BotOS: no agent for schedule job {job.name}")
             return (None, False)
 
+        # Enforce the job's pinned-model snapshot before the turn: an unattended
+        # job must never silently run on a different/pricier model. Delegate to
+        # the canonical drift check so this path matches the gateway executor
+        # (issue #4079, Defect 3). No-op for unpinned/unsnapshotted jobs.
+        _restore_pin = self._enforce_pinned_model(job, agent)
+
         # Fire SCHEDULE_TRIGGER lifecycle hook (no-op when no hooks registered)
         try:
             from ._protocol_mixin import fire_schedule_trigger, _resolve_runner_from_agent
@@ -737,8 +743,13 @@ class BotOS:
         except Exception as e:
             logger.debug(f"SCHEDULE_TRIGGER emit error (non-fatal): {e}")
 
-        # Run the agent
-        result = await asyncio.to_thread(agent.chat, job.message)
+        # Run the agent (restore any run-scoped model pin afterwards so it never
+        # leaks into another, attended turn on the same shared agent instance).
+        try:
+            result = await asyncio.to_thread(agent.chat, job.message)
+        finally:
+            if _restore_pin is not None:
+                _restore_pin()
         result_str = str(result) if result else None
 
         # Deliver using the new delivery router
@@ -767,6 +778,30 @@ class BotOS:
 
         logger.info(f"BotOS: executed schedule job '{job.name}'")
         return (result_str, delivered)
+
+    @staticmethod
+    def _enforce_pinned_model(job: Any, agent: Any) -> Optional[Any]:
+        """Fail closed when a pinned job has drifted from its model snapshot.
+
+        Delegates to the gateway executor's canonical ``_check_model_drift`` so
+        the BotOS path enforces the exact same rule (issue #4079, Defect 3):
+        raises ``RuntimeError`` with the drift reason on mismatch (recorded as a
+        failed run by the surrounding tick), and otherwise returns a run-scoped
+        restore callable (or ``None`` when nothing was pinned). A no-op for
+        unpinned/unsnapshotted jobs.
+        """
+        try:
+            from ..scheduler.executor import ScheduledAgentExecutor
+        except ImportError as e:  # pragma: no cover - executor always co-located
+            logger.debug(f"BotOS: model-pin check unavailable: {e}")
+            return None
+        checker = ScheduledAgentExecutor(
+            runner=None, agent_resolver=lambda _id: None
+        )
+        drift_reason, restore = checker._check_model_drift(job, agent)
+        if drift_reason:
+            raise RuntimeError(drift_reason)
+        return restore
 
     @staticmethod
     def _summarize_job_result(result: Any) -> Optional[str]:
