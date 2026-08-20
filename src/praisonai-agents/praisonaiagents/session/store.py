@@ -694,8 +694,12 @@ class DefaultSessionStore:
         if self.retention == RETENTION_KEEP_ALL:
             return
 
-        overflow = session.messages[:-window]
-        recent = session.messages[-window:]
+        # Nudge the window boundary forward past any leading orphaned
+        # ``role="tool"`` results so the retained tail never starts mid
+        # tool-exchange (would be rejected by strict providers). Reuses the
+        # same guard as get_chat_history (Issue #3089).
+        recent = SessionData._trim_preserving_tool_exchanges(session.messages, window)
+        overflow = session.messages[: len(session.messages) - len(recent)]
 
         if self.retention == RETENTION_TRUNCATE:
             session.messages = recent

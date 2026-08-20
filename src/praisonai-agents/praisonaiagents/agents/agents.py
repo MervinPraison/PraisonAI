@@ -1466,6 +1466,22 @@ class AgentTeam(SpawnAnnounceProtocol):
                 raise result
         return results
 
+    @staticmethod
+    def _depends_on_pending(task, pending):
+        """True if ``task`` has a context dependency still pending in the batch.
+
+        ``pending`` is a list of ``(task_id, coroutine)`` pairs already queued
+        for parallel execution. If one of the task's context dependencies is in
+        that set, its result isn't available yet, so the batch must be flushed
+        before queuing this task (otherwise process_task_context reads empty
+        context for the still-in-progress dependency).
+        """
+        deps = getattr(task, 'context', None) or []
+        if not deps:
+            return False
+        pending_ids = {tid for tid, _ in pending}
+        return any(getattr(dep, 'id', None) in pending_ids for dep in deps)
+
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
         process = Process(
@@ -1477,14 +1493,21 @@ class AgentTeam(SpawnAnnounceProtocol):
         )
         
         if self.process == "workflow":
-            tasks_to_run = []
+            tasks_to_run = []  # list of (task_id, coroutine)
             async for task_id in process.aworkflow():
-                if self.tasks[task_id].async_execution:
-                    tasks_to_run.append(self.arun_task(task_id))
+                task = self.tasks[task_id]
+                if task.async_execution:
+                    # If this async task depends on another async task still
+                    # pending in the current batch, flush first so its context
+                    # is available before this one reads it.
+                    if self._depends_on_pending(task, tasks_to_run):
+                        await self._gather_with_isolation([c for _, c in tasks_to_run])
+                        tasks_to_run = []
+                    tasks_to_run.append((task_id, self.arun_task(task_id)))
                 else:
                     # If we encounter a sync task, we must wait for the previous async tasks to finish.
                     if tasks_to_run:
-                        await self._gather_with_isolation(tasks_to_run)
+                        await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
                     
                     # Run sync task in an executor to avoid blocking the event loop
@@ -1494,16 +1517,16 @@ class AgentTeam(SpawnAnnounceProtocol):
                     await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
 
             if tasks_to_run:
-                await self._gather_with_isolation(tasks_to_run)
+                await self._gather_with_isolation([c for _, c in tasks_to_run])
                 
         elif self.process == "sequential":
-            async_tasks_to_run = []
+            async_tasks_to_run = []  # list of (task_id, coroutine)
             
             async def flush_async_tasks():
                 """Execute all pending async tasks"""
                 nonlocal async_tasks_to_run
                 if async_tasks_to_run:
-                    await self._gather_with_isolation(async_tasks_to_run)
+                    await self._gather_with_isolation([c for _, c in async_tasks_to_run])
                     async_tasks_to_run = []
 
             def _deps_failed(task_id):
@@ -1525,9 +1548,16 @@ class AgentTeam(SpawnAnnounceProtocol):
                 return False
 
             async for task_id in process.asequential():
-                if self.tasks[task_id].async_execution:
+                task = self.tasks[task_id]
+                if task.async_execution:
+                    # If this async task depends on another async task still
+                    # pending in the current batch, flush first so its context
+                    # is available before this one reads it (avoids a same-batch
+                    # race that silently substitutes empty dependency context).
+                    if self._depends_on_pending(task, async_tasks_to_run):
+                        await flush_async_tasks()
                     # Collect async tasks to run in parallel
-                    async_tasks_to_run.append(self.arun_task(task_id))
+                    async_tasks_to_run.append((task_id, self.arun_task(task_id)))
                 else:
                     # Before running a sync task, execute all pending async tasks
                     await flush_async_tasks()
