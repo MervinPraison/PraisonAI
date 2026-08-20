@@ -164,12 +164,14 @@ class TestRecipeFields:
     def test_prompt_only_does_not_use_recipe_branch(self, store, executor):
         """Regression: prompt-only requests must NOT enter the recipe branch."""
         recipe_called = {"value": False}
+        agent_called = {"value": False}
 
         async def fake_run_recipe(job):
             recipe_called["value"] = True
             return "recipe-result"
 
         async def fake_run_praisonai_agents(job, agent_file):
+            agent_called["value"] = True
             return "agent-result"
 
         executor._run_recipe = fake_run_recipe
@@ -183,12 +185,17 @@ class TestRecipeFields:
         assert response.status_code == 202
         job_id = response.json()["job_id"]
 
+        result_response = None
         for _ in range(50):
             result_response = client.get(f"/api/v1/runs/{job_id}/result")
             if result_response.status_code == 200:
                 break
 
+        assert result_response is not None
+        assert result_response.status_code == 200
+        assert result_response.json()["result"] == "agent-result"
         assert recipe_called["value"] is False
+        assert agent_called["value"] is True
 
 
 class TestStatusEndpoint:
