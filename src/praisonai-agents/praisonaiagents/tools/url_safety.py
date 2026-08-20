@@ -22,9 +22,12 @@ def is_safe_http_url(
 ) -> bool:
     """Return True when *url* is safe for server-side HTTP requests.
 
-    *allowlist* is an explicit per-call-site override. It is deliberately
-    consulted *after* the IP-class checks so an allowlist entry from one
-    caller can never become a blanket loopback exemption for every caller.
+    *allowlist* is an explicit per-call-site override. Every resolved address
+    is still classified, and an allowlisted hostname only exempts the
+    *loopback* class -- private, link-local, multicast and unspecified
+    addresses stay blocked even when the host is allowlisted, so an entry can
+    never be abused to reach cloud metadata (169.254.169.254) or internal
+    ranges.
     """
     try:
         parsed = urllib.parse.urlparse(url)
@@ -37,13 +40,15 @@ def is_safe_http_url(
             allow_local = os.environ.get("ALLOW_LOCAL_CRAWL") == "true"
         if allow_local:
             return True
-        if hostname.lower() in allowlist:
-            return True
+        is_allowlisted = hostname.lower() in allowlist
         for info in socket.getaddrinfo(hostname, None):
             ip = ipaddress.ip_address(info[4][0])
+            if ip.is_loopback:
+                if is_allowlisted:
+                    continue
+                return False
             if (
-                ip.is_loopback
-                or ip.is_private
+                ip.is_private
                 or ip.is_link_local
                 or ip.is_multicast
                 or ip.is_unspecified
