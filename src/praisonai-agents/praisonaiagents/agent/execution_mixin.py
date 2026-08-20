@@ -1571,8 +1571,15 @@ Write the complete compiled report:"""
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
                     
-                    # Check if we should retry
-                    if not retry_policy.should_retry(error_type, attempt):
+                    # Check if we should retry. A tool that *raised* is flattened
+                    # into an error dict before it can be classified, so it always
+                    # arrives here as "unknown" — which no default retry_on
+                    # contains. The sync path escalates exactly those error types
+                    # to its own retry loop (tool_execution.py:853-866); honouring
+                    # the impl's explicit `retryable` flag is how the async path
+                    # reaches the same decision instead of never retrying at all.
+                    if (not retry_policy.should_retry(error_type, attempt)
+                            and result.get("retryable") is not True):
                         return result
                     
                     # Don't retry on last attempt
@@ -1815,7 +1822,16 @@ Write the complete compiled report:"""
                 # sync path. The next pre-execution check will then BLOCK/HALT.
                 if loop_guard is not None:
                     loop_guard.record(function_name, arguments, False, result=None)
-                return {"error": f"Error executing {function_name}: {str(e)}"}
+                # Carry the retry verdict with the flattened exception. Without it
+                # the caller only sees an opaque error string, classifies it as
+                # "unknown" (never in RetryPolicy.retry_on) and gives up — while
+                # the sync path, which still has the exception object, retries.
+                # Same rule as the sync path: programming errors are terminal,
+                # everything else may be retried.
+                return {
+                    "error": f"Error executing {function_name}: {str(e)}",
+                    "retryable": not isinstance(e, (ValueError, TypeError, AttributeError)),
+                }
 
         except ToolExecutionError:
             # A loop-guard HALT must propagate to stop the run, mirroring the sync
