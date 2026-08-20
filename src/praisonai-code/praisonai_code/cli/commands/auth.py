@@ -24,20 +24,40 @@ app = typer.Typer(help="Manage API credentials")
 # Provider id -> environment variable holding its API key. Used to fold active
 # env-sourced credentials into `auth list`/`status` so users can tell which
 # credential is live (env vs stored).
-_PROVIDER_ENV_KEYS = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "google": "GOOGLE_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "xai": "XAI_API_KEY",
-    "cohere": "COHERE_API_KEY",
-    "together": "TOGETHER_API_KEY",
-    "perplexity": "PERPLEXITYAI_API_KEY",
-}
+#
+# Derived from the canonical PROVIDER_ENV_CATALOGUE so this surface can no
+# longer diverge from key auto-detection, provider inference, and env mapping;
+# adding a provider is a single catalogue edit. The value is the provider's
+# canonical (first) credential env-var. Falls back to the historical literal
+# map if the catalogue import is unavailable (offline/degraded), exactly as
+# credentials.py does.
+def _build_provider_env_keys() -> dict:
+    try:
+        from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+
+        return {
+            provider: env_vars[0]
+            for provider, (env_vars, _model, _prefix) in PROVIDER_ENV_CATALOGUE.items()
+            if env_vars
+        }
+    except Exception:
+        return {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "google": "GOOGLE_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "mistral": "MISTRAL_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "xai": "XAI_API_KEY",
+            "cohere": "COHERE_API_KEY",
+            "together": "TOGETHER_API_KEY",
+            "perplexity": "PERPLEXITYAI_API_KEY",
+        }
+
+
+_PROVIDER_ENV_KEYS = _build_provider_env_keys()
 
 
 def _env_credentials() -> dict[str, tuple[str, str]]:

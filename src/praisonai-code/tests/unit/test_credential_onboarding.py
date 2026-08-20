@@ -18,10 +18,13 @@ import pytest
 from praisonai_code.cli.features.setup.handler import SetupHandler
 from praisonai_code.llm.catalogue import (
     ModelCatalogue,
+    PROVIDER_ENV_CATALOGUE,
     PROVIDER_KEY_URLS,
     key_url_for_provider,
 )
 from praisonai_code.cli.commands import auth as auth_cmd
+from praisonai_code.cli.configuration import model_resolver
+from praisonai_code.llm import env as llm_env
 
 
 _PROVIDER_KEY_VARS = (
@@ -42,7 +45,17 @@ _PROVIDER_KEY_VARS = (
 
 @pytest.fixture
 def clean_env(monkeypatch):
-    for var in _PROVIDER_KEY_VARS + ("MODEL_NAME", "OPENAI_MODEL_NAME"):
+    # Clear every credential env-var declared in the catalogue (plus the legacy
+    # literals and model overrides) so per-provider detection tests are
+    # hermetic regardless of the host environment.
+    catalogue_vars = tuple(
+        var
+        for env_vars, _model, _prefix in PROVIDER_ENV_CATALOGUE.values()
+        for var in env_vars
+    )
+    for var in set(
+        _PROVIDER_KEY_VARS + catalogue_vars + ("MODEL_NAME", "OPENAI_MODEL_NAME")
+    ):
         monkeypatch.delenv(var, raising=False)
     return monkeypatch
 
@@ -175,3 +188,37 @@ def test_auth_key_url_hint_uses_print_info():
     auth_cmd._print_key_url_hint("anthropic", _Out())
     assert calls
     assert "Get your key" in calls[0]
+
+
+# --- issue #4097: no provider->env-var drift across consumers ---------------
+
+
+@pytest.mark.parametrize("provider", sorted(PROVIDER_ENV_CATALOGUE))
+def test_auth_env_keys_derived_from_catalogue(provider):
+    # `auth list`/`status` must know every catalogued provider, using the
+    # catalogue's canonical (first) env-var — no separate hand-maintained map.
+    env_vars = PROVIDER_ENV_CATALOGUE[provider][0]
+    assert auth_cmd._PROVIDER_ENV_KEYS[provider] == env_vars[0]
+
+
+@pytest.mark.parametrize("provider", sorted(PROVIDER_ENV_CATALOGUE))
+def test_provider_for_model_resolves_every_catalogue_provider(clean_env, provider):
+    # The transparency "using {model} because {provider} is present" line must
+    # infer a credential env-var for every catalogued provider's default model,
+    # including the newer ones (openrouter/mistral/deepseek/xai/…) the old
+    # hardcoded if-ladder returned None for.
+    default_model = PROVIDER_ENV_CATALOGUE[provider][1]
+    env_var = model_resolver._provider_for_model(default_model)
+    assert env_var in PROVIDER_ENV_CATALOGUE[provider][0]
+
+
+@pytest.mark.parametrize("provider", sorted(PROVIDER_ENV_CATALOGUE))
+def test_env_default_detected_for_every_catalogue_provider(clean_env, provider):
+    # First-run key auto-detection (env.py) must recognise a key for every
+    # catalogued provider and return that provider's default model.
+    env_var = PROVIDER_ENV_CATALOGUE[provider][0][0]
+    clean_env.setenv(env_var, "test-key-value")
+    assert (
+        llm_env.default_model_for_available_provider()
+        == PROVIDER_ENV_CATALOGUE[provider][1]
+    )
