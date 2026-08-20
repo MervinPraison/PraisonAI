@@ -1,6 +1,13 @@
 # Pattern D — Platform API integration (defer)
 
-Pattern D connects PraisonAIUI dashboard pages to **PraisonAI Cloud** via `PlatformClient` `/api/v1`.
+Pattern D connects PraisonAIUI dashboard pages to a **PraisonAI Platform** server via `PlatformClient` `/api/v1`.
+
+> The platform is an optional, separately released service maintained at
+> [MervinPraison/PraisonAI-Platform](https://github.com/MervinPraison/PraisonAI-Platform).
+> Nothing in this repository depends on it, and no self-hosted install needs it.
+> The agent roster lives at `/api/v1/workspaces/{workspace_id}/agents` — note
+> that `/api/v1/agents` is a different, unrelated endpoint served by
+> `praisonai serve agents`.
 
 ## Scope (P3)
 
