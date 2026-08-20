@@ -26,7 +26,7 @@ class DaytonaCompute(SyncComputeProvider):
     Example::
 
         from praisonaiagents.managed import ComputeConfig
-        from praisonai.integrations.compute.daytona import DaytonaCompute
+        from praisonai_sandbox.compute.daytona import DaytonaCompute
 
         compute = DaytonaCompute()
         config = ComputeConfig(

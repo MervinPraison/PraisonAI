@@ -30,7 +30,7 @@ class TenkiCompute(SyncComputeProvider):
     Example::
 
         from praisonaiagents.managed import ComputeConfig
-        from praisonai.integrations.compute.tenki import TenkiCompute
+        from praisonai_sandbox.compute.tenki import TenkiCompute
 
         compute = TenkiCompute()
         config = ComputeConfig(

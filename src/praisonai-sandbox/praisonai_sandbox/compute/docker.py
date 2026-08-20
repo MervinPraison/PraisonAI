@@ -111,7 +111,7 @@ class DockerCompute:
     Example::
 
         from praisonaiagents.managed import ComputeConfig
-        from praisonai.integrations.compute import DockerCompute
+        from praisonai_sandbox.compute.docker import DockerCompute
 
         compute = DockerCompute()
         config = ComputeConfig(

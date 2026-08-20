@@ -26,7 +26,7 @@ class E2BCompute(SyncComputeProvider):
     Example::
 
         from praisonaiagents.managed import ComputeConfig
-        from praisonai.integrations.compute.e2b import E2BCompute
+        from praisonai_sandbox.compute.e2b import E2BCompute
 
         compute = E2BCompute()
         config = ComputeConfig(

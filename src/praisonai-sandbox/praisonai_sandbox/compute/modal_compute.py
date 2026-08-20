@@ -27,7 +27,7 @@ class ModalCompute(SyncComputeProvider):
     Example::
 
         from praisonaiagents.managed import ComputeConfig
-        from praisonai.integrations.compute.modal_compute import ModalCompute
+        from praisonai_sandbox.compute.modal_compute import ModalCompute
 
         compute = ModalCompute()
         config = ComputeConfig(

@@ -38,7 +38,7 @@ class FlyioCompute(SyncComputeProvider):
     Example::
 
         from praisonaiagents.managed import ComputeConfig
-        from praisonai.integrations.compute.flyio import FlyioCompute
+        from praisonai_sandbox.compute.flyio import FlyioCompute
 
         compute = FlyioCompute()
         config = ComputeConfig(
