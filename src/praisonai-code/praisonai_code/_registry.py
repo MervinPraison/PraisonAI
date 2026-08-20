@@ -121,6 +121,18 @@ class PluginRegistry(Generic[T]):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+                if ep.name.lower() in self._builtin_names:
+                    # Same rule as the canonical path: a third-party distribution
+                    # must never replace a built-in, whichever group it publishes
+                    # under. Legacy discovery runs first, so without this the
+                    # deprecated spelling is a bypass for the guard.
+                    logger.debug(
+                        "Legacy entry point %r in group %s matches a built-in "
+                        "loader; keeping the built-in.",
+                        ep.name,
+                        group,
+                    )
+                    continue
                 self._add_loader(ep.name, ep.load)
 
     def register(
