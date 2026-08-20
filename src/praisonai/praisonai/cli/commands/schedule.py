@@ -157,11 +157,19 @@ def schedule_add_cmd(
                 output.print_error(f"Failed to set command/pre-run gate: {e}")
                 raise typer.Exit(1)
 
+        # A duplicate-name response is a rejection: report it as an error and
+        # exit non-zero so scripts/CI never treat a rejected add (which created
+        # nothing and mutated nothing) as success. Match the two rejection
+        # shapes ``schedule_add`` can return precisely so a genuine success
+        # message is never misclassified.
+        add_failed = ("Error" in result) or ("already exists" in result)
         if json_output:
             import json as _json
             print(_json.dumps({"result": result}))
+            if add_failed:
+                raise typer.Exit(1)
         else:
-            if "Error" in result:
+            if add_failed:
                 output.print_error(result)
                 raise typer.Exit(1)
             else:

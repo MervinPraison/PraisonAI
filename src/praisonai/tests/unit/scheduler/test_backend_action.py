@@ -172,6 +172,44 @@ def test_backend_empty_message_skipped(fake_backend):
     assert backend.calls == []
 
 
+def test_schedule_add_duplicate_is_rejected_no_mutation(monkeypatch):
+    """A duplicate-name ``schedule add --backend`` must be a genuine no-op:
+    it neither mutates the pre-existing same-named job nor exits 0."""
+    import typer
+    from praisonai.cli.commands import schedule as sched_cmd
+    import praisonaiagents.tools.schedule_tools as tools
+
+    duplicate_msg = (
+        "A schedule named 'nightly' already exists (id: abc123). "
+        "Remove it first or choose a different name."
+    )
+    monkeypatch.setattr(tools, "schedule_add", lambda **kw: duplicate_msg)
+
+    class FakeStore:
+        def __init__(self):
+            self.updated = []
+
+        def get_by_name(self, name):  # pragma: no cover - must not be reached
+            raise AssertionError("existing job must not be fetched for mutation")
+
+        def update(self, job):  # pragma: no cover - must not be reached
+            self.updated.append(job)
+
+    store = FakeStore()
+    monkeypatch.setattr(tools, "_get_store", lambda: store)
+
+    with pytest.raises(typer.Exit) as exc:
+        sched_cmd.schedule_add_cmd(
+            name="nightly",
+            schedule="cron:0 2 * * *",
+            message="tidy",
+            backend="claude-code",
+            json_output=False,
+        )
+    assert exc.value.exit_code == 1
+    assert store.updated == []
+
+
 def test_backend_fields_round_trip():
     job = _backend_job(options={"cwd": "/tmp/ws"})
     data = job.to_dict()
