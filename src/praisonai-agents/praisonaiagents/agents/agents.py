@@ -654,7 +654,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         name: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
         llm: Optional[str] = None,  # Deprecated alias for model=
-        model: Optional[str] = None,  # Default model for all agents
+        model: Optional[str] = None,  # Default model for members that did not name one
         # Consolidated feature params (agent-centric API)
         memory: Optional[Any] = False,  # Union[bool, MultiAgentMemoryConfig]
         planning: Optional[Any] = False,  # Union[bool, MultiAgentPlanningConfig]
