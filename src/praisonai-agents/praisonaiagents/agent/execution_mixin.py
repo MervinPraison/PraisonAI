@@ -1565,7 +1565,8 @@ Write the complete compiled report:"""
                         result.get("approval_error") or
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
-                        result.get("retryable") is False):
+                        result.get("_praison_retryable") is False):
+                        result.pop("_praison_retryable", None)
                         return result
                     
                     # Determine error type for retry policy
@@ -1578,12 +1579,18 @@ Write the complete compiled report:"""
                     # to its own retry loop (tool_execution.py:853-866); honouring
                     # the impl's explicit `retryable` flag is how the async path
                     # reaches the same decision instead of never retrying at all.
+                    # `_praison_retryable` is a private control-plane key (see
+                    # _execute_tool_async_impl): a tool's own result may legitimately
+                    # contain "retryable" (common for HTTP-API wrappers) and must
+                    # never steer our retry loop.
                     if (not retry_policy.should_retry(error_type, attempt)
-                            and result.get("retryable") is not True):
+                            and result.get("_praison_retryable") is not True):
+                        result.pop("_praison_retryable", None)
                         return result
                     
                     # Don't retry on last attempt
                     if attempt == retry_policy.max_attempts - 1:
+                        result.pop("_praison_retryable", None)
                         return result
                     
                     # Emit retry hook event  
@@ -1782,7 +1789,7 @@ Write the complete compiled report:"""
                         result = {
                             "error": f"Tool timed out after {tool_timeout}s",
                             "timeout": True,
-                            "retryable": False,
+                            "_praison_retryable": False,
                         }
                 else:
                     result = await _invoke()
@@ -1835,9 +1842,12 @@ Write the complete compiled report:"""
                     retryable = e.is_retryable
                 else:
                     retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                # Private control-plane key: a tool's own result may legitimately
+                # contain "retryable" (common for HTTP-API wrappers) and must not
+                # collide with the framework's verdict nor leak to the model.
                 return {
                     "error": f"Error executing {function_name}: {str(e)}",
-                    "retryable": retryable,
+                    "_praison_retryable": retryable,
                 }
 
         except ToolExecutionError:
