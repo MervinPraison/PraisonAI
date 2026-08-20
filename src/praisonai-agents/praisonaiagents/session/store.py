@@ -32,8 +32,42 @@ logger = get_logger(__name__)
 # Module-level sentinel to track if we've warned about degraded locking
 _WARNED_NO_FCNTL = False
 
-# Default session directory (uses centralized paths - DRY)
-DEFAULT_SESSION_DIR = str(get_sessions_dir())
+# Default session directory (uses centralized paths - DRY).
+#
+# Deliberately NOT a module constant. Evaluating ``get_sessions_dir()`` at
+# import time froze the store root to whatever ``PRAISONAI_HOME`` resolved to
+# during the first import of this module, so any later override -- a container
+# exporting ``PRAISONAI_HOME`` after the package was imported, a test
+# monkeypatching ``get_sessions_dir`` -- was silently ignored and reads/writes
+# went to the wrong store. It is resolved live instead.
+#
+# ``DEFAULT_SESSION_DIR`` remains readable as a module attribute (resolved at
+# access time via the PEP 562 ``__getattr__`` below) and remains assignable as
+# an explicit override, so existing importers and tests keep working.
+
+
+def _resolve_default_session_dir() -> str:
+    """Resolve the default session directory *now*.
+
+    An explicit ``praisonaiagents.session.store.DEFAULT_SESSION_DIR = ...``
+    assignment still wins (a documented test/embedding hook); with no
+    assignment the value is resolved live from :func:`get_sessions_dir`.
+    """
+    override = globals().get("DEFAULT_SESSION_DIR")
+    if override:
+        return str(override)
+    return str(get_sessions_dir())
+
+
+def __getattr__(name: str):
+    """Module-level attribute hook (PEP 562).
+
+    Keeps ``from praisonaiagents.session.store import DEFAULT_SESSION_DIR``
+    working, but resolves the value at access time instead of at import time.
+    """
+    if name == "DEFAULT_SESSION_DIR":
+        return str(get_sessions_dir())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Default limits
 DEFAULT_MAX_MESSAGES = 100
@@ -590,7 +624,7 @@ class DefaultSessionStore:
                 local write always happens first and a mirror outage never
                 blocks or fails the turn). Left ``None`` there is zero overhead.
         """
-        self.session_dir = session_dir or DEFAULT_SESSION_DIR
+        self.session_dir = session_dir or _resolve_default_session_dir()
         self.max_messages = max_messages
         self.lock_timeout = lock_timeout
 
@@ -2226,6 +2260,13 @@ class DefaultSessionStore:
 _default_store: Optional[DefaultSessionStore] = None
 _store_lock = threading.Lock()
 
+# Identity + directory of the store this module auto-created, so a store that
+# was injected by a caller (``store._default_store = my_store`` -- a widely used
+# test/embedding hook) is never second-guessed, while one we created ourselves
+# is rebuilt when the resolved session directory changes.
+_autocreated_store: Optional[DefaultSessionStore] = None
+_autocreated_dir: Optional[str] = None
+
 def get_default_session_store() -> DefaultSessionStore:
     """Get the global default session store instance.
 
@@ -2236,32 +2277,58 @@ def get_default_session_store() -> DefaultSessionStore:
     - ``PRAISONAI_SESSION_RETENTION``: ``compact`` | ``truncate`` | ``keep_all``
     - ``PRAISONAI_SESSION_ACTIVE_WINDOW``: int, recent turns kept live
     """
-    global _default_store
-    
-    if _default_store is None:
-        with _store_lock:
-            if _default_store is None:
-                retention = os.environ.get("PRAISONAI_SESSION_RETENTION")
-                active_window_env = os.environ.get("PRAISONAI_SESSION_ACTIVE_WINDOW")
-                active_window: Optional[int] = None
-                if active_window_env:
-                    try:
-                        active_window = int(active_window_env)
-                    except ValueError:
-                        logger.warning(
-                            "Invalid PRAISONAI_SESSION_ACTIVE_WINDOW=%r; ignoring",
-                            active_window_env,
-                        )
-                try:
-                    _default_store = DefaultSessionStore(
-                        retention=retention,
-                        active_window=active_window,
-                    )
-                except ValueError:
-                    logger.warning(
-                        "Invalid PRAISONAI_SESSION_RETENTION=%r; using default",
-                        retention,
-                    )
-                    _default_store = DefaultSessionStore(active_window=active_window)
-    
+    global _default_store, _autocreated_store, _autocreated_dir
+
+    # The singleton is keyed on the *currently* resolved session directory. A
+    # process that changes PRAISONAI_HOME (or a test that repoints
+    # get_sessions_dir) must not keep reading and deleting sessions in the
+    # directory that happened to be active when this module was first imported.
+    resolved_dir = _resolve_default_session_dir()
+
+    def _usable(candidate: Optional["DefaultSessionStore"]) -> bool:
+        if candidate is None:
+            return False
+        # Injected by a caller: honour it verbatim.
+        if candidate is not _autocreated_store:
+            return True
+        return _autocreated_dir == resolved_dir
+
+    store = _default_store
+    if _usable(store):
+        return store
+
+    with _store_lock:
+        store = _default_store
+        if _usable(store):
+            return store
+
+        retention = os.environ.get("PRAISONAI_SESSION_RETENTION")
+        active_window_env = os.environ.get("PRAISONAI_SESSION_ACTIVE_WINDOW")
+        active_window: Optional[int] = None
+        if active_window_env:
+            try:
+                active_window = int(active_window_env)
+            except ValueError:
+                logger.warning(
+                    "Invalid PRAISONAI_SESSION_ACTIVE_WINDOW=%r; ignoring",
+                    active_window_env,
+                )
+        try:
+            _default_store = DefaultSessionStore(
+                session_dir=resolved_dir,
+                retention=retention,
+                active_window=active_window,
+            )
+        except ValueError:
+            logger.warning(
+                "Invalid PRAISONAI_SESSION_RETENTION=%r; using default",
+                retention,
+            )
+            _default_store = DefaultSessionStore(
+                session_dir=resolved_dir,
+                active_window=active_window,
+            )
+        _autocreated_store = _default_store
+        _autocreated_dir = resolved_dir
+
     return _default_store

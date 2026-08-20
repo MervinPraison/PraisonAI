@@ -664,7 +664,10 @@ class TestAgentSessionIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Patch the default session directory
             import praisonaiagents.session.store as store_module
-            original_dir = store_module.DEFAULT_SESSION_DIR
+            # Read from __dict__: DEFAULT_SESSION_DIR is resolved lazily via the
+            # module __getattr__ unless somebody assigned it, and restoring a
+            # resolved value would pin the store root for the whole test session.
+            original_dir = store_module.__dict__.get("DEFAULT_SESSION_DIR")
             store_module.DEFAULT_SESSION_DIR = tmpdir
             
             # Reset global store
@@ -684,7 +687,10 @@ class TestAgentSessionIntegration:
                 # Agent with memory=True should be created successfully
                 assert agent is not None
             finally:
-                store_module.DEFAULT_SESSION_DIR = original_dir
+                if original_dir is None:
+                    store_module.__dict__.pop("DEFAULT_SESSION_DIR", None)
+                else:
+                    store_module.DEFAULT_SESSION_DIR = original_dir
                 store_module._default_store = None
     
     def test_agent_no_session_id_no_persistence(self):

@@ -308,9 +308,13 @@ class TestPersistAutoSaveNoDuplicates:
 
     def test_persist_then_auto_save_does_not_duplicate(self, tmp_path, monkeypatch):
         """memory=history + auto_save: one turn should persist exactly two messages."""
-        monkeypatch.setenv("PRAISONAI_SESSIONS_DIR", str(tmp_path))
-        import praisonaiagents.session as session_mod
-        session_mod._default_store = None
+        # PRAISONAI_HOME is the env var the paths helper actually reads, and
+        # the singleton lives on praisonaiagents.session.store -- setting a
+        # non-existent var on the package module isolated nothing, so this test
+        # used to read and write the developer's real ~/.praisonai/sessions.
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        import praisonaiagents.session.store as store_module
+        monkeypatch.setattr(store_module, "_default_store", None, raising=False)
 
         from praisonaiagents import Agent
         from praisonaiagents.session import get_default_session_store
@@ -338,9 +342,13 @@ class TestSessionSaveStateNoDuplicates:
     """Repeated save_state() must not append duplicate chat history."""
 
     def test_repeated_save_agent_histories_is_idempotent(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("PRAISONAI_SESSIONS_DIR", str(tmp_path))
-        import praisonaiagents.session as session_mod
-        session_mod._default_store = None
+        # PRAISONAI_HOME is the env var the paths helper actually reads, and
+        # the singleton lives on praisonaiagents.session.store -- setting a
+        # non-existent var on the package module isolated nothing, so this test
+        # used to read and write the developer's real ~/.praisonai/sessions.
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        import praisonaiagents.session.store as store_module
+        monkeypatch.setattr(store_module, "_default_store", None, raising=False)
 
         from unittest.mock import MagicMock
         from praisonaiagents.session import Session, get_default_session_store
