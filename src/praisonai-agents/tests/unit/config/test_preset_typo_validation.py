@@ -6,6 +6,7 @@ verbose=False (the silent default) instead of reporting the typo.
 import pytest
 
 from praisonaiagents import Agent
+from praisonaiagents.config.presets import EXECUTION_PRESETS
 
 # (param, typo, expected suggestion in the error message)
 TYPOED_PRESETS = [
@@ -111,6 +112,48 @@ NORMALIZED_VALID_PRESETS = [
 @pytest.mark.parametrize("param,value", NORMALIZED_VALID_PRESETS)
 def test_normalized_preset_accepted(param, value):
     assert Agent(instructions="t", **{param: value}) is not None
+
+
+@pytest.mark.parametrize("value", ["summarize", " summarize ", "SUMMARIZE",
+                                   "sliding_window", "sliding-window"])
+def test_context_variant_actually_resolves(value):
+    """Accepting a spelling and then disabling the feature is worse than
+    rejecting it: the user believes context management is on."""
+    assert Agent(instructions="t", context=value).context_manager is not None
+
+
+@pytest.mark.parametrize("value", ["full_auto", " full_auto ", "FULL_AUTO", "auto-edit"])
+def test_autonomy_variant_actually_resolves(value):
+    """autonomy= gates the snapshot/doom-loop machinery; a blessed spelling
+    must never leave it silently off."""
+    assert Agent(instructions="t", autonomy=value).autonomy_enabled is True
+
+
+@pytest.mark.parametrize("value", [" verbose ", "VERBOSE", "verbose"])
+def test_output_variant_actually_resolves(value):
+    """output=' verbose ' must resolve to the verbose preset, not silent."""
+    agent = Agent(instructions="t", output=value)
+    assert agent.verbose is True
+    assert agent.markdown is True
+
+
+@pytest.mark.parametrize("value", [" thorough ", "THOROUGH", "thorough"])
+def test_execution_variant_actually_resolves(value):
+    """execution=' thorough ' must resolve to the thorough preset."""
+    agent = Agent(instructions="t", execution=value)
+    assert agent.max_iter == EXECUTION_PRESETS["thorough"]["max_iter"]
+
+
+def test_no_preset_dict_has_hyphen_underscore_collision():
+    """canonical_preset_key collapses '-' and '_'; guard against a future
+    preset dict containing both spellings as distinct keys."""
+    from praisonaiagents.config.parse_utils import canonical_preset_key
+    from praisonaiagents.config.presets import (
+        CONTEXT_PRESETS, AUTONOMY_PRESETS, OUTPUT_PRESETS, EXECUTION_PRESETS,
+    )
+    for presets in (CONTEXT_PRESETS, AUTONOMY_PRESETS, OUTPUT_PRESETS, EXECUTION_PRESETS):
+        canon = [canonical_preset_key(k) for k in presets]
+        assert len(canon) == len(set(canon))
 
 
 @pytest.mark.parametrize("value", [" agentic ", "AGENTIC", "propose", " PROPOSE "])
