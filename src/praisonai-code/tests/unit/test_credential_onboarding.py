@@ -115,7 +115,7 @@ def test_provider_setup_info_env_key_matches_auth_for_perplexity():
         "perplexity", defaults
     )
     assert env_key == "PERPLEXITYAI_API_KEY"
-    assert env_key == auth_cmd._PROVIDER_ENV_KEYS["perplexity"]
+    assert env_key in auth_cmd._PROVIDER_ENV_KEYS["perplexity"]
 
 
 def test_provider_setup_info_derives_default_model_for_catalogue_provider():
@@ -195,10 +195,30 @@ def test_auth_key_url_hint_uses_print_info():
 
 @pytest.mark.parametrize("provider", sorted(PROVIDER_ENV_CATALOGUE))
 def test_auth_env_keys_derived_from_catalogue(provider):
-    # `auth list`/`status` must know every catalogued provider, using the
-    # catalogue's canonical (first) env-var — no separate hand-maintained map.
+    # `auth list`/`status` must know every catalogued provider, retaining ALL
+    # of its credential env-var aliases (not just the canonical first) — no
+    # separate hand-maintained map.
     env_vars = PROVIDER_ENV_CATALOGUE[provider][0]
-    assert auth_cmd._PROVIDER_ENV_KEYS[provider] == env_vars[0]
+    assert auth_cmd._PROVIDER_ENV_KEYS[provider] == tuple(env_vars)
+
+
+@pytest.mark.parametrize(
+    "provider",
+    sorted(p for p, (env_vars, *_r) in PROVIDER_ENV_CATALOGUE.items() if len(env_vars) > 1),
+)
+def test_auth_surfaces_every_credential_alias(clean_env, provider):
+    # A provider with multiple credential spellings (e.g. Together's
+    # TOGETHERAI_API_KEY, Fireworks' FIREWORKS_AI_API_KEY) must be recognised by
+    # `auth list`/`status` when the user set ANY alias — not only the canonical
+    # first — so the auth surface never disagrees with runtime detection.
+    for alias in PROVIDER_ENV_CATALOGUE[provider][0]:
+        for var in PROVIDER_ENV_CATALOGUE[provider][0]:
+            clean_env.delenv(var, raising=False)
+        clean_env.setenv(alias, "test-key-value")
+        creds = auth_cmd._env_credentials()
+        assert provider in creds
+        assert creds[provider][0] == alias
+        assert auth_cmd._active_env_var(provider) == alias
 
 
 @pytest.mark.parametrize("provider", sorted(PROVIDER_ENV_CATALOGUE))
