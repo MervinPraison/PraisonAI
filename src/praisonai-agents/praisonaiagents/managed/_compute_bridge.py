@@ -11,18 +11,18 @@ from __future__ import annotations
 import importlib
 from typing import Any, Optional
 
-_INSTALL_HINT = "Remote compute requires the wrapper package: pip install praisonai"
+_INSTALL_HINT = "Remote compute requires: pip install praisonai-sandbox"
 
 # name -> (module, attribute). Kept in sync with
 # praisonai.integrations.managed_local._resolve_compute
 _PROVIDERS = {
-    "local": ("praisonai.integrations.compute.local", "LocalCompute"),
-    "docker": ("praisonai.integrations.compute.docker", "DockerCompute"),
-    "e2b": ("praisonai.integrations.compute.e2b", "E2BCompute"),
-    "modal": ("praisonai.integrations.compute.modal_compute", "ModalCompute"),
-    "daytona": ("praisonai.integrations.compute.daytona", "DaytonaCompute"),
-    "flyio": ("praisonai.integrations.compute.flyio", "FlyioCompute"),
-    "tenki": ("praisonai.integrations.compute.tenki", "TenkiCompute"),
+    "local": ("praisonai_sandbox.compute.local", "LocalCompute"),
+    "docker": ("praisonai_sandbox.compute.docker", "DockerCompute"),
+    "e2b": ("praisonai_sandbox.compute.e2b", "E2BCompute"),
+    "modal": ("praisonai_sandbox.compute.modal_compute", "ModalCompute"),
+    "daytona": ("praisonai_sandbox.compute.daytona", "DaytonaCompute"),
+    "flyio": ("praisonai_sandbox.compute.flyio", "FlyioCompute"),
+    "tenki": ("praisonai_sandbox.compute.tenki", "TenkiCompute"),
 }
 
 # What to actually type when a provider is missing. Every name here must point
@@ -30,19 +30,17 @@ _PROVIDERS = {
 # extras that were absent or empty, so a user followed the official hint, waited
 # for the install, and hit the identical failure again.
 #
-# For a compute provider in _PROVIDERS the failing import is
-# `praisonai.integrations.compute.*`, so the fix has to deliver the `praisonai`
-# wrapper itself: `praisonai[<vendor>]` pulls in the wrapper AND delegates to
-# `praisonai-sandbox[<vendor>]` for the vendor SDK, whereas
-# `praisonai-sandbox[<vendor>]` alone would install the SDK but not the module,
-# leaving the next resolve failing the same way. Sandbox-only places
-# (novita/sandlock/ssh) resolve through the SandboxComputeAdapter instead and
-# only need `praisonai-sandbox`.
+# The providers in _PROVIDERS now live in praisonai-sandbox, so the failing
+# import is `praisonai_sandbox.compute.*`: point the hint at the lightweight
+# package that owns the module, not the heavy wrapper. Reaching E2B through
+# praisonai-sandbox[e2b] resolves 58 packages against 143 through praisonai.
+# Sandbox-only places (novita/sandlock/ssh) resolve through the
+# SandboxComputeAdapter and only need `praisonai-sandbox`.
 _EXTRA_HINTS = {
-    "e2b": "pip install 'praisonai[e2b]'",
-    "modal": "pip install 'praisonai[modal]'",
-    "daytona": "pip install 'praisonai[daytona]'",
-    "docker": "pip install 'praisonai[docker]'",
+    "e2b": "pip install 'praisonai-sandbox[e2b]'",
+    "modal": "pip install 'praisonai-sandbox[modal]'",
+    "daytona": "pip install 'praisonai-sandbox[daytona]'",
+    "docker": "pip install 'praisonai-sandbox[docker]'",
     "novita": "pip install 'praisonai-sandbox[novita]'",
     "sandlock": "pip install 'praisonai-sandbox[sandlock]'",
     "ssh": "pip install 'praisonai-sandbox[ssh]'",
@@ -50,7 +48,7 @@ _EXTRA_HINTS = {
     # HTTP through aiohttp, which praisonaiagents already requires. Export the
     # variable so a child process inherits it -- a bare assignment would not.
     "flyio": "export FLY_API_TOKEN=... (see https://fly.io/docs/flyctl/auth-token)",
-    "tenki": "export TENKI_API_KEY=... (or TENKI_AUTH_TOKEN=...)",
+    "tenki": "pip install 'praisonai-sandbox[tenki]'",
 }
 
 
