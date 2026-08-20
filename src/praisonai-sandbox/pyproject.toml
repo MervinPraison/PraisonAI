@@ -28,6 +28,14 @@ sandlock = [
 ssh = [
     "asyncssh>=2.14.0",
 ]
+
+# Compute-side vendors. flyio needs no pin -- it speaks plain HTTP through
+# aiohttp, which praisonaiagents already requires.
+tenki = [
+    "tenki>=0.5.4",
+]
+
+flyio = []
 modal = [
     "modal>=0.64.0",
 ]

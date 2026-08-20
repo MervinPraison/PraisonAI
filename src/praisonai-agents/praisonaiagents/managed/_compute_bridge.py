@@ -11,18 +11,18 @@ from __future__ import annotations
 import importlib
 from typing import Any, Optional
 
-_INSTALL_HINT = "Remote compute requires the wrapper package: pip install praisonai"
+_INSTALL_HINT = "Remote compute requires: pip install praisonai-sandbox"
 
 # name -> (module, attribute). Kept in sync with
 # praisonai.integrations.managed_local._resolve_compute
 _PROVIDERS = {
-    "local": ("praisonai.integrations.compute.local", "LocalCompute"),
-    "docker": ("praisonai.integrations.compute.docker", "DockerCompute"),
-    "e2b": ("praisonai.integrations.compute.e2b", "E2BCompute"),
-    "modal": ("praisonai.integrations.compute.modal_compute", "ModalCompute"),
-    "daytona": ("praisonai.integrations.compute.daytona", "DaytonaCompute"),
-    "flyio": ("praisonai.integrations.compute.flyio", "FlyioCompute"),
-    "tenki": ("praisonai.integrations.compute.tenki", "TenkiCompute"),
+    "local": ("praisonai_sandbox.compute.local", "LocalCompute"),
+    "docker": ("praisonai_sandbox.compute.docker", "DockerCompute"),
+    "e2b": ("praisonai_sandbox.compute.e2b", "E2BCompute"),
+    "modal": ("praisonai_sandbox.compute.modal_compute", "ModalCompute"),
+    "daytona": ("praisonai_sandbox.compute.daytona", "DaytonaCompute"),
+    "flyio": ("praisonai_sandbox.compute.flyio", "FlyioCompute"),
+    "tenki": ("praisonai_sandbox.compute.tenki", "TenkiCompute"),
 }
 
 # What to actually type when a provider is missing. Every name here must point

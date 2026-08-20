@@ -105,7 +105,7 @@ daytona = [
     "praisonai-sandbox[daytona]",
 ]
 tenki = [
-    "tenki>=0.5.4",
+    "praisonai-sandbox[tenki]",
 ]
 realtime = [
     "aiui>=0.3.121,<0.4",
