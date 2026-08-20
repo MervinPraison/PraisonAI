@@ -19,22 +19,51 @@ from typing import Dict, Any, Iterator, List, Mapping, Optional, Tuple
 from .base import FlagHandler
 
 
+_WRAPPER_TOO_OLD = (
+    "your installed 'praisonai' wrapper is too old for --external-agent "
+    "(missing external_agent_catalog); upgrade with: pip install -U praisonai"
+)
+
+
+def _resolve_catalog_fn():
+    """Return ``(fn, error)`` for the wrapper's ``external_agent_catalog``.
+
+    Distinguishes three states so a version-skewed install is not mistaken for
+    an empty catalog (issue #4167):
+
+    - wrapper absent            -> ``(None, None)`` (standalone: degrade quietly)
+    - wrapper present but old    -> ``(None, _WRAPPER_TOO_OLD)`` (report it)
+    - wrapper present and current-> ``(fn, None)``
+
+    Routed through ``_wrapper_bridge`` so ``praisonai-code`` keeps its C7/C8
+    import boundary (no direct ``from praisonai.*`` reverse import).
+    """
+    from praisonai_code._wrapper_bridge import get_wrapper_attr, wrapper_available
+
+    if not wrapper_available():
+        return None, None
+    try:
+        return get_wrapper_attr(
+            "praisonai.integrations.registry", "external_agent_catalog"
+        ), None
+    except AttributeError:
+        # Wrapper importable but predates external_agent_catalog: a mixed-version
+        # install. Surface it rather than silently returning ``{}``.
+        return None, _WRAPPER_TOO_OLD
+    except ImportError:
+        return None, None
+
+
 def _catalog() -> Dict[str, Dict[str, Any]]:
     """Live view of the external-agent registry (lazy: ``praisonai`` is optional).
 
-    Routed through ``_wrapper_bridge`` so ``praisonai-code`` keeps its C7/C8
-    import boundary (no direct ``from praisonai.*`` reverse import); when the
-    wrapper is not installed this degrades to an empty catalog instead of
-    raising, so every registry-backed surface stays usable standalone.
+    When the wrapper is not installed this degrades to an empty catalog instead
+    of raising, so every registry-backed surface stays usable standalone.
     """
-    from praisonai_code._wrapper_bridge import optional_wrapper_attr
-
-    external_agent_catalog = optional_wrapper_attr(
-        "praisonai.integrations.registry", "external_agent_catalog"
-    )
-    if external_agent_catalog is None:
+    fn, _error = _resolve_catalog_fn()
+    if fn is None:
         return {}
-    return external_agent_catalog()
+    return fn()
 
 
 class _RegistryIntegrations(Mapping):
@@ -94,14 +123,23 @@ class ExternalAgentsHandler(FlagHandler):
         return f"External AI CLI tool to use ({names})"
     
     def check_dependencies(self) -> Tuple[bool, str]:
-        """Check if integrations module is available."""
+        """Check if the integrations module is available *and* new enough.
+
+        A version-skewed install (new ``praisonai-code`` against a ``praisonai``
+        wrapper predating ``external_agent_catalog``) is reported as too old
+        rather than passing here and then yielding an empty catalog downstream.
+        """
         try:
             import importlib.util
-            if importlib.util.find_spec("praisonai.integrations") is not None:
-                return True, ""
-            return False, "Integrations module not available"
+            if importlib.util.find_spec("praisonai.integrations") is None:
+                return False, "Integrations module not available"
         except ImportError:
             return False, "Integrations module not available"
+
+        _fn, error = _resolve_catalog_fn()
+        if error is not None:
+            return False, error
+        return True, ""
     
     def get_integration(self, name: str, **options):
         """

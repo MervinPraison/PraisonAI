@@ -94,3 +94,35 @@ def test_every_surface_agrees(registered_plugin):
     assert set(registry_mod.list_external_agents()) == expected
     assert set(ExternalAgentsHandler().list_integrations()) == expected
     assert {t.removesuffix("_enabled") for t in ui.EXTERNAL_AGENTS} == expected
+
+
+@pytest.fixture
+def broken_plugin(monkeypatch):
+    """Register a plugin whose class fails to resolve (loader raises on import)."""
+    reg = registry_mod.ExternalAgentRegistry()
+
+    def _raise():
+        raise ImportError("broken optional plugin")
+
+    reg._loaders["broken"] = _raise
+    monkeypatch.setattr(registry_mod, "_default_registry", reg)
+    return reg
+
+
+def test_argparse_choices_and_the_handler_agree_about_a_broken_plugin(broken_plugin):
+    """A name offered in --help must be usable, or the failure must name the real cause."""
+    from praisonai.integrations.registry import (
+        list_external_agents,
+        external_agent_catalog,
+    )
+
+    assert set(list_external_agents()) == set(external_agent_catalog())
+    assert "broken" not in list_external_agents()
+
+
+def test_registry_does_not_configure_the_root_logger(broken_plugin):
+    import logging
+
+    logging.getLogger().handlers.clear()
+    registry_mod.external_agent_catalog()
+    assert logging.getLogger().handlers == []

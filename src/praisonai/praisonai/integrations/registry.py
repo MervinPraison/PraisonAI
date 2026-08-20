@@ -27,12 +27,15 @@ Usage:
     available = await registry.get_available()
 """
 
+import logging
 import threading
 from typing import Dict, Type, Optional, Any, List
 
 from .base import BaseCLIIntegration
 from .._registry import PluginRegistry
 from ._cli_loaders import BUILTIN_INTEGRATIONS as _BUILTIN_INTEGRATIONS
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):
@@ -127,8 +130,7 @@ class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):
                 availability[name] = instance.is_available
             except Exception as e:
                 # Log real exceptions rather than hiding them
-                import logging
-                logging.warning(f"Failed to check availability for {name}: {e}")
+                logger.warning("Failed to check availability for %s: %s", name, e)
                 availability[name] = False
         
         return availability
@@ -198,17 +200,21 @@ def create_integration(name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]
 
 
 def list_external_agents() -> List[str]:
-    """Names of every registered external agent (built-ins + plugins).
+    """Names of every *usable* external agent (built-ins + plugins).
 
     This is the single source of truth for every surface that has to *list*
     external agents: the ``--external-agent`` argparse choices, the CLI
     handler and the UI settings toggles. Do not hand-maintain a second copy.
 
+    Derived from :func:`external_agent_catalog` so the argparse ``choices`` can
+    never advertise a name the handler then rejects: a plugin that fails to
+    load is dropped from the catalog and therefore never offered in ``--help``.
+
     Built-ins keep their declaration order (claude, gemini, codex, cursor) so
     help text and UI toggles are unchanged on a default install; plugins are
     appended in sorted order behind them.
     """
-    names = set(get_default_registry().list_names())
+    names = set(external_agent_catalog())
     ordered = [n for n in _BUILTIN_INTEGRATIONS if n in names]
     ordered += sorted(names.difference(ordered))
     return ordered
@@ -224,15 +230,19 @@ def external_agent_catalog() -> Dict[str, Dict[str, Any]]:
     """
     registry = get_default_registry()
     catalog: Dict[str, Dict[str, Any]] = {}
-    for name in list_external_agents():
+    # Iterate registered *names* directly. Do NOT call ``list_external_agents``
+    # here: that would recurse (it is now derived from this catalog).
+    names = set(registry.list_names())
+    ordered = [n for n in _BUILTIN_INTEGRATIONS if n in names]
+    ordered += sorted(names.difference(ordered))
+    for name in ordered:
         try:
             cls = registry.resolve(name)
         except Exception as exc:  # noqa: BLE001 - isolate faulty optional plugins
             # A third-party entry point may raise anything (not just ValueError)
             # while loading. One broken optional plugin must not blank out the
             # catalog for every surface (argparse/CLI/UI); skip it and log.
-            import logging
-            logging.warning("Skipping external agent %r: failed to load (%s)", name, exc)
+            logger.warning("Skipping external agent %r: failed to load (%s)", name, exc)
             continue
         try:
             cli = cls().cli_command
