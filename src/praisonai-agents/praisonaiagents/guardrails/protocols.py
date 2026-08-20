@@ -175,3 +175,25 @@ class PolicyGuardrailProtocol(Protocol):
         """
         ...
 
+
+# Method names that make an object a guardrail. An object exposing at least one
+# of these is a protocol-conforming guardrail even though it is not ``callable``.
+GUARDRAIL_PROTOCOL_METHODS = ("validate_input", "validate_output", "validate_tool_call")
+
+
+def is_guardrail_object(obj: Any) -> bool:
+    """Return True when ``obj`` is a protocol-conforming guardrail *instance*.
+
+    ``isinstance(obj, GuardrailProtocol)`` is not usable here: a ``runtime_checkable``
+    Protocol only checks method presence and would also match unrelated objects
+    partially, while classes (not instances) must be rejected. This helper is the
+    single place that decides "is this thing a guardrail object?".
+
+    Plain validator callables are handled by their own passthrough branch and are
+    not required to match here (they will, however, if they also expose one of the
+    protocol methods - e.g. ``GuardrailChain``).
+    """
+    if obj is None or isinstance(obj, type):
+        return False
+    return any(callable(getattr(obj, name, None)) for name in GUARDRAIL_PROTOCOL_METHODS)
+

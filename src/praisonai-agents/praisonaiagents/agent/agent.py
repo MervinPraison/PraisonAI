@@ -1630,11 +1630,36 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # String could be LLM prompt - passthrough for later processing
             _guardrails_config = guardrails
         else:
-            from ..config.param_resolver import resolve_guardrails as _resolve_guardrails
-            _guardrails_config = _resolve_guardrails(
-                value=guardrails,
-                config_class=GuardrailConfig,
-            )
+            # A protocol-conforming guardrail *object* (validate_input /
+            # validate_output / validate_tool_call) is not ``callable()``, so it
+            # used to fall straight through to the resolver, which returns None
+            # for an unknown object - the validator was silently discarded and
+            # the agent ran with zero enforcement. Adapt it into a
+            # ``GuardrailChain``, which is callable (so it satisfies the existing
+            # guardrail runner) and forwards every protocol method.
+            from ..guardrails.protocols import is_guardrail_object
+            if is_guardrail_object(guardrails):
+                from ..guardrails import GuardrailChain
+                _guardrails_config = GuardrailChain([guardrails])
+            elif isinstance(guardrails, (list, tuple)) and any(
+                is_guardrail_object(g) for g in guardrails
+            ):
+                _bad = [g for g in guardrails if not is_guardrail_object(g)]
+                if _bad:
+                    raise TypeError(
+                        "guardrails=[...] may not mix guardrail objects with "
+                        f"{[type(g).__name__ for g in _bad]}. Every item must implement "
+                        "validate_input/validate_output/validate_tool_call, or wrap the "
+                        "list yourself with GuardrailChain([...])."
+                    )
+                from ..guardrails import GuardrailChain
+                _guardrails_config = GuardrailChain(list(guardrails))
+            else:
+                from ..config.param_resolver import resolve_guardrails as _resolve_guardrails
+                _guardrails_config = _resolve_guardrails(
+                    value=guardrails,
+                    config_class=GuardrailConfig,
+                )
         
         # Same fail-loud guard for GuardrailConfig.policy/.policies passed
         # directly — those fields are never consumed downstream, so silently
@@ -1646,6 +1671,25 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "GuardrailConfig.policy/.policies are not enforced. "
                 "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
                 "or pass a validator via GuardrailConfig(validator=...)."
+            )
+
+        # Fail loud when the value could not be turned into an enforceable
+        # guardrail, instead of storing something that never runs. Silently
+        # dropping a validator the caller explicitly asked for is a "safe by
+        # default" violation, same rationale as the policy-string guard above.
+        if (
+            guardrails is not None
+            and guardrails is not False
+            and not (
+                callable(_guardrails_config)
+                or isinstance(_guardrails_config, (GuardrailConfig, str))
+            )
+        ):
+            raise TypeError(
+                f"guardrails={guardrails!r} (type {type(guardrails).__name__}) is not a "
+                "supported guardrail. Pass a validator callable taking one TaskOutput, an "
+                "object implementing validate_input/validate_output/validate_tool_call, a "
+                "list of such objects, a GuardrailConfig, or a string LLM-validation prompt."
             )
 
         if _guardrails_config is not None:
@@ -6090,6 +6134,10 @@ Answer:"""
 
     def _setup_guardrail(self):
         """Setup the guardrail function based on the provided guardrail parameter."""
+        # ``tool_execution._check_tool_policy_and_guardrails`` reads
+        # ``self._tool_call_guardrails`` but nothing ever assigned it, so the
+        # whole ``validate_tool_call`` surface was dead code. Always define it.
+        self._tool_call_guardrails = []
         if self.guardrail is None:
             self._guardrail_fn = None
             return
@@ -6153,6 +6201,18 @@ Answer:"""
             self._guardrail_fn._praison_output_only = True
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
+
+        # Register the tool-call surface when the guardrail actually exposes one.
+        # Output-only (string/LLM) guardrails are excluded on purpose: running an
+        # LLM validation before every tool call would be a hot-path regression,
+        # the same reasoning that keeps them out of the input gate above.
+        _fn = self._guardrail_fn
+        if (
+            _fn is not None
+            and callable(getattr(_fn, "validate_tool_call", None))
+            and not getattr(_fn, "_praison_output_only", False)
+        ):
+            self._tool_call_guardrails = [_fn]
 
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
