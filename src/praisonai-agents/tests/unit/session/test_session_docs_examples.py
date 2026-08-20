@@ -339,16 +339,49 @@ def _example_files():
 _EXAMPLE_FILES = _example_files()
 
 
-@pytest.mark.parametrize("path", _EXAMPLE_FILES, ids=lambda p: p.name)
-@pytest.mark.parametrize("name", ["session_id", "db", "user_id"])
-def test_example_files_do_not_pass_rejected_kwargs_to_agent(path, name):
-    """Neither docstrings nor runnable examples may show a rejected kwarg.
+def _text_checked_paths():
+    """Every path the textual guard must cover, without duplicates.
 
-    The textual session-doc guard only covered two files; the identical broken
-    spelling shipped in the db package docstrings and the redis example too.
+    ``DOCS`` is included even though the executing guard already runs its
+    ```python fences: ``session/__init__.py`` documents the quick start in an
+    *indented docstring* with no fence, so the executor never reaches it, and a
+    README block excluded by ``_is_self_contained`` is not executed either. The
+    text check is the only guard those two forms have — dropping ``DOCS`` from
+    it (as #4179 did) lets the #4178 bug be reintroduced with the suite green.
+    """
+    seen, ordered = set(), []
+    for path in [*_EXAMPLE_FILES, *DOCS]:
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
+
+
+@pytest.mark.parametrize("path", _text_checked_paths(), ids=lambda p: p.name)
+@pytest.mark.parametrize("name", ["session_id", "db", "user_id"])
+def test_docs_do_not_pass_rejected_kwargs_to_agent(path, name):
+    """No doc or example file may show ``Agent(<rejected-kwarg>=...)``.
+
+    Restored from the pre-#4179 suite and widened to ``DOCS``. The executing
+    guard cannot see files with no python fences (``session/__init__.py``) or
+    blocks excluded by ``_is_self_contained``, so the textual check still has to
+    cover them. ``TOP_LEVEL_KWARG`` matches only *inside* ``Agent(``, so prose
+    discussing ``session_id=`` does not trip it (no false positive while it was
+    in the suite).
     """
     hit = re.search(TOP_LEVEL_KWARG.format(name=name), path.read_text())
     assert hit is None, f"{path.name} shows Agent({name}=...): {hit.group(0)!r}"
+
+
+def test_the_guard_still_sees_a_file_with_no_python_fences(tmp_path, monkeypatch):
+    """``session/__init__.py`` has no fences. An executor-only guard is blind to
+    it, which is how the original #4178 bug could be reintroduced. The text
+    guard must fail on a fenceless docstring that shows the rejected kwarg.
+    """
+    doc = tmp_path / "__init__.py"
+    doc.write_text('"""\nagent = Agent(name="A", session_id="s")\n"""\n')
+    with pytest.raises(AssertionError):
+        test_docs_do_not_pass_rejected_kwargs_to_agent(doc, "session_id")
 
 
 @pytest.mark.parametrize(
