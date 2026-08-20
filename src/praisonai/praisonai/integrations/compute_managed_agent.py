@@ -33,6 +33,7 @@ import logging
 import os
 import shlex
 import uuid
+import weakref
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ class ComputeManagedAgent:
         self._provider = None
         self._instance: Optional[str] = None
         self._prepared = False
+        self._finalizer = None
 
     @property
     def provider_name(self) -> str:
@@ -153,6 +155,9 @@ class ComputeManagedAgent:
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     async def ashutdown(self) -> None:
+        if self._finalizer is not None:
+            self._finalizer.detach()      # shutting down deliberately
+            self._finalizer = None
         if self._provider is not None and self._instance:
             try:
                 await self._provider.shutdown(self._instance)
@@ -194,6 +199,16 @@ class ComputeManagedAgent:
             config.image = self._image
         info = await provider.provision(config)
         self._instance = getattr(info, "instance_id", info)
+
+        # Reclaim the instance when this backend is collected, and at
+        # interpreter exit. keep_alive=True means the instance deliberately
+        # outlives a single call -- it should not outlive the process. For
+        # docker that was a container per script; for a cloud place it is a
+        # billed instance whose only other reaper is the provider's own idle
+        # timer, which docker and flyio do not have.
+        self._finalizer = weakref.finalize(
+            self, _release, provider, self._instance, self._place
+        )
         logger.info("[compute_managed] provisioned %s on %s", self._instance, self._place)
 
         probe = await provider.execute(self._instance, "python -c 'import praisonaiagents'", 180)
@@ -230,6 +245,41 @@ class ComputeManagedAgent:
             raise RuntimeError(
                 f"Could not write {path} on {self._place}: {result.get('stderr', '')[:300]}"
             )
+
+
+
+def _release(provider, instance_id: str, place: str) -> None:
+    """Reclaim an instance whose backend is gone.
+
+    Registered with weakref.finalize, so it runs when the backend is collected
+    *and* at interpreter exit. It must not close over the backend itself --
+    that would keep it alive and prevent the very collection it waits for.
+
+    Collection can happen on a thread that already drives an event loop (GC
+    inside async workflow code), where a bare ``asyncio.run`` raises before the
+    shutdown ever runs and the instance leaks. Bridge through the same
+    loop-safe helper ``SharedCompute`` uses so teardown survives either case.
+    """
+    import asyncio
+
+    async def _shutdown():
+        await provider.shutdown(instance_id)
+
+    try:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_shutdown())
+        else:
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(asyncio.run, _shutdown()).result()
+        logger.debug("[compute_managed] released %s on %s", instance_id, place)
+    except Exception as exc:  # pragma: no cover - teardown stays quiet
+        logger.warning(
+            "[compute_managed] could not release %s on %s: %s", instance_id, place, exc
+        )
 
 
 def _as_dict(config: Any) -> Dict[str, Any]:

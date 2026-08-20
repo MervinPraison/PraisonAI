@@ -154,3 +154,35 @@ def test_a_directory_genuinely_called_sandbox_still_works():
     content, listed = _run(_with_sandbox(check))
     assert content == "kept"
     assert "/sandbox/nested.txt" in listed
+
+
+@needs_docker
+def test_a_timed_out_execution_does_not_leave_a_container():
+    """`proc.kill()` ends the docker CLI while the container it started keeps
+    running. It had no --name either, so it got a random Docker name that
+    neither the timeout handler nor `praisonai managed ps` could find."""
+    import asyncio
+
+    from praisonaiagents.sandbox import SandboxConfig
+
+    before = subprocess.run(["docker", "ps", "-q"], capture_output=True,
+                            text=True, timeout=60).stdout.split()
+
+    config = SandboxConfig(sandbox_type="docker")
+    config.resource_limits.timeout_seconds = 5
+
+    async def run():
+        sandbox = await SandboxManager(config)._create_sandbox()
+        try:
+            return await sandbox.execute("import time; time.sleep(300)")
+        finally:
+            await sandbox.stop()
+
+    result = asyncio.run(run())
+    assert result.status.name == "TIMEOUT"
+
+    import time as _time
+    _time.sleep(3)
+    after = subprocess.run(["docker", "ps", "-q"], capture_output=True,
+                           text=True, timeout=60).stdout.split()
+    assert len(after) <= len(before), "the timed-out container is still running"

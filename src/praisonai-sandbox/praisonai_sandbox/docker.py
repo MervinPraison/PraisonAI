@@ -180,12 +180,14 @@ class DockerSandbox:
         with open(code_file, "w") as f:
             f.write(code)
         
+        container_name = f"praisonai-{execution_id}"
         docker_cmd = self._build_docker_command(
             script_name=script_name,
             language=language,
             limits=limits,
             env=env,
             working_dir=working_dir,
+            container_name=container_name,
         )
         
         started_at = time.time()
@@ -216,9 +218,21 @@ class DockerSandbox:
                     completed_at=completed_at,
                 )
             except asyncio.TimeoutError:
+                # Kill the container, not just the client. proc.kill() ends the
+                # docker CLI while the container it started keeps running,
+                # unnamed and unreachable.
+                try:
+                    killer = await asyncio.create_subprocess_exec(
+                        "docker", "kill", container_name,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await killer.wait()
+                except Exception:  # pragma: no cover - best effort teardown
+                    logger.warning("Could not kill container %s", container_name)
                 proc.kill()
                 await proc.wait()
-                
+
                 return SandboxResult(
                     execution_id=execution_id,
                     status=SandboxStatus.TIMEOUT,
@@ -516,14 +530,25 @@ class DockerSandbox:
         limits: ResourceLimits,
         env: Optional[Dict[str, str]] = None,
         working_dir: Optional[str] = None,
+        container_name: str = "",
     ) -> List[str]:
         """Build the Docker run command.
 
         The script lives in the mounted sandbox dir (SANDBOX_ROOT), so execute()
         shares the same storage as write_file() and run_command().
         """
+        # Named so a timeout can kill the container by name rather than just the
+        # docker client -- without --name a timed-out run left a container with a
+        # random Docker name that nothing could reach. Labelled `praisonai=sandbox-exec`,
+        # deliberately NOT `praisonai=managed`: these are ephemeral per-execution
+        # `--rm` containers, not managed instances, and `praisonai=managed` is the
+        # sole input to DockerCompute.list_instances(). Tagging them managed made
+        # `praisonai managed ps` list a `praisonai-<uuid>` name that `managed stop`
+        # (which resolves `praisonai_<id>`) could never reclaim.
         docker_cmd = [
             "docker", "run", "--rm",
+            "--name", container_name,
+            "--label", "praisonai=sandbox-exec",
             "-v", f"{self._temp_dir}:{SANDBOX_ROOT}",
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
