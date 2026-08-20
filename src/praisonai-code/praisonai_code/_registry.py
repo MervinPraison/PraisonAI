@@ -8,8 +8,9 @@ based plugin discovery with thread-safe registration and dependency injection.
 from __future__ import annotations
 
 import threading
+import warnings
 from importlib.metadata import entry_points
-from typing import Callable, Dict, Generic, Optional, Type, TypeVar
+from typing import Callable, Dict, Generic, Iterable, Optional, Type, TypeVar
 import logging
 
 T = TypeVar("T")
@@ -35,7 +36,8 @@ class PluginRegistry(Generic[T]):
         *,
         entry_point_group: str,
         builtins: Optional[Dict[str, Callable[[], Type[T]]]] = None,
-        discover_entry_points: bool = True
+        discover_entry_points: bool = True,
+        legacy_entry_point_groups: Iterable[str] = (),
     ) -> None:
         """Initialize the registry.
         
@@ -47,8 +49,14 @@ class PluginRegistry(Generic[T]):
                 Pass False to build an isolated registry that only contains the
                 supplied builtins / explicitly registered plugins (useful for
                 opt-out and deterministic tests).
+            legacy_entry_point_groups: Deprecated spellings of
+                ``entry_point_group`` that are still honoured. Plugins found
+                only under a legacy group are registered and a
+                ``DeprecationWarning`` naming the canonical group is emitted.
+                The canonical group always wins on a name clash.
         """
         self._entry_point_group = entry_point_group
+        self._legacy_entry_point_groups = tuple(legacy_entry_point_groups)
         self._loaders: Dict[str, Callable[[], Type[T]]] = {}  # lazy loaders
         self._items: Dict[str, Type[T]] = {}  # resolved cache
         self._aliases: Dict[str, str] = {}  # alias -> canonical name
@@ -60,6 +68,8 @@ class PluginRegistry(Generic[T]):
                 self._add_loader(name, loader)
         
         if discover_entry_points:
+            # Legacy groups first so the canonical spelling wins on a clash.
+            self._discover_legacy_entry_points()
             self._discover_entry_points()
 
     def _add_loader(self, name: str, loader: Callable[[], Type[T]]) -> None:
@@ -75,6 +85,24 @@ class PluginRegistry(Generic[T]):
         except Exception:
             # entry_points() might not be available in older Python versions
             logger.debug("Entry points not available for group %s", self._entry_point_group)
+
+    def _discover_legacy_entry_points(self) -> None:
+        """Discover plugins published under a deprecated group spelling."""
+        for group in self._legacy_entry_point_groups:
+            try:
+                discovered = list(entry_points(group=group))
+            except Exception:
+                logger.debug("Entry points not available for group %s", group)
+                continue
+            for ep in discovered:
+                warnings.warn(
+                    f"Entry-point group {group!r} is deprecated (found plugin "
+                    f"{ep.name!r}); publish it under {self._entry_point_group!r} "
+                    "instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                self._add_loader(ep.name, ep.load)
 
     def register(
         self, 

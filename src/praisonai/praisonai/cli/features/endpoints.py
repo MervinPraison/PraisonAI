@@ -637,11 +637,17 @@ Unified client CLI for interacting with PraisonAI endpoints.
         registry = EndpointProviderRegistry.default()
         try:
             invoke_method = registry.resolve(provider_type)
-            # Bind the method to self and call it
-            return invoke_method(self, endpoint_name, input_data, config, parsed)
         except ValueError:
-            # Fallback to recipe for unknown types
-            return self._invoke_recipe(endpoint_name, input_data, config, parsed)
+            # Do NOT fall back to recipe: silently running an unrelated
+            # provider is how a plugin published under the wrong entry-point
+            # group used to look like a successful invocation.
+            self._print_error(
+                f"Unknown provider type: {provider_type}. "
+                f"Registered types: {', '.join(registry.list_names())}"
+            )
+            return self.EXIT_VALIDATION_ERROR
+        # Bind the method to self and call it
+        return invoke_method(self, endpoint_name, input_data, config, parsed)
     
     def _invoke_recipe(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:
         """Invoke a recipe endpoint."""
@@ -964,6 +970,17 @@ Unified client CLI for interacting with PraisonAI endpoints.
             {"type": "a2a", "description": "Agent-to-agent protocol", "capabilities": ["agent-card", "message-send", "stream"]},
             {"type": "a2u", "description": "Agent-to-user event stream", "capabilities": ["subscribe", "stream"]},
         ]
+        
+        # Append anything contributed through the entry-point group so
+        # `praisonai endpoints types` and `endpoints invoke --type` agree.
+        from ._endpoint_registry import EndpointProviderRegistry
+
+        known = {t["type"] for t in types_info}
+        for name in EndpointProviderRegistry.default().list_names():
+            if name not in known:
+                types_info.append(
+                    {"type": name, "description": "Plugin provider", "capabilities": ["invoke"]}
+                )
         
         if parsed["format"] == "json":
             self._print_json(types_info)
