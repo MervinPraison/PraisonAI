@@ -24,6 +24,21 @@ Usage:
     
     # Or execute directly
     result = await claude.execute("Refactor this code")
+
+Third-party plugins:
+    Extra integrations are discovered from the ``praisonai.integrations``
+    entry-point group and are then importable from this module by their
+    entry-point name::
+
+        # your-plugin/pyproject.toml
+        [project.entry-points."praisonai.integrations"]
+        acme = "acme_praison:AcmeIntegration"
+
+        # after `pip install your-plugin`
+        from praisonai.integrations import acme
+
+    Names that collide with a built-in integration are ignored — built-ins
+    always win.
 """
 
 # Lazy imports to avoid performance impact
