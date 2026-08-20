@@ -34,6 +34,26 @@ SANDBOX_ROOT = "/sandbox"
 MIN_CONTAINER_PIDS = 128
 
 
+
+def _sandbox_relative(path: str) -> str:
+    """Accept both spellings of a sandbox path.
+
+    The directory is mounted at SANDBOX_ROOT, so that is the path a user sees
+    from inside the container and the one they naturally type. But the file API
+    treats "/" as the sandbox root, so "/sandbox/report.txt" was joined onto the
+    root again and landed at "/sandbox/sandbox/report.txt" -- write_file
+    returned True, and `cat /sandbox/report.txt` could not find it.
+
+    Both spellings now mean the same file. Only the exact prefix is stripped, so
+    a genuine subdirectory that happens to be called "sandbox" still works.
+    """
+    if path == SANDBOX_ROOT:
+        return "/"
+    prefix = SANDBOX_ROOT + "/"
+    if path.startswith(prefix):
+        return "/" + path[len(prefix):]
+    return path
+
 class DockerSandbox:
     """Docker-based sandbox for safe code execution.
     
@@ -391,6 +411,8 @@ class DockerSandbox:
         """
         from ._compat import makedirs_in_sandbox, open_in_sandbox
 
+        path = _sandbox_relative(path)
+
         if not makedirs_in_sandbox(self._temp_dir, path):
             return False
 
@@ -419,7 +441,7 @@ class DockerSandbox:
         """
         from ._compat import open_in_sandbox
 
-        fd = open_in_sandbox(self._temp_dir, path, os.O_RDONLY)
+        fd = open_in_sandbox(self._temp_dir, _sandbox_relative(path), os.O_RDONLY)
         if fd is None:
             return None
         try:
@@ -438,8 +460,8 @@ class DockerSandbox:
     ) -> List[str]:
         """List files in a sandbox directory."""
         from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
+
+        full_path = safe_sandbox_path(self._temp_dir, _sandbox_relative(path))
         if full_path is None or not os.path.exists(full_path):
             return []
         

@@ -115,3 +115,42 @@ def test_the_container_is_still_isolated_from_the_host():
 
     result = _run(_with_sandbox(check))
     assert result.exit_code != 0, "the host filesystem is visible inside the container"
+
+
+@needs_docker
+def test_both_spellings_of_a_sandbox_path_mean_the_same_file():
+    """The directory is mounted at /sandbox, so that is what a user sees from
+    inside the container and the one they naturally type. But the file API
+    treats "/" as the sandbox root, so "/sandbox/report.txt" was joined onto
+    the root again and landed at "/sandbox/sandbox/report.txt" -- write_file
+    returned True and `cat /sandbox/report.txt` could not find it.
+    """
+
+    async def check(sandbox):
+        await sandbox.write_file("/sandbox/report.txt", "written via the container path")
+        found = await sandbox.run_command("cat /sandbox/report.txt", shell=True)
+
+        await sandbox.run_command("echo REMOTE > /sandbox/out.txt", shell=True)
+        bare = await sandbox.read_file("out.txt")
+        prefixed = await sandbox.read_file("/sandbox/out.txt")
+        listed = await sandbox.list_files("/sandbox")
+        return found, bare, prefixed, listed
+
+    found, bare, prefixed, listed = _run(_with_sandbox(check))
+    assert found.exit_code == 0, "a file written through the container path was not there"
+    assert bare == prefixed, "the two spellings disagree about the same file"
+    assert sorted(listed) == ["/out.txt", "/report.txt"]
+
+
+@needs_docker
+def test_a_directory_genuinely_called_sandbox_still_works():
+    """Only the exact mount prefix is stripped, so a real subdirectory of that
+    name is not swallowed."""
+
+    async def check(sandbox):
+        await sandbox.write_file("sandbox/nested.txt", "kept")
+        return await sandbox.read_file("sandbox/nested.txt"), await sandbox.list_files("/")
+
+    content, listed = _run(_with_sandbox(check))
+    assert content == "kept"
+    assert "/sandbox/nested.txt" in listed
