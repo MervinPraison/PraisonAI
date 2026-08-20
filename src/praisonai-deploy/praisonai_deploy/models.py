@@ -2,7 +2,7 @@
 Deploy configuration models using Pydantic.
 """
 from enum import Enum
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Union
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -14,13 +14,61 @@ class DeployType(str, Enum):
 
 
 class CloudProvider(str, Enum):
-    """Cloud provider enum."""
+    """Named constants for the *built-in* cloud providers.
+
+    This enum is a convenience for referring to the providers that ship with
+    ``praisonai-deploy`` (``CloudProvider.AWS`` etc.). It is deliberately NOT
+    the list of deployable providers: an ``Enum`` cannot be extended at
+    runtime, so using it as a validation gate makes the
+    ``praisonai.deploy.providers`` entry-point group unusable.
+
+    The authority is ``praisonai_deploy.providers.list_cloud_providers()``.
+    Use :func:`coerce_cloud_provider` to validate user input.
+    """
     AWS = "aws"
     AZURE = "azure"
     GCP = "gcp"
     FLY = "fly"
     RAILWAY = "railway"
     RENDER = "render"
+
+
+# A provider is either one of the built-in enum members or a plain (registry
+# validated) name contributed by a plugin. Built-ins keep their enum identity
+# so ``config.provider.value`` and existing serialisation are unchanged.
+CloudProviderLike = Union[CloudProvider, str]
+
+
+def coerce_cloud_provider(value: "CloudProviderLike") -> "CloudProviderLike":
+    """Validate a provider name against the registry.
+
+    Returns the matching :class:`CloudProvider` member for built-ins (so
+    behaviour and serialisation are byte-identical to before) and the
+    normalised plain string for entry-point plugins.
+
+    Raises:
+        ValueError: if no provider with that name is registered.
+    """
+    if isinstance(value, CloudProvider):
+        return value
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid cloud provider: {value!r}")
+
+    name = value.strip().lower()
+    try:
+        return CloudProvider(name)
+    except ValueError:
+        pass
+
+    from .providers._registry import list_cloud_providers
+
+    available = list_cloud_providers()
+    if name not in available:
+        raise ValueError(
+            f"Invalid cloud provider: {value}. Must be one of: "
+            + ", ".join(available)
+        )
+    return name
 
 
 class APIConfig(BaseModel):
@@ -47,7 +95,7 @@ class DockerConfig(BaseModel):
 
 class CloudConfig(BaseModel):
     """Configuration for cloud deployment."""
-    provider: CloudProvider = Field(..., description="Cloud provider")
+    provider: CloudProviderLike = Field(..., description="Cloud provider")
     region: str = Field(..., description="Deployment region")
     service_name: str = Field(..., description="Service/application name")
     
@@ -69,6 +117,12 @@ class CloudConfig(BaseModel):
     
     # GCP-specific
     project_id: Optional[str] = Field(default=None, description="Project ID (GCP)")
+
+    @field_validator('provider', mode='before')
+    @classmethod
+    def _validate_provider(cls, v):
+        """Accept any provider the registry can actually resolve."""
+        return coerce_cloud_provider(v)
 
 
 class AgentConfig(BaseModel):

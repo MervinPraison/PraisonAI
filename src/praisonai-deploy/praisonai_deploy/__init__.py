@@ -25,6 +25,12 @@ def __getattr__(name):
     elif name == 'CloudProvider':
         from .models import CloudProvider
         return CloudProvider
+    elif name == 'coerce_cloud_provider':
+        from .models import coerce_cloud_provider
+        return coerce_cloud_provider
+    elif name == 'list_cloud_providers':
+        from .providers._registry import list_cloud_providers
+        return list_cloud_providers
     elif name == 'DeployResult':
         from .models import DeployResult
         return DeployResult
@@ -79,6 +85,8 @@ __all__ = [
     'DeployConfig',
     'DeployType',
     'CloudProvider',
+    'coerce_cloud_provider',
+    'list_cloud_providers',
     'DeployResult',
     'DeployStatus',
     'DestroyResult',
