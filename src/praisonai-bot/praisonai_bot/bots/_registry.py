@@ -90,6 +90,166 @@ class BotPlatformRegistry(PluginRegistry):
         self._descriptors_lock = threading.Lock()
         # Discover third-party channel connectors without shadowing builtins.
         self._discover_channel_entry_points()
+        # Zero-code drop-in channels (Issue #4104): a single-file adapter placed
+        # in ``./.praisonai/channels/`` or ``~/.praisonai/channels/`` is picked
+        # up under the same trust model as single-file plugins, so a custom
+        # platform works from the CLI with no install step. Best-effort — never
+        # blocks registry construction.
+        self._discover_channel_files()
+
+    def _discover_channel_files(self) -> None:
+        """Load single-file channel adapters from the drop-in directories.
+
+        Mirrors ``praisonaiagents.plugins.discovery``: project-local files are
+        gated behind the ``PRAISONAI_ALLOW_PROJECT_PLUGINS`` trust flag,
+        user-global files are trusted. Each ``.py`` file is imported and every
+        ``BasePlatformAdapter`` subclass it defines is registered under its
+        declared ``platform_name`` (falling back to the file stem).
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+        try:
+            for path in self._discover_channel_file_paths():
+                try:
+                    self._load_channel_file(path)
+                except Exception:
+                    logger.debug("Skipping invalid channel file %s", path, exc_info=True)
+        except Exception:
+            logger.debug("Channel drop-in discovery unavailable", exc_info=True)
+
+    @staticmethod
+    def _discover_channel_file_paths() -> "List[Any]":
+        """Return channel drop-in ``.py`` paths in precedence order.
+
+        Project: ``./.praisonai/channels/`` then user: ``~/.praisonai/channels/``.
+        """
+        try:
+            from praisonaiagents.paths import (
+                get_plugins_dir,
+                get_project_data_dir,
+            )
+        except Exception:
+            return []
+
+        dirs = []
+        try:
+            project_channels = get_project_data_dir() / "channels"
+            if project_channels.is_dir():
+                dirs.append(project_channels)
+        except Exception:
+            pass
+        try:
+            # ``get_plugins_dir()`` is ``~/.praisonai/plugins``; its parent is
+            # the user ``~/.praisonai`` home, so drop-ins live alongside plugins.
+            user_channels = get_plugins_dir().parent / "channels"
+            if user_channels.is_dir():
+                dirs.append(user_channels)
+        except Exception:
+            pass
+
+        paths = []
+        for d in dirs:
+            try:
+                for item in sorted(d.iterdir()):
+                    if item.suffix == ".py" and not item.name.startswith("_"):
+                        paths.append(item)
+            except Exception:
+                continue
+        return paths
+
+    @staticmethod
+    def _is_project_local_channel(path) -> bool:
+        """True when ``path`` is reached via ``./.praisonai/channels/``.
+
+        The trust gate must fire on *how the file was reached*, not on where a
+        symlink ultimately points — a repository-controlled
+        ``.praisonai/channels/evil.py -> /tmp/evil.py`` is still
+        project-controlled code. Mirrors ``plugins.discovery._is_project_local``
+        but scoped to the *channels* directory: resolve only the parent dirs
+        (so a symlinked ``channels`` dir is still recognised) while keeping the
+        file's own name un-resolved (so a symlinked file cannot slip the gate).
+        """
+        try:
+            from praisonaiagents.paths import get_project_data_dir
+
+            project_channels = (get_project_data_dir() / "channels").resolve()
+        except Exception:
+            return False
+        try:
+            located = path.expanduser()
+            candidate = located.parent.resolve() / located.name
+            candidate.relative_to(project_channels)
+            return True
+        except Exception:
+            return False
+
+    def _load_channel_file(self, path) -> None:
+        """Import one channel drop-in file and register its adapter classes.
+
+        Project-local files are gated behind ``PRAISONAI_ALLOW_PROJECT_PLUGINS``
+        (see ``_is_project_local_channel``) so a cloned repo cannot silently run
+        a malicious drop-in adapter until the user opts in.
+        """
+        import importlib.util
+        import inspect
+        import logging
+        import sys
+
+        logger = logging.getLogger(__name__)
+
+        # Trust gate: project-local drop-ins share the single-file plugin
+        # opt-in flag; user-global drop-ins are trusted. NOTE: the plugins
+        # helper ``_is_project_local`` is scoped to ``.praisonai/plugins`` and
+        # would wrongly classify a ``.praisonai/channels`` file as non-project,
+        # so we compute project-locality against the *channels* directory here
+        # (reusing only the shared env-flag helper).
+        try:
+            from praisonaiagents.plugins.discovery import _project_plugins_allowed
+
+            if self._is_project_local_channel(path) and not _project_plugins_allowed():
+                logger.warning(
+                    "Refusing to load project channel %s: set "
+                    "PRAISONAI_ALLOW_PROJECT_PLUGINS=true to enable.",
+                    path,
+                )
+                return
+        except Exception:
+            logger.debug("Channel trust gate unavailable", exc_info=True)
+
+        try:
+            from praisonaiagents.bots import BasePlatformAdapter
+        except Exception:
+            return
+
+        module_name = f"praison_channel_{path.stem}_{id(path)}"
+        spec = importlib.util.spec_from_file_location(module_name, str(path))
+        if spec is None or spec.loader is None:
+            return
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
+
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if obj is BasePlatformAdapter or not issubclass(obj, BasePlatformAdapter):
+                continue
+            if obj.__module__ != module_name:
+                continue
+            name = getattr(obj, "platform_name", None) or path.stem
+            descriptor = None
+            candidate = getattr(obj, "channel_descriptor", None)
+            if candidate is not None:
+                try:
+                    descriptor = candidate() if callable(candidate) else candidate
+                except Exception:
+                    descriptor = None
+            self.register_with_capabilities(
+                str(name).lower(), obj, descriptor=descriptor
+            )
 
     def _discover_channel_entry_points(self) -> None:
         """Discover channel connectors from the ``praisonai.channels`` group."""

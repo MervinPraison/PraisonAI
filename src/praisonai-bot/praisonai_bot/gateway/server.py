@@ -7203,7 +7203,11 @@ class WebSocketGateway:
             if env_val:
                 init_kwargs[param] = env_val
         for key, value in ch_cfg.items():
-            if key in ("platform", "token"):
+            # ``platform``/``token`` are wired explicitly above; ``adapter`` is a
+            # loader-only YAML import ref (Issue #4104) that self-registers the
+            # class — it must never reach the adapter constructor, whose
+            # signature does not accept it.
+            if key in ("platform", "token", "adapter"):
                 continue
             init_kwargs[key] = value
 
