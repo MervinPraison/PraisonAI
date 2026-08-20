@@ -422,6 +422,12 @@ def schedule_update(
         if schedule:
             from ..scheduler.parser import parse_schedule
             job.schedule = parse_schedule(schedule, tz=tz or None)
+            # A new cadence must be evaluated fresh: a stale ``last_run_at``
+            # from the previous schedule would make an ``at:`` one-shot look
+            # already-fired (never runs) and would offset ``every``/``cron``
+            # from the old last-run instead of the new cadence. Clearing it
+            # restarts the schedule from now.
+            job.last_run_at = None
             changed.append(f"schedule={schedule}")
         if message:
             job.message = message

@@ -208,20 +208,44 @@ def _fmt_ts(ts) -> str:
         return str(ts)
 
 
-def _print_store_jobs(output, jobs, json_output: bool) -> None:
-    """Print store-backed ScheduleJobs with a source label."""
-    if json_output:
-        import json as _json
-        print(_json.dumps([{
-            "source": "store",
-            "id": j.id,
-            "name": j.name,
-            "schedule": _fmt_schedule(j.schedule),
-            "enabled": j.enabled,
-            "last_run_at": j.last_run_at,
-            "message": j.message,
-        } for j in jobs]))
-        return
+def _store_jobs_payload(jobs) -> list:
+    """Serialise store-backed ScheduleJobs to plain dicts for JSON output."""
+    return [{
+        "source": "store",
+        "id": j.id,
+        "name": j.name,
+        "schedule": _fmt_schedule(j.schedule),
+        "enabled": j.enabled,
+        "last_run_at": j.last_run_at,
+        "message": j.message,
+    } for j in jobs]
+
+
+def _daemon_states_payload() -> list:
+    """Return live daemon scheduler states as plain dicts (best-effort)."""
+    try:
+        from praisonai.scheduler.state_manager import SchedulerStateManager
+        state_manager = SchedulerStateManager()
+        state_manager.cleanup_dead_processes()
+        states = state_manager.list_all()
+        out = []
+        for s in states:
+            pid = s.get("pid", 0)
+            out.append({
+                "source": "daemon",
+                "name": s.get("name", "unknown"),
+                "pid": pid,
+                "status": "running" if state_manager.is_process_alive(pid) else "stopped",
+                "interval": s.get("interval", "unknown"),
+                "task": s.get("task", ""),
+            })
+        return out
+    except Exception:
+        return []
+
+
+def _print_store_jobs(output, jobs) -> None:
+    """Print store-backed ScheduleJobs with a source label (human output)."""
     if not jobs:
         return
     output.print_header(f"Store schedules ({len(jobs)}):")
@@ -246,12 +270,20 @@ def schedule_list(
     except Exception:
         jobs = []
 
-    _print_store_jobs(output, jobs, json_output)
-
-    args = ["list"]
     if json_output:
-        args.append("--json")
-    _run_schedule(args)
+        # Emit a single valid JSON document so consumers can parse stdout.
+        # The daemon list handler only prints a human table, so its states are
+        # gathered directly here instead of delegating (which would corrupt the
+        # JSON payload).
+        import json as _json
+        print(_json.dumps({
+            "store": _store_jobs_payload(jobs),
+            "daemon": _daemon_states_payload(),
+        }))
+        raise typer.Exit(0)
+
+    _print_store_jobs(output, jobs)
+    _run_schedule(["list"])
     raise typer.Exit(0)
 
 
@@ -293,6 +325,18 @@ def schedule_runs(
         raise typer.Exit(4)
 
 
+def _resolve_store_job(ident: str):
+    """Return (store, job) for ``ident`` resolved by id first, then name.
+
+    Resolving by id first guarantees an exact record even when several jobs
+    share a name, so a subsequent mutation targets that record and never a
+    different same-named job.
+    """
+    from praisonaiagents.tools.schedule_tools import _get_store
+    store = _get_store()
+    return store, (store.get(ident) or store.get_by_name(ident))
+
+
 @app.command("pause")
 def schedule_pause(
     name: str = typer.Argument(..., help="Schedule name or id"),
@@ -300,14 +344,16 @@ def schedule_pause(
     """Pause a store-backed schedule (stops it firing, keeps it)."""
     output = get_output_controller()
     try:
-        from praisonaiagents.tools.schedule_tools import schedule_pause as _pause, _get_store
-        # Support id as well as name.
-        job = _get_store().get(name)
-        result = _pause(job.name) if job is not None else _pause(name)
-        if "not found" in result or "Error" in result:
-            output.print_error(result)
+        store, job = _resolve_store_job(name)
+        if job is None:
+            output.print_error(f"Schedule '{name}' not found.")
             raise typer.Exit(1)
-        output.print_success(result)
+        if not job.enabled:
+            output.print_info(f"Schedule '{job.name}' is already paused.")
+            raise typer.Exit(0)
+        job.enabled = False
+        store.update(job)
+        output.print_success(f"Schedule '{job.name}' paused.")
     except typer.Exit:
         raise
     except ImportError as e:
@@ -322,13 +368,16 @@ def schedule_resume(
     """Resume a paused store-backed schedule."""
     output = get_output_controller()
     try:
-        from praisonaiagents.tools.schedule_tools import schedule_resume as _resume, _get_store
-        job = _get_store().get(name)
-        result = _resume(job.name) if job is not None else _resume(name)
-        if "not found" in result or "Error" in result:
-            output.print_error(result)
+        store, job = _resolve_store_job(name)
+        if job is None:
+            output.print_error(f"Schedule '{name}' not found.")
             raise typer.Exit(1)
-        output.print_success(result)
+        if job.enabled:
+            output.print_info(f"Schedule '{job.name}' is already active.")
+            raise typer.Exit(0)
+        job.enabled = True
+        store.update(job)
+        output.print_success(f"Schedule '{job.name}' resumed.")
     except typer.Exit:
         raise
     except ImportError as e:
@@ -346,14 +395,30 @@ def schedule_update(
     """Update a store-backed schedule's cadence and/or message."""
     output = get_output_controller()
     try:
-        from praisonaiagents.tools.schedule_tools import schedule_update as _update, _get_store
-        job = _get_store().get(name)
-        target = job.name if job is not None else name
-        result = _update(target, schedule=schedule, message=message, tz=tz)
-        if "not found" in result or "Error" in result:
-            output.print_error(result)
+        store, job = _resolve_store_job(name)
+        if job is None:
+            output.print_error(f"Schedule '{name}' not found.")
             raise typer.Exit(1)
-        output.print_success(result)
+        changed = []
+        if schedule:
+            from praisonaiagents.scheduler.parser import parse_schedule
+            try:
+                job.schedule = parse_schedule(schedule, tz=tz or None)
+            except ValueError as e:
+                output.print_error(f"Error updating schedule: {e}")
+                raise typer.Exit(1)
+            # A new cadence must be evaluated fresh (see schedule_tools):
+            # clearing last_run_at restarts the schedule from now.
+            job.last_run_at = None
+            changed.append(f"schedule={schedule}")
+        if message:
+            job.message = message
+            changed.append("message")
+        if not changed:
+            output.print_info(f"Schedule '{job.name}' unchanged (nothing to update).")
+            raise typer.Exit(0)
+        store.update(job)
+        output.print_success(f"Schedule '{job.name}' updated ({', '.join(changed)}).")
     except typer.Exit:
         raise
     except ImportError as e:
@@ -369,20 +434,20 @@ def schedule_remove(
     """Remove a store-backed schedule (run history is retained)."""
     output = get_output_controller()
     try:
-        from praisonaiagents.tools.schedule_tools import schedule_remove as _remove, _get_store
-        store = _get_store()
-        job = store.get(name) or store.get_by_name(name)
+        store, job = _resolve_store_job(name)
         if job is None:
             output.print_error(f"Schedule '{name}' not found.")
             raise typer.Exit(1)
         if not confirm and not typer.confirm(f"Remove schedule '{job.name}'?"):
             output.print_info("Cancelled")
             raise typer.Exit(0)
-        result = _remove(job.name)
-        if "not found" in result or "Error" in result:
-            output.print_error(result)
+        # Remove the exact resolved record by id so a duplicate name cannot
+        # cause a different job to be deleted.
+        if store.remove(job.id):
+            output.print_success(f"Schedule '{job.name}' removed.")
+        else:
+            output.print_error(f"Schedule '{job.name}' not found.")
             raise typer.Exit(1)
-        output.print_success(result)
     except typer.Exit:
         raise
     except ImportError as e:
@@ -439,28 +504,59 @@ def schedule_delete(
             raise typer.Exit(0)
 
     if store_job is not None:
-        try:
-            from praisonaiagents.tools.schedule_tools import schedule_remove as _remove
-            result = _remove(store_job.name)
-            if "Error" in result:
-                output.print_error(result)
-                raise typer.Exit(1)
-            output.print_success(result)
-            raise typer.Exit(0)
-        except typer.Exit:
-            raise
-        except ImportError:
-            pass
+        # Remove the exact resolved record by id so a duplicate name cannot
+        # cause a different job to be deleted.
+        if store.remove(store_job.id):
+            output.print_success(f"Schedule '{store_job.name}' removed.")
+        else:
+            output.print_error(f"Schedule '{store_job.name}' not found.")
+            raise typer.Exit(1)
+        raise typer.Exit(0)
 
     raise typer.Exit(_run_schedule(["delete", job_id]))
 
 
 @app.command("describe")
 def schedule_describe(
-    job_id: str = typer.Argument(..., help="Job ID"),
+    job_id: str = typer.Argument(..., help="Job ID or name"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
-    """Show job details."""
+    """Show job details (store-backed job or daemon scheduler)."""
+    output = get_output_controller()
+
+    # Prefer the store: a job authored by ``schedule add`` lives there and the
+    # daemon handler cannot see it. Fall back to the daemon for PID-state jobs.
+    store_job = None
+    try:
+        from praisonaiagents.tools.schedule_tools import _get_store
+        store = _get_store()
+        store_job = store.get(job_id) or store.get_by_name(job_id)
+    except Exception:
+        store_job = None
+
+    if store_job is not None:
+        if json_output:
+            import json as _json
+            payload = _store_jobs_payload([store_job])[0]
+            payload["agent_id"] = store_job.agent_id
+            payload["principal"] = getattr(store_job, "principal", None)
+            payload["delete_after_run"] = getattr(store_job, "delete_after_run", False)
+            print(_json.dumps(payload))
+            raise typer.Exit(0)
+        status = "enabled" if store_job.enabled else "paused"
+        output.print_header(f"Schedule '{store_job.name}' [store]")
+        output.print_info(f"  id:          {store_job.id}")
+        output.print_info(f"  status:      {status}")
+        output.print_info(f"  schedule:    {_fmt_schedule(store_job.schedule)}")
+        output.print_info(f"  last run:    {_fmt_ts(store_job.last_run_at)}")
+        if store_job.agent_id:
+            output.print_info(f"  agent:       {store_job.agent_id}")
+        if getattr(store_job, "delete_after_run", False):
+            output.print_info("  one-shot:    yes (delete_after_run)")
+        if store_job.message:
+            output.print_info(f"  message:     {store_job.message}")
+        raise typer.Exit(0)
+
     args = ["describe", job_id]
     if json_output:
         args.append("--json")

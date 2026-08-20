@@ -344,6 +344,29 @@ class TestScheduleManageTools:
             result = schedule_update(name="ghost", schedule="daily")
         assert "not found" in result.lower()
 
+    def test_update_cadence_resets_last_run(self, tmp_path):
+        """A cadence change clears last_run_at so the new schedule runs fresh.
+
+        Regression: a previously-run recurring job updated to an ``at:`` one-shot
+        kept its non-null last_run_at, so is_due treated it as already fired and
+        it never ran again.
+        """
+        import time
+        from datetime import datetime, timedelta
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_update
+        from praisonaiagents.scheduler.due import is_due
+        store = self._store(tmp_path)
+        with patch('praisonaiagents.tools.schedule_tools._get_store', return_value=store):
+            schedule_add(name="brief", schedule="daily", message="x")
+            job = store.get_by_name("brief")
+            job.last_run_at = time.time() - 10
+            store.update(job)
+            future = (datetime.now() + timedelta(minutes=1)).replace(microsecond=0)
+            schedule_update(name="brief", schedule=f"at:{future.isoformat()}")
+        updated = store.get_by_name("brief")
+        assert updated.last_run_at is None
+        assert is_due(updated, now=future.timestamp() + 1) is True
+
     def test_once_maps_to_delete_after_run(self, tmp_path):
         from praisonaiagents.tools.schedule_tools import schedule_add
         store = self._store(tmp_path)
