@@ -2,13 +2,15 @@
 PraisonAI Database - Ultra-simple persistence for agents.
 
 RECOMMENDED (simplified import):
-    from praisonaiagents import Agent, db
-    # or: from praisonai import Agent, db
-    
+    from praisonaiagents import Agent, db, MemoryConfig
+    # or: from praisonai import Agent, db, MemoryConfig
+
     agent = Agent(
         name="Assistant",
-        db=db(database_url="postgresql://localhost/mydb"),
-        session_id="my-session"
+        memory=MemoryConfig(
+            db=db(database_url="postgresql://localhost/mydb"),
+            session_id="my-session",
+        ),
     )
     agent.chat("Hello!")  # auto-persists + can resume
 
