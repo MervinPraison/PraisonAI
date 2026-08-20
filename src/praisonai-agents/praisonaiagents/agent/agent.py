@@ -6690,9 +6690,19 @@ Answer:"""
             # Import backend types
             from ..cli_backend import CliSessionBinding
             
-            # Build session binding for state management
+            # Build session binding for state management. A session the agent
+            # has already delegated a turn for is a resume: the backend then
+            # continues the CLI-side conversation (and skips re-sending the
+            # system prompt where configured) instead of starting fresh.
             session_id = getattr(self, '_session_id', None) or f"agent-{self.agent_id}"
-            session_binding = CliSessionBinding(session_id=session_id)
+            started_sessions = getattr(self, '_cli_backend_sessions_started', None)
+            if started_sessions is None:
+                started_sessions = set()
+                self._cli_backend_sessions_started = started_sessions
+            session_binding = CliSessionBinding(
+                session_id=session_id,
+                is_resume=session_id in started_sessions,
+            )
             
             # Get system prompt from agent configuration
             system_prompt = None
@@ -6746,7 +6756,11 @@ Answer:"""
                     f"CLI backend failed for agent={self.display_name!r}, "
                     f"session_id={session_id!r}: {result.error}"
                 )
-            
+
+            # A successful turn establishes the CLI-side session; subsequent
+            # turns under the same session_id are resumes.
+            started_sessions.add(session_id)
+
             # Update chat history with the exchange
             if hasattr(self, '_append_to_chat_history'):
                 self._append_to_chat_history({

@@ -276,6 +276,15 @@ class ScheduledAgentExecutor:
                 duration=duration,
             )
 
+        # Model-free external-backend action: when the job names a CLI
+        # backend, the message runs as one headless turn through that backend
+        # — no native agent is resolved and no in-process model turn is taken.
+        # Checked after the empty-message guard (the message IS the prompt)
+        # and before agent resolution, mirroring the ``command`` action.
+        backend_id = str(getattr(job, "backend", "") or "").strip()
+        if backend_id:
+            return await self._execute_backend(job, backend_id, message, started)
+
         # Resolve the agent
         try:
             agent = self._resolve(agent_id)
@@ -583,6 +592,153 @@ class ScheduledAgentExecutor:
         return job_result
 
     # ── command-action helpers ───────────────────────────────────────
+
+    async def _execute_backend(
+        self, job: "ScheduleJob", backend_id: str, message: str, started: float,
+    ) -> JobResult:
+        """Run the job's message as one headless turn through a CLI backend.
+
+        Resolution goes through the sanctioned ``_code_bridge`` seam so the bot
+        package never hard-depends on ``praisonai-code``; when the optional
+        code package is unavailable the tick is recorded as ``failed`` with a
+        clear remediation instead of crashing the ticker. The job's pinned
+        ``model`` is passed straight to the backend (the pin is an input here,
+        not a drift guard — there is no in-process agent to compare against),
+        output is bounded like command output, and failures flow through the
+        same run-record, audit, and failure-delivery plumbing as agent turns.
+        """
+        options = dict(getattr(job, "backend_options", None) or {})
+        cwd = options.pop("cwd", None)
+
+        try:
+            from praisonai_bot._code_bridge import import_code_module
+            backends_mod = import_code_module("praisonai_code.cli_backends")
+            spec = {"id": backend_id, "overrides": options} if options else backend_id
+            backend = backends_mod.resolve_cli_backend_config(spec)
+        except Exception as e:
+            err = (
+                f"CLI backend {backend_id!r} unavailable: {e}. "
+                "Backend jobs require the praisonai-code package "
+                "(pip install praisonai-code)."
+            )
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await self._maybe_deliver_failure(job, result)
+            return result
+
+        try:
+            from praisonaiagents.cli_backend.protocols import CliSessionBinding
+            session = CliSessionBinding(session_id=f"cron_{job.id}")
+        except Exception:  # pragma: no cover - core primitive always present
+            session = None
+
+        # Belt-and-braces bound on top of the backend's own timeout_ms
+        # enforcement, so a wedged subprocess can never stall the ticker.
+        timeout_ms = getattr(getattr(backend, "config", None), "timeout_ms", 300_000)
+        try:
+            timeout_s = float(timeout_ms) / 1000.0
+            if not math.isfinite(timeout_s) or timeout_s <= 0:
+                timeout_s = 300.0
+        except (TypeError, ValueError):
+            timeout_s = 300.0
+
+        exec_kwargs: Dict[str, Any] = {"session": session}
+        if cwd:
+            exec_kwargs["cwd"] = str(cwd)
+        model = getattr(job, "model", None)
+        if model:
+            exec_kwargs["model"] = model
+
+        try:
+            result_obj = await asyncio.wait_for(
+                backend.execute(message, **exec_kwargs), timeout=timeout_s + 30.0,
+            )
+        except asyncio.TimeoutError:
+            err = f"backend turn timed out after {timeout_s + 30.0:.0f}s"
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await self._maybe_deliver_failure(job, result)
+            return result
+        except Exception as e:
+            err = f"backend turn failed to launch: {e}"
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            result = JobResult(job=job, status="failed", error=err, duration=duration)
+            await self._maybe_deliver_failure(job, result)
+            return result
+
+        duration = time.time() - started
+        error = getattr(result_obj, "error", None)
+        text = str(getattr(result_obj, "content", "") or "")
+        if len(text) > _MAX_COMMAND_OUTPUT_CHARS:
+            text = text[:_MAX_COMMAND_OUTPUT_CHARS] + "\n…[output truncated]"
+        succeeded = not error
+
+        # Honour the intentional-silence contract like agent turns do: the
+        # backend ran fine but chose to say nothing worth delivering.
+        silent = False
+        if succeeded:
+            try:
+                from praisonaiagents.bots.silence import is_intentional_silence_response
+                silent = is_intentional_silence_response(text)
+            except Exception:  # pragma: no cover - core primitive always present
+                silent = False
+
+        delivered = False
+        delivery_error: Optional[str] = None
+        delivery = getattr(job, "delivery", None)
+        if succeeded and text and not silent and delivery and self._can_deliver(delivery):
+            try:
+                await self._dispatch_delivery(delivery, text)
+                delivered = True
+                logger.info(
+                    "Delivered backend job '%s' output to %s:%s",
+                    job.id, delivery.channel, delivery.channel_id,
+                )
+            except Exception as e:
+                delivery_error = str(e)
+                logger.warning(
+                    "Delivery failed for backend job '%s': %s", job.id, e,
+                )
+
+        status = "succeeded" if succeeded else "failed"
+        self._runner.mark_run(
+            job,
+            status=status,
+            result=text if succeeded else None,
+            error=None if succeeded else str(error),
+            duration=duration,
+            delivered=delivered,
+        )
+        if succeeded and self._on_success:
+            self._on_success(job, text)
+        elif not succeeded and self._on_failure:
+            self._on_failure(job, str(error))
+
+        result = JobResult(
+            job=job,
+            result=text if succeeded else None,
+            status=status,
+            error=None if succeeded else str(error),
+            duration=duration,
+            delivered=delivered,
+            delivery_error=delivery_error,
+        )
+        self._audit_output(job, result)
+        if not succeeded:
+            await self._maybe_deliver_failure(job, result)
+        return result
 
     async def _execute_command(
         self, job: "ScheduleJob", command: str, started: float,

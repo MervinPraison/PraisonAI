@@ -153,17 +153,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         if 'backend' in global_config:
             return global_config['backend']
         
-        # 7. Check CLI backend override (legacy with warning)
-        if 'cli_backend' in details:
-            import warnings
-            warnings.warn(
-                "Agent-level 'cli_backend' in YAML is deprecated. "
-                "Use 'runtime' parameter or model-scoped runtime configuration instead.",
-                DeprecationWarning,
-                stacklevel=3
-            )
-            return details['cli_backend']
-        
+        # 7. ``cli_backend`` is NOT a runtime id — it is resolved to a backend
+        # instance and passed as the ``cli_backend`` kwarg instead (see the
+        # agent construction path). Returning it here would send a CLI-backend
+        # id into the runtime registry, which fails closed on unknown ids.
         return None
     
     def _resolve_agent_approval(self, details: Dict[str, Any], config: Dict[str, Any]):
@@ -390,6 +383,17 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 'toolsets': agent_toolsets,
                 'runtime': agent_runtime,
             }
+
+            # Agent-level ``cli_backend`` in YAML delegates this agent's turns
+            # to an external coding CLI. Core Agent refuses raw string ids, so
+            # resolve to an instance here in the wrapper layer.
+            if 'cli_backend' in details:
+                from praisonai.agents_generator import _resolve_yaml_cli_backend
+                resolved_backend = _resolve_yaml_cli_backend(
+                    details.get('cli_backend'), logger
+                )
+                if resolved_backend is not None:
+                    agent_kwargs['cli_backend'] = resolved_backend
             
             # Forward agent-level fields that core Agent already accepts as-is
             # so CLI/YAML flags (--planning, --web, --autonomy, ...) are

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import os
 import subprocess
 from typing import AsyncIterator, List, Optional
+
+from ._errors import called_process_error_message
 
 try:
     from praisonaiagents import (
@@ -67,8 +70,14 @@ class CodexBackend:
         except subprocess.CalledProcessError as exc:
             return CliBackendResult(
                 content="",
-                error=f"Codex CLI failed: {exc}",
+                error=f"Codex CLI failed: {called_process_error_message(exc)}",
                 metadata={"command": cmd, "return_code": getattr(exc, "returncode", -1)},
+            )
+        except TimeoutError as exc:
+            return CliBackendResult(
+                content="",
+                error=f"Codex CLI failed: {exc}",
+                metadata={"command": cmd, "timeout_ms": self.config.timeout_ms},
             )
 
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[CliBackendDelta]:
@@ -87,15 +96,26 @@ class CodexBackend:
         system_prompt: Optional[str] = None,
         **kwargs,
     ) -> List[str]:
-        cmd = [self.config.command, *self.config.args]
-
+        # ``resume`` is a subcommand of ``exec`` and must come immediately
+        # after it, before exec's own flags (``codex exec resume <id> ...``).
         if session and session.session_id and getattr(session, "is_resume", False):
-            cmd.extend(["resume", session.session_id])
+            args = list(self.config.args)
+            insert_at = args.index("exec") + 1 if "exec" in args else 0
+            args[insert_at:insert_at] = ["resume", session.session_id]
+            cmd = [self.config.command, *args]
+        else:
+            cmd = [self.config.command, *self.config.args]
 
-        cmd.extend(["-C", os.getcwd()])
+        cmd.extend(["-C", kwargs.get("cwd") or os.getcwd()])
+
+        model = kwargs.get("model")
+        if model:
+            cmd.extend(["-m", str(model)])
 
         if system_prompt:
-            cmd.extend(["-c", f'instructions="{system_prompt}"'])
+            # The value is parsed by the CLI as a TOML scalar; JSON string
+            # escaping is TOML-basic-string compatible.
+            cmd.extend(["-c", f"instructions={json.dumps(system_prompt)}"])
 
         if images:
             for image_path in images:

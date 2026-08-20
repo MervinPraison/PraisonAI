@@ -8,6 +8,8 @@ import os
 import subprocess
 from typing import AsyncIterator, List, Optional
 
+from ._errors import called_process_error_message
+
 try:
     from praisonaiagents import (
         CliBackendConfig,
@@ -66,8 +68,14 @@ class GrokBackend:
         except subprocess.CalledProcessError as exc:
             return CliBackendResult(
                 content="",
-                error=f"Grok CLI failed: {exc}",
+                error=f"Grok CLI failed: {called_process_error_message(exc)}",
                 metadata={"command": cmd, "return_code": getattr(exc, "returncode", -1)},
+            )
+        except TimeoutError as exc:
+            return CliBackendResult(
+                content="",
+                error=f"Grok CLI failed: {exc}",
+                metadata={"command": cmd, "timeout_ms": self.config.timeout_ms},
             )
 
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[CliBackendDelta]:
@@ -86,7 +94,11 @@ class GrokBackend:
         system_prompt: Optional[str] = None,
         **kwargs,
     ) -> List[str]:
-        cmd = [self.config.command, *self.config.args, "--cwd", os.getcwd()]
+        cmd = [self.config.command, *self.config.args, "--cwd", kwargs.get("cwd") or os.getcwd()]
+
+        model = kwargs.get("model")
+        if model:
+            cmd.extend(["--model", str(model)])
 
         if session and session.session_id and getattr(session, "is_resume", False):
             cmd.extend(["--resume", session.session_id])

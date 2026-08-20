@@ -214,6 +214,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "audit": (".commands.audit", "audit", "Compliance auditing"),
     "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
     "models": (".commands.models", "app", "List and describe available models"),
+    "backends": (".commands.backends", "app", "List registered CLI backends"),
 
     # Wrapper-resident commands — see ``_WRAPPER_RESIDENT_COMMANDS`` below. These entries keep
     # relative ``.commands.*`` paths so they are advertised in ``--help``, but
