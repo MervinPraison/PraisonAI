@@ -182,6 +182,14 @@ def _mistyped_command_suggestions(argv, first_cmd):
     exactly one positional; no whitespace, path separator, ``.yaml``/``.yml``
     suffix or existing file; not itself a command; discovery succeeded; and
     difflib ratio >= 0.8 to some command.
+
+    A high difflib ratio is necessary but not sufficient: a legitimate plural or
+    extension of a command word (``tests`` for ``test``, ``runs`` for ``run``,
+    ``server`` for ``serve``) also scores >= 0.8, yet is a valid prompt, not a
+    typo. These are distinguished structurally — an extension *contains the full
+    command as a prefix* (or vice-versa), whereas a genuine typo does not
+    (``deploi`` is not a prefix-extension of ``deploy``). Any such prefix-related
+    match is therefore dropped so real prompts reach ``run`` untouched.
     """
     import os
 
@@ -211,7 +219,17 @@ def _mistyped_command_suggestions(argv, first_cmd):
 
     import difflib
 
-    return difflib.get_close_matches(first_cmd, sorted(commands), n=3, cutoff=0.8)
+    matches = difflib.get_close_matches(first_cmd, sorted(commands), n=3, cutoff=0.8)
+    # Drop prefix-related matches: a plural/extension of a command (``tests`` for
+    # ``test``, ``server`` for ``serve``) shares the command as a prefix and is a
+    # legitimate prompt, not a typo. Genuine typos (``deploi`` vs ``deploy``) do
+    # not exhibit this prefix relationship, so they survive.
+    matches = [
+        cmd
+        for cmd in matches
+        if not (first_cmd.startswith(cmd) or cmd.startswith(first_cmd))
+    ]
+    return matches
 
 
 def _dispatch_value_opts():

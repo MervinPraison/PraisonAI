@@ -73,6 +73,22 @@ class TestDispatcherRouting(unittest.TestCase):
         self.assertEqual(self.route(["deploi", "the", "app"]),
                          ("typer", ["run", "deploi the app"]))
 
+    def test_plural_of_command_is_a_prompt_not_a_typo(self):
+        # A plural/extension of a command word scores >= 0.8 on difflib but is a
+        # legitimate one-word prompt, not a typo — it must reach ``run``, never
+        # ``exit 2``. (``tests`` for ``test``, ``server`` for ``serve``, ...)
+        for word in ("tests", "runs", "apps", "codes", "server"):
+            self.assertEqual(
+                self.route([word]),
+                ("typer", ["run", word]),
+                f"{word!r} is a valid prompt, must not be blocked as a typo",
+            )
+            self.assertEqual(
+                dispatcher._mistyped_command_suggestions([word], word),
+                [],
+                f"{word!r} shares a command prefix; no suggestion",
+            )
+
     def test_yaml_exact_command_and_failed_discovery_disable_the_guard(self):
         m = dispatcher._mistyped_command_suggestions
         self.assertEqual(m(["deploi.yaml"], "deploi.yaml"), [])
