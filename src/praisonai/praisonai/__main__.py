@@ -30,6 +30,12 @@ _typer_commands_lock = threading.Lock()
 _run_option_names_cache = None
 _run_option_names_lock = threading.Lock()
 
+# Cache for the *root app* callback's options — the modern engine's GLOBAL flags
+# (``--output-format``, ``--json``, ``--quiet`` ...). Click requires them *before*
+# the subcommand, so they are tracked separately from ``run``'s own options.
+_global_option_names_cache = None
+_global_option_names_lock = threading.Lock()
+
 # Short options whose meaning DIFFERS between the legacy argparse surface and the
 # modern ``run`` command. Routing an existing YAML/prompt invocation that carries
 # one of these to the modern engine would silently change its semantics:
@@ -92,6 +98,126 @@ def _get_run_option_names():
 
         _run_option_names_cache = (all_opts, value_opts)
         return _run_option_names_cache
+
+
+def _get_global_option_names():
+    """The modern engine's *global* flags, declared on ``@app.callback`` rather
+    than on any subcommand. Same ``(all_opts, value_opts)`` contract and
+    ``None``-on-failure convention as :func:`_get_run_option_names`.
+    """
+    global _global_option_names_cache
+
+    if _global_option_names_cache is not None:
+        return None if _global_option_names_cache is False else _global_option_names_cache
+
+    with _global_option_names_lock:
+        if _global_option_names_cache is not None:
+            return None if _global_option_names_cache is False else _global_option_names_cache
+
+        try:
+            from praisonai.cli.app import app as root_app
+            from typer.main import get_command as _get_command
+
+            command = _get_command(root_app)
+            all_opts = set()
+            value_opts = set()
+            for param in command.params:
+                is_flag = getattr(param, "is_flag", False) or getattr(
+                    param, "is_bool_flag", False
+                )
+                for opt in getattr(param, "opts", []):
+                    if opt.startswith("-"):
+                        all_opts.add(opt)
+                        if not is_flag:
+                            value_opts.add(opt)
+                for opt in getattr(param, "secondary_opts", []):
+                    if opt.startswith("-"):
+                        all_opts.add(opt)
+        except Exception:
+            _global_option_names_cache = False
+            return None
+
+        _global_option_names_cache = (all_opts, value_opts)
+        return _global_option_names_cache
+
+
+def _get_dispatch_option_names():
+    """Union of ``run``'s and the root callback's option names.
+
+    Tokenising argv needs *every* value-consuming option the modern engine knows;
+    without the global half, ``praisonai --output-format json version`` treats
+    ``json`` as the first positional and mis-routes. ``None`` only when ``run``
+    introspection failed; a global-half failure degrades to ``run``'s sets.
+    """
+    run_opts = _get_run_option_names()
+    if run_opts is None:
+        return None
+    global_opts = _get_global_option_names()
+    if global_opts is None:
+        return run_opts
+    return (run_opts[0] | global_opts[0], run_opts[1] | global_opts[1])
+
+
+def _global_only_option_names():
+    """Option names on the root callback but NOT on ``run``. Click accepts a
+    group-level option only *before* the subcommand. Options on both (``-o``,
+    ``-v``) stay with ``run``: ``praisonai "hi" -o json`` has always meant
+    ``run --output json``.
+    """
+    run_opts = _get_run_option_names()
+    global_opts = _get_global_option_names()
+    if run_opts is None or global_opts is None:
+        return frozenset()
+    return frozenset(global_opts[0] - run_opts[0])
+
+
+def _mistyped_command_suggestions(argv, first_cmd):
+    """Close command matches when ``first_cmd`` is a typo'd subcommand.
+
+    ``praisonai deploi`` is a mistyped verb, not a prompt, but the bare-prompt
+    rule cannot tell them apart by shape — so it forwards it to ``run`` and the
+    word is billed to an LLM. Disambiguated by the signal every CLI uses for
+    "did you mean": lexical proximity to a *registered* command name. Non-empty
+    only when ALL hold, so one-word prompts (``praisonai hello``) keep working:
+    exactly one positional; no whitespace, path separator, ``.yaml``/``.yml``
+    suffix or existing file; not itself a command; discovery succeeded; and
+    difflib ratio >= 0.8 to some command.
+    """
+    import os
+
+    if not first_cmd or first_cmd.startswith("-"):
+        return []
+    if any(ch.isspace() for ch in first_cmd):
+        return []
+    if "/" in first_cmd or os.sep in first_cmd:
+        return []
+    if first_cmd.lower().endswith((".yaml", ".yml")):
+        return []
+    if os.path.exists(first_cmd):
+        return []
+
+    commands = _get_typer_commands()
+    if not commands or first_cmd in commands:
+        return []
+
+    # Exactly one positional token — otherwise it reads as free text.
+    positionals = [
+        arg
+        for arg, _name, kind in _iter_argv_tokens(argv, _dispatch_value_opts())
+        if kind == "pos"
+    ]
+    if len(positionals) != 1:
+        return []
+
+    import difflib
+
+    return difflib.get_close_matches(first_cmd, sorted(commands), n=3, cutoff=0.8)
+
+
+def _dispatch_value_opts():
+    """Value-consuming option names for tokenisation, or the static fallback."""
+    opts = _get_dispatch_option_names()
+    return opts[1] if opts is not None else {"--output-format", "-o"}
 
 
 def _get_typer_commands():
@@ -231,11 +357,11 @@ def _looks_like_bare_prompt(argv, first_cmd):
     if not any(arg.startswith("-") for arg in argv):
         return True
 
-    run_opts = _get_run_option_names()
-    if run_opts is None:
+    dispatch_opts = _get_dispatch_option_names()
+    if dispatch_opts is None:
         # Discovery failed → conservative: any flag means legacy owns it.
         return False
-    supported, value_opts = run_opts
+    supported, value_opts = dispatch_opts
     # Classify flags value-aware so a value-taking option's dash-prefixed value
     # (``--session -abc``, ``--output -json``) is not mistaken for a flag.
     flags = _flag_names(argv, value_opts)
@@ -276,11 +402,11 @@ def _looks_like_yaml_run_target(argv, first_cmd):
     if not any(arg.startswith("-") for arg in argv):
         return True
 
-    run_opts = _get_run_option_names()
-    if run_opts is None:
+    dispatch_opts = _get_dispatch_option_names()
+    if dispatch_opts is None:
         # Discovery failed → conservative: any flag means legacy owns it.
         return False
-    supported, value_opts = run_opts
+    supported, value_opts = dispatch_opts
     flags = _flag_names(argv, value_opts)
     # A short option whose meaning differs between legacy and modern (``-s``,
     # ``-f``) keeps the YAML invocation on legacy to avoid silent
@@ -306,15 +432,38 @@ def _build_run_argv(argv, value_opts):
     than mistaken for part of the prompt. ``--opt=value`` forms are self-
     contained and need no lookahead.
     """
+    global_flags, rest = _split_global_flags(argv, value_opts)
     positionals = []
     flags = []
-    for arg, _name, kind in _iter_argv_tokens(argv, value_opts):
+    for arg, _name, kind in _iter_argv_tokens(rest, value_opts):
         if kind == "pos":
             positionals.append(arg)
         else:
             flags.append(arg)
     prompt = " ".join(positionals)
-    return ["run", prompt, *flags]
+    return [*global_flags, "run", prompt, *flags]
+
+
+def _split_global_flags(argv, value_opts):
+    """Partition ``argv`` into ``(global_flag_tokens, remaining_tokens)``.
+
+    ``--output-format json`` must be emitted as ``praisonai --output-format json
+    run <target>``; appended after ``run``, Click rejects it with "No such
+    option". Options ``run`` also declares stay in ``rest``.
+    """
+    global_only = _global_only_option_names()
+    if not global_only:
+        return [], list(argv)
+    global_flags = []
+    rest = []
+    target = rest
+    for arg, name, kind in _iter_argv_tokens(argv, value_opts):
+        if kind == "flag":
+            target = global_flags if name in global_only else rest
+        elif kind == "pos":
+            target = rest
+        target.append(arg)
+    return global_flags, rest
 
 
 def _run_typer(argv):
@@ -431,9 +580,9 @@ def main():
     #    fails, so the fast/flagless path stays light and mis-routing is avoided.
     value_opts = None
     if any(arg.startswith("-") for arg in argv):
-        run_opts = _get_run_option_names()
-        if run_opts is not None:
-            value_opts = run_opts[1]
+        dispatch_opts = _get_dispatch_option_names()
+        if dispatch_opts is not None:
+            value_opts = dispatch_opts[1]
     first_cmd = _find_first_command(argv, value_opts)
 
     if first_cmd is None:
@@ -444,7 +593,26 @@ def main():
     if first_cmd in _get_typer_commands():
         # Known Typer command → Typer
         _run_typer(argv)
-    elif _looks_like_bare_prompt(argv, first_cmd):
+        return
+
+    # A lone token that is a near-miss for a registered command is a mistyped
+    # verb, not a prompt. Without this guard it falls through to the bare-prompt
+    # rule below and is billed to an LLM: ``praisonai deploi`` costs money and
+    # exits 1, where the sibling praisonai-* binaries exit 2 without running.
+    suggestions = _mistyped_command_suggestions(argv, first_cmd)
+    if suggestions:
+        print("Error: No such command '{}'.".format(first_cmd), file=sys.stderr)
+        print(
+            "Did you mean: {}?".format(", ".join(suggestions)),
+            file=sys.stderr,
+        )
+        print(
+            'To run it as a prompt instead: praisonai run "{}"'.format(first_cmd),
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if _looks_like_bare_prompt(argv, first_cmd):
         # Bare free-text prompt → modern Typer `run` engine (same as
         # `praisonai run "<prompt>"`), inheriting session continuity,
         # --output modes, the credential gate and permissions.
@@ -465,7 +633,8 @@ def main():
         # is already a single positional token, so the argv is forwarded intact
         # after the `run` command — the existing YAML executors run *inside* the
         # modern session/output/credential/permission envelope.
-        _run_typer(["run", *argv])
+        yaml_globals, yaml_rest = _split_global_flags(argv, value_opts or set())
+        _run_typer([*yaml_globals, "run", *yaml_rest])
     else:
         # Legacy/deprecated-flag invocation → legacy. This is reached only when
         # a YAML workflow or prompt carries a flag the modern engine does not
