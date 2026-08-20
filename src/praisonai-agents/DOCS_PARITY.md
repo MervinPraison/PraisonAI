@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2760 |
 | ✅ Bots | 7 | 31 | 13366 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 36061 |
+| ✅ CLI | 5 | 121 | 36183 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4790 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 76 | 27743 |
+| ✅ Gateway | 7 | 76 | 27798 |
 | ✅ Guardrails | 4 | 4 | 2029 |
 | ✅ Handoffs | 11 | 6 | 2567 |
 | ✅ Hooks | 2 | 9 | 4434 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1549 |
 | ✅ Plugins | 8 | 4 | 2858 |
-| ✅ Prompts | 2 | 9 | 1965 |
+| ✅ Prompts | 2 | 9 | 1971 |
 | ✅ Providers | 1 | 56 | 7765 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3003 |
@@ -69,25 +69,25 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1054 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3257 |
-| ✅ Security | 1 | 3 | 3332 |
+| ✅ Security | 1 | 3 | 3337 |
 | ✅ Sessions | 4 | 18 | 7158 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 142 | 41677 |
+| ✅ Tools | 12 | 142 | 41792 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1211 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
-| ✅ Web | 3 | 9 | 2471 |
+| ✅ Web | 3 | 9 | 2484 |
 | ✅ Workflows | 5 | 16 | 6593 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6713 lines)
+- ℹ️ Database (42 docs, 6761 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
