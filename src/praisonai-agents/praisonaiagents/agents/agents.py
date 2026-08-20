@@ -688,8 +688,10 @@ class AgentTeam(SpawnAnnounceProtocol):
             process: Execution process type ("sequential", "workflow", "hierarchical").
                 For parallel fan-out, set async_execution=True on individual Task
                 objects within a "workflow" or "sequential" process.
-            manager_llm: LLM model for manager agent
-            llm: Default LLM model for all agents
+            manager_llm: LLM model for the hierarchical manager agent. Unrelated
+                to llm=; it never touches the members.
+            llm: Default model for members that did not name one themselves.
+                An agent constructed with its own llm=/model=/auth= keeps it.
             name: Name for this agent collection
             variables: Global variables for substitution
             memory: Memory configuration (bool | MultiAgentMemoryConfig)
@@ -707,7 +709,15 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         # Store new params for propagation to agents
         self._learn = learn
-        self.llm = llm  # Store default LLM for API consistency
+        # Default model for the members. Applied to every agent that never named
+        # a model of its own; an agent that did keeps it. Same rule AgentFlow
+        # already uses for the agents it builds (llm=config.get("llm", model)).
+        self.llm = llm
+        if llm:
+            for _member in (agents.values() if isinstance(agents, dict) else (agents or [])):
+                _apply = getattr(_member, "_apply_default_llm", None)
+                if callable(_apply):
+                    _apply(llm)
         self._autonomy = autonomy
         self._knowledge = knowledge
         self._guardrails = guardrails

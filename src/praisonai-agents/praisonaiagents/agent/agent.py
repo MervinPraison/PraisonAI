@@ -344,6 +344,33 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     cls._default_model_checked = True
         return cls._default_model
     
+    def _apply_default_llm(self, model) -> None:
+        """Adopt a container-level default model, unless this agent chose one.
+
+        ``AgentTeam(llm=...)`` and ``AgentFlow(llm=...)`` document their model as
+        the *default* for their agents. An agent that named its own model keeps
+        it -- that is already how AgentFlow builds the agents it creates
+        (``llm=config.get("llm", model)``), so both containers follow one rule.
+        """
+        if not model or self._llm_explicit or self._panel_descriptor is not None:
+            return
+        self.llm = model
+        self._llm_instance = None
+        # A used agent caches a dispatcher (chat_mixin) bound to the old model --
+        # the OpenAI path bakes model= into it, the custom path wraps the old
+        # llm_instance. Drop it so the next chat rebuilds against the new model.
+        if getattr(self, '_unified_dispatcher', None) is not None:
+            self._unified_dispatcher = None
+        if self._llm_init_params is not None:
+            # base_url path: keep the connection settings, swap the model.
+            self._llm_init_params = {**self._llm_init_params, 'model': model}
+        elif isinstance(model, str) and "/" in model:
+            params = {'model': model, **self._llm_option_kwargs}
+            if self.api_key:
+                params['api_key'] = self.api_key
+            self._llm_init_params = params
+            self._using_custom_llm = True
+
     def _ensure_llm_instance(self):
         """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
         if self._llm_instance is not None:
@@ -1890,6 +1917,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self._using_custom_llm = False
         self._llm_instance = None
         self._llm_init_params = None
+        # Did the caller name a model? Recorded before llm/model are normalised
+        # so a container-level default (AgentTeam(llm=)/AgentFlow(llm=)) can fill
+        # in agents that never chose one without overriding those that did.
+        # auth= pins the vendor too, so it counts as an explicit choice.
+        self._llm_explicit = llm is not None or model is not None or auth is not None
         self._panel_descriptor = None
         self._panel_llm_kwargs = {}
         # Flag to track if final result has been displayed to prevent duplicates
@@ -1997,6 +2029,19 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             _retry_init_params = {'max_retries': _rc.max_retries}
         elif retry is False:
             _retry_init_params = {'max_retries': 0}
+
+        # Connection/execution options that every LLM construction branch
+        # forwards. Kept so a container default applied after construction
+        # (_apply_default_llm) builds the same LLM the constructor would have.
+        self._llm_option_kwargs = {
+            'metrics': metrics,
+            'max_iter': max_iter,
+            'web_search': web_search,
+            'web_fetch': web_fetch,
+            'prompt_caching': prompt_caching,
+            'claude_memory': claude_memory,
+            **_retry_init_params,
+        }
 
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.
