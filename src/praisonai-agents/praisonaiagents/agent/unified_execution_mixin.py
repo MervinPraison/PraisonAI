@@ -282,7 +282,7 @@ class UnifiedExecutionMixin:
                     task_id=task_id,
                     config=config,
                     tool_choice=tool_choice,
-                    parallel_tool_calls=getattr(self, 'parallel_tool_calls', False)  # Gap 2 integration
+                    parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False)  # Gap 2 integration
                 )
             else:
                 # Standard LiteLLM path - delegate to existing LLM class
@@ -304,7 +304,7 @@ class UnifiedExecutionMixin:
                     task_id=task_id,
                     config=config,
                     tool_choice=tool_choice,
-                    parallel_tool_calls=getattr(self, 'parallel_tool_calls', False)  # Gap 2 integration
+                    parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False)  # Gap 2 integration
                 )
             
             # Store response in memory if enabled

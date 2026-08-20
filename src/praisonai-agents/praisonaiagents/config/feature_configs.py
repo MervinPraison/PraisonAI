@@ -887,8 +887,12 @@ class ExecutionConfig:
     
     # Parallel tool execution (Gap 2): Enable parallel execution of batched LLM tool calls
     # When True, multiple tool calls from LLM are executed concurrently instead of sequentially
-    # Default False preserves existing behavior for backward compatibility
-    parallel_tool_calls: bool = False
+    # Default False preserves existing behavior for backward compatibility.
+    # This is the single source of truth; ToolConfig.parallel is a deprecated alias.
+    # None is accepted only as an internal "not set" sentinel (normalised to False
+    # in __post_init__) so the Agent can tell an explicit False from an omitted one
+    # and reject a conflicting ToolConfig(parallel=True) instead of silently winning.
+    parallel_tool_calls: Optional[bool] = None
 
     # Durable tool-loop replay. Default-off keeps the execution hot path free
     # of journal construction and SQLite writes.
@@ -898,6 +902,11 @@ class ExecutionConfig:
 
     def __post_init__(self) -> None:
         """Post-initialization processing with deprecation warnings and validation."""
+        # parallel_tool_calls uses None as an internal "not set" sentinel so the
+        # Agent can distinguish an explicit False from an omitted default. Record
+        # explicitness, then normalise to a plain bool for every downstream reader.
+        self._parallel_tool_calls_explicit = self.parallel_tool_calls is not None
+        self.parallel_tool_calls = bool(self.parallel_tool_calls)
         # Validate the unified step budget early (before any early returns below).
         if self.max_steps is not None and self.max_steps < 1:
             raise ValueError("ExecutionConfig.max_steps must be >= 1 when set.")
@@ -1049,7 +1058,7 @@ class ExecutionConfig:
             max_context_tokens=data.get("max_context_tokens", None),
             compaction_strategy=compaction_strategy,
             max_budget=data.get("max_budget", None),
-            parallel_tool_calls=data.get("parallel_tool_calls", False),
+            parallel_tool_calls=data.get("parallel_tool_calls", None),
             durable=data.get("durable", False),
             journal_path=data.get("journal_path", None),
             resume_run_id=data.get("resume_run_id", None),
@@ -1151,8 +1160,13 @@ class ToolConfig:
     # Retry policy for tool execution with exponential backoff
     retry_policy: Optional[Any] = None  # RetryPolicy instance
     
-    # Enable parallel execution of batched LLM tool calls
-    parallel: bool = False
+    # DEPRECATED ALIAS for ExecutionConfig.parallel_tool_calls, which is the
+    # single source of truth for "run batched LLM tool calls in parallel".
+    # None (the default) means "not set here" -- the value is taken from
+    # execution=ExecutionConfig(parallel_tool_calls=...). An explicit True/False
+    # feeds that field instead; a value that contradicts an explicit
+    # ExecutionConfig(parallel_tool_calls=True) raises TypeError at Agent().
+    parallel: Optional[bool] = None
     
     # Tool output handling and artifact storage
     output_limit: int = DEFAULT_TOOL_OUTPUT_LIMIT  # Maximum bytes before spilling to artifact store
@@ -1215,7 +1229,7 @@ class ToolConfig:
         return cls(
             timeout=data.get("timeout"),
             retry_policy=retry_policy,
-            parallel=data.get("parallel", False),
+            parallel=data.get("parallel"),
             output_limit=data.get("output_limit", DEFAULT_TOOL_OUTPUT_LIMIT),
             output_max_lines=data.get("output_max_lines"),
             output_direction=data.get("output_direction", "both"),
