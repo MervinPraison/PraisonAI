@@ -77,6 +77,17 @@ def has_memory_adapter(name: str) -> bool:
     return get_default_memory_registry().is_available(name)
 
 
+#: Accepted spellings for a backend, mapped to the adapter that serves them.
+#: Single source of truth for MemoryConfig, Agent and Memory.
+MEMORY_PROVIDER_ALIASES = {"rag": "chroma", "chromadb": "chroma", "none": "in_memory"}
+
+
+def resolve_memory_adapter_name(name: str) -> Optional[str]:
+    """Adapter name for *name*, or None if nothing is registered under it."""
+    candidate = MEMORY_PROVIDER_ALIASES.get(name, name)
+    return candidate if has_memory_adapter(candidate) else None
+
+
 def get_first_available_memory_adapter(
     preferences: Optional[List[str]] = None, **kwargs
 ) -> Optional[Tuple[str, MemoryProtocol]]:
@@ -107,4 +118,6 @@ __all__ = [
     'add_memory_adapter',
     'add_memory_factory',
     'has_memory_adapter',
+    'resolve_memory_adapter_name',
+    'MEMORY_PROVIDER_ALIASES',
 ]

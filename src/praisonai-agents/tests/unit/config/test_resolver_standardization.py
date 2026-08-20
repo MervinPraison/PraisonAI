@@ -368,12 +368,12 @@ class TestCLIResolverIntegration:
         assert isinstance(result, MockMemoryConfig)
     
     def test_cli_memory_flag_preset_string(self):
-        """CLI --memory=redis should resolve as preset."""
+        """CLI --memory=sqlite should resolve as preset."""
         from praisonaiagents.config.param_resolver import resolve, ArrayMode
         from praisonaiagents.config.presets import MEMORY_PRESETS, MEMORY_URL_SCHEMES
         
         result = resolve(
-            value="redis",
+            value="sqlite",
             param_name="memory",
             config_class=MockMemoryConfig,
             presets=MEMORY_PRESETS,
@@ -382,15 +382,15 @@ class TestCLIResolverIntegration:
         )
         
         assert isinstance(result, MockMemoryConfig)
-        assert result.backend == "redis"
+        assert result.backend == "sqlite"
     
     def test_cli_memory_flag_url(self):
-        """CLI --memory=postgresql://... should resolve as URL."""
+        """CLI --memory=mongodb://... should resolve as URL."""
         from praisonaiagents.config.param_resolver import resolve, ArrayMode
         from praisonaiagents.config.presets import MEMORY_PRESETS, MEMORY_URL_SCHEMES
         
         result = resolve(
-            value="postgresql://localhost/db",
+            value="mongodb://localhost/db",
             param_name="memory",
             config_class=MockMemoryConfig,
             presets=MEMORY_PRESETS,
@@ -399,7 +399,7 @@ class TestCLIResolverIntegration:
         )
         
         assert isinstance(result, MockMemoryConfig)
-        assert result.backend == "postgres"
+        assert result.backend == "mongodb"
 
 
 # =============================================================================
@@ -517,7 +517,7 @@ class TestAllPrecedenceLevels:
         assert result is None
         
         # 2. Config class instance
-        config = MemoryConfig(backend="redis")
+        config = MemoryConfig(backend="sqlite")
         result = resolve(value=config, param_name="memory", config_class=MemoryConfig,
                         presets=MEMORY_PRESETS, url_schemes=MEMORY_URL_SCHEMES,
                         array_mode=ArrayMode.SINGLE_OR_LIST)
@@ -531,13 +531,13 @@ class TestAllPrecedenceLevels:
         assert result.backend == "sqlite"
         
         # 4. String preset
-        result = resolve(value="redis", param_name="memory", config_class=MemoryConfig,
+        result = resolve(value="mongodb", param_name="memory", config_class=MemoryConfig,
                         presets=MEMORY_PRESETS, url_schemes=MEMORY_URL_SCHEMES,
                         array_mode=ArrayMode.SINGLE_OR_LIST)
         assert isinstance(result, MemoryConfig)
         
         # 5. String URL
-        result = resolve(value="postgresql://localhost/db", param_name="memory",
+        result = resolve(value="mongodb://localhost/db", param_name="memory",
                         config_class=MemoryConfig, presets=MEMORY_PRESETS,
                         url_schemes=MEMORY_URL_SCHEMES, array_mode=ArrayMode.SINGLE_OR_LIST)
         assert isinstance(result, MemoryConfig)

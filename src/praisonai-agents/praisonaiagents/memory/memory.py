@@ -136,16 +136,21 @@ class Memory(SearchMixin, MemoryCoreMixin):
         provider = self.cfg.get("provider", "rag").lower()
         self._log_verbose(f"Requested memory provider: {provider}")
         
-        # Map legacy provider names to adapter names
-        provider_mapping = {
-            "rag": "chroma",  # Legacy "rag" provider uses ChromaDB
-            "mem0": "mem0",
-            "mongodb": "mongodb",
-            "sqlite": "sqlite",
-            "none": "in_memory"
-        }
-        
-        adapter_name = provider_mapping.get(provider, provider)
+        # Legacy provider aliases live in memory/adapters/registry.py
+        from .adapters.registry import (
+            MEMORY_PROVIDER_ALIASES, list_memory_adapters, resolve_memory_adapter_name)
+
+        # A provider with no adapter must fail loudly: falling through landed
+        # on the SQLite fallback below, so provider="redis" silently produced a
+        # local .db file per process.
+        adapter_name = resolve_memory_adapter_name(provider)
+        if adapter_name is None:
+            from ..config.parse_utils import make_preset_error
+            raise make_preset_error(
+                "memory provider",
+                provider,
+                sorted(set(list_memory_adapters()) | set(MEMORY_PROVIDER_ALIASES)),
+            )
         
         # Try to get preferred adapter, fallback to available ones
         adapter = None
@@ -195,8 +200,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 self.provider = adapter_name
                 return
                 
-            # Fallback to first available adapter
-            self._log_verbose(f"Provider '{adapter_name}' not available, trying fallbacks")
+            # Falling back changes where the data lives - say so out loud when
+            # the user named a specific provider.
+            _fallback_log = (
+                logger.warning if provider_explicitly_requested else self._log_verbose
+            )
+            _fallback_log(
+                f"Memory provider '{adapter_name}' is not available; falling back "
+                f"to a local store. Data will NOT be in '{adapter_name}'."
+            )
             # Try each fallback preference individually
             for fallback_provider in ["sqlite", "in_memory"]:
                 try:
@@ -204,7 +216,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                     adapter = get_memory_adapter(fallback_provider, **fallback_config)
                     if adapter:
                         adapter_name = fallback_provider
-                        self._log_verbose(f"Using fallback adapter: {adapter_name}")
+                        _fallback_log(f"Using fallback memory adapter: {adapter_name}")
                         break
                 except Exception as e:
                     self._log_verbose(f"Fallback {fallback_provider} failed: {e}")

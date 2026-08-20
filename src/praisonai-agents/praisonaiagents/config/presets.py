@@ -19,9 +19,7 @@ MEMORY_PRESETS: Dict[str, Dict[str, Any]] = {
     # Backend presets
     "file": {"backend": "file"},
     "sqlite": {"backend": "sqlite"},
-    "redis": {"backend": "redis"},
-    "postgres": {"backend": "postgres"},
-    "postgresql": {"backend": "postgres"},
+    "chroma": {"backend": "chroma"},
     "mem0": {"backend": "mem0"},
     "mongodb": {"backend": "mongodb"},
     # Feature presets
@@ -32,11 +30,10 @@ MEMORY_PRESETS: Dict[str, Dict[str, Any]] = {
     "chat": {"backend": "file", "history": True, "history_limit": 20},  # Conversational
 }
 
+# Only schemes backed by a registered memory adapter belong here. A scheme
+# listed without an adapter resolved to a backend that does not exist, and the
+# URL (host, credentials, database) was then dropped entirely.
 MEMORY_URL_SCHEMES: Dict[str, str] = {
-    "postgresql": "postgres",
-    "postgres": "postgres",
-    "redis": "redis",
-    "rediss": "redis",  # Redis with SSL
     "sqlite": "sqlite",
     "mongodb": "mongodb",
     "mongodb+srv": "mongodb",

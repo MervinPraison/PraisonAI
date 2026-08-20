@@ -25,7 +25,7 @@ Usage:
     # With config
     agent = Agent(
         instructions="...",
-        memory=MemoryConfig(backend="redis", user_id="user123"),
+        memory=MemoryConfig(backend="sqlite", user_id="user123"),
         knowledge=KnowledgeConfig(sources=["docs/"], rerank=True),
         tool_search=ToolSearchConfig(enabled="auto", threshold_pct=15),
     )
@@ -52,14 +52,54 @@ if TYPE_CHECKING:
 
 
 class MemoryBackend(str, Enum):
-    """Memory storage backends."""
+    """Memory storage backends.
+
+    Every member must have an adapter in ``praisonaiagents.memory.adapters``
+    (FILE is served by ``FileMemory``). Declaring a backend with no adapter
+    used to silently swap in a local SQLite/JSON store.
+    """
     FILE = "file"
     SQLITE = "sqlite"
-    REDIS = "redis"
-    VALKEY = "valkey"
-    POSTGRES = "postgres"
+    CHROMA = "chroma"
     MEM0 = "mem0"
     MONGODB = "mongodb"
+    DAKERA = "dakera"
+    IN_MEMORY = "in_memory"
+
+
+#: Accepted before but never implemented: requests were silently redirected.
+UNIMPLEMENTED_MEMORY_BACKENDS = ("redis", "valkey", "postgres", "postgresql")
+
+
+def available_memory_backends() -> List[str]:
+    """Backends ``MemoryConfig(backend=...)`` accepts, read from the registry.
+
+    Adapters added via ``register_memory_adapter()`` are accepted automatically.
+    """
+    from ..memory.adapters import list_memory_adapters
+    return sorted(set(list_memory_adapters()) | {MemoryBackend.FILE.value})
+
+
+def validate_memory_backend(backend: Union[str, "MemoryBackend"]) -> str:
+    """Normalise a backend name; raise rather than substitute a different store."""
+    from .parse_utils import make_preset_error
+    from ..memory.adapters.registry import MEMORY_PROVIDER_ALIASES
+
+    name = backend.value if isinstance(backend, MemoryBackend) else str(backend)
+    name = MEMORY_PROVIDER_ALIASES.get(name.strip().lower(), name.strip().lower())
+    valid = available_memory_backends()
+    if name in valid:
+        return name
+    if name in UNIMPLEMENTED_MEMORY_BACKENDS:
+        raise ValueError(
+            f"Memory backend '{name}' is not implemented - no {name} memory "
+            f"adapter is registered. Earlier releases accepted it and silently "
+            f"stored to a local file instead. Valid backends: {', '.join(valid)}. "
+            f"To keep using {name}, pass a live store (memory=<instance> or "
+            f"db(url=...)), or register an adapter with "
+            f"register_memory_adapter('{name}', MyAdapter)."
+        )
+    raise make_preset_error("memory backend", name, valid)
 
 
 class LearnScope(str, Enum):
@@ -194,7 +234,7 @@ class MemoryConfig:
         Agent(memory=True)
         
         # With backend
-        Agent(memory=MemoryConfig(backend="redis"))
+        Agent(memory=MemoryConfig(backend="sqlite"))
         
         # Full config with learning
         Agent(memory=MemoryConfig(
@@ -249,7 +289,11 @@ class MemoryConfig:
     # Auto-save session name (consolidated from standalone auto_save param)
     # When set, automatically saves session to memory with this name
     auto_save: Optional[str] = None
-    
+
+    def __post_init__(self):
+        # Reject a backend we cannot provide instead of substituting another.
+        self.backend = validate_memory_backend(self.backend)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         learn_dict = None

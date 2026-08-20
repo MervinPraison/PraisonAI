@@ -47,21 +47,19 @@ class TestResolveMemory:
     
     def test_string_backend(self):
         """String returns MemoryConfig with that backend."""
-        result = resolve_memory("redis")
+        result = resolve_memory("sqlite")
         assert isinstance(result, MemoryConfig)
-        assert result.backend == MemoryBackend.REDIS
+        assert result.backend == MemoryBackend.SQLITE
 
     def test_string_valkey_backend(self):
-        """'valkey' string returns MemoryConfig with VALKEY backend."""
-        result = resolve_memory("valkey")
-        assert isinstance(result, MemoryConfig)
-        assert result.backend == MemoryBackend.VALKEY
-    
+        """'valkey' has no adapter, so it must raise, not substitute."""
+        with pytest.raises(ValueError, match="valkey"):
+            resolve_memory("valkey")
+
     def test_string_custom_backend(self):
-        """Custom string backend is preserved."""
-        result = resolve_memory("custom_backend")
-        assert isinstance(result, MemoryConfig)
-        assert result.backend == "custom_backend"
+        """An unregistered backend name raises instead of being 'preserved'."""
+        with pytest.raises(ValueError, match="custom_backend"):
+            resolve_memory("custom_backend")
     
     def test_dict_expansion(self):
         """Dict expands to MemoryConfig."""
@@ -77,7 +75,7 @@ class TestResolveMemory:
     
     def test_config_passthrough(self):
         """MemoryConfig passes through unchanged."""
-        config = MemoryConfig(backend=MemoryBackend.POSTGRES, user_id="bob")
+        config = MemoryConfig(backend=MemoryBackend.MONGODB, user_id="bob")
         result = resolve_memory(config)
         assert result is config
     

@@ -123,26 +123,8 @@ class TestAutoMemoryWiring:
 # ===========================================================================
 
 class TestBackendHandling:
-    """backend='redis' and 'postgres' should NOT silently store a raw string
-    as _memory_instance. They should either work or raise a clear error."""
-
-    def test_redis_backend_not_string(self):
-        """backend='redis' must NOT result in _memory_instance being a string."""
-        from praisonaiagents import Agent, MemoryConfig
-        agent = _make_agent(memory=MemoryConfig(backend="redis"))
-        if agent._memory_instance is not None:
-            assert not isinstance(agent._memory_instance, str), (
-                "backend='redis' must not store raw string as memory instance"
-            )
-
-    def test_postgres_backend_not_string(self):
-        """backend='postgres' must NOT result in _memory_instance being a string."""
-        from praisonaiagents import Agent, MemoryConfig
-        agent = _make_agent(memory=MemoryConfig(backend="postgres"))
-        if agent._memory_instance is not None:
-            assert not isinstance(agent._memory_instance, str), (
-                "backend='postgres' must not store raw string as memory instance"
-            )
+    """Backend selection. redis/postgres/unknown now raise - see
+    tests/unit/memory/test_memory_backend_contract.py."""
 
     def test_file_backend_creates_file_memory(self):
         """backend='file' should create a FileMemory instance."""
@@ -150,16 +132,6 @@ class TestBackendHandling:
         from praisonaiagents.memory.file_memory import FileMemory
         agent = _make_agent(memory=MemoryConfig(backend="file"))
         assert isinstance(agent._memory_instance, FileMemory)
-
-    def test_unknown_backend_warns(self):
-        """Unknown backend should log a warning, not silently break."""
-        from praisonaiagents import Agent, MemoryConfig
-        import logging
-        with patch.object(logging, 'warning') as mock_warn:
-            agent = _make_agent(memory=MemoryConfig(backend="unknown_db"))
-            # Should either warn or the instance should be None/FileMemory fallback
-            if agent._memory_instance is not None:
-                assert not isinstance(agent._memory_instance, str)
 
 
 # ===========================================================================
