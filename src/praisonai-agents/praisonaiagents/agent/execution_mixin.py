@@ -1826,11 +1826,18 @@ Write the complete compiled report:"""
                 # the caller only sees an opaque error string, classifies it as
                 # "unknown" (never in RetryPolicy.retry_on) and gives up — while
                 # the sync path, which still has the exception object, retries.
-                # Same rule as the sync path: programming errors are terminal,
-                # everything else may be retried.
+                # Mirror the sync path exactly: a ToolExecutionError already
+                # carries an explicit is_retryable verdict (e.g. a terminal
+                # non-retryable failure) and must be honoured verbatim; for any
+                # other exception apply the same terminal rule — programming
+                # errors are terminal, everything else may be retried.
+                if isinstance(e, ToolExecutionError):
+                    retryable = e.is_retryable
+                else:
+                    retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
                 return {
                     "error": f"Error executing {function_name}: {str(e)}",
-                    "retryable": not isinstance(e, (ValueError, TypeError, AttributeError)),
+                    "retryable": retryable,
                 }
 
         except ToolExecutionError:

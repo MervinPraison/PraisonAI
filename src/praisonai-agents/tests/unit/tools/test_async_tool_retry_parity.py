@@ -9,6 +9,7 @@ import pytest
 
 from praisonaiagents import Agent
 from praisonaiagents.config.feature_configs import ToolConfig
+from praisonaiagents.errors import ToolExecutionError
 from praisonaiagents.tools.retry import RetryPolicy
 
 FAST = ToolConfig(retry_policy=RetryPolicy(max_attempts=3, initial_delay_ms=0))
@@ -74,3 +75,31 @@ def test_async_flattened_error_carries_the_retry_verdict():
         agent2._execute_tool_async_impl("flaky", {}, None, None)
     )
     assert result2["retryable"] is False
+
+
+def test_async_honours_terminal_tool_execution_error():
+    """A ToolExecutionError(is_retryable=False) is terminal — its explicit
+    verdict must be preserved, not overwritten to retryable, so the tool runs
+    exactly once (parity with the sync path, which re-raises it verbatim)."""
+    terminal = ToolExecutionError(
+        "terminal failure", tool_name="flaky", is_retryable=False
+    )
+    assert _async_runs(terminal) == 1
+
+    agent, _ = _make_agent(terminal)
+    result = asyncio.run(
+        agent._execute_tool_async_impl("flaky", {}, None, None)
+    )
+    assert result["retryable"] is False
+
+
+def test_async_honours_retryable_tool_execution_error():
+    """A ToolExecutionError(is_retryable=True) keeps its explicit retry verdict."""
+    retryable = ToolExecutionError(
+        "transient failure", tool_name="flaky", is_retryable=True
+    )
+    agent, _ = _make_agent(retryable)
+    result = asyncio.run(
+        agent._execute_tool_async_impl("flaky", {}, None, None)
+    )
+    assert result["retryable"] is True
