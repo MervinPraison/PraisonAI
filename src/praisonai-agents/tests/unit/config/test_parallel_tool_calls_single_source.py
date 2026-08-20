@@ -104,3 +104,27 @@ def test_conflicting_spellings_raise_typeerror():
     message = str(excinfo.value)
     assert "ToolConfig.parallel" in message
     assert "ExecutionConfig.parallel_tool_calls" in message
+
+
+def test_conflicting_spellings_raise_typeerror_reverse():
+    # The symmetric direction: an explicit ExecutionConfig(parallel_tool_calls=False)
+    # must NOT be silently overridden by ToolConfig(parallel=True).
+    with pytest.raises(TypeError) as excinfo:
+        Agent(
+            instructions="x",
+            tool_config=ToolConfig(parallel=True),
+            execution=ExecutionConfig(parallel_tool_calls=False),
+        )
+    message = str(excinfo.value)
+    assert "ToolConfig.parallel" in message
+    assert "ExecutionConfig.parallel_tool_calls" in message
+
+
+def test_explicit_execution_false_disables_everywhere():
+    # An explicit sequential ExecutionConfig with no alias stays sequential.
+    assert _observed(execution=ExecutionConfig(parallel_tool_calls=False)) == {
+        "chat": False,
+        "achat": False,
+        "iter_stream": False,
+        "unified": False,
+    }

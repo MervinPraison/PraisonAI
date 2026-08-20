@@ -2613,12 +2613,15 @@ Your Goal: {self.goal}
         alias = bool(alias)
         if alias == current:
             return current, exec_config
-        if current:
-            # ExecutionConfig.parallel_tool_calls defaults to False, so True can
-            # only have been passed explicitly: the two spellings disagree.
+        # The two spellings disagree. Only raise when the source of truth was set
+        # *explicitly* -- an omitted ExecutionConfig.parallel_tool_calls (its bool
+        # default) must not masquerade as a real value, or an explicit
+        # ToolConfig(parallel=False) would be silently overridden (and vice versa).
+        explicit = getattr(exec_config, '_parallel_tool_calls_explicit', current)
+        if explicit:
             raise TypeError(
-                "Agent(tool_config=ToolConfig(parallel=False), "
-                "execution=ExecutionConfig(parallel_tool_calls=True)) is not "
+                f"Agent(tool_config=ToolConfig(parallel={alias}), "
+                f"execution=ExecutionConfig(parallel_tool_calls={current})) is not "
                 "valid: both name the same setting and they disagree.\n"
                 "  ToolConfig.parallel is a deprecated alias for "
                 "ExecutionConfig.parallel_tool_calls.\n"
