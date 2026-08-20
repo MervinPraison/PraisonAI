@@ -21,19 +21,19 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 22 | 53 | 16755 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
-| ✅ Approval | 1 | 5 | 2537 |
+| ✅ Approval | 1 | 5 | 2552 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3542 |
 | ✅ Autonomy | 3 | 7 | 2759 |
-| ✅ Bots | 7 | 31 | 13366 |
+| ✅ Bots | 7 | 31 | 13403 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 36395 |
+| ✅ CLI | 5 | 121 | 36396 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4790 |
 | ✅ Conditions | 1 | 3 | 1321 |
 | ✅ Configuration | 3 | 8 | 3117 |
-| ✅ Context Management | 16 | 35 | 13672 |
+| ✅ Context Management | 16 | 36 | 13886 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -43,13 +43,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 77 | 28168 |
+| ✅ Gateway | 7 | 78 | 28577 |
 | ✅ Guardrails | 4 | 4 | 2036 |
 | ✅ Handoffs | 11 | 6 | 2567 |
 | ✅ Hooks | 2 | 9 | 4488 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 15 | 4656 |
-| ✅ LLM | 3 | 15 | 5192 |
+| ✅ LLM | 3 | 15 | 5296 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14132 |
 | ✅ Memory | 6 | 18 | 7094 |
@@ -68,14 +68,14 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Reflection | 3 | 3 | 683 |
 | ✅ Retrieval | 2 | 5 | 1054 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3344 |
+| ✅ Sandbox | 5 | 7 | 3417 |
 | ✅ Security | 1 | 3 | 3343 |
 | ✅ Sessions | 4 | 19 | 7451 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 143 | 42133 |
+| ✅ Tools | 12 | 143 | 42132 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1211 |
 | ✅ Video | 2 | 6 | 649 |
