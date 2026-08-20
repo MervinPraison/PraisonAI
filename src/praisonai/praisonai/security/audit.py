@@ -6,6 +6,7 @@ Integrates with PraisonAI's AFTER_TOOL hook event.
 
 Zero overhead when not enabled — all imports are local.
 """
+import functools
 import json
 import logging
 import os
@@ -77,8 +78,13 @@ class AuditLogHook:
         self._log_path = os.path.expanduser(log_path or _DEFAULT_LOG_PATH)
         self._include_output = include_output
         self._max_output_chars = max_output_chars
-        self._redactor = redactor
         self._sensitive_keys = sensitive_keys or _DEFAULT_SENSITIVE_KEYS
+        # Bind sensitive_keys to the built-in redactor so every redactor —
+        # default or custom — honours the single-arg Callable[[Any], Any]
+        # contract. Custom redactors are used exactly as supplied.
+        if redactor is _default_redactor:
+            redactor = functools.partial(_default_redactor, sensitive=self._sensitive_keys)
+        self._redactor = redactor
         self._ensure_dir()
         self._lock = threading.Lock()
         # Single long-lived handle; reopened lazily if it gets rotated out.
@@ -143,7 +149,7 @@ class AuditLogHook:
                 "agent_name": getattr(data, "agent_name", "unknown"),
                 "tool_name": getattr(data, "tool_name", "unknown"),
                 "tool_input": (
-                    hook._redactor(raw_input, hook._sensitive_keys)
+                    hook._redactor(raw_input)
                     if hook._redactor else raw_input
                 ),
                 "execution_time_ms": getattr(data, "execution_time_ms", 0.0),

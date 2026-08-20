@@ -42,6 +42,9 @@ class DbSessionAdapter:
         # Guards the four in-memory containers above. DB I/O is kept outside
         # the lock (it may be slow or re-enter this adapter).
         self._lock = threading.RLock()
+        # Per-session init locks serialise the (non-idempotent) on_agent_start
+        # call so two threads racing on first access don't both hit the DB.
+        self._init_locks: Dict[str, threading.Lock] = {}
 
     def _conversation_store(self) -> Any:
         """Optional ConversationStore behind the DbAdapter (if present)."""
@@ -144,31 +147,39 @@ class DbSessionAdapter:
         with self._lock:
             if session_id in self._sessions:
                 return
-            skip_history = session_id in self._cleared_sessions
-            if skip_history:
-                self._cleared_sessions.discard(session_id)
-        # Call the DB outside the lock — it may be slow or re-enter this adapter.
-        try:
-            msgs = self._db.on_agent_start(agent_name, session_id)
-        except Exception as e:
-            logger.warning("[db_session_adapter] on_agent_start failed: %s", e)
+            # Grab (or create) a per-session init lock while holding the shared
+            # lock so all racers agree on the same lock object.
+            init_lock = self._init_locks.setdefault(session_id, threading.Lock())
+        # Serialise first-time initialisation: only one thread calls the
+        # non-idempotent on_agent_start; the rest see _sessions populated and
+        # return early. The DB call stays outside the shared lock (it may be
+        # slow or re-enter this adapter).
+        with init_lock:
             with self._lock:
-                self._sessions.add(session_id)
-            return
-        with self._lock:
-            if session_id in self._sessions:  # someone else won the race
+                if session_id in self._sessions:  # initialised while we waited
+                    return
+                skip_history = session_id in self._cleared_sessions
+                if skip_history:
+                    self._cleared_sessions.discard(session_id)
+            try:
+                msgs = self._db.on_agent_start(agent_name, session_id)
+            except Exception as e:
+                logger.warning("[db_session_adapter] on_agent_start failed: %s", e)
+                with self._lock:
+                    self._sessions.add(session_id)
                 return
-            if msgs and not skip_history:
-                self._history_cache[session_id] = [
-                    {"role": m.role, "content": m.content} for m in msgs
-                ]
-            elif skip_history:
-                self._history_cache[session_id] = []
-            if session_id not in self._metadata:
-                loaded = self._load_metadata_from_db(session_id)
-                if loaded:
-                    self._metadata[session_id] = loaded
-            self._sessions.add(session_id)
+            with self._lock:
+                if msgs and not skip_history:
+                    self._history_cache[session_id] = [
+                        {"role": m.role, "content": m.content} for m in msgs
+                    ]
+                elif skip_history:
+                    self._history_cache[session_id] = []
+                if session_id not in self._metadata:
+                    loaded = self._load_metadata_from_db(session_id)
+                    if loaded:
+                        self._metadata[session_id] = loaded
+                self._sessions.add(session_id)
 
     def add_message(
         self,
@@ -242,6 +253,7 @@ class DbSessionAdapter:
             self._metadata.pop(session_id, None)
             self._sessions.discard(session_id)
             self._cleared_sessions.discard(session_id)
+            self._init_locks.pop(session_id, None)
         try:
             self._db.on_agent_end(session_id)
         except Exception:
