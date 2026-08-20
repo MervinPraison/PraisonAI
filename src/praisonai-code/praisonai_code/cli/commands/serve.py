@@ -34,6 +34,42 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 
+# Transports `praisonai serve mcp` can actually start. ``ToolsMCPServer`` in
+# praisonaiagents only implements ``run_stdio()`` and ``run_sse()``, so these
+# are the only two values this command can honour.
+MCP_SUPPORTED_TRANSPORTS = ("stdio", "sse")
+
+# Transports that are advertised elsewhere in the docs but that this command
+# cannot serve. They are rejected explicitly instead of silently aliasing to
+# SSE, which is a different wire protocol.
+MCP_UNIMPLEMENTED_TRANSPORTS = {
+    "http-stream": (
+        "Streamable HTTP is not implemented by 'praisonai serve mcp'. "
+        "Use 'praisonai mcp serve --transport http-stream' instead."
+    ),
+}
+
+
+def _validate_mcp_transport(transport: str, output) -> None:
+    """Reject unknown/unimplemented MCP transports before anything binds.
+
+    Without this, every value other than the exact string ``"stdio"`` fell
+    through to the SSE branch, so a typo such as ``--transport stido`` opened a
+    listening socket instead of staying on the stdio pipe.
+    """
+    if transport in MCP_SUPPORTED_TRANSPORTS:
+        return
+
+    valid = ", ".join(MCP_SUPPORTED_TRANSPORTS)
+    reason = MCP_UNIMPLEMENTED_TRANSPORTS.get(transport)
+    if reason is not None:
+        output.print_error(f"Unsupported transport: {transport!r}. {reason}")
+    else:
+        output.print_error(
+            f"Invalid transport: {transport!r}. Valid transports are: {valid}."
+        )
+    raise typer.Exit(2)
+
 
 @app.command("start")
 def serve_start(
@@ -230,7 +266,7 @@ def serve_gateway(
 def serve_mcp(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
     port: int = typer.Option(8080, "--port", "-p", help="Port to bind to"),
-    transport: str = typer.Option("stdio", "--transport", "-T", help="Transport: stdio, sse, http-stream"),
+    transport: str = typer.Option("stdio", "--transport", "-T", help="Transport: stdio, sse"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Server name from config"),
 ):
     """Start MCP server (Model Context Protocol).
@@ -243,7 +279,11 @@ def serve_mcp(
         praisonai serve mcp --name my-server
     """
     output = get_output_controller()
-    
+
+    # Validate before any branch can bind a socket: an unrecognised value must
+    # never be treated as "not stdio, therefore SSE".
+    _validate_mcp_transport(transport, output)
+
     if name:
         # Run configured server
         try:
@@ -272,7 +312,7 @@ def serve_mcp(
             if transport == "stdio":
                 proc = subprocess.Popen(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, env=env)
                 proc.wait()
-            else:
+            else:  # transport == "sse", guaranteed by _validate_mcp_transport
                 from praisonaiagents.mcp import MCP, ToolsMCPServer
                 cmd_string = " ".join(cmd)
                 mcp = MCP(cmd_string, timeout=60, env=server.env or {})
@@ -295,7 +335,7 @@ def serve_mcp(
             mcp_server = ToolsMCPServer(name="praisonai-mcp")
             if transport == "stdio":
                 mcp_server.run()
-            else:
+            else:  # transport == "sse", guaranteed by _validate_mcp_transport
                 mcp_server.run_sse(host=host, port=port)
         except ImportError as e:
             output.print_error(f"MCP module not available: {e}")
