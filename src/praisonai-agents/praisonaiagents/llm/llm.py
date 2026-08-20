@@ -534,7 +534,18 @@ Respond with ONLY a valid JSON tool call in this format:
         if self._failover_manager:
             self._current_profile = self._failover_manager.get_next_profile()
             if self._current_profile:
-                self._switch_to_profile(self._current_profile)
+                # Apply the initial profile's values to the instance attributes
+                # (backward compatible with the documented llm.api_key/model
+                # surface). Later failover rotations are per-call only and do
+                # not mutate these attributes (issue #3613 gap 2).
+                profile = self._current_profile
+                if profile.api_key:
+                    self.api_key = profile.api_key
+                if profile.base_url:
+                    self.base_url = profile.base_url
+                if profile.model and profile.model != self.model:
+                    logging.info(f"Failover: using profile model {profile.model}")
+                    self.model = profile.model
 
         # Cache for formatted tools and messages
         self._formatted_tools_cache = {}
@@ -974,18 +985,58 @@ Respond with ONLY a valid JSON tool call in this format:
 
     def _switch_to_profile(self, profile: "AuthProfile") -> None:
         """Switch to a new auth profile for failover.
-        
+
+        The profile's credentials are threaded through the per-call kwargs of
+        the retry loop instead of being written onto the shared instance. The
+        old behaviour mutated ``self.api_key``/``self.base_url``/``self.model``
+        on a shared ``LLM`` (issue #3613 gap 2), so concurrent requests on one
+        instance could silently cross-talk credentials and model after a
+        failover rotation. Keeping the instance attributes on the initial
+        profile preserves single-profile behaviour and the documented
+        ``llm.api_key``/``llm.model`` surface.
+
         Args:
             profile: AuthProfile to switch to
         """
+        # NOTE: profile values are applied to the per-call kwargs by
+        # _handle_retry_exception when it rotates. This method is kept as a
+        # no-op placeholder so any out-of-tree callers that invoke it directly
+        # keep working; it intentionally no longer mutates shared state.
+        if profile is None:
+            return
+
+    def _response_model_for_tracking(self, response: Any) -> str:
+        """Model to attribute token usage to for a completed call.
+
+        Prefers the model carried on the response itself, which reflects the
+        provider/profile that actually served the request. This is race-free
+        under concurrency (unlike reading the shared ``self._current_profile``)
+        and stays correct after a failover rotation. Falls back to
+        ``self.model`` when the response does not expose a model.
+        """
+        model = None
+        if isinstance(response, dict):
+            model = response.get("model")
+        else:
+            model = getattr(response, "model", None)
+        return model or self.model
+
+    def _apply_profile_to_kwargs(self, profile: "AuthProfile", kwargs: dict) -> dict:
+        """Return a new kwargs dict with profile overrides applied.
+
+        Never mutates ``self``: the active profile is a per-call concern, so
+        its credentials travel in the request kwargs only. Callers that pass
+        an explicit per-call override (e.g. ``api_key=``) keep it; profile
+        values fill in the gaps.
+        """
+        kwargs = dict(kwargs)
         if profile.api_key:
-            self.api_key = profile.api_key
+            kwargs["api_key"] = profile.api_key
         if profile.base_url:
-            self.base_url = profile.base_url
-        if profile.model and profile.model != self.model:
-            # Only log if model actually changes
-            logging.info(f"Failover: switching from {self.model} to {profile.model}")
-            self.model = profile.model
+            kwargs["base_url"] = profile.base_url
+        if profile.model:
+            kwargs["model"] = profile.model
+        return kwargs
 
     def _resolve_subscription_creds(self):
         """Lazy resolve + cache subscription credentials, checking expiration."""
@@ -1055,7 +1106,7 @@ Respond with ONLY a valid JSON tool call in this format:
             )
             return None
 
-    def _handle_retry_exception(self, e, attempt, kwargs, refreshed_creds=None):
+    def _handle_retry_exception(self, e, attempt, kwargs, refreshed_creds=None, active_profile=None):
         """Decide retry vs raise from a failover decision. No sleep/await.
 
         Shared decision logic used by both the sync (`_call_with_retry`) and
@@ -1069,21 +1120,34 @@ Respond with ONLY a valid JSON tool call in this format:
         blocks the event loop. The already-refreshed credentials (if any) are
         passed in via ``refreshed_creds``.
 
+        The active failover profile is a *per-call* value threaded in via
+        ``active_profile`` and returned back in the result tuple. It is never
+        read from or written to ``self._current_profile`` here, so concurrent
+        requests sharing one ``LLM`` instance cannot corrupt each other's
+        failover bookkeeping or cost attribution (issue #3613 gap 2).
+
         Args:
             e: The exception raised by the wrapped call.
             attempt: Zero-based attempt index for the current iteration.
             kwargs: Keyword arguments for the wrapped call (may be updated).
             refreshed_creds: Credentials already refreshed by the caller (off
                 the event loop for async), or ``None`` if no refresh was done.
+            active_profile: The profile this call is currently using, or
+                ``None``. Defaults to the initial profile for backward compat.
 
         Returns:
-            Tuple of (should_raise, category, retry_delay, error_str, kwargs):
+            Tuple of (should_raise, category, retry_delay, error_str, kwargs,
+            active_profile):
                 should_raise: Whether the caller should re-raise immediately.
                 category: The error category/reason from the decision.
                 retry_delay: Seconds to wait before the next attempt.
                 error_str: String form of the exception.
                 kwargs: The (possibly updated) keyword arguments.
+                active_profile: The (possibly rotated) profile for the next
+                    attempt.
         """
+        if active_profile is None:
+            active_profile = self._current_profile
         # A turn is "side-effecting" when it exposes tools the model may call:
         # a post-dispatch failure on such a turn could have already run a
         # side-effecting tool, so it must not be silently replayed. A turn with
@@ -1135,55 +1199,48 @@ Respond with ONLY a valid JSON tool call in this format:
         # immediately with fresh credentials and skip profile rotation so we
         # neither mark the current profile failed nor overwrite the new creds.
         if refreshed_auth:
-            return False, category, retry_delay, error_str, kwargs
+            return False, category, retry_delay, error_str, kwargs, active_profile
 
-        # Handle different failover decision actions
+        # Handle different failover decision actions. Rotation is a per-call
+        # concern: the active profile is a local threaded in/out of this method,
+        # never self._current_profile, so concurrent calls on one shared LLM
+        # cannot mark each other's profiles failed/healthy (issue #3613 gap 2).
         if decision.action == "rotate_profile" and self._failover_manager:
-            if self._current_profile:
+            if active_profile:
                 is_rate_limit = (category == "rate_limit")
                 self._failover_manager.mark_failure(
-                    self._current_profile, error_str, is_rate_limit=is_rate_limit
+                    active_profile, error_str, is_rate_limit=is_rate_limit
                 )
             next_profile = self._failover_manager.get_next_profile()
-            if next_profile and next_profile != self._current_profile:
-                self._switch_to_profile(next_profile)
-                self._current_profile = next_profile
-                # Update the kwargs with new profile values for the next retry
-                if "api_key" in kwargs:
-                    kwargs["api_key"] = self.api_key
-                if "base_url" in kwargs:
-                    kwargs["base_url"] = self.base_url
-                if "model" in kwargs:
-                    kwargs["model"] = self.model
+            if next_profile and next_profile != active_profile:
+                active_profile = next_profile
+                # Thread the active profile through the per-call kwargs so the
+                # shared instance state is never mutated (issue #3613 gap 2).
+                kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
                 logging.info(f"Failover: switched to profile '{next_profile.name}'")
             else:
                 # No alternate profile available - retrying would just hit the
                 # same failing profile, so surface the error instead.
                 can_retry = False
         # Legacy failover for compatibility (when decision is retry but failover is configured)
-        elif self._failover_manager and self._current_profile and decision.action == "retry":
+        elif self._failover_manager and active_profile and decision.action == "retry":
             is_rate_limit = (category == "rate_limit")
             self._failover_manager.mark_failure(
-                self._current_profile, error_str, is_rate_limit=is_rate_limit
+                active_profile, error_str, is_rate_limit=is_rate_limit
             )
             next_profile = self._failover_manager.get_next_profile()
-            if next_profile and next_profile != self._current_profile:
-                self._switch_to_profile(next_profile)
-                self._current_profile = next_profile
-                # Update the kwargs with new profile values for the next retry
-                if "api_key" in kwargs:
-                    kwargs["api_key"] = self.api_key
-                if "base_url" in kwargs:
-                    kwargs["base_url"] = self.base_url
-                if "model" in kwargs:
-                    kwargs["model"] = self.model
+            if next_profile and next_profile != active_profile:
+                active_profile = next_profile
+                # Thread the active profile through the per-call kwargs so the
+                # shared instance state is never mutated (issue #3613 gap 2).
+                kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
                 # Enable retry for profile switch even if originally non-retryable
                 can_retry = True
                 retry_delay = 0.0
                 logging.info(f"Failover: switched to profile '{next_profile.name}'")
 
         should_raise = decision.action == "surface_error" or not can_retry
-        return should_raise, category, retry_delay, error_str, kwargs
+        return should_raise, category, retry_delay, error_str, kwargs, active_profile
 
     def _call_with_retry(self, func, *args, **kwargs):
         """Call a function with automatic retry on rate limit errors and failover support.
@@ -1200,6 +1257,10 @@ Respond with ONLY a valid JSON tool call in this format:
             The original exception if max retries exceeded
         """
         last_error = None
+        # Track the failover profile per call (never self._current_profile) so
+        # concurrent calls on one shared LLM cannot corrupt each other's
+        # failover bookkeeping (issue #3613 gap 2).
+        active_profile = self._current_profile
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -1210,8 +1271,8 @@ Respond with ONLY a valid JSON tool call in this format:
                 result = func(*args, **kwargs)
                 
                 # Mark success if failover is configured
-                if self._failover_manager and self._current_profile:
-                    self._failover_manager.mark_success(self._current_profile)
+                if self._failover_manager and active_profile:
+                    self._failover_manager.mark_success(active_profile)
                 
                 # Reset idle timeout circuit breaker on success
                 self._idle_timeout_breaker.reset()
@@ -1226,8 +1287,12 @@ Respond with ONLY a valid JSON tool call in this format:
                 if self._should_attempt_auth_refresh(e, attempt):
                     refreshed_creds = self._try_refresh_subscription_creds()
 
-                should_raise, category, retry_delay, error_str, kwargs = (
-                    self._handle_retry_exception(e, attempt, kwargs, refreshed_creds=refreshed_creds)
+                should_raise, category, retry_delay, error_str, kwargs, active_profile = (
+                    self._handle_retry_exception(
+                        e, attempt, kwargs,
+                        refreshed_creds=refreshed_creds,
+                        active_profile=active_profile,
+                    )
                 )
 
                 if should_raise:
@@ -1276,6 +1341,10 @@ Respond with ONLY a valid JSON tool call in this format:
             The original exception if max retries exceeded
         """
         last_error = None
+        # Track the failover profile per call (never self._current_profile) so
+        # concurrent coroutines on one shared LLM cannot corrupt each other's
+        # failover bookkeeping (issue #3613 gap 2).
+        active_profile = self._current_profile
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -1286,8 +1355,8 @@ Respond with ONLY a valid JSON tool call in this format:
                 result = await func(*args, **kwargs)
                 
                 # Mark success if failover is configured
-                if self._failover_manager and self._current_profile:
-                    self._failover_manager.mark_success(self._current_profile)
+                if self._failover_manager and active_profile:
+                    self._failover_manager.mark_success(active_profile)
                 
                 # Reset idle timeout circuit breaker on success
                 self._idle_timeout_breaker.reset()
@@ -1305,8 +1374,12 @@ Respond with ONLY a valid JSON tool call in this format:
                         self._try_refresh_subscription_creds
                     )
 
-                should_raise, category, retry_delay, error_str, kwargs = (
-                    self._handle_retry_exception(e, attempt, kwargs, refreshed_creds=refreshed_creds)
+                should_raise, category, retry_delay, error_str, kwargs, active_profile = (
+                    self._handle_retry_exception(
+                        e, attempt, kwargs,
+                        refreshed_creds=refreshed_creds,
+                        active_profile=active_profile,
+                    )
                 )
 
                 if should_raise:
@@ -1358,7 +1431,7 @@ Respond with ONLY a valid JSON tool call in this format:
         import litellm
         response = self._call_with_retry(litellm.completion, **completion_params)
         if not completion_params.get("stream"):
-            self._track_token_usage(response, self.model)
+            self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 
     async def _acompletion_with_retry(self, **completion_params):
@@ -1379,7 +1452,7 @@ Respond with ONLY a valid JSON tool call in this format:
             **completion_params,
         )
         if not completion_params.get("stream"):
-            self._track_token_usage(response, self.model)
+            self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 
     def _supports_web_search(self) -> bool:
@@ -5998,7 +6071,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         import litellm
         response = await self._call_with_retry_async(litellm.aresponses, **params)
-        self._track_token_usage(response, self.model)
+        self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 
     def _extract_from_responses_output(self, response) -> tuple:
