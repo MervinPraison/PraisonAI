@@ -87,6 +87,8 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
             prompt=body.prompt,
             agent_file=agent_file,
             agent_yaml=body.agent_yaml,
+            recipe_name=body.recipe_name,
+            recipe_config=body.recipe_config or {},
             framework=body.framework or "praisonai",
             config=body.config or {},
             webhook_url=body.webhook_url,

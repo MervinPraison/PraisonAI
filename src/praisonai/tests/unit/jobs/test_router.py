@@ -113,6 +113,91 @@ class TestSubmitEndpoint:
         assert job_id1 == job_id2
 
 
+class TestRecipeFields:
+    """Regression tests: recipe fields on /api/v1/runs must reach the executor.
+
+    Prior to the fix, ``JobSubmitRequest.recipe_name``/``recipe_config`` were
+    declared on the request schema (and honoured by the executor's recipe
+    branch) but the router never copied them into ``Job`` — so recipe runs
+    silently ran nothing recipe-related.
+    """
+
+    def test_recipe_fields_reach_executor(self, store, executor):
+        """A request with recipe_name reaches the executor's recipe branch."""
+        captured = {}
+
+        async def fake_run_recipe(job):
+            captured["recipe_name"] = job.recipe_name
+            captured["recipe_config"] = job.recipe_config
+            return "recipe-result"
+
+        executor._run_recipe = fake_run_recipe
+
+        app = create_app(store=store, executor=executor)
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/v1/runs",
+            json={
+                "prompt": "review todays merges",
+                "recipe_name": "nightly-reviewer",
+                "recipe_config": {"model": "gpt-4o-mini"},
+            },
+        )
+
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+
+        # Poll until the job leaves the running/queued state (execution is async).
+        result_response = None
+        for _ in range(50):
+            result_response = client.get(f"/api/v1/runs/{job_id}/result")
+            if result_response.status_code == 200:
+                break
+
+        assert result_response is not None
+        assert result_response.status_code == 200
+        assert result_response.json()["result"] == "recipe-result"
+        assert captured["recipe_name"] == "nightly-reviewer"
+        assert captured["recipe_config"] == {"model": "gpt-4o-mini"}
+
+    def test_prompt_only_does_not_use_recipe_branch(self, store, executor):
+        """Regression: prompt-only requests must NOT enter the recipe branch."""
+        recipe_called = {"value": False}
+        agent_called = {"value": False}
+
+        async def fake_run_recipe(job):
+            recipe_called["value"] = True
+            return "recipe-result"
+
+        async def fake_run_praisonai_agents(job, agent_file):
+            agent_called["value"] = True
+            return "agent-result"
+
+        executor._run_recipe = fake_run_recipe
+        executor._run_praisonai_agents = fake_run_praisonai_agents
+
+        app = create_app(store=store, executor=executor)
+        client = TestClient(app)
+
+        response = client.post("/api/v1/runs", json={"prompt": "Test prompt"})
+
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+
+        result_response = None
+        for _ in range(50):
+            result_response = client.get(f"/api/v1/runs/{job_id}/result")
+            if result_response.status_code == 200:
+                break
+
+        assert result_response is not None
+        assert result_response.status_code == 200
+        assert result_response.json()["result"] == "agent-result"
+        assert recipe_called["value"] is False
+        assert agent_called["value"] is True
+
+
 class TestStatusEndpoint:
     """Tests for job status."""
     
