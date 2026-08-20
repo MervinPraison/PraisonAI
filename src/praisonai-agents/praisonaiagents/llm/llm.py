@@ -534,7 +534,18 @@ Respond with ONLY a valid JSON tool call in this format:
         if self._failover_manager:
             self._current_profile = self._failover_manager.get_next_profile()
             if self._current_profile:
-                self._switch_to_profile(self._current_profile)
+                # Apply the initial profile's values to the instance attributes
+                # (backward compatible with the documented llm.api_key/model
+                # surface). Later failover rotations are per-call only and do
+                # not mutate these attributes (issue #3613 gap 2).
+                profile = self._current_profile
+                if profile.api_key:
+                    self.api_key = profile.api_key
+                if profile.base_url:
+                    self.base_url = profile.base_url
+                if profile.model and profile.model != self.model:
+                    logging.info(f"Failover: using profile model {profile.model}")
+                    self.model = profile.model
 
         # Cache for formatted tools and messages
         self._formatted_tools_cache = {}
@@ -974,18 +985,55 @@ Respond with ONLY a valid JSON tool call in this format:
 
     def _switch_to_profile(self, profile: "AuthProfile") -> None:
         """Switch to a new auth profile for failover.
-        
+
+        The profile's credentials are threaded through the per-call kwargs of
+        the retry loop instead of being written onto the shared instance. The
+        old behaviour mutated ``self.api_key``/``self.base_url``/``self.model``
+        on a shared ``LLM`` (issue #3613 gap 2), so concurrent requests on one
+        instance could silently cross-talk credentials and model after a
+        failover rotation. Keeping the instance attributes on the initial
+        profile preserves single-profile behaviour and the documented
+        ``llm.api_key``/``llm.model`` surface.
+
         Args:
             profile: AuthProfile to switch to
         """
+        # NOTE: profile values are applied to the per-call kwargs by
+        # _handle_retry_exception when it rotates. This method is kept as a
+        # no-op placeholder so any out-of-tree callers that invoke it directly
+        # keep working; it intentionally no longer mutates shared state.
+        if profile is None:
+            return
+
+    def _active_profile_values(self) -> dict:
+        """Return the current profile's overrides (or {} if none active)."""
+        if self._current_profile is not None:
+            values = {}
+            if self._current_profile.api_key:
+                values["api_key"] = self._current_profile.api_key
+            if self._current_profile.base_url:
+                values["base_url"] = self._current_profile.base_url
+            if self._current_profile.model:
+                values["model"] = self._current_profile.model
+            return values
+        return {}
+
+    def _apply_profile_to_kwargs(self, profile: "AuthProfile", kwargs: dict) -> dict:
+        """Return a new kwargs dict with profile overrides applied.
+
+        Never mutates ``self``: the active profile is a per-call concern, so
+        its credentials travel in the request kwargs only. Callers that pass
+        an explicit per-call override (e.g. ``api_key=``) keep it; profile
+        values fill in the gaps.
+        """
+        kwargs = dict(kwargs)
         if profile.api_key:
-            self.api_key = profile.api_key
+            kwargs["api_key"] = profile.api_key
         if profile.base_url:
-            self.base_url = profile.base_url
-        if profile.model and profile.model != self.model:
-            # Only log if model actually changes
-            logging.info(f"Failover: switching from {self.model} to {profile.model}")
-            self.model = profile.model
+            kwargs["base_url"] = profile.base_url
+        if profile.model:
+            kwargs["model"] = profile.model
+        return kwargs
 
     def _resolve_subscription_creds(self):
         """Lazy resolve + cache subscription credentials, checking expiration."""
@@ -1146,15 +1194,10 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
             next_profile = self._failover_manager.get_next_profile()
             if next_profile and next_profile != self._current_profile:
-                self._switch_to_profile(next_profile)
                 self._current_profile = next_profile
-                # Update the kwargs with new profile values for the next retry
-                if "api_key" in kwargs:
-                    kwargs["api_key"] = self.api_key
-                if "base_url" in kwargs:
-                    kwargs["base_url"] = self.base_url
-                if "model" in kwargs:
-                    kwargs["model"] = self.model
+                # Thread the active profile through the per-call kwargs so the
+                # shared instance state is never mutated (issue #3613 gap 2).
+                kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
                 logging.info(f"Failover: switched to profile '{next_profile.name}'")
             else:
                 # No alternate profile available - retrying would just hit the
@@ -1168,15 +1211,10 @@ Respond with ONLY a valid JSON tool call in this format:
             )
             next_profile = self._failover_manager.get_next_profile()
             if next_profile and next_profile != self._current_profile:
-                self._switch_to_profile(next_profile)
                 self._current_profile = next_profile
-                # Update the kwargs with new profile values for the next retry
-                if "api_key" in kwargs:
-                    kwargs["api_key"] = self.api_key
-                if "base_url" in kwargs:
-                    kwargs["base_url"] = self.base_url
-                if "model" in kwargs:
-                    kwargs["model"] = self.model
+                # Thread the active profile through the per-call kwargs so the
+                # shared instance state is never mutated (issue #3613 gap 2).
+                kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
                 # Enable retry for profile switch even if originally non-retryable
                 can_retry = True
                 retry_delay = 0.0
@@ -1358,7 +1396,8 @@ Respond with ONLY a valid JSON tool call in this format:
         import litellm
         response = self._call_with_retry(litellm.completion, **completion_params)
         if not completion_params.get("stream"):
-            self._track_token_usage(response, self.model)
+            active = self._active_profile_values()
+            self._track_token_usage(response, active.get("model") or self.model)
         return response
 
     async def _acompletion_with_retry(self, **completion_params):
@@ -1379,7 +1418,8 @@ Respond with ONLY a valid JSON tool call in this format:
             **completion_params,
         )
         if not completion_params.get("stream"):
-            self._track_token_usage(response, self.model)
+            active = self._active_profile_values()
+            self._track_token_usage(response, active.get("model") or self.model)
         return response
 
     def _supports_web_search(self) -> bool:
@@ -5998,7 +6038,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         import litellm
         response = await self._call_with_retry_async(litellm.aresponses, **params)
-        self._track_token_usage(response, self.model)
+        active = self._active_profile_values()
+        self._track_token_usage(response, active.get("model") or self.model)
         return response
 
     def _extract_from_responses_output(self, response) -> tuple:
