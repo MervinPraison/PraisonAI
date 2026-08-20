@@ -152,6 +152,64 @@ def test_no_changes_returns_early(monkeypatch):
     assert not [c for c in calls if c[:2] == ["git", "push"]]
 
 
+def test_existing_local_target_not_reset(monkeypatch):
+    # Agent is on one branch but targets an existing local branch; the tool
+    # must switch with a plain checkout (never ``-B``) so the target's
+    # local-only commits are preserved.
+    responses = {
+        ("status", "--porcelain"): ("M file\n", 0),
+        ("rev-parse", "--abbrev-ref", "HEAD"): ("praisonai/current\n", 0),
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): ("refs/remotes/origin/main\n", 0),
+        ("show-ref", "--verify", "--quiet", "refs/heads/praisonai/other"): ("", 0),
+    }
+    calls = _call(monkeypatch, responses)
+    result = _run_tool(
+        github_tools.github_commit_and_push, "fix", branch="praisonai/other"
+    )
+    assert "Successfully" in result
+    checkouts = [c for c in calls if c[:2] == ["git", "checkout"]]
+    assert checkouts, "expected a checkout to the target branch"
+    for c in checkouts:
+        assert "-B" not in c, "existing branch must not be force-reset with -B"
+
+
+def test_diverged_agent_branch_refused_no_force(monkeypatch):
+    # Divergence (force-push) is never overridable and applies even to
+    # agent-prefixed branches.
+    responses = {
+        ("status", "--porcelain"): ("M file\n", 0),
+        ("rev-parse", "--abbrev-ref", "HEAD"): ("praisonai/work\n", 0),
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): ("refs/remotes/origin/main\n", 0),
+        ("show-ref", "--verify", "--quiet", "refs/remotes/origin/praisonai/work"): ("", 0),
+        ("merge-base", "--is-ancestor", "origin/praisonai/work", "HEAD"): ("", 1),
+    }
+    calls = _call(monkeypatch, responses)
+    result = _run_tool(github_tools.github_commit_and_push, "fix")
+    assert "Error" in result
+    assert "diverged" in result
+    for c in calls:
+        assert "--force" not in c
+    assert not [c for c in calls if c[:2] == ["git", "push"]]
+
+
+def test_refusal_leaves_changes_uncommitted(monkeypatch):
+    # A refused push must not commit first — the working changes must survive
+    # so a retry can succeed.
+    responses = {
+        ("status", "--porcelain"): ("M file\n", 0),
+        ("rev-parse", "--abbrev-ref", "HEAD"): ("release/v2\n", 0),
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): ("refs/remotes/origin/main\n", 0),
+        ("config", "user.email"): ("me@example.com\n", 0),
+        ("merge-base", "origin/main", "HEAD"): ("abc\n", 0),
+        ("log", "--format=%ae", "abc..HEAD"): ("other@x.com\n", 0),
+    }
+    calls = _call(monkeypatch, responses)
+    result = _run_tool(github_tools.github_commit_and_push, "fix", branch="release/v2")
+    assert "Error" in result
+    assert not [c for c in calls if c[:2] == ["git", "commit"]]
+    assert not [c for c in calls if c[:2] == ["git", "push"]]
+
+
 def test_slugify_and_auto_branch():
     assert github_tools._slugify("Fix: parser!! bug") == "fix-parser-bug"
     name = github_tools._auto_branch_name("Fix parser")
