@@ -6,6 +6,8 @@ Provides scheduler management.
 
 from typing import Optional
 
+import math
+
 import typer
 
 from ..output.console import get_output_controller
@@ -74,6 +76,16 @@ def schedule_add_cmd(
         praisonai schedule add "nightly-refactor" -s "cron:0 2 * * *" -m "tidy utils.py, run tests" --backend claude-code --backend-cwd ~/proj --deliver telegram
     """
     output = get_output_controller()
+    if (
+        backend
+        and isinstance(backend_timeout, (int, float))
+        and backend_timeout
+        and not (math.isfinite(backend_timeout) and backend_timeout >= 0)
+    ):
+        output.print_error(
+            "--backend-timeout must be a finite, non-negative number of seconds."
+        )
+        raise typer.Exit(1)
     if command and backend:
         output.print_error(
             "--command and --backend are mutually exclusive: a job runs exactly "
@@ -146,7 +158,7 @@ def schedule_add_cmd(
                             # positive instead of collapsing to 0 (which the
                             # executor would replace with the 300s default).
                             backend_options["timeout_ms"] = max(
-                                1, int(round(backend_timeout * 1000))
+                                1, round(backend_timeout * 1000)
                             )
                         job.backend_options = backend_options
                         # A backend turn uses the pinned model as an input
@@ -162,12 +174,13 @@ def schedule_add_cmd(
                 output.print_error(f"Failed to set command/pre-run gate: {e}")
                 raise typer.Exit(1)
 
-        # A duplicate-name response is a rejection: report it as an error and
-        # exit non-zero so scripts/CI never treat a rejected add (which created
-        # nothing and mutated nothing) as success. Match the two rejection
-        # shapes ``schedule_add`` can return precisely so a genuine success
-        # message is never misclassified.
-        add_failed = ("Error" in result) or ("already exists" in result)
+        # A rejected add (duplicate name or error) must exit non-zero so
+        # scripts/CI never treat it as success. Detect failure as the absence
+        # of the producer-owned success confirmation rather than substring
+        # matching on error words — a schedule *named* "Error monitor" or
+        # "already exists" appears inside the success message and must not be
+        # misclassified as a failure.
+        add_failed = not job_created
         if json_output:
             import json as _json
             print(_json.dumps({"result": result}))

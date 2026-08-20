@@ -265,3 +265,35 @@ def test_command_and_backend_conflict_fails(fake_backend):
     assert "exactly one" in result.error
     assert backend.calls == []
     assert audited and audited[0].error == result.error
+
+
+def test_gate_go_path_state_persists_only_on_success(fake_backend, monkeypatch):
+    """A go-path gate watermark must not advance when the backend turn fails."""
+    backend, _ = fake_backend
+
+    class Decision:
+        run = True
+        context = None
+        state_updates = {"cursor": "42"}
+
+    class Gate:
+        def should_run(self, job):
+            return Decision()
+
+    persisted: list = []
+    delivered: list = []
+    ex = _executor(delivered)
+    ex._condition_resolver = lambda job: Gate()
+    monkeypatch.setattr(
+        ex, "_persist_job_state", lambda job, prior, updates: persisted.append(updates)
+    )
+
+    backend.result = FakeResult(error="boom")
+    result = _run(ex._execute_one(_backend_job()))
+    assert result.status == "failed"
+    assert persisted == []  # failed run: cursor NOT advanced
+
+    backend.result = FakeResult(content="ok")
+    result = _run(ex._execute_one(_backend_job()))
+    assert result.status == "succeeded"
+    assert persisted == [{"cursor": "42"}]  # success: cursor advanced once

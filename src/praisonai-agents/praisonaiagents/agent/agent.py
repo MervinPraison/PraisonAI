@@ -6758,13 +6758,9 @@ Answer:"""
                 system_prompt=system_prompt
             )
 
-            await self._emit_cli_backend_hook(
-                backend=backend,
-                session_id=session_id,
-                result=result,
-            )
-            
-            # Check for CLI backend errors
+            # Check for CLI backend errors BEFORE the (cancellable) hook and
+            # before marking the session started, so a failed turn never
+            # records a resumable session.
             if result is None:
                 raise RuntimeError(
                     f"CLI backend returned no result for agent={self.display_name!r}, "
@@ -6777,10 +6773,18 @@ Answer:"""
                 )
 
             # A successful turn establishes the CLI-side session; subsequent
-            # turns under the same session_id are resumes.
+            # turns under the same session_id are resumes. Recorded (and the
+            # lock released) BEFORE the hook await: cancellation during the
+            # hook must not lose the resume state or hold the lock.
             started_sessions.add(session_id)
             session_lock.release()
             lock_held = False
+
+            await self._emit_cli_backend_hook(
+                backend=backend,
+                session_id=session_id,
+                result=result,
+            )
 
             # Update chat history with the exchange
             if hasattr(self, '_append_to_chat_history'):

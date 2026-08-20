@@ -631,12 +631,13 @@ class ScheduledAgentExecutor:
         # they honour the same cheap go/no-go gate as native-agent jobs. On
         # "nothing to do" the tick is recorded ``skipped`` with no subprocess
         # spawned; gate context is appended to the prompt like the agent path.
+        pending_state_updates = None
         gate = self._resolve_condition(job)
         if gate is not None:
             # State-aware like the native-agent path: a monitor gate's cursor /
             # watermark must be loaded, passed when the gate supports it, and
-            # persisted on both the skip and go paths — otherwise a backend
-            # monitor job re-reads the same "new" items every tick.
+            # persisted on the skip path; go-path updates are held back until
+            # the backend turn succeeds (see below).
             prior_state = self._get_job_state(job)
             try:
                 if self._gate_accepts_state(gate):
@@ -664,9 +665,13 @@ class ScheduledAgentExecutor:
                 context = getattr(decision, "context", None)
                 if context:
                     message = f"{message}\n\n{context}"
+                # Defer go-path watermark persistence until the backend turn
+                # actually succeeds — persisting here would advance the cursor
+                # past unprocessed work when the run is later blocked by
+                # policy, fails to resolve, times out, or errors.
                 updates = getattr(decision, "state_updates", None)
                 if isinstance(updates, dict) and updates:
-                    self._persist_job_state(job, prior_state, updates)
+                    pending_state_updates = updates
 
         # Run-scoped policy: the message is the untrusted portion of a backend
         # turn (there is no in-process agent whose skills could load content),
@@ -791,6 +796,9 @@ class ScheduledAgentExecutor:
                 logger.warning(
                     "Delivery failed for backend job '%s': %s", job.id, e,
                 )
+
+        if succeeded and pending_state_updates:
+            self._persist_job_state(job, prior_state, pending_state_updates)
 
         status = "succeeded" if succeeded else "failed"
         self._runner.mark_run(
