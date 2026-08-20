@@ -76,6 +76,50 @@ def test_canonical_stage_names_cover_pipeline():
         assert stage in GATEWAY_TRACE_STAGES
 
 
+def test_null_stage_accepts_parent_carrier():
+    hook = NullGatewayTraceHook()
+    carrier = {"traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}
+    with hook.stage("agent.run", correlation_id="abc", parent_carrier=carrier) as span:
+        assert span is None
+
+
+def test_null_inject_context_is_noop():
+    hook = NullGatewayTraceHook()
+    carrier: dict = {}
+    assert hook.inject_context(carrier) is None
+    assert carrier == {}
+
+
+def test_null_extract_carrier_returns_none():
+    hook = NullGatewayTraceHook()
+    carrier = {"traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"}
+    assert hook.extract_carrier(carrier) is None
+
+
+def test_propagation_capable_hook_conforms_to_protocol():
+    class _Prop:
+        def stage(self, name, *, correlation_id=None, parent_carrier=None, **attrs):
+            return NULL_GATEWAY_TRACE_HOOK.stage(name)
+
+        def inject_context(self, carrier):
+            carrier["traceparent"] = "00-abc-def-01"
+
+        def extract_carrier(self, carrier):
+            return dict(carrier) if "traceparent" in carrier else None
+
+    hook = _Prop()
+    assert isinstance(hook, GatewayTraceHook)
+
+    out: dict = {}
+    hook.inject_context(out)
+    assert out["traceparent"] == "00-abc-def-01"
+
+    assert hook.extract_carrier({}) is None
+    parent = hook.extract_carrier({"traceparent": "00-abc-def-01"})
+    with hook.stage("agent.run", parent_carrier=parent) as span:
+        assert span is None
+
+
 def test_custom_hook_scope_wraps_stage():
     events = []
 
