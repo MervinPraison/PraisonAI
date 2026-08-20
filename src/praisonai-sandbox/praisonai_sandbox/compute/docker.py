@@ -325,13 +325,20 @@ class DockerCompute(SyncComputeProvider):
             return None
         try:
             repository, _, tag = ref.partition(":")
-            # Scrub the forwarded secrets out of the committed image. `docker
-            # commit` preserves Config.Env, so every model API key handed to
-            # the container was baked into an image that persists for days --
-            # readable by anyone who can run `docker inspect`. The capture is
-            # meant to reuse the installed *packages*, not the credentials that
-            # happened to be in the environment when they were installed.
-            scrub = [f"ENV {name}=" for name in sorted(_FORWARDED_SECRETS)]
+            # Scrub every forwarded env value out of the committed image.
+            # `docker commit` preserves Config.Env, so anything handed to the
+            # container -- a model API key, or an arbitrary secret the caller
+            # put in ComputeConfig.env -- was baked into an image that persists
+            # for days, readable by anyone who can run `docker inspect`. The
+            # capture is meant to reuse the installed *packages*, not the
+            # credentials that happened to be in the environment when they were
+            # installed. The known-secret set is only a floor; the config's own
+            # env names are the values actually injected into THIS container, so
+            # scrub their union rather than trusting a fixed list to be complete.
+            config = info.get("config")
+            config_env = getattr(config, "env", None) or {}
+            names = _FORWARDED_SECRETS | {str(name) for name in config_env}
+            scrub = [f"ENV {name}=" for name in sorted(names)]
             info["container"].commit(
                 repository=repository, tag=tag or "latest", changes=scrub
             )

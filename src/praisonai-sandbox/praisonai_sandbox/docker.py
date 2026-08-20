@@ -505,8 +505,17 @@ class DockerSandbox:
             "-v", f"{self._temp_dir}:{SANDBOX_ROOT}",
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
-            "--pids-limit", str(limits.max_processes),
         ]
+
+        # Same floor as run_command(): --pids-limit is per CONTAINER, and the
+        # default max_processes of 10 was chosen for setrlimit's per-user world.
+        # A raw 10 here kills the container before python even starts (exit 125),
+        # so raise it to something a container can live within. Still bounds a
+        # fork bomb; just stops the bound from being the bug.
+        if limits.max_processes and limits.max_processes > 0:
+            docker_cmd.extend(
+                ["--pids-limit", str(max(limits.max_processes, MIN_CONTAINER_PIDS))]
+            )
         
         if not limits.network_enabled:
             docker_cmd.extend(["--network", "none"])

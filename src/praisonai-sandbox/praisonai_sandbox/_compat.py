@@ -6,6 +6,19 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# The descriptor-relative walk relies on POSIX-only openat semantics:
+# O_DIRECTORY / O_NOFOLLOW and os.open()'s dir_fd argument. Windows has none of
+# them -- referencing os.O_DIRECTORY there is an AttributeError, and dir_fd is
+# unsupported -- so the whole approach is guarded behind this flag. Docker on
+# Windows talks to a Linux daemon, so the container-side race these helpers
+# defend against does not exist on the host; falling back to the resolved-string
+# guard there is both correct and the only thing that runs.
+_HAS_OPENAT = (
+    hasattr(os, "O_NOFOLLOW")
+    and hasattr(os, "O_DIRECTORY")
+    and os.open in getattr(os, "supports_dir_fd", set())
+)
+
 
 def safe_sandbox_path(temp_dir: str | None, path: str) -> str | None:
     """Resolve a caller-supplied path to an absolute path inside temp_dir.
@@ -66,6 +79,19 @@ def open_in_sandbox(temp_dir: str | None, path: str, flags: int, mode: int = 0o6
         logger.warning("Path traversal attempt blocked: %s", path)
         return None
 
+    if not _HAS_OPENAT:
+        # No openat here (Windows). The container-side symlink race this walk
+        # defends against cannot occur -- Docker Desktop runs Linux containers
+        # in a VM, so nothing shares this host directory -- so the resolved
+        # string guard is sufficient and is the only thing that can run.
+        resolved = safe_sandbox_path(temp_dir, path)
+        if resolved is None:
+            return None
+        try:
+            return os.open(resolved, flags, mode)
+        except OSError:
+            return None
+
     try:
         root_fd = os.open(temp_dir, os.O_RDONLY | os.O_DIRECTORY)
     except OSError:
@@ -106,6 +132,20 @@ def makedirs_in_sandbox(temp_dir: str | None, path: str) -> bool:
     parts = _components(path)
     if parts is None:
         return False
+
+    if not _HAS_OPENAT:
+        # Windows fallback: no openat, and no host-shared directory to race.
+        # Create the parent chain through the resolved string guard.
+        if len(parts) <= 1:
+            return True
+        resolved = safe_sandbox_path(temp_dir, "/".join(parts[:-1]))
+        if resolved is None:
+            return False
+        try:
+            os.makedirs(resolved, exist_ok=True)
+            return True
+        except OSError:
+            return False
 
     try:
         dir_fd = os.open(temp_dir, os.O_RDONLY | os.O_DIRECTORY)
