@@ -68,13 +68,13 @@ def test_async_flattened_error_carries_the_retry_verdict():
     result = asyncio.run(
         agent._execute_tool_async_impl("flaky", {}, None, None)
     )
-    assert result["retryable"] is True
+    assert result["_praison_retryable"] is True
 
     agent2, _ = _make_agent(ValueError("bad"))
     result2 = asyncio.run(
         agent2._execute_tool_async_impl("flaky", {}, None, None)
     )
-    assert result2["retryable"] is False
+    assert result2["_praison_retryable"] is False
 
 
 def test_async_honours_terminal_tool_execution_error():
@@ -90,7 +90,7 @@ def test_async_honours_terminal_tool_execution_error():
     result = asyncio.run(
         agent._execute_tool_async_impl("flaky", {}, None, None)
     )
-    assert result["retryable"] is False
+    assert result["_praison_retryable"] is False
 
 
 def test_async_honours_retryable_tool_execution_error():
@@ -102,4 +102,73 @@ def test_async_honours_retryable_tool_execution_error():
     result = asyncio.run(
         agent._execute_tool_async_impl("flaky", {}, None, None)
     )
-    assert result["retryable"] is True
+    assert result["_praison_retryable"] is True
+
+
+def test_a_tools_own_retryable_field_does_not_drive_the_retry_loop():
+    """'retryable' is a common key in API-wrapper results. It is the tool's payload,
+    not our control plane, and must not cause re-execution.
+
+    The tool *returns* an error dict, so execute_tool surfaces it as a terminal
+    ToolExecutionError (existing contract); the body must run exactly once.
+    """
+    calls = []
+
+    def upstream(x: str = "") -> dict:
+        calls.append(1)
+        return {"error": "upstream 503", "retryable": True}
+
+    try:
+        Agent(
+            name="t", instructions="x", tools=[upstream], tool_config=FAST
+        ).execute_tool("upstream", {})
+    except Exception:
+        pass
+    assert len(calls) == 1
+
+
+def test_framework_verdict_is_not_visible_to_the_model():
+    """The private control-plane key must never reach the model, whether the
+    result is returned or the failure surfaces as a raised error."""
+    def boom(x: str = "") -> str:
+        raise RuntimeError("network down")
+
+    try:
+        result = Agent(
+            name="t", instructions="x", tools=[boom], tool_config=FAST
+        ).execute_tool("boom", {})
+        surfaced = str(result)
+    except Exception as exc:
+        surfaced = str(exc)
+    assert "_praison_retryable" not in surfaced
+    assert "retryable" not in surfaced
+
+
+def test_async_a_tools_own_retryable_field_does_not_drive_the_retry_loop():
+    """Async parity: a tool whose payload carries 'retryable' must not steer the
+    async retry loop. The public execute_tool_async path (not just the impl) must
+    run the body exactly once and preserve the tool-owned field."""
+    calls = []
+
+    def upstream(x: str = "") -> dict:
+        calls.append(1)
+        return {"error": "upstream 503", "retryable": True}
+
+    agent = Agent(name="t", instructions="x", tools=[upstream], tool_config=FAST)
+    result = asyncio.run(agent.execute_tool_async("upstream", {}))
+    assert len(calls) == 1
+    # The tool's own payload field survives untouched...
+    assert result.get("retryable") is True
+    # ...and the framework's private control key never appears on the surfaced dict.
+    assert "_praison_retryable" not in result
+
+
+def test_async_framework_verdict_is_not_visible_to_the_model():
+    """Async parity: the private control-plane key must never reach the model on
+    the public execute_tool_async path after the retry budget is exhausted."""
+    def boom(x: str = "") -> str:
+        raise RuntimeError("network down")
+
+    agent = Agent(name="t", instructions="x", tools=[boom], tool_config=FAST)
+    result = asyncio.run(agent.execute_tool_async("boom", {}))
+    assert "_praison_retryable" not in str(result)

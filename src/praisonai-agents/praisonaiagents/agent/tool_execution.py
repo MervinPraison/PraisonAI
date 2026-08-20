@@ -843,20 +843,39 @@ class ToolExecutionMixin:
                             # connection_error) to exhaustion before returning here,
                             # so re-escalating them as retryable would restart the
                             # whole inner budget on every outer attempt and run the
-                            # tool up to max_attempts² times. Only escalate error
-                            # types the inner loop does NOT retry so they get one
-                            # outer pass. circuit_open is returned by the inner loop
-                            # without a body run and is not in retry_on, so it still
-                            # engages one outer backoff pass as before.
+                            # tool up to max_attempts² times.
                             error_type = self._classify_error_type(result, None)
                             inner_policy = self._get_tool_retry_policy(function_name)
-                            # An outer wall-clock timeout (see _outer_timeout tag)
-                            # was produced by this loop's own guard, not the inner
-                            # budget, so it still deserves one outer retry pass.
-                            if result.get("_outer_timeout"):
-                                is_retryable = True
-                            else:
-                                is_retryable = error_type not in inner_policy.retry_on
+                            # Only escalate to an outer retry pass when the failure is
+                            # a transient the inner loop did NOT already re-drive:
+                            #   • _outer_timeout — this loop's own wall-clock guard
+                            #     tripped; the body ran once and the inner budget
+                            #     never saw it, so it earns one outer pass.
+                            #   • circuit_open — returned by the inner loop WITHOUT a
+                            #     body run, so retrying costs no duplicate side effect.
+                            #   • _praison_retryable — a raised exception was flattened
+                            #     into this error dict (see _execute_tool_impl); honour
+                            #     that verdict, but ONLY for error types the inner loop
+                            #     does not itself retry, or inner×outer would run the
+                            #     body max_attempts² times.
+                            # A plain error dict the tool body *returned* carries no tag
+                            # — it is the tool's own reported outcome, not a transient
+                            # the framework must re-drive. The body already ran to
+                            # completion, so re-running it would duplicate its side
+                            # effects (charge money, send a message, write a row) for a
+                            # decision the tool already made. If a user genuinely wants
+                            # such an outcome retried, its error type belongs in the
+                            # RetryPolicy.retry_on the inner loop honours — not a word
+                            # in the tool's own payload. Surface it once.
+                            is_retryable = bool(
+                                result.get("_outer_timeout")
+                                or result.get("circuit_open")
+                                or (result.get("_praison_retryable") is True
+                                    and error_type not in inner_policy.retry_on)
+                            )
+                            # Strip the private control-plane tag before it can reach
+                            # the model or be re-surfaced as the tool's payload.
+                            result.pop("_praison_retryable", None)
                             raise ToolExecutionError(
                                 result.get("error", f"Tool '{function_name}' failed"),
                                 tool_name=function_name,
@@ -2561,8 +2580,20 @@ class ToolExecutionMixin:
                             f"{error_msg} Expected parameters for '{function_name}' — "
                             f"required: {schema['required']}, optional: {schema['optional']}."
                         )
-                        return {"error": error_msg, "expected_parameters": schema}
-                return {"error": error_msg}
+                        # An argument-binding error is a programming error — the same
+                        # call will always fail — so mark it terminal and never retry.
+                        return {"error": error_msg, "expected_parameters": schema, "_praison_retryable": False}
+                # A tool that *raised* is flattened into an error dict here, which
+                # erases the exception type the retry policy needs. Carry the same
+                # verdict the exception paths use so the outer loop can retry a
+                # transient failure without re-running a tool that merely *returned*
+                # an error dict of its own. Programming errors are terminal;
+                # everything else may be retried. Private key: never leaks to the
+                # model and cannot collide with a tool's own "retryable" field.
+                return {
+                    "error": error_msg,
+                    "_praison_retryable": not isinstance(e, (ValueError, TypeError, AttributeError)),
+                }
 
         # Unresolved: return a corrective, model-readable message so the model can
         # retry with a valid name instead of repeating the same mistake.
