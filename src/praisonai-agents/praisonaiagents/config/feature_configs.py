@@ -1151,8 +1151,13 @@ class ToolConfig:
     # Retry policy for tool execution with exponential backoff
     retry_policy: Optional[Any] = None  # RetryPolicy instance
     
-    # Enable parallel execution of batched LLM tool calls
-    parallel: bool = False
+    # DEPRECATED ALIAS for ExecutionConfig.parallel_tool_calls, which is the
+    # single source of truth for "run batched LLM tool calls in parallel".
+    # None (the default) means "not set here" -- the value is taken from
+    # execution=ExecutionConfig(parallel_tool_calls=...). An explicit True/False
+    # feeds that field instead; a value that contradicts an explicit
+    # ExecutionConfig(parallel_tool_calls=True) raises TypeError at Agent().
+    parallel: Optional[bool] = None
     
     # Tool output handling and artifact storage
     output_limit: int = DEFAULT_TOOL_OUTPUT_LIMIT  # Maximum bytes before spilling to artifact store
@@ -1215,7 +1220,7 @@ class ToolConfig:
         return cls(
             timeout=data.get("timeout"),
             retry_policy=retry_policy,
-            parallel=data.get("parallel", False),
+            parallel=data.get("parallel"),
             output_limit=data.get("output_limit", DEFAULT_TOOL_OUTPUT_LIMIT),
             output_max_lines=data.get("output_max_lines"),
             output_direction=data.get("output_direction", "both"),

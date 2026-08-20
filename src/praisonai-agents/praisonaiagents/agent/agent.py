@@ -1788,8 +1788,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 redact_secrets=_tool_config.redact_secrets
             )
         
-        # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
-        self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
+        # Gap 2: one setting, two spellings. ExecutionConfig.parallel_tool_calls
+        # is the source of truth (it is what chat/achat/iter_stream forward to
+        # the LLM); ToolConfig.parallel is a deprecated alias that feeds it.
+        self.parallel_tool_calls, _exec_config = Agent._merge_parallel_tool_calls(
+            _tool_config, _exec_config
+        )
         # G2: Store interrupt controller for cooperative cancellation
         self.interrupt_controller = interrupt_controller
         # Check for model name in environment variable if not provided
@@ -2588,6 +2592,44 @@ Your Goal: {self.goal}
                 FutureWarning,
                 stacklevel=2,
             )
+
+    @staticmethod
+    def _merge_parallel_tool_calls(tool_config, exec_config):
+        """Merge the two spellings of "run batched tool calls in parallel".
+
+        ``ExecutionConfig.parallel_tool_calls`` is the single source of truth:
+        it is the value ``chat()``, ``achat()`` and ``iter_stream()`` forward to
+        the LLM. ``ToolConfig.parallel`` is a deprecated alias -- ``None`` means
+        "not set here", an explicit ``True``/``False`` feeds the source of truth.
+
+        Returns ``(resolved_bool, exec_config)``. The ExecutionConfig is copied
+        (never mutated) when the alias contributes a value, so a config instance
+        shared between agents is not rewritten behind the caller's back.
+        """
+        alias = getattr(tool_config, 'parallel', None) if tool_config is not None else None
+        current = bool(getattr(exec_config, 'parallel_tool_calls', False))
+        if alias is None:
+            return current, exec_config
+        alias = bool(alias)
+        if alias == current:
+            return current, exec_config
+        if current:
+            # ExecutionConfig.parallel_tool_calls defaults to False, so True can
+            # only have been passed explicitly: the two spellings disagree.
+            raise TypeError(
+                "Agent(tool_config=ToolConfig(parallel=False), "
+                "execution=ExecutionConfig(parallel_tool_calls=True)) is not "
+                "valid: both name the same setting and they disagree.\n"
+                "  ToolConfig.parallel is a deprecated alias for "
+                "ExecutionConfig.parallel_tool_calls.\n"
+                "  To run batched tool calls in parallel:  "
+                "Agent(execution=ExecutionConfig(parallel_tool_calls=True))\n"
+                "  To run them sequentially (the default): drop both spellings."
+            )
+        import copy as _copy
+        exec_config = _copy.copy(exec_config)
+        exec_config.parallel_tool_calls = alias
+        return alias, exec_config
 
     @staticmethod
     def _resolve_tool_config(tool_config):
