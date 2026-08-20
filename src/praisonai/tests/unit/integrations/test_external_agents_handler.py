@@ -98,7 +98,7 @@ class TestExternalAgentsHandler:
         handler = ExternalAgentsHandler()
         integrations = handler.list_integrations()
         
-        assert len(integrations) == 4
+        assert len(integrations) >= 4
         assert all(name in integrations for name in ["claude", "gemini", "codex", "cursor"])
     
     def test_check_availability(self):

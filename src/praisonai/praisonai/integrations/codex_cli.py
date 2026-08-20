@@ -47,7 +47,10 @@ class CodexCLIIntegration(BaseCLIIntegration):
         json_output: Whether to use JSON streaming output
         output_schema: Path to JSON schema for structured output
     """
-    
+
+    display_label = "Codex CLI (refactoring)"
+    install_hint = "npm install -g @openai/codex"
+
     VALID_APPROVAL_MODES = {"suggest", "auto-edit", "full-auto"}
 
     def __init__(

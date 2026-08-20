@@ -14,9 +14,36 @@ Usage:
     praisonai "Add tests" --external-agent cursor
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Iterator, List, Mapping, Optional, Tuple
 
 from .base import FlagHandler
+
+
+def _catalog() -> Dict[str, Dict[str, Any]]:
+    """Live view of the external-agent registry (lazy: ``praisonai`` is optional)."""
+    from praisonai.integrations.registry import external_agent_catalog
+    return external_agent_catalog()
+
+
+class _RegistryIntegrations(Mapping):
+    """Read-only ``name -> integration class`` view backed by the registry.
+
+    Kept so the historical ``ExternalAgentsHandler.INTEGRATIONS`` attribute
+    still supports ``in``, iteration and ``[]`` — but it is now a *view*, not a
+    hand-written copy that can drift from the registry.
+    """
+
+    def __getitem__(self, key: str) -> Any:
+        return _catalog()[key]["cls"]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_catalog())
+
+    def __len__(self) -> int:
+        return len(_catalog())
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"_RegistryIntegrations({list(self)!r})"
 
 
 class ExternalAgentsHandler(FlagHandler):
@@ -30,13 +57,8 @@ class ExternalAgentsHandler(FlagHandler):
         praisonai "Analyze this codebase" --external-agent gemini
     """
     
-    # Mapping of integration names to their module paths
-    INTEGRATIONS = {
-        "claude": "claude_code.ClaudeCodeIntegration",
-        "gemini": "gemini_cli.GeminiCLIIntegration",
-        "codex": "codex_cli.CodexCLIIntegration",
-        "cursor": "cursor_cli.CursorCLIIntegration",
-    }
+    # Live view of praisonai.integrations.registry — NOT a hand-written copy.
+    INTEGRATIONS = _RegistryIntegrations()
     
     def __init__(self, verbose: bool = False):
         """Initialize the handler."""
@@ -56,7 +78,8 @@ class ExternalAgentsHandler(FlagHandler):
     @property
     def flag_help(self) -> str:
         """Return the flag help text."""
-        return "External AI CLI tool to use (claude, gemini, codex, cursor)"
+        names = ", ".join(self.list_integrations()) or "none registered"
+        return f"External AI CLI tool to use ({names})"
     
     def check_dependencies(self) -> Tuple[bool, str]:
         """Check if integrations module is available."""
@@ -82,21 +105,17 @@ class ExternalAgentsHandler(FlagHandler):
         Raises:
             ValueError: If integration name is invalid
         """
-        if name not in self.INTEGRATIONS:
-            raise ValueError(f"Unknown integration: {name}. Available: {list(self.INTEGRATIONS.keys())}")
+        catalog = _catalog()
+        if name not in catalog:
+            raise ValueError(f"Unknown integration: {name}. Available: {list(catalog)}")
         
         # Check cache first
         cache_key = f"{name}_{hash(frozenset(options.items()))}"
         if cache_key in self._integration_cache:
             return self._integration_cache[cache_key]
         
-        # Lazy import the integration
-        module_path = self.INTEGRATIONS[name]
-        module_name, class_name = module_path.rsplit(".", 1)
-        
-        import importlib
-        module = importlib.import_module(f"praisonai.integrations.{module_name}")
-        integration_class = getattr(module, class_name)
+        # Resolve through the registry (built-ins and entry-point plugins alike)
+        integration_class = catalog[name]["cls"]
         
         # Create instance with options
         integration = integration_class(**options)
@@ -113,7 +132,7 @@ class ExternalAgentsHandler(FlagHandler):
         Returns:
             List of integration names
         """
-        return list(self.INTEGRATIONS.keys())
+        return list(_catalog())
     
     def check_availability(self) -> Dict[str, bool]:
         """
@@ -123,7 +142,7 @@ class ExternalAgentsHandler(FlagHandler):
             Dict mapping integration name to availability
         """
         availability = {}
-        for name in self.INTEGRATIONS:
+        for name in _catalog():
             try:
                 integration = self.get_integration(name)
                 availability[name] = integration.is_available
@@ -222,10 +241,5 @@ class ExternalAgentsHandler(FlagHandler):
     
     def _get_install_instructions(self, name: str) -> str:
         """Get installation instructions for an integration."""
-        instructions = {
-            "claude": "npm install -g @anthropic-ai/claude-code",
-            "gemini": "npm install -g @anthropic-ai/gemini-cli",
-            "codex": "npm install -g @openai/codex",
-            "cursor": "Download from cursor.com",
-        }
-        return instructions.get(name, "See documentation")
+        meta = _catalog().get(name)
+        return meta["install"] if meta else "See documentation"

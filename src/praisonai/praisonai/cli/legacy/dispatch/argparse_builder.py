@@ -276,8 +276,19 @@ def build_argument_parser(in_test_env: bool):
 
     # Backend group - mutually exclusive external agent and CLI backend options
     backend_group = parser.add_mutually_exclusive_group()
-    backend_group.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
-                      help="Use external AI CLI tool (claude, gemini, codex, cursor)")
+    # Dynamically populate choices from the external-agent registry, exactly
+    # like --cli-backend below, so a plugin registered under the
+    # "praisonai.external_agents" entry-point group is selectable.
+    try:
+        from praisonai.integrations.registry import list_external_agents
+        external_agent_choices = list_external_agents() or None
+    except ImportError:
+        external_agent_choices = None
+
+    backend_group.add_argument("--external-agent", type=str, choices=external_agent_choices,
+                      help="Use external AI CLI tool (%s)" % (
+                          ", ".join(external_agent_choices) if external_agent_choices
+                          else "none registered"))
 
     # CLI Backend - delegate agent turns to CLI backend
     # Dynamically populate choices from registered backends
