@@ -217,8 +217,17 @@ def __getattr__(name):
 
     try:
         import praisonaiagents
-    except ModuleNotFoundError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    except ModuleNotFoundError as e:
+        if e.name == "praisonaiagents":
+            # Genuinely not installed — this is a real attribute miss.
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        # praisonaiagents IS installed but a transitive dep is missing.
+        # Surface the real cause instead of a misleading attribute error.
+        _praisonaiagents_import_error = e
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}: praisonaiagents is "
+            f"installed but failed to import ({e})"
+        ) from e
     except ImportError as e:
         _praisonaiagents_import_error = e
         raise AttributeError(

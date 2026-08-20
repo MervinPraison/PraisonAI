@@ -6,6 +6,7 @@ Integrates with PraisonAI's AFTER_TOOL hook event.
 
 Zero overhead when not enabled — all imports are local.
 """
+import functools
 import json
 import logging
 import os
@@ -17,6 +18,26 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOG_PATH = os.path.expanduser("~/.praisonai/audit.jsonl")
+
+_DEFAULT_SENSITIVE_KEYS = frozenset({
+    "api_key", "apikey", "authorization", "auth", "password", "passwd",
+    "secret", "token", "access_token", "refresh_token", "bearer",
+    "x-api-key", "openai_api_key", "anthropic_api_key", "cookie",
+})
+_REDACTED = "***REDACTED***"
+
+
+def _default_redactor(obj: Any, sensitive: frozenset = _DEFAULT_SENSITIVE_KEYS) -> Any:
+    """Recursively redact values whose key matches a sensitive name."""
+    if isinstance(obj, dict):
+        return {
+            k: (_REDACTED if isinstance(k, str) and k.lower() in sensitive
+                else _default_redactor(v, sensitive))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_default_redactor(v, sensitive) for v in obj)
+    return obj
 
 
 class AuditLogHook:
@@ -38,6 +59,8 @@ class AuditLogHook:
         log_path: Optional[str] = None,
         include_output: bool = False,
         max_output_chars: int = 500,
+        redactor: Optional[Callable[[Any], Any]] = _default_redactor,
+        sensitive_keys: Optional[frozenset] = None,
     ):
         """
         Args:
@@ -47,10 +70,21 @@ class AuditLogHook:
                             Default False to keep log compact.
             max_output_chars: Maximum characters of tool output to log
                               (only used when include_output=True).
+            redactor: Callable applied to tool_input before writing, to strip
+                      secrets (api keys, tokens, passwords). Defaults to a
+                      built-in key-name denylist redactor. Pass None to disable.
+            sensitive_keys: Override the denylist of key names to redact.
         """
         self._log_path = os.path.expanduser(log_path or _DEFAULT_LOG_PATH)
         self._include_output = include_output
         self._max_output_chars = max_output_chars
+        self._sensitive_keys = sensitive_keys or _DEFAULT_SENSITIVE_KEYS
+        # Bind sensitive_keys to the built-in redactor so every redactor —
+        # default or custom — honours the single-arg Callable[[Any], Any]
+        # contract. Custom redactors are used exactly as supplied.
+        if redactor is _default_redactor:
+            redactor = functools.partial(_default_redactor, sensitive=self._sensitive_keys)
+        self._redactor = redactor
         self._ensure_dir()
         self._lock = threading.Lock()
         # Single long-lived handle; reopened lazily if it gets rotated out.
@@ -68,6 +102,13 @@ class AuditLogHook:
             with self._lock:
                 # Lazy initialize file handle
                 if self._fh is None:
+                    # Ensure the log file is user-only (0o600) regardless of
+                    # the process umask before the first append.
+                    try:
+                        Path(self._log_path).touch(mode=0o600, exist_ok=True)
+                        os.chmod(self._log_path, 0o600)
+                    except OSError:
+                        pass
                     self._fh = open(self._log_path, "a", encoding="utf-8")
                 self._fh.write(line)
                 self._fh.flush()
@@ -101,12 +142,16 @@ class AuditLogHook:
         hook = self
 
         def _audit_hook(data: Any) -> None:
+            raw_input = getattr(data, "tool_input", {})
             entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "session_id": getattr(data, "session_id", "unknown"),
                 "agent_name": getattr(data, "agent_name", "unknown"),
                 "tool_name": getattr(data, "tool_name", "unknown"),
-                "tool_input": getattr(data, "tool_input", {}),
+                "tool_input": (
+                    hook._redactor(raw_input)
+                    if hook._redactor else raw_input
+                ),
                 "execution_time_ms": getattr(data, "execution_time_ms", 0.0),
                 "error": getattr(data, "tool_error", None),
             }

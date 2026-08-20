@@ -16,6 +16,7 @@ Usage::
 """
 
 import logging
+import threading
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,12 @@ class DbSessionAdapter:
         self._metadata: Dict[str, Dict[str, Any]] = {}
         self._history_cache: Dict[str, List[Dict[str, str]]] = {}
         self._cleared_sessions: Set[str] = set()
+        # Guards the four in-memory containers above. DB I/O is kept outside
+        # the lock (it may be slow or re-enter this adapter).
+        self._lock = threading.RLock()
+        # Per-session init locks serialise the (non-idempotent) on_agent_start
+        # call so two threads racing on first access don't both hit the DB.
+        self._init_locks: Dict[str, threading.Lock] = {}
 
     def _conversation_store(self) -> Any:
         """Optional ConversationStore behind the DbAdapter (if present)."""
@@ -137,12 +144,31 @@ class DbSessionAdapter:
 
     def _ensure_session(self, session_id: str, agent_name: str = "ManagedAgent") -> None:
         """Ensure session exists in the DB adapter."""
-        if session_id not in self._sessions:
-            skip_history = session_id in self._cleared_sessions
-            if skip_history:
-                self._cleared_sessions.discard(session_id)
+        with self._lock:
+            if session_id in self._sessions:
+                return
+            # Grab (or create) a per-session init lock while holding the shared
+            # lock so all racers agree on the same lock object.
+            init_lock = self._init_locks.setdefault(session_id, threading.Lock())
+        # Serialise first-time initialisation: only one thread calls the
+        # non-idempotent on_agent_start; the rest see _sessions populated and
+        # return early. The DB call stays outside the shared lock (it may be
+        # slow or re-enter this adapter).
+        with init_lock:
+            with self._lock:
+                if session_id in self._sessions:  # initialised while we waited
+                    return
+                skip_history = session_id in self._cleared_sessions
+                if skip_history:
+                    self._cleared_sessions.discard(session_id)
             try:
                 msgs = self._db.on_agent_start(agent_name, session_id)
+            except Exception as e:
+                logger.warning("[db_session_adapter] on_agent_start failed: %s", e)
+                with self._lock:
+                    self._sessions.add(session_id)
+                return
+            with self._lock:
                 if msgs and not skip_history:
                     self._history_cache[session_id] = [
                         {"role": m.role, "content": m.content} for m in msgs
@@ -153,9 +179,6 @@ class DbSessionAdapter:
                     loaded = self._load_metadata_from_db(session_id)
                     if loaded:
                         self._metadata[session_id] = loaded
-                self._sessions.add(session_id)
-            except Exception as e:
-                logger.warning("[db_session_adapter] on_agent_start failed: %s", e)
                 self._sessions.add(session_id)
 
     def add_message(
@@ -183,9 +206,10 @@ class DbSessionAdapter:
             else:
                 self._db.on_user_message(session_id, content, metadata={"role": role, **(metadata or {})})
 
-            if session_id not in self._history_cache:
-                self._history_cache[session_id] = []
-            self._history_cache[session_id].append({"role": role, "content": content})
+            with self._lock:
+                self._history_cache.setdefault(session_id, []).append(
+                    {"role": role, "content": content}
+                )
             return True
         except Exception as e:
             logger.warning("[db_session_adapter] add_message failed: %s", e)
@@ -198,32 +222,38 @@ class DbSessionAdapter:
     ) -> List[Dict[str, str]]:
         """Get chat history in LLM-compatible format."""
         self._ensure_session(session_id)
-        history = self._history_cache.get(session_id, [])
+        with self._lock:
+            history = list(self._history_cache.get(session_id, []))
         if max_messages:
             return history[-max_messages:]
-        return list(history)
+        return history
 
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session."""
-        if session_id in self._sessions:
+        with self._lock:
+            exists = session_id in self._sessions
+        if exists:
             try:
                 self._db.on_agent_end(session_id)
             except Exception as e:
                 logger.warning("[db_session_adapter] on_agent_end failed: %s", e)
         self._purge_persisted_messages(session_id)
-        self._history_cache[session_id] = []
-        self._sessions.discard(session_id)
-        self._cleared_sessions.add(session_id)
+        with self._lock:
+            self._history_cache[session_id] = []
+            self._sessions.discard(session_id)
+            self._cleared_sessions.add(session_id)
         return True
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
         self._purge_persisted_messages(session_id)
         self._purge_persisted_metadata(session_id)
-        self._history_cache.pop(session_id, None)
-        self._metadata.pop(session_id, None)
-        self._sessions.discard(session_id)
-        self._cleared_sessions.discard(session_id)
+        with self._lock:
+            self._history_cache.pop(session_id, None)
+            self._metadata.pop(session_id, None)
+            self._sessions.discard(session_id)
+            self._cleared_sessions.discard(session_id)
+            self._init_locks.pop(session_id, None)
         try:
             self._db.on_agent_end(session_id)
         except Exception:
@@ -232,7 +262,8 @@ class DbSessionAdapter:
 
     def session_exists(self, session_id: str) -> bool:
         """Check if a session exists."""
-        return session_id in self._sessions
+        with self._lock:
+            return session_id in self._sessions
 
     # ------------------------------------------------------------------
     # Extended metadata API (beyond SessionStoreProtocol minimum)
@@ -240,18 +271,19 @@ class DbSessionAdapter:
 
     def set_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
         """Store metadata for a session (agent IDs, usage, compute refs)."""
-        if session_id not in self._metadata:
-            self._metadata[session_id] = {}
-        self._metadata[session_id].update(metadata)
+        with self._lock:
+            self._metadata.setdefault(session_id, {}).update(metadata)
         self._persist_metadata_to_db(session_id)
 
     def get_metadata(self, session_id: str) -> Dict[str, Any]:
         """Retrieve metadata for a session."""
-        if session_id in self._metadata:
-            return dict(self._metadata[session_id])
+        with self._lock:
+            if session_id in self._metadata:
+                return dict(self._metadata[session_id])
         loaded = self._load_metadata_from_db(session_id)
         if loaded:
-            self._metadata[session_id] = loaded
+            with self._lock:
+                self._metadata[session_id] = loaded
         return dict(loaded)
 
     # ------------------------------------------------------------------
@@ -263,8 +295,9 @@ class DbSessionAdapter:
 
         Returns None if session doesn't exist.
         """
-        if session_id not in self._sessions:
-            return None
+        with self._lock:
+            if session_id not in self._sessions:
+                return None
 
         class _SessionProxy:
             def __init__(self, sid, meta):
@@ -276,8 +309,8 @@ class DbSessionAdapter:
         """Update session metadata fields (DefaultSessionStore-compatible)."""
         if not fields:
             return
-        if session_id not in self._metadata:
-            self._metadata[session_id] = {}
-        for key, value in fields.items():
-            if value is not None:
-                self._metadata[session_id][key] = value
+        with self._lock:
+            meta = self._metadata.setdefault(session_id, {})
+            for key, value in fields.items():
+                if value is not None:
+                    meta[key] = value
