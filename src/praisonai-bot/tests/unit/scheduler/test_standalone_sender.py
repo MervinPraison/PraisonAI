@@ -242,6 +242,112 @@ def test_live_handler_still_wins(monkeypatch):
     assert live == [("123", "echo:hello")]
 
 
+def test_a_failed_delivery_is_not_recorded_as_delivered():
+    """Issue #4193: a live handler that returns ``False`` (a non-raising
+    delivery failure, e.g. the router could not resolve the target) must not be
+    recorded as ``delivered``. 'The handler returned' is not 'the message
+    arrived' — recording it as delivered makes the run history wrong and
+    suppresses failure alerting.
+    """
+
+    async def deliver(target, text):
+        # Mirrors the gateway's ``_deliver_scheduled_result`` returning False
+        # when routing fails, instead of raising.
+        return False
+
+    ex = _agent_executor(delivery_handler=deliver)
+    result = _run(ex._execute_one(_job(deliver="telegram:42")))
+
+    assert result.status == "succeeded"
+    assert result.delivered is False
+    assert "telegram:42" in (result.delivery_error or "")
+
+
+def test_handler_returning_none_is_treated_as_delivered():
+    """A live handler that returns ``None`` still counts as delivered, so
+    adapters that report success by simply not raising keep working (backward
+    compatible with the pre-#4193 contract).
+    """
+
+    async def deliver(target, text):
+        return None
+
+    ex = _agent_executor(delivery_handler=deliver)
+    result = _run(ex._execute_one(_job(deliver="telegram:42")))
+
+    assert result.delivered is True
+    assert result.delivery_error is None
+
+
+class _OkScan:
+    ok = True
+    reason = None
+
+
+class _DeliverOnFailurePolicy:
+    """Minimal duck-typed run policy that enables fail-closed delivery."""
+
+    deliver_on_failure = True
+    audit_dir = None
+
+    def scan_prompt(self, _text):
+        return _OkScan()
+
+    def filter_tools(self, tools):
+        return tools
+
+
+class _BoomAgent:
+    def chat(self, message, **kwargs):
+        raise RuntimeError("agent blew up")
+
+
+def test_delivered_failure_summary_is_recorded_as_delivered():
+    """When a job fails and its failure summary is delivered successfully,
+    the run must be recorded as ``delivered`` — the payload reached the
+    channel. Leaving ``delivered`` False makes monitoring report a delivered
+    notification as undelivered (Greptile #4198).
+    """
+    sent: list = []
+
+    async def deliver(target, text):
+        sent.append((target.channel_id, text))
+
+    ex = ScheduledAgentExecutor(
+        runner=FakeRunner(),
+        agent_resolver=lambda aid: _BoomAgent(),
+        delivery_handler=deliver,
+        run_policy=_DeliverOnFailurePolicy(),
+    )
+    result = _run(ex._execute_one(_job(deliver="telegram:42")))
+
+    assert result.status == "failed"
+    assert result.delivered is True
+    assert result.delivery_error is None
+    assert sent and sent[0][0] == "42"
+
+
+def test_failed_failure_summary_is_not_recorded_as_delivered():
+    """A failure summary whose delivery itself fails (handler returns False)
+    must stay ``delivered=False`` and record a ``delivery_error``.
+    """
+
+    async def deliver(target, text):
+        return False
+
+    ex = ScheduledAgentExecutor(
+        runner=FakeRunner(),
+        agent_resolver=lambda aid: _BoomAgent(),
+        delivery_handler=deliver,
+        run_policy=_DeliverOnFailurePolicy(),
+    )
+    result = _run(ex._execute_one(_job(deliver="telegram:42")))
+
+    assert result.status == "failed"
+    assert result.delivered is False
+    assert "telegram:42" in (result.delivery_error or "")
+
+
 # ── new-platform standalone senders (#4050) ──────────────────────────
 
 

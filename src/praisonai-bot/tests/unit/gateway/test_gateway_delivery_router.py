@@ -200,9 +200,48 @@ def test_scheduled_delivery_missing_target_is_skipped():
     gw = _make_gateway_with_bot(bot)
     delivery = SimpleNamespace(channel="", channel_id="", thread_id=None)
 
-    asyncio.run(gw._deliver_scheduled_result(delivery, "nope"))
+    delivered = asyncio.run(gw._deliver_scheduled_result(delivery, "nope"))
 
+    assert delivered is False
     assert bot.sends == []
+
+
+def test_scheduled_delivery_returns_true_on_success():
+    """A successful scheduled delivery reports ``True`` (issue #4193).
+
+    The handler's return value is the delivery signal; the executor keys
+    ``delivered`` off it, so a real send must report success explicitly rather
+    than by merely not raising.
+    """
+    bot = _RecordingBot()
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    delivered = asyncio.run(gw._deliver_scheduled_result(delivery, "daily report"))
+
+    assert delivered is True
+
+
+def test_scheduled_delivery_returns_false_when_routing_fails():
+    """A routing failure reports ``False`` instead of a silent success.
+
+    Regression for issue #4193: with the target channel not running, the router
+    fails to resolve the target. The handler previously returned ``None`` on
+    every path, so the executor recorded ``delivered=True`` next to a logged
+    'Failed to deliver'. It must now report ``False``.
+    """
+    gw = WebSocketGateway()  # no channel bots wired → routing cannot resolve
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="42", thread_id=None,
+        session_id="cron_daily-brief",
+    )
+
+    delivered = asyncio.run(gw._deliver_scheduled_result(delivery, "brief"))
+
+    assert delivered is False
 
 
 # ─── Durable scheduled dedup across restart (issue #3231) ────────────

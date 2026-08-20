@@ -5163,8 +5163,13 @@ class WebSocketGateway:
 
     async def _deliver_scheduled_result(
         self, delivery: Any, text: str,
-    ) -> None:
+    ) -> bool:
         """Route a scheduled job result to the correct channel bot.
+
+        Returns whether the payload actually reached the target. Returning
+        ``None`` on every path (issue #4193) made "the handler did not raise"
+        the success signal, so a routing failure was recorded as a successful
+        delivery. ``True`` means delivered, ``False`` means it did not.
 
         Args:
             delivery: A ``DeliveryTarget`` with ``channel`` and ``channel_id``.
@@ -5177,7 +5182,7 @@ class WebSocketGateway:
 
         if not channel or not channel_id:
             logger.warning("Delivery target missing channel or channel_id, skipping")
-            return
+            return False
 
         router = self.delivery_router
         if router is not None:
@@ -5226,7 +5231,7 @@ class WebSocketGateway:
                 logger.error(
                     "Failed to deliver scheduled result to %s:%s", channel, channel_id,
                 )
-            return
+            return bool(delivered)
 
         # Fallback: router unavailable — preserve the prior bare-send behaviour.
         bot = self.get_channel_bot(channel)
@@ -5241,7 +5246,7 @@ class WebSocketGateway:
             logger.warning(
                 "No channel bot '%s' found for scheduled delivery", channel,
             )
-            return
+            return False
 
         try:
             await bot.send_message(
@@ -5256,6 +5261,8 @@ class WebSocketGateway:
             logger.error(
                 "Failed to deliver to %s:%s: %s", channel, channel_id, e,
             )
+            return False
+        return True
 
     def _seed_continuable_session(self, delivery: Any, text: str) -> None:
         """Seed a resumable session so a reply to a delivered brief has context.
