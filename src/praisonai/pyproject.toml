@@ -41,6 +41,19 @@ crewai = "praisonai.framework_adapters.crewai_adapter:CrewAIAdapter"
 autogen = "praisonai.framework_adapters.autogen_adapter:AutoGenFamilyAdapter"
 autogen_v2 = "praisonai.framework_adapters.autogen_adapter:AutoGenAdapter"
 
+# Canonical group for endpoint providers. Third-party packages publish
+# `name = "your_pkg:YourProvider"` (a praisonai.endpoints.providers.base
+# .BaseProvider subclass) here. The old "praisonai.endpoints.providers"
+# spelling still works but emits a DeprecationWarning.
+[project.entry-points."praisonai.endpoint_providers"]
+recipe = "praisonai.endpoints.providers.recipe:RecipeProvider"
+agents-api = "praisonai.endpoints.providers.agents_api:AgentsAPIProvider"
+mcp = "praisonai.endpoints.providers.mcp:MCPProvider"
+tools-mcp = "praisonai.endpoints.providers.tools_mcp:ToolsMCPProvider"
+a2a = "praisonai.endpoints.providers.a2a:A2AProvider"
+a2u = "praisonai.endpoints.providers.a2u:A2UProvider"
+openai-compat = "praisonai.endpoints.providers.openai_compat:OpenAICompatProvider"
+
 [project.optional-dependencies]
 ui = [
     "aiui>=0.3.121,<0.4",

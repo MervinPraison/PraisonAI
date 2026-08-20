@@ -11,6 +11,21 @@ Provider Types:
 - tools-mcp: Tools exposed as MCP server
 - a2a: Agent-to-agent protocol
 - a2u: Agent-to-user event stream
+- openai-compat: OpenAI-compatible HTTP API
+
+Third-party provider types:
+    Publish a ``BaseProvider`` subclass under the ``praisonai.endpoint_providers``
+    entry-point group::
+
+        [project.entry-points."praisonai.endpoint_providers"]
+        acme = "acme_praison:AcmeProvider"
+
+    The plugin is then usable everywhere a built-in type is: ``praisonai
+    endpoints types``, ``praisonai endpoints invoke --type acme``, and
+    ``praisonai.endpoints.registry.get_provider("acme")``.
+
+    ``praisonai.endpoints.providers`` is a deprecated spelling of the same
+    group. It is still read, but emits a ``DeprecationWarning``.
 
 Architecture:
 - Discovery schema is versioned and consistent across all providers

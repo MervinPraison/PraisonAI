@@ -43,14 +43,34 @@ def _a2u_loader():
     return A2UProvider
 
 
+def _openai_compat_loader():
+    from .providers.openai_compat import OpenAICompatProvider
+    return OpenAICompatProvider
+
+
 _BUILTIN_PROVIDERS = {
-    "recipe":      _recipe_loader,
-    "agents-api":  _agents_api_loader,
-    "mcp":         _mcp_loader,
-    "tools-mcp":   _tools_mcp_loader,
-    "a2a":         _a2a_loader,
-    "a2u":         _a2u_loader,
+    "recipe":         _recipe_loader,
+    "agents-api":     _agents_api_loader,
+    "mcp":            _mcp_loader,
+    "tools-mcp":      _tools_mcp_loader,
+    "a2a":            _a2a_loader,
+    "a2u":            _a2u_loader,
+    # Shipped provider that was never registered, so `--type openai-compat`
+    # silently ran as a recipe.
+    "openai-compat":  _openai_compat_loader,
 }
+
+
+#: Canonical entry-point group for third-party endpoint providers. A plugin
+#: publishes ``name = your_pkg:YourProvider`` (a :class:`BaseProvider`
+#: subclass) under this group.
+ENTRY_POINT_GROUP = "praisonai.endpoint_providers"
+
+#: Historical misspelling, still honoured but warned about. It was read by
+#: ``praisonai_code.cli.features._endpoint_registry`` while this module read
+#: ``praisonai.endpoint_providers``, so which reader saw a plugin depended on
+#: which spelling its author happened to guess.
+LEGACY_ENTRY_POINT_GROUPS = ("praisonai.endpoints.providers",)
 
 
 class ProviderRegistry(PluginRegistry[Type[BaseProvider]]):
@@ -58,8 +78,9 @@ class ProviderRegistry(PluginRegistry[Type[BaseProvider]]):
 
     def __init__(self) -> None:
         super().__init__(
-            entry_point_group="praisonai.endpoint_providers",
+            entry_point_group=ENTRY_POINT_GROUP,
             builtins=_BUILTIN_PROVIDERS,
+            legacy_entry_point_groups=LEGACY_ENTRY_POINT_GROUPS,
         )
 
     def get(
