@@ -98,6 +98,20 @@ jobs:
           --ignore=tests/unit/cli/test_message_queue.py \
           --maxfail=5
 
+    - name: Run praisonai-agents subscription-auth smoke tests
+      env:
+        PRAISONAI_TEST_TIER: smoke
+        PRAISONAI_ALLOW_NETWORK: '0'
+        OPENAI_MODEL_NAME: gpt-4o-mini
+        OPENAI_API_KEY: 'test-key'
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd src/praisonai-agents
+        python -m pytest tests/smoke/test_subscription_auth.py \
+          tests/unit/auth/test_agent_auth_wiring.py \
+          -q --tb=line --timeout=60 --maxfail=5
+
     - name: Standalone praisonai-code import smoke
       shell: bash
       run: |
