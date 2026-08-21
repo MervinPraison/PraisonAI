@@ -172,6 +172,24 @@ def test_backend_empty_message_skipped(fake_backend):
     assert backend.calls == []
 
 
+def test_backend_monitor_no_change_has_distinct_status(fake_backend):
+    backend, _ = fake_backend
+    ex = _executor([])
+
+    class NoChangeGate:
+        def should_run(self, job, *, state=None):
+            from praisonaiagents.scheduler.protocols import GateResult
+
+            return GateResult(no_change=True, reason="monitor source unchanged")
+
+    ex._condition_resolver = lambda _job: NoChangeGate()
+    result = _run(ex._execute_one(_backend_job(message="summarise")))
+
+    assert result.status == "no_change"
+    assert ex._runner.runs[-1]["status"] == "no_change"
+    assert backend.calls == []
+
+
 def test_schedule_add_duplicate_is_rejected_no_mutation(monkeypatch):
     """A duplicate-name ``schedule add --backend`` must be a genuine no-op:
     it neither mutates the pre-existing same-named job nor exits 0."""

@@ -9,15 +9,18 @@ Covers:
 """
 
 import asyncio
+import inspect
+import socket
+import sys
+import threading
+import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import pytest
-
+from praisonai.scheduler.condition_gate import MonitorGate, ShellConditionGate
+from praisonai.scheduler.executor import ScheduledAgentExecutor
 from praisonaiagents.scheduler.protocols import GateResult, JobConditionProtocol
-from praisonai.scheduler.condition_gate import ShellConditionGate
-from praisonai.scheduler.executor import ScheduledAgentExecutor, JobResult
-
 
 # ── lightweight fakes ────────────────────────────────────────────────
 
@@ -27,11 +30,12 @@ class FakeJob:
     id: str = "job1"
     name: str = "test-job"
     message: str = "do the thing"
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
     session_target: str = "isolated"
     delivery: Any = None
-    pre_run: Optional[str] = None
-    condition: Optional[str] = None
+    pre_run: str | None = None
+    condition: str | None = None
+    monitor: dict | None = None
 
 
 class FakeAgent:
@@ -97,6 +101,243 @@ class TestShellConditionGate:
 
     def test_is_job_condition_protocol(self):
         assert isinstance(ShellConditionGate(), JobConditionProtocol)
+
+
+class TestMonitorGate:
+    @pytest.mark.parametrize("monitor", ["command", [], {}, {"command": "x", "url": "https://example.com"}])
+    def test_invalid_monitor_spec_fails_closed(self, monitor):
+        decision = MonitorGate().should_run(FakeJob(monitor=monitor), state={})
+
+        assert decision.run is False
+        assert decision.no_change is False
+        assert "monitor" in (decision.reason or "")
+        assert decision.state_updates is None
+
+    def test_first_command_observation_runs_and_stores_watermark(self):
+        gate = MonitorGate()
+        decision = gate.should_run(
+            FakeJob(monitor={"command": "printf watched-value"}), state={},
+        )
+
+        assert decision.run is True
+        assert decision.context == "watched-value"
+        assert decision.state_updates == {
+            "monitor_sha256": (
+                "0e05219c99c1ee894858c495940c8d745b61ae77dc2430568a31df2d3932b2c3"
+            ),
+            "monitor_output": "watched-value",
+        }
+
+    def test_unchanged_command_suppresses_tick(self):
+        gate = MonitorGate()
+        first = gate.should_run(
+            FakeJob(monitor={"command": "printf watched-value"}), state={},
+        )
+        decision = gate.should_run(
+            FakeJob(monitor={"command": "printf watched-value"}),
+            state=first.state_updates,
+        )
+
+        assert decision.run is False
+        assert decision.no_change is True
+        assert decision.reason == "monitor source unchanged"
+        assert decision.state_updates is None
+
+    def test_changed_command_runs_with_previous_and_current_context(self):
+        gate = MonitorGate()
+        decision = gate.should_run(
+            FakeJob(monitor={"command": "printf new-value"}),
+            state={
+                "monitor_sha256": "old-digest",
+                "monitor_output": "old-value",
+            },
+        )
+
+        assert decision.run is True
+        assert "--- previous" in (decision.context or "")
+        assert "+++ current" in (decision.context or "")
+        assert "-old-value" in (decision.context or "")
+        assert "+new-value" in (decision.context or "")
+        assert len(decision.context or "") <= 8000
+        assert decision.state_updates["monitor_output"] == "new-value"
+
+    def test_change_beyond_retained_preview_has_context(self, monkeypatch):
+        gate = MonitorGate()
+        previous = "x" * 2048
+        monkeypatch.setattr(gate, "_fetch_url", lambda _url: previous + "new")
+
+        decision = gate.should_run(
+            FakeJob(monitor={"url": "https://example.com/value"}),
+            state={
+                "monitor_sha256": "old-digest",
+                "monitor_output": previous,
+            },
+        )
+
+        assert decision.run is True
+        assert decision.context == "Monitor output changed outside retained preview."
+
+    def test_persisted_preview_is_bounded_by_utf8_bytes(self, monkeypatch):
+        gate = MonitorGate()
+        monkeypatch.setattr(gate, "_fetch_url", lambda _url: "界" * 3000)
+
+        decision = gate.should_run(
+            FakeJob(monitor={"url": "https://example.com/value"}), state={},
+        )
+
+        preview = decision.state_updates["monitor_output"]
+        assert len(preview.encode("utf-8")) <= 2048
+
+    def test_command_timeout_does_not_replace_watermark(self):
+        decision = MonitorGate(timeout=0.05).should_run(
+            FakeJob(monitor={"command": "sleep 5"}),
+            state={"monitor_sha256": "keep-me"},
+        )
+
+        assert decision.run is False
+        assert "timed out" in (decision.reason or "")
+        assert decision.state_updates is None
+
+    def test_command_output_limit_does_not_replace_watermark(self):
+        command = (
+            f'"{sys.executable}" -c '
+            '"import sys; sys.stdout.write(\'x\' * 9000)"'
+        )
+        decision = MonitorGate().should_run(
+            FakeJob(
+                monitor={"command": command},
+            ),
+            state={"monitor_sha256": "keep-me"},
+        )
+
+        assert decision.run is False
+        assert "exceeded" in (decision.reason or "")
+        assert decision.state_updates is None
+
+    def test_url_observation_uses_same_change_contract(self, monkeypatch):
+        gate = MonitorGate()
+        monkeypatch.setattr(gate, "_fetch_url", lambda _url: "url-value")
+
+        first = gate.should_run(
+            FakeJob(monitor={"url": "https://example.com/value"}), state={},
+        )
+        second = gate.should_run(
+            FakeJob(monitor={"url": "https://example.com/value"}),
+            state=first.state_updates,
+        )
+
+        assert first.run is True
+        assert first.context == "url-value"
+        assert second.no_change is True
+
+    def test_url_connects_to_validated_address(self, monkeypatch):
+        gate = MonitorGate()
+        captured = {}
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *_args, **_kwargs: [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+            ],
+        )
+        monkeypatch.setattr(
+            gate,
+            "_request_url",
+            lambda parsed, address: captured.update(
+                hostname=parsed.hostname, address=address,
+            ) or b"value",
+        )
+
+        assert gate._fetch_url("https://example.com/value") == "value"
+        assert captured == {
+            "hostname": "example.com",
+            "address": "93.184.216.34",
+        }
+
+    def test_read_bounded_enforces_total_deadline(self):
+        class _DripResponse:
+            def read(self, _amount):
+                return b"x"
+
+        gate = MonitorGate()
+        with pytest.raises(TimeoutError):
+            gate._read_bounded(_DripResponse(), deadline=time.monotonic() - 1)
+
+    def test_url_total_deadline_covers_response_headers(self, monkeypatch):
+        from praisonai_bot.scheduler import condition_gate
+
+        closed = threading.Event()
+
+        class _SlowHeadersConnection:
+            def __init__(self, *_args, **_kwargs):
+                self.sock = None
+
+            def request(self, *_args, **_kwargs):
+                return None
+
+            def getresponse(self):
+                if not closed.wait(0.2):
+                    raise AssertionError("header read was not interrupted")
+                raise OSError("connection closed")
+
+            def close(self):
+                closed.set()
+
+        monkeypatch.setattr(
+            condition_gate, "_PinnedHTTPConnection", _SlowHeadersConnection,
+        )
+        gate = MonitorGate(timeout=0.02)
+        parsed = condition_gate.parse.urlsplit("http://example.com/value")
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="total deadline"):
+            gate._request_url(parsed, "93.184.216.34")
+        assert time.monotonic() - started < 0.15
+
+    def test_read_bounded_returns_full_body(self):
+        class _OneShotResponse:
+            def __init__(self):
+                self._sent = False
+
+            def read(self, _amount):
+                if self._sent:
+                    return b""
+                self._sent = True
+                return b"payload"
+
+        gate = MonitorGate()
+        body = gate._read_bounded(
+            _OneShotResponse(), deadline=time.monotonic() + 30,
+        )
+        assert body == b"payload"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:///etc/passwd",
+            "http://127.0.0.1/private",
+            "http://169.254.169.254/latest/meta-data",
+            "http://user:password@example.com/",
+        ],
+    )
+    def test_url_rejects_unsafe_targets(self, url):
+        decision = MonitorGate().should_run(
+            FakeJob(monitor={"url": url}), state={},
+        )
+
+        assert decision.run is False
+        assert "invalid monitor URL" in (decision.reason or "")
+        assert decision.state_updates is None
+
+    def test_failed_probe_does_not_replace_watermark(self):
+        decision = MonitorGate().should_run(
+            FakeJob(monitor={"command": "exit 2"}),
+            state={"monitor_sha256": "keep-me"},
+        )
+
+        assert decision.run is False
+        assert decision.no_change is False
+        assert decision.state_updates is None
 
 
 # ── executor enforcement ─────────────────────────────────────────────
@@ -224,9 +465,156 @@ class TestPreRunNotAgentCallable:
         An LLM under prompt injection should be unable to persist a host-side
         shell command via the tool surface; ``pre_run`` is CLI/Python-only.
         """
-        import inspect
         from praisonaiagents.tools.schedule_tools import schedule_add
 
         params = inspect.signature(schedule_add).parameters
         assert "pre_run" not in params
         assert "condition" not in params
+
+    def test_schedule_add_does_not_expose_monitor_sources(self):
+        from praisonaiagents.tools.schedule_tools import schedule_add
+
+        params = inspect.signature(schedule_add).parameters
+        assert "monitor" not in params
+        assert "monitor_command" not in params
+        assert "monitor_url" not in params
+
+
+class TestMonitorCli:
+    def test_monitor_update_uses_id_after_full_success_prefix(self, monkeypatch):
+        import praisonaiagents.tools.schedule_tools as tools
+        from praisonai.cli.commands.schedule import app
+        from typer.testing import CliRunner
+
+        name = "watch (id: wrong-id)"
+        job = FakeJob(id="real-id")
+
+        class FakeStore:
+            def get(self, job_id):
+                assert job_id == "real-id"
+                return job
+
+            def update(self, _job):
+                return None
+
+        monkeypatch.setattr(
+            tools,
+            "schedule_add",
+            lambda **_kwargs: (
+                f"Schedule '{name}' added (id: real-id, hourly)."
+            ),
+        )
+        monkeypatch.setattr(tools, "_get_store", lambda: FakeStore())
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "add", name, "--schedule", "hourly",
+                "--monitor-command", "printf value",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert job.monitor == {"command": "printf value"}
+
+    def test_monitor_command_is_persisted_by_trusted_cli(self, monkeypatch):
+        import praisonaiagents.tools.schedule_tools as tools
+        from praisonai.cli.commands.schedule import app
+        from typer.testing import CliRunner
+
+        job = FakeJob()
+        job.id = "new-job-id"
+
+        class FakeStore:
+            def get(self, job_id):
+                assert job_id == "new-job-id"
+                return job
+
+            def update(self, _job):
+                return None
+
+        monkeypatch.setattr(
+            tools,
+            "schedule_add",
+            lambda **kwargs: f"Schedule '{kwargs['name']}' added (id: new-job-id, */5m)",
+        )
+        monkeypatch.setattr(tools, "_get_store", lambda: FakeStore())
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "add", "price-watch", "--schedule", "*/5m",
+                "--message", "summarise the change",
+                "--monitor-command", "printf price",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert job.monitor == {"command": "printf price"}
+
+    def test_monitor_url_is_persisted_by_trusted_cli(self, monkeypatch):
+        import praisonaiagents.tools.schedule_tools as tools
+        from praisonai.cli.commands.schedule import app
+        from typer.testing import CliRunner
+
+        job = FakeJob()
+        job.id = "new-job-id"
+
+        class FakeStore:
+            def get(self, job_id):
+                assert job_id == "new-job-id"
+                return job
+
+            def update(self, _job):
+                return None
+
+        monkeypatch.setattr(
+            tools,
+            "schedule_add",
+            lambda **kwargs: f"Schedule '{kwargs['name']}' added (id: new-job-id, */5m)",
+        )
+        monkeypatch.setattr(tools, "_get_store", lambda: FakeStore())
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "add", "price-watch", "--schedule", "*/5m",
+                "--message", "summarise the change",
+                "--monitor-url", "https://example.com/price",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert job.monitor == {"url": "https://example.com/price"}
+
+    def test_monitor_sources_are_mutually_exclusive(self):
+        from praisonai.cli.commands.schedule import app
+        from typer.testing import CliRunner
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "add", "watch", "--schedule", "hourly",
+                "--monitor-command", "printf value",
+                "--monitor-url", "https://example.com/value",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "mutually exclusive" in result.stdout
+
+    @pytest.mark.parametrize("conflict", ["--pre-run", "--command", "--backend"])
+    def test_monitor_rejects_conflicting_execution_modes(self, conflict):
+        from praisonai.cli.commands.schedule import app
+        from typer.testing import CliRunner
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "add", "watch", "--schedule", "hourly",
+                "--monitor-command", "printf value", conflict, "other",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "cannot be combined" in result.stdout

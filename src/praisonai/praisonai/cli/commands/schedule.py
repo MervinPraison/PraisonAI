@@ -4,9 +4,9 @@ Schedule command group for PraisonAI CLI.
 Provides scheduler management.
 """
 
-from typing import Optional
-
 import math
+import re
+from typing import Optional
 
 import typer
 
@@ -53,6 +53,8 @@ def schedule_add_cmd(
     continuable: bool = typer.Option(True, "--continuable/--no-continuable", help="Seed a resumable session on delivery so a reply resumes the job with context (default); --no-continuable for fire-and-forget notices"),
     pre_run: str = typer.Option("", "--pre-run", help="Cheap pre-run gate command: exit 0 + output => run (output seeds the prompt); non-zero => skip (no model tokens, no delivery)"),
     condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
+    monitor_command: str = typer.Option("", "--monitor-command", help="Run the agent only when this command's stdout changes"),
+    monitor_url: str = typer.Option("", "--monitor-url", help="Run the agent only when this public HTTP(S) response changes"),
     command: str = typer.Option("", "--command", "--script", help="No-LLM action: run this shell command on schedule and deliver its stdout verbatim (no agent, no model turn)"),
     command_timeout: float = typer.Option(60.0, "--command-timeout", help="Max seconds the --command may run before it is killed (default 60)"),
     backend: str = typer.Option("", "--backend", help="External coding-CLI backend action: run the message as one headless turn via a registered backend (see 'praisonai backends'), e.g. claude-code, codex-cli. No native agent, no in-process model turn"),
@@ -72,6 +74,7 @@ def schedule_add_cmd(
         praisonai schedule add "report" -s hourly -m "status report" --deliver all
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
         praisonai schedule add "inbox-watch" -s "*/5m" -m "Summarise new emails" --pre-run "scripts/new_mail.sh" --deliver telegram
+        praisonai schedule add "price-watch" -s "*/15m" -m "Summarise the change" --monitor-url "https://example.com/api/price" --deliver telegram
         praisonai schedule add "disk-watch" -s hourly --command "df -h /" --deliver telegram:-100123
         praisonai schedule add "nightly-refactor" -s "cron:0 2 * * *" -m "tidy utils.py, run tests" --backend claude-code --backend-cwd ~/proj --deliver telegram
     """
@@ -90,6 +93,17 @@ def schedule_add_cmd(
         output.print_error(
             "--command and --backend are mutually exclusive: a job runs exactly "
             "one model-free action. Configure one or the other."
+        )
+        raise typer.Exit(1)
+    if monitor_command and monitor_url:
+        output.print_error(
+            "--monitor-command and --monitor-url are mutually exclusive."
+        )
+        raise typer.Exit(1)
+    if (monitor_command or monitor_url) and (pre_run or command or backend):
+        output.print_error(
+            "Monitor options cannot be combined with --pre-run, --command, "
+            "or --backend."
         )
         raise typer.Exit(1)
     try:
@@ -123,7 +137,7 @@ def schedule_add_cmd(
             **delivery_kwargs
         )
 
-        # ``pre_run``/``condition``/``command``/``backend`` run an arbitrary
+        # ``pre_run``/``monitor``/``condition``/``command``/``backend`` run an arbitrary
         # host process, so they are NOT part of the LLM-callable schedule_add
         # surface. The CLI is a trusted, human-driven surface, so set them on
         # the stored job here. A ``--command`` job runs verbatim with no agent
@@ -135,16 +149,34 @@ def schedule_add_cmd(
         # created the job. A duplicate-name response ("already exists") is a
         # rejection: mutating the existing job here would let a rejected add
         # reconfigure a live schedule (e.g. attach a new --command/--backend).
-        job_created = f"Schedule '{name}' added" in result
+        success_prefix = f"Schedule '{name}' added (id: "
+        job_id_match = re.match(
+            rf"^{re.escape(success_prefix)}([^,\s)]+)(?:,|\))", result,
+        )
+        job_created = job_id_match is not None
         want_pin_update = bool(model) or (not pin and not command)
-        if (pre_run or condition or command or backend or want_pin_update) and job_created:
+        if (
+            pre_run
+            or condition
+            or monitor_command
+            or monitor_url
+            or command
+            or backend
+            or want_pin_update
+        ) and job_created:
             try:
                 from praisonaiagents.tools.schedule_tools import _get_store
                 store = _get_store()
-                job = store.get_by_name(name)
+                if job_id_match is None:
+                    raise ValueError("schedule_add success response omitted the job id")
+                job = store.get(job_id_match.group(1))
                 if job is not None:
                     job.pre_run = pre_run or None
                     job.condition = condition or None
+                    if monitor_command:
+                        job.monitor = {"command": monitor_command}
+                    elif monitor_url:
+                        job.monitor = {"url": monitor_url}
                     job.command = command or None
                     if command:
                         job.command_timeout = command_timeout
@@ -171,7 +203,7 @@ def schedule_add_cmd(
                         job.pin_model = pin
                     store.update(job)
             except Exception as e:
-                output.print_error(f"Failed to set command/pre-run gate: {e}")
+                output.print_error(f"Failed to set trusted schedule options: {e}")
                 raise typer.Exit(1)
 
         # A rejected add (duplicate name or error) must exit non-zero so

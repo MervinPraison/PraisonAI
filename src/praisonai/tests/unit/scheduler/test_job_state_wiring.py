@@ -27,6 +27,7 @@ class FakeJob:
     session_target: str = "isolated"
     delivery: Any = None
     pre_run: Optional[str] = None
+    monitor: Optional[Dict[str, Any]] = None
     delete_after_run: bool = False
 
 
@@ -150,7 +151,28 @@ class TestAgentEmittedState:
 
 
 class TestGateState:
-    def test_stateful_gate_persists_on_no_change_skip(self):
+    def test_default_monitor_gate_suppresses_unchanged_tick(self):
+        store = FakeStateStore()
+        agent = FakeAgent()
+        runner = FakeRunner(store)
+        executor = ScheduledAgentExecutor(
+            runner=runner, agent_resolver=lambda _id: agent,
+        )
+        job = FakeJob(
+            message="watch",
+            monitor={"command": "printf stable-value"},
+        )
+
+        first = _run(executor, job)
+        agent.last_message = None
+        second = _run(executor, job)
+
+        assert first.status == "succeeded"
+        assert second.status == "no_change"
+        assert agent.last_message is None
+        assert runner.runs[-1]["status"] == "no_change"
+
+    def test_stateful_gate_persists_on_no_change_suppression(self):
         store = FakeStateStore()
         agent = FakeAgent()
 
@@ -168,7 +190,7 @@ class TestGateState:
             condition_resolver=lambda job: MonitorGate(),
         )
         result = _run(executor, FakeJob(message="watch"))
-        assert result.status == "skipped"
+        assert result.status == "no_change"
         assert agent.last_message is None
         # watermark carried forward even though the tick was suppressed
         assert store.get_state("job1") == {"hash": "deadbeef"}

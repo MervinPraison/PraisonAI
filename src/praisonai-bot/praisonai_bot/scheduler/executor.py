@@ -77,7 +77,8 @@ class JobResult:
     Attributes:
         job: The ScheduleJob that was executed.
         result: Agent response (str) or None on failure.
-        status: ``"succeeded"``, ``"failed"``, or ``"skipped"``.
+        status: ``"succeeded"``, ``"failed"``, ``"skipped"``, or
+            ``"no_change"``.
         error: Error message if status is ``"failed"``.
         duration: Wall-clock seconds for agent execution.
         delivered: Whether the result was delivered to a channel bot.
@@ -128,8 +129,10 @@ class ScheduledAgentExecutor:
             ``run=False`` the tick is recorded as ``skipped`` (no tokens spent,
             no delivery); when it returns ``run=True`` with ``context`` the
             context is appended to the job message. Defaults to a resolver that
-            returns a :class:`~praisonai.scheduler.condition_gate.ShellConditionGate`
-            for jobs with a ``pre_run`` command. Pass ``condition_resolver=False``
+            returns a :class:`~praisonai.scheduler.condition_gate.MonitorGate`
+            for jobs with ``monitor`` configured, or a
+            :class:`~praisonai.scheduler.condition_gate.ShellConditionGate` for
+            jobs with a ``pre_run`` command. Pass ``condition_resolver=False``
             (or a resolver returning ``None``) to disable gating entirely.
             This is a *cost/efficiency* gate, complementary to the *safety*
             ``run_policy``.
@@ -424,11 +427,16 @@ class ScheduledAgentExecutor:
                     job, prior_state, getattr(decision, "state_updates", None),
                 )
                 duration = time.time() - started
+                status = (
+                    "no_change"
+                    if getattr(decision, "no_change", False)
+                    else "skipped"
+                )
                 self._runner.mark_run(
-                    job, status="skipped", error=reason, duration=duration,
+                    job, status=status, error=reason, duration=duration,
                 )
                 return JobResult(
-                    job=job, status="skipped", error=reason, duration=duration,
+                    job=job, status=status, error=reason, duration=duration,
                 )
             if decision is not None:
                 context = getattr(decision, "context", None)
@@ -668,8 +676,13 @@ class ScheduledAgentExecutor:
                     job, prior_state, getattr(decision, "state_updates", None),
                 )
                 duration = time.time() - started
-                self._runner.mark_run(job, status="skipped", error=reason, duration=duration)
-                return JobResult(job=job, status="skipped", error=reason, duration=duration)
+                status = (
+                    "no_change"
+                    if getattr(decision, "no_change", False)
+                    else "skipped"
+                )
+                self._runner.mark_run(job, status=status, error=reason, duration=duration)
+                return JobResult(job=job, status=status, error=reason, duration=duration)
             if decision is not None:
                 context = getattr(decision, "context", None)
                 if context:
@@ -1045,13 +1058,13 @@ class ScheduledAgentExecutor:
     # ── condition-gate helpers ───────────────────────────────────────
 
     def _resolve_condition(self, job: "ScheduleJob") -> Optional["JobConditionProtocol"]:
-        """Resolve the pre-run gate for ``job`` (or ``None`` for no gate).
+        """Resolve the condition gate for ``job`` (or ``None`` for no gate).
 
         Resolution order:
         - ``condition_resolver is False`` → gating disabled, return ``None``.
         - a user-supplied callable → call it with the job and return its result.
-        - default (``None``) → return a :class:`ShellConditionGate` when the
-          job declares a ``pre_run`` command, else ``None``.
+                - default (``None``) → return a :class:`MonitorGate` for ``monitor``,
+                    otherwise a :class:`ShellConditionGate` for ``pre_run``, else ``None``.
         """
         resolver = self._condition_resolver
         if resolver is False:
@@ -1065,7 +1078,11 @@ class ScheduledAgentExecutor:
                     getattr(job, "id", "?"), e,
                 )
                 return None
-        # Default resolver: only build a gate when there is something to gate on.
+        # A stateful monitor is the default gate when configured.
+        if getattr(job, "monitor", None) is not None:
+            from .condition_gate import MonitorGate
+            return MonitorGate()
+        # Otherwise only build a gate when there is something to gate on.
         if not (getattr(job, "pre_run", None) or "").strip():
             return None
         from .condition_gate import ShellConditionGate
