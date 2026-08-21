@@ -604,9 +604,13 @@ class AgentFlow:
     default_agent_config: Optional[Dict[str, Any]] = None  # Default agent for all steps
     # Default model for steps that did not name one. A ready-made Agent step
     # constructed with its own llm=/model=/auth= keeps it -- same rule as
-    # AgentTeam(llm=). manager_llm below is separate: it is the hierarchical
+    # AgentTeam. manager_llm below is separate: it is the hierarchical
     # manager's model and never touches the steps.
-    llm: Optional[str] = None  # (renamed from default_llm for consistency)
+    # model= is the canonical name; llm= is the deprecated alias kept for
+    # compatibility (renamed from default_llm). Passing both raises TypeError
+    # -- see resolve_model_alias.
+    model: Optional[str] = None
+    llm: Optional[str] = None
     
     # Process type: "sequential" (default) or "hierarchical" (manager-based validation)
     process: str = "sequential"  # "sequential", "hierarchical"
@@ -703,6 +707,12 @@ class AgentFlow:
 
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
+        from ..utils.model_alias import resolve_model_alias
+
+        # One rule for the alias pair, shared with Agent and AgentTeam.
+        self.llm = resolve_model_alias(self.llm, self.model, type(self).__name__)
+        self.model = self.llm
+
         from ..agent.placement import resolve_placement
 
         resolve_placement(

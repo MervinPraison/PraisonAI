@@ -158,9 +158,8 @@ class VideoAgent:
             verbose: Verbosity level for output
             output: Output preset ("silent", "verbose", etc.)
         """
-        # Handle model= alias for llm=
-        if llm is None and model is not None:
-            llm = model
+        from ..utils.model_alias import resolve_model_name
+        llm = resolve_model_name(llm, model, "VideoAgent")
         
         # Store core identity
         self.name = name or "VideoAgent"

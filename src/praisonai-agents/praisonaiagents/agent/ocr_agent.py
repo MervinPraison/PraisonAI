@@ -89,8 +89,8 @@ class OCRAgent:
             ocr: OCR configuration
             verbose: Verbosity level for output
         """
-        if llm is None and model is not None:
-            llm = model
+        from ..utils.model_alias import resolve_model_name
+        llm = resolve_model_name(llm, model, "OCRAgent")
         
         self.name = name or "OCRAgent"
         self.instructions = instructions

@@ -59,7 +59,8 @@ class CodeAgent:
     def __init__(
         self,
         name: str = "CodeAgent",
-        llm: Optional[str] = None,
+        llm: Optional[str] = None,  # Deprecated alias for model=
+        model: Optional[str] = None,
         code: Optional[Union[bool, Dict, CodeConfig]] = None,
         instructions: Optional[str] = None,
         verbose: bool = True,
@@ -69,14 +70,16 @@ class CodeAgent:
         
         Args:
             name: Agent name
-            llm: LLM model (default: gpt-4o-mini)
+            llm: Deprecated alias for model=. Passing both raises TypeError.
+            model: Model to use (default: gpt-4o-mini)
             code: Code configuration (bool, dict, or CodeConfig)
             instructions: System instructions
             verbose: Enable verbose output
             **kwargs: Additional arguments
         """
+        from ..utils.model_alias import resolve_model_name
         self.name = name
-        self.llm = llm or "gpt-4o-mini"
+        self.llm = resolve_model_name(llm, model, "CodeAgent") or "gpt-4o-mini"
         self.instructions = instructions
         self.verbose = verbose
         

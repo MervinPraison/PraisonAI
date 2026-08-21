@@ -653,7 +653,8 @@ class AgentTeam(SpawnAnnounceProtocol):
         manager_llm=None,
         name: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
-        llm: Optional[str] = None,  # Default LLM for all agents (API consistency)
+        llm: Optional[str] = None,  # Deprecated alias for model=
+        model: Optional[str] = None,  # Default model for members that did not name one
         # Consolidated feature params (agent-centric API)
         memory: Optional[Any] = False,  # Union[bool, MultiAgentMemoryConfig]
         planning: Optional[Any] = False,  # Union[bool, MultiAgentPlanningConfig]
@@ -688,9 +689,10 @@ class AgentTeam(SpawnAnnounceProtocol):
             process: Execution process type ("sequential", "workflow", "hierarchical").
                 For parallel fan-out, set async_execution=True on individual Task
                 objects within a "workflow" or "sequential" process.
-            manager_llm: LLM model for the hierarchical manager agent. Unrelated
-                to llm=; it never touches the members.
-            llm: Default model for members that did not name one themselves.
+            manager_llm: Model for the hierarchical manager agent. Unrelated to
+                model=/llm=; it never touches the members.
+            llm: Deprecated alias for model=. Passing both raises TypeError.
+            model: Default model for members that did not name one themselves.
                 An agent constructed with its own llm=/model=/auth= keeps it.
             name: Name for this agent collection
             variables: Global variables for substitution
@@ -709,15 +711,18 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         # Store new params for propagation to agents
         self._learn = learn
-        # Default model for the members. Applied to every agent that never named
-        # a model of its own; an agent that did keeps it. Same rule AgentFlow
-        # already uses for the agents it builds (llm=config.get("llm", model)).
-        self.llm = llm
-        if llm:
+        # model= is the canonical name; llm= is the deprecated alias. Passing
+        # both is refused rather than silently resolved (see resolve_model_alias).
+        # The resolved value is the default model for the members: applied to
+        # every agent that never named a model of its own; an agent that did
+        # keeps it. Same rule AgentFlow uses for the agents it builds.
+        from ..utils.model_alias import resolve_model_alias
+        self.llm = resolve_model_alias(llm, model, type(self).__name__)
+        if self.llm:
             for _member in (agents.values() if isinstance(agents, dict) else (agents or [])):
                 _apply = getattr(_member, "_apply_default_llm", None)
                 if callable(_apply):
-                    _apply(llm)
+                    _apply(self.llm)
         self._autonomy = autonomy
         self._knowledge = knowledge
         self._guardrails = guardrails

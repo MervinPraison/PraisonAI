@@ -136,9 +136,8 @@ class AudioAgent:
                 - AudioConfig: Full configuration object
             verbose: Verbosity level for output
         """
-        # Handle model= alias
-        if llm is None and model is not None:
-            llm = model
+        from ..utils.model_alias import resolve_model_name
+        llm = resolve_model_name(llm, model, "AudioAgent")
         
         self.name = name or "AudioAgent"
         self.instructions = instructions

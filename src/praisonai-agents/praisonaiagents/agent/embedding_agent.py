@@ -110,8 +110,8 @@ class EmbeddingAgent:
                 - EmbeddingConfig: Full configuration object
             verbose: Verbosity level for output
         """
-        if llm is None and model is not None:
-            llm = model
+        from ..utils.model_alias import resolve_model_name
+        llm = resolve_model_name(llm, model, "EmbeddingAgent")
         
         self.name = name or "EmbeddingAgent"
         self.instructions = instructions
