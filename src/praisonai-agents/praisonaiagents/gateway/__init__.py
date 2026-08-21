@@ -34,6 +34,8 @@ from .protocols import (
     PresenceProtocol,
     DeliveryGuaranteeProtocol,
     OutboundDeliveryProtocol,
+    IdempotencyStoreProtocol,
+    InMemoryIdempotencyStore,
     ChannelInfo,
     PresenceInfo,
     # Home channel and delivery protocols
@@ -308,6 +310,8 @@ __all__ = [
     "PresenceProtocol",
     "DeliveryGuaranteeProtocol",
     "OutboundDeliveryProtocol",
+    "IdempotencyStoreProtocol",
+    "InMemoryIdempotencyStore",
     "ChannelInfo",
     "PresenceInfo",
     # Home channel and delivery protocols
