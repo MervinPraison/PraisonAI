@@ -1346,6 +1346,11 @@ class AgentFlow:
                 results.extend(route_result["steps"])
                 previous_output = route_result["output"]
                 all_variables.update(route_result.get("variables", {}))
+                if route_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by nested route step")
+                    break
                 i += 1
                 continue
                 
@@ -1368,6 +1373,13 @@ class AgentFlow:
                 results.extend(loop_result["steps"])
                 previous_output = loop_result["output"]
                 all_variables.update(loop_result.get("variables", {}))
+                # A nested step with on_error="stop" halts the whole workflow,
+                # not just the loop: honor the propagated stop signal here.
+                if loop_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by nested loop step")
+                    break
                 i += 1
                 continue
                 
@@ -1379,6 +1391,11 @@ class AgentFlow:
                 results.extend(repeat_result["steps"])
                 previous_output = repeat_result["output"]
                 all_variables.update(repeat_result.get("variables", {}))
+                if repeat_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by nested repeat step")
+                    break
                 i += 1
                 continue
                 
@@ -1401,6 +1418,11 @@ class AgentFlow:
                 results.extend(if_result["steps"])
                 previous_output = if_result["output"]
                 all_variables.update(if_result.get("variables", {}))
+                if if_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by nested conditional step")
+                    break
                 i += 1
                 continue
             
@@ -2384,7 +2406,9 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             return {
                 "step": f"loop_{index}",
                 "output": loop_result.get("output", ""),
-                "stop": False,
+                # Propagate a nested stop request so an on_error="stop" step
+                # inside the loop halts the enclosing workflow, not just the loop.
+                "stop": loop_result.get("stop", False),
                 "variables": loop_result.get("variables", all_variables)
             }
         
@@ -2406,7 +2430,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             return {
                 "step": f"route_{index}",
                 "output": route_result.get("output", ""),
-                "stop": False,
+                "stop": route_result.get("stop", False),
                 "variables": route_result.get("variables", all_variables)
             }
         
@@ -2417,7 +2441,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             return {
                 "step": f"repeat_{index}",
                 "output": repeat_result.get("output", ""),
-                "stop": False,
+                "stop": repeat_result.get("stop", False),
                 "variables": repeat_result.get("variables", all_variables)
             }
         
@@ -2428,7 +2452,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             return {
                 "step": f"if_{index}",
                 "output": if_result.get("output", ""),
-                "stop": False,
+                "stop": if_result.get("stop", False),
                 "variables": if_result.get("variables", all_variables)
             }
         
@@ -2531,9 +2555,51 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Apply the same retry / guardrail / output_file policies used by the
         # top-level run() loop so nested patterns (Parallel/Loop/Route/If/Repeat)
         # and hierarchical mode don't silently drop these guarantees (Gap 2).
-        output = self._apply_step_policies(
+        output, step_error = self._apply_step_policies(
             normalized, _run_body, all_variables, verbose
         )
+
+        # Honor the step's on_error flow-control and status bookkeeping exactly
+        # as the top-level _run_impl loop does. Previously a failing step inside a
+        # nested pattern folded f"Error: {e}" into its output and reported the run
+        # as "completed", so downstream steps consumed the exception text as data
+        # and failure detection was lost. Instead: mark the run failed and, when
+        # on_error == "stop" (the Task default), signal a stop and do NOT hand the
+        # error string forward as this step's output.
+        if step_error is not None:
+            if hasattr(normalized, 'status'):
+                normalized.status = "failed"
+            self.step_statuses[normalized.name] = "failed"
+            self.status = "failed"
+            if getattr(normalized, 'on_error', 'stop') == 'stop':
+                if verbose:
+                    print(f"🛑 Step '{normalized.name}' failed (on_error='stop'): {step_error}")
+                return {
+                    "step": normalized.name,
+                    "output": output if output is not None else previous_output,
+                    "stop": True,
+                    "error": str(step_error),
+                    "variables": all_variables
+                }
+            # on_error == "continue": the run is still marked failed above, but we
+            # keep going. Do not pass the exception text on as real output.
+            if verbose:
+                print(f"⚠️ Step '{normalized.name}' failed (on_error='continue'): {step_error}")
+            return {
+                "step": normalized.name,
+                "output": output,
+                "stop": state["stop"],
+                "error": str(step_error),
+                "variables": all_variables
+            }
+
+        # Success: record status and write output_variable so nested patterns get
+        # the same variable-scoping guarantee the top-level loop provides.
+        if hasattr(normalized, 'status'):
+            normalized.status = "completed"
+        self.step_statuses[normalized.name] = "completed"
+        var_name = getattr(normalized, 'output_variable', None) or f"{normalized.name}_output"
+        all_variables[var_name] = output
 
         if verbose:
             print(f"✅ {normalized.name}: {str(output)}")
@@ -2570,12 +2636,22 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             run_body: Callable(validation_feedback) -> output. Raises on error.
             all_variables: Current workflow variables (for output_file substitution).
             verbose: Whether to print progress.
+
+        Returns:
+            Tuple ``(output, step_error)``. ``step_error`` is an Exception when the
+            step ultimately failed (an exception that exhausted retries, or a
+            guardrail that never validated) and ``None`` otherwise. The exception
+            is NOT folded into ``output``: downstream steps cannot distinguish an
+            error string from a real answer, so surfacing it lets the caller's
+            ``on_error`` policy and the run status react exactly as ``_run_impl``
+            does at the top level.
         """
         max_retries = getattr(step, 'max_retries', 3)
         retry_count = 0
         validation_feedback = None
         output = None
         step_error = None
+        guardrail_failed = False
 
         while retry_count <= max_retries:
             step_error = None
@@ -2583,7 +2659,6 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 output = run_body(validation_feedback)
             except Exception as e:
                 step_error = e
-                output = f"Error: {e}"
                 is_retryable = getattr(e, 'is_retryable', True)
                 if not is_retryable:
                     break
@@ -2591,6 +2666,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 if retry_count <= max_retries:
                     self._retry_backoff(step, retry_count, max_retries, e, verbose)
                     continue
+                break
 
             # Guardrail check (guardrails canonical, guardrail deprecated)
             guardrail = getattr(step, 'guardrails', None) or getattr(step, 'guardrail', None)
@@ -2604,11 +2680,20 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                             print(f"⚠️ {step.name} failed validation (attempt {retry_count}/{max_retries}): {feedback}")
                         if retry_count <= max_retries:
                             continue
+                        # A guardrail that never validated after exhausting retries
+                        # is a failure too, even without an exception. Surface it
+                        # so on_error flow control and status match _run_impl.
+                        guardrail_failed = True
                         break
                 except Exception as e:
                     logger.error(f"Guardrail failed for {step.name}: {e}")
 
             break
+
+        if step_error is None and guardrail_failed:
+            step_error = ValueError(
+                f"guardrail validation failed: {validation_feedback}"
+            )
 
         # Handle output_file - save output to file
         if hasattr(step, 'output_file') and step.output_file and output and not step_error:
@@ -2624,7 +2709,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             except Exception as e:
                 logger.error(f"Failed to save output to file: {e}")
 
-        return output
+        return output, step_error
     
     def _execute_route(
         self,
@@ -2662,6 +2747,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             print(f"🔀 Routing to: {route_name}")
         
         # Execute matched route steps
+        route_stopped = False
         for idx, step in enumerate(matched_route):
             step_result = self._execute_single_step_internal(
                 step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth+1
@@ -2671,9 +2757,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             all_variables.update(step_result.get("variables", {}))
             
             if step_result.get("stop"):
+                route_stopped = True
                 break
         
-        return {"steps": results, "output": output, "variables": all_variables}
+        return {"steps": results, "output": output, "variables": all_variables, "stop": route_stopped}
     
     def _llm_summarize_for_parallel(
         self,
@@ -2831,24 +2918,51 @@ CONCISE SUMMARY:"""
             for idx, future in futures:
                 try:
                     step_result = future.result()
+                except Exception as e:
+                    # A branch that raised before _apply_step_policies could catch
+                    # it (e.g. a pattern-level error). Treat like a branch failure.
+                    branch_error = e
+                    step_result = None
+                else:
+                    # A nested step that failed now surfaces its error via the
+                    # result dict instead of raising (so on_error can be honored),
+                    # so the future resolves successfully. Detect that here so the
+                    # Parallel on_failure modes still fire instead of silently
+                    # treating the exception text as a real branch output.
+                    branch_error = step_result.get("error")
+
+                if branch_error is None:
                     results.append({"step": step_result["step"], "output": step_result["output"]})
                     outputs.append(step_result["output"])
-                except Exception as e:
-                    logger.error(f"Parallel branch {idx} failed: {e}")
-                    errors.append({"step": idx, "error": e})
-                    if parallel_step.on_failure == "fail_fast":
-                        # Cancel remaining futures
-                        for _, f in futures:
-                            f.cancel()
-                        raise WorkflowStepError(f"Parallel branch {idx} failed", cause=e) from e
-                    elif parallel_step.on_failure == "partial_ok":
-                        # Add error as output but continue
-                        results.append({"step": f"parallel_{idx}", "output": f"Error: {e}"})
-                        outputs.append(f"Error: {e}")
+                    continue
+
+                logger.error(f"Parallel branch {idx} failed: {branch_error}")
+                errors.append({"step": idx, "error": branch_error})
+                # The whole run has a failed branch regardless of on_failure mode.
+                self.status = "failed"
+                if parallel_step.on_failure == "fail_fast":
+                    # Cancel remaining futures
+                    for _, f in futures:
+                        f.cancel()
+                    # Only chain a real exception; nested steps surface the error
+                    # as a string, so guard against `raise ... from <str>` which
+                    # would itself raise TypeError and mask the failure.
+                    cause = branch_error if isinstance(branch_error, BaseException) else None
+                    raise WorkflowStepError(
+                        f"Parallel branch {idx} failed", cause=cause, errors=errors
+                    ) from cause
+                elif parallel_step.on_failure == "partial_ok":
+                    # Record the failure but continue with other branches. Do not
+                    # fold the exception text into outputs as if it were data.
+                    results.append({"step": f"parallel_{idx}", "output": None, "error": str(branch_error)})
             
             # Check if we should fail after all branches completed
             if errors and parallel_step.on_failure == "fail_all":
-                raise WorkflowStepError(f"{len(errors)} parallel branches failed", errors=errors) from errors[0]["error"]
+                first_error = errors[0]["error"]
+                cause = first_error if isinstance(first_error, BaseException) else None
+                raise WorkflowStepError(
+                    f"{len(errors)} parallel branches failed", errors=errors, cause=cause
+                ) from cause
         
         # Combine outputs
         combined_output = "\n---\n".join(str(o) for o in outputs)
@@ -2881,6 +2995,9 @@ CONCISE SUMMARY:"""
         results = []
         outputs = []
         items = []
+        # Tracks whether any iteration requested a workflow stop (on_error="stop")
+        # so the signal can propagate to the enclosing workflow, not just this loop.
+        loop_stopped = False
         
         # Get items from variable, CSV, or file
         if loop_step.over:
@@ -2958,6 +3075,7 @@ CONCISE SUMMARY:"""
                     # Execute all steps sequentially within this iteration
                     iteration_output = opt_prev
                     iteration_results = []
+                    iteration_stopped = False
                     for step_idx, step in enumerate(steps_to_run):
                         step_result = self._execute_single_step_internal(
                             step, iteration_output, input, loop_vars, model, False, step_idx, stream=False, depth=depth+1
@@ -2967,12 +3085,19 @@ CONCISE SUMMARY:"""
                         # Update variables if step set any
                         if step_result.get("variables"):
                             loop_vars.update(step_result["variables"])
+                        # A failed step with on_error="stop" signals a stop; halt
+                        # this iteration instead of feeding later steps forward.
+                        if step_result.get("stop"):
+                            iteration_stopped = True
+                            break
                     
-                    # Return final output (last step's output)
+                    # Return final output (last step's output). Surface the stop
+                    # signal so the loop can propagate it to the outer workflow.
                     final_result = {
                         "step": f"loop_{idx}",
                         "output": iteration_output,
-                        "steps": iteration_results
+                        "steps": iteration_results,
+                        "stop": iteration_stopped
                     }
                     return idx, final_result
                 finally:
@@ -2997,7 +3122,8 @@ CONCISE SUMMARY:"""
                             print(f"  ✓ Item {idx + 1}/{num_items} complete")
                     except Exception as e:
                         logger.error(f"Parallel loop iteration {idx} failed: {e}")
-                        indexed_results.append((idx, {"step": f"loop_{idx}", "output": f"Error: {e}"}))
+                        self.status = "failed"
+                        indexed_results.append((idx, {"step": f"loop_{idx}", "output": None, "error": str(e)}))
                 
                 # Sort by index to maintain order
                 indexed_results.sort(key=lambda x: x[0])
@@ -3005,6 +3131,8 @@ CONCISE SUMMARY:"""
                 for idx, step_result in indexed_results:
                     results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
                     outputs.append(step_result["output"])
+                    if step_result.get("stop"):
+                        loop_stopped = True
             
             if verbose:
                 print(f"✅ Parallel loop complete: {len(outputs)} results")
@@ -3028,6 +3156,7 @@ CONCISE SUMMARY:"""
                 
                 # Execute all steps sequentially within this iteration
                 iteration_output = previous_output
+                iteration_stopped = False
                 for step_idx, step in enumerate(steps_to_run):
                     step_result = self._execute_single_step_internal(
                         step, iteration_output, input, loop_vars, model, verbose, step_idx, stream=stream, depth=depth+1
@@ -3036,10 +3165,21 @@ CONCISE SUMMARY:"""
                     # Update variables if step set any
                     if step_result.get("variables"):
                         loop_vars.update(step_result["variables"])
+                    # A failed step with on_error="stop" signals a stop; halt this
+                    # iteration instead of feeding later steps the error forward.
+                    if step_result.get("stop"):
+                        iteration_stopped = True
+                        break
                 
                 results.append({"step": f"loop_{idx}", "output": iteration_output})
                 outputs.append(iteration_output)
                 previous_output = iteration_output
+
+                # Abort the remaining items too: a step that asked to stop the
+                # workflow (on_error="stop") must not silently keep looping.
+                if iteration_stopped:
+                    loop_stopped = True
+                    break
         # Store outputs in user-specified variable or default to loop_outputs
         output_var_name = loop_step.output_variable or "loop_outputs"
         all_variables[output_var_name] = outputs
@@ -3076,7 +3216,7 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"📦 Loop stored {len(outputs)} results in variable: '{output_var_name}'")
         
-        return {"steps": results, "output": combined_output, "variables": all_variables}
+        return {"steps": results, "output": combined_output, "variables": all_variables, "stop": loop_stopped}
     
     def _parse_list_from_string(self, text: str) -> List[Any]:
         """
@@ -3147,6 +3287,7 @@ CONCISE SUMMARY:"""
         """Repeat step until condition is met."""
         results = []
         output = previous_output
+        repeat_stopped = False
         
         if verbose:
             print(f"🔄 Repeating up to {repeat_step.max_iterations} times...")
@@ -3176,10 +3317,11 @@ CONCISE SUMMARY:"""
                     logger.error(f"Repeat until condition failed: {e}")
             
             if step_result.get("stop"):
+                repeat_stopped = True
                 break
         
         all_variables["repeat_iterations"] = iteration + 1
-        return {"steps": results, "output": output, "variables": all_variables}
+        return {"steps": results, "output": output, "variables": all_variables, "stop": repeat_stopped}
     
     def _execute_if(
         self,
@@ -3221,6 +3363,7 @@ CONCISE SUMMARY:"""
         steps_to_execute = if_step.then_steps if condition_result else if_step.else_steps
         
         # Execute the selected branch
+        if_stopped = False
         for idx, step in enumerate(steps_to_execute):
             step_result = self._execute_single_step_internal(
                 step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth
@@ -3230,9 +3373,10 @@ CONCISE SUMMARY:"""
             all_variables.update(step_result.get("variables", {}))
             
             if step_result.get("stop"):
+                if_stopped = True
                 break
         
-        return {"steps": results, "output": output, "variables": all_variables}
+        return {"steps": results, "output": output, "variables": all_variables, "stop": if_stopped}
     
     def _evaluate_condition(
         self,
