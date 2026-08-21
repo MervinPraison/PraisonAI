@@ -18,32 +18,32 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 53 | 16965 |
+| ✅ Agent | 22 | 53 | 17018 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
 | ✅ Approval | 1 | 5 | 2658 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3542 |
-| ✅ Autonomy | 3 | 7 | 2763 |
+| ✅ Autonomy | 3 | 7 | 2790 |
 | ✅ Bots | 7 | 31 | 13403 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 36654 |
+| ✅ CLI | 5 | 122 | 36658 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4851 |
+| ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1321 |
 | ✅ Configuration | 3 | 8 | 3140 |
-| ✅ Context Management | 16 | 36 | 13890 |
+| ✅ Context Management | 16 | 36 | 13933 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
-| ✅ Evaluation | 1 | 7 | 2905 |
+| ✅ Evaluation | 1 | 7 | 2913 |
 | ✅ Events | 1 | 2 | 749 |
-| ✅ Execution | 3 | 4 | 1586 |
+| ✅ Execution | 3 | 4 | 1606 |
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 78 | 28577 |
+| ✅ Gateway | 7 | 78 | 28605 |
 | ✅ Guardrails | 4 | 4 | 2205 |
 | ✅ Handoffs | 11 | 6 | 2567 |
 | ✅ Hooks | 2 | 9 | 4488 |
@@ -56,7 +56,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1246 |
+| ✅ Output | 3 | 5 | 1265 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1605 |
 | ✅ Plugins | 8 | 5 | 3120 |
@@ -73,15 +73,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sessions | 4 | 19 | 7576 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
-| ✅ Telemetry | 1 | 2 | 604 |
+| ✅ Telemetry | 1 | 2 | 617 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 42732 |
+| ✅ Tools | 12 | 144 | 42736 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 9 | 2484 |
-| ✅ Workflows | 5 | 17 | 7049 |
+| ✅ Workflows | 5 | 18 | 7352 |
 
 ## Documentation Without Features
 
