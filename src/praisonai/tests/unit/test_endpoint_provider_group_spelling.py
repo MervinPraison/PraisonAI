@@ -97,10 +97,35 @@ def _publish(monkeypatch, group, name="acme"):
     _reset_cli_registry_default(monkeypatch)
 
 
+_SINGLETON_REGISTRIES = (
+    cli_registry.EndpointProviderRegistry,
+    endpoints_registry.ProviderRegistry,
+)
+
+
+def _evict_default_registries():
+    """Drop the per-class ``.default()`` singletons.
+
+    ``EndpointProviderRegistry.default()`` caches a per-class instance whose
+    entry-point discovery runs once at construction. ``cmd_invoke`` resolves
+    providers through that cache, so a singleton built by an earlier test on the
+    same xdist worker — before this file publishes ``acme`` — never sees the
+    plugin and the CLI silently falls back to the recipe HTTP path
+    (``assert http == [] ⇒ assert 2 == 0``). Evicting before and after each case
+    forces rediscovery against the freshly published plugin and prevents a
+    poisoned instance from leaking to later tests.
+    """
+    for registry_cls in _SINGLETON_REGISTRIES:
+        if "_default_instance" in registry_cls.__dict__:
+            delattr(registry_cls, "_default_instance")
+
+
 @pytest.fixture(params=[CANONICAL, LEGACY], ids=["canonical", "legacy"])
 def published(request, monkeypatch):
     _publish(monkeypatch, request.param)
-    return request.param
+    _evict_default_registries()
+    yield request.param
+    _evict_default_registries()
 
 
 def test_both_readers_see_the_plugin(published):
