@@ -8,10 +8,17 @@ PraisonAI takes security seriously. We appreciate responsible disclosure from re
 |---------|----------|-------------|
 | `praisonaiagents` | [PyPI](https://pypi.org/project/praisonaiagents/) | `src/praisonai-agents/` |
 | `praisonai` | [PyPI](https://pypi.org/project/praisonai/) | `src/praisonai/` |
-| `praisonai-platform` | [PyPI](https://pypi.org/project/praisonai-platform/) | `src/praisonai-platform/` |
 | `praisonai` | [npm](https://www.npmjs.com/package/praisonai) | `src/praisonai-ts/` |
 
 Report issues against the **specific package** where the vulnerability exists. A platform-only issue does not necessarily affect the core SDK, and vice versa.
+
+### Packages maintained in their own repositories
+
+`praisonai-platform` now lives at
+[MervinPraison/PraisonAI-Platform](https://github.com/MervinPraison/PraisonAI-Platform).
+Report platform vulnerabilities through
+[that repository's advisories](https://github.com/MervinPraison/PraisonAI-Platform/security/advisories/new),
+not here — it is versioned and released independently of the SDK.
 
 ## In scope
 

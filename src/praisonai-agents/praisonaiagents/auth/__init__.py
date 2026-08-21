@@ -2,7 +2,10 @@
 Authentication & Authorization Protocols for PraisonAI Agents.
 
 This package provides protocol-driven auth interfaces for the core SDK.
-Implementations (JWT, OAuth, etc.) live in the platform package.
+Implementations (JWT, OAuth, etc.) live outside it — implement the protocols
+against your own store, or use the reference implementation in the separate
+``praisonai-platform`` package
+(https://github.com/MervinPraison/PraisonAI-Platform).
 
 Quick start::
 

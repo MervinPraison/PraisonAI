@@ -155,11 +155,16 @@ class WorkspaceContextProtocol(Protocol):
     """Protocol for providing workspace context to agents.
 
     Enables agents to access workspace-specific settings, instructions,
-    and agent configurations from the platform layer.
+    and agent configurations from a platform layer.
+
+    Implementations live outside this package. The reference one is
+    ``PlatformWorkspaceContext`` in the ``praisonai-platform`` package
+    (https://github.com/MervinPraison/PraisonAI-Platform); implement this
+    protocol yourself to back agent configuration with your own store.
 
     Example::
 
-        class PlatformWorkspaceContext:
+        class MyWorkspaceContext:
             async def get_workspace_context(self, workspace_id):
                 ws = await db.get_workspace(workspace_id)
                 return ws.context

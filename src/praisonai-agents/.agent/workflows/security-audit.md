@@ -99,13 +99,12 @@ pip index versions praisonaiagents | head -1
 pip index versions praisonai | head -1
 ```
 
-13. Publish **praisonai-platform** (only when the advisory targets platform code):
-```bash
-cd /Users/praison/praisonai-package/src/praisonai-platform
-praisonai publish pypi
-# or: uv lock && uv build && uv publish --token $PYPI_TOKEN
-```
-Platform releases are **independent** of `praisonai` / `praisonaiagents` version numbers. A platform-only fix (e.g. `0.1.8`) does **not** require bumping the main SDK.
+13. **praisonai-platform** advisories are handled in a different repository:
+[MervinPraison/PraisonAI-Platform](https://github.com/MervinPraison/PraisonAI-Platform).
+It is not part of this monorepo and is not published from here. Triage, patch,
+release and advisory publication all happen in that repo, on its own semver line.
+Nothing in this repository imports it, so a platform advisory never requires an
+SDK release.
 
 14. Publish **praisonai (npm / TypeScript)** (only when the advisory targets `src/praisonai-ts`):
 ```bash
@@ -113,9 +112,8 @@ cd /Users/praison/praisonai-package/src/praisonai-ts
 npm version patch && npm publish
 ```
 
-15. Verify platform / npm when applicable:
+15. Verify npm when applicable:
 ```bash
-pip index versions praisonai-platform | head -1
 npm view praisonai version
 ```
 
@@ -139,7 +137,7 @@ gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> \
 }
 EOF
 ```
-- `<PACKAGE_NAME>`: `praisonaiagents` (core SDK), `praisonai` (Python wrapper), `praisonai-platform` (platform layer), or `praisonai` (npm ecosystem for TypeScript)
+- `<PACKAGE_NAME>`: `praisonaiagents` (core SDK), `praisonai` (Python wrapper), or `praisonai` (npm ecosystem for TypeScript)
 - `<LAST_VULNERABLE_VERSION>`: version before the fix
 - `<FIRST_PATCHED_VERSION>`: the version just published with the fix
 - Always include credits for the reporter
@@ -190,8 +188,8 @@ After validating each advisory in source code, assign **one** label:
 | Package | Version line | Notes |
 |---|---|---|
 | `praisonaiagents` + `praisonai` | Aligned patch (e.g. `1.6.62` / `4.6.62`) | Main SDK + wrapper; bump together via `bump_and_release.py` |
-| `praisonai-platform` | Independent semver (e.g. `0.1.8`) | Platform-only fixes; users need **not** upgrade the main SDK |
 | `praisonai` (npm) | Independent semver (e.g. `1.7.2`) | TypeScript SDK; publish from `src/praisonai-ts` |
+| `praisonai-platform` | Independent semver, **separate repository** | Not released from this repo — see [PraisonAI-Platform](https://github.com/MervinPraison/PraisonAI-Platform) |
 
 Always set the advisory `patched_versions` to the **package that actually contains the fix**. Do not imply users must upgrade all packages when only one changed.
 
@@ -217,8 +215,10 @@ Close (or publish advisory with no code change only if already mitigated) when:
 |---|---|---|---|
 | praisonaiagents | pip | src/praisonai-agents/praisonaiagents/ | tools/, mcp/, memory/, agent/, sandbox/ |
 | praisonai | pip | src/praisonai/praisonai/ | cli/, capabilities/, mcp_server/, sandbox/, recipe/ |
-| praisonai-platform | pip | src/praisonai-platform/praisonai_platform/ | api/routes/, services/, auth |
 | praisonai | npm | src/praisonai-ts/src/ | agent/, mcp/, tools/, code-mode/ |
+
+`praisonai-platform` is **not audited from this repository** — it lives in
+[MervinPraison/PraisonAI-Platform](https://github.com/MervinPraison/PraisonAI-Platform).
 
 ## RESOURCES & DOCUMENTATION
 
@@ -234,7 +234,7 @@ Close (or publish advisory with no code change only if already mitigated) when:
 - ALWAYS set patched_versions before publishing advisory
 - ALWAYS publish to PyPI/npm BEFORE publishing advisories (so Dependabot can point users to a fix)
 - Python SDK: `praisonai publish pypi` from `src/praisonai-agents`, then `bump_and_release.py` for the wrapper
-- Platform-only: `praisonai publish pypi` from `src/praisonai-platform` — no SDK bump required
+- Platform-only: released from the separate [PraisonAI-Platform](https://github.com/MervinPraison/PraisonAI-Platform) repo, never from here
 - npm: `npm publish` from `src/praisonai-ts` when the TypeScript SDK is affected
 - ALWAYS request CVE AFTER publishing advisory
 - Use generic commit messages: "refactor: harden X" not "fix: SQL injection in Y"
