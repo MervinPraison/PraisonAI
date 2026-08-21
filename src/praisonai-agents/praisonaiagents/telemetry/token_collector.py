@@ -22,15 +22,14 @@ class TokenMetrics:
     
     @property
     def total_tokens(self) -> int:
-        """Calculate total tokens across all types."""
-        return (
-            self.input_tokens + 
-            self.output_tokens + 
-            self.cached_tokens + 
-            self.reasoning_tokens +
-            self.audio_input_tokens +
-            self.audio_output_tokens
-        )
+        """Calculate total tokens reported by the provider.
+
+        cached_tokens are a subset of input_tokens, and reasoning_tokens /
+        audio tokens are subsets of the input/output totals the provider
+        already reports. Adding them again double-counts every cached prompt
+        and o-series (reasoning) call, inflating usage by up to ~1.8x.
+        """
+        return self.input_tokens + self.output_tokens
     
     def to_dict(self) -> Dict[str, int]:
         """Convert to dictionary format."""

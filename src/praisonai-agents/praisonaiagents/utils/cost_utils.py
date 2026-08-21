@@ -146,12 +146,21 @@ def _calculate_fallback_cost(
         Estimated cost in USD
     """
     model_name = (model or "gpt-4o-mini").lower()
-    
-    # Find matching pricing (partial match)
+    # Strip a provider prefix (e.g. "openai/gpt-4o-mini" -> "gpt-4o-mini") so
+    # litellm-style names still resolve against the fallback table.
+    if "/" in model_name:
+        model_name = model_name.rsplit("/", 1)[-1]
+
+    # Find matching pricing. Match longest keys first and require an exact
+    # match or a prefix boundary ("<key>-...") so that "gpt-4o-mini" does not
+    # fall through to the "gpt-4o" entry (which billed it at 16.7x the real
+    # rate). "default" is excluded from matching and used only as a fallback.
     pricing = _FALLBACK_PRICING.get("default")
-    for key, price in _FALLBACK_PRICING.items():
-        if key in model_name or model_name in key:
-            pricing = price
+    for key in sorted(
+        (k for k in _FALLBACK_PRICING if k != "default"), key=len, reverse=True
+    ):
+        if model_name == key or model_name.startswith(key + "-"):
+            pricing = _FALLBACK_PRICING[key]
             break
     
     # Calculate cost (pricing is per 1M tokens)

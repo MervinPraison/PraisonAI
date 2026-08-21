@@ -461,7 +461,10 @@ class MinimalTelemetry:
         metrics = self.get_metrics()
         self.logger.debug(f"Telemetry flush: {metrics}")
         
-        # Send to PostHog if available
+        # Send to PostHog if available. Only reset the counters once the batch
+        # has actually been handed off; otherwise a failed send would silently
+        # discard the metrics it never delivered.
+        send_succeeded = True
         posthog_client = self._get_posthog_client()
         if posthog_client:
             
@@ -489,14 +492,16 @@ class MinimalTelemetry:
             except Exception as e:
                 # Silent fail - telemetry should never break user operations
                 # But log at debug level for troubleshooting
+                send_succeeded = False
                 logger = get_logger(__name__)
                 logger.debug(f"Telemetry capture failed: {e}")
         
-        # Reset counters
-        with self._metrics_lock:
-            for key in self._metrics:
-                if isinstance(self._metrics[key], int):
-                    self._metrics[key] = 0
+        # Reset counters only if we did not fail to send a pending batch.
+        if send_succeeded:
+            with self._metrics_lock:
+                for key in self._metrics:
+                    if isinstance(self._metrics[key], int):
+                        self._metrics[key] = 0
     
     def shutdown(self):
         """
