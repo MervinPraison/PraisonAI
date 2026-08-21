@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 53 | 16964 |
+| ✅ Agent | 22 | 53 | 16965 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
 | ✅ Approval | 1 | 5 | 2658 |
@@ -32,7 +32,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4851 |
 | ✅ Conditions | 1 | 3 | 1321 |
-| ✅ Configuration | 3 | 8 | 3139 |
+| ✅ Configuration | 3 | 8 | 3140 |
 | ✅ Context Management | 16 | 36 | 13890 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -52,14 +52,14 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5296 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14135 |
-| ✅ Memory | 6 | 18 | 7130 |
+| ✅ Memory | 6 | 18 | 7133 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1246 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1605 |
-| ✅ Plugins | 8 | 5 | 3094 |
+| ✅ Plugins | 8 | 5 | 3120 |
 | ✅ Prompts | 2 | 9 | 1971 |
 | ✅ Providers | 1 | 56 | 7781 |
 | ✅ Query | 1 | 2 | 736 |
@@ -69,13 +69,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1054 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3483 |
-| ✅ Security | 1 | 3 | 3343 |
-| ✅ Sessions | 4 | 19 | 7567 |
+| ✅ Security | 1 | 3 | 3415 |
+| ✅ Sessions | 4 | 19 | 7576 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 42712 |
+| ✅ Tools | 12 | 144 | 42732 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6761 lines)
+- ℹ️ Database (42 docs, 6766 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
