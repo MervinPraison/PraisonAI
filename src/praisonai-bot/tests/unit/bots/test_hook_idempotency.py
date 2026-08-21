@@ -82,6 +82,100 @@ class TestSqliteIdempotencyStore:
         store = SqliteIdempotencyStore(tmp_path / "idem.sqlite")
         assert isinstance(store, IdempotencyStoreProtocol)
 
+    def test_stale_inflight_reclaimed_after_crash(self, tmp_path):
+        # A crash between reserve and record/release leaves a durable
+        # ``inflight`` row. Once it outlives the lease, the provider's retry
+        # (after a restart) must be able to re-run rather than be deduplicated.
+        from praisonai_bot.bots import SqliteIdempotencyStore
+
+        p = tmp_path / "idem.sqlite"
+        store = SqliteIdempotencyStore(p, inflight_lease_seconds=-1)
+        assert store.reserve("evt") is True  # neither recorded nor released
+        restarted = SqliteIdempotencyStore(p, inflight_lease_seconds=-1)
+        assert restarted.reserve("evt") is True  # stale claim reclaimed
+
+    def test_recorded_key_not_reclaimed_by_lease(self, tmp_path):
+        # The lease only reclaims ``inflight`` rows; a successfully recorded key
+        # keeps deduplicating until its TTL regardless of the lease.
+        from praisonai_bot.bots import SqliteIdempotencyStore
+
+        p = tmp_path / "idem.sqlite"
+        store = SqliteIdempotencyStore(p, inflight_lease_seconds=-1)
+        assert store.reserve("evt") is True
+        store.record("evt")
+        restarted = SqliteIdempotencyStore(p, inflight_lease_seconds=-1)
+        assert restarted.reserve("evt") is False  # recorded still dedups
+
+
+class TestGatewayConfigWiring:
+    """The ``hooks.idempotency.store_backend`` config must actually reach the
+    store the gateway builds — the prior code read a ``GatewayConfig`` field that
+    no config path populated, leaving the durable backend unreachable (#4208).
+    """
+
+    def _bare_server(self):
+        # Build the method's required attributes without the full (network-
+        # binding) __init__ so the wiring is unit-tested in isolation.
+        from praisonai_bot.gateway.server import WebSocketGateway
+
+        srv = object.__new__(WebSocketGateway)
+        srv._hooks = {}
+        srv._hook_idem = None
+        srv._hook_idempotency_backend = None
+        srv._hook_idempotency_max = 10_000
+        srv._hook_idempotency_ttl = 86_400.0
+        return srv
+
+    def test_sqlite_backend_selected_from_config(self, tmp_path, monkeypatch):
+        from praisonai_bot.bots import SqliteIdempotencyStore
+
+        srv = self._bare_server()
+        srv._apply_hooks_from_config(
+            {"hooks": {"idempotency": {"store_backend": "sqlite"}, "hooks": []}}
+        )
+        assert srv._hook_idempotency_backend == "sqlite"
+        monkeypatch.setattr(
+            "pathlib.Path.home", lambda: tmp_path, raising=True
+        )
+        assert isinstance(srv._get_hook_idem_store(), SqliteIdempotencyStore)
+
+    def test_sibling_idempotency_key_selected(self, tmp_path, monkeypatch):
+        from praisonai_bot.bots import SqliteIdempotencyStore
+
+        srv = self._bare_server()
+        srv._apply_hooks_from_config(
+            {"hooks": [], "hooks_idempotency": {"store_backend": "sqlite"}}
+        )
+        assert srv._hook_idempotency_backend == "sqlite"
+        monkeypatch.setattr(
+            "pathlib.Path.home", lambda: tmp_path, raising=True
+        )
+        assert isinstance(srv._get_hook_idem_store(), SqliteIdempotencyStore)
+
+    def test_default_is_memory(self):
+        from praisonaiagents.gateway import InMemoryIdempotencyStore
+
+        srv = self._bare_server()
+        srv._apply_hooks_from_config({"hooks": []})
+        assert srv._hook_idempotency_backend is None
+        assert isinstance(srv._get_hook_idem_store(), InMemoryIdempotencyStore)
+
+    def test_backend_change_rebuilds_store(self, tmp_path, monkeypatch):
+        from praisonaiagents.gateway import InMemoryIdempotencyStore
+        from praisonai_bot.bots import SqliteIdempotencyStore
+
+        monkeypatch.setattr(
+            "pathlib.Path.home", lambda: tmp_path, raising=True
+        )
+        srv = self._bare_server()
+        srv._apply_hooks_from_config({"hooks": []})
+        assert isinstance(srv._get_hook_idem_store(), InMemoryIdempotencyStore)
+        # Hot-reload flips to sqlite: the cached in-memory store is discarded.
+        srv._apply_hooks_from_config(
+            {"hooks": {"idempotency": {"store_backend": "sqlite"}, "hooks": []}}
+        )
+        assert isinstance(srv._get_hook_idem_store(), SqliteIdempotencyStore)
+
 
 class TestBuildIdempotencyStore:
     def test_memory_backend_default(self):

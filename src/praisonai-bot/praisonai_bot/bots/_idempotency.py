@@ -48,6 +48,13 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_SIZE = 10_000
 _DEFAULT_TTL_SECONDS = 86_400.0  # 24h, matching the in-memory default
+# An ``inflight`` reservation whose run neither recorded nor released it — the
+# only durable cause is a process crash *during* the hook — is reclaimable after
+# this lease. It bounds how long a crashed delivery is (wrongly) deduplicated
+# before the provider's retry can re-run it, while staying long enough that a
+# genuinely slow in-flight run is never stolen by a concurrent duplicate. Only
+# ``inflight`` rows are reclaimed; a ``recorded`` key dedups until its TTL.
+_DEFAULT_INFLIGHT_LEASE_SECONDS = 900.0  # 15 min
 
 
 class SqliteIdempotencyStore:
@@ -58,6 +65,10 @@ class SqliteIdempotencyStore:
         max_size: Maximum recorded entries kept; oldest recorded entries evicted
             when exceeded.
         ttl_seconds: Entries older than this are pruned lazily on ``reserve``.
+        inflight_lease_seconds: A stale ``inflight`` reservation (crash between
+            reserve and record/release) is reclaimable after this lease so the
+            provider's retry can re-run rather than being deduplicated for the
+            full ``ttl_seconds``.
     """
 
     def __init__(
@@ -66,10 +77,12 @@ class SqliteIdempotencyStore:
         *,
         max_size: int = _DEFAULT_MAX_SIZE,
         ttl_seconds: float = _DEFAULT_TTL_SECONDS,
+        inflight_lease_seconds: float = _DEFAULT_INFLIGHT_LEASE_SECONDS,
     ) -> None:
         self.path = Path(path).expanduser()
         self.max_size = max(1, int(max_size))
         self.ttl_seconds = float(ttl_seconds)
+        self.inflight_lease_seconds = float(inflight_lease_seconds)
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -102,6 +115,16 @@ class SqliteIdempotencyStore:
             "DELETE FROM hook_idempotency WHERE ? - ts > ?",
             (now, self.ttl_seconds),
         )
+        # Reclaim stale ``inflight`` reservations: a durable ``inflight`` row that
+        # outlives the lease can only be a crash between reserve and
+        # record/release (a live run records or releases well within the lease).
+        # Dropping it lets the provider's post-restart retry re-run instead of
+        # being deduplicated for the full TTL. ``recorded`` rows are untouched.
+        conn.execute(
+            "DELETE FROM hook_idempotency "
+            "WHERE status = 'inflight' AND ? - ts > ?",
+            (now, self.inflight_lease_seconds),
+        )
         # Enforce max size on recorded entries (drop oldest).
         row = conn.execute(
             "SELECT COUNT(*) FROM hook_idempotency WHERE status = 'recorded'"
@@ -125,7 +148,10 @@ class SqliteIdempotencyStore:
 
         Returns ``False`` when the key was already recorded *or* is currently in
         flight — the insert fails on the primary-key constraint, so both a
-        redelivery and a concurrent duplicate are rejected crash-safely.
+        redelivery and a concurrent duplicate are rejected crash-safely. A
+        ``inflight`` reservation orphaned by a crash is first reclaimed by
+        :meth:`_prune` once it outlives ``inflight_lease_seconds``, so the insert
+        can then succeed and the provider's retry re-runs.
         """
         now = time.time()
         with self._lock, closing(self._connect()) as conn:
@@ -170,6 +196,7 @@ def build_idempotency_store(
     path: Union[str, Path, None] = None,
     max_size: int = _DEFAULT_MAX_SIZE,
     ttl_seconds: float = _DEFAULT_TTL_SECONDS,
+    inflight_lease_seconds: float = _DEFAULT_INFLIGHT_LEASE_SECONDS,
 ):
     """Build an idempotency store for the given ``backend``.
 
@@ -194,7 +221,10 @@ def build_idempotency_store(
                 Path.home() / ".praisonai" / "state" / "hook_idempotency.sqlite"
             )
             return SqliteIdempotencyStore(
-                store_path, max_size=max_size, ttl_seconds=ttl_seconds
+                store_path,
+                max_size=max_size,
+                ttl_seconds=ttl_seconds,
+                inflight_lease_seconds=inflight_lease_seconds,
             )
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(

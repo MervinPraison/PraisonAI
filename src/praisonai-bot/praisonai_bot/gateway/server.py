@@ -1093,6 +1093,12 @@ class WebSocketGateway:
         self._hook_idem: Any = None
         self._hook_idempotency_max = 10_000
         self._hook_idempotency_ttl = 86_400.0  # 24h
+        # Backend selected by ``hooks.idempotency.store_backend`` in the parsed
+        # YAML (``"memory"`` default, ``"sqlite"`` for restart durability). It is
+        # captured in ``_apply_hooks_from_config`` — the only path that sees the
+        # raw ``hooks`` dict — because ``GatewayConfig`` carries no idempotency
+        # field. ``None`` until a config with a ``hooks:`` block is applied.
+        self._hook_idempotency_backend: Optional[str] = None
 
         # Issue #3021: opt-in gateway lifecycle — idle/scale-to-zero, epoch-aware
         # external drain marker, and a crash-loop restart guard. These reuse the
@@ -4151,9 +4157,37 @@ class WebSocketGateway:
         hooks_cfg = cfg.get("hooks")
         if hooks_cfg is None:
             hooks_cfg = cfg.get("gateway", {}).get("hooks")
+
+        # Capture the inbound dedup backend (#4208). ``hooks`` is normally a list
+        # of hook entries, so the ``idempotency`` knob lives as a sibling
+        # (``hooks_idempotency``/``idempotency``); a mapping-shaped ``hooks:``
+        # block may instead nest it under ``hooks.idempotency``. Support both,
+        # then invalidate any store already built under the old backend so a
+        # hot-reload that flips ``memory``↔``sqlite`` takes effect.
+        idem_cfg: Any = None
+        if isinstance(hooks_cfg, dict):
+            idem_cfg = hooks_cfg.get("idempotency")
+            entries = hooks_cfg.get("hooks", [])
+        else:
+            entries = hooks_cfg
+        if idem_cfg is None:
+            idem_cfg = cfg.get("hooks_idempotency") or cfg.get("idempotency")
+            if idem_cfg is None:
+                idem_cfg = cfg.get("gateway", {}).get("hooks_idempotency")
+        backend: Optional[str] = None
+        if isinstance(idem_cfg, dict):
+            backend = idem_cfg.get("store_backend")
+        elif isinstance(idem_cfg, str):
+            backend = idem_cfg
+        if backend is not None:
+            backend = str(backend)
+        if backend != self._hook_idempotency_backend:
+            self._hook_idempotency_backend = backend
+            self._hook_idem = None  # rebuild lazily under the new backend
+
         self._hooks.clear()
-        if hooks_cfg:
-            self._register_hooks_from_config(hooks_cfg)
+        if entries:
+            self._register_hooks_from_config(entries)
 
     def _get_hook_idem_store(self) -> Any:
         """Build (once) and return the inbound idempotency store (#4208).
@@ -4166,15 +4200,10 @@ class WebSocketGateway:
         """
         if self._hook_idem is not None:
             return self._hook_idem
-        backend = "memory"
-        try:
-            idem_cfg = getattr(self.config, "hook_idempotency", None)
-            if isinstance(idem_cfg, dict):
-                backend = str(idem_cfg.get("store_backend", "memory"))
-            elif idem_cfg is not None:
-                backend = str(getattr(idem_cfg, "store_backend", "memory"))
-        except Exception:  # pragma: no cover - defensive config access
-            backend = "memory"
+        # Backend is captured from the parsed ``hooks.idempotency`` config in
+        # ``_apply_hooks_from_config`` (``GatewayConfig`` carries no field for
+        # it). Default to the in-memory store when no config selected one.
+        backend = self._hook_idempotency_backend or "memory"
         try:
             from pathlib import Path
             from praisonai_bot.bots import build_idempotency_store
