@@ -1096,7 +1096,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Fast path: string preset lookup (most common case)
         if isinstance(output, str):
-            output_lower = output.lower()
+            from ..config.parse_utils import canonical_preset_key
+            output_lower = canonical_preset_key(output)
             preset_value = OUTPUT_PRESETS.get(output_lower)
             if preset_value is not None:
                 _output_config = OutputConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
@@ -1221,7 +1222,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         elif isinstance(execution, ExecutionConfig):
             _exec_config = execution
         elif isinstance(execution, str):
-            preset_value = EXECUTION_PRESETS.get(execution.lower())
+            from ..config.parse_utils import canonical_preset_key
+            preset_value = EXECUTION_PRESETS.get(canonical_preset_key(execution))
             if preset_value is not None:
                 _exec_config = ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
             else:
@@ -3378,7 +3380,8 @@ Your Goal: {self.goal}
         elif isinstance(self._context_param, str):
             # String preset: "sliding_window", "summarize", "truncate"
             from ..config.presets import CONTEXT_PRESETS
-            preset_config = CONTEXT_PRESETS.get(self._context_param)
+            from ..config.parse_utils import canonical_preset_key
+            preset_config = CONTEXT_PRESETS.get(canonical_preset_key(self._context_param))
             if preset_config is not None:
                 # Convert preset to ContextConfig, then to ManagerConfig
                 try:
@@ -3753,7 +3756,8 @@ Summary:"""
         elif isinstance(autonomy, str):
             # String preset: "suggest", "auto_edit", "full_auto"
             from ..config.presets import AUTONOMY_PRESETS
-            preset_config = AUTONOMY_PRESETS.get(autonomy)
+            from ..config.parse_utils import canonical_preset_key
+            preset_config = AUTONOMY_PRESETS.get(canonical_preset_key(autonomy))
             if preset_config is not None:
                 config = AutonomyConfig.from_dict(preset_config)
             else:

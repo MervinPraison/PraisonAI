@@ -195,6 +195,17 @@ def make_preset_error(
     return ValueError(" ".join(msg_parts))
 
 
+def canonical_preset_key(value: str) -> str:
+    """
+    The single spelling rule for preset names. Validation and resolution must
+    not disagree about what counts as the same preset, so both go through here.
+
+    Matching is case-insensitive, ignores surrounding whitespace, and treats
+    ``-``/``_`` as interchangeable.
+    """
+    return value.strip().lower().replace("-", "_")
+
+
 def validate_preset_string(
     param_name: str,
     value: Any,
@@ -222,13 +233,10 @@ def validate_preset_string(
     if not isinstance(value, str):
         return
 
-    def _canonical(s: str) -> str:
-        return s.strip().lower().replace("-", "_")
-
-    normalized = _canonical(value)
+    normalized = canonical_preset_key(value)
     presets_list = list(presets)
     for preset in presets_list:
-        if _canonical(preset) == normalized:
+        if canonical_preset_key(preset) == normalized:
             return
 
     raise make_preset_error(param_name, value, presets_list)
