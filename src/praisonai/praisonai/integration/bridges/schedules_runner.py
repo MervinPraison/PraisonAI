@@ -84,8 +84,16 @@ def ensure_schedule_runner() -> None:
 
         def on_trigger(job):
             log.info("Schedule triggered: %s", getattr(job, "name", job))
+            # ScheduleLoop claims the occurrence *atomically* before this fires
+            # (advancing last_run_at / deleting one-shot jobs at claim time). The
+            # prior ``asyncio.run(...)`` path had no timeout, so a legitimately
+            # long-running scheduled agent/command always completed. Pass
+            # ``timeout=None`` to keep that unbounded behaviour — the bridge's
+            # default 300s would otherwise cancel long runs *after* the claim,
+            # silently dropping one-shot and long-interval work.
             run_sync_or_offload(
                 _executor._execute_one(job),
+                timeout=None,
                 thread_name="praisonai-schedule-tick",
             )
 

@@ -116,6 +116,15 @@ class AuditLogHook:
                             self._fh.close()
                             self._fh = None
                     except OSError:
+                        # fstat/close raised: still close best-effort before
+                        # dropping our only reference, so we don't leak the fd
+                        # (repeated leaks could exhaust descriptors). The inner
+                        # close is guarded so a failing close never masks the
+                        # reopen below.
+                        try:
+                            self._fh.close()
+                        except OSError:
+                            pass
                         self._fh = None
                 # Lazy initialize file handle
                 if self._fh is None:
