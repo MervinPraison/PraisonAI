@@ -11,6 +11,7 @@ Covers:
 import asyncio
 import inspect
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -258,6 +259,37 @@ class TestMonitorGate:
         gate = MonitorGate()
         with pytest.raises(TimeoutError):
             gate._read_bounded(_DripResponse(), deadline=time.monotonic() - 1)
+
+    def test_url_total_deadline_covers_response_headers(self, monkeypatch):
+        from praisonai_bot.scheduler import condition_gate
+
+        closed = threading.Event()
+
+        class _SlowHeadersConnection:
+            def __init__(self, *_args, **_kwargs):
+                self.sock = None
+
+            def request(self, *_args, **_kwargs):
+                return None
+
+            def getresponse(self):
+                if not closed.wait(0.2):
+                    raise AssertionError("header read was not interrupted")
+                raise OSError("connection closed")
+
+            def close(self):
+                closed.set()
+
+        monkeypatch.setattr(
+            condition_gate, "_PinnedHTTPConnection", _SlowHeadersConnection,
+        )
+        gate = MonitorGate(timeout=0.02)
+        parsed = condition_gate.parse.urlsplit("http://example.com/value")
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="total deadline"):
+            gate._request_url(parsed, "93.184.216.34")
+        assert time.monotonic() - started < 0.15
 
     def test_read_bounded_returns_full_body(self):
         class _OneShotResponse:

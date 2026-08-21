@@ -321,6 +321,11 @@ class MonitorGate:
         # synchronous body read alive indefinitely and stall the sequential
         # scheduler tick. Enforce an absolute deadline across connect + read.
         deadline = time.monotonic() + self._timeout
+        watchdog = threading.Timer(
+            self._timeout, self._abort_connection, args=(connection,),
+        )
+        watchdog.daemon = True
+        watchdog.start()
         try:
             connection.request(
                 "GET",
@@ -335,8 +340,25 @@ class MonitorGate:
             if not 200 <= response.status < 300:
                 raise RuntimeError(f"HTTP {response.status}")
             return self._read_bounded(response, deadline)
+        except Exception as e:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    "monitor URL probe exceeded total deadline"
+                ) from e
+            raise
         finally:
+            watchdog.cancel()
             connection.close()
+
+    @staticmethod
+    def _abort_connection(connection: Any) -> None:
+        sock = getattr(connection, "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        connection.close()
 
     @staticmethod
     def _read_bounded(response: Any, deadline: float) -> bytes:
