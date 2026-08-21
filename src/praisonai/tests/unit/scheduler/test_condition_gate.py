@@ -11,6 +11,7 @@ Covers:
 import asyncio
 import inspect
 import socket
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -248,6 +249,32 @@ class TestMonitorGate:
             "hostname": "example.com",
             "address": "93.184.216.34",
         }
+
+    def test_read_bounded_enforces_total_deadline(self):
+        class _DripResponse:
+            def read(self, _amount):
+                return b"x"
+
+        gate = MonitorGate()
+        with pytest.raises(TimeoutError):
+            gate._read_bounded(_DripResponse(), deadline=time.monotonic() - 1)
+
+    def test_read_bounded_returns_full_body(self):
+        class _OneShotResponse:
+            def __init__(self):
+                self._sent = False
+
+            def read(self, _amount):
+                if self._sent:
+                    return b""
+                self._sent = True
+                return b"payload"
+
+        gate = MonitorGate()
+        body = gate._read_bounded(
+            _OneShotResponse(), deadline=time.monotonic() + 30,
+        )
+        assert body == b"payload"
 
     @pytest.mark.parametrize(
         "url",

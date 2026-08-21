@@ -39,6 +39,7 @@ import socket
 import ssl
 import subprocess
 import threading
+import time
 from collections.abc import Mapping
 from typing import Any
 from urllib import parse
@@ -314,6 +315,12 @@ class MonitorGate:
         if ":" in host:
             host = f"[{host}]"
         host_header = host if port == default_port else f"{host}:{port}"
+        # Total wall-clock deadline for the whole probe: the per-socket
+        # ``timeout`` only bounds each individual recv, so a server that
+        # drip-feeds a byte just inside every socket window could keep the
+        # synchronous body read alive indefinitely and stall the sequential
+        # scheduler tick. Enforce an absolute deadline across connect + read.
+        deadline = time.monotonic() + self._timeout
         try:
             connection.request(
                 "GET",
@@ -327,9 +334,31 @@ class MonitorGate:
             response = connection.getresponse()
             if not 200 <= response.status < 300:
                 raise RuntimeError(f"HTTP {response.status}")
-            return response.read(_MAX_MONITOR_BYTES + 1)
+            return self._read_bounded(response, deadline)
         finally:
             connection.close()
+
+    @staticmethod
+    def _read_bounded(response: Any, deadline: float) -> bytes:
+        """Read up to the byte cap while enforcing a total wall-clock deadline.
+
+        Reads in bounded chunks and checks an absolute ``deadline`` between
+        each so a slow drip-feed cannot keep the synchronous read (and thus
+        the scheduler tick) alive past the monitor timeout. Stops once the
+        response is exhausted or one byte past the cap is seen (so the caller
+        can detect an over-limit body).
+        """
+        chunks: list[bytes] = []
+        remaining = _MAX_MONITOR_BYTES + 1
+        while remaining > 0:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("monitor URL read exceeded total deadline")
+            chunk = response.read(min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
 
 class ShellConditionGate:
