@@ -1032,7 +1032,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-mcp"
-version = "0.0.15"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
