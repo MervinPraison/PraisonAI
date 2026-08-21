@@ -296,11 +296,19 @@ class Memory(SearchMixin, MemoryCoreMixin):
         from ..paths import get_project_data_dir
         project_data = str(get_project_data_dir())
         os.makedirs(project_data, exist_ok=True)
-        
-        config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, "short_term.db"))
-        config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, "long_term.db"))
-        config["rag_db_path"] = self.cfg.get("rag_db_path", os.path.join(project_data, "chroma_db"))
-        config["collection_name"] = self.cfg.get("collection_name", "memory_store")
+
+        # When a user_id scopes this store, derive per-user default paths/names so
+        # two agents in one process/dir don't silently share one on-disk store.
+        # Explicit short_db/long_db/rag_db_path/collection_name always win; a bare
+        # store with no user_id keeps the original shared defaults (backwards
+        # compatible).
+        user_id = self.cfg.get("user_id")
+        suffix = f"_{user_id}" if user_id else ""
+
+        config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, f"short_term{suffix}.db"))
+        config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, f"long_term{suffix}.db"))
+        config["rag_db_path"] = self.cfg.get("rag_db_path", os.path.join(project_data, f"chroma_db{suffix}"))
+        config["collection_name"] = self.cfg.get("collection_name", f"memory_store{suffix}")
         config["verbose"] = self.verbose
         
         # Add specific configurations for different adapters
@@ -337,9 +345,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # This ensures existing code that accesses _get_stm_conn() still works
         from ..paths import get_project_data_dir
         project_data = str(get_project_data_dir())
-        
-        self.short_db = self.cfg.get("short_db", os.path.join(project_data, "short_term.db"))
-        self.long_db = self.cfg.get("long_db", os.path.join(project_data, "long_term.db"))
+
+        # Scope legacy direct-SQLite defaults by user_id so this path matches the
+        # per-user store paths derived in _get_adapter_config (explicit paths win).
+        user_id = self.cfg.get("user_id")
+        suffix = f"_{user_id}" if user_id else ""
+
+        self.short_db = self.cfg.get("short_db", os.path.join(project_data, f"short_term{suffix}.db"))
+        self.long_db = self.cfg.get("long_db", os.path.join(project_data, f"long_term{suffix}.db"))
         
         # Only create separate SQLite adapter if primary adapter is not SQLite
         if self.provider != "sqlite":
@@ -357,6 +370,47 @@ class Memory(SearchMixin, MemoryCoreMixin):
         self._write_lock = self._sqlite_adapter._write_lock
         self._all_connections = self._sqlite_adapter._all_connections
         self._connection_lock = self._sqlite_adapter._connection_lock
+
+    def commit_memory_batch(
+        self,
+        writes: List[tuple],
+        *,
+        deadline: float,
+        commit_guard: Any = None,
+    ) -> None:
+        """Persist a batch of staged memory writes under the write lock.
+
+        Mirrors ``FileMemory.commit_memory_batch`` so the pre-compaction fact
+        flush (compaction/memory_flush.py) durably commits extracted facts for
+        sqlite/chroma/mongodb/mem0 backends instead of raising and being
+        swallowed. Each staged tuple is ``(method_name, args, kwargs)`` produced
+        by _StagedMemory; ``add_*`` names map to the ``store_*`` equivalents.
+        """
+        with self._write_lock:
+            for method_name, args, kwargs in writes:
+                if commit_guard is not None and getattr(commit_guard, "cancelled", False):
+                    return
+                target = method_name.replace("add_", "store_", 1)
+                getattr(self, target)(*args, **kwargs)
+
+    async def acommit_memory_batch(
+        self,
+        writes: List[tuple],
+        *,
+        deadline: float,
+        commit_guard: Any = None,
+    ) -> None:
+        """Async variant preferring ``store_*_async`` when available."""
+        import inspect
+
+        for method_name, args, kwargs in writes:
+            if commit_guard is not None and getattr(commit_guard, "cancelled", False):
+                return
+            target = method_name.replace("add_", "store_", 1)
+            method = getattr(self, f"{target}_async", None) or getattr(self, target)
+            result = method(*args, **kwargs)
+            if inspect.isawaitable(result):
+                await result
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory SQLite connection."""
