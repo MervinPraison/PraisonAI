@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 log = logging.getLogger(__name__)
@@ -81,9 +80,14 @@ def ensure_schedule_runner() -> None:
             )
             return
 
+        from praisonai._async_bridge import run_sync_or_offload
+
         def on_trigger(job):
             log.info("Schedule triggered: %s", getattr(job, "name", job))
-            asyncio.run(_executor._execute_one(job))
+            run_sync_or_offload(
+                _executor._execute_one(job),
+                thread_name="praisonai-schedule-tick",
+            )
 
         _loop = ScheduleLoop(on_trigger=on_trigger, store=store)
         _loop.start()

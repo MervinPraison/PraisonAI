@@ -6,7 +6,7 @@ T = TypeVar("T")
 
 
 class LazyCache:
-    """Thread-safe double-checked lazy cache. Caches and re-raises ImportError exceptions."""
+    """Thread-safe double-checked lazy cache. Caches and re-raises terminal loader failures."""
 
     def __init__(self) -> None:
         self._cache: Dict[str, object] = {}
@@ -16,19 +16,23 @@ class LazyCache:
         if key in self._cache:
             cached = self._cache[key]
             # Re-raise cached exception
-            if isinstance(cached, ImportError):
+            if isinstance(cached, BaseException):
                 raise cached
             return cached  # type: ignore[return-value]
         with self._lock:
             if key in self._cache:
                 cached = self._cache[key]
-                if isinstance(cached, ImportError):
+                if isinstance(cached, BaseException):
                     raise cached
                 return cached  # type: ignore[return-value]
             try:
                 value: object = loader()
-            except ImportError as e:
-                # Cache the exception and re-raise
+            except (KeyboardInterrupt, SystemExit):
+                # Control-flow exceptions must propagate cleanly, never memoised.
+                raise
+            except BaseException as e:
+                # Cache every terminal loader failure so a broken optional dep
+                # fails fast instead of re-running the import/probe every call.
                 self._cache[key] = e
                 raise
             self._cache[key] = value
