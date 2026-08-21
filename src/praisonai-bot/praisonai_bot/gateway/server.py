@@ -2916,6 +2916,10 @@ class WebSocketGateway:
                     EventType.TOOL_PROGRESS_STREAM.value,
                     EventType.STREAM_ERROR.value,
                     EventType.STREAM_END.value,
+                    EventType.MODEL_FALLBACK_STREAM.value,
+                    EventType.RETRY_STREAM.value,
+                    EventType.TODO_STREAM.value,
+                    EventType.TOOL_RESULT_STREAM.value,
                 ])
             
             # Add optional features based on client capabilities
@@ -3884,6 +3888,10 @@ class WebSocketGateway:
                     "reasoning_stream",
                     "tool_progress_stream",
                     "stream_error",
+                    "model_fallback_stream",
+                    "retry_stream",
+                    "todo_stream",
+                    "tool_result_stream",
                 ]:
                     session_id = self._client_sessions.get(client_id)
                     if session_id:
