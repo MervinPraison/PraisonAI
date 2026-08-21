@@ -2,6 +2,7 @@ import os
 import sqlite3
 import json
 import time
+import asyncio
 import shutil
 import threading
 from typing import Any, Dict, List, Optional, Union, Literal
@@ -279,6 +280,27 @@ class Memory(SearchMixin, MemoryCoreMixin):
             # Initialize use_vector_search to False for non-MongoDB providers
             self.use_vector_search = False
 
+    @staticmethod
+    def _path_safe_suffix(user_id: Any) -> str:
+        """Return a filesystem-safe ``_<user_id>`` suffix for default store paths.
+
+        The scoping ``user_id`` doubles as a metadata filter, so it may be any
+        string. When it is embedded into default sqlite/chroma paths a raw value
+        containing separators or traversal (e.g. ``a/b`` or ``../escape``) would
+        create stores outside the project-data dir or break sqlite init. Reject
+        path separators/parent refs and keep only path-safe characters; a bare
+        store with no user_id keeps the original shared defaults.
+        """
+        if not user_id:
+            return ""
+        text = str(user_id)
+        if ".." in text or "/" in text or "\\" in text or "\x00" in text:
+            raise ValueError(
+                "memory user_id must not contain path separators or parent references"
+            )
+        safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in text.strip())
+        return f"_{safe}" if safe else ""
+
     def _get_adapter_config(self) -> Dict[str, Any]:
         """Get configuration for adapter initialization."""
         # Only include adapter-relevant configuration
@@ -302,8 +324,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # Explicit short_db/long_db/rag_db_path/collection_name always win; a bare
         # store with no user_id keeps the original shared defaults (backwards
         # compatible).
-        user_id = self.cfg.get("user_id")
-        suffix = f"_{user_id}" if user_id else ""
+        suffix = self._path_safe_suffix(self.cfg.get("user_id"))
 
         config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, f"short_term{suffix}.db"))
         config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, f"long_term{suffix}.db"))
@@ -348,8 +369,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
         # Scope legacy direct-SQLite defaults by user_id so this path matches the
         # per-user store paths derived in _get_adapter_config (explicit paths win).
-        user_id = self.cfg.get("user_id")
-        suffix = f"_{user_id}" if user_id else ""
+        suffix = self._path_safe_suffix(self.cfg.get("user_id"))
 
         self.short_db = self.cfg.get("short_db", os.path.join(project_data, f"short_term{suffix}.db"))
         self.long_db = self.cfg.get("long_db", os.path.join(project_data, f"long_term{suffix}.db"))
@@ -371,6 +391,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
         self._all_connections = self._sqlite_adapter._all_connections
         self._connection_lock = self._sqlite_adapter._connection_lock
 
+    @staticmethod
+    def _resolve_batch_target(method_name: str) -> str:
+        """Map a staged write name to its ``store_*`` persistence method."""
+        target = method_name.replace("add_", "store_", 1)
+        if target not in ("store_short_term", "store_long_term"):
+            raise ValueError(f"Unsupported staged memory write {method_name!r}")
+        return target
+
     def commit_memory_batch(
         self,
         writes: List[tuple],
@@ -378,20 +406,32 @@ class Memory(SearchMixin, MemoryCoreMixin):
         deadline: float,
         commit_guard: Any = None,
     ) -> None:
-        """Persist a batch of staged memory writes under the write lock.
+        """Persist a batch of staged memory writes.
 
         Mirrors ``FileMemory.commit_memory_batch`` so the pre-compaction fact
         flush (compaction/memory_flush.py) durably commits extracted facts for
         sqlite/chroma/mongodb/mem0 backends instead of raising and being
         swallowed. Each staged tuple is ``(method_name, args, kwargs)`` produced
         by _StagedMemory; ``add_*`` names map to the ``store_*`` equivalents.
+
+        The ``store_*`` methods serialize their own SQLite writes with
+        ``_write_lock``; this method therefore must NOT hold that lock while
+        calling them (it is a non-reentrant ``threading.Lock`` and doing so
+        would deadlock). Each write goes through ``commit_guard.commit`` so a
+        write is skipped once the flush has been cancelled or the shared
+        ``deadline`` has passed, honoring the same atomic-commit contract as the
+        file backend.
         """
-        with self._write_lock:
-            for method_name, args, kwargs in writes:
-                if commit_guard is not None and getattr(commit_guard, "cancelled", False):
-                    return
-                target = method_name.replace("add_", "store_", 1)
-                getattr(self, target)(*args, **kwargs)
+        for method_name, args, kwargs in writes:
+            target = self._resolve_batch_target(method_name)
+            store = getattr(self, target)
+            authorized = self._authorize_commit(
+                lambda store=store, args=args, kwargs=kwargs: store(*args, **kwargs),
+                deadline=deadline,
+                commit_guard=commit_guard,
+            )
+            if not authorized:
+                return
 
     async def acommit_memory_batch(
         self,
@@ -400,17 +440,60 @@ class Memory(SearchMixin, MemoryCoreMixin):
         deadline: float,
         commit_guard: Any = None,
     ) -> None:
-        """Async variant preferring ``store_*_async`` when available."""
+        """Async variant preferring ``store_*_async`` when available.
+
+        Blocking ``store_*`` work is offloaded to a worker thread so the event
+        loop is never blocked, and each write is gated by the same deadline /
+        cancellation guard as the sync path so late or cancelled facts are not
+        persisted after compaction resumes.
+        """
         import inspect
 
         for method_name, args, kwargs in writes:
-            if commit_guard is not None and getattr(commit_guard, "cancelled", False):
+            if self._commit_expired(deadline, commit_guard):
                 return
-            target = method_name.replace("add_", "store_", 1)
-            method = getattr(self, f"{target}_async", None) or getattr(self, target)
-            result = method(*args, **kwargs)
-            if inspect.isawaitable(result):
-                await result
+            target = self._resolve_batch_target(method_name)
+            async_method = getattr(self, f"{target}_async", None)
+            if async_method is not None:
+                if self._commit_expired(deadline, commit_guard):
+                    return
+                result = async_method(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    await result
+                continue
+
+            store = getattr(self, target)
+            authorized = await asyncio.to_thread(
+                self._authorize_commit,
+                lambda store=store, args=args, kwargs=kwargs: store(*args, **kwargs),
+                deadline=deadline,
+                commit_guard=commit_guard,
+            )
+            if not authorized:
+                return
+
+    @staticmethod
+    def _commit_expired(deadline: float, commit_guard: Any) -> bool:
+        """True once the flush was cancelled or the shared deadline has passed."""
+        if commit_guard is not None and getattr(commit_guard, "cancelled", False):
+            return True
+        return time.monotonic() >= deadline
+
+    def _authorize_commit(
+        self, operation: Any, *, deadline: float, commit_guard: Any
+    ) -> bool:
+        """Run ``operation`` under the guard's atomic-commit gate.
+
+        Returns ``False`` (and skips the write) once cancelled or past the
+        deadline. When no guard is supplied, fall back to a plain deadline
+        check so callers outside the flush path still behave correctly.
+        """
+        if commit_guard is not None and hasattr(commit_guard, "commit"):
+            return commit_guard.commit(operation, deadline=deadline)
+        if self._commit_expired(deadline, commit_guard):
+            return False
+        operation()
+        return True
 
     def _get_stm_conn(self):
         """Get thread-local short-term memory SQLite connection."""
