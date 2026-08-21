@@ -11,6 +11,7 @@ Covers:
 import asyncio
 import inspect
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -198,11 +199,13 @@ class TestMonitorGate:
         assert decision.state_updates is None
 
     def test_command_output_limit_does_not_replace_watermark(self):
+        command = (
+            f'"{sys.executable}" -c '
+            '"import sys; sys.stdout.write(\'x\' * 9000)"'
+        )
         decision = MonitorGate().should_run(
             FakeJob(
-                monitor={
-                    "command": "head -c 9000 /dev/zero | tr '\\0' x",
-                },
+                monitor={"command": command},
             ),
             state={"monitor_sha256": "keep-me"},
         )
@@ -478,6 +481,42 @@ class TestPreRunNotAgentCallable:
 
 
 class TestMonitorCli:
+    def test_monitor_update_uses_id_after_full_success_prefix(self, monkeypatch):
+        import praisonaiagents.tools.schedule_tools as tools
+        from praisonai.cli.commands.schedule import app
+        from typer.testing import CliRunner
+
+        name = "watch (id: wrong-id)"
+        job = FakeJob(id="real-id")
+
+        class FakeStore:
+            def get(self, job_id):
+                assert job_id == "real-id"
+                return job
+
+            def update(self, _job):
+                return None
+
+        monkeypatch.setattr(
+            tools,
+            "schedule_add",
+            lambda **_kwargs: (
+                f"Schedule '{name}' added (id: real-id, hourly)."
+            ),
+        )
+        monkeypatch.setattr(tools, "_get_store", lambda: FakeStore())
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "add", name, "--schedule", "hourly",
+                "--monitor-command", "printf value",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert job.monitor == {"command": "printf value"}
+
     def test_monitor_command_is_persisted_by_trusted_cli(self, monkeypatch):
         import praisonaiagents.tools.schedule_tools as tools
         from praisonai.cli.commands.schedule import app

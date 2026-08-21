@@ -149,8 +149,11 @@ def schedule_add_cmd(
         # created the job. A duplicate-name response ("already exists") is a
         # rejection: mutating the existing job here would let a rejected add
         # reconfigure a live schedule (e.g. attach a new --command/--backend).
-        job_created = f"Schedule '{name}' added" in result
-        job_id_match = re.search(r"\(id: ([^,\s)]+)(?:,|\))", result)
+        success_prefix = f"Schedule '{name}' added (id: "
+        job_id_match = re.match(
+            rf"^{re.escape(success_prefix)}([^,\s)]+)(?:,|\))", result,
+        )
+        job_created = job_id_match is not None
         want_pin_update = bool(model) or (not pin and not command)
         if (
             pre_run

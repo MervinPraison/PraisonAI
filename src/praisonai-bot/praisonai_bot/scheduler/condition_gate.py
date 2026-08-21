@@ -74,11 +74,12 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, address: str, port: int, timeout: float) -> None:
+        self._ssl_context = ssl.create_default_context()
         super().__init__(
             host,
             port=port,
             timeout=timeout,
-            context=ssl.create_default_context(),
+            context=self._ssl_context,
         )
         self._address = address
 
@@ -87,7 +88,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             (self._address, self.port), self.timeout, self.source_address,
         )
         try:
-            self.sock = self._context.wrap_socket(
+            self.sock = self._ssl_context.wrap_socket(
                 raw_socket, server_hostname=self.host,
             )
         except Exception:
