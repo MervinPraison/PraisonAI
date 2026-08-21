@@ -15,7 +15,6 @@ import re
 import secrets
 import time
 import uuid
-from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
@@ -1084,15 +1083,22 @@ class WebSocketGateway:
         # surfaces that start an agent run from an external event. Routes are
         # mounted dynamically when the server starts.
         self._hooks: Dict[str, Any] = {}  # path -> HookConfig
-        # Bounded idempotency store: dedup key -> insertion time (seconds).
-        self._hook_idempotency: "OrderedDict[str, float]" = OrderedDict()
+        # Inbound webhook/trigger dedup store (#4208). Built lazily via
+        # ``_hook_idem`` from the ``hooks.idempotency.store_backend`` config
+        # knob: ``"memory"`` (default, per-process) or ``"sqlite"`` (durable,
+        # survives a restart within a provider's retry window). The store
+        # implements the core ``IdempotencyStoreProtocol`` reserve/record/release
+        # contract; the durable backend makes the atomic "already seen or in
+        # flight" claim a crash-safe ``UNIQUE`` insert.
+        self._hook_idem: Any = None
         self._hook_idempotency_max = 10_000
         self._hook_idempotency_ttl = 86_400.0  # 24h
-        # Keys currently being processed. Used to deduplicate *concurrent*
-        # identical deliveries: the idempotency store is only written after a
-        # run succeeds, so without this set two simultaneous requests would both
-        # pass the seen-check across the ``await`` and run the agent twice.
-        self._hook_inflight: set = set()
+        # Backend selected by ``hooks.idempotency.store_backend`` in the parsed
+        # YAML (``"memory"`` default, ``"sqlite"`` for restart durability). It is
+        # captured in ``_apply_hooks_from_config`` — the only path that sees the
+        # raw ``hooks`` dict — because ``GatewayConfig`` carries no idempotency
+        # field. ``None`` until a config with a ``hooks:`` block is applied.
+        self._hook_idempotency_backend: Optional[str] = None
 
         # Issue #3021: opt-in gateway lifecycle — idle/scale-to-zero, epoch-aware
         # external drain marker, and a crash-loop restart guard. These reuse the
@@ -4151,49 +4157,95 @@ class WebSocketGateway:
         hooks_cfg = cfg.get("hooks")
         if hooks_cfg is None:
             hooks_cfg = cfg.get("gateway", {}).get("hooks")
+
+        # Capture the inbound dedup backend (#4208). ``hooks`` is normally a list
+        # of hook entries, so the ``idempotency`` knob lives as a sibling
+        # (``hooks_idempotency``/``idempotency``); a mapping-shaped ``hooks:``
+        # block may instead nest it under ``hooks.idempotency``. Support both,
+        # then invalidate any store already built under the old backend so a
+        # hot-reload that flips ``memory``↔``sqlite`` takes effect.
+        idem_cfg: Any = None
+        if isinstance(hooks_cfg, dict):
+            idem_cfg = hooks_cfg.get("idempotency")
+            entries = hooks_cfg.get("hooks", [])
+        else:
+            entries = hooks_cfg
+        if idem_cfg is None:
+            idem_cfg = cfg.get("hooks_idempotency") or cfg.get("idempotency")
+            if idem_cfg is None:
+                idem_cfg = cfg.get("gateway", {}).get("hooks_idempotency")
+        backend: Optional[str] = None
+        if isinstance(idem_cfg, dict):
+            backend = idem_cfg.get("store_backend")
+        elif isinstance(idem_cfg, str):
+            backend = idem_cfg
+        if backend is not None:
+            backend = str(backend)
+        if backend != self._hook_idempotency_backend:
+            self._hook_idempotency_backend = backend
+            self._hook_idem = None  # rebuild lazily under the new backend
+
         self._hooks.clear()
-        if hooks_cfg:
-            self._register_hooks_from_config(hooks_cfg)
+        if entries:
+            self._register_hooks_from_config(entries)
+
+    def _get_hook_idem_store(self) -> Any:
+        """Build (once) and return the inbound idempotency store (#4208).
+
+        Backend is selected by ``hooks.idempotency.store_backend`` on the gateway
+        config (``"memory"`` default, ``"sqlite"`` for restart durability). The
+        durable SQLite store reuses the gateway's state dir, exactly as the
+        ingress journal and outbound queue do. Falls back to the in-memory
+        default on any build failure so inbound delivery keeps working.
+        """
+        if self._hook_idem is not None:
+            return self._hook_idem
+        # Backend is captured from the parsed ``hooks.idempotency`` config in
+        # ``_apply_hooks_from_config`` (``GatewayConfig`` carries no field for
+        # it). Default to the in-memory store when no config selected one.
+        backend = self._hook_idempotency_backend or "memory"
+        try:
+            from pathlib import Path
+            from praisonai_bot.bots import build_idempotency_store
+
+            self._hook_idem = build_idempotency_store(
+                backend,
+                path=Path.home() / ".praisonai" / "state" / "hook_idempotency.sqlite",
+                max_size=self._hook_idempotency_max,
+                ttl_seconds=self._hook_idempotency_ttl,
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            from praisonaiagents.gateway import InMemoryIdempotencyStore
+
+            logger.debug(
+                "build_idempotency_store unavailable, using in-memory dedup: %s", e
+            )
+            self._hook_idem = InMemoryIdempotencyStore(
+                max_entries=self._hook_idempotency_max,
+                ttl_seconds=self._hook_idempotency_ttl,
+            )
+        return self._hook_idem
 
     def _hook_reserve(self, key: str) -> bool:
         """Atomically claim ``key`` for processing.
 
         Returns ``True`` when the caller may proceed, ``False`` when the key was
         already recorded *or* is currently being processed by a concurrent
-        request. This check-and-reserve runs entirely synchronously (no
-        ``await``), so on the single-threaded event loop it is atomic and closes
-        the time-of-check/time-of-use race between the seen-check and the
-        deferred :meth:`_hook_record`.
+        request. Delegates to the configured :class:`IdempotencyStoreProtocol`
+        store, whose durable backend makes the claim survive a restart.
 
         On a falsy outcome the caller must release the reservation via
         :meth:`_hook_release`; on success it must call :meth:`_hook_record`.
-        Expired entries are pruned lazily here.
         """
-        now = time.time()
-        store = self._hook_idempotency
-        # Prune expired entries lazily.
-        if store:
-            ttl = self._hook_idempotency_ttl
-            expired = [k for k, ts in store.items() if now - ts > ttl]
-            for k in expired:
-                store.pop(k, None)
-        if key in store or key in self._hook_inflight:
-            return False
-        self._hook_inflight.add(key)
-        return True
+        return self._get_hook_idem_store().reserve(key)
 
     def _hook_release(self, key: str) -> None:
         """Release an in-flight reservation so the delivery can be retried."""
-        self._hook_inflight.discard(key)
+        self._get_hook_idem_store().release(key)
 
     def _hook_record(self, key: str) -> None:
-        """Record ``key`` as processed. Bounded so the store cannot grow unboundedly."""
-        self._hook_inflight.discard(key)
-        store = self._hook_idempotency
-        store[key] = time.time()
-        # Enforce max size (drop oldest).
-        while len(store) > self._hook_idempotency_max:
-            store.popitem(last=False)
+        """Record ``key`` as processed after a successful run."""
+        self._get_hook_idem_store().record(key)
 
     async def _run_hook(self, hook: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a hook: resolve session, run agent (or wake), deliver.

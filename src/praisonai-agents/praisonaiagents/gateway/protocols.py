@@ -1567,6 +1567,90 @@ class OutboundDeliveryProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class IdempotencyStoreProtocol(Protocol):
+    """Protocol for inbound webhook/trigger delivery deduplication.
+
+    The gateway's inbound HTTP hook surface must not start a second agent run
+    for an event a provider re-delivers (webhook providers routinely retry for
+    minutes to days). Deduplication is a three-step, restart-stable claim on the
+    deterministic idempotency key (``compute_idempotency_key``):
+
+      - ``reserve`` — atomically claim the key. Returns ``False`` when the key
+        was already recorded *or* is currently in flight, so both a redelivery
+        and a concurrent duplicate are rejected.
+      - ``record`` — commit the key after a successful run so future
+        redeliveries dedup.
+      - ``release`` — drop an in-flight reservation after a failed run so the
+        provider's retry can re-run.
+
+    This mirrors :class:`CallbackPayloadStoreProtocol`: the contract lives in
+    core so third-party gateways and a future ``redis`` backend interoperate;
+    core ships the bounded in-memory default (:class:`InMemoryIdempotencyStore`)
+    and the durable, restart-surviving SQLite backend lives in the
+    ``praisonai-bot`` runtime (as the ingress journal and outbound queue do).
+    """
+
+    def reserve(self, key: str) -> bool:
+        """Atomically claim ``key``; ``False`` if seen-or-in-flight."""
+        ...
+
+    def record(self, key: str) -> None:
+        """Commit ``key`` as processed after a successful run."""
+        ...
+
+    def release(self, key: str) -> None:
+        """Drop an in-flight reservation so a failed delivery can be retried."""
+        ...
+
+
+class InMemoryIdempotencyStore:
+    """Bounded, zero-dependency in-memory :class:`IdempotencyStoreProtocol`.
+
+    The default store for single-replica deployments — identical behaviour to
+    the gateway's original per-process ``OrderedDict`` + in-flight ``set``. It
+    is *not* durable: after a process restart the store is empty, so a durable
+    backend (SQLite/redis) must be injected for the restart/multi-replica case.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_entries: int = 10_000,
+        ttl_seconds: float = 86_400.0,
+    ) -> None:
+        self._max_entries = max(1, int(max_entries))
+        self._ttl_seconds = float(ttl_seconds)
+        # key -> insertion time (seconds); insertion-ordered for FIFO eviction.
+        self._seen: "Dict[str, float]" = {}
+        self._inflight: Set[str] = set()
+
+    def _purge_expired(self, now: float) -> None:
+        if not self._seen:
+            return
+        expired = [k for k, ts in self._seen.items() if now - ts > self._ttl_seconds]
+        for k in expired:
+            self._seen.pop(k, None)
+
+    def reserve(self, key: str) -> bool:
+        now = time.time()
+        self._purge_expired(now)
+        if key in self._seen or key in self._inflight:
+            return False
+        self._inflight.add(key)
+        return True
+
+    def record(self, key: str) -> None:
+        self._inflight.discard(key)
+        self._seen[key] = time.time()
+        while len(self._seen) > self._max_entries:
+            oldest = next(iter(self._seen))
+            self._seen.pop(oldest, None)
+
+    def release(self, key: str) -> None:
+        self._inflight.discard(key)
+
+
 # ---------------------------------------------------------------------------
 # Per-route, trust-tiered toolset scoping (Issue #2298)
 # ---------------------------------------------------------------------------
