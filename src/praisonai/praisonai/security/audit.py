@@ -100,6 +100,32 @@ class AuditLogHook:
         line = json.dumps(entry, default=str) + "\n"
         try:
             with self._lock:
+                # Detect rotation: if the on-disk path is gone (rm) or now points
+                # at a different inode than our open handle (logrotate/mv), our fd
+                # refers to the unlinked/rotated file. Drop it so we reopen the
+                # fresh path below and audit records keep landing on disk.
+                if self._fh is not None:
+                    try:
+                        on_disk = os.stat(self._log_path)
+                    except FileNotFoundError:
+                        on_disk = None
+                    try:
+                        if on_disk is None or (
+                            os.fstat(self._fh.fileno()).st_ino != on_disk.st_ino
+                        ):
+                            self._fh.close()
+                            self._fh = None
+                    except OSError:
+                        # fstat/close raised: still close best-effort before
+                        # dropping our only reference, so we don't leak the fd
+                        # (repeated leaks could exhaust descriptors). The inner
+                        # close is guarded so a failing close never masks the
+                        # reopen below.
+                        try:
+                            self._fh.close()
+                        except OSError:
+                            pass
+                        self._fh = None
                 # Lazy initialize file handle
                 if self._fh is None:
                     # Ensure the log file is user-only (0o600) regardless of
