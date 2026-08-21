@@ -3,6 +3,6 @@
 from praisonai._bootstrap import ensure_praisonai_bot
 
 ensure_praisonai_bot()
-from praisonai_bot.scheduler.condition_gate import ShellConditionGate
+from praisonai_bot.scheduler.condition_gate import MonitorGate, ShellConditionGate
 
-__all__ = ["ShellConditionGate"]
+__all__ = ["MonitorGate", "ShellConditionGate"]
