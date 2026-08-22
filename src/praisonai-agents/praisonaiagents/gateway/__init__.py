@@ -161,6 +161,11 @@ from .protocols import (
     TurnPlacement,
     TurnExecutorProtocol,
     InProcessTurnExecutor,
+    # Global operator emergency-stop / pause brake (Issue #4220)
+    EmergencyStopState,
+    EmergencyStopProtocol,
+    NullEmergencyStop,
+    FileEmergencyStop,
     # Schema-validated inbound frame codec (Issue #2831)
     HelloParams,
     HelloResult,
@@ -211,6 +216,7 @@ from .config import (
     GatewayConfig,
     SessionConfig,
     ApiConfig,
+    EmergencyStopConfig,
     ChannelRouteConfig,
     MultiChannelGatewayConfig,
     # Config version stamp + doctor-driven migration (Issue #3841)
@@ -433,6 +439,11 @@ __all__ = [
     "TurnPlacement",
     "TurnExecutorProtocol",
     "InProcessTurnExecutor",
+    # Global operator emergency-stop / pause brake (Issue #4220)
+    "EmergencyStopState",
+    "EmergencyStopProtocol",
+    "NullEmergencyStop",
+    "FileEmergencyStop",
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams",
     "HelloResult",
@@ -477,6 +488,7 @@ __all__ = [
     "GatewayConfig",
     "SessionConfig",
     "ApiConfig",
+    "EmergencyStopConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
     # Config version stamp + doctor-driven migration (Issue #3841)
