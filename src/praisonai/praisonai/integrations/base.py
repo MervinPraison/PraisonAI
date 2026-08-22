@@ -183,20 +183,27 @@ class BaseCLIIntegration(ABC):
         )
         
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout
-            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
             
             # Check exit code and raise error if non-zero
             if proc.returncode != 0:
                 raise CLIExecutionError(cmd, proc.returncode, stderr.decode(errors="replace"))
             
             return stdout.decode(errors="replace")
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise TimeoutError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+        finally:
+            # Reap the child on any exit path — including caller cancellation
+            # (CancelledError), which is not caught above — so a cancelled
+            # request never leaks a running subprocess plus its two pipes.
+            if proc.returncode is None:
+                proc.kill()
+                with contextlib.suppress(ProcessLookupError):
+                    await proc.wait()
     
     async def execute_async_with_stderr(
         self, 
@@ -227,20 +234,27 @@ class BaseCLIIntegration(ABC):
         )
         
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout
-            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
             
             # Check exit code and raise error if non-zero
             if proc.returncode != 0:
                 raise CLIExecutionError(cmd, proc.returncode, stderr.decode(errors="replace"))
             
             return stdout.decode(errors="replace"), stderr.decode(errors="replace")
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise TimeoutError(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+        finally:
+            # Reap the child on any exit path — including caller cancellation
+            # (CancelledError), which is not caught above — so a cancelled
+            # request never leaks a running subprocess plus its two pipes.
+            if proc.returncode is None:
+                proc.kill()
+                with contextlib.suppress(ProcessLookupError):
+                    await proc.wait()
     
     async def stream_async(
         self, 

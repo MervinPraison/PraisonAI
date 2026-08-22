@@ -185,41 +185,84 @@ class DynamoDBStateStore(StateStore):
         except self._client.exceptions.ConditionalCheckFailedException:
             return False
     
+    def _hash_field(self, item: dict) -> Dict[str, Any]:
+        """Extract the hash map from a stored item.
+
+        Hash fields live in a native DynamoDB ``Map`` attribute (``hash``) so
+        individual fields can be updated atomically. Falls back to the legacy
+        JSON-string ``value`` for items written before this store used a map.
+        """
+        if not item:
+            return {}
+        hashed = item.get("hash")
+        if isinstance(hashed, dict):
+            return hashed
+        value = item.get("value")
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        return value if isinstance(value, dict) else {}
+
     def hget(self, key: str, field: str) -> Optional[Any]:
         """Get a field from a hash."""
-        value = self.get(key)
-        if not isinstance(value, dict):
+        response = self._table.get_item(Key={"pk": key})
+        item = response.get("Item")
+        if not item or (item.get("ttl") and item["ttl"] <= int(time.time())):
             return None
-        return value.get(field)
+        return self._hash_field(item).get(field)
     
     def hset(self, key: str, field: str, value: Any) -> None:
-        """Set a field in a hash."""
-        current = self.get(key)
-        if not isinstance(current, dict):
-            current = {}
-        current[field] = value
-        self.set(key, current)
+        """Set a field in a hash.
+
+        Uses an atomic ``UpdateExpression`` on a native map attribute so
+        concurrent writers to different fields of the same key do not clobber
+        each other.
+        """
+        # A single UpdateExpression cannot both create the parent map and set a
+        # nested field, so seed an empty map only when it is missing first.
+        self._table.update_item(
+            Key={"pk": key},
+            UpdateExpression="SET #h = if_not_exists(#h, :empty)",
+            ExpressionAttributeNames={"#h": "hash"},
+            ExpressionAttributeValues={":empty": {}},
+        )
+        self._table.update_item(
+            Key={"pk": key},
+            UpdateExpression="SET #h.#f = :val, updated_at = :now",
+            ExpressionAttributeNames={"#h": "hash", "#f": field},
+            ExpressionAttributeValues={":val": value, ":now": int(time.time())},
+        )
     
     def hgetall(self, key: str) -> Dict[str, Any]:
         """Get all fields from a hash."""
-        value = self.get(key)
-        if not isinstance(value, dict):
+        response = self._table.get_item(Key={"pk": key})
+        item = response.get("Item")
+        if not item or (item.get("ttl") and item["ttl"] <= int(time.time())):
             return {}
-        return value
+        return dict(self._hash_field(item))
     
     def hdel(self, key: str, *fields: str) -> int:
-        """Delete fields from a hash."""
-        current = self.get(key)
-        if not isinstance(current, dict):
+        """Delete fields from a hash.
+
+        Uses an atomic ``REMOVE`` UpdateExpression so it does not clobber
+        concurrent writes to other fields of the same key.
+        """
+        if not fields:
             return 0
-        count = 0
-        for field in fields:
-            if field in current:
-                del current[field]
-                count += 1
-        if count > 0:
-            self.set(key, current)
-        return count
+        names = {f"#f{i}": f for i, f in enumerate(fields)}
+        expr = "REMOVE " + ", ".join(f"#h.{n}" for n in names)
+        try:
+            self._table.update_item(
+                Key={"pk": key},
+                UpdateExpression=expr,
+                ExpressionAttributeNames={"#h": "hash", **names},
+                ConditionExpression="attribute_exists(pk)",
+            )
+            return len(fields)
+        except Exception:
+            return 0
     
     def close(self) -> None:
         """Close the store."""
