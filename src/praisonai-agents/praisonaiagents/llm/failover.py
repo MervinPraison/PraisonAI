@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -24,6 +25,9 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
+
+if TYPE_CHECKING:
+    from .quota import QuotaCoordinatorProtocol
 
 logger = get_logger(__name__)
 
@@ -207,13 +211,27 @@ class FailoverManager:
         profile = manager.get_next_profile()
     """
     
-    def __init__(self, config: Optional[FailoverConfig] = None):
+    def __init__(
+        self,
+        config: Optional[FailoverConfig] = None,
+        coordinator: Optional["QuotaCoordinatorProtocol"] = None,
+    ):
         """Initialize the failover manager.
         
         Args:
             config: Failover configuration
+            coordinator: Optional shared quota coordinator. When supplied
+                (e.g. a Redis-backed one wired by the gateway), credential
+                benches/cooldowns are coordinated fleet-wide so a key benched
+                by any replica is skipped by all replicas. Defaults to an
+                in-memory local coordinator, keeping single-replica behaviour
+                exactly as before with no new dependency and no hot-path cost.
         """
         self.config = config or FailoverConfig()
+        if coordinator is None:
+            from .quota import LocalQuotaCoordinator
+            coordinator = LocalQuotaCoordinator()
+        self._coordinator: "QuotaCoordinatorProtocol" = coordinator
         self._profiles: List[AuthProfile] = []
         self._current_index: int = 0
         self._on_failover_callbacks: List[Callable[[AuthProfile, AuthProfile], None]] = []
@@ -274,6 +292,30 @@ class FailoverManager:
         with self._lock:
             return list(self._profiles)
     
+    def _sync_bench_from_coordinator(
+        self, profile: AuthProfile, now: Optional[float] = None
+    ) -> None:
+        """Apply a fleet-wide bench from the coordinator onto a local profile.
+
+        If another replica benched this credential, reflect its cooldown here
+        so this replica skips it too. Fail-open: never raise into failover.
+        Callers already hold ``self._lock``.
+        """
+        try:
+            until = self._coordinator.benched_until(profile.name, now=now)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(
+                f"Quota coordinator lookup failed for '{profile.name}': {e}; "
+                f"using local cooldown state"
+            )
+            return
+        if until is not None and (
+            profile.cooldown_until is None or until > profile.cooldown_until
+        ):
+            if profile.status == ProviderStatus.AVAILABLE:
+                profile.status = ProviderStatus.RATE_LIMITED
+            profile.cooldown_until = until
+
     def get_next_profile(self) -> Optional[AuthProfile]:
         """Get the next available profile.
         
@@ -287,9 +329,10 @@ class FailoverManager:
             if not self._profiles:
                 return None
             
-            # First, check if any cooldowns have expired
+            # First, sync fleet-wide benches, then check if any cooldowns have expired.
             current_time = time.time()
             for profile in self._profiles:
+                self._sync_bench_from_coordinator(profile, now=current_time)
                 if profile.cooldown_until and current_time >= profile.cooldown_until:
                     profile.reset()
             
@@ -328,12 +371,27 @@ class FailoverManager:
                     f"Profile '{profile.name}' rate limited, "
                     f"cooldown for {self.config.cooldown_on_rate_limit}s"
                 )
+                reason = "rate_limit"
             else:
                 profile.mark_error(error, self.config.cooldown_on_error)
                 logger.warning(
                     f"Profile '{profile.name}' error: {error}, "
                     f"cooldown for {self.config.cooldown_on_error}s"
                 )
+                reason = "error"
+
+            # Share the bench fleet-wide so other replicas skip this key too.
+            # Fail-open: a coordinator hiccup must never wedge failover.
+            if profile.cooldown_until is not None:
+                try:
+                    self._coordinator.bench(
+                        profile.name, until=profile.cooldown_until, reason=reason
+                    )
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.warning(
+                        f"Quota coordinator bench failed for '{profile.name}': {e}; "
+                        f"falling back to local cooldown only"
+                    )
             
             # Resolve the target profile and snapshot callbacks while holding
             # the lock, but invoke them AFTER releasing it. User callbacks may
@@ -363,6 +421,12 @@ class FailoverManager:
             if profile.status != ProviderStatus.AVAILABLE:
                 profile.reset()
                 logger.info(f"Profile '{profile.name}' recovered")
+                try:
+                    self._coordinator.clear(profile.name)
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.warning(
+                        f"Quota coordinator clear failed for '{profile.name}': {e}"
+                    )
     
     def on_failover(
         self,
