@@ -157,28 +157,29 @@ class TestConcurrentMemoryAccess:
 
 
 class TestLazyCacheThreadSafety:
-    """Test _lazy_cache thread safety."""
+    """Test lazy loading thread safety."""
     
     def test_lazy_cache_access_thread_safe(self):
-        """_lazy_cache access should be thread-safe."""
-        from praisonaiagents import _get_lazy_cache
+        """Concurrent lazy attribute access should resolve to a single cached object."""
+        import praisonaiagents
         
         errors = []
+        results = []
         
-        def access_cache():
+        def access_lazy_attr():
             try:
-                cache = _get_lazy_cache()
-                assert isinstance(cache, dict)
+                results.append(praisonaiagents.Task)
             except Exception as e:
                 errors.append(str(e))
         
-        threads = [threading.Thread(target=access_cache) for _ in range(10)]
+        threads = [threading.Thread(target=access_lazy_attr) for _ in range(10)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
         
         assert len(errors) == 0, f"Thread errors: {errors}"
+        assert all(r is results[0] for r in results)
 
 
 if __name__ == "__main__":
