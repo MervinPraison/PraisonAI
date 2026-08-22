@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 78 | 28605 |
+| ✅ Gateway | 7 | 78 | 28808 |
 | ✅ Guardrails | 4 | 4 | 2205 |
 | ✅ Handoffs | 11 | 6 | 2567 |
 | ✅ Hooks | 2 | 9 | 4488 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6766 lines)
+- ℹ️ Database (42 docs, 6955 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
