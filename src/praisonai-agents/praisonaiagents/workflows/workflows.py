@@ -1362,6 +1362,13 @@ class AgentFlow:
                 results.extend(parallel_result["steps"])
                 previous_output = parallel_result["output"]
                 all_variables.update(parallel_result.get("variables", {}))
+                # A nested step with on_error="stop" halts the whole workflow,
+                # not just the parallel block: honor the propagated stop signal.
+                if parallel_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by nested parallel step")
+                    break
                 i += 1
                 continue
                 
@@ -2419,7 +2426,9 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             return {
                 "step": f"parallel_{index}",
                 "output": parallel_result.get("output", ""),
-                "stop": False,
+                # Propagate a nested stop request so an on_error="stop" step
+                # inside the parallel block halts the enclosing workflow.
+                "stop": parallel_result.get("stop", False),
                 "variables": parallel_result.get("variables", all_variables)
             }
         
@@ -2915,6 +2924,7 @@ CONCISE SUMMARY:"""
                 futures.append((idx, future))
             
             errors = []
+            parallel_stopped = False
             for idx, future in futures:
                 try:
                     step_result = future.result()
@@ -2930,6 +2940,11 @@ CONCISE SUMMARY:"""
                     # Parallel on_failure modes still fire instead of silently
                     # treating the exception text as a real branch output.
                     branch_error = step_result.get("error")
+                    # A branch step with on_error="stop" (Task default) requests a
+                    # workflow-wide halt. Capture it so the enclosing workflow stops
+                    # after this parallel block, matching Loop/Route/Repeat/If.
+                    if step_result.get("stop"):
+                        parallel_stopped = True
 
                 if branch_error is None:
                     results.append({"step": step_result["step"], "output": step_result["output"]})
@@ -2955,6 +2970,14 @@ CONCISE SUMMARY:"""
                     # Record the failure but continue with other branches. Do not
                     # fold the exception text into outputs as if it were data.
                     results.append({"step": f"parallel_{idx}", "output": None, "error": str(branch_error)})
+                    # Keep `outputs` index-aligned with parallel_step.steps so a
+                    # downstream reader of parallel_outputs[idx] cannot silently
+                    # receive a later branch's result once an earlier one fails.
+                    outputs.append(None)
+                    # A failed branch whose step requested on_error="stop" halts the
+                    # enclosing workflow even under partial_ok.
+                    if step_result is not None and step_result.get("stop"):
+                        parallel_stopped = True
             
             # Check if we should fail after all branches completed
             if errors and parallel_step.on_failure == "fail_all":
@@ -2971,7 +2994,7 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"✅ Parallel complete: {len(outputs)} results")
         
-        return {"steps": results, "output": combined_output, "variables": all_variables}
+        return {"steps": results, "output": combined_output, "variables": all_variables, "stop": parallel_stopped}
     
     def _execute_loop(
         self,

@@ -5812,6 +5812,11 @@ Summary:"""
             try:
                 from ..memory.memory import Memory
                 config = {"provider": _resolve_memory_adapter_name(memory)}
+                # Scope the store to this agent's isolation id (same id the
+                # FileMemory branches use) so two agents in one process/dir do
+                # not silently share one on-disk store when no user_id is given.
+                config.setdefault("user_id", mem_user_id)
+                config.setdefault("collection_name", f"memory_{mem_user_id}")
                 self._memory_instance = Memory(config)
             except ImportError:
                 logging.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")
@@ -5822,11 +5827,18 @@ Summary:"""
             provider = memory.get("provider", memory.get("backend", "file"))
             learn_enabled = memory.get("learn", False)
             
+            # Build a scoped config so an explicit user_id in the dict wins but a
+            # missing one falls back to this agent's isolation id (matching the
+            # FileMemory branches) instead of a process-wide shared store.
+            scoped_memory = dict(memory)
+            scoped_memory.setdefault("user_id", mem_user_id)
+            scoped_memory.setdefault("collection_name", f"memory_{scoped_memory['user_id']}")
+
             # Use full Memory class if learn is enabled (requires LearnManager)
             if learn_enabled:
                 try:
                     from ..memory.memory import Memory
-                    self._memory_instance = Memory(memory)
+                    self._memory_instance = Memory(scoped_memory)
                 except ImportError:
                     logging.warning("Memory with learn requires additional dependencies. Falling back to FileMemory (learn disabled).")
                     from ..memory.file_memory import FileMemory
@@ -5840,7 +5852,7 @@ Summary:"""
             else:
                 try:
                     from ..memory.memory import Memory
-                    self._memory_instance = Memory(memory)
+                    self._memory_instance = Memory(scoped_memory)
                 except ImportError:
                     logging.warning("Full Memory class requires additional dependencies. Falling back to FileMemory.")
                     from ..memory.file_memory import FileMemory
