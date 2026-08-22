@@ -27,7 +27,7 @@ SUPPRESSED_PATTERNS = [
     "The `dict` method is deprecated; use `model_dump` instead",
     "Pydantic serializer warnings",
     "PydanticSerializationUnexpectedValue",
-    "Expected",  # Catches all "Expected N fields but got M" patterns
+    "fields but got",  # litellm/pydantic "Expected N fields but got M"
     "Expected `StreamingChoices` but got `Choices`",
     "serialized value may not be as expected",
     "Mixing V1 models and V2 models",

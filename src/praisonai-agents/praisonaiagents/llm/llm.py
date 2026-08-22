@@ -6323,6 +6323,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         is_reasoning=False,
                     ))
 
+            elif evt_type == "response.reasoning_summary_text.delta":
+                delta_text = (event.get("delta", "") if isinstance(event, dict)
+                              else getattr(event, "delta", ""))
+                if _emit and delta_text:
+                    stream_callback(StreamEvent(
+                        type=StreamEventType.DELTA_TEXT,
+                        timestamp=time.perf_counter(),
+                        content=delta_text,
+                        is_reasoning=True,
+                    ))
+
             elif evt_type == "response.function_call_arguments.delta":
                 idx = (event.get("output_index", 0) if isinstance(event, dict)
                        else getattr(event, "output_index", 0))
