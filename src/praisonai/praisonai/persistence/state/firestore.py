@@ -41,11 +41,19 @@ class FirestoreStateStore(StateStore):
                 "Install with: pip install google-cloud-firestore"
             )
         
-        if credentials_path:
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-        
         project = project or os.getenv("FIRESTORE_PROJECT")
-        self._client = firestore.Client(project=project)
+        # Scope credentials to this client instead of mutating the
+        # process-wide environment, which would leak one tenant's
+        # service account into every other Google Cloud client.
+        if credentials_path:
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_file(
+                credentials_path
+            )
+            self._client = firestore.Client(project=project, credentials=creds)
+        else:
+            self._client = firestore.Client(project=project)
+        self._firestore = firestore
         self._collection = self._client.collection(collection)
         
         logger.info(f"Connected to Firestore collection: {collection}")
@@ -142,12 +150,16 @@ class FirestoreStateStore(StateStore):
         return value.get(field)
     
     def hset(self, key: str, field: str, value: Any) -> None:
-        """Set a field in a hash."""
-        current = self.get(key)
-        if not isinstance(current, dict):
-            current = {}
-        current[field] = value
-        self.set(key, current)
+        """Set a field in a hash.
+
+        Uses Firestore's atomic field-level merge so concurrent writers to
+        different fields of the same key do not clobber each other, and any
+        existing TTL (``expires_at``) is preserved.
+        """
+        self._collection.document(key).set(
+            {"value": {field: value}, "updated_at": time.time()},
+            merge=True,
+        )
     
     def hgetall(self, key: str) -> Dict[str, Any]:
         """Get all fields from a hash."""
@@ -157,18 +169,28 @@ class FirestoreStateStore(StateStore):
         return value
     
     def hdel(self, key: str, *fields: str) -> int:
-        """Delete fields from a hash."""
-        current = self.get(key)
-        if not isinstance(current, dict):
+        """Delete fields from a hash.
+
+        Uses Firestore's atomic field-level delete so it does not clobber
+        concurrent writes to other fields of the same key.
+        """
+        if not fields:
             return 0
-        count = 0
-        for field in fields:
-            if field in current:
-                del current[field]
-                count += 1
-        if count > 0:
-            self.set(key, current)
-        return count
+        existing = self.get(key)
+        if not isinstance(existing, dict):
+            return 0
+        present = [f for f in fields if f in existing]
+        if not present:
+            return 0
+        doc = self._collection.document(key)
+        updates = {
+            f"value.{field}": self._firestore.DELETE_FIELD for field in present
+        }
+        try:
+            doc.update(updates)
+            return len(present)
+        except Exception:
+            return 0
     
     def close(self) -> None:
         """Close the store."""

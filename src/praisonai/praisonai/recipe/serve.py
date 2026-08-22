@@ -40,9 +40,12 @@ trace_exporter: none      # none, otlp, jaeger, zipkin
 ```
 """
 
+import asyncio
+import contextlib
 import hmac
 import json
 import os
+import threading
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -451,7 +454,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         tags = request.query_params.get("tags")
         tags_list = tags.split(",") if tags else None
         
-        recipes = recipe.list_recipes(
+        recipes = await asyncio.to_thread(
+            recipe.list_recipes,
             source_filter=source_filter,
             tags=tags_list,
         )
@@ -465,7 +469,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         name = request.path_params["name"]
         
         from praisonai import recipe
-        info = recipe.describe(name)
+        info = await asyncio.to_thread(recipe.describe, name)
         
         if info is None:
             return JSONResponse(
@@ -480,7 +484,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         name = request.path_params["name"]
         
         from praisonai import recipe
-        info = recipe.describe(name)
+        info = await asyncio.to_thread(recipe.describe, name)
         
         if info is None:
             return JSONResponse(
@@ -518,7 +522,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         session_id = body.get("session_id")
         
         from praisonai import recipe
-        result = recipe.run(
+        result = await asyncio.to_thread(
+            recipe.run,
             recipe_name,
             input=input_data,
             config=config_data,
@@ -568,17 +573,60 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         
         async def event_generator():
             from praisonai import recipe
-            for event in recipe.run_stream(
-                recipe_name,
-                input=input_data,
-                config=config_data,
-                session_id=session_id,
-                options=options,
-            ):
-                yield {
-                    "event": event.event_type,
-                    "data": json.dumps(event.data),
-                }
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+            SENTINEL = object()
+            stop = threading.Event()
+
+            def pump():
+                # Drive the sync generator on a worker thread and hand each
+                # event back to the loop so no ``next()`` blocks the event loop.
+                try:
+                    for event in recipe.run_stream(
+                        recipe_name,
+                        input=input_data,
+                        config=config_data,
+                        session_id=session_id,
+                        options=options,
+                    ):
+                        if stop.is_set():
+                            break
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                queue.put(event), loop
+                            ).result()
+                        except RuntimeError:
+                            # Event loop is gone (client disconnected/shutdown).
+                            break
+                finally:
+                    with contextlib.suppress(RuntimeError):
+                        asyncio.run_coroutine_threadsafe(
+                            queue.put(SENTINEL), loop
+                        ).result()
+
+            worker = asyncio.create_task(asyncio.to_thread(pump))
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is SENTINEL:
+                        break
+                    yield {
+                        "event": item.event_type,
+                        "data": json.dumps(item.data),
+                    }
+            finally:
+                # Signal the producer to stop, then keep draining the queue so
+                # any pending ``queue.put`` on the worker thread unblocks and the
+                # generator terminates instead of leaking the thread.
+                stop.set()
+                while not worker.done():
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        while True:
+                            queue.get_nowait()
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(asyncio.shield(worker), timeout=0.1)
+                with contextlib.suppress(Exception):
+                    await worker
         
         return EventSourceResponse(event_generator())
     
@@ -600,7 +648,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
             )
         
         from praisonai import recipe
-        result = recipe.validate(recipe_name)
+        result = await asyncio.to_thread(recipe.validate, recipe_name)
         
         status_code = 200 if result.valid else 400
         return JSONResponse(result.to_dict(), status_code=status_code)
@@ -621,11 +669,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         """POST /admin/reload - Hot reload recipe registry."""
         try:
             from praisonai import recipe
-            # Clear any cached recipes and reload
-            if hasattr(recipe, '_recipe_cache'):
-                recipe._recipe_cache.clear()
-            if hasattr(recipe, 'reload_registry'):
-                recipe.reload_registry()
+
+            def _reload():
+                # Clear any cached recipes and reload
+                if hasattr(recipe, '_recipe_cache'):
+                    recipe._recipe_cache.clear()
+                if hasattr(recipe, 'reload_registry'):
+                    recipe.reload_registry()
+
+            await asyncio.to_thread(_reload)
             
             return JSONResponse({
                 "status": "reloaded",
