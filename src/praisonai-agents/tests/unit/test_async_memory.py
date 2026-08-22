@@ -163,6 +163,11 @@ class TestLazyCacheThreadSafety:
         """Concurrent lazy attribute access should resolve to a single cached object."""
         import praisonaiagents
         
+        # Evict any pre-cached value so the concurrent access below actually
+        # exercises the synchronized first-load path (double-checked lock in
+        # _lazy.lazy_import) instead of taking the unlocked cache fast path.
+        praisonaiagents._lazy_cache.pop('Task', None)
+        
         errors = []
         results = []
         
