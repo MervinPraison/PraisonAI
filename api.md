@@ -255,6 +255,7 @@ Methods:
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">finalize_task_output</a>(content: str, agent_name: str, quality_score: float, threshold: float = 0.7, metrics: Dict[str, Any] = None, task_id: str = None)</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">forget</a>(**kwargs) -> int</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">get_all_memories</a>() -> List[Dict[str, Any]]</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">get_context</a>(query: Optional[str] = None, **kwargs) -> str</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">get_learn_context</a>() -> str</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">learn</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">recall</a>(query: str, **kwargs) -> List[Dict[str, Any]]</code>
