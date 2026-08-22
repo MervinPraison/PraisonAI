@@ -113,9 +113,12 @@ class FunctionTool(BaseTool):
         retry_policy: Optional[Any] = None,
         approval: Optional[Union[bool, str]] = None,
         requires_approval: Union[bool, str] = _UNSET,
-        to_model_output: Optional[Callable[[Any], Any]] = None
+        to_model_output: Optional[Callable[[Any], Any]] = None,
+        restart_safe: Optional[bool] = None
     ):
         self._func = func
+        # Restart-safety contract for durable resume (see BaseTool.restart_safe).
+        self.restart_safe = restart_safe
         # Optional compact model-facing view builder: result -> compact view.
         self._to_model_output = to_model_output
         self.name = name or func.__name__
@@ -240,7 +243,8 @@ def tool(
     retry_policy: Optional[Any] = None,
     approval: Optional[Union[bool, str]] = None,
     requires_approval: Union[bool, str] = _UNSET,
-    to_model_output: Optional[Callable[[Any], Any]] = None
+    to_model_output: Optional[Callable[[Any], Any]] = None,
+    restart_safe: Optional[bool] = None
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     
@@ -293,6 +297,13 @@ def tool(
             the executor feeds this compact view to the LLM (context economy)
             while the full result stays available to display, hooks, and
             downstream consumers. Defaults to ``None`` (model sees full output).
+        restart_safe: Declare the tool's replay behaviour for durable resume.
+            ``True`` marks a read-only/idempotent tool that is safe to re-run
+            after a crash; ``False`` marks an effectful tool that must never be
+            silently re-executed on resume (an in-flight call surfaces a
+            recorded, operator-visible outcome to reconcile instead). Defaults
+            to ``None`` (undeclared): durable resume falls back to a read-only
+            name heuristic and fails closed when uncertain.
     
     Returns:
         FunctionTool instance that wraps the function
@@ -310,7 +321,8 @@ def tool(
             dynamic_schema_overrides=dynamic_schema_overrides,
             retry_policy=retry_policy,
             approval=resolved_approval,
-            to_model_output=to_model_output
+            to_model_output=to_model_output,
+            restart_safe=restart_safe
         )
 
         # Register approval requirement with the global registry so local,
