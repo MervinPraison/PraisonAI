@@ -143,14 +143,45 @@ class TestGatewayDurableRuns:
         assert agent is not None
         assert getattr(agent.execution, "durable", False) is True
 
-    def test_durable_runs_flag_defaults_false(self):
-        """Missing/invalid gateway config yields a non-durable default."""
+    def test_durable_runs_defaults_on_with_durable_store(self):
+        """Issue #4216: crash-safe resume auto-enables by default because the
+        session store is durable out of the box (no explicit opt-in needed)."""
         from praisonai_bot.gateway import WebSocketGateway
 
         gw = WebSocketGateway()
-        assert gw._durable_runs_from_config({}) is False
-        assert gw._durable_runs_from_config({"gateway": {}}) is False
-        assert gw._durable_runs_from_config(None) is False
+        assert gw._durable_runs_from_config({}) is True
+        assert gw._durable_runs_from_config({"gateway": {}}) is True
+        assert gw._durable_runs_from_config(None) is True
+
+    def test_durable_runs_off_when_sessions_not_persisted(self):
+        """No durable store (``session.persist: false``) → no journal-backed
+        resume to auto-enable, so it stays off (zero-overhead)."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        assert gw._durable_runs_from_config(
+            {"gateway": {"session": {"persist": False}}}
+        ) is False
+
+    def test_reliability_off_opts_out_of_durable_runs(self):
+        """``reliability: "off"`` (immediate-teardown posture) opts back out of
+        the crash-safe default."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        assert gw._durable_runs_from_config(
+            {"gateway": {"reliability": "off"}}
+        ) is False
+
+    def test_explicit_durable_runs_false_wins_over_default(self):
+        """An explicit ``durable_runs: false`` opts out even with a durable
+        store present."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        assert gw._durable_runs_from_config(
+            {"gateway": {"durable_runs": False}}
+        ) is False
 
     def test_per_agent_durable_overrides_gateway_default(self):
         """A per-agent ``durable: true`` opts in even when the gateway default is off."""
