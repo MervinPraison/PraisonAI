@@ -850,7 +850,11 @@ class ToolExecutionMixin:
                             # a transient the inner loop did NOT already re-drive:
                             #   • _outer_timeout — this loop's own wall-clock guard
                             #     tripped; the body ran once and the inner budget
-                            #     never saw it, so it earns one outer pass.
+                            #     never saw it. BUT the timed-out body is still
+                            #     running in an orphaned thread (future.cancel() is
+                            #     a no-op once started), so retrying a mutating tool
+                            #     would duplicate its side effects. Only re-drive it
+                            #     when the tool is known idempotent/read-only.
                             #   • circuit_open — returned by the inner loop WITHOUT a
                             #     body run, so retrying costs no duplicate side effect.
                             #   • _praison_retryable — a raised exception was flattened
@@ -868,7 +872,8 @@ class ToolExecutionMixin:
                             # RetryPolicy.retry_on the inner loop honours — not a word
                             # in the tool's own payload. Surface it once.
                             is_retryable = bool(
-                                result.get("_outer_timeout")
+                                (result.get("_outer_timeout")
+                                    and self._is_tool_idempotent(function_name))
                                 or result.get("circuit_open")
                                 or (result.get("_praison_retryable") is True
                                     and error_type not in inner_policy.retry_on)
@@ -2979,6 +2984,52 @@ class ToolExecutionMixin:
         
         else:
             return f"Unknown bridge tool: {function_name}"
+
+    def _is_tool_idempotent(self, tool_name):
+        """Whether re-running ``tool_name`` is safe (no duplicated side effects).
+
+        Used to decide if an OUTER wall-clock timeout may be retried: the timed-out
+        tool body is still running in an orphaned thread (``future.cancel()`` is a
+        no-op once started), so auto-retrying a mutating tool would duplicate its
+        side effects (send a second email, charge twice). Only tools classified as
+        read-only/idempotent are safe to re-drive.
+
+        Precedence: explicit ``idempotent`` attribute on the tool > the shared
+        read-only/mutating name registry (reused from the escalation loop guard).
+        Unknown tools default to NOT idempotent (safe: surface the timeout once).
+        """
+        tools = getattr(self, 'tools', [])
+        if not isinstance(tools, (list, tuple)):
+            tools = []
+        for tool in tools:
+            tool_name_attr = getattr(tool, '__name__', None) or getattr(tool, 'name', None)
+            if tool_name_attr == tool_name:
+                explicit = getattr(tool, 'idempotent', None)
+                if isinstance(explicit, bool):
+                    return explicit
+                break
+        # A tool from the process-global registry (only reachable when
+        # ToolConfig(allow_global_tools=True)) can carry its own explicit
+        # ``idempotent`` flag even when its name is absent from the shared
+        # read-only/mutating registries below.
+        if getattr(self, '_allow_global_tools', False):
+            try:
+                from ..tools.registry import get_registry
+                global_tool = get_registry().get(tool_name)
+                explicit = getattr(global_tool, 'idempotent', None)
+                if isinstance(explicit, bool):
+                    return explicit
+            except Exception:
+                pass
+        try:
+            from ..escalation.loop_guard import IDEMPOTENT_TOOLS, MUTATING_TOOLS
+        except Exception:
+            return False
+        if tool_name in IDEMPOTENT_TOOLS:
+            return True
+        if tool_name in MUTATING_TOOLS:
+            return False
+        return False
 
     def _get_tool_retry_policy(self, tool_name):
         """Get retry policy for a tool (tool-level > agent-level > default).

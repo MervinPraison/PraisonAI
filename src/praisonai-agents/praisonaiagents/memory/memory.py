@@ -1894,13 +1894,17 @@ class Memory(SearchMixin, MemoryCoreMixin):
         into a single text block with deduplication and clean formatting.
         
         Args:
-            include_in_output: If None, memory content is only included when debug logging is enabled.
-                               If True, memory content is always included.
-                               If False, memory content is never included (only logged for debugging).
+            include_in_output: If None, memory content is included (the primary
+                               purpose of this method is to feed retrieved memory
+                               into the prompt). If True, memory content is always
+                               included. If False, memory content is never included
+                               (only logged for debugging).
         """
-        # Determine whether to include memory content in output based on logging level
+        # Include retrieved memory by default. Gating this on DEBUG-level logging
+        # meant Agent(memory=True) silently retrieved hits but never appended them
+        # to the prompt under normal usage.
         if include_in_output is None:
-            include_in_output = get_logger().getEffectiveLevel() == logging.DEBUG
+            include_in_output = True
         
         q = (task_descr + " " + additional).strip()
         lines = []
@@ -2069,6 +2073,30 @@ class Memory(SearchMixin, MemoryCoreMixin):
         result["cache_boundary"] = CACHE_BOUNDARY if include_cache_boundary else ""
             
         return result
+
+    def get_context(self, query: Optional[str] = None, **kwargs) -> str:
+        """
+        Return retrieved memory as a prompt-ready context string.
+
+        Satisfies ``AgentMemoryProtocol`` (used by ``Agent.get_memory_context()``)
+        so the non-prompt-caching code path can inject memory into the system
+        prompt. Without this, ``hasattr(memory, 'get_context')`` was False and the
+        fallback branch always returned "".
+        """
+        # A missing/empty query would make the local fallback search match every
+        # record (LIKE "%%") with no relevance ordering, leaking unrelated (and
+        # possibly other users') memories into the prompt. Retrieve nothing until
+        # there is a meaningful query.
+        if not query or not str(query).strip():
+            return ""
+        # Propagate the effective user id so user-scoped memories are included and
+        # cross-user records are not returned by a shared Memory instance.
+        user_id = kwargs.get("user_id") or self.cfg.get("user_id")
+        return self.build_context_for_task(
+            task_descr=query,
+            user_id=user_id,
+            include_in_output=True,
+        )
 
     # -------------------------------------------------------------------------
     #                      Master Reset (Everything)
