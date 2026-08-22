@@ -33,7 +33,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1321 |
 | ✅ Configuration | 3 | 8 | 3140 |
-| ✅ Context Management | 16 | 36 | 13933 |
+| ✅ Context Management | 16 | 36 | 13941 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -43,16 +43,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 79 | 29084 |
+| ✅ Gateway | 7 | 79 | 29175 |
 | ✅ Guardrails | 4 | 4 | 2205 |
-| ✅ Handoffs | 11 | 6 | 2567 |
+| ✅ Handoffs | 11 | 6 | 2626 |
 | ✅ Hooks | 2 | 9 | 4488 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 16 | 4942 |
 | ✅ LLM | 3 | 15 | 5296 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14135 |
-| ✅ Memory | 6 | 18 | 7133 |
+| ✅ Memory | 6 | 18 | 7188 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2814 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -75,19 +75,19 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 617 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 42736 |
+| ✅ Tools | 12 | 144 | 42819 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 9 | 2484 |
-| ✅ Workflows | 5 | 18 | 7352 |
+| ✅ Workflows | 5 | 18 | 7406 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6955 lines)
+- ℹ️ Database (42 docs, 6959 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
