@@ -40,7 +40,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Evaluation | 1 | 7 | 2913 |
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1606 |
-| ✅ Failover | 2 | 1 | 432 |
+| ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
 | ✅ Gateway | 7 | 79 | 29084 |
