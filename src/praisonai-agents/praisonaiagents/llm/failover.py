@@ -117,6 +117,29 @@ class AuthProfile:
         )
     
     @property
+    def credential_id(self) -> str:
+        """Stable, non-secret identity for cross-replica quota coordination.
+
+        The coordinator keys benches by the *credential*, not the profile
+        label. ``name`` is a local display label: two replicas may name the
+        same key differently (breaking cooldown propagation) or reuse a name
+        like ``"default"`` for different keys (benching an unrelated key).
+        Derive a deterministic id from the fields that identify the credential
+        (provider, api_key, base_url) using a short salted hash so the real key
+        is never exposed. Falls back to ``name`` when no api_key is present.
+        """
+        if not self.api_key:
+            return self.name
+        import hashlib
+
+        digest = hashlib.sha256(
+            f"{self.provider}\x00{self.base_url or ''}\x00{self.api_key}".encode(
+                "utf-8", "ignore"
+            )
+        ).hexdigest()[:16]
+        return f"{self.provider}:{digest}"
+
+    @property
     def is_available(self) -> bool:
         """Check if this profile is currently available."""
         if self.status == ProviderStatus.DISABLED:
@@ -302,7 +325,7 @@ class FailoverManager:
         Callers already hold ``self._lock``.
         """
         try:
-            until = self._coordinator.benched_until(profile.name, now=now)
+            until = self._coordinator.benched_until(profile.credential_id, now=now)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(
                 f"Quota coordinator lookup failed for '{profile.name}': {e}; "
@@ -385,7 +408,9 @@ class FailoverManager:
             if profile.cooldown_until is not None:
                 try:
                     self._coordinator.bench(
-                        profile.name, until=profile.cooldown_until, reason=reason
+                        profile.credential_id,
+                        until=profile.cooldown_until,
+                        reason=reason,
                     )
                 except Exception as e:  # pragma: no cover - defensive
                     logger.warning(
@@ -419,10 +444,26 @@ class FailoverManager:
         """
         with self._lock:
             if profile.status != ProviderStatus.AVAILABLE:
+                # Snapshot the cooldown this success is recovering from BEFORE
+                # resetting, so we can avoid clobbering a newer fleet-wide bench.
+                recovered_from = profile.cooldown_until
                 profile.reset()
                 logger.info(f"Profile '{profile.name}' recovered")
+                cred_id = profile.credential_id
                 try:
-                    self._coordinator.clear(profile.name)
+                    # A concurrent/other-replica failure may have benched this
+                    # credential with a LATER expiry than the cooldown this
+                    # (possibly stale, already in-flight) success is recovering
+                    # from. Clearing unconditionally would resume a credential
+                    # that is still rate-limited. Only clear when the shared
+                    # bench is not newer than what we recovered from.
+                    shared_until = self._coordinator.benched_until(cred_id)
+                    if (
+                        shared_until is None
+                        or recovered_from is None
+                        or shared_until <= recovered_from
+                    ):
+                        self._coordinator.clear(cred_id)
                 except Exception as e:  # pragma: no cover - defensive
                     logger.warning(
                         f"Quota coordinator clear failed for '{profile.name}': {e}"
