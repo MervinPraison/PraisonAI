@@ -59,6 +59,30 @@ def _accepts_idempotency_key(execute_tool_fn: Callable) -> bool:
     )
 
 
+def _normalize_restart_safe(value: Any) -> Optional[bool]:
+    """Accept only genuine booleans as a restart-safety declaration.
+
+    ``None`` means undeclared. Any other type (e.g. the string ``"False"``) is a
+    malformed declaration and is treated as unsafe so we fail closed rather than
+    coercing a truthy value into an unintended replay.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    return False
+
+
+def _canonical_tool_name(name: Any) -> str:
+    """Normalise a tool name for tolerant comparison across repair variants.
+
+    ``execute_tool`` may repair case/separator variants (e.g. ``Send-Email`` →
+    ``send_email``); the declaration lookup mirrors that so an explicit
+    ``restart_safe`` declaration is not missed for a repaired name.
+    """
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
 def _declared_restart_safe(
     function_name: str, executor: Optional[Callable]
 ) -> Optional[bool]:
@@ -69,13 +93,20 @@ def _declared_restart_safe(
     ``restart_safe`` attribute. Returns ``None`` when the tool is undeclared or
     cannot be resolved.
     """
+    if not function_name:
+        return False
+    target = _canonical_tool_name(function_name)
     agent = getattr(executor, "__self__", None)
     tools = getattr(agent, "tools", None)
     if isinstance(tools, (list, tuple)):
         for tool in tools:
             name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
-            if name == function_name and getattr(tool, "restart_safe", None) is not None:
-                return bool(tool.restart_safe)
+            if (
+                name is not None
+                and _canonical_tool_name(name) == target
+                and getattr(tool, "restart_safe", None) is not None
+            ):
+                return _normalize_restart_safe(tool.restart_safe)
     try:
         from ..tools import get_registry as _get_tool_registry
 
@@ -83,7 +114,7 @@ def _declared_restart_safe(
     except Exception:  # pragma: no cover - registry lookup is best-effort
         tool = None
     declared = getattr(tool, "restart_safe", None) if tool is not None else None
-    return None if declared is None else bool(declared)
+    return _normalize_restart_safe(declared)
 
 
 def _is_restart_safe(function_name: str, executor: Optional[Callable] = None) -> bool:
@@ -94,6 +125,8 @@ def _is_restart_safe(function_name: str, executor: Optional[Callable] = None) ->
     heuristic and, ultimately, fail closed — an effectful/unknown tool is *not*
     replayed so a missing declaration never causes a duplicated side effect.
     """
+    if not function_name:
+        return False
     declared = _declared_restart_safe(function_name, executor)
     if declared is not None:
         return declared

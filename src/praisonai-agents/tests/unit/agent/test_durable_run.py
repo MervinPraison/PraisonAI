@@ -402,6 +402,37 @@ def test_inflight_undeclared_effectful_name_fails_closed_on_resume():
     journal.close()
 
 
+def test_inflight_malformed_restart_safe_declaration_fails_closed():
+    from praisonaiagents import Agent, tool
+
+    calls = {"n": 0}
+
+    @tool
+    def push_payment(amount: int) -> str:
+        calls["n"] += 1
+        return "charged"
+
+    push_payment.restart_safe = "False"
+    agent = Agent(name="agent", instructions="test", tools=[push_payment])
+
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    original = DurableRunContext(journal, "run-1", replaying=False)
+    with pytest.raises(KeyboardInterrupt):
+        original.wrap_sync(MagicMock(side_effect=KeyboardInterrupt))(
+            "push_payment", {"amount": 5}, tool_call_id="call-1"
+        )
+
+    resumed = DurableRunContext(journal, "run-1", replaying=True)
+    result = resumed.wrap_sync(agent.execute_tool)(
+        "push_payment", {"amount": 5}, tool_call_id="call-1"
+    )
+
+    assert calls["n"] == 0
+    assert result["not_safely_resumable"] is True
+    journal.close()
+
+
 def test_resume_requires_known_running_run_and_matching_prompt(tmp_path):
     path = str(tmp_path / "journal.db")
     agent = SimpleNamespace(
