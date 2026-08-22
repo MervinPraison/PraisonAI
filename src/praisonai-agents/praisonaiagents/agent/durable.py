@@ -59,6 +59,85 @@ def _accepts_idempotency_key(execute_tool_fn: Callable) -> bool:
     )
 
 
+def _normalize_restart_safe(value: Any) -> Optional[bool]:
+    """Accept only genuine booleans as a restart-safety declaration.
+
+    ``None`` means undeclared. Any other type (e.g. the string ``"False"``) is a
+    malformed declaration and is treated as unsafe so we fail closed rather than
+    coercing a truthy value into an unintended replay.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    return False
+
+
+def _canonical_tool_name(name: Any) -> str:
+    """Normalise a tool name for tolerant comparison across repair variants.
+
+    ``execute_tool`` may repair case/separator variants (e.g. ``Send-Email`` →
+    ``send_email``); the declaration lookup mirrors that so an explicit
+    ``restart_safe`` declaration is not missed for a repaired name.
+    """
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def _declared_restart_safe(
+    function_name: str, executor: Optional[Callable]
+) -> Optional[bool]:
+    """Return an explicit ``restart_safe`` declaration for ``function_name``.
+
+    Resolves the tool object first from the executor's owning agent (its live
+    ``tools``), then from the global tool registry, and reads its
+    ``restart_safe`` attribute. Returns ``None`` when the tool is undeclared or
+    cannot be resolved.
+    """
+    if not function_name:
+        return False
+    target = _canonical_tool_name(function_name)
+    agent = getattr(executor, "__self__", None)
+    tools = getattr(agent, "tools", None)
+    if isinstance(tools, (list, tuple)):
+        for tool in tools:
+            name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+            if (
+                name is not None
+                and _canonical_tool_name(name) == target
+                and getattr(tool, "restart_safe", None) is not None
+            ):
+                return _normalize_restart_safe(tool.restart_safe)
+    try:
+        from ..tools import get_registry as _get_tool_registry
+
+        tool = _get_tool_registry().get(function_name)
+    except Exception:  # pragma: no cover - registry lookup is best-effort
+        tool = None
+    declared = getattr(tool, "restart_safe", None) if tool is not None else None
+    return _normalize_restart_safe(declared)
+
+
+def _is_restart_safe(function_name: str, executor: Optional[Callable] = None) -> bool:
+    """Resolve whether a tool is safe to re-run for an in-flight durable resume.
+
+    An explicit ``restart_safe`` declaration on the tool contract wins. When the
+    tool is undeclared (or cannot be resolved), fall back to the read-only name
+    heuristic and, ultimately, fail closed — an effectful/unknown tool is *not*
+    replayed so a missing declaration never causes a duplicated side effect.
+    """
+    if not function_name:
+        return False
+    declared = _declared_restart_safe(function_name, executor)
+    if declared is not None:
+        return declared
+    try:
+        from .tool_execution import ToolExecutionMixin
+
+        return bool(ToolExecutionMixin._is_read_only_tool(function_name))
+    except Exception:  # pragma: no cover - heuristic import is best-effort
+        return False
+
+
 class DurableRunContext:
     """Per-turn journal state; safe for parallel tool-call wrappers."""
 
@@ -81,6 +160,10 @@ class DurableRunContext:
         self._results_by_tool_call_id: Dict[str, Any] = {}
         self._pending_by_call_id: Dict[str, Tuple[int, str, Dict[str, Any], str]] = {}
         self._pending_by_fingerprint: Dict[str, Tuple[int, str, Dict[str, Any], str]] = {}
+        # Names of in-flight tool calls (journalled tool_call with no tool_result
+        # at the crash). Used only when replaying to gate replay by restart-safety.
+        self._inflight_names_by_call_id: Dict[str, str] = {}
+        self._inflight_names_by_fingerprint: Dict[str, str] = {}
         self._recorded_iterations = set()
         for event in events:
             if event.kind == KIND_TOOL_RESULT:
@@ -107,8 +190,11 @@ class DurableRunContext:
                 or f"{self.run_id}:{event.seq}:{name}"
             )
             pending = (event.seq, call_id, args, key)
+            fingerprint = self._fingerprint(name, args)
             self._pending_by_call_id[call_id] = pending
-            self._pending_by_fingerprint[self._fingerprint(name, args)] = pending
+            self._pending_by_fingerprint[fingerprint] = pending
+            self._inflight_names_by_call_id[call_id] = name
+            self._inflight_names_by_fingerprint[fingerprint] = name
 
         self._resume_completed_steps = len(self._recorded_iterations)
 
@@ -119,6 +205,44 @@ class DurableRunContext:
     @staticmethod
     def _fingerprint(function_name: str, arguments: Dict[str, Any]) -> str:
         return f"{function_name}:{json.dumps(_json_safe(arguments), sort_keys=True)}"
+
+    def _is_inflight_call(
+        self,
+        function_name: str,
+        arguments: Dict[str, Any],
+        tool_call_id: Optional[str],
+    ) -> bool:
+        """Whether this call was in-flight (journalled, no result) at the crash.
+
+        Only meaningful while replaying: such calls have a recorded ``tool_call``
+        but no ``tool_result``, so re-driving the loop would re-execute their
+        side effect. Completed calls (already have a result) are replayed
+        upstream and never reach this check.
+        """
+        if not self.replaying:
+            return False
+        call_id = str(tool_call_id) if tool_call_id is not None else None
+        if call_id and call_id in self._inflight_names_by_call_id:
+            return True
+        return self._fingerprint(function_name, arguments) in (
+            self._inflight_names_by_fingerprint
+        )
+
+    @staticmethod
+    def _not_safely_resumable_result(function_name: str) -> Dict[str, Any]:
+        """Typed, operator-visible outcome for a gated in-flight effectful tool."""
+        return {
+            "error": (
+                f"Tool '{function_name}' was in-flight when the durable run "
+                "crashed and is not declared restart_safe; its outcome could not "
+                "be confirmed. It was not re-executed on resume to avoid a "
+                "duplicate side effect. Reconcile the external action manually "
+                "or mark the tool @tool(restart_safe=True) if it is idempotent."
+            ),
+            "error_type": "NotSafelyResumable",
+            "not_safely_resumable": True,
+            "restart_safe": False,
+        }
 
     def restore_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Append completed decision/result pairs once, before the next model call."""
@@ -307,9 +431,19 @@ class DurableRunContext:
             call_id = str(tool_call_id) if tool_call_id is not None else None
             if call_id and call_id in self._results_by_tool_call_id:
                 return self._results_by_tool_call_id[call_id]
+            gate_inflight = self._is_inflight_call(
+                function_name, arguments, tool_call_id
+            ) and not _is_restart_safe(function_name, execute_tool_fn)
             seq, call_id, idempotency_key = self._allocate_step(
                 function_name, arguments, tool_call_id
             )
+            if gate_inflight:
+                return self._record_result(
+                    seq,
+                    call_id,
+                    self._not_safely_resumable_result(function_name),
+                    iteration_index,
+                )
             token = _active_idempotency_key.set(idempotency_key)
             try:
                 call_kwargs = dict(kwargs)
@@ -340,9 +474,20 @@ class DurableRunContext:
             call_id = str(tool_call_id) if tool_call_id is not None else None
             if call_id and call_id in self._results_by_tool_call_id:
                 return self._results_by_tool_call_id[call_id]
+            gate_inflight = self._is_inflight_call(
+                function_name, arguments, tool_call_id
+            ) and not _is_restart_safe(function_name, execute_tool_fn)
             seq, call_id, idempotency_key = await asyncio.to_thread(
                 self._allocate_step, function_name, arguments, tool_call_id
             )
+            if gate_inflight:
+                return await asyncio.to_thread(
+                    self._record_result,
+                    seq,
+                    call_id,
+                    self._not_safely_resumable_result(function_name),
+                    iteration_index,
+                )
             token = _active_idempotency_key.set(idempotency_key)
             try:
                 call_kwargs = dict(kwargs)

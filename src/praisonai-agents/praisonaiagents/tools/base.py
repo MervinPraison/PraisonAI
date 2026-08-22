@@ -207,6 +207,13 @@ class BaseTool(ABC):
     # Optional class attributes
     version: str = "1.0.0"
     parameters: Optional[Dict[str, Any]] = None  # JSON Schema, auto-generated if None
+    # Restart-safety contract for durable resume. ``None`` (the default) means
+    # "undeclared": durable resume falls back to a read-only name heuristic and,
+    # when uncertain, fails closed rather than replaying a side effect. ``True``
+    # marks a read-only/idempotent tool that is safe to re-run after a crash;
+    # ``False`` marks an effectful tool that must never be silently re-executed
+    # on resume.
+    restart_safe: Optional[bool] = None
     
     def __init__(self, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None):
         """Initialize the tool and validate configuration.

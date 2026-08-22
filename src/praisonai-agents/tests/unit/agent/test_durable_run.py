@@ -320,6 +320,119 @@ async def test_async_wrapper_records_and_replays_result():
     journal.close()
 
 
+def test_inflight_effectful_tool_is_not_replayed_on_resume():
+    from praisonaiagents import Agent, tool
+
+    calls = {"n": 0}
+
+    @tool(restart_safe=False)
+    def send_invoice(amount: int) -> str:
+        calls["n"] += 1
+        return "charged"
+
+    agent = Agent(name="agent", instructions="test", tools=[send_invoice])
+
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    original = DurableRunContext(journal, "run-1", replaying=False)
+    with pytest.raises(KeyboardInterrupt):
+        original.wrap_sync(MagicMock(side_effect=KeyboardInterrupt))(
+            "send_invoice", {"amount": 10}, tool_call_id="call-1"
+        )
+
+    resumed = DurableRunContext(journal, "run-1", replaying=True)
+    result = resumed.wrap_sync(agent.execute_tool)(
+        "send_invoice", {"amount": 10}, tool_call_id="call-1"
+    )
+
+    assert calls["n"] == 0
+    assert result["not_safely_resumable"] is True
+    assert result["error_type"] == "NotSafelyResumable"
+    journal.close()
+
+
+def test_inflight_restart_safe_tool_is_replayed_on_resume():
+    from praisonaiagents import Agent, tool
+
+    calls = {"n": 0}
+
+    @tool(restart_safe=True)
+    def fetch_report(id: int, idempotency_key: str = "") -> str:
+        calls["n"] += 1
+        return "report"
+
+    agent = Agent(name="agent", instructions="test", tools=[fetch_report])
+
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    original = DurableRunContext(journal, "run-1", replaying=False)
+    with pytest.raises(KeyboardInterrupt):
+        original.wrap_sync(MagicMock(side_effect=KeyboardInterrupt))(
+            "fetch_report", {"id": 7}, tool_call_id="call-1"
+        )
+
+    resumed = DurableRunContext(journal, "run-1", replaying=True)
+    result = resumed.wrap_sync(agent.execute_tool)(
+        "fetch_report", {"id": 7}, tool_call_id="call-1"
+    )
+
+    assert calls["n"] == 1
+    assert result == "report"
+    journal.close()
+
+
+def test_inflight_undeclared_effectful_name_fails_closed_on_resume():
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    original = DurableRunContext(journal, "run-1", replaying=False)
+
+    with pytest.raises(KeyboardInterrupt):
+        original.wrap_sync(MagicMock(side_effect=KeyboardInterrupt))(
+            "delete_account", {"user": "u1"}, tool_call_id="call-1"
+        )
+
+    resumed = DurableRunContext(journal, "run-1", replaying=True)
+    effect = MagicMock(return_value="deleted")
+    result = resumed.wrap_sync(effect)(
+        "delete_account", {"user": "u1"}, tool_call_id="call-1"
+    )
+
+    effect.assert_not_called()
+    assert result["not_safely_resumable"] is True
+    journal.close()
+
+
+def test_inflight_malformed_restart_safe_declaration_fails_closed():
+    from praisonaiagents import Agent, tool
+
+    calls = {"n": 0}
+
+    @tool
+    def push_payment(amount: int) -> str:
+        calls["n"] += 1
+        return "charged"
+
+    push_payment.restart_safe = "False"
+    agent = Agent(name="agent", instructions="test", tools=[push_payment])
+
+    journal = RunJournal(":memory:")
+    journal.open_run("run-1", task="task")
+    original = DurableRunContext(journal, "run-1", replaying=False)
+    with pytest.raises(KeyboardInterrupt):
+        original.wrap_sync(MagicMock(side_effect=KeyboardInterrupt))(
+            "push_payment", {"amount": 5}, tool_call_id="call-1"
+        )
+
+    resumed = DurableRunContext(journal, "run-1", replaying=True)
+    result = resumed.wrap_sync(agent.execute_tool)(
+        "push_payment", {"amount": 5}, tool_call_id="call-1"
+    )
+
+    assert calls["n"] == 0
+    assert result["not_safely_resumable"] is True
+    journal.close()
+
+
 def test_resume_requires_known_running_run_and_matching_prompt(tmp_path):
     path = str(tmp_path / "journal.db")
     agent = SimpleNamespace(
