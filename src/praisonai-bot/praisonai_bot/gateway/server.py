@@ -6099,22 +6099,22 @@ class WebSocketGateway:
             return default
         return bool(value)
 
-    @staticmethod
-    def _durable_store_present(gw_cfg: Dict[str, Any]) -> bool:
-        """Whether the resolved session store is durable (persisted).
+    def _durable_store_present(self, gw_cfg: Dict[str, Any]) -> bool:
+        """Whether the *effective* session store is durable (persisted).
 
         Sessions persist by default (``persist: true``, ``store: sqlite`` —
         :class:`SessionConfig`), so the durable store the journal-backed resume
-        needs is already present out of the box. Only an explicit
-        ``session.persist: false`` opts back into ephemeral in-memory sessions.
+        needs is normally present out of the box. But :meth:`_build_session_store`
+        degrades to in-memory sessions (``self._session_store is None``) when a
+        persistent store cannot be initialised — e.g. an absent/read-only home
+        dir. In that case there is no journal to resume against, so durable runs
+        must *not* auto-enable. We therefore consult the instantiated store, not
+        just the ``session.persist`` intent, so a silent fallback doesn't leave
+        ``ExecutionConfig(durable=True)`` recording against in-memory sessions.
         """
-        session_yaml = gw_cfg.get("session")
-        if isinstance(session_yaml, dict):
-            return WebSocketGateway._config_bool(session_yaml.get("persist"), True)
-        return True
+        return self._session_store is not None
 
-    @staticmethod
-    def _durable_runs_from_config(cfg: Optional[Dict[str, Any]]) -> bool:
+    def _durable_runs_from_config(self, cfg: Optional[Dict[str, Any]]) -> bool:
         """Return whether gateway turns should run crash-safe (journal-backed).
 
         Issue #4216: a gateway restart mid-turn must resume *crash-safely* by
@@ -6130,10 +6130,13 @@ class WebSocketGateway:
 
         An explicit ``gateway.durable_runs`` (Issue #4028) always wins over the
         auto-default. Individual agents may still override via a per-agent
-        ``durable`` key.
+        ``durable`` key. Absent an explicit choice, the auto-default follows the
+        *effective* session store (see :meth:`_durable_store_present`): if the
+        persistent store degraded to in-memory, there is no journal to resume
+        against and durable runs stay off.
         """
         if not isinstance(cfg, dict):
-            return True
+            return self._durable_store_present({})
         gw_cfg = cfg.get("gateway", {})
         if not isinstance(gw_cfg, dict):
             gw_cfg = {}
@@ -6149,8 +6152,8 @@ class WebSocketGateway:
         if isinstance(reliability, str) and reliability.strip().lower() == "off":
             return False
 
-        # Auto-enable when a durable session store is present (the default).
-        return WebSocketGateway._durable_store_present(gw_cfg)
+        # Auto-enable when the effective session store is durable (the default).
+        return self._durable_store_present(gw_cfg)
 
     def _create_agents_from_config(
         self,

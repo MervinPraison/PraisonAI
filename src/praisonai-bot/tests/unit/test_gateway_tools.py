@@ -149,18 +149,41 @@ class TestGatewayDurableRuns:
         from praisonai_bot.gateway import WebSocketGateway
 
         gw = WebSocketGateway()
+        # Sessions persist by default, so the effective store is durable here.
+        assert gw._session_store is not None
         assert gw._durable_runs_from_config({}) is True
         assert gw._durable_runs_from_config({"gateway": {}}) is True
         assert gw._durable_runs_from_config(None) is True
 
     def test_durable_runs_off_when_sessions_not_persisted(self):
         """No durable store (``session.persist: false``) → no journal-backed
-        resume to auto-enable, so it stays off (zero-overhead)."""
+        resume to auto-enable, so it stays off (zero-overhead).
+
+        The default follows the *effective* store, so with persistence off the
+        gateway holds no store (``self._session_store is None``).
+        """
         from praisonai_bot.gateway import WebSocketGateway
 
         gw = WebSocketGateway()
+        gw._session_store = None
         assert gw._durable_runs_from_config(
             {"gateway": {"session": {"persist": False}}}
+        ) is False
+        assert gw._durable_runs_from_config({}) is False
+        assert gw._durable_runs_from_config(None) is False
+
+    def test_durable_runs_off_when_persistent_store_fails_to_init(self):
+        """Issue #4216 / CodeRabbit: ``session.persist: true`` but the store
+        degraded to in-memory (``_build_session_store`` returned ``None``) must
+        NOT auto-enable durable runs — there is no journal to record against."""
+        from praisonai_bot.gateway import WebSocketGateway
+
+        gw = WebSocketGateway()
+        # Simulate a persistent store that failed to initialise (absent/read-only
+        # home dir): persistence intent is on, but the effective store is None.
+        gw._session_store = None
+        assert gw._durable_runs_from_config(
+            {"gateway": {"session": {"persist": True}}}
         ) is False
 
     def test_reliability_off_opts_out_of_durable_runs(self):
