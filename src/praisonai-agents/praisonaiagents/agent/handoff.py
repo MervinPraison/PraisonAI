@@ -14,6 +14,7 @@ from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Li
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
+from contextlib import contextmanager
 from praisonaiagents._logging import get_logger
 import asyncio
 import contextvars
@@ -469,27 +470,38 @@ class Handoff:
                     return value
         return 'gpt-4o-mini'
 
-    def _seed_target_history(self, prior_messages: Optional[List[Any]]) -> None:
-        """Prepend the filtered handoff context to the target agent's history.
+    @contextmanager
+    def _seed_target_history(self, prior_messages: Optional[List[Any]]):
+        """Temporarily seed the filtered handoff context onto the target agent.
 
         The configured ``context_policy``/``input_filter`` produce the messages the
-        target should see; without seeding them here the target only ever received
-        the literal handoff prompt string and the configured policy had no effect.
-        Non-system messages already present on the target are preserved after the
-        seeded context; duplicates already at the head are not re-added.
+        target should see; without seeding them the target only ever received the
+        literal handoff prompt string and the configured policy had no effect.
+
+        The seeding is *invocation-scoped*: the prior messages are prepended for the
+        duration of this handoff and the target's original ``chat_history`` is
+        restored on exit. This keeps handoff context from leaking into later
+        handoffs or ordinary chats that reuse the same target agent, and stops the
+        target prompt from growing across sequential handoffs.
+        No shared mutable state is retained between agents.
         """
-        if not prior_messages:
+        existing = getattr(self.agent, 'chat_history', None)
+        if not prior_messages or not isinstance(existing, list):
+            yield
             return
         try:
             prior = list(prior_messages)
         except TypeError:
+            yield
             return
-        existing = getattr(self.agent, 'chat_history', None)
-        if not isinstance(existing, list):
-            return
-        if existing[:len(prior)] == prior:
-            return
-        self.agent.chat_history = prior + existing
+        original = existing
+        try:
+            # Avoid re-seeding if the context is already at the head.
+            if existing[:len(prior)] != prior:
+                self.agent.chat_history = prior + existing
+            yield
+        finally:
+            self.agent.chat_history = original
 
     def _execute_with_runtime_resolution(
         self, 
@@ -507,8 +519,8 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
-        self._seed_target_history(prior_messages)
-        return self.agent.chat(prompt, tools=effective_tools)
+        with self._seed_target_history(prior_messages):
+            return self.agent.chat(prompt, tools=effective_tools)
     
     async def _execute_with_runtime_resolution_async(
         self, 
@@ -526,14 +538,14 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
-        self._seed_target_history(prior_messages)
-        async_chat = getattr(self.agent, 'achat', None)
-        if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
-            return await async_chat(prompt, tools=effective_tools)
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, lambda: self.agent.chat(prompt, tools=effective_tools)
-        )
+        with self._seed_target_history(prior_messages):
+            async_chat = getattr(self.agent, 'achat', None)
+            if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
+                return await async_chat(prompt, tools=effective_tools)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, lambda: self.agent.chat(prompt, tools=effective_tools)
+            )
     
     def _check_safety(self, source_agent: 'Agent') -> None:
         """
@@ -928,15 +940,22 @@ class Handoff:
                 # Prepare handoff data with context policy
                 handoff_data = self._prepare_context(source_agent, kwargs)
                 
-                # Get the last user message or context to pass to target agent
+                # Get the last user message or context to pass to target agent.
+                # Track the index of the message chosen for ``prompt`` so exactly
+                # that item is excluded from the seeded history (it may not be the
+                # final list item if an assistant/tool message follows it).
                 last_message = None
-                for msg in reversed(handoff_data.messages):
+                selected_index = None
+                for i in range(len(handoff_data.messages) - 1, -1, -1):
+                    msg = handoff_data.messages[i]
                     if isinstance(msg, dict) and msg.get('role') == 'user':
                         last_message = msg.get('content', '')
+                        selected_index = i
                         break
                 
                 if not last_message and handoff_data.messages:
-                    last_msg = handoff_data.messages[-1]
+                    selected_index = len(handoff_data.messages) - 1
+                    last_msg = handoff_data.messages[selected_index]
                     if isinstance(last_msg, dict):
                         last_message = last_msg.get('content', '')
                     else:
@@ -956,12 +975,19 @@ class Handoff:
                     effective_tools = self._compute_effective_tools(source_agent)
                     
                     # Resolve runtime at turn-time for tool function execution.
-                    # The last message is already folded into ``prompt`` above, so
-                    # only the preceding filtered history is seeded to avoid
-                    # duplicating it.
+                    # The selected message is already folded into ``prompt`` above,
+                    # so exclude exactly that item from the seeded history to avoid
+                    # duplicating it while preserving any messages that follow it.
+                    if selected_index is None:
+                        prior_messages = list(handoff_data.messages)
+                    else:
+                        prior_messages = (
+                            handoff_data.messages[:selected_index]
+                            + handoff_data.messages[selected_index + 1:]
+                        )
                     response = self._execute_with_runtime_resolution(
                         source_agent, prompt, effective_tools, kwargs,
-                        prior_messages=handoff_data.messages[:-1],
+                        prior_messages=prior_messages,
                     )
                     
                     result = HandoffResult(
@@ -1502,9 +1528,9 @@ class TypedHandoff(Handoff, Generic[T]):
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
             
-            # Apply context policy / input filter and seed the target's history.
+            # Apply context policy / input filter; the resulting messages are
+            # seeded onto the target only for the duration of its chat below.
             handoff_data = self._prepare_context(source_agent, kwargs)
-            self._seed_target_history(handoff_data.messages)
             
             # Validate payload against schema
             try:
@@ -1531,7 +1557,8 @@ class TypedHandoff(Handoff, Generic[T]):
             logger.info(f"Typed handoff to {self.agent.name} with validated payload")
             
             # Execute with timeout if sync
-            response = self.agent.chat(full_prompt)
+            with self._seed_target_history(handoff_data.messages):
+                response = self.agent.chat(full_prompt)
             
             result = HandoffResult(
                 success=True,
@@ -1616,9 +1643,9 @@ class TypedHandoff(Handoff, Generic[T]):
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
                 
-                # Apply context policy / input filter and seed the target's history.
+                # Apply context policy / input filter; the resulting messages are
+                # seeded onto the target only for the duration of its chat below.
                 handoff_data = self._prepare_context(source_agent, kwargs)
-                self._seed_target_history(handoff_data.messages)
                 
                 # Validate payload against schema
                 try:
@@ -1644,12 +1671,13 @@ class TypedHandoff(Handoff, Generic[T]):
                 logger.info(f"Async typed handoff to {self.agent.name}")
                 
                 # Execute - check for async chat method
-                if hasattr(self.agent, 'achat'):
-                    response = await self.agent.achat(full_prompt)
-                else:
-                    # Run sync chat in executor
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
+                with self._seed_target_history(handoff_data.messages):
+                    if hasattr(self.agent, 'achat'):
+                        response = await self.agent.achat(full_prompt)
+                    else:
+                        # Run sync chat in executor
+                        loop = asyncio.get_event_loop()
+                        response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
                 
                 return HandoffResult(
                     success=True,

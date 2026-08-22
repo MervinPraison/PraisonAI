@@ -3008,6 +3008,19 @@ class ToolExecutionMixin:
                 if isinstance(explicit, bool):
                     return explicit
                 break
+        # A tool from the process-global registry (only reachable when
+        # ToolConfig(allow_global_tools=True)) can carry its own explicit
+        # ``idempotent`` flag even when its name is absent from the shared
+        # read-only/mutating registries below.
+        if getattr(self, '_allow_global_tools', False):
+            try:
+                from ..tools.registry import get_registry
+                global_tool = get_registry().get(tool_name)
+                explicit = getattr(global_tool, 'idempotent', None)
+                if isinstance(explicit, bool):
+                    return explicit
+            except Exception:
+                pass
         try:
             from ..escalation.loop_guard import IDEMPOTENT_TOOLS, MUTATING_TOOLS
         except Exception:
