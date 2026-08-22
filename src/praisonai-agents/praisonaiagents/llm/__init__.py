@@ -107,6 +107,22 @@ def __getattr__(name):
             from .rate_limiter import RateLimiter
             _lazy_cache[name] = RateLimiter
             return RateLimiter
+        elif name == "QuotaCoordinatorProtocol":
+            from .quota import QuotaCoordinatorProtocol
+            _lazy_cache[name] = QuotaCoordinatorProtocol
+            return QuotaCoordinatorProtocol
+        elif name == "QuotaCoordinatorConfig":
+            from .quota import QuotaCoordinatorConfig
+            _lazy_cache[name] = QuotaCoordinatorConfig
+            return QuotaCoordinatorConfig
+        elif name == "LocalQuotaCoordinator":
+            from .quota import LocalQuotaCoordinator
+            _lazy_cache[name] = LocalQuotaCoordinator
+            return LocalQuotaCoordinator
+        elif name == "build_quota_coordinator":
+            from .quota import build_quota_coordinator
+            _lazy_cache[name] = build_quota_coordinator
+            return build_quota_coordinator
         elif name == "TokenUsage":
             from .llm import TokenUsage
             _lazy_cache[name] = TokenUsage
@@ -229,6 +245,11 @@ __all__ = [
     "create_routing_agent",
     "RateLimiter",
     "TokenUsage",
+    # Provider quota coordination (cross-replica credential cooldowns)
+    "QuotaCoordinatorProtocol",
+    "QuotaCoordinatorConfig",
+    "LocalQuotaCoordinator",
+    "build_quota_coordinator",
     # Protocols
     "LLMProviderProtocol",
     "ModelCapabilitiesProtocol",
