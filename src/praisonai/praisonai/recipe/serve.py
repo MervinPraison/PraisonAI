@@ -41,9 +41,11 @@ trace_exporter: none      # none, otlp, jaeger, zipkin
 """
 
 import asyncio
+import contextlib
 import hmac
 import json
 import os
+import threading
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -574,6 +576,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
             loop = asyncio.get_running_loop()
             queue: asyncio.Queue = asyncio.Queue(maxsize=64)
             SENTINEL = object()
+            stop = threading.Event()
 
             def pump():
                 # Drive the sync generator on a worker thread and hand each
@@ -586,9 +589,20 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
                         session_id=session_id,
                         options=options,
                     ):
-                        asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
+                        if stop.is_set():
+                            break
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                queue.put(event), loop
+                            ).result()
+                        except RuntimeError:
+                            # Event loop is gone (client disconnected/shutdown).
+                            break
                 finally:
-                    asyncio.run_coroutine_threadsafe(queue.put(SENTINEL), loop).result()
+                    with contextlib.suppress(RuntimeError):
+                        asyncio.run_coroutine_threadsafe(
+                            queue.put(SENTINEL), loop
+                        ).result()
 
             worker = asyncio.create_task(asyncio.to_thread(pump))
             try:
@@ -601,7 +615,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
                         "data": json.dumps(item.data),
                     }
             finally:
-                worker.cancel()
+                # Signal the producer to stop, then keep draining the queue so
+                # any pending ``queue.put`` on the worker thread unblocks and the
+                # generator terminates instead of leaking the thread.
+                stop.set()
+                while not worker.done():
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        while True:
+                            queue.get_nowait()
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(asyncio.shield(worker), timeout=0.1)
+                with contextlib.suppress(Exception):
+                    await worker
         
         return EventSourceResponse(event_generator())
     

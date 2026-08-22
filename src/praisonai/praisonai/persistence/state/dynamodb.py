@@ -213,6 +213,26 @@ class DynamoDBStateStore(StateStore):
             return None
         return self._hash_field(item).get(field)
     
+    def _seed_hash_map(self, key: str) -> None:
+        """Ensure the native ``hash`` map exists, migrating legacy data.
+
+        A single ``UpdateExpression`` cannot both create the parent map and set
+        a nested field, so seed it first. If the item was written by the legacy
+        implementation (hash stored as a JSON string in ``value``) migrate those
+        fields into the native map so they remain visible after field updates.
+        """
+        response = self._table.get_item(Key={"pk": key})
+        item = response.get("Item")
+        if item and isinstance(item.get("hash"), dict):
+            return
+        seed = self._hash_field(item) if item else {}
+        self._table.update_item(
+            Key={"pk": key},
+            UpdateExpression="SET #h = if_not_exists(#h, :seed)",
+            ExpressionAttributeNames={"#h": "hash"},
+            ExpressionAttributeValues={":seed": seed},
+        )
+
     def hset(self, key: str, field: str, value: Any) -> None:
         """Set a field in a hash.
 
@@ -220,14 +240,7 @@ class DynamoDBStateStore(StateStore):
         concurrent writers to different fields of the same key do not clobber
         each other.
         """
-        # A single UpdateExpression cannot both create the parent map and set a
-        # nested field, so seed an empty map only when it is missing first.
-        self._table.update_item(
-            Key={"pk": key},
-            UpdateExpression="SET #h = if_not_exists(#h, :empty)",
-            ExpressionAttributeNames={"#h": "hash"},
-            ExpressionAttributeValues={":empty": {}},
-        )
+        self._seed_hash_map(key)
         self._table.update_item(
             Key={"pk": key},
             UpdateExpression="SET #h.#f = :val, updated_at = :now",
@@ -251,7 +264,24 @@ class DynamoDBStateStore(StateStore):
         """
         if not fields:
             return 0
-        names = {f"#f{i}": f for i, f in enumerate(fields)}
+        response = self._table.get_item(Key={"pk": key})
+        item = response.get("Item")
+        if not item:
+            return 0
+        current = self._hash_field(item)
+        present = [f for f in fields if f in current]
+        if not present:
+            return 0
+        # Migrate legacy JSON-string hashes into the native map so the REMOVE
+        # below actually mutates the stored representation.
+        if not isinstance(item.get("hash"), dict):
+            self._table.update_item(
+                Key={"pk": key},
+                UpdateExpression="SET #h = if_not_exists(#h, :seed)",
+                ExpressionAttributeNames={"#h": "hash"},
+                ExpressionAttributeValues={":seed": current},
+            )
+        names = {f"#f{i}": f for i, f in enumerate(present)}
         expr = "REMOVE " + ", ".join(f"#h.{n}" for n in names)
         try:
             self._table.update_item(
@@ -260,7 +290,7 @@ class DynamoDBStateStore(StateStore):
                 ExpressionAttributeNames={"#h": "hash", **names},
                 ConditionExpression="attribute_exists(pk)",
             )
-            return len(fields)
+            return len(present)
         except Exception:
             return 0
     

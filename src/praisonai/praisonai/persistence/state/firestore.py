@@ -176,13 +176,19 @@ class FirestoreStateStore(StateStore):
         """
         if not fields:
             return 0
+        existing = self.get(key)
+        if not isinstance(existing, dict):
+            return 0
+        present = [f for f in fields if f in existing]
+        if not present:
+            return 0
         doc = self._collection.document(key)
         updates = {
-            f"value.{field}": self._firestore.DELETE_FIELD for field in fields
+            f"value.{field}": self._firestore.DELETE_FIELD for field in present
         }
         try:
             doc.update(updates)
-            return len(fields)
+            return len(present)
         except Exception:
             return 0
     
