@@ -6099,21 +6099,61 @@ class WebSocketGateway:
             return default
         return bool(value)
 
-    @staticmethod
-    def _durable_runs_from_config(cfg: Optional[Dict[str, Any]]) -> bool:
-        """Return the gateway-wide durable-runs opt-in (``gateway.durable_runs``).
+    def _durable_store_present(self, gw_cfg: Dict[str, Any]) -> bool:
+        """Whether the *effective* session store is durable (persisted).
 
-        Issue #4028: operators enable durable gateway runs by setting
-        ``gateway.durable_runs: true`` in ``gateway.yaml``. Default-off so
-        existing gateways are unchanged. Individual agents may still override
-        this default via a per-agent ``durable`` key in their config.
+        Sessions persist by default (``persist: true``, ``store: sqlite`` —
+        :class:`SessionConfig`), so the durable store the journal-backed resume
+        needs is normally present out of the box. But :meth:`_build_session_store`
+        degrades to in-memory sessions (``self._session_store is None``) when a
+        persistent store cannot be initialised — e.g. an absent/read-only home
+        dir. In that case there is no journal to resume against, so durable runs
+        must *not* auto-enable. We therefore consult the instantiated store, not
+        just the ``session.persist`` intent, so a silent fallback doesn't leave
+        ``ExecutionConfig(durable=True)`` recording against in-memory sessions.
+        """
+        return self._session_store is not None
+
+    def _durable_runs_from_config(self, cfg: Optional[Dict[str, Any]]) -> bool:
+        """Return whether gateway turns should run crash-safe (journal-backed).
+
+        Issue #4216: a gateway restart mid-turn must resume *crash-safely* by
+        default. Sessions are already durable by default, and the gateway
+        already attempts resume on boot — so the safe, journal-backed path is
+        auto-enabled when a durable session store is present, replacing the old
+        unsafe re-drive that re-executed side-effecting tools and re-billed the
+        model. Two explicit, zero-overhead escape hatches opt back out:
+
+          * ``gateway.durable_runs: false`` — the operator turns it off; or
+          * ``gateway.reliability: "off"`` — the immediate-teardown posture that
+            already opts out of the gateway's safety defaults.
+
+        An explicit ``gateway.durable_runs`` (Issue #4028) always wins over the
+        auto-default. Individual agents may still override via a per-agent
+        ``durable`` key. Absent an explicit choice, the auto-default follows the
+        *effective* session store (see :meth:`_durable_store_present`): if the
+        persistent store degraded to in-memory, there is no journal to resume
+        against and durable runs stay off.
         """
         if not isinstance(cfg, dict):
-            return False
+            return self._durable_store_present({})
         gw_cfg = cfg.get("gateway", {})
         if not isinstance(gw_cfg, dict):
+            gw_cfg = {}
+
+        # An explicit operator choice always wins (both directions).
+        explicit = gw_cfg.get("durable_runs")
+        if explicit is not None:
+            return WebSocketGateway._config_bool(explicit, True)
+
+        # ``reliability: "off"`` is the documented immediate-teardown posture;
+        # keep durable runs off there for the zero-overhead path.
+        reliability = gw_cfg.get("reliability")
+        if isinstance(reliability, str) and reliability.strip().lower() == "off":
             return False
-        return WebSocketGateway._config_bool(gw_cfg.get("durable_runs"), False)
+
+        # Auto-enable when the effective session store is durable (the default).
+        return self._durable_store_present(gw_cfg)
 
     def _create_agents_from_config(
         self,
@@ -6142,13 +6182,17 @@ class WebSocketGateway:
             default_model: Fallback model when an agent has no ``model`` key
                            (e.g. from the ``provider.model`` section of UI config).
             guardrails_cfg: Optional ``guardrails.registry`` dict to wire per-agent.
-            durable_runs: When ``True`` (operator opt-in via ``gateway.durable_runs``),
+            durable_runs: When ``True`` (crash-safe by default when a durable
+                          session store is present — see
+                          :meth:`_durable_runs_from_config`, Issue #4216),
                           construct each agent with ``ExecutionConfig(durable=True)`` so
                           every gateway turn is journalled to the core ``RunJournal`` and
                           can resume after a restart — no re-execution of side-effecting
-                          tools, no re-billing of LLM calls. Default-off/zero-overhead:
-                          when unset the execution hot path is unchanged. Per-agent
-                          ``durable`` in YAML overrides this gateway-wide default.
+                          tools, no re-billing of LLM calls. When ``False`` (explicit
+                          ``durable_runs: false`` / ``reliability: "off"`` / no durable
+                          store) the execution hot path is unchanged (zero-overhead).
+                          Per-agent ``durable`` in YAML overrides this gateway-wide
+                          default.
         """
         from praisonaiagents import Agent
 
