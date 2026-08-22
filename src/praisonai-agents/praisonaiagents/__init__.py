@@ -92,20 +92,6 @@ from ._lazy import lazy_import, create_lazy_getattr_with_fallback
 # Thread-safe cache for lazy-loaded values
 _lazy_cache = {}
 
-# Backward compatibility: _get_lazy_cache function for tests
-import threading
-_lazy_cache_local = threading.local()
-
-def _get_lazy_cache():
-    """Get thread-local lazy cache dict. Thread-safe for concurrent access.
-    
-    Note: This is kept for backward compatibility with tests.
-    The main lazy loading now uses the centralized _lazy.py utility.
-    """
-    if not hasattr(_lazy_cache_local, 'cache'):
-        _lazy_cache_local.cache = {}
-    return _lazy_cache_local.cache
-
 # ============================================================================
 # LAZY IMPORT MAPPING
 # ============================================================================
