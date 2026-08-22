@@ -707,6 +707,71 @@ class ApiConfig:
 
 
 @dataclass
+class EmergencyStopConfig:
+    """Configuration for the global operator emergency-stop brake (Issue #4220).
+
+    Selects the backend for the durable, fail-safe operator brake consulted at
+    every new-work admission seam (WebSocket inbound, HTTP/MCP inbound, kanban
+    dispatch, scheduler due-loop). The default ``"off"`` backend engages a
+    no-op brake so ``is_engaged()`` is always ``False`` — behaviour is
+    byte-for-byte today's, no new dependency, no hot-path change. Selecting
+    ``"file"`` persists the engaged state to a sentinel at ``path`` so it
+    survives a crash/restart and is shared across lanes; an unreadable/corrupt
+    sentinel counts as *engaged* (fail-safe).
+
+    This maps onto the pure core
+    :class:`~praisonaiagents.gateway.protocols.EmergencyStopProtocol`;
+    :meth:`to_estop` builds the concrete brake.
+
+    Attributes:
+        backend: ``"off"`` (default, no-op) or ``"file"`` (durable sentinel).
+        path: Sentinel location for the ``"file"`` backend (required for it).
+    """
+
+    backend: str = "off"
+    path: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.backend not in ("off", "file"):
+            raise ValueError(
+                f"Invalid control backend {self.backend!r}; expected 'off' or 'file'"
+            )
+        if self.backend == "file" and not self.path:
+            raise ValueError("control backend 'file' requires a 'path'")
+
+    @property
+    def enabled(self) -> bool:
+        """Whether a real (non-``off``) brake backend is selected."""
+        return self.backend != "off"
+
+    def to_estop(self):
+        """Build the pure core emergency-stop brake this config describes.
+
+        ``"off"`` returns a :class:`NullEmergencyStop` (never engaged);
+        ``"file"`` returns a durable, fail-safe :class:`FileEmergencyStop`.
+        """
+        from .protocols import FileEmergencyStop, NullEmergencyStop
+
+        if self.backend == "file" and self.path:
+            return FileEmergencyStop(self.path)
+        return NullEmergencyStop()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {"backend": self.backend, "path": self.path}
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "EmergencyStopConfig":
+        """Create from a parsed ``gateway.control`` mapping (tolerant of None)."""
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            backend=str(data.get("backend") or "off"),
+            path=data.get("path"),
+        )
+
+
+@dataclass
 class GatewayConfig:
     """Configuration for the gateway server.
     
@@ -783,6 +848,12 @@ class GatewayConfig:
     # serialises turns across replicas so a horizontally-scaled gateway does not
     # run concurrent turns on one session.
     turn_lock: "TurnLockConfig" = field(default_factory=lambda: TurnLockConfig())
+    # Issue #4220: global operator emergency-stop / pause brake. Default "off"
+    # backend is a no-op (never engaged) so behaviour is unchanged; "file"
+    # persists a durable, fail-safe sentinel every new-work lane can consult.
+    control: "EmergencyStopConfig" = field(
+        default_factory=lambda: EmergencyStopConfig()
+    )
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -905,6 +976,7 @@ class GatewayConfig:
             "api": self.api.to_dict(),
             "liveness": self.liveness.to_dict(),
             "turn_lock": self.turn_lock.to_dict(),
+            "control": self.control.to_dict(),
         }
     
     @property
@@ -1096,6 +1168,7 @@ class MultiChannelGatewayConfig:
             api=ApiConfig.from_dict(gw_data.get("api")),
             liveness=LivenessConfig.from_dict(gw_data.get("liveness")),
             turn_lock=TurnLockConfig.from_dict(gw_data.get("turn_lock")),
+            control=EmergencyStopConfig.from_dict(gw_data.get("control")),
         )
         
         # Parse agents section (pass through as dicts)

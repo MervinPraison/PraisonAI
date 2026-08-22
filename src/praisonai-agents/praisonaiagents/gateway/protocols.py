@@ -6125,3 +6125,195 @@ def _register_core_gateway_methods() -> None:
 
 
 _register_core_gateway_methods()
+
+
+# ---------------------------------------------------------------------------
+# Global operator emergency-stop / pause brake (Issue #4220)
+# ---------------------------------------------------------------------------
+#
+# A single, durable, fail-safe operator brake: "stop admitting NEW agent work
+# everywhere, right now, but let in-flight runs finish — and resume later with
+# no restart." Every new-work admission seam (WebSocket inbound, HTTP/MCP
+# inbound, kanban dispatch cycle, scheduler due-loop) consults one shared
+# contract instead of each lane deciding independently.
+#
+# Design mirrors the drain / idle / admission / liveness policy family already
+# in this module: a pure ``Protocol`` in core plus a lightweight default and a
+# durable fail-safe backend. When no brake is engaged, ``is_engaged()`` is
+# ``False`` and behaviour is byte-for-byte today's — zero cost, no new
+# dependency, fully backward-compatible.
+
+
+@dataclass(frozen=True)
+class EmergencyStopState:
+    """Immutable snapshot of the operator brake, for status/audit surfaces.
+
+    ``engaged`` is the only field the hot path needs; ``reason``/``actor``/
+    ``at`` provide the optional audit trail surfaced in ``/health``/status.
+    """
+
+    engaged: bool
+    reason: str = ""
+    actor: str = ""
+    at: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "engaged": self.engaged,
+            "reason": self.reason,
+            "actor": self.actor,
+            "at": self.at,
+        }
+
+
+@runtime_checkable
+class EmergencyStopProtocol(Protocol):
+    """Pure contract for the global operator brake consulted at every seam.
+
+    Fail-safe rule: if the engaged state cannot be read with confidence (a
+    corrupt / unreadable durable sentinel), ``is_engaged()`` MUST return
+    ``True`` — an ambiguous brake holds new work rather than letting it run
+    freely. ``engage``/``disengage`` are idempotent.
+    """
+
+    def is_engaged(self) -> bool: ...
+
+    def engage(self, *, reason: str = "", actor: str = "") -> None: ...
+
+    def disengage(self) -> None: ...
+
+    def state(self) -> EmergencyStopState: ...
+
+
+class NullEmergencyStop:
+    """Default no-op brake: never engaged, no persistence.
+
+    Selected by ``backend: "off"`` (the default) so a gateway with no brake
+    configured behaves exactly as before — ``is_engaged()`` is always
+    ``False`` and ``engage``/``disengage`` are inert.
+    """
+
+    def is_engaged(self) -> bool:
+        return False
+
+    def engage(self, *, reason: str = "", actor: str = "") -> None:
+        return None
+
+    def disengage(self) -> None:
+        return None
+
+    def state(self) -> EmergencyStopState:
+        return EmergencyStopState(engaged=False)
+
+
+class FileEmergencyStop:
+    """Durable, fail-safe file-sentinel operator brake.
+
+    Engaging writes a small JSON sentinel at ``path``; disengaging removes it.
+    The engaged state therefore survives a crash/restart (durable) and is
+    shared by every lane that consults the same path.
+
+    Fail-safe: any error reading the sentinel — a partially written file,
+    corrupt JSON, a permission error — is treated as *engaged*. An ambiguous
+    brake holds new work; it never silently falls open to "run freely". The
+    common, unambiguous case (sentinel simply absent) reports not-engaged.
+
+    Pure-stdlib (``os``/``json``): no new dependency, safe to live in core.
+    """
+
+    def __init__(self, path: str) -> None:
+        if not path:
+            raise ValueError("FileEmergencyStop requires a non-empty sentinel path")
+        import os
+
+        self._path = os.path.expanduser(str(path))
+
+    def is_engaged(self) -> bool:
+        import os
+
+        if not os.path.exists(self._path):
+            return False
+        # Present but unreadable/corrupt => fail-safe engaged.
+        try:
+            with open(self._path, "r", encoding="utf-8") as fh:
+                fh.read()
+            return True
+        except OSError:
+            return True
+
+    def engage(self, *, reason: str = "", actor: str = "") -> None:
+        import json
+        import os
+
+        directory = os.path.dirname(self._path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        payload = {
+            "engaged": True,
+            "reason": str(reason or ""),
+            "actor": str(actor or ""),
+            "at": time.time(),
+        }
+        # Atomic replace so a reader never observes a half-written sentinel
+        # (which would fail-safe engaged anyway, but this keeps it clean).
+        # ``mkstemp`` in the sentinel's own directory yields an unpredictable
+        # name owned by us, so a local attacker cannot pre-create a symlink to
+        # redirect the write. fsync + parent-dir fsync make an engaged brake
+        # durable across an abrupt crash.
+        import tempfile
+
+        fd, tmp = tempfile.mkstemp(
+            dir=directory or ".", prefix=".gateway.pause.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self._path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        if directory:
+            try:
+                dir_fd = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
+
+    def disengage(self) -> None:
+        import os
+
+        try:
+            os.remove(self._path)
+        except FileNotFoundError:
+            return None
+
+    def state(self) -> EmergencyStopState:
+        import json
+        import os
+
+        if not os.path.exists(self._path):
+            return EmergencyStopState(engaged=False)
+        try:
+            with open(self._path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                raise ValueError("sentinel is not a JSON object")
+            return EmergencyStopState(
+                engaged=True,
+                reason=str(data.get("reason", "")),
+                actor=str(data.get("actor", "")),
+                at=float(data.get("at", 0.0) or 0.0),
+            )
+        except (OSError, TypeError, ValueError):
+            # Fail-safe: unreadable/corrupt sentinel counts as engaged. A valid
+            # JSON object with a non-numeric ``at`` (e.g. a list) raises
+            # TypeError from ``float()`` and must also fail-safe engaged.
+            return EmergencyStopState(engaged=True, reason="unreadable-sentinel")
