@@ -469,12 +469,35 @@ class Handoff:
                     return value
         return 'gpt-4o-mini'
 
+    def _seed_target_history(self, prior_messages: Optional[List[Any]]) -> None:
+        """Prepend the filtered handoff context to the target agent's history.
+
+        The configured ``context_policy``/``input_filter`` produce the messages the
+        target should see; without seeding them here the target only ever received
+        the literal handoff prompt string and the configured policy had no effect.
+        Non-system messages already present on the target are preserved after the
+        seeded context; duplicates already at the head are not re-added.
+        """
+        if not prior_messages:
+            return
+        try:
+            prior = list(prior_messages)
+        except TypeError:
+            return
+        existing = getattr(self.agent, 'chat_history', None)
+        if not isinstance(existing, list):
+            return
+        if existing[:len(prior)] == prior:
+            return
+        self.agent.chat_history = prior + existing
+
     def _execute_with_runtime_resolution(
         self, 
         source_agent: 'Agent', 
         prompt: str, 
         effective_tools: Optional[List[Any]], 
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        prior_messages: Optional[List[Any]] = None,
     ) -> str:
         """Execute handoff through the target agent's full chat pipeline."""
         target_model_ref = self._extract_model_ref(self.agent)
@@ -484,6 +507,7 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
+        self._seed_target_history(prior_messages)
         return self.agent.chat(prompt, tools=effective_tools)
     
     async def _execute_with_runtime_resolution_async(
@@ -491,7 +515,8 @@ class Handoff:
         source_agent: 'Agent', 
         prompt: str, 
         effective_tools: Optional[List[Any]], 
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        prior_messages: Optional[List[Any]] = None,
     ) -> str:
         """Execute handoff through the target agent's full async chat pipeline."""
         target_model_ref = self._extract_model_ref(self.agent)
@@ -501,6 +526,7 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
+        self._seed_target_history(prior_messages)
         async_chat = getattr(self.agent, 'achat', None)
         if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
             return await async_chat(prompt, tools=effective_tools)
@@ -661,8 +687,9 @@ class Handoff:
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
             
-            # Prepare context (for future extensibility - context data available for hooks)
-            _ = self._prepare_context(source_agent, kwargs)
+            # Prepare context per the configured context_policy/input_filter and
+            # thread the filtered history through to the target agent.
+            handoff_data = self._prepare_context(source_agent, kwargs)
             
             # Build prompt with context
             context_prefix = f"[Handoff from {source_agent.name}] "
@@ -677,7 +704,8 @@ class Handoff:
             
             # Resolve runtime at turn-time instead of using construction-time pin
             response = self._execute_with_runtime_resolution(
-                source_agent, full_prompt, effective_tools, kwargs
+                source_agent, full_prompt, effective_tools, kwargs,
+                prior_messages=handoff_data.messages,
             )
             
             result = HandoffResult(
@@ -769,8 +797,9 @@ class Handoff:
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
                 
-                # Prepare context (for future extensibility)
-                _ = self._prepare_context(source_agent, kwargs)
+                # Prepare context per the configured context_policy/input_filter
+                # and thread the filtered history through to the target agent.
+                handoff_data = self._prepare_context(source_agent, kwargs)
                 
                 # Build prompt
                 context_prefix = f"[Handoff from {source_agent.name}] "
@@ -785,7 +814,8 @@ class Handoff:
                 
                 # Resolve runtime at turn-time for async execution
                 response = await self._execute_with_runtime_resolution_async(
-                    source_agent, full_prompt, effective_tools, kwargs
+                    source_agent, full_prompt, effective_tools, kwargs,
+                    prior_messages=handoff_data.messages,
                 )
                 
                 result = HandoffResult(
@@ -925,9 +955,13 @@ class Handoff:
                     # Compute effective tools based on tool policy
                     effective_tools = self._compute_effective_tools(source_agent)
                     
-                    # Resolve runtime at turn-time for tool function execution
+                    # Resolve runtime at turn-time for tool function execution.
+                    # The last message is already folded into ``prompt`` above, so
+                    # only the preceding filtered history is seeded to avoid
+                    # duplicating it.
                     response = self._execute_with_runtime_resolution(
-                        source_agent, prompt, effective_tools, kwargs
+                        source_agent, prompt, effective_tools, kwargs,
+                        prior_messages=handoff_data.messages[:-1],
                     )
                     
                     result = HandoffResult(
@@ -1468,8 +1502,9 @@ class TypedHandoff(Handoff, Generic[T]):
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
             
-            # Apply input filter if provided (fixes Greptile P1 issue)
-            _ = self._prepare_context(source_agent, kwargs)
+            # Apply context policy / input filter and seed the target's history.
+            handoff_data = self._prepare_context(source_agent, kwargs)
+            self._seed_target_history(handoff_data.messages)
             
             # Validate payload against schema
             try:
@@ -1581,8 +1616,9 @@ class TypedHandoff(Handoff, Generic[T]):
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
                 
-                # Apply input filter if provided (fixes Greptile P1 issue)
-                _ = self._prepare_context(source_agent, kwargs)
+                # Apply context policy / input filter and seed the target's history.
+                handoff_data = self._prepare_context(source_agent, kwargs)
+                self._seed_target_history(handoff_data.messages)
                 
                 # Validate payload against schema
                 try:
