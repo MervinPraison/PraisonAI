@@ -18,9 +18,11 @@ from praisonaiagents.gateway import (
 )
 
 
-def test_null_and_file_conform_to_protocol():
+def test_null_and_file_conform_to_protocol(tmp_path):
     assert isinstance(NullEmergencyStop(), EmergencyStopProtocol)
-    assert isinstance(FileEmergencyStop("/tmp/x.pause"), EmergencyStopProtocol)
+    assert isinstance(
+        FileEmergencyStop(str(tmp_path / "x.pause")), EmergencyStopProtocol
+    )
 
 
 def test_null_brake_never_engaged():
@@ -67,6 +69,16 @@ def test_file_brake_corrupt_sentinel_fails_safe_engaged(tmp_path):
     sentinel.write_text("{ this is not valid json")
     brake = FileEmergencyStop(str(sentinel))
     # Unreadable/corrupt sentinel counts as engaged, never "run freely".
+    assert brake.is_engaged() is True
+    assert brake.state().engaged is True
+
+
+def test_file_brake_structured_at_fails_safe_engaged(tmp_path):
+    # Valid JSON object but a non-numeric ``at`` (list) must not raise from
+    # float(); state() must still fail-safe engaged rather than propagate.
+    sentinel = tmp_path / "gateway.pause"
+    sentinel.write_text('{"engaged": true, "at": []}')
+    brake = FileEmergencyStop(str(sentinel))
     assert brake.is_engaged() is True
     assert brake.state().engaged is True
 

@@ -6256,10 +6256,36 @@ class FileEmergencyStop:
         }
         # Atomic replace so a reader never observes a half-written sentinel
         # (which would fail-safe engaged anyway, but this keeps it clean).
-        tmp = f"{self._path}.tmp.{os.getpid()}"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh)
-        os.replace(tmp, self._path)
+        # ``mkstemp`` in the sentinel's own directory yields an unpredictable
+        # name owned by us, so a local attacker cannot pre-create a symlink to
+        # redirect the write. fsync + parent-dir fsync make an engaged brake
+        # durable across an abrupt crash.
+        import tempfile
+
+        fd, tmp = tempfile.mkstemp(
+            dir=directory or ".", prefix=".gateway.pause.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self._path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        if directory:
+            try:
+                dir_fd = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
 
     def disengage(self) -> None:
         import os
@@ -6286,6 +6312,8 @@ class FileEmergencyStop:
                 actor=str(data.get("actor", "")),
                 at=float(data.get("at", 0.0) or 0.0),
             )
-        except (OSError, ValueError):
-            # Fail-safe: unreadable/corrupt sentinel counts as engaged.
+        except (OSError, TypeError, ValueError):
+            # Fail-safe: unreadable/corrupt sentinel counts as engaged. A valid
+            # JSON object with a non-numeric ``at`` (e.g. a list) raises
+            # TypeError from ``float()`` and must also fail-safe engaged.
             return EmergencyStopState(engaged=True, reason="unreadable-sentinel")

@@ -668,6 +668,12 @@ class GatewayServerSchema(BaseModel):
     api: Optional[Dict[str, Any]] = None
     liveness: Optional[Dict[str, Any]] = None
     health: Optional[HealthMonitorSchema] = None
+    # Cluster-wide per-turn serialisation (#3643) and the global operator
+    # emergency-stop / pause brake (#4220). Parsed by the core GatewayConfig
+    # (TurnLockConfig / EmergencyStopConfig); declared here so ``extra="forbid"``
+    # accepts the documented ``gateway.turn_lock`` / ``gateway.control`` blocks.
+    turn_lock: Optional[Dict[str, Any]] = None
+    control: Optional[Dict[str, Any]] = None
     # Crash/shutdown forensics (#2436)
     forensics: Optional[Dict[str, Any]] = None
     # Hooks may be nested under ``gateway:`` for grouping
