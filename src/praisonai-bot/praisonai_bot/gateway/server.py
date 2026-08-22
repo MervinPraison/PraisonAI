@@ -2922,6 +2922,10 @@ class WebSocketGateway:
                     EventType.TOOL_PROGRESS_STREAM.value,
                     EventType.STREAM_ERROR.value,
                     EventType.STREAM_END.value,
+                    EventType.MODEL_FALLBACK_STREAM.value,
+                    EventType.RETRY_STREAM.value,
+                    EventType.TODO_STREAM.value,
+                    EventType.TOOL_RESULT_STREAM.value,
                 ])
             
             # Add optional features based on client capabilities
@@ -3598,11 +3602,36 @@ class WebSocketGateway:
                         "error": getattr(event, 'error', None),
                         "session_id": sid,
                     }
+                elif event_type == StreamEventType.MODEL_FALLBACK:
+                    gw_type = EventType.MODEL_FALLBACK_STREAM
+                    data = {
+                        "metadata": getattr(event, 'metadata', None),
+                        "session_id": sid,
+                    }
+                elif event_type == StreamEventType.RETRY:
+                    gw_type = EventType.RETRY_STREAM
+                    data = {
+                        "metadata": getattr(event, 'metadata', None),
+                        "session_id": sid,
+                    }
+                elif event_type == StreamEventType.TODO_UPDATED:
+                    gw_type = EventType.TODO_STREAM
+                    data = {
+                        "metadata": getattr(event, 'metadata', None),
+                        "session_id": sid,
+                    }
+                elif event_type == StreamEventType.TOOL_CALL_RESULT:
+                    gw_type = EventType.TOOL_RESULT_STREAM
+                    data = {
+                        "tool_call": getattr(event, 'tool_call', {}),
+                        "metadata": getattr(event, 'metadata', None),
+                        "session_id": sid,
+                    }
                 elif event_type == StreamEventType.STREAM_END:
                     gw_type = EventType.STREAM_END
                     data = {"session_id": sid}
                 else:
-                    return  # Skip non-forwarded events
+                    return  # Skip genuinely internal markers
 
                 gw_event = GatewayEvent(
                     type=gw_type,
@@ -3865,6 +3894,10 @@ class WebSocketGateway:
                     "reasoning_stream",
                     "tool_progress_stream",
                     "stream_error",
+                    "model_fallback_stream",
+                    "retry_stream",
+                    "todo_stream",
+                    "tool_result_stream",
                 ]:
                     session_id = self._client_sessions.get(client_id)
                     if session_id:

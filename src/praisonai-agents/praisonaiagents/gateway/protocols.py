@@ -200,6 +200,10 @@ class EventType(str, Enum):
     TOOL_PROGRESS_STREAM = "tool_progress_stream"
     STREAM_ERROR = "stream_error"
     STREAM_END = "stream_end"
+    MODEL_FALLBACK_STREAM = "model_fallback_stream"
+    RETRY_STREAM = "retry_stream"
+    TODO_STREAM = "todo_stream"
+    TOOL_RESULT_STREAM = "tool_result_stream"
     
     # System events
     HEALTH = "health"
