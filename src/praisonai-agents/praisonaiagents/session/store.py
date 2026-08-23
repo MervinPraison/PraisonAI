@@ -2148,6 +2148,219 @@ class DefaultSessionStore:
         """Check if a session exists."""
         filepath = self._get_session_path(session_id)
         return os.path.exists(filepath)
+
+    # ── Portable export / import / migration (Issue #4267) ────────────────
+    #
+    # Store-agnostic backup/restore/migration for the gateway's own store.
+    # The payload is a simple, versioned envelope carrying the same portable
+    # session dicts that ``SessionData.to_dict`` already produces, so it
+    # round-trips through ``from_dict`` and is symmetric across the built-in
+    # stores (``SqliteSessionStore`` inherits this behaviour unchanged).
+
+    # Bumped only on a breaking payload-shape change; import tolerates older/
+    # unversioned payloads (best-effort) rather than rejecting them.
+    PORTABLE_VERSION = 1
+
+    # Live routing / activity fields cleared on import (unless opted out) so a
+    # restored record is inert until re-bound and cannot masquerade as an active
+    # connection. Kept intentionally small: transcript + identity survive; only
+    # the gateway's live wiring is reset.
+    _LIVE_FIELDS = ("gateway_session_id", "agent_id")
+
+    def export_session(
+        self, session_id: str, *, include_lineage: bool = True
+    ) -> Dict[str, Any]:
+        """Export a single session to a portable, versioned payload.
+
+        Reuses the existing ``SessionData.to_dict`` shape (so the payload
+        round-trips through ``import_sessions``). When ``include_lineage`` is
+        set, any compacted/rotated ancestors sharing this session's lineage id
+        are included so the conversation restores as one logical session.
+        """
+        session = self._read_session_fresh(session_id)
+        if not self.session_exists(session_id):
+            return {"version": self.PORTABLE_VERSION, "sessions": []}
+
+        sessions = [session.to_dict()]
+        if include_lineage:
+            for extra in self._collect_lineage(session, exclude=session_id):
+                sessions.append(extra)
+        return {"version": self.PORTABLE_VERSION, "sessions": sessions}
+
+    def export_all(self) -> Dict[str, Any]:
+        """Export every stored session to a portable, versioned payload."""
+        sessions: List[Dict[str, Any]] = []
+        try:
+            filenames = os.listdir(self.session_dir)
+        except (IOError, OSError):
+            filenames = []
+        for filename in filenames:
+            if not filename.endswith(".json"):
+                continue
+            filepath = os.path.join(self.session_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    sessions.append(json.load(f))
+            except (json.JSONDecodeError, IOError, OSError):
+                continue
+        return {"version": self.PORTABLE_VERSION, "sessions": sessions}
+
+    def _collect_lineage(
+        self, session: SessionData, *, exclude: str
+    ) -> List[Dict[str, Any]]:
+        """Return other on-disk sessions sharing this session's lineage id.
+
+        Uses the same *chain* identifiers as recall's lineage dedup
+        (``lineage_id`` / ``root_session_id`` / ``thread_id``) so a compacted /
+        rotated continuation exports alongside its logical session. Returns the
+        raw session dicts (already portable). Empty when no lineage is known.
+        """
+        lineage = self._lineage_key(session.to_dict())
+        if not lineage:
+            return []
+        out: List[Dict[str, Any]] = []
+        try:
+            filenames = os.listdir(self.session_dir)
+        except (IOError, OSError):
+            return []
+        for filename in filenames:
+            if not filename.endswith(".json"):
+                continue
+            filepath = os.path.join(self.session_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError, OSError):
+                continue
+            if data.get("session_id") == exclude:
+                continue
+            if self._lineage_key(data) == lineage:
+                out.append(data)
+        return out
+
+    def _save_imported_session(self, session: SessionData) -> bool:
+        """Persist a restored session verbatim (no retention/window applied).
+
+        Mirrors ``_save_session`` (timestamp + atomic, file-locked write) but
+        deliberately skips ``_enforce_window`` so importing a valid larger
+        export is not truncated/compacted by the destination's own retention
+        settings before it lands on disk.
+        """
+        filepath = self._get_session_path(session.session_id)
+        session.updated_at = datetime.now(timezone.utc).isoformat()
+        with FileLock(filepath, self.lock_timeout):
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error(f"Failed to save imported session {session.session_id}")
+                return False
+            return True
+
+    def import_sessions(
+        self,
+        payload: Dict[str, Any],
+        *,
+        max_sessions: int = 10_000,
+        reset_live_fields: bool = True,
+        overwrite: bool = False,
+    ) -> "ImportReport":
+        """Import sessions from an exported payload (hardened).
+
+        Validates the payload shape, caps ingest at ``max_sessions``, skips
+        malformed / duplicate records (reported, not silently dropped) and —
+        unless opted out — resets live routing/activity fields so restored
+        state is inert until re-bound.
+        """
+        from .protocols import ImportReport
+
+        report = ImportReport(version=self.PORTABLE_VERSION)
+        if not isinstance(payload, dict):
+            return report
+        # Reject payloads from a newer, breaking export format: a future shape
+        # could otherwise slip through ``from_dict`` with silently defaulted
+        # fields and corrupt restored state. Older/unversioned payloads are
+        # still accepted (best-effort) since v1 is the compatible baseline.
+        payload_version = payload.get("version")
+        if isinstance(payload_version, int) and payload_version > self.PORTABLE_VERSION:
+            report.skipped.append(
+                {
+                    "session_id": "",
+                    "reason": (
+                        f"unsupported payload version {payload_version} "
+                        f"(supported <= {self.PORTABLE_VERSION})"
+                    ),
+                }
+            )
+            return report
+        raw_sessions = payload.get("sessions")
+        if not isinstance(raw_sessions, list):
+            return report
+
+        seen_ids: set = set()
+        for index, raw in enumerate(raw_sessions):
+            if report.imported >= max_sessions:
+                report.skipped.append(
+                    {"session_id": "", "reason": f"max_sessions={max_sessions} cap reached"}
+                )
+                # Everything after the cap is skipped for the same reason; stop.
+                break
+            if not isinstance(raw, dict):
+                report.skipped.append(
+                    {"session_id": "", "reason": f"malformed record at index {index}"}
+                )
+                continue
+            session_id = str(raw.get("session_id") or "").strip()
+            if not session_id:
+                report.skipped.append(
+                    {"session_id": "", "reason": f"missing session_id at index {index}"}
+                )
+                continue
+            # Cycle / duplicate guard: the same id appearing twice in one payload
+            # is ingested once (first wins) so a self-referential lineage export
+            # cannot double-write.
+            if session_id in seen_ids:
+                report.skipped.append(
+                    {"session_id": session_id, "reason": "duplicate in payload"}
+                )
+                continue
+            seen_ids.add(session_id)
+
+            if not overwrite and self.session_exists(session_id):
+                report.skipped.append(
+                    {"session_id": session_id, "reason": "already exists (use overwrite)"}
+                )
+                continue
+
+            try:
+                data = dict(raw)
+                if reset_live_fields:
+                    for field_name in self._LIVE_FIELDS:
+                        data.pop(field_name, None)
+                    meta = data.get("metadata")
+                    if isinstance(meta, dict):
+                        # Copy before mutating so the caller's payload (and any
+                        # later import with reset_live_fields=False) keeps its
+                        # original live fields intact (data = dict(raw) is shallow).
+                        meta = dict(meta)
+                        for field_name in self._LIVE_FIELDS:
+                            meta.pop(field_name, None)
+                        data["metadata"] = meta
+                session = SessionData.from_dict(data)
+                session.session_id = session_id
+                # Persist the imported record verbatim: an import is a restore,
+                # so the destination's retention/active_window must not truncate
+                # or compact a valid larger export before it lands on disk.
+                if not self._save_imported_session(session):
+                    report.skipped.append(
+                        {"session_id": session_id, "reason": "write failed"}
+                    )
+                    continue
+                with self._lock:
+                    self._cache[session_id] = session
+                report.imported += 1
+            except Exception as e:  # pragma: no cover - defensive; one bad record
+                report.skipped.append(
+                    {"session_id": session_id, "reason": f"import error: {e}"}
+                )
+        return report
     
     def invalidate_cache(self, session_id: Optional[str] = None) -> None:
         """Invalidate cache for a session or all sessions."""

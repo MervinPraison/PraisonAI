@@ -1922,6 +1922,117 @@ def gateway_sessions_show(
         print(f"\n{data.get('footer')}")
 
 
+@sessions_app.command("export")
+def gateway_sessions_export(
+    session_id: Optional[str] = typer.Option(
+        None, "--session-id", "-s",
+        help="Export just this session (lineage-aware); default: all sessions",
+    ),
+    out: Optional[str] = typer.Option(
+        None, "--out", "-o", help="Write the payload to this file (default: stdout)"
+    ),
+    no_lineage: bool = typer.Option(
+        False, "--no-lineage",
+        help="Do not include compacted/rotated ancestors of a single session",
+    ),
+):
+    """Export gateway conversation sessions to a portable, versioned JSON payload.
+
+    Backup / migrate the gateway's own conversation state — the same store the
+    bot persists to — so it can be restored on another host or environment.
+
+    Examples:
+        praisonai gateway sessions export --out backup.json
+        praisonai gateway sessions export -s bot_slack_U123 -o one.json
+    """
+    import json
+
+    from praisonai_bot.gateway.preflight import export_gateway_sessions
+
+    payload = export_gateway_sessions(
+        session_id=session_id, include_lineage=not no_lineage
+    )
+    text = json.dumps(payload, indent=2)
+    if out:
+        # Write to a temp file in the destination dir, then atomically replace
+        # so a failed/partial write never truncates or corrupts an existing
+        # backup at ``out``.
+        import os
+        import tempfile
+
+        dest_dir = os.path.dirname(os.path.abspath(out)) or "."
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(tmp_path, out)
+        except OSError as exc:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            print(f"Error: could not write export to {out}: {exc}")
+            raise typer.Exit(1) from exc
+        print(f"Exported {len(payload.get('sessions') or [])} session(s) -> {out}")
+    else:
+        print(text)
+
+
+@sessions_app.command("import")
+def gateway_sessions_import(
+    in_path: str = typer.Option(
+        ..., "--in", "-i", help="Read the exported payload from this file"
+    ),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Overwrite sessions that already exist"
+    ),
+    keep_live_fields: bool = typer.Option(
+        False, "--keep-live-fields",
+        help="Do NOT reset live routing/activity fields (advanced)",
+    ),
+    max_sessions: int = typer.Option(
+        10_000, "--max-sessions", help="Cap on how many sessions to ingest"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON report"),
+):
+    """Import (restore/migrate) gateway sessions from an exported payload.
+
+    Hardened: caps ingest, skips duplicates, and by default resets live
+    routing/activity fields so restored state is inert until re-bound.
+
+    Examples:
+        praisonai gateway sessions import --in backup.json
+        praisonai gateway sessions import -i backup.json --overwrite
+    """
+    import json
+
+    from praisonai_bot.gateway.preflight import import_gateway_sessions
+
+    try:
+        with open(in_path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Error: could not read payload: {exc}")
+        raise typer.Exit(1) from exc
+
+    report = import_gateway_sessions(
+        payload,
+        max_sessions=max_sessions,
+        reset_live_fields=not keep_live_fields,
+        overwrite=overwrite,
+    )
+
+    if json_output:
+        print(json.dumps(report, indent=2))
+    else:
+        print(
+            f"Imported {report['imported']} session(s); "
+            f"skipped {report['skipped_count']}."
+        )
+        for entry in report.get("skipped") or []:
+            print(f"  skipped {entry.get('session_id') or '?'}: {entry.get('reason')}")
+
+
 def _run_hooks_action(**kwargs) -> None:
     """Reuse GatewayHandler.hooks() by adapting kwargs to its Namespace API."""
     from types import SimpleNamespace

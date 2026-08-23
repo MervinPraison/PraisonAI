@@ -87,6 +87,35 @@ class SessionSummary:
         }
 
 
+@dataclass
+class ImportReport:
+    """Outcome of a :meth:`PortableSessionStoreProtocol.import_sessions` call.
+
+    A structured, JSON-serialisable summary so an operator (or the gateway CLI)
+    can see exactly what a restore did: how many sessions were imported vs
+    skipped, and why. ``skipped`` entries carry ``{"session_id", "reason"}`` so
+    a rejected record (cap exceeded, malformed, duplicate) is observable rather
+    than silently dropped.
+    """
+
+    imported: int = 0
+    skipped: List[Dict[str, str]] = field(default_factory=list)
+    version: int = 1
+
+    @property
+    def skipped_count(self) -> int:
+        return len(self.skipped)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serialisable dict."""
+        return {
+            "imported": self.imported,
+            "skipped": self.skipped,
+            "skipped_count": self.skipped_count,
+            "version": self.version,
+        }
+
+
 @runtime_checkable
 class SessionStoreProtocol(Protocol):
     """Protocol for session persistence backends.
@@ -183,6 +212,85 @@ class SessionStoreProtocol(Protocol):
             
         Returns:
             True if the session exists.
+        """
+        ...
+
+
+@runtime_checkable
+class PortableSessionStoreProtocol(Protocol):
+    """Protocol for portable backup / restore / migration of sessions.
+
+    Extends the storage contract with a store-agnostic way to export a
+    versioned, JSON-serialisable payload and import it back on another host or
+    into another store — so a gateway operator can back up, move, or restore
+    conversation state without hand-copying opaque store files.
+
+    The payload shape is deliberately simple and versioned::
+
+        {"version": 1, "sessions": [ <session dict>, ... ]}
+
+    Each session dict is the same portable shape produced by
+    ``SessionData.to_dict`` (round-trips through ``SessionData.from_dict``), so
+    export/import is symmetric across the built-in stores. ``import_sessions``
+    is *hardened*: it caps how much it will ingest and, by default, resets live
+    routing/activity fields so restored state is inert until re-bound (an
+    imported record must not masquerade as an active connection).
+
+    Example::
+
+        data = store.export_all()
+        report = other_store.import_sessions(data)
+        print(report.imported, report.skipped_count)
+    """
+
+    def export_session(
+        self, session_id: str, *, include_lineage: bool = True
+    ) -> Dict[str, Any]:
+        """Export a single session to a portable, versioned payload.
+
+        Args:
+            session_id: The session to export.
+            include_lineage: When True, also include any compacted/rotated
+                ancestors of this conversation so it round-trips as one logical
+                session.
+
+        Returns:
+            ``{"version": ..., "sessions": [...]}`` (empty ``sessions`` when the
+            id is unknown).
+        """
+        ...
+
+    def export_all(self) -> Dict[str, Any]:
+        """Export every stored session to a portable, versioned payload.
+
+        Returns:
+            ``{"version": ..., "sessions": [...]}`` covering all sessions.
+        """
+        ...
+
+    def import_sessions(
+        self,
+        payload: Dict[str, Any],
+        *,
+        max_sessions: int = 10_000,
+        reset_live_fields: bool = True,
+        overwrite: bool = False,
+    ) -> "ImportReport":
+        """Import sessions from an exported payload (hardened).
+
+        Args:
+            payload: A payload previously produced by ``export_session`` /
+                ``export_all``.
+            max_sessions: Cap on how many sessions to ingest; the remainder is
+                skipped and reported (guards against an oversized payload).
+            reset_live_fields: When True (default), clear live routing/activity
+                fields on each imported record so restored state is inert until
+                re-bound (does not masquerade as an active connection).
+            overwrite: When False (default), an existing session id is skipped
+                rather than clobbered.
+
+        Returns:
+            An :class:`ImportReport` summarising imported vs skipped sessions.
         """
         ...
 
