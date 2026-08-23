@@ -849,7 +849,13 @@ class TestIssue3492WrapperGaps:
             # Awaitable sibling never blocks the loop and completes.
             return await arun_sync_or_offload(_work())
 
-        assert asyncio.run(_main_strict()) == 42
+        # Force strict behaviour regardless of the ambient environment: a
+        # process-level ``PRAISONAI_ALLOW_LOOP_BLOCKING=true`` would otherwise
+        # select the legacy blocking path and this assertion would not raise.
+        with mock.patch.dict(
+            os.environ, {"PRAISONAI_ALLOW_LOOP_BLOCKING": ""}
+        ):
+            assert asyncio.run(_main_strict()) == 42
 
         async def _main_optin():
             # Legacy behaviour remains available behind an explicit opt-in.

@@ -149,6 +149,13 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
                     exc_info=True,
                 )
                 continue
+        # ``sys.modules[info.name]`` may be a ``None`` placeholder (CPython
+        # records known-absent submodules that way). Aliasing one would poison
+        # the old dotted name so ``import old_name.sub`` raises "None in
+        # sys.modules" before _AliasFinder can resolve it lazily — mirror the
+        # guard in the already-imported pass above.
+        if sub is None:
+            continue
         old_equiv = old_name + info.name[len(new_name):]
         sys.modules.setdefault(old_equiv, sub)
 

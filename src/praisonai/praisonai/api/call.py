@@ -294,8 +294,20 @@ def _register_routes(app):
 
     Handlers are defined at module scope (below) and attached here so the app is
     built lazily by :func:`build_call_app` without any import-time app object.
+
+    The handlers are annotation-free at module scope to keep ``import
+    praisonai.api.call`` free of a top-level ``fastapi`` dependency. FastAPI
+    resolves framework objects (``Request``/``WebSocket``) by *annotation*, not
+    by parameter name, so the real classes are stamped onto the handlers here —
+    at build time, where ``fastapi`` is already imported — before registration.
+    Without this, an unannotated ``request`` parameter is treated as a required
+    query parameter and the ``/`` route 422s.
     """
+    from fastapi import Request, WebSocket
     from fastapi.responses import HTMLResponse
+
+    handle_incoming_call.__annotations__["request"] = Request
+    handle_media_stream.__annotations__["websocket"] = WebSocket
 
     app.add_api_route(
         "/status", index_page, methods=["GET"], response_class=HTMLResponse
