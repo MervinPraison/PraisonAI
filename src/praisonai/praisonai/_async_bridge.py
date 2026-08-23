@@ -291,21 +291,44 @@ def run_sync_or_offload(
       :class:`AsyncBridge` via :func:`run_sync`, sharing its background loop and
       connection pools.
     - Called from inside a running loop (FastAPI handler, Jupyter, async test):
-      copies the caller's ContextVars onto a worker thread that hands the
-      coroutine to the SAME bridge (never a fresh ``asyncio.new_event_loop()``),
-      so a caller-installed :func:`scoped_bridge` binding still wins and
-      LiteLLM/HTTPX per-loop connection pools are preserved. Exceptions are
-      re-raised on the caller thread.
+      by default this raises ``RuntimeError`` rather than blocking the loop,
+      pointing callers at the awaitable siblings (:func:`arun_sync_or_offload`,
+      ``adapter.arun``, ``praisonai.arun``). Set
+      ``PRAISONAI_ALLOW_LOOP_BLOCKING=true`` to opt into the legacy behaviour
+      that copies the caller's ContextVars onto a worker thread handing the
+      coroutine to the SAME bridge (never a fresh ``asyncio.new_event_loop()``)
+      and joins it — which pins the loop for up to ``timeout`` seconds.
 
     Callers who *know* they are on a sync-only path should use :func:`run_sync`
-    (it fails loudly inside a loop). Everything that participates in the 3-way
-    surface (CLI + YAML + Python) should use this helper so the correct
-    running-loop handling lives in one place instead of being re-implemented.
+    (it fails loudly inside a loop). Async callers should ``await``
+    :func:`arun_sync_or_offload`, which never blocks the loop.
     """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return run_sync(coro, timeout=timeout)
+
+    # Strict path (default): never block a running event loop. Joining the
+    # worker thread from the loop thread pins the loop for up to ``timeout``
+    # seconds — exactly the "async-safe" pathology this project forbids. Steer
+    # callers to the awaitable siblings that never block the loop.
+    if os.environ.get("PRAISONAI_ALLOW_LOOP_BLOCKING", "").lower() not in (
+        "1",
+        "true",
+    ):
+        # Close the coroutine we are refusing to run so it does not leak as a
+        # "coroutine was never awaited" warning.
+        with contextlib.suppress(Exception):
+            coro.close()  # type: ignore[attr-defined]
+        raise RuntimeError(
+            "run_sync_or_offload() would block the running event loop for up to "
+            f"{timeout}s. From an async context, await one of:\n"
+            "  - praisonai.arun(...)\n"
+            "  - adapter.arun(...)\n"
+            "  - praisonai._async_bridge.arun_sync_or_offload(coro)\n"
+            "Set PRAISONAI_ALLOW_LOOP_BLOCKING=true to opt into the legacy "
+            "blocking behaviour."
+        )
 
     result: list[T] = []
     error: list[BaseException] = []
