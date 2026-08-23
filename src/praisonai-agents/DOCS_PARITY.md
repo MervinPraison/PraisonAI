@@ -49,7 +49,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Hooks | 2 | 9 | 4488 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 16 | 4942 |
-| ✅ LLM | 3 | 15 | 5296 |
+| ✅ LLM | 3 | 15 | 5323 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14135 |
 | ✅ Memory | 6 | 18 | 7188 |
