@@ -689,21 +689,32 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             Execution result as string
         """
         # Single source of truth: sync goes through the async bridge.
-        # Use run_sync_or_offload so this flagship sync entry point is safe
-        # from ANY calling context (plain sync, FastAPI handler, async test,
-        # notebook). A bare run_sync would raise RuntimeError inside a running
-        # loop, crashing praisonai.run(...) deep in the adapter.
-        from praisonai._async_bridge import run_sync_or_offload
-        return run_sync_or_offload(
-            self.arun(
-                config, llm_config, topic,
-                tools_dict=tools_dict,
-                agent_callback=agent_callback,
-                task_callback=task_callback,
-                cli_config=cli_config,
-            ),
-            thread_name="praisonai-adapter-sync",
+        # Plain sync callers get the shared background loop via run_sync. Callers
+        # already inside a running event loop (FastAPI handler, Jupyter, async
+        # test) must not take the sync path — blocking the loop for the full
+        # agent run is the "async-safe" pathology this project forbids — so we
+        # fail loudly and point them at the awaitable ``arun``.
+        import asyncio
+
+        coro = self.arun(
+            config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config,
         )
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            from praisonai._async_bridge import run_sync
+            return run_sync(coro)
+
+        # Inside a running loop: run_sync_or_offload enforces the strict
+        # no-loop-blocking policy (and honours PRAISONAI_ALLOW_LOOP_BLOCKING for
+        # callers that opt back into the legacy blocking behaviour), raising a
+        # RuntimeError that steers callers to ``await adapter.arun(...)``.
+        from praisonai._async_bridge import run_sync_or_offload
+        return run_sync_or_offload(coro, thread_name="praisonai-adapter-sync")
 
     async def arun(
         self,

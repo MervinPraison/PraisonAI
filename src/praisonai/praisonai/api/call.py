@@ -4,20 +4,18 @@ import base64
 import hmac
 import secrets
 import asyncio
-import websockets
-from fastapi import FastAPI, WebSocket, Request
-from fastapi.responses import HTMLResponse
-from fastapi.websockets import WebSocketDisconnect
-from twilio.twiml.voice_response import VoiceResponse, Connect
-import uvicorn
-from pyngrok import ngrok, conf
-from rich import print
 import argparse
 import logging
 import importlib.util
 import time
 from typing import Optional
 from collections import defaultdict
+
+# Heavy, optional dependencies (websockets, fastapi, twilio, uvicorn, pyngrok,
+# rich) are imported lazily inside the functions that need them. Importing this
+# module must stay cheap: ``import praisonai.api.call`` (reachable from unrelated
+# code paths) should not pay the transitive cost of the voice/serve stack or
+# fail on minimal containers where those native deps are absent.
 
 
 def _maybe_load_dotenv() -> None:
@@ -170,25 +168,16 @@ def _refresh_env_globals() -> None:
         pass
 
 
-app = FastAPI()
-
 # Set up logging
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
 logger.handlers.clear()
 
-# Include agent invoke router for n8n integration
-try:
-    from .agent_invoke import router as agent_invoke_router
-    app.include_router(agent_invoke_router)
-    logger.debug("Agent invoke router added for n8n integration")
-except ImportError as e:
-    logger.warning(f"Could not load agent invoke router: {e}")
-
-# Try to import tools from the root directory
+# Tool registry populated only when a server verb explicitly loads local tools
+# (see ``_load_local_tools`` / ``build_call_app``). It is NEVER populated as an
+# import-time side effect.
 tools = []
-tools_path = os.path.join(os.getcwd(), 'tools.py')
-logger.debug(f"Tools path: {tools_path}")
+
 
 def import_tools_from_file(file_path):
     """Import tools from file with PRAISONAI_ALLOW_LOCAL_TOOLS opt-in.
@@ -211,34 +200,122 @@ def import_tools_from_file(file_path):
         logger.error("Failed to import tools from %s", file_path, exc_info=True)
         raise ValueError(f"Failed to import tools from {file_path}") from e
 
-try:
-    # Security: Require explicit opt-in for local tools loading
-    if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
-        logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
-        custom_tools_module = None
-    elif os.path.exists(tools_path):
-        # tools.py exists in the root directory, import from file
-        custom_tools_module = import_tools_from_file(tools_path)
-        logger.debug("Successfully imported custom tools from root tools.py")
-    else:
-        logger.debug("No custom tools.py file found in the root directory")
-        custom_tools_module = None
 
-    if custom_tools_module:
-        # Update the tools list with custom tools
-        if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
-            tools.extend(custom_tools_module.tools)
+def _load_local_tools():
+    """Load ``./tools.py`` into the module ``tools`` registry, if opted in.
+
+    Runs user code, so it is gated behind ``PRAISONAI_ALLOW_LOCAL_TOOLS=true``
+    and only invoked by a server entry point (``build_call_app``/``main``) — never
+    at import time. Importing ``praisonai.api.call`` therefore has no filesystem
+    scan and never executes a neighbouring ``tools.py``.
+
+    Idempotent: the shared ``tools`` registry is rebuilt from scratch on each
+    call. Building the app more than once in a process (e.g. two
+    ``build_call_app(load_local_tools=True)`` calls) therefore does not
+    accumulate duplicate tool definitions — which would otherwise send the same
+    tool multiple times in every realtime ``session.update`` and grow the
+    registry unbounded across builds.
+    """
+    tools_path = os.path.join(os.getcwd(), 'tools.py')
+    logger.debug(f"Tools path: {tools_path}")
+    try:
+        if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+            logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+            custom_tools_module = None
+        elif os.path.exists(tools_path):
+            custom_tools_module = import_tools_from_file(tools_path)
+            logger.debug("Successfully imported custom tools from root tools.py")
         else:
-            for name, obj in custom_tools_module.__dict__.items():
-                if callable(obj) and not name.startswith("__"):
-                    tool_definition = getattr(obj, 'definition', None)
-                    if tool_definition:
-                        tools.append(tool_definition)
+            logger.debug("No custom tools.py file found in the root directory")
+            custom_tools_module = None
 
-except Exception as e:
-    logger.warning(f"Error importing custom tools: {str(e)}. Continuing without custom tools.")
+        if custom_tools_module:
+            # Reset in place (keep the same list object other modules may hold a
+            # reference to) so a re-load replaces rather than appends.
+            tools.clear()
+            if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
+                tools.extend(custom_tools_module.tools)
+            else:
+                for name, obj in custom_tools_module.__dict__.items():
+                    if callable(obj) and not name.startswith("__"):
+                        tool_definition = getattr(obj, 'definition', None)
+                        if tool_definition:
+                            tools.append(tool_definition)
+    except Exception as e:
+        logger.warning(f"Error importing custom tools: {str(e)}. Continuing without custom tools.")
 
-@app.get("/status", response_class=HTMLResponse)
+
+def build_call_app(*, load_local_tools: bool = False):
+    """Build a fresh FastAPI app with the call routes registered.
+
+    Heavy deps (FastAPI, the agent-invoke router) are imported here, not at
+    module import time. When ``load_local_tools`` is true and the env opt-in is
+    set, ``./tools.py`` is loaded into the shared ``tools`` registry.
+    """
+    from fastapi import FastAPI
+
+    app = FastAPI()
+
+    try:
+        from .agent_invoke import router as agent_invoke_router
+        app.include_router(agent_invoke_router)
+        logger.debug("Agent invoke router added for n8n integration")
+    except ImportError as e:
+        logger.warning(f"Could not load agent invoke router: {e}")
+
+    _register_routes(app)
+
+    if load_local_tools:
+        _load_local_tools()
+
+    return app
+
+
+_app = None
+
+
+def __getattr__(name):
+    """Lazily construct the module-level ``app`` on first access.
+
+    Preserves the ``praisonai.api.call.app`` attribute for third parties that
+    import the name directly, without building a FastAPI app (and pulling its
+    transitive deps) merely because the module was imported.
+    """
+    if name == "app":
+        global _app
+        if _app is None:
+            _app = build_call_app()
+        return _app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _register_routes(app):
+    """Register the voice-call HTTP/WebSocket routes on ``app``.
+
+    Handlers are defined at module scope (below) and attached here so the app is
+    built lazily by :func:`build_call_app` without any import-time app object.
+
+    The handlers are annotation-free at module scope to keep ``import
+    praisonai.api.call`` free of a top-level ``fastapi`` dependency. FastAPI
+    resolves framework objects (``Request``/``WebSocket``) by *annotation*, not
+    by parameter name, so the real classes are stamped onto the handlers here —
+    at build time, where ``fastapi`` is already imported — before registration.
+    Without this, an unannotated ``request`` parameter is treated as a required
+    query parameter and the ``/`` route 422s.
+    """
+    from fastapi import Request, WebSocket
+    from fastapi.responses import HTMLResponse
+
+    handle_incoming_call.__annotations__["request"] = Request
+    handle_media_stream.__annotations__["websocket"] = WebSocket
+
+    app.add_api_route(
+        "/status", index_page, methods=["GET"], response_class=HTMLResponse
+    )
+    app.add_api_route("/", handle_incoming_call, methods=["GET", "POST"])
+    app.add_api_websocket_route("/media-stream", handle_media_stream)
+
+
 async def index_page():
     return """
     <html>
@@ -251,11 +328,13 @@ async def index_page():
     </html>
     """
 
-from fastapi import HTTPException, status
 
-@app.api_route("/", methods=["GET", "POST"])
-async def handle_incoming_call(request: Request):
+async def handle_incoming_call(request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
+    from fastapi import HTTPException, status
+    from fastapi.responses import HTMLResponse
+    from twilio.twiml.voice_response import VoiceResponse, Connect
+
     if not CALL_SERVER_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -298,9 +377,11 @@ async def handle_incoming_call(request: Request):
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
-@app.websocket("/media-stream")
-async def handle_media_stream(websocket: WebSocket):
+async def handle_media_stream(websocket):
     """Handle WebSocket connections between Twilio and OpenAI."""
+    import websockets
+    from fastapi.websockets import WebSocketDisconnect
+
     global active_connections
     
     # 1. Authentication — accept a one-shot, per-connection session token
@@ -498,6 +579,8 @@ async def send_session_update(openai_ws):
     await openai_ws.send(json.dumps(session_update))
 
 def setup_public_url(port):
+    from pyngrok import ngrok, conf
+
     if NGROK_AUTH_TOKEN:
         conf.get_default().auth_token = NGROK_AUTH_TOKEN
     public_url = ngrok.connect(addr=str(port)).public_url
@@ -506,6 +589,8 @@ def setup_public_url(port):
 
 def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
     """Run the FastAPI server using uvicorn."""
+    import uvicorn
+
     if not OPENAI_API_KEY:
         raise ValueError('Missing the OpenAI API key. Please set it in the .env file or configure it through the GUI.')
     
@@ -522,6 +607,9 @@ def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
 
     os.environ["PRAISONAI_CALL_BIND_HOST"] = host
 
+    # Build the app here (server entry point) — this is the only place local
+    # tools.py is loaded, and only when PRAISONAI_ALLOW_LOCAL_TOOLS is set.
+    app = build_call_app(load_local_tools=True)
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 def main(args=None):

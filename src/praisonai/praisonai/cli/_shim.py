@@ -33,9 +33,13 @@ the moved package.
 from __future__ import annotations
 
 import importlib
+import logging
+import os
 import pkgutil
 import sys
 from importlib.machinery import ModuleSpec
+
+_logger = logging.getLogger(__name__)
 
 
 class _RedirectLoader:
@@ -75,25 +79,35 @@ class _AliasFinder:
 
 
 def _register_submodules(old_name: str, new_name: str, module) -> None:
-    """Eagerly import the moved subtree and alias each submodule.
+    """Alias the moved subtree under the old dotted name.
 
     Registering each moved submodule under its old dotted name in
     ``sys.modules`` guarantees that a later ``import old_name.sub`` finds the
     identical object immediately, never re-executing the file (which would
-    create duplicate class/enum objects). Modules that fail to import eagerly
-    (e.g. optional heavy dependencies not installed) are skipped and resolved
-    lazily by :class:`_AliasFinder` on first successful use.
+    create duplicate class/enum objects).
 
-    Eager pre-registration is required for correctness, not just startup speed:
-    if the alias for ``old_name.sub`` is *absent* when a combined statement such
-    as ``from old_name.sub import Symbol`` runs, CPython imports the parent
-    shim, then resolves ``.sub`` through :class:`_AliasFinder.find_spec`, which
-    calls ``import_module`` re-entrantly *inside* the parent's in-progress
-    import. Under the import lock that re-entrancy loads the moved file twice,
+    Eager pre-registration is required for **correctness**, not merely startup
+    speed. If the alias for ``old_name.sub`` is *absent* when a statement such as
+    ``from old_name.sub import Symbol`` (or ``import old_name.sub``) runs first,
+    CPython imports the parent shim, then resolves ``.sub`` through
+    :class:`_AliasFinder.find_spec`, which calls ``import_module`` re-entrantly.
+    Under the import lock that re-entrancy can load the moved file *twice*,
     producing two distinct module objects (duplicate classes) and breaking
-    module identity (guarantee #1). Pre-stamping ``sys.modules[old_name.sub]``
-    here means ``_find_and_load`` returns the single canonical object directly
-    and never re-enters the finder.
+    module identity — so ``old_name.sub is new_name.sub`` becomes ``False`` and
+    ``unittest.mock.patch("old_name.sub.attr")`` no longer patches the object the
+    running code (importing via the new name) actually uses.
+
+    Pre-stamping ``sys.modules[old_name.sub]`` here means ``_find_and_load``
+    returns the single canonical object directly and never re-enters the finder.
+    Modules that fail to import eagerly (optional heavy deps not installed) are
+    logged and left for :class:`_AliasFinder` to resolve lazily on first use, so
+    a partial install still starts cleanly.
+
+    Set ``PRAISONAI_SHIM_LAZY=1`` to opt *out* of the eager subtree walk (pure
+    lazy resolution). This trades the module-identity guarantee above for not
+    importing the moved subtree at shim-install time; only use it when nothing in
+    the process relies on ``old_name.sub is new_name.sub`` (e.g. no ``mock.patch``
+    against the old dotted path).
     """
     new_prefix = new_name + "."
 
@@ -109,6 +123,12 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
             old_equiv = old_name + mod_name[len(new_name):]
             sys.modules.setdefault(old_equiv, mod)
 
+    if os.environ.get("PRAISONAI_SHIM_LAZY", "").lower() in ("1", "true"):
+        # Explicit opt-out: rely solely on _AliasFinder for on-demand
+        # resolution. Callers choosing this must not depend on module identity
+        # across the old/new dotted paths (see docstring).
+        return
+
     search_path = getattr(module, "__path__", None)
     if not search_path:
         return
@@ -120,7 +140,22 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
             try:
                 sub = importlib.import_module(info.name)
             except Exception:
+                # Do not swallow silently: a downstream AttributeError on the
+                # alias with no traceback pointing here is the opposite of
+                # "safe by default". Log and let _AliasFinder retry lazily.
+                _logger.warning(
+                    "shim: eager import of %s failed; will be resolved lazily",
+                    info.name,
+                    exc_info=True,
+                )
                 continue
+        # ``sys.modules[info.name]`` may be a ``None`` placeholder (CPython
+        # records known-absent submodules that way). Aliasing one would poison
+        # the old dotted name so ``import old_name.sub`` raises "None in
+        # sys.modules" before _AliasFinder can resolve it lazily — mirror the
+        # guard in the already-imported pass above.
+        if sub is None:
+            continue
         old_equiv = old_name + info.name[len(new_name):]
         sys.modules.setdefault(old_equiv, sub)
 

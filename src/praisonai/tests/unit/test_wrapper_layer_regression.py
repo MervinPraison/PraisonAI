@@ -828,19 +828,43 @@ class TestIssue3492WrapperGaps:
         assert adapter_capability("shared", "SUPPORTS_WORKFLOW", registry=reg_a) is True
 
     def test_gap2_run_sync_or_offload_from_running_loop(self):
-        """``run_sync_or_offload`` must drive a coroutine to completion even when
-        called from inside a running event loop (where ``run_sync`` raises)."""
+        """From inside a running loop, ``run_sync_or_offload`` must refuse to
+        block the loop by default (raising a clear RuntimeError), while the
+        awaitable sibling and the explicit opt-in still complete the coroutine."""
         import asyncio
-        from praisonai._async_bridge import run_sync_or_offload
+        import os
+        from unittest import mock
+        from praisonai._async_bridge import (
+            run_sync_or_offload,
+            arun_sync_or_offload,
+        )
 
         async def _work():
             return 42
 
-        async def _main():
-            # We are inside a running loop here; a bare run_sync would raise.
+        async def _main_strict():
+            # Strict default: refuse to pin the running loop.
+            with pytest.raises(RuntimeError, match="arun"):
+                run_sync_or_offload(_work())
+            # Awaitable sibling never blocks the loop and completes.
+            return await arun_sync_or_offload(_work())
+
+        # Force strict behaviour regardless of the ambient environment: a
+        # process-level ``PRAISONAI_ALLOW_LOOP_BLOCKING=true`` would otherwise
+        # select the legacy blocking path and this assertion would not raise.
+        with mock.patch.dict(
+            os.environ, {"PRAISONAI_ALLOW_LOOP_BLOCKING": ""}
+        ):
+            assert asyncio.run(_main_strict()) == 42
+
+        async def _main_optin():
+            # Legacy behaviour remains available behind an explicit opt-in.
             return run_sync_or_offload(_work())
 
-        assert asyncio.run(_main()) == 42
+        with mock.patch.dict(
+            os.environ, {"PRAISONAI_ALLOW_LOOP_BLOCKING": "true"}
+        ):
+            assert asyncio.run(_main_optin()) == 42
 
     def test_gap2_run_sync_or_offload_plain_sync_caller(self):
         from praisonai._async_bridge import run_sync_or_offload
