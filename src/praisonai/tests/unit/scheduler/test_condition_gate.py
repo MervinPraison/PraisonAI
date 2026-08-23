@@ -294,6 +294,80 @@ class TestMonitorGate:
             gate._request_url(parsed, "93.184.216.34")
         assert time.monotonic() - started < 0.15
 
+    def test_deadline_aborts_close_delimited_slow_body(self, monkeypatch):
+        # ``Connection: close`` replies make http.client set ``sock = None`` at
+        # getresponse() time — the very responses whose body can hang forever.
+        # The watchdog must still abort via the pinned raw socket; otherwise a
+        # hostile drip-feed stalls the whole scheduler tick.
+        from praisonai_bot.scheduler import condition_gate
+
+        aborted = threading.Event()
+
+        class _RawSocket:
+            def shutdown(self, _how):
+                aborted.set()
+
+            def close(self):
+                pass
+
+        class _SlowBodyConnection:
+            def __init__(self, *_args, **_kwargs):
+                self.sock = None
+                self._raw_socket = _RawSocket()
+
+            def request(self, *_args, **_kwargs):
+                return None
+
+            def getresponse(self):
+                return self
+
+            status = 200
+
+            def read(self, _amount):
+                if not aborted.wait(0.5):
+                    raise AssertionError("slow body read was not interrupted")
+                raise OSError("connection aborted")
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(
+            condition_gate, "_PinnedHTTPConnection", _SlowBodyConnection,
+        )
+        gate = MonitorGate(timeout=0.02)
+        parsed = condition_gate.parse.urlsplit("http://example.com/value")
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="total deadline"):
+            gate._request_url(parsed, "93.184.216.34")
+        assert aborted.is_set()
+        assert time.monotonic() - started < 0.4
+
+    def test_abort_falls_back_to_pinned_raw_socket(self):
+        # Direct check of the abort path: a nulled ``sock`` must not stop the
+        # watchdog from shutting down the retained handle.
+        class _RawSocket:
+            def __init__(self):
+                self.shutdown_called = False
+                self.closed = False
+
+            def shutdown(self, _how):
+                self.shutdown_called = True
+
+        class _Connection:
+            def __init__(self):
+                self.sock = None
+                self._raw_socket = _RawSocket()
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        conn = _Connection()
+        MonitorGate._abort_connection(conn)
+        assert conn._raw_socket.shutdown_called
+        assert conn.closed
+
     def test_read_bounded_returns_full_body(self):
         class _OneShotResponse:
             def __init__(self):
