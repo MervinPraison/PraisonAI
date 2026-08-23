@@ -23,13 +23,17 @@ Usage::
     metrics.inc("messages_inbound_total")
     metrics.inc("outbound_failed_total", labels={"channel": "telegram"})
     metrics.set_gauge("outbox_depth", 3)
+    with metrics.timer("gateway_turn_latency_seconds", labels={"platform": "telegram"}):
+        ...                              # observe a duration distribution
     text = metrics.render_prometheus()   # serve at GET /metrics
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Callable, Dict, List, Optional, Tuple
+import time
+from contextlib import contextmanager
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 # Stable metric names + help text so the exposition output is self-describing.
 _COUNTER_HELP: Dict[str, str] = {
@@ -55,6 +59,19 @@ _GAUGE_HELP: Dict[str, str] = {
     "channel_recoveries": "Total supervision recoveries per channel.",
 }
 
+_HISTOGRAM_HELP: Dict[str, str] = {
+    "gateway_turn_latency_seconds": "Turn latency (inbound received -> reply delivered).",
+    "gateway_llm_latency_seconds": "LLM-call latency in seconds.",
+    "gateway_tool_latency_seconds": "Tool-call latency in seconds.",
+    "gateway_queue_wait_seconds": "Admission/queue wait time before dispatch.",
+    "gateway_outbound_latency_seconds": "Outbound send latency in seconds.",
+}
+
+# Sane default buckets (seconds) covering sub-second to multi-second turns.
+DEFAULT_BUCKETS: Tuple[float, ...] = (
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+)
+
 # A label set is a sorted tuple of (name, value) pairs so it is hashable and
 # renders deterministically.
 _LabelKey = Tuple[Tuple[str, str], ...]
@@ -77,6 +94,49 @@ def _escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+def _fmt_bound(bound: float) -> str:
+    """Render a bucket upper bound without a trailing ``.0`` for whole numbers."""
+    if bound == int(bound):
+        return str(int(bound))
+    return repr(bound)
+
+
+def _validate_buckets(buckets: Tuple[float, ...]) -> Tuple[float, ...]:
+    """Coerce and validate bucket bounds: finite and strictly increasing.
+
+    The implicit ``+Inf`` bucket is always appended at render time, so callers
+    supply only the finite upper bounds here.
+    """
+    bounds = tuple(float(b) for b in buckets)
+    if not bounds:
+        raise ValueError("histogram buckets must be non-empty")
+    previous: Optional[float] = None
+    for bound in bounds:
+        if bound != bound or bound in (float("inf"), float("-inf")):
+            raise ValueError(f"histogram bucket bound must be finite: {bound!r}")
+        if previous is not None and bound <= previous:
+            raise ValueError(
+                "histogram bucket bounds must be strictly increasing: "
+                f"{bounds!r}"
+            )
+        previous = bound
+    return bounds
+
+
+class _HistData:
+    """Mutable per-label-set histogram accumulator."""
+
+    __slots__ = ("counts", "sum", "count")
+
+    def __init__(self, counts: List[int], total: float, count: int) -> None:
+        self.counts = counts
+        self.sum = total
+        self.count = count
+
+    def copy(self) -> "_HistData":
+        return _HistData(list(self.counts), self.sum, self.count)
+
+
 class GatewayMetrics:
     """Thread-safe, dependency-free message-flow metrics registry."""
 
@@ -87,6 +147,9 @@ class GatewayMetrics:
         self._gauges: Dict[str, Dict[_LabelKey, float]] = {}
         # name -> callable returning a live value (e.g. outbox_depth probe)
         self._gauge_providers: Dict[str, Callable[[], float]] = {}
+        # name -> label_key -> {"buckets": {le: count}, "sum": float, "count": int}
+        self._histograms: Dict[str, Dict[_LabelKey, _HistData]] = {}
+        self._histogram_buckets: Dict[str, Tuple[float, ...]] = {}
 
     # ── Counters ────────────────────────────────────────────────────
     def inc(
@@ -144,6 +207,64 @@ class GatewayMetrics:
                     pass
             return self._gauges.get(name, {}).get(key, 0.0)
 
+    # ── Histograms ──────────────────────────────────
+    def observe(
+        self,
+        name: str,
+        seconds: float,
+        buckets: Tuple[float, ...] = DEFAULT_BUCKETS,
+        labels: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Record a duration observation into a histogram.
+
+        Accumulates cumulative bucket counts plus running ``_sum``/``_count`` so
+        the exposition can render Prometheus histogram series and clients can
+        compute p50/p95/p99.
+        """
+        if labels and "le" in labels:
+            raise ValueError("'le' is a reserved histogram label name")
+        value = float(seconds)
+        key = _label_key(labels)
+        new_bounds = _validate_buckets(buckets)
+        with self._lock:
+            existing = self._histogram_buckets.get(name)
+            if existing is None:
+                bounds = new_bounds
+                self._histogram_buckets[name] = bounds
+            elif existing != new_bounds:
+                raise ValueError(
+                    f"histogram {name!r} already registered with different "
+                    f"buckets {existing!r}; cannot re-register {new_bounds!r}"
+                )
+            else:
+                bounds = existing
+            series = self._histograms.setdefault(name, {})
+            data = series.get(key)
+            if data is None:
+                data = _HistData(counts=[0] * len(bounds), total=0.0, count=0)
+                series[key] = data
+            for i, bound in enumerate(bounds):
+                if value <= bound:
+                    data.counts[i] += 1
+            data.sum += value
+            data.count += 1
+
+    @contextmanager
+    def timer(
+        self,
+        name: str,
+        buckets: Tuple[float, ...] = DEFAULT_BUCKETS,
+        labels: Optional[Dict[str, str]] = None,
+    ) -> Iterator[None]:
+        """Context manager timing its body and recording it via :meth:`observe`."""
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.observe(
+                name, time.perf_counter() - start, buckets=buckets, labels=labels
+            )
+
     # ── Snapshot / rendering ────────────────────────────────────────
     def snapshot(self) -> Dict[str, Dict[str, float]]:
         """Return a plain-dict snapshot for JSON callers or tests.
@@ -151,7 +272,11 @@ class GatewayMetrics:
         Series with labels are flattened to ``name{a="b"}`` keys; unlabelled
         series use the bare ``name``.
         """
-        out: Dict[str, Dict[str, float]] = {"counters": {}, "gauges": {}}
+        out: Dict[str, Dict[str, float]] = {
+            "counters": {},
+            "gauges": {},
+            "histograms": {},
+        }
         with self._lock:
             for name, series in self._counters.items():
                 for key, value in series.items():
@@ -160,6 +285,18 @@ class GatewayMetrics:
                 name: dict(series) for name, series in self._gauges.items()
             }
             providers = dict(self._gauge_providers)
+            for name, series in self._histograms.items():
+                bounds = self._histogram_buckets.get(name, ())
+                for key, data in series.items():
+                    rendered = _render_labels(key)
+                    out["histograms"][name + "_count" + rendered] = float(data.count)
+                    out["histograms"][name + "_sum" + rendered] = data.sum
+                    for i, bound in enumerate(bounds):
+                        out["histograms"][
+                            f"{name}_bucket" + _render_labels(
+                                key + (("le", _fmt_bound(bound)),)
+                            )
+                        ] = float(data.counts[i])
         for name, provider in providers.items():
             try:
                 gauges.setdefault(name, {})[()] = float(provider())
@@ -179,6 +316,11 @@ class GatewayMetrics:
             }
             gauges = {name: dict(series) for name, series in self._gauges.items()}
             providers = dict(self._gauge_providers)
+            histograms = {
+                name: {k: v.copy() for k, v in series.items()}
+                for name, series in self._histograms.items()
+            }
+            histogram_bounds = dict(self._histogram_buckets)
 
         # Sample live gauge providers outside the lock.
         for name, provider in providers.items():
@@ -200,6 +342,26 @@ class GatewayMetrics:
             lines.append(f"# TYPE {name} gauge")
             for key in sorted(gauges[name]):
                 lines.append(f"{name}{_render_labels(key)} {gauges[name][key]}")
+
+        for name in sorted(histograms):
+            help_text = _HISTOGRAM_HELP.get(name, name)
+            bounds = histogram_bounds.get(name, ())
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} histogram")
+            for key in sorted(histograms[name]):
+                data = histograms[name][key]
+                for i, bound in enumerate(bounds):
+                    bucket_key = key + (("le", _fmt_bound(bound)),)
+                    lines.append(
+                        f"{name}_bucket{_render_labels(bucket_key)} "
+                        f"{data.counts[i]}"
+                    )
+                inf_key = key + (("le", "+Inf"),)
+                lines.append(
+                    f"{name}_bucket{_render_labels(inf_key)} {data.count}"
+                )
+                lines.append(f"{name}_sum{_render_labels(key)} {data.sum}")
+                lines.append(f"{name}_count{_render_labels(key)} {data.count}")
 
         return "\n".join(lines) + "\n"
 

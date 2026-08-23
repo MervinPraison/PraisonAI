@@ -159,3 +159,93 @@ class TestGatewayMetrics:
         assert snap["counters"]["messages_inbound_total"] == 2
         assert snap["counters"]['outbound_failed_total{channel="slack"}'] == 1
         assert snap["gauges"]["active_sessions"] == 3
+
+    def test_observe_accumulates_buckets_sum_count(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        m.observe("gateway_turn_latency_seconds", 0.3)
+        m.observe("gateway_turn_latency_seconds", 1.5)
+        snap = m.snapshot()["histograms"]
+        assert snap["gateway_turn_latency_seconds_count"] == 2
+        assert snap["gateway_turn_latency_seconds_sum"] == 1.8
+        assert snap['gateway_turn_latency_seconds_bucket{le="0.5"}'] == 1
+        assert snap['gateway_turn_latency_seconds_bucket{le="2.5"}'] == 2
+
+    def test_render_histogram_format(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        m.observe("gateway_llm_latency_seconds", 0.2)
+        text = m.render_prometheus()
+        assert "# TYPE gateway_llm_latency_seconds histogram" in text
+        assert 'gateway_llm_latency_seconds_bucket{le="+Inf"} 1' in text
+        assert "gateway_llm_latency_seconds_sum 0.2" in text
+        assert "gateway_llm_latency_seconds_count 1" in text
+
+    def test_histogram_with_labels(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        m.observe("gateway_tool_latency_seconds", 0.1, labels={"tool": "search"})
+        text = m.render_prometheus()
+        assert (
+            'gateway_tool_latency_seconds_bucket{tool="search",le="0.25"} 1' in text
+        )
+        assert 'gateway_tool_latency_seconds_count{tool="search"} 1' in text
+
+    def test_timer_records_observation(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        with m.timer("gateway_turn_latency_seconds"):
+            pass
+        snap = m.snapshot()["histograms"]
+        assert snap["gateway_turn_latency_seconds_count"] == 1
+
+    def test_custom_buckets(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        m.observe("gateway_queue_wait_seconds", 0.15, buckets=(0.1, 0.2, 0.3))
+        text = m.render_prometheus()
+        assert 'gateway_queue_wait_seconds_bucket{le="0.1"} 0' in text
+        assert 'gateway_queue_wait_seconds_bucket{le="0.2"} 1' in text
+
+    def test_labeled_snapshot_key_ordering(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        m.observe("gateway_tool_latency_seconds", 0.1, labels={"tool": "search"})
+        snap = m.snapshot()["histograms"]
+        assert snap['gateway_tool_latency_seconds_count{tool="search"}'] == 1
+        assert snap['gateway_tool_latency_seconds_sum{tool="search"}'] == 0.1
+
+    def test_conflicting_buckets_raise(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        m.observe("gateway_queue_wait_seconds", 0.1, buckets=(0.1, 0.2))
+        with pytest.raises(ValueError):
+            m.observe("gateway_queue_wait_seconds", 0.1, buckets=(0.5, 1.0))
+
+    def test_reserved_le_label_rejected(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        with pytest.raises(ValueError):
+            m.observe("gateway_turn_latency_seconds", 0.1, labels={"le": "0.5"})
+
+    def test_non_finite_buckets_rejected(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        with pytest.raises(ValueError):
+            m.observe("gateway_turn_latency_seconds", 0.1, buckets=(float("inf"),))
+
+    def test_non_increasing_buckets_rejected(self):
+        from praisonai_bot.bots import GatewayMetrics
+
+        m = GatewayMetrics()
+        with pytest.raises(ValueError):
+            m.observe("gateway_turn_latency_seconds", 0.1, buckets=(0.5, 0.5, 1.0))
