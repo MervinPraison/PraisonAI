@@ -2568,8 +2568,11 @@ Your Goal: {self.goal}
             # fall back to the same env-driven default deny set the bare
             # ``approval is None`` path uses, so e.g. ``ApprovalConfig(timeout=30)``
             # keeps the default denials (execute_command, delete_file, …) instead
-            # of silently dropping all of them.
-            if not self._approval_permissions:
+            # of silently dropping all of them. ``is None`` (not falsiness) so an
+            # explicit empty policy (``permissions={}``) is still an intentional
+            # policy that owns denial — only a genuinely absent policy inherits
+            # the env-driven default deny set.
+            if self._approval_permissions is None:
                 self._perm_deny = self._resolve_default_deny_set()
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
@@ -2580,8 +2583,10 @@ Your Goal: {self.goal}
             self._approval_permissions = getattr(approval_config, 'permissions', None)
             self._permission_mode = getattr(approval_config, 'permission_mode', None)
             # See the ApprovalConfig branch above: never weaken the default
-            # posture just because a config object was passed.
-            if not self._approval_permissions:
+            # posture just because a config object was passed. ``is None`` so an
+            # explicit empty policy (``approval={"permissions": {}}``) still owns
+            # denial rather than inheriting the default deny set.
+            if self._approval_permissions is None:
                 self._perm_deny = self._resolve_default_deny_set()
         else:
             # Plain backend object — dangerous tools only, backend default timeout

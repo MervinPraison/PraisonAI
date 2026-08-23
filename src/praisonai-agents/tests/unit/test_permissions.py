@@ -520,6 +520,28 @@ class TestApprovalConfigNeverWeakensDefault:
         )
         assert agent._perm_deny == frozenset()
 
+    def test_explicit_empty_permissions_policy_owns_denial(self):
+        """``permissions={}`` is an intentional (empty) policy, not an absent one.
+
+        An empty mapping must NOT inherit the default deny set — the caller
+        explicitly opted into a declarative policy that happens to allow all.
+        Only a genuinely absent policy (``permissions=None``) falls back to the
+        env-driven default denials.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        empty_config = Agent(
+            name="test", instructions="test",
+            approval=ApprovalConfig(permissions={}),
+        )._perm_deny
+        empty_dict = Agent(
+            name="test", instructions="test",
+            approval={"permissions": {}},
+        )._perm_deny
+        assert empty_config == frozenset()
+        assert empty_dict == frozenset()
+
 
 class TestArgumentScopedDeny:
     """Issue #4228 (b): argument-level deny rules must reach the enforcement path."""
@@ -585,3 +607,65 @@ class TestArgumentScopedDeny:
             )
             assert isinstance(result, dict)
             assert result.get("permission_denied") is True
+
+    def test_malformed_argument_key_cannot_evade_scoped_deny(self, tmp_path):
+        """A trailing-'=' kwarg (``command=``) normalises before dispatch, so the
+        deny gate must normalise it too — otherwise the scoped rule is bypassed
+        while the command still runs after ``_cast_arguments`` cleans the key."""
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+        blocked = agent._check_tool_approval_sync(
+            "execute_command", {"command=": "rm -rf /tmp/x"}
+        )
+        assert isinstance(blocked, dict)
+        assert blocked.get("permission_denied") is True
+
+    def test_modified_args_rechecked_against_scoped_deny(self, tmp_path):
+        """An approval backend rewriting args into a denied command must be
+        re-authorized — the first gate only saw the original (allowed) args."""
+        from praisonaiagents.approval.protocols import ApprovalDecision
+
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+        with patch("praisonaiagents.approval.get_approval_registry") as get_reg:
+            reg = MagicMock()
+            reg.mark_approved = MagicMock()
+            get_reg.return_value = reg
+            with patch.object(
+                agent, "_resolve_approval_decision",
+                return_value=ApprovalDecision(
+                    approved=True, reason="mock",
+                    modified_args={"command": "rm -rf /tmp/x"},
+                ),
+            ):
+                result = agent._check_tool_approval_sync(
+                    "execute_command", {"command": "ls -la"}
+                )
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
+
+    def test_modified_args_rechecked_async(self, tmp_path):
+        import asyncio
+        from praisonaiagents.approval.protocols import ApprovalDecision
+
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+
+        async def _run():
+            with patch("praisonaiagents.approval.get_approval_registry") as get_reg:
+                reg = MagicMock()
+                reg.mark_approved = MagicMock()
+                get_reg.return_value = reg
+                with patch.object(
+                    agent, "_resolve_approval_decision"
+                ) as resolve:
+                    async def _decide(*a, **k):
+                        return ApprovalDecision(
+                            approved=True, reason="mock",
+                            modified_args={"command": "rm -rf /tmp/x"},
+                        )
+                    resolve.side_effect = _decide
+                    return await agent._check_tool_approval_async(
+                        "execute_command", {"command": "ls -la"}
+                    )
+
+        result = asyncio.run(_run())
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
