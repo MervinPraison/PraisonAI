@@ -120,6 +120,47 @@ def test_strict_masks_bearer_and_pem_but_standard_does_not():
     assert "[redacted:secret:" in strict
 
 
+def test_stripe_live_and_test_keys_are_redacted():
+    """sk_live_/sk_test_ shapes must be masked, not only sk- (Issue #4243)."""
+    payload = {
+        "chat_history": [
+            {"role": "user", "content": "key sk_live_51H8xQ2KZvB9nLmPqRsTuVwXy here"},
+            {"role": "user", "content": "and sk_test_ABCDEF0123456789ABCDEF too"},
+        ]
+    }
+    dumped = json.dumps(redact_transcript(payload))
+    assert "sk_live_51H8xQ2KZvB9nLmPqRsTuVwXy" not in dumped
+    assert "sk_test_ABCDEF0123456789ABCDEF" not in dumped
+    assert "[redacted:secret:" in dumped
+
+
+def test_secret_named_keys_are_redacted_when_key_contains_secret_word():
+    """key=value where the key *contains* a secret word (not only ends in one)
+    must be masked — AWS_SECRET_ACCESS_KEY / STRIPE_SECRET_KEY (Issue #4243)."""
+    payload = {
+        "chat_history": [
+            {"role": "user", "content": "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENGbPxRfiCY"},
+            {"role": "user", "content": "STRIPE_SECRET_KEY=sk_live_51H8xQ2KZvB9nLmPqRsTuVwXy"},
+        ]
+    }
+    dumped = json.dumps(redact_transcript(payload))
+    assert "wJalrXUtnFEMI" not in dumped
+    assert "sk_live_51H8xQ2KZvB9nLmPqRsTuVwXy" not in dumped
+    assert "[redacted:secret:" in dumped
+
+
+def test_aws_secret_value_is_not_half_masked_by_path():
+    """A secret value containing '/' must be masked whole, not leave a visible
+    prefix with the tail eaten by the path regex (Issue #4243)."""
+    payload = {
+        "chat_history": [
+            {"role": "user", "content": "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENGbPxRfiCY"}
+        ]
+    }
+    dumped = json.dumps(redact_transcript(payload, level="strict"))
+    assert "wJalrXUtnFEMI" not in dumped
+
+
 def test_invalid_level_raises():
     with pytest.raises(ValueError):
         redact_transcript(_fixture_payload(), level="bogus")

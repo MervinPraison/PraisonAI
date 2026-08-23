@@ -796,9 +796,10 @@ def _render_share_html(session_id: str, transcript_md: str) -> str:
 def session_share(
     session_id: str = typer.Argument(..., help="Session ID to share"),
     redact_level: str = typer.Option(
-        "standard",
+        "strict",
         "--redact-level",
-        help="Redaction level: 'standard' or 'strict'.",
+        help="Redaction level: 'standard' or 'strict'. Defaults to 'strict' "
+        "because share publishes a transcript for wider distribution.",
     ),
 ):
     """Publish a redacted, read-only transcript and return a shareable link.
