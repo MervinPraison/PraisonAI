@@ -194,14 +194,15 @@ REASONING: Way too low"""
         assert result.score == 1.0
     
     def test_parse_response_invalid_score(self):
-        """Test parsing response with invalid score."""
+        """An unparseable score must fail closed, not fabricate a passing 5.0 (#4195)."""
         grader = BaseLLMGrader()
         
         response = """SCORE: not a number
 REASONING: Invalid"""
         
         result = grader._parse_response(response, "", "", None)
-        assert result.score == 5.0  # Default
+        assert result.score == 1.0  # Fail closed: no trustworthy number parsed
+        assert result.reasoning == "Invalid"
     
     def test_get_litellm_import_error(self):
         """Test that missing litellm raises ImportError."""

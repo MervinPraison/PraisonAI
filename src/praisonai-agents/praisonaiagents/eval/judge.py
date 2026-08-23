@@ -19,7 +19,7 @@ from praisonaiagents._logging import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
 
-from .grader import BaseLLMGrader
+from .grader import BaseLLMGrader, _extract_score_reasoning
 from .results import JudgeResult
 
 if TYPE_CHECKING:
@@ -294,41 +294,22 @@ SUGGESTIONS:
         Returns:
             JudgeResult with score, passed, reasoning, suggestions
         """
-        score = 5.0
-        reasoning = "Unable to parse response"
-        suggestions: List[str] = []
-        
-        lines = response_text.strip().split('\n')
-        in_suggestions = False
-        
-        for line in lines:
-            line = line.strip()
-            
-            if line.startswith('SCORE:'):
-                try:
-                    score_str = line.replace('SCORE:', '').strip()
-                    score = float(score_str)
-                    score = max(1.0, min(10.0, score))
-                except ValueError:
-                    pass
-            
-            elif line.startswith('REASONING:'):
-                reasoning = line.replace('REASONING:', '').strip()
-            
-            elif line.startswith('SUGGESTIONS:'):
-                in_suggestions = True
-                rest = line.replace('SUGGESTIONS:', '').strip()
-                if rest.lower() not in ('none', '') and rest:
-                    suggestions.append(rest)
-            
-            elif in_suggestions and line.startswith('-'):
-                suggestion = line.lstrip('- ').strip()
-                if suggestion and suggestion.lower() != 'none':
-                    suggestions.append(suggestion)
-        
+        score, reasoning, suggestions, score_parsed = _extract_score_reasoning(response_text)
+
+        if not score_parsed:
+            # An unscored verdict is an error, not a middling result. Fail closed
+            # so a fabricated 5.0 can never be compared against - and pass - a
+            # threshold. A reasoning-only response has no trustworthy number.
+            # Mirrors safety.py / parse_score_reasoning.
+            logger.warning(
+                "Could not parse judge response; failing closed. Raw: %r",
+                response_text[:200],
+            )
+            score = 1.0
+
         return JudgeResult(
             score=score,
-            passed=score >= self.threshold,
+            passed=score_parsed and score >= self.threshold,
             reasoning=reasoning,
             output=output,
             expected=expected,

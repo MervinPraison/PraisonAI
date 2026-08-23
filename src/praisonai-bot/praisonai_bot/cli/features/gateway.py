@@ -558,17 +558,26 @@ class GatewayHandler:
             return
         
         if force:
-            self._force_kill_process(pid)
+            stopped = self._force_kill_process(pid)
         else:
-            self._graceful_stop_process(pid, drain_timeout=drain_timeout)
-        
-        # Clean up lock file
-        pid_lock.release_lock()
-        print(f"Gateway stopped (PID {pid})")
+            stopped = self._graceful_stop_process(pid, drain_timeout=drain_timeout)
+
+        # Only release the lock once the process is confirmed gone. A
+        # PermissionError means "I may not signal it", not "it is dead":
+        # deleting a live cross-uid holder's lock would admit a second poller
+        # for the same bot token (#4192).
+        if stopped:
+            pid_lock.release_lock()
+            print(f"Gateway stopped (PID {pid})")
+        else:
+            print(
+                f"Could not confirm PID {pid} stopped (possibly owned by another "
+                f"user); leaving the lock in place."
+            )
     
     def _graceful_stop_process(
         self, pid: int, drain_timeout: Optional[float] = None
-    ) -> None:
+    ) -> bool:
         """Gracefully stop a process by sending SIGTERM.
 
         Waits up to ``drain_timeout`` seconds (default 10) for the process to
@@ -576,6 +585,10 @@ class GatewayHandler:
         gateway's configured drain timeout here (e.g. from
         ``restart --drain-timeout``) ensures a long drain window is respected
         instead of an unconditional 10s cut-off (#3161).
+
+        Returns ``True`` only when the process is confirmed stopped. A
+        ``PermissionError`` (cross-uid target) returns ``False`` rather than
+        being mistaken for "already dead" (#4192).
         """
         import signal
         import time
@@ -599,28 +612,67 @@ class GatewayHandler:
                 try:
                     os.kill(pid, 0)  # Check if process exists
                     time.sleep(0.1)
+                except PermissionError:
+                    # Exists but owned by another user - still running.
+                    time.sleep(0.1)
                 except (OSError, ProcessLookupError):
-                    return  # Process has stopped
+                    return True  # Process has stopped
 
             print(f"Process {pid} did not stop gracefully, forcing...")
-            self._force_kill_process(pid)
+            return self._force_kill_process(pid)
 
-        except (OSError, ProcessLookupError):
+        except PermissionError:
+            # We may not signal this PID - it is NOT dead. Do not let the caller
+            # release a live cross-uid holder's lock.
+            print(f"Not permitted to signal PID {pid}; it may belong to another user.")
+            return False
+        except ProcessLookupError:
             print(f"Process {pid} not found or already stopped")
-    
-    def _force_kill_process(self, pid: int) -> None:
-        """Force kill a process with SIGKILL (Windows: SIGTERM)."""
+            return True
+        except OSError:
+            print(f"Process {pid} not found or already stopped")
+            return True
+
+    def _force_kill_process(self, pid: int) -> bool:
+        """Force kill a process with SIGKILL (Windows: SIGTERM).
+
+        Returns ``True`` only when the process is confirmed gone. A
+        ``PermissionError`` returns ``False`` - "I may not kill it" is not
+        "it is dead" (#4192).
+        """
         import signal
         import os
         import sys
-        
+        import time
+
         try:
             print(f"Force killing PID {pid}...")
             # Use SIGTERM on Windows since SIGKILL is not available
             sig = signal.SIGTERM if sys.platform == "win32" else signal.SIGKILL
             os.kill(pid, sig)
-        except (OSError, ProcessLookupError):
+        except PermissionError:
+            print(f"Not permitted to kill PID {pid}; it may belong to another user.")
+            return False
+        except (ProcessLookupError, OSError):
             print(f"Process {pid} not found or already stopped")
+            return True
+
+        # Signalling succeeded, but delivery is not exit. Confirm the process is
+        # actually gone before the caller releases the PID lock; otherwise a new
+        # gateway could start while the old one still owns the resources (#4192).
+        for _ in range(50):  # up to ~5s
+            try:
+                os.kill(pid, 0)
+                time.sleep(0.1)
+            except PermissionError:
+                # Reaped and PID reused by another user - or still ours but now
+                # cross-uid. Cannot confirm exit; treat as still running.
+                return False
+            except (ProcessLookupError, OSError):
+                return True
+
+        print(f"Process {pid} still present after force kill; lock retained.")
+        return False
 
     def hooks(self, args) -> int:
         """Manage inbound trigger hooks in a gateway.yaml file (Issue #2281).

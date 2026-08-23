@@ -9,12 +9,23 @@ that was duplicated across multiple evaluators.
 """
 
 import os
+import re
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+# Tolerant matcher for judge field labels. Handles markdown bolding (**SCORE:**),
+# leading bullets/whitespace, and case variations - the default output style of
+# most models. Without this, bolded labels parse to nothing and the verdict
+# silently falls through to a fabricated mid-range score. Mirrors the matcher in
+# safety.py so grader/judge fail the same way safety already does.
+_FIELD_RE = re.compile(
+    r"^[\s>*_#`-]*(score|reasoning|suggestions)\s*\**\s*:\s*(.*)$",
+    re.IGNORECASE,
+)
 
 @dataclass
 class GradeResult:
@@ -186,39 +197,18 @@ EXPECTED OUTPUT (ideal response):
         Returns:
             Parsed GradeResult
         """
-        score = 5.0  # Default
-        reasoning = "Unable to parse response"
-        suggestions: List[str] = []
-        
-        lines = response_text.strip().split('\n')
-        in_suggestions = False
-        
-        for line in lines:
-            line = line.strip()
-            
-            if line.startswith('SCORE:'):
-                try:
-                    score_str = line.replace('SCORE:', '').strip()
-                    score = float(score_str)
-                    # Clamp to valid range
-                    score = max(1.0, min(10.0, score))
-                except ValueError:
-                    pass
-            
-            elif line.startswith('REASONING:'):
-                reasoning = line.replace('REASONING:', '').strip()
-            
-            elif line.startswith('SUGGESTIONS:'):
-                in_suggestions = True
-                rest = line.replace('SUGGESTIONS:', '').strip()
-                if rest.lower() != 'none' and rest:
-                    suggestions.append(rest)
-            
-            elif in_suggestions and line.startswith('-'):
-                suggestion = line.lstrip('- ').strip()
-                if suggestion and suggestion.lower() != 'none':
-                    suggestions.append(suggestion)
-        
+        score, reasoning, suggestions, score_parsed = _extract_score_reasoning(response_text)
+
+        if not score_parsed:
+            # No numeric score was parsed. Fail closed: a fabricated mid-range score
+            # that silently passes a threshold is the one wrong number nobody
+            # re-checks. Report the minimum instead.
+            logger.warning(
+                "Could not parse grader response; failing closed. Raw: %r",
+                response_text[:200],
+            )
+            score = 1.0
+
         return GradeResult(
             score=score,
             reasoning=reasoning,
@@ -365,38 +355,102 @@ EXPECTED OUTPUT (ideal response):
                 expected_output=expected_output,
             )
 
+def _extract_score_reasoning(response_text: str) -> tuple:
+    """
+    Line-based tolerant extraction of SCORE / REASONING / SUGGESTIONS.
+
+    Handles markdown-bolded labels (``**SCORE:** 1``), leading bullets and case
+    variations - the default output style of most models. Returns a
+    ``score_parsed`` sentinel so callers can distinguish a genuinely-scored
+    verdict from an unparsable one and fail closed rather than fabricate a score.
+
+    Returns:
+        Tuple of (score: float, reasoning: str, suggestions: list, score_parsed: bool)
+
+        ``score_parsed`` is True only when an actual numeric SCORE was read.
+        Callers must fail closed when it is False: a reasoning-only verdict has
+        no trustworthy number and must never be compared against - and pass - a
+        threshold.
+    """
+    score = 5.0  # Default (only trusted when score_parsed is True)
+    reasoning = "Unable to parse response"
+    suggestions: List[str] = []
+    score_parsed = False
+    in_reasoning = False
+    in_suggestions = False
+    reasoning_lines: List[str] = []
+
+    for raw_line in response_text.strip().split('\n'):
+        line = raw_line.strip()
+
+        match = _FIELD_RE.match(line) if line else None
+        if match:
+            field_name = match.group(1).lower()
+            value = match.group(2).strip().strip('*_`').strip()
+
+            if field_name == 'score':
+                number = re.search(r'-?\d+(?:\.\d+)?', value)
+                if number:
+                    try:
+                        score = max(1.0, min(10.0, float(number.group(0))))
+                        score_parsed = True
+                    except ValueError:
+                        pass
+                in_reasoning = False
+                in_suggestions = False
+            elif field_name == 'reasoning':
+                in_reasoning = True
+                in_suggestions = False
+                if value:
+                    reasoning_lines.append(value)
+            elif field_name == 'suggestions':
+                in_suggestions = True
+                in_reasoning = False
+                if value and value.lower() != 'none':
+                    suggestions.append(value)
+            continue
+
+        if not line:
+            continue
+
+        if in_suggestions and line.lstrip('*_`').startswith('-'):
+            suggestion = line.lstrip('*_`- ').strip()
+            if suggestion and suggestion.lower() != 'none':
+                suggestions.append(suggestion)
+        elif in_reasoning:
+            reasoning_lines.append(line)
+
+    if reasoning_lines:
+        reasoning = ' '.join(reasoning_lines).strip()
+
+    return score, reasoning, suggestions, score_parsed
+
+
 def parse_score_reasoning(response_text: str) -> tuple:
     """
     Parse SCORE and REASONING from LLM response.
-    
+
     DRY: Static utility function for parsing LLM-as-judge responses.
     Used by AccuracyEvaluator, CriteriaEvaluator, and BaseLLMGrader.
-    
+
+    Tolerant of markdown-bolded labels. When nothing can be parsed the verdict
+    fails closed (score 1.0) rather than silently returning a mid-range 5.0 that
+    could pass a threshold - the one wrong number nobody re-checks.
+
     Args:
         response_text: Raw LLM response text
-        
+
     Returns:
         Tuple of (score: float, reasoning: str)
     """
-    import re
+    score, reasoning, _suggestions, score_parsed = _extract_score_reasoning(response_text)
 
-    score = 5.0  # Default
-    reasoning = "Unable to parse response"
-
-    # Extract score (case-insensitive, first numeric value after SCORE:)
-    score_match = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)', response_text, re.IGNORECASE)
-    if score_match:
-        try:
-            score = float(score_match.group(1))
-            # Clamp to valid range
-            score = max(1.0, min(10.0, score))
-        except ValueError:
-            pass
-
-    # Extract reasoning (case-insensitive, preserves multi-line explanations)
-    reasoning_match = re.search(r'REASONING:\s*(.+)', response_text, re.IGNORECASE | re.DOTALL)
-    if reasoning_match:
-        reasoning = reasoning_match.group(1).strip()
+    if not score_parsed:
+        logger.warning(
+            "Could not parse judge response; failing closed. Raw: %r",
+            response_text[:200],
+        )
+        score = 1.0
 
     return score, reasoning
 
