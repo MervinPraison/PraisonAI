@@ -31,11 +31,47 @@ from praisonaiagents._logging import get_logger
 from typing import Optional, List
 
 from ..approval import require_approval
+from .path_safety import resolve_within_root
 
 logger = get_logger(__name__)
 
 # Availability cache for performance (checked once per process)
 _availability_cache: Optional[bool] = None
+
+# Bound the output returned to the model. ast-grep can emit millions of chars
+# against a large tree; without a cap that floods the context window.
+_MAX_OUTPUT_SIZE = 10000
+
+
+def _workspace_spill_dir() -> Optional[str]:
+    """Directory for overflow artifacts the agent can actually retrieve.
+
+    The pointer emitted by :func:`bounded_with_pointer` tells the model to
+    ``read_file``/``grep`` the artifact, but those tools reject paths outside
+    the workspace. When the caller has not pinned an explicit
+    ``PRAISONAI_TOOL_OUTPUT_DIR`` (which they own), spill into a workspace-local
+    directory so the advertised retrieval path is reachable. Returns ``None`` to
+    defer to ``_output_overflow``'s own resolution when the env var is set.
+    """
+    import os
+    if os.environ.get("PRAISONAI_TOOL_OUTPUT_DIR"):
+        return None
+    workspace = resolve_within_root(".")
+    if workspace is None:
+        return None
+    return os.path.join(workspace, ".praisonai_tool_output")
+
+
+def _bound_output(output: str, kind: str) -> str:
+    """Cap over-budget output, spilling the full buffer to a retrievable file.
+
+    No-op with zero overhead when ``output`` fits inside ``_MAX_OUTPUT_SIZE``.
+    """
+    if len(output) <= _MAX_OUTPUT_SIZE:
+        return output
+    from ._output_overflow import spill, bounded_with_pointer
+    path = spill(output, kind, spill_dir=_workspace_spill_dir())
+    return bounded_with_pointer(output, _MAX_OUTPUT_SIZE, path)
 
 def is_ast_grep_available() -> bool:
     """Check if ast-grep (sg) CLI is available.
@@ -115,13 +151,20 @@ def ast_grep_search(
     if not pattern:
         return "Error: Pattern cannot be empty"
     
+    safe_path = resolve_within_root(path or ".")
+    if safe_path is None:
+        return f"Error: path '{path}' is outside the workspace"
+    
     try:
         cmd = ['sg', '--pattern', pattern, '--lang', lang]
         
         if json_output:
             cmd.append('--json')
         
-        cmd.append(path)
+        # `--` stops flag parsing so a path beginning with '-' is treated as a
+        # literal path rather than silently consumed as a flag.
+        cmd.append('--')
+        cmd.append(safe_path)
         
         result = subprocess.run(
             cmd,
@@ -137,7 +180,7 @@ def ast_grep_search(
         if not output:
             return "No matches found"
         
-        return output
+        return _bound_output(output, "ast_grep_search")
         
     except subprocess.TimeoutExpired:
         return "Error: Search timed out after 60 seconds"
@@ -202,6 +245,10 @@ def ast_grep_rewrite(
     if not replacement:
         return "Error: Replacement cannot be empty"
     
+    safe_path = resolve_within_root(path or ".")
+    if safe_path is None:
+        return f"Error: path '{path}' is outside the workspace"
+    
     try:
         cmd = [
             'sg', '--pattern', pattern,
@@ -212,7 +259,10 @@ def ast_grep_rewrite(
         if not dry_run:
             cmd.append('--update-all')
         
-        cmd.append(path)
+        # `--` stops flag parsing so a path beginning with '-' is treated as a
+        # literal path rather than silently consumed as a flag.
+        cmd.append('--')
+        cmd.append(safe_path)
         
         result = subprocess.run(
             cmd,
@@ -221,10 +271,14 @@ def ast_grep_rewrite(
             timeout=120,
         )
         
-        if result.returncode != 0 and result.stderr:
-            return f"Error: {result.stderr}"
+        if result.returncode != 0:
+            return f"Error: {result.stderr or result.stdout}".strip()
         
-        output = result.stdout.strip()
+        # `sg --update-all` writes its receipt ("Applied N changes") to stderr
+        # and leaves stdout empty. Gating stderr on a non-zero exit discarded the
+        # only evidence the rewrite happened, so a successful destructive rewrite
+        # reported "No changes made" and the agent would retry it.
+        output = (result.stdout.strip() or result.stderr.strip())
         if not output:
             if dry_run:
                 return "No matches found for rewrite"
@@ -232,7 +286,7 @@ def ast_grep_rewrite(
                 return "No changes made"
         
         prefix = "[DRY RUN] " if dry_run else ""
-        return f"{prefix}{output}"
+        return _bound_output(f"{prefix}{output}", "ast_grep_rewrite")
         
     except subprocess.TimeoutExpired:
         return "Error: Rewrite timed out after 120 seconds"
@@ -274,13 +328,23 @@ def ast_grep_scan(
     if not is_ast_grep_available():
         return _get_not_installed_message()
     
+    safe_path = resolve_within_root(path or ".")
+    if safe_path is None:
+        return f"Error: path '{path}' is outside the workspace"
+    
     try:
         cmd = ['sg', 'scan']
         
         if rule_file:
-            cmd.extend(['--rule', rule_file])
+            safe_rule = resolve_within_root(rule_file)
+            if safe_rule is None:
+                return f"Error: rule_file '{rule_file}' is outside the workspace"
+            cmd.extend(['--rule', safe_rule])
         
-        cmd.append(path)
+        # `--` stops flag parsing so a path beginning with '-' is treated as a
+        # literal path rather than silently consumed as a flag.
+        cmd.append('--')
+        cmd.append(safe_path)
         
         result = subprocess.run(
             cmd,
@@ -297,7 +361,7 @@ def ast_grep_scan(
         if not output:
             return "No issues found"
         
-        return output
+        return _bound_output(output, "ast_grep_scan")
         
     except subprocess.TimeoutExpired:
         return "Error: Scan timed out after 120 seconds"

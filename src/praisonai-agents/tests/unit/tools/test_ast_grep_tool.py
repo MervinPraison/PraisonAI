@@ -131,7 +131,7 @@ class TestAstGrepToolOperations:
                     stderr=''
                 )
                 
-                result = ast_grep_search("def $FN($$$)", lang="python", path="/test/path")
+                result = ast_grep_search("def $FN($$$)", lang="python", path=".")
                 
                 mock_run.assert_called_once()
                 call_args = mock_run.call_args
@@ -140,6 +140,9 @@ class TestAstGrepToolOperations:
                 assert 'sg' in cmd_list[0] or cmd_list[0] == 'sg'
                 assert '--pattern' in cmd_list or 'def $FN($$$)' in cmd_list
                 assert '--lang' in cmd_list or 'python' in cmd_list
+                # `--` terminator precedes the path so a dash-leading path is not
+                # parsed as a flag.
+                assert '--' in cmd_list
                 # Verify result is returned
                 assert result is not None
     
@@ -180,6 +183,96 @@ class TestAstGrepToolOperations:
                 assert '--update-all' not in cmd_list
                 assert mock_run.called
                 assert result is not None
+
+
+class TestAstGrepToolReceiptAndConfinement:
+    """Regression tests for issue #4247: inverted rewrite receipt, path
+    confinement, the ``--`` terminator and the output cap."""
+
+    def test_rewrite_reports_receipt_from_stderr(self, monkeypatch):
+        """`sg --update-all` writes 'Applied N changes' to stderr with empty
+        stdout. Reporting 'No changes made' after a real rewrite makes the agent
+        retry a destructive, already-applied edit."""
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+        from praisonaiagents.tools.ast_grep_tool import ast_grep_rewrite
+
+        with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
+            mock_avail.return_value = True
+            with patch('subprocess.run') as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout='', stderr='Applied 1 changes'
+                )
+                result = ast_grep_rewrite(
+                    "def old_name($$$)", "def new_name($$$)",
+                    lang="python", path=".", dry_run=False,
+                )
+                assert "No changes made" not in result
+                assert "Applied 1 changes" in result
+
+    def test_search_rejects_path_outside_workspace(self):
+        """A traversal/absolute path outside the workspace must not reach sg."""
+        from praisonaiagents.tools.ast_grep_tool import ast_grep_search
+
+        with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
+            mock_avail.return_value = True
+            with patch('subprocess.run') as mock_run:
+                result = ast_grep_search("def $F($$$)", lang="python", path="/etc")
+                mock_run.assert_not_called()
+                assert "outside the workspace" in result
+
+    def test_rewrite_rejects_path_outside_workspace(self, monkeypatch):
+        """Confinement also guards the destructive rewrite path."""
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+        from praisonaiagents.tools.ast_grep_tool import ast_grep_rewrite
+
+        with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
+            mock_avail.return_value = True
+            with patch('subprocess.run') as mock_run:
+                result = ast_grep_rewrite(
+                    "a", "b", lang="python", path="../outside", dry_run=False,
+                )
+                mock_run.assert_not_called()
+                assert "outside the workspace" in result
+
+    def test_search_output_is_capped(self):
+        """A huge match dump must be bounded before it floods the context."""
+        from praisonaiagents.tools.ast_grep_tool import ast_grep_search, _MAX_OUTPUT_SIZE
+
+        with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
+            mock_avail.return_value = True
+            with patch('subprocess.run') as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout='x' * (_MAX_OUTPUT_SIZE * 3), stderr=''
+                )
+                result = ast_grep_search("def $F($$$)", lang="python", path=".")
+                assert len(result) <= _MAX_OUTPUT_SIZE
+                assert "truncated" in result
+
+    def test_overflow_artifact_is_workspace_retrievable(self, tmp_path, monkeypatch):
+        """The spilled artifact the pointer advertises must live inside the
+        workspace so the confined ``read_file``/``grep`` tools can open it
+        (issue #4247 follow-up: default temp spills were unreachable)."""
+        import os
+        from praisonaiagents.tools.ast_grep_tool import ast_grep_search, _MAX_OUTPUT_SIZE
+        from praisonaiagents.tools.path_safety import resolve_within_root
+
+        monkeypatch.delenv("PRAISONAI_TOOL_OUTPUT_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
+            mock_avail.return_value = True
+            with patch('subprocess.run') as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout='y' * (_MAX_OUTPUT_SIZE * 3), stderr=''
+                )
+                result = ast_grep_search("def $F($$$)", lang="python", path=".")
+
+        marker = "Full output saved to: "
+        assert marker in result
+        artifact = result.split(marker, 1)[1].splitlines()[0].strip()
+        # The advertised artifact must resolve inside the workspace.
+        assert resolve_within_root(artifact) is not None
+        assert os.path.exists(artifact)
 
 
 class TestAstGrepToolAgentIntegration:
