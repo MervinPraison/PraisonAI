@@ -1560,15 +1560,28 @@ Example: /handoff code "refactor the auth module" """
             streamed["text"] = msg.content
             self._update_output()
         
-        # Register callback for tool visibility
+        # Register callbacks for tool visibility + live narrative. Save any
+        # previously-registered callback per slot and restore it on cleanup
+        # (rather than deleting the slot) so another in-process consumer that
+        # owns these display slots keeps receiving events after our turn. Guard
+        # every mutation with the core callbacks lock and an identity check,
+        # mirroring praisonaiagents' own register/restore pattern.
         _sync_display_callbacks = None
-        _register_display_callback = None
+        _callbacks_lock = None
+        _registered_slots = {}
+        _our_callbacks = {
+            'tool_call': tool_call_callback,
+            'llm_content': llm_content_callback,
+        }
         try:
-            from praisonaiagents import register_display_callback, sync_display_callbacks
+            from praisonaiagents import sync_display_callbacks
+            from praisonaiagents.main import _callbacks_lock as _core_lock
             _sync_display_callbacks = sync_display_callbacks
-            _register_display_callback = register_display_callback
-            _register_display_callback('tool_call', tool_call_callback)
-            _register_display_callback('llm_content', llm_content_callback)
+            _callbacks_lock = _core_lock
+            with _callbacks_lock:
+                for _slot, _cb in _our_callbacks.items():
+                    _registered_slots[_slot] = sync_display_callbacks.get(_slot)
+                    sync_display_callbacks[_slot] = _cb
         except ImportError:
             pass
         
@@ -1630,11 +1643,19 @@ Example: /handoff code "refactor the auth module" """
             
             llm_thread.join()
             
-            # Cleanup callbacks
-            if _sync_display_callbacks is not None:
-                for _cb in ('tool_call', 'llm_content'):
-                    if _sync_display_callbacks.get(_cb) is not None:
-                        del _sync_display_callbacks[_cb]
+            # Restore the prior callback for each slot we owned. The identity
+            # check ensures we only mutate a slot while it still holds our
+            # callback, so a consumer that re-registered during the turn is
+            # never clobbered; slots with no prior owner are removed.
+            if _sync_display_callbacks is not None and _callbacks_lock is not None:
+                with _callbacks_lock:
+                    for _slot, _cb in _our_callbacks.items():
+                        if _sync_display_callbacks.get(_slot) is _cb:
+                            _prev = _registered_slots.get(_slot)
+                            if _prev is not None:
+                                _sync_display_callbacks[_slot] = _prev
+                            else:
+                                _sync_display_callbacks.pop(_slot, None)
             
             # Done processing current prompt
             self._processing = False
