@@ -12,6 +12,7 @@ import sys
 import yaml
 import shutil
 import difflib
+import textwrap
 import contextlib
 import subprocess
 from functools import partial
@@ -1186,11 +1187,21 @@ class TrainModel:
         num_ctx_line = ""
         if "num_ctx" in chosen:
             num_ctx_line = f"PARAMETER num_ctx {chosen['num_ctx']}\n"
-        # Assemble and return the modelfile content.
-        return f"""FROM {output_model}
-    TEMPLATE \"\"\"{chosen['template']}\"\"\"
-    {system_line}{num_ctx_line}{stop_params}
-    """
+        # The template literals above are written at source indentation, so every
+        # continuation line carries a leading four spaces that would otherwise be
+        # baked into the served TEMPLATE (e.g. "\n    <start_of_turn>model"). That
+        # tokenizes differently from training and degrades a correct fine-tune, so
+        # strip the common leading indent from the template before embedding it.
+        # `dedent` needs a uniform indent, but the first line (right after `"""`)
+        # has none — normalise by indenting the first line, dedenting, then
+        # restoring it.
+        template = textwrap.dedent("    " + chosen["template"])
+        # Assemble and return the modelfile content at column 0.
+        return (
+            f"FROM {output_model}\n"
+            f'TEMPLATE """{template}"""\n'
+            f"{system_line}{num_ctx_line}{stop_params}\n"
+        )
 
     def create_and_push_ollama_model(self):
         from .._ollama import create_and_push_ollama_model

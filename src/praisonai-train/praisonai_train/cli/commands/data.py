@@ -92,24 +92,23 @@ def generate_data(
     snap_every = cfg.get("snapshot_every")
     snap_dir = cfg.get("snapshot_dir", "snapshots")
 
-    # Consume the first row *before* truncating the destination, so a run that
-    # fails on credentials/recipe/first-request never destroys an existing file
-    # (and a self-referential dedup_from is read before it would be emptied).
+    # Write to a sibling temp file and atomically replace the destination only on
+    # success (mirrors the `dedup` command). A run that yields no rows — every
+    # teacher request failed, bad credentials/recipe, no JSON-mode support — must
+    # never destroy an existing corpus: the original file is left untouched and
+    # the temp file is removed. A self-referential dedup_from is also read before
+    # it could be emptied.
+    import os
+    import tempfile
+
     progress = _Progress(cfg.get("num_examples"))
     gen = generate_dataset(cfg, progress_callback=progress.update)
+    kept = 0
+    out_dir = Path(out_path).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
     try:
-        try:
-            first = next(gen)
-        except StopIteration:
-            first = None
-
-        kept = 0
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w", buffering=1) as fh:
-            for row in ([first] if first is not None else []):
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-                fh.flush()
-                kept += 1
+        with os.fdopen(fd, "w", buffering=1) as fh:
             for row in gen:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 fh.flush()
@@ -117,8 +116,20 @@ def generate_data(
                 if snap_every and kept % snap_every == 0:
                     Path(snap_dir).mkdir(parents=True, exist_ok=True)
                     snap = Path(snap_dir) / f"{Path(out_path).stem}_{kept}.jsonl"
-                    snap.write_text(Path(out_path).read_text())
+                    snap.write_text(Path(tmp_name).read_text())
                     typer.echo(f"  snapshot: {snap} ({kept} rows)")
+        # Only replace the destination when at least one row was produced, so the
+        # all-failures path leaves any existing file intact.
+        if kept:
+            os.replace(tmp_name, out_path)
+        else:
+            os.unlink(tmp_name)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     finally:
         progress.close()
     typer.echo(f"generated {kept} unique examples -> {out_path}")

@@ -63,7 +63,11 @@ def train_llm(
             )
         raise typer.Exit(1)
 
-    argv = ['train', dataset]
+    # The legacy dispatcher declares a single nargs="?" positional, so a second
+    # bare positional lands in unknown_args and is silently dropped (the train
+    # branch then falls back to the default yahma/alpaca-cleaned). The train
+    # branch reads args.dataset, so pass it as the option it actually consumes.
+    argv = ['train', '--dataset', dataset]
     if model:
         argv.extend(['--model', model])
     if verbose:

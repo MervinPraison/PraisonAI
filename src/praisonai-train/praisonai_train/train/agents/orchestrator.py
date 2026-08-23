@@ -310,12 +310,17 @@ class AgentTrainer:
                         previous_grade,
                     )
                 
-                # Get agent output
+                # Get agent output. A genuine agent failure (provider unreachable,
+                # bad credentials, timeout) must NOT be captured as an output and
+                # then graded as training data — the grader would score the error
+                # string, the session would persist it, `train apply` would derive
+                # prompt guidance from it, and the run would still report success
+                # with exit 0. Re-raise so the caller (CLI) fails loudly instead.
                 try:
                     output = self._get_agent_output(current_prompt)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
-                    output = f"Error: {str(e)}"
+                    raise
                 
                 # Grade the output
                 if self.human_mode:

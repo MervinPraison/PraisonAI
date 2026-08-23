@@ -397,6 +397,47 @@ class TestAgentTrainerEarlyStop:
         assert report.metadata["early_stopped"] is False
 
 
+class TestAgentTrainerAgentFailure:
+    """A genuine agent failure must abort — not be graded as training data."""
+
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
+    def test_agent_error_propagates_and_is_not_graded(self, mock_grader_class):
+        """When the agent raises, run() re-raises and never grades the error.
+
+        Previously the exception was swallowed into ``output = "Error: ..."`` and
+        handed to the grader, so a run against an unreachable provider scored the
+        error string, persisted it, and reported success (exit 0).
+        """
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        import pytest
+
+        def boom(prompt):
+            raise ConnectionError("connection refused: llm provider unreachable")
+
+        mock_agent = Mock()
+        mock_agent.chat = Mock(side_effect=boom)
+
+        mock_grader = Mock()
+        mock_grader.grade = Mock()
+        mock_grader_class.return_value = mock_grader
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = AgentTrainer(
+                agent=mock_agent,
+                iterations=3,
+                storage_dir=Path(tmpdir),
+                verbose=False,
+            )
+            trainer.add_scenario(TrainingScenario(id="s1", input_text="Test"))
+
+            with pytest.raises(ConnectionError, match="provider unreachable"):
+                trainer.run()
+
+        # The error must never reach the grader as if it were an agent output.
+        mock_grader.grade.assert_not_called()
+
+
 class TestAgentTrainerWithAgents:
     """Tests for AgentTrainer with multi-agent (Agents class)."""
     
