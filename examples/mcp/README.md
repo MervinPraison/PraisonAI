@@ -136,6 +136,9 @@ These examples comply with MCP Protocol Version 2025-11-25:
 
 Pair a phone running [Build Remote Agent](https://grokbuildremote.com/) to a PraisonAI agent via MCP stdio `gbr-mcp` (protocol `gbr/1`). Requires `gbr-agent pair && gbr-agent run`. Phone is spectator. Never put mailbox keys in the example.
 
+Clone [`GrokBuildRemote-Agents`](https://github.com/LinespottingOrg/GrokBuildRemote-Agents), run `npm install` in `mcp/gbr-mcp`, then point `GBR_MCP_JS` at the entrypoint (defaults to `GrokBuildRemote-Agents/mcp/gbr-mcp/bin/gbr-mcp.js` relative to the clone; resolved to an absolute path so the example runs from any directory):
+
 ```bash
+export GBR_MCP_JS=/abs/path/to/GrokBuildRemote-Agents/mcp/gbr-mcp/bin/gbr-mcp.js
 python gbr_pair.py
 ```
