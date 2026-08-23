@@ -1849,6 +1849,11 @@ Your Goal: {self.goal}"""
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
+            except ToolExecutionError:
+                # A tool failed during the streaming attempt. Re-raise so it is
+                # not relabelled as an LLM error and so the tool is not executed
+                # a second time by the non-streaming fallback below.
+                raise
             except Exception as e:
                 from ..errors import LLMError
                 # Don't retry if it's an LLMError that has exhausted retries

@@ -142,9 +142,13 @@ def _agent_with_failing_tool(message, monkeypatch):
 
 def test_chat_raises_tool_execution_error(monkeypatch):
     """A failing tool must surface as ToolExecutionError, not as None."""
-    agent, _rec, _runs = _agent_with_failing_tool("smtp down", monkeypatch)
+    agent, _rec, runs = _agent_with_failing_tool("smtp down", monkeypatch)
     with pytest.raises(ToolExecutionError):
         agent.chat("send the email")
+    # The failing tool must have actually run, proving the error surfaced
+    # *because of* the tool call rather than before it. The tool executor retries
+    # a failing tool up to 3 times, and every attempt targets the same recipient.
+    assert runs and all(to == "a@b.com" for to in runs)
 
 
 def test_tool_error_text_is_not_classified_as_an_llm_error(monkeypatch):
@@ -154,10 +158,13 @@ def test_tool_error_text_is_not_classified_as_an_llm_error(monkeypatch):
     LLM error, sleeps, and calls the model a second time with no tool result --
     returning that answer to the user as a success.
     """
-    agent, rec, _runs = _agent_with_failing_tool("429 too many requests", monkeypatch)
+    agent, rec, runs = _agent_with_failing_tool("429 too many requests", monkeypatch)
     with pytest.raises(ToolExecutionError):
         agent.chat("send the email")
 
+    assert runs and all(to == "a@b.com" for to in runs), (
+        "the failing tool must have executed"
+    )
     assert len(rec.requests) == 1, (
         f"model was re-driven {len(rec.requests)} times after a tool failure; "
         f"last request carried roles "
