@@ -1725,7 +1725,7 @@ Your Goal: {self.goal}"""
             return max_retries
         return 2
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
+    def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
         start_time = time.time()
 
         # --- Proactive Context Budget Management (default-on) ---
@@ -2119,7 +2119,7 @@ Your Goal: {self.goal}"""
         self, 
         exc: Exception, 
         messages, 
-        temperature=1.0, 
+        temperature=None, 
         tools=None, 
         stream=True,
         reasoning_steps=False,
@@ -2309,7 +2309,7 @@ Your Goal: {self.goal}"""
     def _execute_unified_chat_completion(
         self, 
         messages, 
-        temperature=1.0, 
+        temperature=None, 
         tools=None, 
         stream=None,
         reasoning_steps=False,
@@ -2443,7 +2443,7 @@ Your Goal: {self.goal}"""
     async def _execute_unified_achat_completion(
         self, 
         messages, 
-        temperature=1.0, 
+        temperature=None, 
         tools=None, 
         stream=True,  # Async methods keep stream=True default (async adapters support streaming vs sync smart fallback)
         reasoning_steps=False,
@@ -2888,7 +2888,7 @@ Your Goal: {self.goal}"""
             )
         return rendered
 
-    def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
         """
         Chat with the agent.
         
@@ -3498,11 +3498,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 reflection_output = _get_display_functions()['ReflectionOutput'](**reflection_data)
                             else:
                                 # Use OpenAI's structured output for OpenAI models
+                                _reflection_kwargs = {}
+                                if temperature is not None:
+                                    _reflection_kwargs['temperature'] = temperature
                                 reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
                                     model=self.reflect_llm if self.reflect_llm else self.llm,
                                     messages=messages,
-                                    temperature=temperature,
-                                    response_format=_get_display_functions()['ReflectionOutput']
+                                    response_format=_get_display_functions()['ReflectionOutput'],
+                                    **_reflection_kwargs
                                 )
 
                                 reflection_output = reflection_response.choices[0].message.parsed
@@ -3586,7 +3589,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return clean_triple_backticks(output)
 
-    async def achat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
+    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
         """Async version of chat method with self-reflection support.
         
         Args:
@@ -4147,11 +4150,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             self._rollback_chat_history_to(chat_history_length)
                                             return None
                                     
+                                    _areflection_kwargs = {}
+                                    if temperature is not None:
+                                        _areflection_kwargs['temperature'] = temperature
                                     reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
                                         messages=reflection_messages,
-                                        temperature=temperature,
-                                        response_format=_get_display_functions()['ReflectionOutput']
+                                        response_format=_get_display_functions()['ReflectionOutput'],
+                                        **_areflection_kwargs
                                     )
                                     
                                     reflection_output = reflection_response.choices[0].message.parsed
@@ -4265,9 +4271,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_call_kwargs = dict(
                                 model=self.llm,
                                 messages=messages,
-                                temperature=temperature,
                                 tools=formatted_tools,
                             )
+                            if temperature is not None:
+                                tool_call_kwargs['temperature'] = temperature
                             if effective_tool_choice:
                                 tool_call_kwargs['tool_choice'] = effective_tool_choice
                             response = await self._openai_client.async_client.chat.completions.create(
@@ -4281,11 +4288,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
                             return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
                         elif output_json or output_pydantic:
+                            _json_kwargs = {}
+                            if temperature is not None:
+                                _json_kwargs['temperature'] = temperature
                             response = await self._openai_client.async_client.chat.completions.create(
                                 model=self.llm,
                                 messages=messages,
-                                temperature=temperature,
-                                response_format={"type": "json_object"}
+                                response_format={"type": "json_object"},
+                                **_json_kwargs
                             )
                             response_text = response.choices[0].message.content
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
@@ -4295,10 +4305,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
                             return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
                         else:
+                            _plain_kwargs = {}
+                            if temperature is not None:
+                                _plain_kwargs['temperature'] = temperature
                             response = await self._openai_client.async_client.chat.completions.create(
                                 model=self.llm,
                                 messages=messages,
-                                temperature=temperature
+                                **_plain_kwargs
                             )
                         
                         response_text = response.choices[0].message.content
@@ -4335,11 +4348,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                                         return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
                                     
+                                    _areflection_kwargs = {}
+                                    if temperature is not None:
+                                        _areflection_kwargs['temperature'] = temperature
                                     reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
                                         messages=reflection_messages,
-                                        temperature=temperature,
-                                        response_format=_get_display_functions()['ReflectionOutput']
+                                        response_format=_get_display_functions()['ReflectionOutput'],
+                                        **_areflection_kwargs
                                     )
                                     
                                     reflection_output = reflection_response.choices[0].message.parsed
@@ -4365,10 +4381,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         {"role": "user", "content": "Now regenerate your response using the reflection you made"}
                                     ]
                                     
+                                    _regen_kwargs = {}
+                                    if temperature is not None:
+                                        _regen_kwargs['temperature'] = temperature
                                     new_response = await self._openai_client.async_client.chat.completions.create(
                                         model=self.llm,
                                         messages=regenerate_messages,
-                                        temperature=temperature
+                                        **_regen_kwargs
                                     )
                                     response_text = new_response.choices[0].message.content
                                     reflection_count += 1
@@ -5256,7 +5275,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             agent_id=getattr(self, 'name', None),
         )
 
-    def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    def _chat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
         
@@ -5343,7 +5362,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # This should never be reached, but just in case
         raise RuntimeError("Retry loop completed without returning or raising an exception")
 
-    async def _achat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
         

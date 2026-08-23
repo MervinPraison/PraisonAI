@@ -1579,10 +1579,13 @@ class OpenAIClient:
         params = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             "stream": stream,
             **kwargs
         }
+        # Omit temperature when unset so the provider default applies rather
+        # than sending an explicit None.
+        if temperature is not None:
+            params["temperature"] = temperature
         
         # Add tools if provided
         if tools:
@@ -1640,10 +1643,13 @@ class OpenAIClient:
         params = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             "stream": stream,
             **kwargs
         }
+        # Omit temperature when unset so the provider default applies rather
+        # than sending an explicit None.
+        if temperature is not None:
+            params["temperature"] = temperature
         
         # Add tools if provided
         if tools:
