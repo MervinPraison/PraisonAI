@@ -1953,6 +1953,8 @@ Your Goal: {self.goal}"""
 
         except BudgetExceededError:
             raise
+        except ToolExecutionError:
+            raise
         except Exception as e:
             from ..errors import LLMError
             
