@@ -1211,7 +1211,15 @@ Your Goal: {self.goal}"""
         return content
 
     def _extract_llm_response_content(self, response) -> Optional[str]:
-        """Return assistant message text, a tool-call summary, or str(response) as fallback."""
+        """Return assistant message text, or a tool-call summary.
+
+        A well-formed response that simply carries no content -- a content filter,
+        a refusal, or ``finish_reason="length"`` with zero output tokens -- yields
+        the empty string.  ``str(response)`` is reserved for responses this method
+        could not parse at all, where the repr is a diagnostic rather than an
+        answer; returning it for a merely empty message put the raw SDK object's
+        repr in front of the user and into ``chat_history``.
+        """
         if not response:
             return None
         try:
@@ -1226,6 +1234,17 @@ Your Goal: {self.goal}"""
                     if tool_calls:
                         names = [getattr(tc.function, "name", "?") for tc in tool_calls]
                         return f"[tool_calls: {', '.join(names)}]"
+                    # Parsed cleanly; the model returned no content.  A refusal
+                    # (safety) is carried in ``message.refusal`` independently of
+                    # ``finish_reason`` -- surface it so an empty answer isn't silent.
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    refusal = getattr(msg, "refusal", None)
+                    if refusal or finish_reason not in (None, "stop"):
+                        logging.warning(
+                            f"Agent {self.name}: model returned no content "
+                            f"(finish_reason={finish_reason!r}, refused={bool(refusal)})"
+                        )
+                    return ""
         except (AttributeError, IndexError, TypeError) as e:
             logging.warning(
                 f"Failed to extract LLM response content (falling back to str): {e}"
