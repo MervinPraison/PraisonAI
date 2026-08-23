@@ -40,6 +40,66 @@ async def _seed_in_flight(queue):
     return key
 
 
+def test_dead_letter_count(tmp_path):
+    """dead_letter_count() reports only the permanent_failure tier (Issue #4265)."""
+    async def run():
+        q = _new_queue(tmp_path)
+        assert q.dead_letter_count() == 0
+        # A live pending entry is not dead-letter.
+        await q.enqueue("m-pending", "telegram:1", {"content": "a"})
+        assert q.dead_letter_count() == 0
+        # Force one entry into the dead-letter tier.
+        key = await q.enqueue("m-dead", "telegram:2", {"content": "b"})
+        entry_id = int(key.split(":")[-1])
+        with q._lock, closing(q._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status='permanent_failure' WHERE id=?",
+                (entry_id,),
+            )
+            conn.commit()
+        assert q.dead_letter_count() == 1
+        assert q.pending_count() == 1  # the dead entry is not counted as pending
+
+    asyncio.run(run())
+
+
+def test_try_depth_snapshot_matches_blocking_counts(tmp_path):
+    """try_depth_snapshot() returns the same (pending, dead) as the blocking APIs (Issue #4265)."""
+    async def run():
+        q = _new_queue(tmp_path)
+        assert q.try_depth_snapshot() == (0, 0)
+        await q.enqueue("m-pending", "telegram:1", {"content": "a"})
+        key = await q.enqueue("m-dead", "telegram:2", {"content": "b"})
+        entry_id = int(key.split(":")[-1])
+        with q._lock, closing(q._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status='permanent_failure' WHERE id=?",
+                (entry_id,),
+            )
+            conn.commit()
+        snap = q.try_depth_snapshot()
+        assert snap == (q.pending_count(), q.dead_letter_count()) == (1, 1)
+
+    asyncio.run(run())
+
+
+def test_try_depth_snapshot_never_blocks_on_held_lock(tmp_path):
+    """A contended writer lock yields None immediately rather than blocking (Issue #4265).
+
+    The gateway health/metrics surface runs on the event loop; it must never
+    wait on the outbox writer lock. When the lock is held the non-blocking
+    snapshot returns None so the caller can reuse its last-known depths.
+    """
+    q = _new_queue(tmp_path)
+    q._lock.acquire()
+    try:
+        assert q.try_depth_snapshot() is None
+    finally:
+        q._lock.release()
+    # Once released, the snapshot works again.
+    assert q.try_depth_snapshot() == (0, 0)
+
+
 def test_crash_recovers_sending_to_recovered(tmp_path):
     """A 'sending' entry from a prior crash becomes 'recovered' on restart."""
     async def run():

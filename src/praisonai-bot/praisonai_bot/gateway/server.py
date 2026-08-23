@@ -44,6 +44,8 @@ from praisonaiagents.gateway.protocols import (
     MIN_CLIENT_PROTOCOL_VERSION,
     ReloadStatus,
     compute_config_revision,
+    HealthPressure,
+    evaluate_pressure,
 )
 from praisonaiagents.session.protocols import SessionStoreProtocol
 from praisonaiagents.session.store import DefaultSessionStore
@@ -4877,6 +4879,112 @@ class WebSocketGateway:
                 )
         except Exception as e:  # pragma: no cover — defensive
             logger.debug("supervision metric mirror failed: %s", e)
+        # Issue #4265: mirror the saturation/back-pressure facts the enforcement
+        # layer already tracks (admission counters, outbound backlog, event-loop
+        # lag) so ``/metrics`` gains the forward overload signal it was missing.
+        try:
+            pressure = self._compute_pressure()
+            if pressure is not None:
+                self._metrics.set_gauge(
+                    "admission_in_flight", float(pressure.admission_in_flight)
+                )
+                self._metrics.set_gauge(
+                    "admission_queued", float(pressure.admission_queued)
+                )
+                self._metrics.set_gauge(
+                    "inbox_pending", float(pressure.inbox_pending)
+                )
+                self._metrics.set_gauge(
+                    "outbox_pending", float(pressure.outbox_pending)
+                )
+                self._metrics.set_gauge(
+                    "outbox_dead_letter", float(pressure.outbox_dead_letter)
+                )
+                self._metrics.set_gauge(
+                    "event_loop_lag_ms", float(pressure.event_loop_lag_p99_ms)
+                )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("pressure metric mirror failed: %s", e)
+
+    def _inbox_pending_total(self) -> int:
+        """Aggregate pending inbound queue depth across all sessions.
+
+        Issue #4265: each :class:`GatewaySession` owns an ``_inbox`` queue; the
+        fleet-wide backlog is the sum of their sizes — a forward saturation
+        signal that inbound work is arriving faster than it drains.
+        """
+        total = 0
+        for session in self._sessions.values():
+            inbox = getattr(session, "_inbox", None)
+            if inbox is None:
+                continue
+            try:
+                total += int(inbox.qsize())
+            except Exception:  # pragma: no cover — defensive
+                continue
+        return total
+
+    def _compute_pressure(self) -> Optional[HealthPressure]:
+        """Read back the gateway's saturation state as a :class:`HealthPressure`.
+
+        Issue #4265: the back-pressure enforcement layer (admission gate,
+        durable outbox, loop watchdog) already computes exactly how loaded the
+        gateway is; this reads those facts and folds them through the pure core
+        classifier. Returns ``None`` only when no back-pressure machinery is
+        wired. Best-effort: any per-source failure degrades to a zero for that
+        source rather than raising into the health/metrics path.
+        """
+        gate = getattr(self, "_admission_gate", None)
+        watchdog = self._watchdog
+        outbox = self._scheduled_outbox
+        if gate is None and watchdog is None and outbox is None:
+            return None
+
+        admission_stats: Dict[str, Any] = {}
+        if gate is not None:
+            try:
+                admission_stats = gate.stats()
+            except Exception:  # pragma: no cover — defensive
+                admission_stats = {}
+
+        try:
+            inbox_pending = self._inbox_pending_total()
+        except Exception:  # pragma: no cover — defensive
+            inbox_pending = 0
+
+        # Read the outbound backlog *without ever blocking the event loop*.
+        # health()/metrics run on the loop, while outbox counts take the
+        # outbox writer lock and hit SQLite; a blocking read issued while a
+        # drain/enqueue holds that lock would wedge all gateway scheduling.
+        # ``try_depth_snapshot`` returns None if the writer lock is contended,
+        # in which case we reuse the last-known depths rather than waiting.
+        outbox_pending, outbox_dead_letter = getattr(
+            self, "_last_outbox_depths", (0, 0)
+        )
+        if outbox is not None:
+            snapshot = None
+            try:
+                snapshot = outbox.try_depth_snapshot()
+            except Exception:  # pragma: no cover — defensive
+                snapshot = None
+            if snapshot is not None:
+                outbox_pending, outbox_dead_letter = snapshot
+                self._last_outbox_depths = snapshot
+
+        loop_lag_ms = 0.0
+        if watchdog is not None:
+            try:
+                loop_lag_ms = float(getattr(watchdog, "last_lag_ms", 0.0) or 0.0)
+            except Exception:  # pragma: no cover — defensive
+                loop_lag_ms = 0.0
+
+        return evaluate_pressure(
+            admission=admission_stats,
+            inbox_pending=inbox_pending,
+            outbox_pending=outbox_pending,
+            outbox_dead_letter=outbox_dead_letter,
+            loop_lag_p99_ms=loop_lag_ms,
+        )
 
     def metrics_snapshot(self) -> Dict[str, Any]:
         """Return a plain-dict snapshot of current metrics (for JSON/tests)."""
@@ -5159,6 +5267,19 @@ class WebSocketGateway:
                         on_disk != self._applied_config_revision
                     )
         
+        # Issue #4265: surface saturation/back-pressure telemetry so overload is
+        # a first-class, forward signal — admission utilisation, inbound/outbound
+        # backlog, event-loop lag and a single derived ``pressure`` class — read
+        # back from the enforcement layer that already tracks it. Only included
+        # when back-pressure machinery is wired, and computed defensively so
+        # health() never raises.
+        try:
+            pressure = self._compute_pressure()
+            if pressure is not None:
+                result["pressure"] = pressure.to_dict()
+        except Exception:
+            pass
+
         # Add push status if enabled (push infra lives in wrapper; guard defensively)
         if getattr(self, "_push_enabled", False):
             push_status: Dict[str, Any] = {"enabled": True}

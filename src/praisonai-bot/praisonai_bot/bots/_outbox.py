@@ -811,6 +811,50 @@ class OutboundQueue:
                 "SELECT COUNT(*) FROM outbound_queue WHERE status IN ('pending', 'recovered', 'failed')"
             ).fetchone()[0])
     
+    def dead_letter_count(self) -> int:
+        """Get count of messages in the dead-letter tier (permanent failures).
+
+        Surfaced on the gateway health surface as a saturation signal (Issue
+        #4265): a non-empty dead-letter tier means outbound delivery has
+        exhausted retries and is dropping work.
+        """
+        with self._lock, closing(self._connect()) as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM outbound_queue WHERE status = 'permanent_failure'"
+            ).fetchone()[0])
+
+    def try_depth_snapshot(self) -> Optional[Tuple[int, int]]:
+        """Best-effort ``(pending, dead_letter)`` counts that never block.
+
+        Issue #4265: the gateway health/metrics surface runs *on the event
+        loop* and must never stall it. ``pending_count``/``dead_letter_count``
+        both take the writer ``_lock`` and open a SQLite connection, so a
+        health probe issued while a ``drain``/``enqueue`` holds the lock would
+        wedge all gateway scheduling behind disk I/O.
+
+        This variant acquires the lock non-blockingly: if a writer holds it the
+        method returns ``None`` immediately (the caller reuses its last-known
+        value) instead of waiting. When the lock is free both tiers are counted
+        in a single connection so the snapshot is internally consistent.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            with closing(self._connect()) as conn:
+                pending = int(conn.execute(
+                    "SELECT COUNT(*) FROM outbound_queue "
+                    "WHERE status IN ('pending', 'recovered', 'failed')"
+                ).fetchone()[0])
+                dead = int(conn.execute(
+                    "SELECT COUNT(*) FROM outbound_queue "
+                    "WHERE status = 'permanent_failure'"
+                ).fetchone()[0])
+            return pending, dead
+        except Exception:  # pragma: no cover - defensive; health never raises
+            return None
+        finally:
+            self._lock.release()
+
     def size(self) -> int:
         """Get total number of messages in queue."""
         with self._lock, closing(self._connect()) as conn:
