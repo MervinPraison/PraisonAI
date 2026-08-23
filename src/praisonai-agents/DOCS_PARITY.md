@@ -65,7 +65,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3118 |
 | ✅ Realtime | 2 | 5 | 668 |
-| ✅ Reflection | 3 | 3 | 683 |
+| ✅ Reflection | 3 | 3 | 730 |
 | ✅ Retrieval | 2 | 5 | 1054 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3483 |
