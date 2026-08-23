@@ -206,3 +206,63 @@ class TestOptimizationResult:
         
         result = OptimizationResult(original_tokens=0)
         assert result.reduction_percent == 0.0
+
+
+class TestGetOptimizerKwargsFilter:
+    """Regression tests for issue #4240.
+
+    ``ContextManager`` passes the union of every optimizer's kwargs to
+    ``get_optimizer``. Only ``SmartOptimizer`` accepted that full signature;
+    the other six raised ``TypeError`` and context management was silently
+    disabled. ``get_optimizer`` must filter kwargs to each class's signature.
+    """
+
+    def _union_kwargs(self):
+        return {
+            "preserve_recent": 5,
+            "protected_tools": ["search"],
+            "llm_summarize_fn": None,
+            "smart_tool_summarize": True,
+            "tool_summarize_limits": {},
+            "llm_analyze_fn": None,
+            "min_compaction_ratio": 0.5,
+            "analyzer_strategy": "default",
+        }
+
+    def test_every_strategy_instantiates_with_union_kwargs(self):
+        from praisonaiagents.context.optimizer import (
+            get_optimizer, OPTIMIZER_REGISTRY,
+        )
+
+        for strategy in OPTIMIZER_REGISTRY:
+            optimizer = get_optimizer(strategy, **self._union_kwargs())
+            assert optimizer is not None
+
+    def test_every_strategy_reduces_over_budget_history(self):
+        from praisonaiagents.context.manager import ContextManager
+        from praisonaiagents.context.models import ContextConfig, OptimizerStrategy
+        from praisonaiagents.context.tokens import estimate_messages_tokens
+
+        def history():
+            msgs = [{"role": "system", "content": "You are a helpful assistant."}]
+            for i in range(120):
+                msgs.append({"role": "user", "content": f"[u{i}] " + " ".join(f"w{i}_{j}" for j in range(400))})
+                msgs.append({"role": "assistant", "content": f"[a{i}] " + " ".join(f"r{i}_{j}" for j in range(400))})
+            return msgs
+
+        # Strategies that reduce plain user/assistant text. prune_tools and
+        # non_destructive target tool messages, which this transcript lacks.
+        for strategy in (
+            OptimizerStrategy.TRUNCATE,
+            OptimizerStrategy.SLIDING_WINDOW,
+            OptimizerStrategy.SUMMARIZE,
+            OptimizerStrategy.SMART,
+            OptimizerStrategy.CONVERSATION,
+        ):
+            cfg = ContextConfig(strategy=strategy, auto_compact=True)
+            mgr = ContextManager(model="gpt-4o", config=cfg)
+            msgs = history()
+            before = estimate_messages_tokens(msgs)
+            out = mgr.process(msgs)["messages"]
+            after = estimate_messages_tokens(out)
+            assert after < before, f"{strategy.value} did not reduce over-budget history"

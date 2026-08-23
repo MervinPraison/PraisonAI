@@ -1108,6 +1108,18 @@ def get_optimizer(
         Optimizer instance
     """
     optimizer_class = OPTIMIZER_REGISTRY.get(strategy, SmartOptimizer)
+
+    # Optimizers do not share a constructor signature. Callers (e.g. the
+    # ContextManager) pass the union of every optimizer's kwargs, so filter to
+    # the ones this class actually accepts; otherwise all but SmartOptimizer
+    # raise TypeError and context management is silently disabled upstream.
+    import inspect
+    params = inspect.signature(optimizer_class.__init__).parameters
+    accepts_var_kw = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if not accepts_var_kw:
+        kwargs = {k: v for k, v in kwargs.items() if k in params}
     return optimizer_class(**kwargs)
 
 
