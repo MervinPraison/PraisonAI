@@ -104,6 +104,16 @@ def __getattr__(name: str):
         _module_cache[name] = SessionMirrorProtocol
         return SessionMirrorProtocol
 
+    if name == "PortableSessionStoreProtocol":
+        from .protocols import PortableSessionStoreProtocol
+        _module_cache[name] = PortableSessionStoreProtocol
+        return PortableSessionStoreProtocol
+
+    if name == "ImportReport":
+        from .protocols import ImportReport
+        _module_cache[name] = ImportReport
+        return ImportReport
+
     if name == "SessionHit":
         from .protocols import SessionHit
         _module_cache[name] = SessionHit
@@ -197,6 +207,8 @@ __all__ = [
     "SessionStoreProtocol",
     "SearchableSessionStoreProtocol",
     "SessionMirrorProtocol",
+    "PortableSessionStoreProtocol",
+    "ImportReport",
     "SessionHit",
     "SessionSummary",
     "HierarchicalSessionStore",

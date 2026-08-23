@@ -1073,6 +1073,61 @@ def list_gateway_sessions(
     return sessions
 
 
+def _gateway_session_store():
+    """Return the default session store bound to the gateway's sessions dir.
+
+    This is the same store the gateway/bot actually persists to, so
+    export/import operate on live conversation state (Issue #4267).
+    """
+    from praisonaiagents.session import get_default_session_store
+
+    return get_default_session_store()
+
+
+def export_gateway_sessions(
+    session_id: Optional[str] = None,
+    *,
+    include_lineage: bool = True,
+) -> Dict[str, Any]:
+    """Export gateway conversation sessions to a portable, versioned payload.
+
+    Args:
+        session_id: When given, export just that session (lineage-aware);
+            otherwise export every stored session.
+        include_lineage: Include compacted/rotated ancestors for a single
+            session export so it round-trips as one logical conversation.
+
+    Returns:
+        ``{"version": ..., "sessions": [...]}`` suitable for JSON serialisation.
+    """
+    store = _gateway_session_store()
+    if session_id:
+        return store.export_session(session_id, include_lineage=include_lineage)
+    return store.export_all()
+
+
+def import_gateway_sessions(
+    payload: Dict[str, Any],
+    *,
+    max_sessions: int = 10_000,
+    reset_live_fields: bool = True,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """Import gateway sessions from an exported payload (hardened restore).
+
+    Live routing/activity fields are reset by default so restored state is
+    inert until re-bound. Returns the :class:`ImportReport` as a dict.
+    """
+    store = _gateway_session_store()
+    report = store.import_sessions(
+        payload,
+        max_sessions=max_sessions,
+        reset_live_fields=reset_live_fields,
+        overwrite=overwrite,
+    )
+    return report.as_dict()
+
+
 def show_gateway_session(
     session_ref: str,
     tail: int = 20,
