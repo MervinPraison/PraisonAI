@@ -3012,6 +3012,11 @@ class ToolExecutionMixin:
             name_attr = getattr(tool, '__name__', None) or getattr(tool, 'name', None)
             if name_attr == tool_name:
                 explicit = getattr(tool, 'idempotent', None)
+                if not isinstance(explicit, bool):
+                    # ``restart_safe`` is the public replay-safety contract on
+                    # ``@tool`` (FunctionTool) and ``BaseTool``: ``False`` marks an
+                    # effectful tool that must never be silently re-executed.
+                    explicit = getattr(tool, 'restart_safe', None)
                 if isinstance(explicit, bool):
                     return not explicit
                 break

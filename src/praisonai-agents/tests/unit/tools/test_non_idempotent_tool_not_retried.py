@@ -70,3 +70,71 @@ def test_undeclared_tool_still_retries():
 
 def test_declared_safe_tool_still_retries():
     assert _runs(idempotent=True) == 3
+
+
+def _runs_restart_safe(restart_safe, message="boom", max_attempts=3):
+    """Same as ``_runs`` but declares replay-safety via the public ``restart_safe``
+    contract on a ``@tool``-decorated FunctionTool instead of a raw ``idempotent``
+    attribute. ``restart_safe=False`` is the documented way an effectful tool
+    marks itself unsafe to re-run, so the retry veto must honour it too."""
+    from praisonaiagents.tools.decorator import tool
+
+    calls = []
+
+    @tool(restart_safe=restart_safe)
+    def charge_card(amount: str) -> str:
+        """Charge a customer's card."""
+        calls.append(amount)
+        raise RuntimeError(message)
+
+    cfg = ToolConfig(retry_policy=RetryPolicy(max_attempts=max_attempts,
+                                              initial_delay_ms=0))
+    agent = Agent(instructions="x", tools=[charge_card], tool_config=cfg)
+    try:
+        agent.execute_tool("charge_card", {"amount": "100"})
+    except Exception:
+        pass
+    return len(calls)
+
+
+def test_restart_safe_false_is_not_retried():
+    """A ``@tool(restart_safe=False)`` must not be re-driven (outer loop)."""
+    assert _runs_restart_safe(restart_safe=False) == 1
+
+
+def test_restart_safe_false_is_not_retried_for_a_known_transient():
+    """Same declaration, inner loop: a transient error must not re-charge."""
+    assert _runs_restart_safe(restart_safe=False, message="connection reset") == 1
+
+
+def test_restart_safe_true_still_retries():
+    """``restart_safe=True`` is explicitly replay-safe, so it retries as before."""
+    assert _runs_restart_safe(restart_safe=True) == 3
+
+
+def test_restart_safe_undeclared_still_retries():
+    """``restart_safe=None`` (undeclared) must not silently disable retries."""
+    assert _runs_restart_safe(restart_safe=None) == 3
+
+
+def test_base_tool_restart_safe_false_is_not_retried():
+    """A ``BaseTool`` subclass declaring ``restart_safe=False`` runs once."""
+    from praisonaiagents.tools.base import BaseTool
+
+    calls = []
+
+    class ChargeCard(BaseTool):
+        name = "charge_card"
+        description = "Charge a customer's card."
+        restart_safe = False
+
+        def run(self, amount: str) -> str:
+            calls.append(amount)
+            raise RuntimeError("boom")
+
+    agent = Agent(instructions="x", tools=[ChargeCard()], tool_config=FAST)
+    try:
+        agent.execute_tool("charge_card", {"amount": "100"})
+    except Exception:
+        pass
+    assert len(calls) == 1
