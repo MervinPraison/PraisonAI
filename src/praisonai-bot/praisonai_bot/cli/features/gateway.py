@@ -643,22 +643,36 @@ class GatewayHandler:
         import signal
         import os
         import sys
-        
+        import time
+
         try:
             print(f"Force killing PID {pid}...")
             # Use SIGTERM on Windows since SIGKILL is not available
             sig = signal.SIGTERM if sys.platform == "win32" else signal.SIGKILL
             os.kill(pid, sig)
-            return True
         except PermissionError:
             print(f"Not permitted to kill PID {pid}; it may belong to another user.")
             return False
-        except ProcessLookupError:
+        except (ProcessLookupError, OSError):
             print(f"Process {pid} not found or already stopped")
             return True
-        except OSError:
-            print(f"Process {pid} not found or already stopped")
-            return True
+
+        # Signalling succeeded, but delivery is not exit. Confirm the process is
+        # actually gone before the caller releases the PID lock; otherwise a new
+        # gateway could start while the old one still owns the resources (#4192).
+        for _ in range(50):  # up to ~5s
+            try:
+                os.kill(pid, 0)
+                time.sleep(0.1)
+            except PermissionError:
+                # Reaped and PID reused by another user - or still ours but now
+                # cross-uid. Cannot confirm exit; treat as still running.
+                return False
+            except (ProcessLookupError, OSError):
+                return True
+
+        print(f"Process {pid} still present after force kill; lock retained.")
+        return False
 
     def hooks(self, args) -> int:
         """Manage inbound trigger hooks in a gateway.yaml file (Issue #2281).

@@ -197,10 +197,10 @@ EXPECTED OUTPUT (ideal response):
         Returns:
             Parsed GradeResult
         """
-        score, reasoning, suggestions, parsed_any = _extract_score_reasoning(response_text)
+        score, reasoning, suggestions, score_parsed = _extract_score_reasoning(response_text)
 
-        if not parsed_any:
-            # Nothing usable was parsed. Fail closed: a fabricated mid-range score
+        if not score_parsed:
+            # No numeric score was parsed. Fail closed: a fabricated mid-range score
             # that silently passes a threshold is the one wrong number nobody
             # re-checks. Report the minimum instead.
             logger.warning(
@@ -361,24 +361,29 @@ def _extract_score_reasoning(response_text: str) -> tuple:
 
     Handles markdown-bolded labels (``**SCORE:** 1``), leading bullets and case
     variations - the default output style of most models. Returns a
-    ``parsed_any`` sentinel so callers can distinguish a genuinely-scored verdict
-    from an unparsable one and fail closed rather than fabricate a score.
+    ``score_parsed`` sentinel so callers can distinguish a genuinely-scored
+    verdict from an unparsable one and fail closed rather than fabricate a score.
 
     Returns:
-        Tuple of (score: float, reasoning: str, suggestions: list, parsed_any: bool)
+        Tuple of (score: float, reasoning: str, suggestions: list, score_parsed: bool)
+
+        ``score_parsed`` is True only when an actual numeric SCORE was read.
+        Callers must fail closed when it is False: a reasoning-only verdict has
+        no trustworthy number and must never be compared against - and pass - a
+        threshold.
     """
-    score = 5.0  # Default (only trusted when parsed_any is True)
+    score = 5.0  # Default (only trusted when score_parsed is True)
     reasoning = "Unable to parse response"
     suggestions: List[str] = []
-    parsed_any = False
+    score_parsed = False
+    in_reasoning = False
     in_suggestions = False
+    reasoning_lines: List[str] = []
 
     for raw_line in response_text.strip().split('\n'):
         line = raw_line.strip()
-        if not line:
-            continue
 
-        match = _FIELD_RE.match(line)
+        match = _FIELD_RE.match(line) if line else None
         if match:
             field_name = match.group(1).lower()
             value = match.group(2).strip().strip('*_`').strip()
@@ -388,26 +393,37 @@ def _extract_score_reasoning(response_text: str) -> tuple:
                 if number:
                     try:
                         score = max(1.0, min(10.0, float(number.group(0))))
-                        parsed_any = True
+                        score_parsed = True
                     except ValueError:
                         pass
+                in_reasoning = False
                 in_suggestions = False
             elif field_name == 'reasoning':
-                reasoning = value
-                parsed_any = True
+                in_reasoning = True
                 in_suggestions = False
+                if value:
+                    reasoning_lines.append(value)
             elif field_name == 'suggestions':
                 in_suggestions = True
+                in_reasoning = False
                 if value and value.lower() != 'none':
                     suggestions.append(value)
+            continue
+
+        if not line:
             continue
 
         if in_suggestions and line.lstrip('*_`').startswith('-'):
             suggestion = line.lstrip('*_`- ').strip()
             if suggestion and suggestion.lower() != 'none':
                 suggestions.append(suggestion)
+        elif in_reasoning:
+            reasoning_lines.append(line)
 
-    return score, reasoning, suggestions, parsed_any
+    if reasoning_lines:
+        reasoning = ' '.join(reasoning_lines).strip()
+
+    return score, reasoning, suggestions, score_parsed
 
 
 def parse_score_reasoning(response_text: str) -> tuple:
@@ -427,9 +443,9 @@ def parse_score_reasoning(response_text: str) -> tuple:
     Returns:
         Tuple of (score: float, reasoning: str)
     """
-    score, reasoning, _suggestions, parsed_any = _extract_score_reasoning(response_text)
+    score, reasoning, _suggestions, score_parsed = _extract_score_reasoning(response_text)
 
-    if not parsed_any:
+    if not score_parsed:
         logger.warning(
             "Could not parse judge response; failing closed. Raw: %r",
             response_text[:200],

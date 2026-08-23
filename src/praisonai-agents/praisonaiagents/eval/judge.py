@@ -294,12 +294,13 @@ SUGGESTIONS:
         Returns:
             JudgeResult with score, passed, reasoning, suggestions
         """
-        score, reasoning, suggestions, parsed_any = _extract_score_reasoning(response_text)
+        score, reasoning, suggestions, score_parsed = _extract_score_reasoning(response_text)
 
-        if not parsed_any:
-            # An unparsed verdict is an error, not a middling result. Fail closed
+        if not score_parsed:
+            # An unscored verdict is an error, not a middling result. Fail closed
             # so a fabricated 5.0 can never be compared against - and pass - a
-            # threshold. Mirrors safety.py / parse_score_reasoning.
+            # threshold. A reasoning-only response has no trustworthy number.
+            # Mirrors safety.py / parse_score_reasoning.
             logger.warning(
                 "Could not parse judge response; failing closed. Raw: %r",
                 response_text[:200],
@@ -308,7 +309,7 @@ SUGGESTIONS:
 
         return JudgeResult(
             score=score,
-            passed=parsed_any and score >= self.threshold,
+            passed=score_parsed and score >= self.threshold,
             reasoning=reasoning,
             output=output,
             expected=expected,
