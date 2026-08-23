@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 43037 |
+| ✅ Tools | 12 | 144 | 43102 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
