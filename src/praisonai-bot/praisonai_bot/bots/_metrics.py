@@ -101,14 +101,36 @@ def _fmt_bound(bound: float) -> str:
     return repr(bound)
 
 
+def _validate_buckets(buckets: Tuple[float, ...]) -> Tuple[float, ...]:
+    """Coerce and validate bucket bounds: finite and strictly increasing.
+
+    The implicit ``+Inf`` bucket is always appended at render time, so callers
+    supply only the finite upper bounds here.
+    """
+    bounds = tuple(float(b) for b in buckets)
+    if not bounds:
+        raise ValueError("histogram buckets must be non-empty")
+    previous: Optional[float] = None
+    for bound in bounds:
+        if bound != bound or bound in (float("inf"), float("-inf")):
+            raise ValueError(f"histogram bucket bound must be finite: {bound!r}")
+        if previous is not None and bound <= previous:
+            raise ValueError(
+                "histogram bucket bounds must be strictly increasing: "
+                f"{bounds!r}"
+            )
+        previous = bound
+    return bounds
+
+
 class _HistData:
     """Mutable per-label-set histogram accumulator."""
 
     __slots__ = ("counts", "sum", "count")
 
-    def __init__(self, counts: List[int], sum: float, count: int) -> None:
+    def __init__(self, counts: List[int], total: float, count: int) -> None:
         self.counts = counts
-        self.sum = sum
+        self.sum = total
         self.count = count
 
     def copy(self) -> "_HistData":
@@ -199,14 +221,27 @@ class GatewayMetrics:
         the exposition can render Prometheus histogram series and clients can
         compute p50/p95/p99.
         """
+        if labels and "le" in labels:
+            raise ValueError("'le' is a reserved histogram label name")
         value = float(seconds)
         key = _label_key(labels)
+        new_bounds = _validate_buckets(buckets)
         with self._lock:
-            bounds = self._histogram_buckets.setdefault(name, tuple(buckets))
+            existing = self._histogram_buckets.get(name)
+            if existing is None:
+                bounds = new_bounds
+                self._histogram_buckets[name] = bounds
+            elif existing != new_bounds:
+                raise ValueError(
+                    f"histogram {name!r} already registered with different "
+                    f"buckets {existing!r}; cannot re-register {new_bounds!r}"
+                )
+            else:
+                bounds = existing
             series = self._histograms.setdefault(name, {})
             data = series.get(key)
             if data is None:
-                data = _HistData(counts=[0] * len(bounds), sum=0.0, count=0)
+                data = _HistData(counts=[0] * len(bounds), total=0.0, count=0)
                 series[key] = data
             for i, bound in enumerate(bounds):
                 if value <= bound:
@@ -253,9 +288,9 @@ class GatewayMetrics:
             for name, series in self._histograms.items():
                 bounds = self._histogram_buckets.get(name, ())
                 for key, data in series.items():
-                    base = name + _render_labels(key)
-                    out["histograms"][base + "_count"] = float(data.count)
-                    out["histograms"][base + "_sum"] = data.sum
+                    rendered = _render_labels(key)
+                    out["histograms"][name + "_count" + rendered] = float(data.count)
+                    out["histograms"][name + "_sum" + rendered] = data.sum
                     for i, bound in enumerate(bounds):
                         out["histograms"][
                             f"{name}_bucket" + _render_labels(
