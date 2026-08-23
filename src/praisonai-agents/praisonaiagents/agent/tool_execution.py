@@ -876,7 +876,12 @@ class ToolExecutionMixin:
                                     and self._is_tool_idempotent(function_name))
                                 or result.get("circuit_open")
                                 or (result.get("_praison_retryable") is True
-                                    and error_type not in inner_policy.retry_on)
+                                    and error_type not in inner_policy.retry_on
+                                    # The body already ran and may have completed
+                                    # its side effect before raising. Honour an
+                                    # explicit non-idempotent declaration here, as
+                                    # the _outer_timeout clause above already does.
+                                    and not self._tool_declares_not_idempotent(function_name))
                             )
                             # Strip the private control-plane tag before it can reach
                             # the model or be re-surfaced as the tool's payload.
@@ -2103,7 +2108,13 @@ class ToolExecutionMixin:
                         result.get("guardrail_denied") or
                         result.get("circuit_open")):
                         return result
-                    
+
+                    # The body already ran and may have completed its side effect
+                    # before failing. Honour an explicit non-idempotent declaration
+                    # rather than re-driving it (send a second email, charge twice).
+                    if self._tool_declares_not_idempotent(function_name):
+                        return result
+
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
                     
@@ -2984,6 +2995,36 @@ class ToolExecutionMixin:
         
         else:
             return f"Unknown bridge tool: {function_name}"
+
+    def _tool_declares_not_idempotent(self, tool_name):
+        """True only when the tool *explicitly* declares itself unsafe to re-run.
+
+        Distinct from ``_is_tool_idempotent``, which answers False for unknown
+        tools as a safe default. Gating a retry on that would stop retrying every
+        unregistered user tool; gating it on an *explicit* declaration vetoes only
+        what the author actually marked, so existing retry behaviour is unchanged
+        for everything else.
+        """
+        tools = getattr(self, 'tools', [])
+        if not isinstance(tools, (list, tuple)):
+            tools = []
+        for tool in tools:
+            name_attr = getattr(tool, '__name__', None) or getattr(tool, 'name', None)
+            if name_attr == tool_name:
+                explicit = getattr(tool, 'idempotent', None)
+                if not isinstance(explicit, bool):
+                    # ``restart_safe`` is the public replay-safety contract on
+                    # ``@tool`` (FunctionTool) and ``BaseTool``: ``False`` marks an
+                    # effectful tool that must never be silently re-executed.
+                    explicit = getattr(tool, 'restart_safe', None)
+                if isinstance(explicit, bool):
+                    return not explicit
+                break
+        try:
+            from ..escalation.loop_guard import MUTATING_TOOLS
+        except Exception:
+            return False
+        return tool_name in MUTATING_TOOLS
 
     def _is_tool_idempotent(self, tool_name):
         """Whether re-running ``tool_name`` is safe (no duplicated side effects).
