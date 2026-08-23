@@ -2799,8 +2799,23 @@ Your Goal: {self.goal}"""
             return optimized, result
             
         except Exception as e:
-            # Context management should never break the chat flow
-            logging.warning(f"Context management error (continuing without): {e}")
+            # Context management should never break the chat flow, but silently
+            # returning the unchanged history disables the hard-limit truncation
+            # too and sends an over-budget request. Fall back to emergency
+            # truncation so we still fit within the model window.
+            logging.error(f"Context management failed: {e}")
+            try:
+                from ..context.budgeter import get_model_limit
+                from ..context.tokens import estimate_messages_tokens
+
+                model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+                model_limit = get_model_limit(model_name)
+                if estimate_messages_tokens(messages) > model_limit * 0.95:
+                    target = int(model_limit * 0.8)
+                    truncated = self.context_manager.emergency_truncate(messages, target)
+                    return truncated, {"emergency_truncated": True}
+            except Exception as inner:
+                logging.debug(f"Emergency truncation fallback skipped: {inner}")
             return messages, None
 
     def _truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str | None = None) -> str:
