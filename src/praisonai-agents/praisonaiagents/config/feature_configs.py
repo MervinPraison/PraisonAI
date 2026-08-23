@@ -1937,9 +1937,9 @@ def canonical_runtime_name(value: str) -> str:
     known = sorted(set(RUNTIME_ALIASES))
     if suggest_similar(key, known):
         # Close enough to a known runtime that it is almost certainly a typo.
-        raise make_preset_error(
-            "runtime", value, sorted(set(RUNTIME_ALIASES.values()))
-        )
+        # Pass the full alias set so the error can suggest the matched name
+        # (e.g. "reducd" -> "reduced") rather than only canonical spellings.
+        raise make_preset_error("runtime", value, known)
     # Unrecognised but not a near-miss: treat as an opaque plugin runtime name.
     return value
 
@@ -1960,9 +1960,15 @@ def resolve_runtime(value: RuntimeParam) -> Optional[RuntimeConfig]:
             config.preferred_runtime = canonical_runtime_name(config.preferred_runtime)
         return config
     if isinstance(value, RuntimeConfig):
-        if value.preferred_runtime is not None:
-            value.preferred_runtime = canonical_runtime_name(value.preferred_runtime)
-        return value
+        if value.preferred_runtime is None:
+            return value
+        # Return a normalised copy rather than mutating the caller's object,
+        # so a config reused/compared after agent construction is unchanged.
+        from dataclasses import replace
+        return replace(
+            value,
+            preferred_runtime=canonical_runtime_name(value.preferred_runtime),
+        )
     raise TypeError(
         f"Invalid runtime parameter type: {type(value).__name__}. "
         "Expected None/False, True, str, list, set, dict, or RuntimeConfig."

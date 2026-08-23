@@ -53,3 +53,34 @@ def test_runtime_config_input_is_normalised():
 def test_dict_input_is_normalised():
     cfg = resolve_runtime({"preferred_runtime": " native "})
     assert cfg.preferred_runtime == "native"
+
+
+def test_runtime_config_input_is_not_mutated():
+    """resolve_runtime returns a normalised copy; the caller's object stands."""
+    original = RuntimeConfig(preferred_runtime="NATIVE")
+    resolved = resolve_runtime(original)
+    assert original.preferred_runtime == "NATIVE"
+    assert resolved is not original
+    assert resolved.preferred_runtime == "native"
+
+
+def test_close_typo_error_suggests_matched_alias():
+    with pytest.raises(ValueError) as exc:
+        canonical_runtime_name("reducd")
+    assert "reduced" in str(exc.value)
+
+
+def test_agent_normalises_runtime_spelling():
+    """Smoke: Agent construction canonicalises a spelling variant."""
+    from praisonaiagents import Agent
+
+    agent = Agent(instructions="test", runtime="NATIVE")
+    assert agent._runtime_config.preferred_runtime == "native"
+
+
+def test_agent_rejects_runtime_config_typo():
+    """A typo in a direct RuntimeConfig must raise, not degrade silently."""
+    from praisonaiagents import Agent
+
+    with pytest.raises(ValueError):
+        Agent(instructions="test", runtime=RuntimeConfig(preferred_runtime="nativ"))

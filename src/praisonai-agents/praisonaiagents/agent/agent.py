@@ -6853,8 +6853,12 @@ Answer:"""
         if AgentRuntimeConfig and isinstance(runtime, AgentRuntimeConfig):
             return runtime
         
-        # If already a RuntimeConfig instance, return as-is
+        # If already a RuntimeConfig instance, normalise its runtime name so a
+        # typo in preferred_runtime (e.g. "nativ") raises instead of silently
+        # dropping capabilities. resolve_runtime returns a normalised copy.
         if RuntimeConfig and hasattr(RuntimeConfig, '__name__') and isinstance(runtime, RuntimeConfig):
+            if resolve_runtime:
+                return resolve_runtime(runtime)
             return runtime
         
         # Handle capability validation style (bool, RuntimeConfig)

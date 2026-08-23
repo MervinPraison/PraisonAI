@@ -12,7 +12,7 @@ Requirements:
     pip install "praisonai[tools]"
 
 Run:
-    python knowledge_qdrant.py
+    python knowledge_chroma.py
 
 Expected Output:
     Agent responds using knowledge from documents
