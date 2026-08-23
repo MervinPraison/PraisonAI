@@ -15,6 +15,54 @@ import typer
 from praisonai_train.cli.commands.train import app
 
 
+def _apply_replacement_mode(tmp_name: str, out_path: str) -> None:
+    """Give an atomically-replaced temp file the permissions a normal write would.
+
+    ``tempfile.mkstemp`` always creates its file 0600, and ``os.replace`` makes
+    that the destination's final mode — silently stripping group/other read
+    access that a plain ``open(path, "w")`` would have granted (via umask), which
+    can lock downstream validation/training jobs out of a shared corpus. Restore
+    the expected mode before the replace: reuse the destination's existing mode
+    when overwriting, otherwise fall back to 0644 masked by the process umask —
+    exactly what ``open`` would have produced for a fresh file.
+    """
+    import os
+
+    try:
+        mode = os.stat(out_path).st_mode & 0o777
+    except OSError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    try:
+        os.chmod(tmp_name, mode)
+    except OSError:
+        pass
+
+
+def _resolve_replace_target(out_path: str) -> str:
+    """Follow a symlink destination so the atomic replace updates its target.
+
+    ``os.replace(tmp, out_path)`` replaces the symlink *itself*, leaving its
+    target holding the stale corpus — downstream jobs reading through the link
+    would then see the old data after a successful command. Resolve the link to
+    its real path (only the final component; parent dirs are left to the OS) so
+    the swap lands on the file consumers actually read. Non-symlinks and broken
+    links are returned unchanged.
+    """
+    import os
+
+    try:
+        if os.path.islink(out_path):
+            target = os.readlink(out_path)
+            if not os.path.isabs(target):
+                target = os.path.join(os.path.dirname(out_path), target)
+            return os.path.realpath(target)
+    except OSError:
+        pass
+    return out_path
+
+
 def _load_cfg(config: Optional[str], **overrides) -> dict:
     cfg: dict = {}
     if config:
@@ -92,24 +140,26 @@ def generate_data(
     snap_every = cfg.get("snapshot_every")
     snap_dir = cfg.get("snapshot_dir", "snapshots")
 
-    # Consume the first row *before* truncating the destination, so a run that
-    # fails on credentials/recipe/first-request never destroys an existing file
-    # (and a self-referential dedup_from is read before it would be emptied).
+    # Write to a sibling temp file and atomically replace the destination only on
+    # success (mirrors the `dedup` command). A run that yields no rows — every
+    # teacher request failed, bad credentials/recipe, no JSON-mode support — must
+    # never destroy an existing corpus: the original file is left untouched and
+    # the temp file is removed. A self-referential dedup_from is also read before
+    # it could be emptied.
+    import os
+    import tempfile
+
     progress = _Progress(cfg.get("num_examples"))
     gen = generate_dataset(cfg, progress_callback=progress.update)
+    kept = 0
+    # Resolve a symlink destination to its real target so the atomic replace
+    # updates the file consumers read through the link, not the link itself.
+    replace_target = _resolve_replace_target(out_path)
+    out_dir = Path(replace_target).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
     try:
-        try:
-            first = next(gen)
-        except StopIteration:
-            first = None
-
-        kept = 0
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w", buffering=1) as fh:
-            for row in ([first] if first is not None else []):
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-                fh.flush()
-                kept += 1
+        with os.fdopen(fd, "w", buffering=1) as fh:
             for row in gen:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 fh.flush()
@@ -117,8 +167,21 @@ def generate_data(
                 if snap_every and kept % snap_every == 0:
                     Path(snap_dir).mkdir(parents=True, exist_ok=True)
                     snap = Path(snap_dir) / f"{Path(out_path).stem}_{kept}.jsonl"
-                    snap.write_text(Path(out_path).read_text())
+                    snap.write_text(Path(tmp_name).read_text())
                     typer.echo(f"  snapshot: {snap} ({kept} rows)")
+        # Only replace the destination when at least one row was produced, so the
+        # all-failures path leaves any existing file intact.
+        if kept:
+            _apply_replacement_mode(tmp_name, replace_target)
+            os.replace(tmp_name, replace_target)
+        else:
+            os.unlink(tmp_name)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     finally:
         progress.close()
     typer.echo(f"generated {kept} unique examples -> {out_path}")
@@ -176,7 +239,9 @@ def dedup_data(
     import tempfile
 
     kept = 0
-    out_dir = Path(out_path).parent
+    # Resolve a symlink destination so the atomic replace updates its target.
+    replace_target = _resolve_replace_target(out_path)
+    out_dir = Path(replace_target).parent
     out_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
     try:
@@ -184,7 +249,8 @@ def dedup_data(
             for row in global_dedup(sources, cfg):
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 kept += 1
-        os.replace(tmp_name, out_path)
+        _apply_replacement_mode(tmp_name, replace_target)
+        os.replace(tmp_name, replace_target)
     except BaseException:
         try:
             os.unlink(tmp_name)
