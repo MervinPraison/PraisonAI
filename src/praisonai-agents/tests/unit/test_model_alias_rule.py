@@ -48,3 +48,19 @@ def test_llmconfig_is_unwrapped_to_a_model_string(name):
     # Containers push this value into every member; a member holding an
     # LLMConfig fails inside chat() and returns None, so the leak is silent.
     assert _cls(name)(llm=LLMConfig(model="gpt-4o"), **_extra(name)).llm == "gpt-4o"
+
+
+def test_agentteam_member_receives_the_unwrapped_model_string():
+    # The #4227 failure: the container unwrapped its own field but pushed the
+    # raw LLMConfig into members via _apply_default_llm, so a member's chat()
+    # died on "'LLMConfig' object has no attribute 'lower'" and returned None.
+    member = _cls("Agent")(instructions="t")
+    _cls("AgentTeam")(agents=[member], llm=LLMConfig(model="gpt-4o"))
+    assert member.llm == "gpt-4o"
+
+
+def test_agentflow_seeds_agents_with_the_unwrapped_model_string():
+    # AgentFlow seeds the agents it builds from self.model (llm=config.get(
+    # "llm", model)); an LLMConfig there would fail the same way inside chat().
+    flow = _cls("AgentFlow")(llm=LLMConfig(model="gpt-4o"))
+    assert flow.model == "gpt-4o"
