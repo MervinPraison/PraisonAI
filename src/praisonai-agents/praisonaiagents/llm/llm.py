@@ -28,6 +28,14 @@ from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
 
 
+# Sentinel returned as the "arguments" value when a tool call's argument string
+# cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
+# It is distinct from {} ("no arguments"): {} would silently execute the tool
+# with the WRONG arguments and report success. Callers must detect this sentinel
+# and surface a tool-error so the model can re-emit the call instead.
+_TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
 def _durable_iteration_kwargs(execute_tool_fn: Callable, index: int) -> Dict[str, int]:
     if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
         return {"_durable_iteration_index": index}
@@ -1844,7 +1852,10 @@ Respond with ONLY a valid JSON tool call in this format:
                 if isinstance(tool_call.get("function"), dict)
                 else None
             ) or tool_call.get("name", "unknown_function")
-            arguments = {}
+            # A parse failure is NOT "no arguments". Returning {} here would run
+            # the tool with the wrong arguments and report success. Signal the
+            # failure so callers surface a tool-error instead of dispatching.
+            arguments = _TOOL_ARGUMENTS_PARSE_FAILED
             tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
             
         return function_name, arguments, tool_call_id
@@ -2509,7 +2520,7 @@ Respond with ONLY a valid JSON tool call in this format:
         prompt: Union[str, List[Dict]],
         system_prompt: Optional[str] = None,
         chat_history: Optional[List[Dict]] = None,
-        temperature: float = 1.0,
+        temperature: Optional[float] = None,
         tools: Optional[List[Any]] = None,
         output_json: Optional[BaseModel] = None,
         output_pydantic: Optional[BaseModel] = None,
@@ -2826,10 +2837,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             # Execute tool calls using ToolCallExecutor (Gap 2: parallel or sequential)
                             is_ollama = self._is_ollama_provider()
                             tool_calls_batch = []
+                            parse_error_messages = []
                             
                             # Prepare batch of ToolCall objects
                             for tool_call in tool_calls:
                                 function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama=is_ollama)
+                                if self._tool_arguments_parse_failed(arguments):
+                                    # Do NOT dispatch with {}: surface a retryable error.
+                                    parse_error_messages.append(
+                                        self._tool_parse_error_message(function_name, tool_call_id)
+                                    )
+                                    continue
                                 tool_calls_batch.append(ToolCall(
                                     function_name=function_name,
                                     arguments=arguments,
@@ -2902,6 +2920,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                     "tool_call_id": tool_result_obj.tool_call_id,
                                     "content": content,
                                 })
+
+                            # Report any unparseable tool-call arguments so the
+                            # model can re-emit them (never dispatched with {}).
+                            for _err_msg in parse_error_messages:
+                                messages.append(_err_msg)
 
                             # Safety: break after max_iter iterations
                             if iteration_count + 1 >= max_iterations:
@@ -3606,6 +3629,11 @@ Respond with ONLY a valid JSON tool call in this format:
                             is_ollama = self._is_ollama_provider()
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
+                            if self._tool_arguments_parse_failed(arguments):
+                                # Do NOT dispatch with {}: surface a retryable error.
+                                messages.append(self._tool_parse_error_message(function_name, tool_call_id))
+                                continue
+
                             # Validate and filter arguments for Ollama provider
                             if is_ollama and tools:
                                 # First check if any argument references a previous tool result
@@ -4165,7 +4193,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         prompt: Union[str, List[Dict]],
         system_prompt: Optional[str] = None,
         chat_history: Optional[List[Dict]] = None,
-        temperature: float = 1.0,
+        temperature: Optional[float] = None,
         tools: Optional[List[Any]] = None,
         output_json: Optional[BaseModel] = None,
         output_pydantic: Optional[BaseModel] = None,
@@ -4350,10 +4378,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Execute tool calls using ToolCallExecutor (Gap 2: parallel or sequential)
                         is_ollama = self._is_ollama_provider()
                         tool_calls_batch = []
+                        parse_error_messages = []
                         
                         # Prepare batch of ToolCall objects
                         for tool_call in tool_calls:
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+                            if self._tool_arguments_parse_failed(arguments):
+                                # Do NOT dispatch with {}: surface a retryable error.
+                                parse_error_messages.append(
+                                    self._tool_parse_error_message(function_name, tool_call_id)
+                                )
+                                continue
                             tool_calls_batch.append(ToolCall(
                                 function_name=function_name,
                                 arguments=arguments, 
@@ -4393,6 +4428,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     tool_result.is_ollama
                                 )
                             messages.append(tool_message)
+
+                        # Report any unparseable tool-call arguments so the
+                        # model can re-emit them (never dispatched with {}).
+                        for _err_msg in parse_error_messages:
+                            messages.append(_err_msg)
                         
                         # Continue conversation after tool execution - get follow-up response
                         try:
@@ -4500,7 +4540,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         prompt: Union[str, List[Dict]],
         system_prompt: Optional[str] = None,
         chat_history: Optional[List[Dict]] = None,
-        temperature: float = 1.0,
+        temperature: Optional[float] = None,
         tools: Optional[List[Any]] = None,
         output_json: Optional[BaseModel] = None,
         output_pydantic: Optional[BaseModel] = None,
@@ -4730,6 +4770,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         for tool_call in tool_calls:
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
+                            if self._tool_arguments_parse_failed(arguments):
+                                # Do NOT dispatch with {}: surface a retryable error.
+                                messages.append(self._tool_parse_error_message(function_name, tool_call_id))
+                                continue
                             logging.debug(f"[RESPONSES_API_ASYNC] Executing tool {function_name}")
                             tool_result = await _dispatch_async_tool(
                                 execute_tool_fn,
@@ -4978,6 +5022,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
                         function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+
+                        if self._tool_arguments_parse_failed(arguments):
+                            # Do NOT dispatch with {}: surface a retryable error.
+                            messages.append(self._tool_parse_error_message(function_name, tool_call_id))
+                            continue
 
                         # Validate and filter arguments for Ollama provider
                         if is_ollama and tools:
@@ -5689,6 +5738,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         # Override with any provided parameters
         params.update(override_params)
+
+        # Resolve temperature from the instance when the caller did not specify
+        # one. Public entry points now default temperature to None so a value
+        # configured via Agent(llm={'temperature': ...}) actually reaches the
+        # request instead of being silently overridden by a hardcoded 1.0.
+        if params.get("temperature") is None:
+            if self.temperature is not None:
+                params["temperature"] = self.temperature
+            else:
+                params.pop("temperature", None)
         
         # Handle structured output parameters
         output_json = override_params.get('output_json')
@@ -6446,17 +6505,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 tool_call_id = tool_call.id
             except (json.JSONDecodeError, AttributeError) as e:
                 logging.error(f"Error parsing object-style tool call: {e}")
-                function_name = "unknown_function"
-                arguments = {}
-                tool_call_id = f"tool_{id(tool_call)}"
+                function_name = getattr(getattr(tool_call, 'function', None), 'name', None) or "unknown_function"
+                # See _parse_tool_call_arguments: a parse failure is not {}.
+                arguments = _TOOL_ARGUMENTS_PARSE_FAILED
+                tool_call_id = getattr(tool_call, 'id', None) or f"tool_{id(tool_call)}"
             return function_name, arguments, tool_call_id
+
+    @staticmethod
+    def _tool_arguments_parse_failed(arguments) -> bool:
+        """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
+        return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
+
+    @staticmethod
+    def _tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
+        """Build a tool-role message telling the model its arguments were lost.
+
+        Surfacing this instead of dispatching with {} converts a silent
+        wrong-action-reported-as-success into a visible, retryable error.
+        """
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": (
+                f"Error: arguments for tool '{function_name}' could not be parsed "
+                f"(the argument string was invalid or truncated). "
+                f"The tool was NOT executed. Please re-emit the tool call with "
+                f"complete, valid JSON arguments."
+            ),
+        }
 
     # Response without tool calls
     def response(
         self,
         prompt: Union[str, List[Dict]],
         system_prompt: Optional[str] = None,
-        temperature: float = 1.0,
+        temperature: Optional[float] = None,
         stream: bool = True,
         verbose: bool = True,
         markdown: bool = True,
@@ -6550,7 +6633,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         self,
         prompt: Union[str, List[Dict]],
         system_prompt: Optional[str] = None,
-        temperature: float = 1.0,
+        temperature: Optional[float] = None,
         stream: bool = True,
         verbose: bool = True,
         markdown: bool = True,
