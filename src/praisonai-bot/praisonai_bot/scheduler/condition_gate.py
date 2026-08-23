@@ -65,11 +65,17 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
     def __init__(self, host: str, address: str, port: int, timeout: float) -> None:
         super().__init__(host, port=port, timeout=timeout)
         self._address = address
+        self._raw_socket: socket.socket | None = None
 
     def connect(self) -> None:
         self.sock = socket.create_connection(
             (self._address, self.port), self.timeout, self.source_address,
         )
+        # http.client sets self.sock = None when it closes a close-delimited
+        # response, which is exactly when a slow body can hang forever. Keep a
+        # separate handle so the deadline watchdog still has something to shut
+        # down. Cleared in ``_request_url``'s finally so the fd is not retained.
+        self._raw_socket = self.sock
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -82,6 +88,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             context=self._ssl_context,
         )
         self._address = address
+        self._raw_socket: socket.socket | None = None
 
     def connect(self) -> None:
         raw_socket = socket.create_connection(
@@ -94,6 +101,9 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         except Exception:
             raw_socket.close()
             raise
+        # See ``_PinnedHTTPConnection.connect``: retain a handle the close path
+        # does not clear so the deadline watchdog can still abort a hung body.
+        self._raw_socket = self.sock
 
 
 class MonitorGate:
@@ -350,10 +360,20 @@ class MonitorGate:
         finally:
             watchdog.cancel()
             connection.close()
+            # Drop the retained raw-socket handle so the fd is not held past the
+            # probe. Connections are per-probe, so this keeps the window short.
+            if hasattr(connection, "_raw_socket"):
+                connection._raw_socket = None
 
     @staticmethod
     def _abort_connection(connection: Any) -> None:
-        sock = getattr(connection, "sock", None)
+        # ``http.client.getresponse`` sets ``sock = None`` when it closes a
+        # close-delimited reply — exactly the responses whose body can hang
+        # forever — so fall back to the pinned raw socket the close path leaves
+        # in place. Without it the watchdog fires with nothing to shut down.
+        sock = getattr(connection, "sock", None) or getattr(
+            connection, "_raw_socket", None,
+        )
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
