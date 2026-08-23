@@ -155,6 +155,40 @@ def test_generate_preserves_existing_output_mode(tmp_path):
     assert os.stat(out).st_mode & 0o777 == 0o640
 
 
+def test_generate_preserves_symlink_output(tmp_path):
+    """A symlink destination stays a link; its target receives the new rows.
+
+    ``os.replace`` would otherwise clobber the link itself, leaving consumers
+    that read through it staring at the stale target.
+    """
+    import os
+
+    from praisonai_train.cli.commands import data as data_cmd
+
+    real = tmp_path / "real_corpus.jsonl"
+    real.write_text('{"instruction": "old"}\n')
+    link = tmp_path / "corpus.jsonl"
+    os.symlink(real, link)
+
+    def one_row(cfg, progress_callback=None):
+        yield {"instruction": "new"}
+
+    with patch("praisonai_train.data.generate_dataset", one_row):
+        data_cmd.generate_data(
+            config=None, output=str(link), recipe=None, deployment=None,
+            num=1, concurrency=None, start_offset=None, snapshot_every=None,
+        )
+
+    # The link is intact and still points at the real file.
+    assert os.path.islink(link)
+    assert os.path.realpath(link) == os.path.realpath(real)
+    # The rows landed on the target consumers actually read through the link.
+    lines = [ln for ln in real.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    assert "new" in real.read_text()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 # --- Bug 3: the Ollama Modelfile TEMPLATE must not be indented ----------------
 
 def _modelfile_for(model_name):

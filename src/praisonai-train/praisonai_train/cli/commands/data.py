@@ -40,6 +40,29 @@ def _apply_replacement_mode(tmp_name: str, out_path: str) -> None:
         pass
 
 
+def _resolve_replace_target(out_path: str) -> str:
+    """Follow a symlink destination so the atomic replace updates its target.
+
+    ``os.replace(tmp, out_path)`` replaces the symlink *itself*, leaving its
+    target holding the stale corpus — downstream jobs reading through the link
+    would then see the old data after a successful command. Resolve the link to
+    its real path (only the final component; parent dirs are left to the OS) so
+    the swap lands on the file consumers actually read. Non-symlinks and broken
+    links are returned unchanged.
+    """
+    import os
+
+    try:
+        if os.path.islink(out_path):
+            target = os.readlink(out_path)
+            if not os.path.isabs(target):
+                target = os.path.join(os.path.dirname(out_path), target)
+            return os.path.realpath(target)
+    except OSError:
+        pass
+    return out_path
+
+
 def _load_cfg(config: Optional[str], **overrides) -> dict:
     cfg: dict = {}
     if config:
@@ -129,7 +152,10 @@ def generate_data(
     progress = _Progress(cfg.get("num_examples"))
     gen = generate_dataset(cfg, progress_callback=progress.update)
     kept = 0
-    out_dir = Path(out_path).parent
+    # Resolve a symlink destination to its real target so the atomic replace
+    # updates the file consumers read through the link, not the link itself.
+    replace_target = _resolve_replace_target(out_path)
+    out_dir = Path(replace_target).parent
     out_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
     try:
@@ -146,8 +172,8 @@ def generate_data(
         # Only replace the destination when at least one row was produced, so the
         # all-failures path leaves any existing file intact.
         if kept:
-            _apply_replacement_mode(tmp_name, out_path)
-            os.replace(tmp_name, out_path)
+            _apply_replacement_mode(tmp_name, replace_target)
+            os.replace(tmp_name, replace_target)
         else:
             os.unlink(tmp_name)
     except BaseException:
@@ -213,7 +239,9 @@ def dedup_data(
     import tempfile
 
     kept = 0
-    out_dir = Path(out_path).parent
+    # Resolve a symlink destination so the atomic replace updates its target.
+    replace_target = _resolve_replace_target(out_path)
+    out_dir = Path(replace_target).parent
     out_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
     try:
@@ -221,8 +249,8 @@ def dedup_data(
             for row in global_dedup(sources, cfg):
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 kept += 1
-        _apply_replacement_mode(tmp_name, out_path)
-        os.replace(tmp_name, out_path)
+        _apply_replacement_mode(tmp_name, replace_target)
+        os.replace(tmp_name, replace_target)
     except BaseException:
         try:
             os.unlink(tmp_name)
