@@ -33,7 +33,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1321 |
 | ✅ Configuration | 3 | 8 | 3139 |
-| ✅ Context Management | 16 | 36 | 13941 |
+| ✅ Context Management | 16 | 36 | 13988 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
