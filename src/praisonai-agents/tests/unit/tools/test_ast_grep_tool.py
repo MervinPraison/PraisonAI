@@ -248,6 +248,32 @@ class TestAstGrepToolReceiptAndConfinement:
                 assert len(result) <= _MAX_OUTPUT_SIZE
                 assert "truncated" in result
 
+    def test_overflow_artifact_is_workspace_retrievable(self, tmp_path, monkeypatch):
+        """The spilled artifact the pointer advertises must live inside the
+        workspace so the confined ``read_file``/``grep`` tools can open it
+        (issue #4247 follow-up: default temp spills were unreachable)."""
+        import os
+        from praisonaiagents.tools.ast_grep_tool import ast_grep_search, _MAX_OUTPUT_SIZE
+        from praisonaiagents.tools.path_safety import resolve_within_root
+
+        monkeypatch.delenv("PRAISONAI_TOOL_OUTPUT_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
+            mock_avail.return_value = True
+            with patch('subprocess.run') as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout='y' * (_MAX_OUTPUT_SIZE * 3), stderr=''
+                )
+                result = ast_grep_search("def $F($$$)", lang="python", path=".")
+
+        marker = "Full output saved to: "
+        assert marker in result
+        artifact = result.split(marker, 1)[1].splitlines()[0].strip()
+        # The advertised artifact must resolve inside the workspace.
+        assert resolve_within_root(artifact) is not None
+        assert os.path.exists(artifact)
+
 
 class TestAstGrepToolAgentIntegration:
     """Test ast-grep tool integration with Agent."""

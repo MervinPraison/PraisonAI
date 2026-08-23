@@ -43,6 +43,25 @@ _availability_cache: Optional[bool] = None
 _MAX_OUTPUT_SIZE = 10000
 
 
+def _workspace_spill_dir() -> Optional[str]:
+    """Directory for overflow artifacts the agent can actually retrieve.
+
+    The pointer emitted by :func:`bounded_with_pointer` tells the model to
+    ``read_file``/``grep`` the artifact, but those tools reject paths outside
+    the workspace. When the caller has not pinned an explicit
+    ``PRAISONAI_TOOL_OUTPUT_DIR`` (which they own), spill into a workspace-local
+    directory so the advertised retrieval path is reachable. Returns ``None`` to
+    defer to ``_output_overflow``'s own resolution when the env var is set.
+    """
+    import os
+    if os.environ.get("PRAISONAI_TOOL_OUTPUT_DIR"):
+        return None
+    workspace = resolve_within_root(".")
+    if workspace is None:
+        return None
+    return os.path.join(workspace, ".praisonai_tool_output")
+
+
 def _bound_output(output: str, kind: str) -> str:
     """Cap over-budget output, spilling the full buffer to a retrievable file.
 
@@ -51,7 +70,7 @@ def _bound_output(output: str, kind: str) -> str:
     if len(output) <= _MAX_OUTPUT_SIZE:
         return output
     from ._output_overflow import spill, bounded_with_pointer
-    path = spill(output, kind)
+    path = spill(output, kind, spill_dir=_workspace_spill_dir())
     return bounded_with_pointer(output, _MAX_OUTPUT_SIZE, path)
 
 def is_ast_grep_available() -> bool:
