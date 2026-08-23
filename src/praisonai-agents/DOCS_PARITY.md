@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 53 | 17018 |
+| ✅ Agent | 22 | 53 | 17053 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
 | ✅ Approval | 1 | 5 | 2658 |
@@ -32,7 +32,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1321 |
-| ✅ Configuration | 3 | 8 | 3140 |
+| ✅ Configuration | 3 | 8 | 3139 |
 | ✅ Context Management | 16 | 36 | 13941 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -52,9 +52,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 15 | 5323 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14135 |
-| ✅ Memory | 6 | 18 | 7188 |
+| ✅ Memory | 6 | 18 | 7187 |
 | ✅ OCR | 2 | 1 | 237 |
-| ✅ Observability | 2 | 23 | 2814 |
+| ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1265 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
