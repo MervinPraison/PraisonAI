@@ -801,9 +801,9 @@ Subtask: {st.name}
                             decision_str = None
                             if current_task.result:
                                 if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
-                                    decision_str = current_task.result.pydantic.decision.lower()
+                                    decision_str = current_task.result.pydantic.decision.lower().strip()
                                 elif current_task.result.raw:
-                                    decision_str = current_task.result.raw.lower()
+                                    decision_str = current_task.result.raw.lower().strip()
                             
                             # For loop tasks, use "done" to follow condition path
                             if current_task.task_type == "loop" and all(t.status == "completed" for t in subtasks):
@@ -894,9 +894,9 @@ Subtask: {st.name}
             if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
                     # Get decision from pydantic or raw response
-                    decision_str = current_task.result.raw.lower()
+                    decision_str = current_task.result.raw.lower().strip()
                     if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
-                        decision_str = current_task.result.pydantic.decision.lower()
+                        decision_str = current_task.result.pydantic.decision.lower().strip()
 
                     # Check if task has conditions and next_tasks
                     if current_task.condition:
@@ -1408,9 +1408,9 @@ Subtask: {st.name}
                             decision_str = None
                             if current_task.result:
                                 if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
-                                    decision_str = current_task.result.pydantic.decision.lower()
+                                    decision_str = current_task.result.pydantic.decision.lower().strip()
                                 elif current_task.result.raw:
-                                    decision_str = current_task.result.raw.lower()
+                                    decision_str = current_task.result.raw.lower().strip()
                             
                             # For loop tasks, use "done" to follow condition path
                             if current_task.task_type == "loop" and all(t.status == "completed" for t in subtasks):
@@ -1499,9 +1499,9 @@ Subtask: {st.name}
             if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
                     # Get decision from pydantic or raw response
-                    decision_str = current_task.result.raw.lower()
+                    decision_str = current_task.result.raw.lower().strip()
                     if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
-                        decision_str = current_task.result.pydantic.decision.lower()
+                        decision_str = current_task.result.pydantic.decision.lower().strip()
 
                     # Check if task has conditions and next_tasks
                     if current_task.condition:
