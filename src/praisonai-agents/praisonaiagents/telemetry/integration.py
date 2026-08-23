@@ -10,6 +10,7 @@ import threading
 import concurrent.futures
 import queue
 import asyncio
+import contextvars
 from contextlib import contextmanager
 
 if TYPE_CHECKING:
@@ -241,13 +242,25 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
     original_start = agent.start if hasattr(agent, 'start') else None
     original_execute_tool = agent.execute_tool if hasattr(agent, 'execute_tool') else None
 
+    # Re-entrancy guard scoped per-agent (this ContextVar is created fresh in
+    # each instrument_agent call) AND per-execution. A plain instance attribute
+    # is shared across threads/tasks, so N concurrent chat() calls on one agent
+    # would all but the first see reentrant=True and undercount N:1 (#4196). A
+    # ContextVar gives each thread/async task its own value, so nested
+    # run()->chat() still records once while concurrent top-level calls each
+    # record independently.
+    in_execution = contextvars.ContextVar(
+        f'_telemetry_in_execution_{id(agent)}', default=False
+    )
+
     def _make_instrumented_execution(original_method):
         @wraps(original_method)
         def wrapper(*args, **kwargs):
             # Only the outermost of run/start/chat records the execution.
-            reentrant = getattr(agent, '_telemetry_in_execution', False)
+            reentrant = in_execution.get()
+            token = None
             if not reentrant:
-                agent._telemetry_in_execution = True
+                token = in_execution.set(True)
             try:
                 result = original_method(*args, **kwargs)
                 if not reentrant and not performance_mode:
@@ -270,8 +283,8 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
                     })
                 raise
             finally:
-                if not reentrant:
-                    agent._telemetry_in_execution = False
+                if token is not None:
+                    in_execution.reset(token)
         return wrapper
 
     if original_chat:

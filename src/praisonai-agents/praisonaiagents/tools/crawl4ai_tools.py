@@ -28,6 +28,28 @@ from praisonaiagents._logging import get_logger
 import asyncio
 from importlib import util
 
+def _is_safe_crawl_url(url: str) -> bool:
+    """Return True when *url* passes SSRF checks for crawling.
+
+    Mirrors ``web_crawl_tools._is_safe_crawl_url`` so every crawl entry point is
+    guarded consistently. ``raw://`` inline-HTML inputs bypass the network and
+    are exempt. (#4189)
+    """
+    if isinstance(url, str) and url.startswith("raw://"):
+        return True
+    from praisonaiagents.tools.url_safety import is_safe_http_url
+
+    return is_safe_http_url(url)
+
+
+def _blocked_url_result(url: str) -> Dict[str, Any]:
+    """Uniform error payload for a URL rejected by SSRF validation."""
+    return {
+        "error": f"URL blocked by SSRF safety check: {url}",
+        "success": False,
+    }
+
+
 def _check_crawl4ai_available() -> tuple[bool, Optional[str]]:
     """Check if Crawl4AI and its Playwright browser binaries are available.
 
@@ -169,6 +191,9 @@ class Crawl4AITools:
         Returns:
             Dict with 'markdown', 'html', 'cleaned_html', 'links', 'media', etc.
         """
+        if not _is_safe_crawl_url(url):
+            self.logger.warning("Crawl4AI crawl blocked unsafe URL: %s", url)
+            return _blocked_url_result(url)
         try:
             crawler = await self._get_crawler()
             
@@ -237,6 +262,13 @@ class Crawl4AITools:
         Returns:
             List of crawl results
         """
+        blocked = [u for u in urls if not _is_safe_crawl_url(u)]
+        safe_urls = [u for u in urls if _is_safe_crawl_url(u)]
+        for u in blocked:
+            self.logger.warning("Crawl4AI crawl_many blocked unsafe URL: %s", u)
+        if not safe_urls:
+            return [_blocked_url_result(u) for u in blocked]
+        urls = safe_urls
         try:
             crawler = await self._get_crawler()
             
@@ -249,7 +281,7 @@ class Crawl4AITools:
                 stream=stream
             )
             
-            results = []
+            results = [_blocked_url_result(u) for u in blocked]
             
             if stream:
                 async for result in await crawler.arun_many(urls, config=config):
@@ -320,6 +352,9 @@ class Crawl4AITools:
                 ]
             }
         """
+        if not _is_safe_crawl_url(url):
+            self.logger.warning("Crawl4AI extract_css blocked unsafe URL: %s", url)
+            return _blocked_url_result(url)
         try:
             crawler = await self._get_crawler()
             
@@ -383,6 +418,9 @@ class Crawl4AITools:
         Returns:
             Dict with 'data' containing extracted content
         """
+        if not _is_safe_crawl_url(url):
+            self.logger.warning("Crawl4AI extract_llm blocked unsafe URL: %s", url)
+            return _blocked_url_result(url)
         try:
             crawler = await self._get_crawler()
             
