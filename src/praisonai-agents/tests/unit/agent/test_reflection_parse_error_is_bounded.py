@@ -119,7 +119,7 @@ def _agent():
 
 
 def test_sync_reflection_terminates_when_the_reflection_never_parses():
-    agent, t = _agent()
+    agent, _t = _agent()
     try:
         result = agent.chat("q")
     except _CallCap as exc:
