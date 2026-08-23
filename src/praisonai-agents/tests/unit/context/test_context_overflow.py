@@ -135,6 +135,99 @@ class TestEmergencyTruncation:
         assert result_tokens <= target_tokens * 1.5
 
 
+class TestApplyContextManagementFallback:
+    """Regression tests for issue #4240.
+
+    When ``ContextManager`` raises, ``_apply_context_management`` must still
+    apply emergency truncation instead of silently returning the over-budget
+    history. The threshold and target must budget the *whole* request
+    (history + system prompt + tool schemas), or a large system prompt / tool
+    block can push the call over the model window undetected.
+    """
+
+    def _make_agent(self, strategy_error=False):
+        from praisonaiagents.agent.chat_mixin import ChatMixin
+        from praisonaiagents.context import ContextManager
+
+        class _Agent(ChatMixin):
+            def __init__(self):
+                self.name = "test"
+                self.llm = "gpt-4o-mini"
+                self._memory_instance = None
+                self.context_manager = ContextManager(model="gpt-4o-mini")
+
+        agent = _Agent()
+        if strategy_error:
+            def _boom(*args, **kwargs):
+                raise RuntimeError("simulated context-management failure")
+            agent.context_manager.process = _boom
+        return agent
+
+    def test_overhead_counts_system_prompt_and_tools(self):
+        """_estimate_request_overhead_tokens includes prompt + tool schemas."""
+        agent = self._make_agent()
+
+        assert agent._estimate_request_overhead_tokens("", None) == 0
+
+        prompt_only = agent._estimate_request_overhead_tokens("word " * 500, None)
+        assert prompt_only > 0
+
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "search",
+                "description": "d" * 4000,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+        with_tools = agent._estimate_request_overhead_tokens("word " * 500, tools)
+        assert with_tools > prompt_only
+
+    def test_fallback_truncates_when_system_prompt_overflows(self):
+        """Large system prompt over budget must trigger emergency truncation.
+
+        History alone is well under the limit; only the system prompt pushes
+        the request over. Before the fix this branch skipped truncation.
+        """
+        from praisonaiagents.context.budgeter import get_model_limit
+        from praisonaiagents.context.tokens import (
+            estimate_messages_tokens,
+            estimate_tokens_heuristic,
+        )
+
+        agent = self._make_agent(strategy_error=True)
+        model_limit = get_model_limit("gpt-4o-mini")
+
+        messages = [
+            {"role": "user", "content": "short question"},
+            {"role": "assistant", "content": "short answer"},
+        ]
+        # History is tiny; a massive system prompt consumes the whole window.
+        big_prompt = "token " * (model_limit)  # far above the model limit
+        assert estimate_messages_tokens(messages) < model_limit * 0.95
+        assert estimate_tokens_heuristic(big_prompt) > model_limit
+
+        out, result = agent._apply_context_management(
+            messages, system_prompt=big_prompt, tools=None
+        )
+        assert result is not None
+        assert result.get("emergency_truncated") is True
+
+    def test_fallback_noop_when_whole_request_fits(self):
+        """No truncation when the full request is comfortably under budget."""
+        agent = self._make_agent(strategy_error=True)
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
+        out, result = agent._apply_context_management(
+            messages, system_prompt="You are helpful.", tools=None
+        )
+        assert out == messages
+        assert result is None
+
+
 class TestToolOutputLimits:
     """Tests for tool output truncation at source."""
     

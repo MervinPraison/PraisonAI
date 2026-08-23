@@ -2781,7 +2781,11 @@ Your Goal: {self.goal}"""
                 
                 model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
                 model_limit = get_model_limit(model_name)
-                current_tokens = estimate_messages_tokens(optimized)
+                # Count the whole request (history + system prompt + tool schemas),
+                # otherwise a large prompt/tool block can push the call over the
+                # window while the history alone stays under the threshold.
+                overhead = self._estimate_request_overhead_tokens(system_prompt, tools)
+                current_tokens = estimate_messages_tokens(optimized) + overhead
                 
                 # If over 95% of limit, apply emergency truncation
                 if current_tokens > model_limit * 0.95:
@@ -2789,10 +2793,12 @@ Your Goal: {self.goal}"""
                         f"[{self.name}] Context at {current_tokens} tokens (limit: {model_limit}), "
                         f"applying emergency truncation"
                     )
-                    target = int(model_limit * 0.8)  # Target 80% of limit
+                    # Leave room for the fixed overhead so the full request lands
+                    # near 80% of the window rather than the history alone.
+                    target = max(1, int(model_limit * 0.8) - overhead)
                     optimized = self.context_manager.emergency_truncate(optimized, target)
                     result["emergency_truncated"] = True
-                    result["tokens_after"] = estimate_messages_tokens(optimized)
+                    result["tokens_after"] = estimate_messages_tokens(optimized) + overhead
             except Exception as e:
                 logging.debug(f"Hard limit check skipped: {e}")
             
@@ -2810,13 +2816,43 @@ Your Goal: {self.goal}"""
 
                 model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
                 model_limit = get_model_limit(model_name)
-                if estimate_messages_tokens(messages) > model_limit * 0.95:
-                    target = int(model_limit * 0.8)
+                # Include the system prompt and tool schemas in the budget: the
+                # request can exceed the window on those alone even when the
+                # history is under the threshold.
+                overhead = self._estimate_request_overhead_tokens(system_prompt, tools)
+                if estimate_messages_tokens(messages) + overhead > model_limit * 0.95:
+                    target = max(1, int(model_limit * 0.8) - overhead)
                     truncated = self.context_manager.emergency_truncate(messages, target)
                     return truncated, {"emergency_truncated": True}
             except Exception as inner:
                 logging.debug(f"Emergency truncation fallback skipped: {inner}")
             return messages, None
+
+    def _estimate_request_overhead_tokens(
+        self,
+        system_prompt: str = "",
+        tools: Optional[list] = None,
+    ) -> int:
+        """Estimate non-history request tokens (system prompt + tool schemas).
+
+        Emergency-truncation thresholds must budget the full request, not just
+        the message history, or a large system prompt / tool block can push the
+        call over the model window undetected.
+        """
+        try:
+            from ..context.tokens import (
+                estimate_tokens_heuristic,
+                estimate_tool_schema_tokens,
+            )
+        except Exception:
+            return 0
+
+        overhead = 0
+        if system_prompt:
+            overhead += estimate_tokens_heuristic(system_prompt)
+        if tools:
+            overhead += estimate_tool_schema_tokens(tools)
+        return overhead
 
     def _truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str | None = None) -> str:
         """
