@@ -1514,6 +1514,10 @@ Example: /handoff code "refactor the auth module" """
         """
         # Track tool calls for visibility
         tool_calls = []
+        # Holds the live assistant message that streamed narrative is rendered
+        # into as the turn progresses, plus the text seen so far (so a final
+        # append can be skipped when the stream already surfaced the response).
+        streamed = {"message": None, "text": ""}
         
         def tool_call_callback(message):
             """Callback triggered when a tool is called."""
@@ -1528,6 +1532,33 @@ Example: /handoff code "refactor the auth module" """
             elif "Function " in message and " returned:" in message:
                 self._status_text = "Processing result..."
                 self._update_output()
+
+        def llm_content_callback(content=None, **_kwargs):
+            """Render intermediate LLM narrative into the transcript live.
+
+            The core emits ``llm_content`` with the full text of each LLM step
+            as it completes, so a multi-step (tool-using) turn surfaces its
+            narrative incrementally instead of only after the whole turn joins.
+            Read-only review turns keep the spinner-only behaviour so their
+            transcript stays a single summarised message.
+            """
+            if read_only or not content or not str(content).strip():
+                return
+            text = str(content).strip()
+            msg = streamed["message"]
+            if msg is None:
+                msg = ChatMessage(role="assistant", content=text)
+                streamed["message"] = msg
+                self.messages.append(msg)
+            elif text != msg.content:
+                # A later step supersedes/extends the earlier narrative; show
+                # the newest text rather than duplicating overlapping content.
+                if text.startswith(msg.content):
+                    msg.content = text
+                else:
+                    msg.content = f"{msg.content}\n\n{text}"
+            streamed["text"] = msg.content
+            self._update_output()
         
         # Register callback for tool visibility
         _sync_display_callbacks = None
@@ -1537,6 +1568,7 @@ Example: /handoff code "refactor the auth module" """
             _sync_display_callbacks = sync_display_callbacks
             _register_display_callback = register_display_callback
             _register_display_callback('tool_call', tool_call_callback)
+            _register_display_callback('llm_content', llm_content_callback)
         except ImportError:
             pass
         
@@ -1598,9 +1630,11 @@ Example: /handoff code "refactor the auth module" """
             
             llm_thread.join()
             
-            # Cleanup callback
-            if _sync_display_callbacks is not None and 'tool_call' in _sync_display_callbacks:
-                del _sync_display_callbacks['tool_call']
+            # Cleanup callbacks
+            if _sync_display_callbacks is not None:
+                for _cb in ('tool_call', 'llm_content'):
+                    if _sync_display_callbacks.get(_cb) is not None:
+                        del _sync_display_callbacks[_cb]
             
             # Done processing current prompt
             self._processing = False
@@ -1611,11 +1645,21 @@ Example: /handoff code "refactor the auth module" """
                 tools_used = ", ".join(tool_calls)
                 self.messages.append(ChatMessage(role="system", content=f"Tools used: {tools_used}"))
             
+            streamed_msg = streamed["message"]
             if error[0]:
                 self.messages.append(ChatMessage(role="assistant", content=f"Error: {error[0]}"))
                 self._conversation_history.append({"role": "assistant", "content": f"Error: {error[0]}"})
             elif result[0]:
-                self.messages.append(ChatMessage(role="assistant", content=result[0]))
+                # If the turn already streamed its narrative into a live
+                # assistant message, reuse it as the finalised turn (updating it
+                # in place if the full result differs) instead of appending a
+                # duplicate. Otherwise append the result as before so /undo,
+                # /revert and history are unaffected.
+                if streamed_msg is not None:
+                    if result[0] != streamed_msg.content:
+                        streamed_msg.content = result[0]
+                else:
+                    self.messages.append(ChatMessage(role="assistant", content=result[0]))
                 self._conversation_history.append({"role": "assistant", "content": result[0]})
             
             self._update_output()
