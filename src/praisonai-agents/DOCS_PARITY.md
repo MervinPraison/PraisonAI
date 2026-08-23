@@ -25,9 +25,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3542 |
 | ✅ Autonomy | 3 | 7 | 2790 |
-| ✅ Bots | 7 | 31 | 13403 |
+| ✅ Bots | 7 | 31 | 13411 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 36658 |
+| ✅ CLI | 5 | 122 | 36697 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
@@ -37,19 +37,19 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
-| ✅ Evaluation | 1 | 7 | 2913 |
+| ✅ Evaluation | 1 | 7 | 2920 |
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1606 |
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 79 | 29175 |
+| ✅ Gateway | 7 | 79 | 29183 |
 | ✅ Guardrails | 4 | 4 | 2205 |
 | ✅ Handoffs | 11 | 6 | 2626 |
 | ✅ Hooks | 2 | 9 | 4488 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 16 | 4942 |
-| ✅ LLM | 3 | 15 | 5323 |
+| ✅ LLM | 3 | 15 | 5372 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 61 | 14135 |
 | ✅ Memory | 6 | 18 | 7187 |
@@ -73,14 +73,14 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sessions | 4 | 19 | 7576 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
-| ✅ Telemetry | 1 | 2 | 617 |
+| ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 42819 |
+| ✅ Tools | 12 | 144 | 42925 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
-| ✅ Web | 3 | 9 | 2484 |
+| ✅ Web | 3 | 9 | 2487 |
 | ✅ Workflows | 5 | 18 | 7406 |
 
 ## Documentation Without Features
