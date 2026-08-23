@@ -2563,6 +2563,14 @@ Your Goal: {self.goal}
             # Store permissions if provided (for CI-safe declarative policies)
             self._approval_permissions = getattr(approval, 'permissions', None)
             self._permission_mode = getattr(approval, 'permission_mode', None)
+            # Configuring approval must never be a WEAKER posture than passing
+            # nothing. When no declarative ``permissions`` policy is supplied,
+            # fall back to the same env-driven default deny set the bare
+            # ``approval is None`` path uses, so e.g. ``ApprovalConfig(timeout=30)``
+            # keeps the default denials (execute_command, delete_file, …) instead
+            # of silently dropping all of them.
+            if not self._approval_permissions:
+                self._perm_deny = self._resolve_default_deny_set()
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
             approval_config = ApprovalConfig(**approval)
@@ -2571,6 +2579,10 @@ Your Goal: {self.goal}
             self._approval_timeout = approval_config.timeout
             self._approval_permissions = getattr(approval_config, 'permissions', None)
             self._permission_mode = getattr(approval_config, 'permission_mode', None)
+            # See the ApprovalConfig branch above: never weaken the default
+            # posture just because a config object was passed.
+            if not self._approval_permissions:
+                self._perm_deny = self._resolve_default_deny_set()
         else:
             # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval
@@ -6419,6 +6431,31 @@ Answer:"""
             return bool(sys.stdin.isatty() and sys.stdout.isatty())
         except Exception:
             return False
+
+    @staticmethod
+    def _resolve_default_deny_set() -> frozenset:
+        """Return the env-driven default permission deny set.
+
+        Mirrors the ``approval is None`` path: honour ``PRAISONAI_TOOL_SAFETY``
+        (``off``/``full``/``none``/``0``/``false`` → no denials), otherwise use
+        the named preset (defaulting to ``"default"``, which blocks destructive
+        ops like ``execute_command``/``delete_file``/``kill_process``/
+        ``execute_code``). An unknown env value falls back to ``"default"``.
+
+        Shared by the ``ApprovalConfig``/``dict`` branches so configuring
+        approval never silently drops the default denials — passing a config
+        object must not be a weaker posture than passing nothing.
+        """
+        _raw_safety_env = os.environ.get("PRAISONAI_TOOL_SAFETY")
+        _safety_env = (_raw_safety_env or "").strip().lower()
+        if _safety_env in ("off", "full", "none", "0", "false"):
+            return frozenset()
+        from ..approval.registry import PERMISSION_PRESETS
+        _resolved = _safety_env or "default"
+        _preset = PERMISSION_PRESETS.get(_resolved)
+        if _preset is None:
+            _preset = PERMISSION_PRESETS.get("default")
+        return _preset if _preset is not None else frozenset()
 
     def _setup_guardrail(self):
         """Setup the guardrail function based on the provided guardrail parameter."""
