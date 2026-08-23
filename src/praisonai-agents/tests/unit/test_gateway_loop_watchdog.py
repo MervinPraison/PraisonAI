@@ -100,6 +100,49 @@ def test_last_lag_ms_measured_on_healthy_loop():
     assert wd.last_lag_ms < 1000.0
 
 
+def test_last_lag_ms_anchored_to_oldest_unacked_probe():
+    """Multi-interval stalls are measured from the *oldest* unacked probe.
+
+    Regression for Issue #4265: when the loop is stalled the watchdog keeps
+    scheduling fresh acks that all queue behind the wedge. If each new probe
+    overwrote the send-time anchor, the ack that finally runs would report only
+    the gap since the newest probe, understating a severe stall. The anchor
+    must stay pinned to the first still-unacked probe until an ack consumes it.
+    """
+    loop = asyncio.new_event_loop()
+    wd = LoopWatchdog(
+        LoopWatchdogPolicy(probe_interval_s=0.02, on_wedge="dump_only")
+    )
+    wd._loop = loop  # attach without arming the OS thread; drive probes by hand
+    try:
+        # Three probes scheduled while the loop is stalled (no ack runs between
+        # them). The real _schedule_probe must keep the anchor pinned to the
+        # first probe rather than advancing it on every call.
+        wd._schedule_probe()
+        first_anchor = wd._probe_sent_at
+        assert first_anchor > 0.0
+        time.sleep(0.02)
+        wd._schedule_probe()
+        time.sleep(0.02)
+        wd._schedule_probe()
+        assert wd._probe_sent_at == first_anchor  # never advanced past the oldest
+
+        # The loop finally drains the burst of acks. The first _ack measures the
+        # full stall from the oldest anchor and consumes it; later acks in the
+        # burst see a zeroed anchor and leave the measured lag intact.
+        loop.call_soon(wd._ack)
+        loop.call_soon(wd._ack)
+        loop.call_soon(wd._ack)
+        loop.call_soon(loop.stop)
+        loop.run_forever()
+        # Elapsed since the oldest probe is ~0.04s+ (two 0.02s sleeps): the
+        # reported lag reflects the full multi-interval stall, not ~0.
+        assert wd.last_lag_ms >= 40.0
+        assert wd._probe_sent_at == 0.0  # consumed → next probe re-anchors fresh
+    finally:
+        loop.close()
+
+
 def test_wedged_loop_detected():
     """A loop blocked inside a sync call is detected (dump_only, no exit)."""
     loop = asyncio.new_event_loop()

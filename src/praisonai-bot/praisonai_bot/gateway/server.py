@@ -4952,17 +4952,24 @@ class WebSocketGateway:
         except Exception:  # pragma: no cover — defensive
             inbox_pending = 0
 
-        outbox_pending = 0
-        outbox_dead_letter = 0
+        # Read the outbound backlog *without ever blocking the event loop*.
+        # health()/metrics run on the loop, while outbox counts take the
+        # outbox writer lock and hit SQLite; a blocking read issued while a
+        # drain/enqueue holds that lock would wedge all gateway scheduling.
+        # ``try_depth_snapshot`` returns None if the writer lock is contended,
+        # in which case we reuse the last-known depths rather than waiting.
+        outbox_pending, outbox_dead_letter = getattr(
+            self, "_last_outbox_depths", (0, 0)
+        )
         if outbox is not None:
+            snapshot = None
             try:
-                outbox_pending = int(outbox.pending_count())
+                snapshot = outbox.try_depth_snapshot()
             except Exception:  # pragma: no cover — defensive
-                outbox_pending = 0
-            try:
-                outbox_dead_letter = int(outbox.dead_letter_count())
-            except Exception:  # pragma: no cover — defensive
-                outbox_dead_letter = 0
+                snapshot = None
+            if snapshot is not None:
+                outbox_pending, outbox_dead_letter = snapshot
+                self._last_outbox_depths = snapshot
 
         loop_lag_ms = 0.0
         if watchdog is not None:

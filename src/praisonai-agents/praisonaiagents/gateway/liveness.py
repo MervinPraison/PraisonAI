@@ -197,9 +197,17 @@ class LoopWatchdog:
         # Record the scheduling lag: how long the loop took to run this ack
         # after we scheduled it. This is the same signal the wedge check uses,
         # exposed as a gauge for the health surface (Issue #4265).
+        #
+        # ``_probe_sent_at`` is anchored to the *oldest still-unacked* probe,
+        # not the most recent one: when the loop stalls across several probe
+        # intervals the watchdog keeps scheduling fresh acks that all queue
+        # behind the wedge, and measuring from the newest probe would report a
+        # fraction of the true stall. Consuming the anchor here (setting it to
+        # 0.0) lets the next scheduled probe re-anchor from a caught-up loop.
         sent = self._probe_sent_at
         if sent:
             self._last_lag_ms = max(0.0, (now - sent) * 1000.0)
+            self._probe_sent_at = 0.0
 
     def _schedule_probe(self) -> bool:
         """Schedule an ack onto the loop. Returns False if scheduling fails."""
@@ -207,9 +215,16 @@ class LoopWatchdog:
         if loop is None:
             return False
         try:
-            self._probe_sent_at = time.monotonic()
+            # Only (re-)anchor the lag clock when the previous probe has been
+            # acked (``_ack`` zeroes ``_probe_sent_at``). If the loop is stalled
+            # and earlier probes are still queued, keep the anchor pinned to the
+            # oldest unacked probe so the reported lag reflects the full stall
+            # rather than the gap since the newest probe (Issue #4265).
+            now = time.monotonic()
+            if not self._probe_sent_at:
+                self._probe_sent_at = now
             loop.call_soon_threadsafe(self._ack)
-            self._last_probe = time.monotonic()
+            self._last_probe = now
             return True
         except RuntimeError:
             # Loop is closed / not running — treat as not-scheduled but do not
