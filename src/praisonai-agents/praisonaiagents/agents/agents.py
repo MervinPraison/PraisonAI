@@ -716,8 +716,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         # The resolved value is the default model for the members: applied to
         # every agent that never named a model of its own; an agent that did
         # keeps it. Same rule AgentFlow uses for the agents it builds.
-        from ..utils.model_alias import resolve_model_alias
-        self.llm = resolve_model_alias(llm, model, type(self).__name__)
+        # Must UNWRAP, not just alias-resolve: this value is pushed into every
+        # member via _apply_default_llm, and a member holding an LLMConfig fails
+        # inside chat() with "'LLMConfig' object has no attribute 'lower'".
+        from ..utils.model_alias import resolve_model_name
+        self.llm = resolve_model_name(llm, model, type(self).__name__)
         if self.llm:
             for _member in (agents.values() if isinstance(agents, dict) else (agents or [])):
                 _apply = getattr(_member, "_apply_default_llm", None)

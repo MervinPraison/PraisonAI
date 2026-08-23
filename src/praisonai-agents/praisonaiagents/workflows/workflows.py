@@ -707,10 +707,12 @@ class AgentFlow:
 
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
-        from ..utils.model_alias import resolve_model_alias
+        from ..utils.model_alias import resolve_model_name
 
-        # One rule for the alias pair, shared with Agent and AgentTeam.
-        self.llm = resolve_model_alias(self.llm, self.model, type(self).__name__)
+        # One rule for the alias pair, shared with Agent and AgentTeam. Must
+        # UNWRAP an LLMConfig to its model string: this value seeds the agents
+        # AgentFlow builds, and an agent holding an LLMConfig fails inside chat().
+        self.llm = resolve_model_name(self.llm, self.model, type(self).__name__)
         self.model = self.llm
 
         from ..agent.placement import resolve_placement

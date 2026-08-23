@@ -42,7 +42,9 @@ def test_either_name_alone_is_honoured(kw, name):
     assert _cls(name)(**{kw: "gpt-4o"}, **_extra(name)).llm == "gpt-4o"
 
 
-@pytest.mark.parametrize("name", UNWRAPPING)
+@pytest.mark.parametrize("name", ALL)
 def test_llmconfig_is_unwrapped_to_a_model_string(name):
     # Otherwise the LLMConfig object itself is handed to litellm as model=.
+    # Containers push this value into every member; a member holding an
+    # LLMConfig fails inside chat() and returns None, so the leak is silent.
     assert _cls(name)(llm=LLMConfig(model="gpt-4o"), **_extra(name)).llm == "gpt-4o"
