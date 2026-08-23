@@ -6863,8 +6863,13 @@ Answer:"""
                 result = resolve_runtime(runtime)
                 if result is not None:
                     return result
-            except (TypeError, ValueError):
-                pass  # Try AgentRuntimeConfig path
+            except ValueError:
+                # An invalid runtime *name* (e.g. a typo) must surface rather
+                # than falling through and being stored verbatim, which would
+                # silently drop most capabilities.
+                raise
+            except TypeError:
+                pass  # Not this style; try AgentRuntimeConfig path
         
         # Handle turn-based style (AgentRuntimeConfig)
         if AgentRuntimeConfig:
@@ -6919,16 +6924,17 @@ Answer:"""
             else:
                 raise TypeError(f"Invalid capability type: {type(cap)}")
         
-        # Determine runtime name
-        runtime_name = getattr(self._runtime_config, 'preferred_runtime', 'native')
+        # Determine runtime name. Normalise so spelling variants (NATIVE,
+        # " native ", native) map to the same matrix instead of silently
+        # dropping capabilities; an unknown name raises rather than degrading.
+        raw_runtime = getattr(self._runtime_config, 'preferred_runtime', None) or 'native'
+        from ..config.feature_configs import canonical_runtime_name
+        runtime_name = canonical_runtime_name(raw_runtime)
         
         # Get runtime capabilities based on runtime type
         if runtime_name == 'native':
             runtime_matrix = get_native_runtime_capabilities()
-        elif runtime_name in ('plugin-harness', 'harness', 'plugin', 'reduced'):
-            runtime_matrix = get_reduced_harness_capabilities()
         else:
-            # Unknown runtime, use reduced capabilities as safe default
             runtime_matrix = get_reduced_harness_capabilities()
         
         # Validate capabilities

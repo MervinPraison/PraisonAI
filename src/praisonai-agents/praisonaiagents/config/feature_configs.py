@@ -1902,6 +1902,48 @@ class RuntimeConfig:
 RuntimeParam = Union[bool, str, Dict[str, Any], RuntimeConfig, None]
 
 
+# Known runtime names, keyed by their canonical spelling. Every alias maps to
+# the runtime whose capability matrix the agent will actually use, so a name
+# that resolves here can never silently drop capabilities downstream.
+RUNTIME_ALIASES: Dict[str, str] = {
+    "native": "native",
+    "plugin_harness": "plugin-harness",
+    "plugin-harness": "plugin-harness",
+    "harness": "plugin-harness",
+    "plugin": "plugin-harness",
+    "reduced": "plugin-harness",
+}
+
+
+def canonical_runtime_name(value: str) -> str:
+    """Normalise a runtime name; reject typos but allow genuine plugin names.
+
+    Matching is case-insensitive, ignores surrounding whitespace, and treats
+    ``-``/``_`` as interchangeable, mirroring the other preset resolvers.
+
+    A value that names a known runtime resolves to its canonical spelling, so
+    ``NATIVE``/`` native `` all map to ``native`` and pick up the full matrix
+    instead of silently dropping capabilities. A value that is a close typo of
+    a known runtime (e.g. ``nativ``) raises with a suggestion rather than
+    degrading silently. A genuinely unknown name (e.g. a third-party plugin
+    runtime registered later) is returned as-is so it can fall back to the
+    reduced harness — matching the runtime registry, not a closed literal.
+    """
+    from .parse_utils import canonical_preset_key, make_preset_error, suggest_similar
+
+    key = canonical_preset_key(value)
+    if key in RUNTIME_ALIASES:
+        return RUNTIME_ALIASES[key]
+    known = sorted(set(RUNTIME_ALIASES))
+    if suggest_similar(key, known):
+        # Close enough to a known runtime that it is almost certainly a typo.
+        raise make_preset_error(
+            "runtime", value, sorted(set(RUNTIME_ALIASES.values()))
+        )
+    # Unrecognised but not a near-miss: treat as an opaque plugin runtime name.
+    return value
+
+
 def resolve_runtime(value: RuntimeParam) -> Optional[RuntimeConfig]:
     """Resolve runtime= parameter following precedence ladder."""
     if value is None or value is False:
@@ -1909,12 +1951,17 @@ def resolve_runtime(value: RuntimeParam) -> Optional[RuntimeConfig]:
     if value is True:
         return RuntimeConfig()
     if isinstance(value, str):
-        return RuntimeConfig(preferred_runtime=value)
+        return RuntimeConfig(preferred_runtime=canonical_runtime_name(value))
     if isinstance(value, (list, set, tuple, frozenset)):
         return RuntimeConfig(required_capabilities=list(value))
     if isinstance(value, dict):
-        return RuntimeConfig(**value)
+        config = RuntimeConfig(**value)
+        if config.preferred_runtime is not None:
+            config.preferred_runtime = canonical_runtime_name(config.preferred_runtime)
+        return config
     if isinstance(value, RuntimeConfig):
+        if value.preferred_runtime is not None:
+            value.preferred_runtime = canonical_runtime_name(value.preferred_runtime)
         return value
     raise TypeError(
         f"Invalid runtime parameter type: {type(value).__name__}. "
@@ -1986,6 +2033,7 @@ __all__ = [
     "resolve_tool_search",
     "resolve_tools",
     "resolve_runtime",
+    "canonical_runtime_name",
 ]
 
 
