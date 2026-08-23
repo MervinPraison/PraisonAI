@@ -69,8 +69,31 @@ def test_achat_does_not_write_object_repr_into_chat_history():
 
     result = asyncio.run(agent.achat("say something blocked"))
 
-    assert not (result or "").startswith("ChatCompletion("), (
-        f"achat returned {len(result)} chars of object repr: {result[:80]!r}")
+    assert result == "", f"expected empty async result, got {result!r}"
     for m in agent.chat_history:
         assert not str(m.get("content", "")).startswith("ChatCompletion("), (
             f"object repr persisted into chat_history: {str(m['content'])[:80]!r}")
+    assistant_msgs = [m for m in agent.chat_history if m.get("role") == "assistant"]
+    assert assistant_msgs, "no assistant message written to chat_history"
+    assert assistant_msgs[-1].get("content", None) == "", (
+        f"assistant chat_history entry must be empty, got "
+        f"{assistant_msgs[-1].get('content')!r}")
+
+
+def test_extractor_warns_on_refusal_even_when_finish_reason_stop(caplog):
+    """A refusal with finish_reason='stop' must still surface a warning."""
+    agent = Agent(name="A", instructions="x", llm="gpt-4o-mini")
+    resp = ChatCompletion(
+        id="chatcmpl-test", created=0, model="gpt-4o-mini", object="chat.completion",
+        choices=[Choice(finish_reason="stop", index=0, logprobs=None,
+                        message=ChatCompletionMessage(
+                            content=None, role="assistant",
+                            refusal="I can't help with that."))],
+    )
+    with caplog.at_level("WARNING"):
+        out = agent._extract_llm_response_content(resp)
+    assert out == ""
+    assert any("refused=True" in r.getMessage() for r in caplog.records), (
+        "expected a warning when the model refused")
+    assert not any("I can't help with that." in r.getMessage() for r in caplog.records), (
+        "refusal text must not be logged")

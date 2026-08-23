@@ -1234,12 +1234,15 @@ Your Goal: {self.goal}"""
                     if tool_calls:
                         names = [getattr(tc.function, "name", "?") for tc in tool_calls]
                         return f"[tool_calls: {', '.join(names)}]"
-                    # Parsed cleanly; the model returned no content.
+                    # Parsed cleanly; the model returned no content.  A refusal
+                    # (safety) is carried in ``message.refusal`` independently of
+                    # ``finish_reason`` -- surface it so an empty answer isn't silent.
                     finish_reason = getattr(choice, "finish_reason", None)
-                    if finish_reason not in (None, "stop"):
+                    refusal = getattr(msg, "refusal", None)
+                    if refusal or finish_reason not in (None, "stop"):
                         logging.warning(
                             f"Agent {self.name}: model returned no content "
-                            f"(finish_reason={finish_reason!r})"
+                            f"(finish_reason={finish_reason!r}, refused={bool(refusal)})"
                         )
                     return ""
         except (AttributeError, IndexError, TypeError) as e:
