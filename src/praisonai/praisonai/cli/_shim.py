@@ -86,18 +86,28 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
     identical object immediately, never re-executing the file (which would
     create duplicate class/enum objects).
 
-    By default this only aliases what is *already imported* and relies on
-    :class:`_AliasFinder` to resolve everything else lazily on first access —
-    honouring the "no eager import of heavy submodules" guarantee. The
-    already-loaded pass already covers the combined-import correctness case: by
-    the time an inner ``from old.sub import X`` re-enters, ``sub`` is loaded into
-    ``sys.modules[new_name.sub]`` and the finder returns the same object.
+    Eager pre-registration is required for **correctness**, not merely startup
+    speed. If the alias for ``old_name.sub`` is *absent* when a statement such as
+    ``from old_name.sub import Symbol`` (or ``import old_name.sub``) runs first,
+    CPython imports the parent shim, then resolves ``.sub`` through
+    :class:`_AliasFinder.find_spec`, which calls ``import_module`` re-entrantly.
+    Under the import lock that re-entrancy can load the moved file *twice*,
+    producing two distinct module objects (duplicate classes) and breaking
+    module identity — so ``old_name.sub is new_name.sub`` becomes ``False`` and
+    ``unittest.mock.patch("old_name.sub.attr")`` no longer patches the object the
+    running code (importing via the new name) actually uses.
 
-    Set ``PRAISONAI_SHIM_EAGER=1`` to opt into the legacy behaviour that walks
-    and pre-imports the whole moved subtree — reserved for the narrow edge case
-    where a combined ``from old_name.sub import Symbol`` runs before the parent
-    shim's import completes, which under the import lock could otherwise load the
-    moved file twice (duplicate classes, broken module identity).
+    Pre-stamping ``sys.modules[old_name.sub]`` here means ``_find_and_load``
+    returns the single canonical object directly and never re-enters the finder.
+    Modules that fail to import eagerly (optional heavy deps not installed) are
+    logged and left for :class:`_AliasFinder` to resolve lazily on first use, so
+    a partial install still starts cleanly.
+
+    Set ``PRAISONAI_SHIM_LAZY=1`` to opt *out* of the eager subtree walk (pure
+    lazy resolution). This trades the module-identity guarantee above for not
+    importing the moved subtree at shim-install time; only use it when nothing in
+    the process relies on ``old_name.sub is new_name.sub`` (e.g. no ``mock.patch``
+    against the old dotted path).
     """
     new_prefix = new_name + "."
 
@@ -113,9 +123,10 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
             old_equiv = old_name + mod_name[len(new_name):]
             sys.modules.setdefault(old_equiv, mod)
 
-    if os.environ.get("PRAISONAI_SHIM_EAGER", "").lower() not in ("1", "true"):
-        # Lazy path (default): _AliasFinder resolves submodules on demand,
-        # without pulling every optional/heavy provider SDK at import time.
+    if os.environ.get("PRAISONAI_SHIM_LAZY", "").lower() in ("1", "true"):
+        # Explicit opt-out: rely solely on _AliasFinder for on-demand
+        # resolution. Callers choosing this must not depend on module identity
+        # across the old/new dotted paths (see docstring).
         return
 
     search_path = getattr(module, "__path__", None)

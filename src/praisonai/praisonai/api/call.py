@@ -208,6 +208,13 @@ def _load_local_tools():
     and only invoked by a server entry point (``build_call_app``/``main``) — never
     at import time. Importing ``praisonai.api.call`` therefore has no filesystem
     scan and never executes a neighbouring ``tools.py``.
+
+    Idempotent: the shared ``tools`` registry is rebuilt from scratch on each
+    call. Building the app more than once in a process (e.g. two
+    ``build_call_app(load_local_tools=True)`` calls) therefore does not
+    accumulate duplicate tool definitions — which would otherwise send the same
+    tool multiple times in every realtime ``session.update`` and grow the
+    registry unbounded across builds.
     """
     tools_path = os.path.join(os.getcwd(), 'tools.py')
     logger.debug(f"Tools path: {tools_path}")
@@ -223,6 +230,9 @@ def _load_local_tools():
             custom_tools_module = None
 
         if custom_tools_module:
+            # Reset in place (keep the same list object other modules may hold a
+            # reference to) so a re-load replaces rather than appends.
+            tools.clear()
             if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
                 tools.extend(custom_tools_module.tools)
             else:
