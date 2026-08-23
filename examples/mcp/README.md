@@ -130,3 +130,12 @@ These examples comply with MCP Protocol Version 2025-11-25:
   - `destructiveHint`: true
   - `idempotentHint`: false
   - `openWorldHint`: true
+
+
+## Build Remote Agent (`gbr_pair.py`)
+
+Pair a phone running [Build Remote Agent](https://grokbuildremote.com/) to a PraisonAI agent via MCP stdio `gbr-mcp` (protocol `gbr/1`). Requires `gbr-agent pair && gbr-agent run`. Phone is spectator. Never put mailbox keys in the example.
+
+```bash
+python gbr_pair.py
+```
