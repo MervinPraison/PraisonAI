@@ -104,6 +104,57 @@ def test_generate_success_writes_rows(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_generate_output_is_not_locked_to_0600(tmp_path):
+    """The atomic mkstemp swap must not leave the corpus at owner-only 0600.
+
+    ``mkstemp`` creates 0600 and ``os.replace`` would make that final, stripping
+    group/other read a plain ``open(..., "w")`` would have granted via umask and
+    locking downstream validation/training jobs out of a shared dataset.
+    """
+    import os
+
+    from praisonai_train.cli.commands import data as data_cmd
+
+    out = tmp_path / "corpus.jsonl"
+
+    def one_row(cfg, progress_callback=None):
+        yield {"instruction": "a"}
+
+    with patch("praisonai_train.data.generate_dataset", one_row):
+        data_cmd.generate_data(
+            config=None, output=str(out), recipe=None, deployment=None,
+            num=1, concurrency=None, start_offset=None, snapshot_every=None,
+        )
+
+    mode = os.stat(out).st_mode & 0o777
+    umask = os.umask(0)
+    os.umask(umask)
+    expected = 0o666 & ~umask
+    assert mode == expected, f"expected {oct(expected)}, got {oct(mode)}"
+
+
+def test_generate_preserves_existing_output_mode(tmp_path):
+    """Overwriting an existing corpus keeps that file's original permissions."""
+    import os
+
+    from praisonai_train.cli.commands import data as data_cmd
+
+    out = tmp_path / "corpus.jsonl"
+    out.write_text('{"instruction": "old"}\n')
+    os.chmod(out, 0o640)
+
+    def one_row(cfg, progress_callback=None):
+        yield {"instruction": "new"}
+
+    with patch("praisonai_train.data.generate_dataset", one_row):
+        data_cmd.generate_data(
+            config=None, output=str(out), recipe=None, deployment=None,
+            num=1, concurrency=None, start_offset=None, snapshot_every=None,
+        )
+
+    assert os.stat(out).st_mode & 0o777 == 0o640
+
+
 # --- Bug 3: the Ollama Modelfile TEMPLATE must not be indented ----------------
 
 def _modelfile_for(model_name):

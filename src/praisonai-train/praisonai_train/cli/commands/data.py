@@ -15,6 +15,31 @@ import typer
 from praisonai_train.cli.commands.train import app
 
 
+def _apply_replacement_mode(tmp_name: str, out_path: str) -> None:
+    """Give an atomically-replaced temp file the permissions a normal write would.
+
+    ``tempfile.mkstemp`` always creates its file 0600, and ``os.replace`` makes
+    that the destination's final mode — silently stripping group/other read
+    access that a plain ``open(path, "w")`` would have granted (via umask), which
+    can lock downstream validation/training jobs out of a shared corpus. Restore
+    the expected mode before the replace: reuse the destination's existing mode
+    when overwriting, otherwise fall back to 0644 masked by the process umask —
+    exactly what ``open`` would have produced for a fresh file.
+    """
+    import os
+
+    try:
+        mode = os.stat(out_path).st_mode & 0o777
+    except OSError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    try:
+        os.chmod(tmp_name, mode)
+    except OSError:
+        pass
+
+
 def _load_cfg(config: Optional[str], **overrides) -> dict:
     cfg: dict = {}
     if config:
@@ -121,6 +146,7 @@ def generate_data(
         # Only replace the destination when at least one row was produced, so the
         # all-failures path leaves any existing file intact.
         if kept:
+            _apply_replacement_mode(tmp_name, out_path)
             os.replace(tmp_name, out_path)
         else:
             os.unlink(tmp_name)
@@ -195,6 +221,7 @@ def dedup_data(
             for row in global_dedup(sources, cfg):
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 kept += 1
+        _apply_replacement_mode(tmp_name, out_path)
         os.replace(tmp_name, out_path)
     except BaseException:
         try:
