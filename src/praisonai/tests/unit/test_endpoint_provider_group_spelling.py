@@ -158,6 +158,27 @@ def test_openai_compat_is_registered():
     assert "openai-compat" in cli_registry.EndpointProviderRegistry().list_names()
 
 
+def test_openai_compat_resolves_through_the_shim_namespace():
+    """Being *listed* is not being *usable*. ``--type openai-compat`` calls
+    ``resolve()``, not ``list_names()``.
+
+    The registry module is loaded twice — once as
+    ``praisonai_code.cli.features._endpoint_registry`` and once under the
+    ``praisonai.cli.features`` compatibility shim (which extends ``__path__``).
+    Its loader must reach ``praisonai_code._wrapper_bridge`` by absolute import;
+    a relative ``from ..._wrapper_bridge`` resolves to the non-existent
+    ``praisonai._wrapper_bridge`` under the shim name — exactly the path the CLI
+    dispatches through. Resolve under *that* module name so the regression can
+    fail here.
+    """
+    from praisonai.cli.features._endpoint_registry import (
+        EndpointProviderRegistry as ShimRegistry,
+    )
+
+    resolved = ShimRegistry().resolve("openai-compat")
+    assert callable(resolved)
+
+
 def _handler():
     from praisonai.cli.features.endpoints import EndpointsHandler
 
