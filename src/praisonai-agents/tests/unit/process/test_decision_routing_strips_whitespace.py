@@ -73,6 +73,39 @@ def _run(decision_text, limit=25):
     return visited, t1
 
 
+def _run_sync(decision_text, limit=25):
+    """Same scenario against the synchronous ``workflow()`` generator.
+
+    ``workflow()`` is a separately duplicated code path from ``aworkflow()`` --
+    its routing sites were edited independently -- so it needs its own
+    regression coverage. A whitespace regression in only one of the two paths
+    would otherwise leave this suite green.
+    """
+    collect = _ScriptedAgent("collector", "Collected only 3 items")
+    judge = _ScriptedAgent("judge", decision_text)
+
+    t1 = Task(name="collect_data", description="Collect data", expected_output="Data",
+              agent=collect, is_start=True, next_tasks=["validate_data"])
+    t2 = Task(name="validate_data", description="Validate", expected_output="verdict",
+              agent=judge, task_type="decision",
+              condition={"valid": [], "invalid": ["collect_data"]})
+    t2.previous_tasks = ["collect_data"]
+
+    process = Process(agents={"collector": collect, "judge": judge},
+                      tasks={t1.id: t1, t2.id: t2}, verbose=0)
+
+    visited = []
+    for tid in process.workflow():
+        task = process.tasks[tid]
+        visited.append(task.name)
+        task.result = TaskOutput(description="d", raw=task.agent.out,
+                                 agent=task.agent.name)
+        task.status = "completed"
+        if len(visited) >= limit:
+            break
+    return visited, t1
+
+
 @pytest.mark.parametrize("decision", ["invalid", "invalid\n", " invalid", "invalid  ",
                                       "\ninvalid\n"])
 def test_rejected_output_is_retried_regardless_of_whitespace(decision):
@@ -105,3 +138,19 @@ def test_clean_decision_still_works():
     visited, collect_task = _run("invalid")
     assert visited.count("collect_data") > 1
     assert collect_task.validation_feedback is not None
+
+
+@pytest.mark.parametrize("decision", ["invalid", "invalid\n", " invalid", "invalid  ",
+                                      "\ninvalid\n"])
+def test_sync_rejected_output_is_retried_regardless_of_whitespace(decision):
+    """The synchronous ``workflow()`` path must strip routing keys too."""
+    visited, _collect_task = _run_sync(decision)
+    assert visited.count("collect_data") > 1, (
+        f"sync judge returned {decision!r} (a rejection) but collect_data was "
+        f"never retried; workflow ran {visited} and finished silently")
+
+
+def test_sync_clean_decision_still_works():
+    """Control for the synchronous path."""
+    visited, _collect_task = _run_sync("invalid")
+    assert visited.count("collect_data") > 1
