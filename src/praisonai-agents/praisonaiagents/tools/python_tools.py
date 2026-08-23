@@ -105,6 +105,35 @@ def _validate_code_ast(code: str):
     return None
 
 
+def _make_resource_preexec(limits: ResourceLimits):
+    """Build a POSIX preexec_fn that applies ResourceLimits via setrlimit.
+
+    Caps address space (memory), process count, open files and file size in
+    the child process so untrusted code cannot exhaust host resources. Any
+    individual cap that the platform rejects is skipped without aborting the
+    launch (the wall-clock timeout still applies as a backstop).
+    """
+    import resource
+
+    def _limit():
+        caps = (
+            (resource.RLIMIT_AS, limits.memory_mb, 1024 * 1024),
+            (resource.RLIMIT_NPROC, limits.max_processes, 1),
+            (resource.RLIMIT_NOFILE, limits.max_open_files, 1),
+            (resource.RLIMIT_FSIZE, limits.disk_write_mb, 1024 * 1024),
+        )
+        for res, value, scale in caps:
+            if not value:
+                continue
+            cap = value * scale
+            try:
+                resource.setrlimit(res, (cap, cap))
+            except (ValueError, OSError):
+                pass
+
+    return _limit
+
+
 def _execute_code_sandboxed(
     code: str,
     timeout: int = 30,
@@ -287,7 +316,20 @@ if __name__ == "__main__":
 
         # Configure subprocess with resource limits
         env = {}  # Clean environment (no access to parent process env vars)
-        
+
+        # Enforce the computed ResourceLimits in the child process. On POSIX we
+        # apply them via setrlimit in a preexec_fn so untrusted code cannot
+        # exhaust host memory/CPU/processes/files (see ResourceLimits.minimal()).
+        preexec_fn = None
+        if os.name == "posix":
+            preexec_fn = _make_resource_preexec(limits)
+        else:
+            logging.warning(
+                "Code sandbox: resource limits (memory/CPU/process/file caps) "
+                "are only enforced on POSIX; on this platform only the "
+                "wall-clock timeout applies."
+            )
+
         # Run subprocess with timeout and resource limits
         process = subprocess.Popen(
             [sys.executable, temp_file],
@@ -296,7 +338,8 @@ if __name__ == "__main__":
             env=env,
             shell=False,  # Security: prevent shell injection
             text=True,
-            cwd=tempfile.gettempdir()  # Run in temp dir, not current dir
+            cwd=tempfile.gettempdir(),  # Run in temp dir, not current dir
+            preexec_fn=preexec_fn,
         )
         
         try:
