@@ -257,6 +257,26 @@ class _LazyObsModule:
 obs = _LazyObsModule()
 
 
+# ``from praisonaiagents import obs`` returns *this submodule*, not the singleton
+# above (Python binds a real submodule as a package attribute, shadowing the
+# package ``__getattr__``). Make the submodule object itself callable and proxy
+# provider lookups to the singleton so ``obs(...)``, ``obs.auto()`` and
+# ``obs.langfuse()`` all work regardless of how ``obs`` is imported.
+import sys as _sys
+from types import ModuleType as _ModuleType
+
+
+class _CallableObsModule(_ModuleType):
+    def __call__(self, provider: str = "auto", **kwargs):
+        return obs(provider, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(obs, name)
+
+
+_sys.modules[__name__].__class__ = _CallableObsModule
+
+
 __all__ = [
     "ObservabilityAdapter",
     "Span",

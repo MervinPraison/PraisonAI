@@ -960,7 +960,19 @@ class Handoff:
                         last_message = last_msg.get('content', '')
                     else:
                         last_message = str(last_msg)
-                
+
+                # Tool-style handoff (as_tool): ContextPolicy.NONE discards the
+                # history, so the prompt must come from the generated ``task``/
+                # ``prompt`` argument instead. Without this the sub-agent would
+                # never run and the tool would report a hollow "completed". The
+                # task is the sub-agent's whole instruction, so it is passed
+                # verbatim rather than wrapped in a ``[Handoff from …]`` prefix.
+                task_prompt = None
+                if not last_message and not self.input_type:
+                    task_prompt = kwargs.get('task') or kwargs.get('prompt')
+                    if task_prompt:
+                        last_message = str(task_prompt)
+
                 # Prepare context information
                 context_info = f"[Handoff from {source_agent.name}] "
                 if kwargs and self.input_type:
@@ -968,7 +980,7 @@ class Handoff:
                 
                 # Execute the target agent with tool boundary enforcement
                 if last_message:
-                    prompt = context_info + last_message
+                    prompt = last_message if task_prompt else context_info + last_message
                     logger.info(f"Handing off to {self.agent.name} with prompt: {prompt}")
                     
                     # Compute effective tools based on tool policy
@@ -1055,6 +1067,17 @@ class Handoff:
                     )
                 )
             handoff_tool.__signature__ = inspect.Signature(sig_params)
+        elif self.config.context_policy == ContextPolicy.NONE:
+            # Tool-style handoff (as_tool): no conversation context is passed, so
+            # advertise an explicit ``task`` parameter the caller must fill. This
+            # is what ``handoff_tool`` reads as the sub-agent's prompt above.
+            handoff_tool.__signature__ = inspect.Signature([
+                inspect.Parameter(
+                    'task',
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=str,
+                )
+            ])
         
         return handoff_tool
 

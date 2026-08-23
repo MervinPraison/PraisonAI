@@ -49,7 +49,13 @@ def _openai_compat_loader():
     # ``from praisonai...`` so the standalone ``praisonai-code`` hot path keeps
     # its C7 import-direction guarantee. ``EndpointProviderRegistry.resolve``
     # adapts the returned class to the CLI dispatch signature.
-    from ..._wrapper_bridge import import_wrapper_module
+    #
+    # Absolute import (not ``from ..._wrapper_bridge``): the ``praisonai.cli``
+    # compatibility shim extends ``__path__`` so this module also loads under the
+    # ``praisonai.cli.features._endpoint_registry`` name, where a relative
+    # ``...`` would resolve to the non-existent ``praisonai._wrapper_bridge``.
+    # The bridge only ever lives in ``praisonai_code``.
+    from praisonai_code._wrapper_bridge import import_wrapper_module
 
     module = import_wrapper_module("praisonai.endpoints.providers.openai_compat")
     return module.OpenAICompatProvider

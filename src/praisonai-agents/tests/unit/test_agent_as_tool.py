@@ -185,3 +185,42 @@ class TestAgentAsToolIntegration:
         # The handoffs should be processed into the tools list
         assert writer.name == "Writer"
         # Note: Handoffs are processed in _process_handoffs, so we check the agent was created
+
+    def test_as_tool_actually_runs_the_sub_agent(self, monkeypatch):
+        """'Handoff completed' is not 'the sub-agent ran'. Assert the call, not
+        the string.
+
+        ``as_tool()`` pins ``ContextPolicy.NONE`` so there is no history to
+        harvest a prompt from; the ``task`` argument must drive the sub-agent.
+        A test that only checks ``"not found" not in result`` passes even when
+        the sub-agent is never invoked — this one records the actual call.
+        """
+        from praisonaiagents import Agent
+
+        seen = []
+        monkeypatch.setattr(
+            Agent, "chat", lambda self, p, **k: seen.append((self.name, p)) or "done"
+        )
+
+        coder = Agent(name="Coder", instructions="x")
+        writer = Agent(
+            name="Writer",
+            instructions="x",
+            tools=[coder.as_tool(tool_name="invoke_coder")],
+        )
+        writer.execute_tool("invoke_coder", {"task": "write a haiku"})
+
+        assert seen == [("Coder", "write a haiku")]
+
+    def test_as_tool_advertises_a_task_parameter(self):
+        """The generated tool must expose a ``task`` parameter so the LLM knows
+        to fill it — a ``(**kwargs)`` signature advertises nothing.
+        """
+        import inspect
+        from praisonaiagents import Agent
+
+        coder = Agent(name="Coder", instructions="x")
+        tool_fn = coder.as_tool(tool_name="invoke_coder").to_tool_function(
+            Agent(name="Writer", instructions="x")
+        )
+        assert "task" in inspect.signature(tool_fn).parameters

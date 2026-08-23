@@ -88,6 +88,26 @@ class _LazyDbModule:
 db = _LazyDbModule()
 
 
+# ``from praisonaiagents import db`` returns *this submodule*, not the singleton
+# above (Python binds a real submodule as a package attribute, shadowing the
+# package ``__getattr__``). Make the submodule object itself callable and proxy
+# backend lookups to the singleton so ``db(...)`` and ``db.PraisonDB`` both work
+# regardless of how ``db`` is imported.
+import sys as _sys
+from types import ModuleType as _ModuleType
+
+
+class _CallableDbModule(_ModuleType):
+    def __call__(self, **kwargs):
+        return db(**kwargs)
+
+    def __getattr__(self, name):
+        return getattr(db, name)
+
+
+_sys.modules[__name__].__class__ = _CallableDbModule
+
+
 __all__ = [
     "DbAdapter",
     "AsyncDbAdapter",

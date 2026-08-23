@@ -15,14 +15,16 @@ class TestNewDbImports:
     """Test that new simplified db imports work correctly."""
     
     def test_import_db_from_praisonaiagents(self):
-        """Test: from praisonaiagents import db"""
-        import sys
+        """Test: from praisonaiagents import db
+
+        The name bound by ``from praisonaiagents import db`` must itself be
+        callable and expose the backend classes. No swapping in a different
+        object obtained a second way — that would make this assertion unable to
+        fail. ``db`` is a real submodule, so this pins the submodule object
+        itself being callable (via its ``__class__`` swap).
+        """
         from praisonaiagents import db
         assert db is not None
-        # Handle case where 'db' might be imported as a module instead of proxy object
-        if isinstance(db, type(sys)):
-            from praisonaiagents.db import db as db_proxy
-            db = db_proxy
         assert hasattr(db, 'PraisonDB')
         assert callable(db)  # db(...) should work as shortcut
     
@@ -44,11 +46,7 @@ class TestNewDbImports:
     
     def test_db_callable_shortcut(self):
         """Test that db(...) works as shortcut for db.PraisonDB(...)"""
-        import sys
         from praisonaiagents import db
-        if isinstance(db, type(sys)):
-            from praisonaiagents.db import db as db_proxy
-            db = db_proxy
         # Should not raise - just creates the adapter
         # (actual DB connection is lazy)
         instance = db(database_url="sqlite:///test.db")
@@ -68,6 +66,19 @@ class TestNewDbImports:
         assert Task is not None
         assert tool is not None
         assert db is not None
+
+    def test_import_obs_is_callable(self):
+        """Test: from praisonaiagents import obs
+
+        ``obs`` shares ``db``'s shape (a real submodule that must be callable).
+        ``obs("langfuse")``/``obs.auto()`` are documented shortcuts, so the name
+        bound by the import must itself be callable, not just the inner
+        singleton.
+        """
+        from praisonaiagents import obs
+        assert obs is not None
+        assert callable(obs)
+        assert hasattr(obs, 'auto')
 
 
 class TestDeprecationWarnings:
