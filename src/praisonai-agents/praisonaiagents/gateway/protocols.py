@@ -1099,6 +1099,10 @@ class GatewayProtocol(Protocol):
               :func:`compute_config_revision`) of the config the gateway is
               *actually running*, comparable against the on-disk revision to
               detect drift.
+            - pressure: Optional :class:`HealthPressure` dict (admission /
+              inbound / outbound backlog + event-loop lag and a derived
+              ``pressure`` classification), when the gateway runs back-pressure
+              machinery. See :class:`HealthPressure` and :func:`evaluate_pressure`.
         """
         ...
 
@@ -1192,6 +1196,165 @@ def compute_config_revision(config: Optional[Dict[str, Any]]) -> str:
         # rather than raising into the reload/health path.
         canonical = repr(config)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+# ---------------------------------------------------------------------------
+# Saturation / back-pressure observability (Issue #4265)
+#
+# The always-on gateway already *enforces* back-pressure — a concurrency
+# ceiling with a bounded fair wait-queue (``AdmissionGate``), a durable
+# outbound outbox with a dead-letter tier (``OutboundQueue``), and an
+# event-loop wedge watchdog (``LoopWatchdog``) — but it exposes no saturation
+# *telemetry*. The health surface reports liveness and config drift, yet never
+# reports how close the gateway is to its limits, so the first signal an
+# operator gets is dropped work (shed turns / stalled outbound) rather than a
+# forward warning. This is the small, canonical contract — mirroring
+# ``ReloadStatus`` exactly — that both the SDK's ``gateway.health()`` and the
+# bot's ``/health`` populate so saturation is a first-class, observable signal.
+# Core owns only the *shape* (a frozen dataclass) and a pure, deterministic
+# classification helper; the wrapper reads back the facts the enforcement layer
+# already computes and fills the block.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HealthPressure:
+    """Observable saturation snapshot of the gateway's back-pressure machinery.
+
+    Populated by the running gateway and surfaced in
+    :meth:`GatewayProtocol.health` so an operator (or an autoscaler / a
+    ``/ready``-driven load balancer) can ask "is the gateway backing up?"
+    *before* admission starts shedding turns — rather than inferring overload
+    post-mortem from shed-load log lines.
+
+    Attributes:
+        admission_max: Configured concurrency ceiling (``0`` when unbounded).
+        admission_in_flight: Turns currently running.
+        admission_queued: Turns currently waiting for a slot.
+        admission_shed_total: Cumulative turns shed since start.
+        inbox_pending: Aggregate pending inbound queue depth across sessions.
+        outbox_pending: Durable outbound backlog awaiting delivery.
+        outbox_dead_letter: Durable outbound entries in the dead-letter tier.
+        event_loop_lag_p99_ms: Recent event-loop scheduling lag (ms).
+        pressure: Single derived classification — ``"nominal"``,
+            ``"elevated"`` or ``"saturated"`` (closed vocabulary) — so an
+            orchestrator can branch on one field.
+    """
+
+    admission_max: int = 0
+    admission_in_flight: int = 0
+    admission_queued: int = 0
+    admission_shed_total: int = 0
+    inbox_pending: int = 0
+    outbox_pending: int = 0
+    outbox_dead_letter: int = 0
+    event_loop_lag_p99_ms: float = 0.0
+    pressure: Literal["nominal", "elevated", "saturated"] = "nominal"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serializable dict for the health surface."""
+        return {
+            "admission_max": self.admission_max,
+            "admission_in_flight": self.admission_in_flight,
+            "admission_queued": self.admission_queued,
+            "admission_shed_total": self.admission_shed_total,
+            "inbox_pending": self.inbox_pending,
+            "outbox_pending": self.outbox_pending,
+            "outbox_dead_letter": self.outbox_dead_letter,
+            "event_loop_lag_p99_ms": self.event_loop_lag_p99_ms,
+            "pressure": self.pressure,
+        }
+
+
+def evaluate_pressure(
+    *,
+    admission: Optional[Dict[str, Any]] = None,
+    inbox_pending: int = 0,
+    outbox_pending: int = 0,
+    outbox_dead_letter: int = 0,
+    loop_lag_p99_ms: float = 0.0,
+) -> HealthPressure:
+    """Pure, deterministic classification of gateway load. No I/O.
+
+    Reads back facts the enforcement layer already computes
+    (``AdmissionGate.stats()``, the outbox ``status`` counts, the watchdog's
+    measured lag) and folds them into a single :class:`HealthPressure`. Lives
+    in core — like :func:`compute_config_revision` — so the SDK and the bot
+    classify identically without divergence.
+
+    Classification (highest wins):
+
+    * ``"saturated"`` — admission is full *and* work is queuing, the outbound
+      dead-letter tier is non-empty, or the event loop is lagging badly
+      (``>= 500 ms``): shed / stall is imminent or occurring.
+    * ``"elevated"`` — admission is highly utilised (``>= 80 %``), the inbound
+      or outbound backlog is building, or the loop is lagging (``>= 100 ms``).
+    * ``"nominal"`` — none of the above.
+
+    Args:
+        admission: An :meth:`AdmissionGate.stats` snapshot (or ``None``).
+        inbox_pending: Aggregate pending inbound queue depth.
+        outbox_pending: Durable outbound backlog.
+        outbox_dead_letter: Durable outbound dead-letter depth.
+        loop_lag_p99_ms: Recent event-loop scheduling lag in ms.
+
+    Returns:
+        A frozen :class:`HealthPressure` ready for the health surface.
+    """
+    stats = admission or {}
+
+    def _int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    admission_max = _int(stats.get("max_concurrent_runs"))
+    in_flight = _int(stats.get("in_flight"))
+    queued = _int(stats.get("queued"))
+    shed_total = _int(stats.get("shed"))
+    inbox = max(0, _int(inbox_pending))
+    outbox = max(0, _int(outbox_pending))
+    dead_letter = max(0, _int(outbox_dead_letter))
+    try:
+        lag = float(loop_lag_p99_ms or 0.0)
+    except (TypeError, ValueError):
+        lag = 0.0
+    if lag < 0.0:
+        lag = 0.0
+
+    utilisation = (in_flight / admission_max) if admission_max > 0 else 0.0
+
+    saturated = (
+        (admission_max > 0 and in_flight >= admission_max and queued > 0)
+        or dead_letter > 0
+        or lag >= 500.0
+    )
+    elevated = (
+        utilisation >= 0.8
+        or queued > 0
+        or inbox > 0
+        or outbox > 0
+        or lag >= 100.0
+    )
+    if saturated:
+        pressure: Literal["nominal", "elevated", "saturated"] = "saturated"
+    elif elevated:
+        pressure = "elevated"
+    else:
+        pressure = "nominal"
+
+    return HealthPressure(
+        admission_max=admission_max,
+        admission_in_flight=in_flight,
+        admission_queued=queued,
+        admission_shed_total=shed_total,
+        inbox_pending=inbox,
+        outbox_pending=outbox,
+        outbox_dead_letter=dead_letter,
+        event_loop_lag_p99_ms=lag,
+        pressure=pressure,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -126,10 +126,26 @@ class LoopWatchdog:
         self._last_ack = 0.0
         self._last_probe = 0.0
         self._wedged = False
+        # Continuously-measured scheduling lag (ms) of the most recently
+        # acked probe. Read back by the health surface as a saturation signal
+        # (Issue #4265) — the same measurement the wedge check already relies
+        # on, exposed rather than only compared against the wedge threshold.
+        self._probe_sent_at = 0.0
+        self._last_lag_ms = 0.0
 
     @property
     def armed(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def last_lag_ms(self) -> float:
+        """Most recent event-loop scheduling lag in milliseconds.
+
+        The delay between scheduling a probe and the loop running its ack.
+        ``0.0`` until the first probe round-trips. Read by the gateway health
+        surface as a forward saturation signal (Issue #4265).
+        """
+        return self._last_lag_ms
 
     @property
     def wedged(self) -> bool:
@@ -176,7 +192,14 @@ class LoopWatchdog:
 
     def _ack(self) -> None:
         """Callback run *on the loop*; records that the loop is alive."""
-        self._last_ack = time.monotonic()
+        now = time.monotonic()
+        self._last_ack = now
+        # Record the scheduling lag: how long the loop took to run this ack
+        # after we scheduled it. This is the same signal the wedge check uses,
+        # exposed as a gauge for the health surface (Issue #4265).
+        sent = self._probe_sent_at
+        if sent:
+            self._last_lag_ms = max(0.0, (now - sent) * 1000.0)
 
     def _schedule_probe(self) -> bool:
         """Schedule an ack onto the loop. Returns False if scheduling fails."""
@@ -184,6 +207,7 @@ class LoopWatchdog:
         if loop is None:
             return False
         try:
+            self._probe_sent_at = time.monotonic()
             loop.call_soon_threadsafe(self._ack)
             self._last_probe = time.monotonic()
             return True

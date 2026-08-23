@@ -811,6 +811,18 @@ class OutboundQueue:
                 "SELECT COUNT(*) FROM outbound_queue WHERE status IN ('pending', 'recovered', 'failed')"
             ).fetchone()[0])
     
+    def dead_letter_count(self) -> int:
+        """Get count of messages in the dead-letter tier (permanent failures).
+
+        Surfaced on the gateway health surface as a saturation signal (Issue
+        #4265): a non-empty dead-letter tier means outbound delivery has
+        exhausted retries and is dropping work.
+        """
+        with self._lock, closing(self._connect()) as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM outbound_queue WHERE status = 'permanent_failure'"
+            ).fetchone()[0])
+
     def size(self) -> int:
         """Get total number of messages in queue."""
         with self._lock, closing(self._connect()) as conn:

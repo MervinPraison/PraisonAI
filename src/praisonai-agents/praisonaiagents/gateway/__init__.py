@@ -29,6 +29,9 @@ from .protocols import (
     # Config hot-reload observability (Issue #3049)
     ReloadStatus,
     compute_config_revision,
+    # Saturation / back-pressure observability (Issue #4265)
+    HealthPressure,
+    evaluate_pressure,
     # Push protocols and dataclasses
     PushChannelProtocol,
     PresenceProtocol,
@@ -311,6 +314,8 @@ __all__ = [
     # Config hot-reload observability (Issue #3049)
     "ReloadStatus",
     "compute_config_revision",
+    "HealthPressure",
+    "evaluate_pressure",
     # Push protocols (always available)
     "PushChannelProtocol",
     "PresenceProtocol",

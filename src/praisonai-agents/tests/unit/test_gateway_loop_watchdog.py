@@ -78,6 +78,28 @@ def test_healthy_loop_not_tripped():
     assert wd.armed is False
 
 
+def test_last_lag_ms_measured_on_healthy_loop():
+    """A responsive loop reports a small, finite scheduling lag (Issue #4265)."""
+    wd = LoopWatchdog()
+    assert wd.last_lag_ms == 0.0  # nothing measured yet
+    loop = asyncio.new_event_loop()
+    policy = LoopWatchdogPolicy(
+        probe_interval_s=0.02,
+        missed_probes_before_wedged=3,
+        on_wedge="dump_only",
+    )
+    wd = LoopWatchdog(policy)
+    wd.arm(loop)
+    try:
+        _run_loop_for(loop, 0.3)
+    finally:
+        wd.disarm()
+        loop.close()
+    # A healthy loop ran the ack promptly: lag is measured and small.
+    assert wd.last_lag_ms >= 0.0
+    assert wd.last_lag_ms < 1000.0
+
+
 def test_wedged_loop_detected():
     """A loop blocked inside a sync call is detected (dump_only, no exit)."""
     loop = asyncio.new_event_loop()
