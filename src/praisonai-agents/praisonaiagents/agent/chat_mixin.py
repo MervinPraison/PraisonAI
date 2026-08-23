@@ -3621,6 +3621,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.error("Reflection parsing failed.", exc_info=True)
                                 messages.append({"role": "assistant", "content": "Self Reflection failed."})
                                 reflection_count += 1
+                                if reflection_count >= self.max_reflect:
+                                    # Bound the retry, as the async path does. Without this
+                                    # a persistently unparseable reflection (e.g. a
+                                    # structured-output refusal, where message.parsed is
+                                    # None) loops forever, two LLM calls at a time.
+                                    if self.verbose:
+                                        _get_display_functions()['display_self_reflection']("Maximum reflection count reached after repeated parse errors, returning current response", console=self.console)
+                                    self._append_to_chat_history({"role": "assistant", "content": response_text})
+                                    try:
+                                        validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                        self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                        return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
+                                    except Exception as guard_e:
+                                        logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
+                                        self._rollback_chat_history_to(chat_history_length)
+                                        return None
                                 continue  # Continue even after error to try again
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
