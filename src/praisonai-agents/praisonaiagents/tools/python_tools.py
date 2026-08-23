@@ -108,22 +108,34 @@ def _validate_code_ast(code: str):
 def _make_resource_preexec(limits: ResourceLimits):
     """Build a POSIX preexec_fn that applies ResourceLimits via setrlimit.
 
-    Caps address space (memory), process count, open files and file size in
-    the child process so untrusted code cannot exhaust host resources. Any
-    individual cap that the platform rejects is skipped without aborting the
-    launch (the wall-clock timeout still applies as a backstop).
+    Caps address space (memory), process count, open files, file size and
+    CPU time in the child process so untrusted code cannot exhaust host
+    resources. CPU time is capped in seconds (derived from timeout_seconds)
+    so sustained CPU-bound code is stopped by the kernel rather than only by
+    the wall-clock timeout. Each RLIMIT_* constant is resolved defensively:
+    constants absent on a given POSIX platform, and individual caps the
+    platform rejects, are skipped without aborting the launch (the wall-clock
+    timeout still applies as a backstop).
     """
     import resource
 
     def _limit():
+        # CPU-time cap in whole seconds; derived from timeout_seconds so the
+        # kernel terminates CPU-bound code near the wall-clock budget instead
+        # of letting it saturate a core until the parent times out.
+        cpu_seconds = max(1, int(limits.timeout_seconds)) if limits.timeout_seconds else 0
         caps = (
-            (resource.RLIMIT_AS, limits.memory_mb, 1024 * 1024),
-            (resource.RLIMIT_NPROC, limits.max_processes, 1),
-            (resource.RLIMIT_NOFILE, limits.max_open_files, 1),
-            (resource.RLIMIT_FSIZE, limits.disk_write_mb, 1024 * 1024),
+            ("RLIMIT_AS", limits.memory_mb, 1024 * 1024),
+            ("RLIMIT_NPROC", limits.max_processes, 1),
+            ("RLIMIT_NOFILE", limits.max_open_files, 1),
+            ("RLIMIT_FSIZE", limits.disk_write_mb, 1024 * 1024),
+            ("RLIMIT_CPU", cpu_seconds, 1),
         )
-        for res, value, scale in caps:
+        for res_name, value, scale in caps:
             if not value:
+                continue
+            res = getattr(resource, res_name, None)
+            if res is None:
                 continue
             cap = value * scale
             try:
