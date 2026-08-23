@@ -2238,6 +2238,22 @@ class DefaultSessionStore:
                 out.append(data)
         return out
 
+    def _save_imported_session(self, session: SessionData) -> bool:
+        """Persist a restored session verbatim (no retention/window applied).
+
+        Mirrors ``_save_session`` (timestamp + atomic, file-locked write) but
+        deliberately skips ``_enforce_window`` so importing a valid larger
+        export is not truncated/compacted by the destination's own retention
+        settings before it lands on disk.
+        """
+        filepath = self._get_session_path(session.session_id)
+        session.updated_at = datetime.now(timezone.utc).isoformat()
+        with FileLock(filepath, self.lock_timeout):
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error(f"Failed to save imported session {session.session_id}")
+                return False
+            return True
+
     def import_sessions(
         self,
         payload: Dict[str, Any],
@@ -2257,6 +2273,22 @@ class DefaultSessionStore:
 
         report = ImportReport(version=self.PORTABLE_VERSION)
         if not isinstance(payload, dict):
+            return report
+        # Reject payloads from a newer, breaking export format: a future shape
+        # could otherwise slip through ``from_dict`` with silently defaulted
+        # fields and corrupt restored state. Older/unversioned payloads are
+        # still accepted (best-effort) since v1 is the compatible baseline.
+        payload_version = payload.get("version")
+        if isinstance(payload_version, int) and payload_version > self.PORTABLE_VERSION:
+            report.skipped.append(
+                {
+                    "session_id": "",
+                    "reason": (
+                        f"unsupported payload version {payload_version} "
+                        f"(supported <= {self.PORTABLE_VERSION})"
+                    ),
+                }
+            )
             return report
         raw_sessions = payload.get("sessions")
         if not isinstance(raw_sessions, list):
@@ -2304,11 +2336,19 @@ class DefaultSessionStore:
                         data.pop(field_name, None)
                     meta = data.get("metadata")
                     if isinstance(meta, dict):
+                        # Copy before mutating so the caller's payload (and any
+                        # later import with reset_live_fields=False) keeps its
+                        # original live fields intact (data = dict(raw) is shallow).
+                        meta = dict(meta)
                         for field_name in self._LIVE_FIELDS:
                             meta.pop(field_name, None)
+                        data["metadata"] = meta
                 session = SessionData.from_dict(data)
                 session.session_id = session_id
-                if not self._save_session(session):
+                # Persist the imported record verbatim: an import is a restore,
+                # so the destination's retention/active_window must not truncate
+                # or compact a valid larger export before it lands on disk.
+                if not self._save_imported_session(session):
                     report.skipped.append(
                         {"session_id": session_id, "reason": "write failed"}
                     )

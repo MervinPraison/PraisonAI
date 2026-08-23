@@ -1954,8 +1954,25 @@ def gateway_sessions_export(
     )
     text = json.dumps(payload, indent=2)
     if out:
-        with open(out, "w", encoding="utf-8") as handle:
-            handle.write(text)
+        # Write to a temp file in the destination dir, then atomically replace
+        # so a failed/partial write never truncates or corrupts an existing
+        # backup at ``out``.
+        import os
+        import tempfile
+
+        dest_dir = os.path.dirname(os.path.abspath(out)) or "."
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(tmp_path, out)
+        except OSError as exc:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            print(f"Error: could not write export to {out}: {exc}")
+            raise typer.Exit(1) from exc
         print(f"Exported {len(payload.get('sessions') or [])} session(s) -> {out}")
     else:
         print(text)

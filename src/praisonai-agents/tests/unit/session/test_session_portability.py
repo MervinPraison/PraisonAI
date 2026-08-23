@@ -149,3 +149,46 @@ class TestImportHardening:
             store = _make_store(tmp)
             report = store.import_sessions(bad)
             assert report.imported == 0
+
+    def test_rejects_newer_version(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            src = _make_store(a)
+            src.add_message("s1", "user", "hi")
+            payload = src.export_all()
+            payload["version"] = src.PORTABLE_VERSION + 1
+            dst = _make_store(b)
+            report = dst.import_sessions(payload)
+            assert report.imported == 0
+            assert not dst.session_exists("s1")
+            assert any("unsupported payload version" in s["reason"] for s in report.skipped)
+
+    def test_import_does_not_mutate_payload(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            src = _make_store(a)
+            src.add_message("s1", "user", "hi")
+            src.set_gateway_info("s1", gateway_session_id="live-1", agent_id="agentX")
+            payload = src.export_all()
+            record = payload["sessions"][0]
+            gsid_before = record.get("gateway_session_id")
+            meta_before = dict(record.get("metadata") or {})
+            dst = _make_store(b)
+            dst.import_sessions(payload)  # reset_live_fields=True by default
+            assert record.get("gateway_session_id") == gsid_before
+            assert (record.get("metadata") or {}) == meta_before
+
+    def test_import_preserves_history_over_destination_window(self):
+        from praisonaiagents.session.store import DefaultSessionStore
+
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            src = _make_store(a)
+            for i in range(6):
+                src.add_message("s1", "user", f"m{i}")
+            payload = src.export_all()
+            # Destination truncates to a small window; a restore must not lose
+            # the exported history before it lands.
+            dst = DefaultSessionStore(
+                session_dir=b, active_window=2, retention="truncate"
+            )
+            assert dst.import_sessions(payload).imported == 1
+            hist = dst.get_chat_history("s1")
+            assert len(hist) == 6
