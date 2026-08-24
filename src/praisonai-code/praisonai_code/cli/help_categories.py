@@ -144,6 +144,7 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "plugins": CATEGORY_ADVANCED,
     "sandbox": CATEGORY_ADVANCED,
     "registry": CATEGORY_ADVANCED,
+    "backends": CATEGORY_ADVANCED,
     "package": CATEGORY_ADVANCED,
     "command": CATEGORY_ADVANCED,
     "standardise": CATEGORY_ADVANCED,
