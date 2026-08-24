@@ -121,6 +121,14 @@ class DockerSandbox:
             if base_cmd not in allowed and cmd[0] not in policy.allowed_commands:
                 return f"Command not in allowlist: {base_cmd}"
 
+        # NOTE: allow_subprocess is deliberately NOT enforced here, unlike
+        # SubprocessSandbox. There the check guards against spawning a shell on
+        # the HOST, where there is no isolation. In Docker the shell runs inside
+        # the container -- run_command() always dispatches through `sh -c` by
+        # design -- so blocking shell binaries would refuse every command and
+        # defeat the backend, not harden it. The container is the boundary that
+        # clause approximates on the host.
+
         for part in policy_scan_parts([strip_heredoc_bodies(c) for c in cmd]):
             if not part.startswith(("/", "~", ".")):
                 continue
@@ -129,6 +137,14 @@ class DockerSandbox:
                 blocked_abs = os.path.realpath(os.path.expanduser(blocked_path))
                 if expanded == blocked_abs or expanded.startswith(blocked_abs + os.sep):
                     return f"Access to blocked path: {blocked_path}"
+            if policy.allowed_paths:
+                allowed = any(
+                    expanded == os.path.realpath(os.path.expanduser(p))
+                    or expanded.startswith(os.path.realpath(os.path.expanduser(p)) + os.sep)
+                    for p in policy.allowed_paths
+                )
+                if not allowed:
+                    return f"Path not in allowlist: {part}"
         return None
 
     def _truncate_output(self, data: bytes) -> bytes:
@@ -351,19 +367,18 @@ class DockerSandbox:
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
+        # Parse the command the same way SubprocessSandbox does, so the policy
+        # sees identical argv -- including the `sh -c "..."` wrapper for
+        # shell=True, which policy_scan_parts splits back out.
+        from ._shell import build_argv
+        cmd_parts = build_argv(command, shell=shell)
+
         if isinstance(command, list):
-            # Always quote list elements to prevent shell injection
-            cmd_parts = list(command)
             cmd_str = " ".join(shlex.quote(arg) for arg in command)
+        elif shell:
+            cmd_str = command
         else:
-            if shell:
-                # Caller explicitly requested shell evaluation
-                cmd_parts = ["sh", "-c", command]
-                cmd_str = command
-            else:
-                # Parse string safely then re-quote each part
-                cmd_parts = shlex.split(command)
-                cmd_str = " ".join(shlex.quote(part) for part in cmd_parts)
+            cmd_str = " ".join(shlex.quote(part) for part in cmd_parts)
 
         # Enforce the command-level security policy before dispatch. The
         # container bounds where code runs, but allowlisting, blocked commands
