@@ -21,6 +21,7 @@ from praisonaiagents.sandbox import (
     SandboxStatus,
     ResourceLimits,
 )
+from praisonaiagents.sandbox.config import SecurityPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,58 @@ class DockerSandbox:
         self._container_id: Optional[str] = None
         self._is_running = False
         self._temp_dir: Optional[str] = None
-    
+
+    def _validate_command_against_policy(
+        self,
+        cmd: List[str],
+        policy: SecurityPolicy,
+    ) -> Optional[str]:
+        """Return an error message when *cmd* violates *policy*.
+
+        Mirrors SubprocessSandbox: the container bounds *where* code runs, but
+        command-level clauses (blocked_commands, allowed_commands, blocked_paths)
+        must still be enforced before dispatch. allowed_commands in particular
+        has no container analogue -- it is the only way a user can say "this
+        sandbox may only run python".
+        """
+        if not cmd:
+            return "Empty command"
+
+        from ._shell import policy_scan_parts, strip_heredoc_bodies
+
+        cmd_str = strip_heredoc_bodies(" ".join(cmd))
+        for blocked in policy.blocked_commands:
+            if blocked and blocked in cmd_str:
+                return f"Blocked command pattern: {blocked}"
+
+        if policy.allowed_commands:
+            base_cmd = os.path.basename(cmd[0])
+            allowed = {c.split()[0] for c in policy.allowed_commands}
+            if base_cmd not in allowed and cmd[0] not in policy.allowed_commands:
+                return f"Command not in allowlist: {base_cmd}"
+
+        for part in policy_scan_parts([strip_heredoc_bodies(c) for c in cmd]):
+            if not part.startswith(("/", "~", ".")):
+                continue
+            expanded = os.path.realpath(os.path.expanduser(part))
+            for blocked_path in policy.blocked_paths:
+                blocked_abs = os.path.realpath(os.path.expanduser(blocked_path))
+                if expanded == blocked_abs or expanded.startswith(blocked_abs + os.sep):
+                    return f"Access to blocked path: {blocked_path}"
+        return None
+
+    def _truncate_output(self, data: bytes) -> bytes:
+        """Bound host-side buffered output to the policy's max_output_size.
+
+        communicate() buffers whatever the container prints on the HOST, so an
+        unbounded print in sandboxed code exhausts the host process -- the very
+        thing the limit exists to contain. Mirrors subprocess.py.
+        """
+        max_output_size = self.config.security_policy.max_output_size
+        if max_output_size and max_output_size > 0 and len(data) > max_output_size:
+            return data[:max_output_size] + b"\n[OUTPUT TRUNCATED]"
+        return data
+
     @property
     def is_available(self) -> bool:
         """Check if Docker is available."""
@@ -206,7 +258,10 @@ class DockerSandbox:
                 )
                 
                 completed_at = time.time()
-                
+
+                stdout = self._truncate_output(stdout)
+                stderr = self._truncate_output(stderr)
+
                 return SandboxResult(
                     execution_id=execution_id,
                     status=SandboxStatus.COMPLETED,
@@ -298,16 +353,32 @@ class DockerSandbox:
         
         if isinstance(command, list):
             # Always quote list elements to prevent shell injection
+            cmd_parts = list(command)
             cmd_str = " ".join(shlex.quote(arg) for arg in command)
         else:
             if shell:
                 # Caller explicitly requested shell evaluation
+                cmd_parts = ["sh", "-c", command]
                 cmd_str = command
             else:
                 # Parse string safely then re-quote each part
                 cmd_parts = shlex.split(command)
                 cmd_str = " ".join(shlex.quote(part) for part in cmd_parts)
-        
+
+        # Enforce the command-level security policy before dispatch. The
+        # container bounds where code runs, but allowlisting, blocked commands
+        # and blocked paths have to be checked here -- the same enforcement
+        # SubprocessSandbox already applies.
+        policy_error = self._validate_command_against_policy(
+            cmd_parts, self.config.security_policy
+        )
+        if policy_error:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.FAILED,
+                error=policy_error,
+            )
+
         # Generate container name for timeout cleanup
         container_name = f"praisonai-{execution_id}"
         
@@ -368,7 +439,10 @@ class DockerSandbox:
                 )
                 
                 completed_at = time.time()
-                
+
+                stdout = self._truncate_output(stdout)
+                stderr = self._truncate_output(stderr)
+
                 return SandboxResult(
                     execution_id=execution_id,
                     status=SandboxStatus.COMPLETED,
