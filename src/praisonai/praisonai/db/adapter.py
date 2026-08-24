@@ -889,7 +889,7 @@ class PraisonAIDB:
             await self._dispatch_async(
                 self._state_store,
                 "set",
-                "aset",
+                "async_set",
                 f"agent:{session_id}",
                 {
                     "agent_name": agent_name,
@@ -1039,7 +1039,7 @@ class PraisonAIDB:
             # instead of overwriting it with a disconnected "ended" record.
             agent_key = f"agent:{session_id}"
             agent_data = await self._dispatch_async(
-                self._state_store, "get", "aget", agent_key
+                self._state_store, "get", "async_get", agent_key
             ) or {}
             agent_data.update({
                 "status": "ended",
@@ -1047,7 +1047,7 @@ class PraisonAIDB:
                 "metadata": {**agent_data.get("metadata", {}), **(metadata or {})},
             })
             await self._dispatch_async(
-                self._state_store, "set", "aset", agent_key, agent_data
+                self._state_store, "set", "async_set", agent_key, agent_data
             )
 
     async def aon_run_start(
@@ -1065,7 +1065,7 @@ class PraisonAIDB:
             await self._dispatch_async(
                 self._state_store,
                 "set",
-                "aset",
+                "async_set",
                 run_key,
                 {
                     "run_id": run_id,
@@ -1092,7 +1092,7 @@ class PraisonAIDB:
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
             run_data = await self._dispatch_async(
-                self._state_store, "get", "aget", run_key
+                self._state_store, "get", "async_get", run_key
             ) or {}
             run_data.update({
                 "ended_at": time.time(),
@@ -1102,7 +1102,7 @@ class PraisonAIDB:
                 "metadata": {**run_data.get("metadata", {}), **(metadata or {})},
             })
             await self._dispatch_async(
-                self._state_store, "set", "aset", run_key, run_data
+                self._state_store, "set", "async_set", run_key, run_data
             )
 
     async def aclose(self) -> None:

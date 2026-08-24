@@ -190,6 +190,119 @@ class AsyncMongoDBStateStore(StateStore):
         """Sync wrapper for clear."""
         return run_sync(self.async_clear(prefix))
     
+    async def async_keys(self, pattern: str = "*") -> List[str]:
+        """List keys matching a glob pattern asynchronously.
+
+        Mirrors the sync ``MongoDBStateStore.keys`` hardening: the literal
+        portion is ``re.escape``-d before glob wildcards (``*`` -> ``.*``,
+        ``?`` -> ``.``) are re-enabled, so regex metacharacters in a
+        user-supplied prefix cannot trigger ReDoS or unintended matches.
+        """
+        if not self._initialized:
+            await self.init()
+
+        if pattern == "*":
+            cursor = self._collection.find({}, {"_id": 1})
+        else:
+            import re
+            regex = re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
+            cursor = self._collection.find({"_id": {"$regex": f"^{regex}$"}}, {"_id": 1})
+
+        return [doc["_id"] async for doc in cursor]
+
+    def keys(self, pattern: str = "*") -> List[str]:
+        """Sync wrapper for keys."""
+        return run_sync(self.async_keys(pattern))
+
+    async def async_ttl(self, key: str) -> Optional[int]:
+        """Get remaining TTL in seconds asynchronously."""
+        if not self._initialized:
+            await self.init()
+
+        doc = await self._collection.find_one({"_id": key}, {"expires_at": 1})
+        if not doc or not doc.get("expires_at"):
+            return None
+
+        remaining = doc["expires_at"] - time.time()
+        if remaining <= 0:
+            return None
+        return int(remaining)
+
+    def ttl(self, key: str) -> Optional[int]:
+        """Sync wrapper for ttl."""
+        return run_sync(self.async_ttl(key))
+
+    async def async_expire(self, key: str, ttl: int) -> bool:
+        """Set TTL on an existing key asynchronously."""
+        if not self._initialized:
+            await self.init()
+
+        result = await self._collection.update_one(
+            {"_id": key},
+            {"$set": {"expires_at": time.time() + ttl}},
+        )
+        return result.modified_count > 0
+
+    def expire(self, key: str, ttl: int) -> bool:
+        """Sync wrapper for expire."""
+        return run_sync(self.async_expire(key, ttl))
+
+    async def async_hget(self, key: str, field: str) -> Optional[Any]:
+        """Get a field from a hash asynchronously."""
+        if not self._initialized:
+            await self.init()
+
+        doc = await self._collection.find_one({"_id": key})
+        if not doc or not isinstance(doc.get("value"), dict):
+            return None
+        return doc["value"].get(field)
+
+    def hget(self, key: str, field: str) -> Optional[Any]:
+        """Sync wrapper for hget."""
+        return run_sync(self.async_hget(key, field))
+
+    async def async_hset(self, key: str, field: str, value: Any) -> None:
+        """Set a field in a hash asynchronously."""
+        if not self._initialized:
+            await self.init()
+
+        await self._collection.update_one(
+            {"_id": key},
+            {"$set": {f"value.{field}": value, "updated_at": time.time()}},
+            upsert=True,
+        )
+
+    def hset(self, key: str, field: str, value: Any) -> None:
+        """Sync wrapper for hset."""
+        run_sync(self.async_hset(key, field, value))
+
+    async def async_hgetall(self, key: str) -> Dict[str, Any]:
+        """Get all fields from a hash asynchronously."""
+        if not self._initialized:
+            await self.init()
+
+        doc = await self._collection.find_one({"_id": key})
+        if not doc or not isinstance(doc.get("value"), dict):
+            return {}
+        return doc["value"]
+
+    def hgetall(self, key: str) -> Dict[str, Any]:
+        """Sync wrapper for hgetall."""
+        return run_sync(self.async_hgetall(key))
+
+    async def async_hdel(self, key: str, *fields: str) -> int:
+        """Delete fields from a hash asynchronously."""
+        if not self._initialized:
+            await self.init()
+
+        unset = {f"value.{field}": "" for field in fields}
+        result = await self._collection.update_one({"_id": key}, {"$unset": unset})
+        return len(fields) if result.modified_count > 0 else 0
+
+    def hdel(self, key: str, *fields: str) -> int:
+        """Sync wrapper for hdel."""
+        return run_sync(self.async_hdel(key, *fields))
+
     async def async_close(self) -> None:
         """Close the connection."""
         if self._client:
