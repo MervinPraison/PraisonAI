@@ -123,7 +123,7 @@ class Deploy:
         if not build_result.success:
             return build_result
 
-        if docker_cfg.push and docker_cfg.registry:
+        if docker_cfg.push:
             push_result = push_docker_image(docker_cfg)
             if not push_result.success:
                 return push_result

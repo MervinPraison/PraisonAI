@@ -41,7 +41,31 @@ def validate_agents_yaml(file_path: str) -> Optional[DeployConfig]:
         return None
     
     deploy_data = data['deploy']
-    
+
+    # The `deploy` section must be a mapping; a scalar or list here means the
+    # YAML is malformed (e.g. `deploy: docker`) and would otherwise blow up with
+    # a confusing error further down.
+    if not isinstance(deploy_data, dict):
+        raise ValueError(
+            "Invalid deploy config: 'deploy' must be a mapping, got "
+            f"{type(deploy_data).__name__}"
+        )
+
+    # Reject unknown keys in the deploy section so that a misspelled *section*
+    # name (e.g. `dockerr:` instead of `docker:`) is not silently discarded and
+    # deployed with all-default values. Keys are coerced to str for the error
+    # message so a non-string YAML key (e.g. `1:` or `true:`) still produces a
+    # clean ValueError rather than a TypeError from sorted()/join().
+    _known_deploy_keys = {'type', 'api', 'docker', 'cloud', 'agents'}
+    _unknown = [k for k in deploy_data if k not in _known_deploy_keys]
+    if _unknown:
+        raise ValueError(
+            "Unknown deploy config key(s): "
+            + ", ".join(sorted(map(str, _unknown)))
+            + ". Allowed keys: "
+            + ", ".join(sorted(_known_deploy_keys))
+        )
+
     # Parse deploy type
     deploy_type_str = deploy_data.get('type')
     if not deploy_type_str:

@@ -303,6 +303,8 @@ class DeployHandler:
                     console.print(f"  Provider: {provider_name}")
                     console.print(f"  Region: {config.cloud.region}")
                     console.print(f"  Service: {config.cloud.service_name}")
+                    if config.cloud.cluster_name:
+                        console.print(f"  Cluster: {config.cloud.cluster_name}")
         
         except ValueError as e:
             if args.json:
