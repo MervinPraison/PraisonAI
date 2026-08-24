@@ -7694,9 +7694,12 @@ class WebSocketGateway:
                 channel_name, facts=facts
             )
 
-            # Ack reaction — show processing indicator
+            # Ack reaction — show processing indicator.
+            # Scope-gated like the standalone Telegram adapter so ambient group
+            # chatter the bot won't answer is not acked (Greptile #4293): a
+            # private chat is direct; a reply to the bot counts as a mention.
             ack_ctx = None
-            if bot._ack.enabled:
+            if bot._ack.enabled and bot._ack.should_ack_message(message):
                 async def _tg_react(emoji, **kw):
                     try:
                         from telegram import ReactionTypeEmoji

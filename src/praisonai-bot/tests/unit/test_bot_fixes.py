@@ -409,6 +409,45 @@ class TestAckScopeGating:
         )
         assert reactor.should_ack_message(reply)
 
+    def test_gateway_telegram_path_scope_gates_ack(self):
+        """Gateway-hosted Telegram must gate acks by scope, not just ``enabled``.
+
+        Greptile #4293: the gateway's own Telegram message handler previously
+        acked whenever the reactor was ``enabled``, bypassing ``ack_scope`` so
+        ambient group chatter still got a reaction. Assert the handler routes
+        through ``should_ack_message`` like the standalone adapter.
+        """
+        import inspect
+        from praisonai_bot.gateway import server
+
+        source = inspect.getsource(server)
+        assert "bot._ack.should_ack_message(message)" in source
+
+    def test_slack_thread_reply_treated_as_engaged(self):
+        """A Slack thread reply is engaged, not ambient, under group-mentions.
+
+        Greptile #4293: when ``mention_required`` is off, a follow-up reply in
+        an ongoing thread (no fresh @mention) is still processed; it must not be
+        classified as ambient or it would silently lose its ack. The adapter
+        treats ``thread_ts`` as a mention; verify the shared contract acks it.
+        """
+        from praisonai_bot.bots._ack import AckReactor
+
+        reactor = AckReactor(ack_emoji="⏳")
+        # thread reply -> adapter sets is_mention=True, is_ambient=False
+        assert reactor.should_ack(
+            is_direct=False, is_mention=True, is_ambient=False
+        )
+
+    def test_slack_adapter_uses_thread_ts_for_ack(self):
+        """Slack ack gate must consider ``thread_ts`` when deriving mention."""
+        import inspect
+        from praisonai_bot.bots.slack import SlackBot
+
+        source = inspect.getsource(SlackBot.start)
+        assert 'event.get("thread_ts")' in source
+        assert "_in_thread" in source
+
 
 class TestWhatsAppRateLimiterIntegration:
     """Tests for WhatsApp rate limiter integration."""

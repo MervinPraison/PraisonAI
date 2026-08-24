@@ -563,8 +563,13 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 msg_ts = event.get("ts", "")
                 
                 # Ack reaction - show processing indicator
-                # (scope-gated: quiet on ambient channel chatter)
-                _is_mention = channel_type == "im" or (
+                # (scope-gated: quiet on ambient channel chatter). A reply
+                # inside a thread (thread_ts present) counts as engaging the
+                # bot even without a fresh @mention, so a follow-up in an
+                # ongoing thread is acked under group-mentions instead of being
+                # misclassified as ambient (Greptile #4293).
+                _in_thread = bool(event.get("thread_ts"))
+                _is_mention = channel_type == "im" or _in_thread or (
                     bool(self._bot_user)
                     and f"<@{self._bot_user.user_id}>"
                     in (event.get("text", "") or "")
