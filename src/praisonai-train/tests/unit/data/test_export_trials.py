@@ -254,6 +254,62 @@ def test_invalid_format_raises(tmp_path):
 
 # ── loads from a path ─────────────────────────────────────────────────────────
 
+# ── QC does not drop English agent trajectories ───────────────────────────────
+
+def test_qc_keeps_english_trajectories(tmp_path):
+    """--qc must not drop English agent runs via the Tamil script-purity default.
+
+    Agent trajectories are English by construction; the export QC config disables
+    the target-script check so a frontier case's passing English attempt survives.
+    """
+    case = {
+        "case_id": "c1",
+        "attempts": [
+            _attempt("The capital of France is Paris.", score=1.0, passed=True),
+            _attempt("wrong", score=0.0, passed=False),
+        ],
+    }
+    out = tmp_path / "train.jsonl"
+    summary = export_trials(_report([case]), out, qc=True)
+    assert summary.written == 1
+    assert summary.skipped_qc == 0
+    assert _read_jsonl(out)[0]["conversations"][-1]["content"].startswith("The capital")
+
+
+def test_qc_drops_reported_and_counted(tmp_path):
+    """When QC removes a row, it is counted (skipped_qc) with a named reason."""
+    # Two identical passing attempts across a frontier case: exact-dup drops one.
+    case = {
+        "case_id": "c1",
+        "attempts": [
+            _attempt("same english answer here", score=1.0, passed=True),
+            _attempt("same english answer here", score=1.0, passed=True),
+            _attempt("nope", score=0.0, passed=False),
+        ],
+    }
+    out = tmp_path / "train.jsonl"
+    summary = export_trials(_report([case]), out, qc=True)
+    assert summary.written == 1
+    assert summary.skipped_qc == 1
+    assert summary.qc_drops.get("exact_dup", 0) == 1
+
+
+def test_qc_cfg_can_reenable_script_check(tmp_path):
+    """An explicit qc_cfg still applies a script check (Tamil default here)."""
+    case = {
+        "case_id": "c1",
+        "attempts": [
+            _attempt("Entirely english output text here", score=1.0, passed=True),
+            _attempt("bad", score=0.0, passed=False),
+        ],
+    }
+    out = tmp_path / "train.jsonl"
+    summary = export_trials(
+        _report([case]), out, qc=True, qc_cfg={"script_drop": 0.5})
+    assert summary.written == 0
+    assert summary.qc_drops.get("low_script_purity", 0) == 1
+
+
 def test_loads_report_from_path(tmp_path):
     case = {"case_id": "c1", "attempts": [
         _attempt("4", score=1.0, passed=True),

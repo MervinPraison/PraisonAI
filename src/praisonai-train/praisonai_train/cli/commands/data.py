@@ -299,8 +299,15 @@ def from_trials(
     typer.echo(f"  wrote {summary.written} rows -> {out_path}")
     typer.echo(f"  provenance -> {out_path}.meta.json")
     if summary.written == 0:
-        typer.echo("error: no rows exported — check --all/--include-saturated or "
-                   "whether the report has passing, tool-free attempts", err=True)
+        if summary.qc_drops:
+            # QC removed every emitted row: name the actual reasons rather than
+            # guessing. ``low_script_purity`` here means the target-script floor
+            # rejected the trajectory — see 'script_range' in validate.yaml.
+            typer.echo(f"error: no rows exported — QC dropped all rows: "
+                       f"{summary.qc_drops}", err=True)
+        else:
+            typer.echo("error: no rows exported — check --all/--include-saturated or "
+                       "whether the report has passing, tool-free attempts", err=True)
         raise typer.Exit(1)
 
 
@@ -312,6 +319,11 @@ def validate_data(
     no_near_dup: bool = typer.Option(False, "--no-near-dup", help="Skip the O(n^2) near-dup pass"),
 ):
     """Quality-check a dataset (dedup, boilerplate/refusal, script purity, diversity).
+
+    Script purity checks outputs against a target Unicode block. The default is
+    the Tamil block (U+0B80–U+0BFF); set 'script_range' in the config to your
+    language (e.g. [65, 591] for Latin) — otherwise non-Tamil outputs are dropped
+    as 'low_script_purity'. See praisonai_train/setup/validate.yaml.
 
     Example: praisonai-train validate data.jsonl --out clean.jsonl
              praisonai-train validate --config qc.yaml
@@ -353,8 +365,36 @@ def validate_data(
 
     out_path = out or cfg.get("output")
     if out_path:
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w") as fh:
-            for r in result["kept"]:
-                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        # Write to a sibling temp file and atomically replace the destination only
+        # when at least one row survived QC (mirrors `dedup`/`generate`). This means
+        # (a) an --out that aliases the input is never truncated to 0 bytes when
+        # everything is dropped — the existing corpus is left intact — and (b) a
+        # crash mid-write can't leave a partial file a downstream job mistakes for
+        # a result.
+        import os
+        import tempfile
+
+        replace_target = _resolve_replace_target(out_path)
+        out_dir = Path(replace_target).parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as fh:
+                for r in result["kept"]:
+                    fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+            if result["kept_n"]:
+                _apply_replacement_mode(tmp_name, replace_target)
+                os.replace(tmp_name, replace_target)
+            else:
+                os.unlink(tmp_name)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
         typer.echo(f"  wrote {result['kept_n']} filtered rows -> {out_path}")
+    if result["kept_n"] == 0:
+        typer.echo("error: no rows kept — all rows were dropped by QC "
+                   f"({result['drops']}); any existing --out was left intact", err=True)
+        raise typer.Exit(1)

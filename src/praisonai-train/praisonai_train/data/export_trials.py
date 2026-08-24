@@ -52,19 +52,25 @@ class ExportSummary:
     skipped_saturated: int = 0
     skipped_tool_runs: int = 0
     skipped_no_text: int = 0
+    skipped_qc: int = 0
+    qc_drops: dict[str, int] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     def __str__(self) -> str:  # concise, CLI-friendly
-        return (
+        base = (
             f"written={self.written} "
             f"skipped_failed={self.skipped_failed} "
             f"skipped_tool_runs={self.skipped_tool_runs} "
             f"skipped_no_text={self.skipped_no_text} "
             f"skipped_unscored={self.skipped_unscored} "
-            f"skipped_saturated={self.skipped_saturated}"
+            f"skipped_saturated={self.skipped_saturated} "
+            f"skipped_qc={self.skipped_qc}"
         )
+        if self.qc_drops:
+            base += f" qc_drops={self.qc_drops}"
+        return base
 
 
 @dataclass
@@ -285,9 +291,12 @@ def export_trials(
             )
 
     if qc:
-        kept_rows = filter_rows_for_export([ln.row for ln in lines], qc_cfg, format)
+        before = len(lines)
+        kept_rows, drops = filter_rows_for_export([ln.row for ln in lines], qc_cfg, format)
         kept_ids = {id(r) for r in kept_rows}
         lines = [ln for ln in lines if id(ln.row) in kept_ids]
+        summary.skipped_qc = before - len(lines)
+        summary.qc_drops = drops
 
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -317,18 +326,40 @@ def export_trials(
     return summary
 
 
-def filter_rows_for_export(rows: list[dict], cfg: Optional[dict], format: str) -> list[dict]:
+def _export_qc_cfg(cfg: Optional[dict]) -> dict:
+    """QC config for exported trajectories, with the script-purity check disabled.
+
+    ``data.qc``'s script-purity default (``script_range``) is the Tamil block, but
+    agent trajectories are English by construction — the trainer's own captured
+    turns, not a translation corpus. Applying the Tamil floor would drop 100% of
+    them as ``low_script_purity``. So default ``script_drop``/``script_flag`` to 0
+    (nothing can fall below the floor) while keeping dedup, boilerplate/refusal,
+    length and diversity intact. An explicit ``qc_cfg`` still wins for callers who
+    know their trajectories' script.
+    """
+    merged = {"script_drop": 0.0, "script_flag": 0.0}
+    if cfg:
+        merged.update(cfg)
+    return merged
+
+
+def filter_rows_for_export(
+    rows: list[dict], cfg: Optional[dict], format: str
+) -> tuple[list[dict], dict[str, int]]:
     """Run rows through the existing QC filter, adapting ShareGPT to its fields.
 
     ``data.qc`` operates on ``instruction``/``input``/``output`` rows, so ShareGPT
-    rows are mapped to a QC view keyed back to the original row identity.
+    rows are mapped to a QC view keyed back to the original row identity. Returns
+    the kept rows (in original identity/order) and the per-reason ``drops`` dict so
+    the caller can report *why* rows were removed instead of guessing.
     """
-    from praisonai_train.data.qc import filter_rows
+    from praisonai_train.data.qc import score
 
+    cfg = _export_qc_cfg(cfg)
     if format == "alpaca":
-        kept = filter_rows(rows, cfg)
-        kept_set = {id(r) for r in kept}
-        return [r for r in rows if id(r) in kept_set]
+        result = score(rows, cfg)
+        kept_set = {id(r) for r in result["kept"]}
+        return [r for r in rows if id(r) in kept_set], result["drops"]
 
     views: list[dict] = []
     view_to_row: dict[int, dict] = {}
@@ -336,6 +367,7 @@ def filter_rows_for_export(rows: list[dict], cfg: Optional[dict], format: str) -
         view = _to_alpaca(r["conversations"])
         views.append(view)
         view_to_row[id(view)] = r
-    kept_views = filter_rows(views, cfg)
-    kept_view_ids = {id(v) for v in kept_views}
-    return [view_to_row[id(v)] for v in views if id(v) in kept_view_ids]
+    result = score(views, cfg)
+    kept_view_ids = {id(v) for v in result["kept"]}
+    kept = [view_to_row[id(v)] for v in views if id(v) in kept_view_ids]
+    return kept, result["drops"]
