@@ -3259,42 +3259,69 @@ CONCISE SUMMARY:"""
             List of items, or [text] if no list found
         """
         import json
-        import re
         
         if not text or not text.strip():
             return []
         
         text = text.strip()
         
-        # 1. Try direct JSON parse (pure JSON array)
+        # 1. Try direct JSON parse (pure JSON array).
+        # RecursionError guards against deeply-nested bracket input, which the
+        # C/Python JSON scanner surfaces instead of JSONDecodeError (CWE-674).
         try:
             parsed = json.loads(text)
             if isinstance(parsed, list):
                 return parsed
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             pass
         
-        # 2. Search for an embedded JSON array without a backtracking regex.
+        # 2. Search for an embedded list without a backtracking regex.
         # The previous nested-repeat pattern could take exponential time on
         # adversarial bracket/quote input (CWE-1333/CWE-730). JSONDecoder
-        # validates each candidate using the JSON grammar in linear parsing time.
+        # validates each candidate using the JSON grammar. raw_decode is
+        # anchored with the ``idx`` argument so we never allocate an
+        # overlapping ``text[start:]`` copy per bracket. To bound the total
+        # work on bracket-dense adversarial output (e.g. deeply nested "[[[["
+        # where each raw_decode still rescans toward the end, giving O(n^2)),
+        # we cap both the input size and the number of decode attempts.
         decoder = json.JSONDecoder()
         max_scan_chars = 1_000_000
         if len(text) > max_scan_chars:
             logger.warning("Loop list text exceeds the safe parsing limit")
             return [text]
+        max_decode_attempts = 10_000
         
-        for start, char in enumerate(text):
-            if char != '[':
-                continue
+        start = text.find('[')
+        attempts = 0
+        while start != -1 and attempts < max_decode_attempts:
+            attempts += 1
             try:
-                parsed, _ = decoder.raw_decode(text[start:])
-            except json.JSONDecodeError:
+                parsed, _ = decoder.raw_decode(text, start)
+            except (json.JSONDecodeError, RecursionError):
+                start = text.find('[', start + 1)
                 continue
             if isinstance(parsed, list) and len(parsed) > 0:
                 return parsed
+            start = text.find('[', start + 1)
         
-        # 3. Fallback: wrap as single item
+        # 3. Fallback for Python-style lists with single quotes, e.g.
+        # "['topic1', 'topic2']", which strict JSON rejects. ast.literal_eval
+        # only evaluates literals (no code execution) so it is safe here and
+        # preserves the single-quoted parsing the previous regex supported.
+        # A single attempt on the outermost bracket span keeps this linear;
+        # LLM output places the list contiguously rather than fragmented.
+        import ast
+        first = text.find('[')
+        last = text.rfind(']')
+        if first != -1 and last > first:
+            try:
+                parsed = ast.literal_eval(text[first:last + 1])
+                if isinstance(parsed, (list, tuple)) and len(parsed) > 0:
+                    return list(parsed)
+            except (ValueError, SyntaxError, RecursionError):
+                pass
+        
+        # 4. Fallback: wrap as single item
         return [text]
     
     def _execute_repeat(

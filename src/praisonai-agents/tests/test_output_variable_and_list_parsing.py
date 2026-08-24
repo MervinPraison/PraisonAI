@@ -241,6 +241,36 @@ These topics are trending this week.
         assert len(result) == 1
         assert result == ['just a plain string']
 
+    def test_parse_single_quoted_python_list(self):
+        """Python-style single-quoted lists must not collapse to one item."""
+        from praisonaiagents.workflows import Workflow
+
+        workflow = Workflow(steps=[])
+        result = workflow._parse_list_from_string("['topic1', 'topic2', 'topic3']")
+
+        assert result == ['topic1', 'topic2', 'topic3']
+
+    def test_parse_single_quoted_list_embedded_in_text(self):
+        """Single-quoted list embedded in surrounding text is extracted."""
+        from praisonaiagents.workflows import Workflow
+
+        workflow = Workflow(steps=[])
+        result = workflow._parse_list_from_string("Topics: ['a', 'b'] found")
+
+        assert result == ['a', 'b']
+
+    def test_parse_adversarial_bracket_input_is_bounded(self):
+        """Deeply nested/bracket-dense input must not hang or crash."""
+        import time
+        from praisonaiagents.workflows import Workflow
+
+        workflow = Workflow(steps=[])
+        text = '[' * 100_000 + 'x'
+        start = time.time()
+        result = workflow._parse_list_from_string(text)
+        assert time.time() - start < 15
+        assert result == [text]
+
 
 class TestBeginnerFriendlyYAML:
     """Tests for beginner-friendly YAML syntax."""
