@@ -162,6 +162,7 @@ def test_azure_provider_deploy_success(mock_run):
         region="eastus",
         service_name="test-service",
         resource_group="test-rg",
+        subscription_id="11111111-2222-3333-4444-555555555555",
         image="test-image:latest"
     )
     
@@ -174,6 +175,32 @@ def test_azure_provider_deploy_success(mock_run):
     result = provider.deploy()
     
     assert result.success is True
+    # Every az invocation must target the configured subscription.
+    for call in mock_run.call_args_list:
+        argv = call.args[0]
+        assert '--subscription' in argv
+        assert config.subscription_id in argv
+
+
+@patch('subprocess.run')
+def test_azure_provider_deploy_requires_subscription(mock_run):
+    """Azure deploy fails fast when subscription_id is not configured."""
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
+
+    config = CloudConfig(
+        provider=CloudProvider.AZURE,
+        region="eastus",
+        service_name="test-service",
+        resource_group="test-rg",
+        image="test-image:latest"
+    )
+
+    provider = AzureProvider(config)
+    result = provider.deploy()
+
+    assert result.success is False
+    mock_run.assert_not_called()
 
 
 @patch('subprocess.run')
@@ -186,7 +213,8 @@ def test_azure_provider_deploy_failure(mock_run):
         provider=CloudProvider.AZURE,
         region="eastus",
         service_name="test-service",
-        resource_group="test-rg"
+        resource_group="test-rg",
+        subscription_id="11111111-2222-3333-4444-555555555555"
     )
     
     mock_run.side_effect = subprocess.CalledProcessError(1, 'az')
@@ -195,6 +223,47 @@ def test_azure_provider_deploy_failure(mock_run):
     result = provider.deploy()
     
     assert result.success is False
+    mock_run.assert_called()
+
+
+@patch('subprocess.run')
+def test_azure_provider_status_requires_subscription(mock_run):
+    """Azure status fails fast when subscription_id is not configured."""
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider, ServiceState
+
+    config = CloudConfig(
+        provider=CloudProvider.AZURE,
+        region="eastus",
+        service_name="test-service",
+        resource_group="test-rg"
+    )
+
+    provider = AzureProvider(config)
+    status = provider.status()
+
+    assert status.state == ServiceState.UNKNOWN
+    mock_run.assert_not_called()
+
+
+@patch('subprocess.run')
+def test_azure_provider_destroy_requires_subscription(mock_run):
+    """Azure destroy fails fast when subscription_id is not configured."""
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
+
+    config = CloudConfig(
+        provider=CloudProvider.AZURE,
+        region="eastus",
+        service_name="test-service",
+        resource_group="test-rg"
+    )
+
+    provider = AzureProvider(config)
+    result = provider.destroy()
+
+    assert result.success is False
+    mock_run.assert_not_called()
 
 
 @patch('subprocess.run')

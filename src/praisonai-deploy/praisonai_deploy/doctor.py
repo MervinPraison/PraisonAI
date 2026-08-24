@@ -180,8 +180,13 @@ def check_aws_cli() -> DoctorCheckResult:
         )
 
 
-def check_azure_cli() -> DoctorCheckResult:
-    """Check Azure CLI configuration."""
+def check_azure_cli(subscription_id: str = None) -> DoctorCheckResult:
+    """Check Azure CLI configuration.
+
+    When ``subscription_id`` is provided, the ambient subscription reported by
+    ``az account show`` is compared against it and a mismatch is surfaced as a
+    warning so resources are not silently created in the wrong subscription.
+    """
     try:
         result = subprocess.run(
             ['az', 'account', 'show', '--output', 'json'],
@@ -195,6 +200,17 @@ def check_azure_cli() -> DoctorCheckResult:
             account = json.loads(result.stdout)
             sub_id = account.get('id', 'unknown')
             name = account.get('name', 'unknown')
+            
+            if subscription_id and sub_id != subscription_id:
+                return DoctorCheckResult(
+                    name="Azure CLI",
+                    passed=False,
+                    message=(
+                        f"Ambient subscription ({sub_id[:8]}...) does not match "
+                        f"configured subscription_id ({subscription_id[:8]}...)"
+                    ),
+                    fix_suggestion=f"Run: az account set --subscription {subscription_id}"
+                )
             
             return DoctorCheckResult(
                 name="Azure CLI",
