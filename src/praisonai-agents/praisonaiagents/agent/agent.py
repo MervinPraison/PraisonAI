@@ -1856,6 +1856,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             elif isinstance(_guardrails_config, str):
                 # LLM validator prompt
                 guardrail = _guardrails_config
+
+        # Persist the resolved value so clone_for_channel() can forward it.
+        # Without this the attribute never exists, its getattr(..., None) in
+        # clone_for_channel() yields None, and every served clone runs with no
+        # output guardrail at all (one clone per gateway channel / HTTP call).
+        self._guardrails_config = _guardrails_config
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve WEB param - FAST PATH
@@ -2461,6 +2467,11 @@ Your Goal: {self.goal}
         # ApprovalConfig = full control (all_tools, timeout, etc.)
         # str = permission preset ("safe", "read_only", "full")
         from ..approval.protocols import ApprovalConfig
+        # Persist the approval kwarg exactly as given: it round-trips through the
+        # constructor (str | bool | ApprovalConfig | dict | backend object).
+        # clone_for_channel() reads this; without it the attribute never exists
+        # and every served clone loses its approval policy.
+        self._approval_config = approval
         self._perm_deny = frozenset()  # Permission tier deny set (empty = no denials)
         self._perm_allow = None        # Permission tier allow set (None = allow all)
         # Optional pattern-based PermissionManager (rules from
