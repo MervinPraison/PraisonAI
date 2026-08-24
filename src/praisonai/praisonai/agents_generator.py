@@ -1527,21 +1527,23 @@ class AgentsGenerator:
 def safe_format(template, **kwargs):
     """
     Safe string formatting that preserves JSON/dict literals while substituting variables.
-    
+
     This function only substitutes placeholders that look like identifiers (e.g., {topic})
     while preserving JSON structures like {"level": 2}.
-    
+
+    Delegates to the single source of truth,
+    ``BaseFrameworkAdapter._format_template`` in the core SDK, so the wrapper
+    and core cannot drift (non-string short-circuit, regex, missing-key
+    handling). ``_format_template`` is stateless; a fresh instance is free.
+
     Args:
         template (str): Template string with placeholders
         **kwargs: Values to substitute
-        
+
     Returns:
         str: Formatted string with safe substitutions
     """
-    # Use the same regex-based substitution logic as BaseFrameworkAdapter._format_template
-    def replace_placeholder(match):
-        placeholder = match.group(1)
-        return str(kwargs.get(placeholder, match.group(0)))
-    
-    # Only replace placeholders that look like identifiers
-    return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', replace_placeholder, template)
+    from praisonaiagents.frameworks.base import BaseFrameworkAdapter
+    return BaseFrameworkAdapter._format_template(
+        BaseFrameworkAdapter(), template, **kwargs
+    )
