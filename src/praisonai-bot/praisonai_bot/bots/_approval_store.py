@@ -60,6 +60,7 @@ def _serialize_request(request: ApprovalRequest) -> str:
             "session_id": request.session_id,
             "context": request.context,
             "approval_id": request.approval_id,
+            "authorized_reviewers": request.authorized_reviewers,
         },
         default=str,
     )
@@ -75,6 +76,7 @@ def _deserialize_request(raw: str) -> ApprovalRequest:
         session_id=data.get("session_id"),
         context=data.get("context", {}),
         approval_id=data.get("approval_id"),
+        authorized_reviewers=data.get("authorized_reviewers"),
     )
 
 

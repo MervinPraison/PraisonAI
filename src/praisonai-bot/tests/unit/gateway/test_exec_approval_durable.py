@@ -194,6 +194,111 @@ def test_prune_marks_store_row_expired(tmp_path):
     assert row["status"] == "expired"
 
 
+def test_resolver_identity_recorded_in_audit_trail(tmp_path):
+    """resolve() records the resolving principal on the durable audit row."""
+    store = ApprovalStore(path=tmp_path / "approvals.sqlite")
+    mgr = ExecApprovalManager(
+        ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+    )
+
+    async def go():
+        rid, future = await mgr.register(tool_name="shell_exec", arguments={})
+        mgr.resolve(rid, Resolution(approved=True, resolver="operator:alice"))
+        for _ in range(100):
+            if store.pending_count() == 0:
+                break
+            await asyncio.sleep(0.01)
+        return rid, await future
+
+    rid, _ = asyncio.run(go())
+    row = store.get(rid)
+    assert row is not None
+    assert row["approver"] == "operator:alice"
+
+
+def test_resolver_identity_defaults_to_gateway(tmp_path):
+    """No resolver keeps today's anonymous ``gateway`` attribution."""
+    store = ApprovalStore(path=tmp_path / "approvals.sqlite")
+    mgr = ExecApprovalManager(
+        ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+    )
+
+    async def go():
+        rid, future = await mgr.register(tool_name="shell_exec", arguments={})
+        mgr.resolve(rid, Resolution(approved=True))
+        for _ in range(100):
+            if store.pending_count() == 0:
+                break
+            await asyncio.sleep(0.01)
+        return rid, await future
+
+    rid, _ = asyncio.run(go())
+    assert store.get(rid)["approver"] == "gateway"
+
+
+def test_authorized_reviewer_binding_rejects_other_operator(tmp_path):
+    """A bound request cannot be resolved by an unauthorised operator."""
+    mgr = ExecApprovalManager(ttl=300, durable=False)
+
+    async def go():
+        rid, future = await mgr.register(
+            tool_name="deploy",
+            arguments={},
+            authorized_reviewers=["operator:alice"],
+        )
+        # Wrong operator is rejected and the request stays pending.
+        assert mgr.resolve(rid, Resolution(approved=True, resolver="operator:bob")) is False
+        assert mgr.get_pending(rid) is not None
+        # Authorised operator resolves (first-answer-wins preserved).
+        assert mgr.resolve(rid, Resolution(approved=True, resolver="operator:alice")) is True
+        return await future
+
+    res = asyncio.run(go())
+    assert res.approved is True
+
+
+def test_unbound_request_resolvable_by_anyone(tmp_path):
+    """Without a reviewer binding any resolver may resolve (legacy behaviour)."""
+    mgr = ExecApprovalManager(ttl=300, durable=False)
+
+    async def go():
+        rid, future = await mgr.register(tool_name="deploy", arguments={})
+        assert mgr.resolve(rid, Resolution(approved=True, resolver="operator:bob")) is True
+        return await future
+
+    assert asyncio.run(go()).approved is True
+
+
+def test_authorized_reviewers_survive_restart(tmp_path):
+    """Per-request custody binding is durable across a rehydrate."""
+    store = ApprovalStore(path=tmp_path / "approvals.sqlite")
+    allow_path = tmp_path / "allow.sqlite"
+
+    async def register_only():
+        mgr = ExecApprovalManager(ttl=300, store=store, allowlist_path=allow_path)
+        rid, _ = await mgr.register(
+            tool_name="deploy",
+            arguments={},
+            authorized_reviewers=["operator:alice"],
+        )
+        return rid
+
+    rid = asyncio.run(register_only())
+
+    async def restart_and_check():
+        mgr2 = ExecApprovalManager(ttl=300, store=store, allowlist_path=allow_path)
+        await mgr2.rehydrate()
+        req = mgr2.get_pending(rid)
+        # Wrong operator still rejected after restart.
+        assert mgr2.resolve(rid, Resolution(approved=True, resolver="operator:bob")) is False
+        assert mgr2.resolve(rid, Resolution(approved=True, resolver="operator:alice")) is True
+        return req
+
+    req = asyncio.run(restart_and_check())
+    assert req is not None
+    assert req.authorized_reviewers == frozenset({"operator:alice"})
+
+
 def test_allow_always_grant_persists_across_manager_restart(tmp_path):
     """allow_always via resolve() persists and short-circuits after restart."""
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
