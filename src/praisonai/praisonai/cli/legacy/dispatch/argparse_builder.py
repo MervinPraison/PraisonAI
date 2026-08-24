@@ -11,6 +11,14 @@ from typing import Optional, Sequence
 from praisonai.cli.legacy.framework_run import fw_registry_module as _fw_registry_module
 
 
+# Authoritative list of verbs the legacy argparse dispatcher implements. Kept as
+# a module-level constant so the unified dispatcher (``praisonai.__main__``) can
+# consult the same oracle: a token that is one of these is an *implemented* verb
+# and must reach its handler, never be reclassified as free text and billed to an
+# LLM (see #4327). ``build_argument_parser`` returns this same object.
+LEGACY_SPECIAL_COMMANDS = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends', 'audit']
+
+
 # Bare verbs that look like a top-level command but do not exist as one.
 # Typing them (e.g. `praisonai show`) must NOT silently become a paid one-shot
 # LLM prompt; instead we point users at the real command surfaces.
@@ -65,7 +73,7 @@ def classify_unknown_command(command: Optional[str], special_commands: Sequence[
 
 def build_argument_parser(in_test_env: bool):
     """Build ArgumentParser and parse argv. Returns (args, unknown_args, special_commands)."""
-    special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends', 'audit']
+    special_commands = list(LEGACY_SPECIAL_COMMANDS)
 
     parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
     try:

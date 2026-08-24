@@ -823,6 +823,82 @@ class TestMainRouting(unittest.TestCase):
         run_legacy.assert_not_called()
 
 
+class TestImplementedLegacyVerbRouting(unittest.TestCase):
+    """Implemented legacy verbs route to legacy, never billed as a prompt (#4327).
+
+    Since ``82f55c97b`` a first token that is not a *Typer* command was
+    reclassified as free text and forwarded to the modern ``run`` engine —
+    billing implemented verbs (``thinking``, ``install``, ``persistence`` …) to
+    ``/v1/responses``. The dispatcher now consults the legacy dispatcher's own
+    authoritative verb oracle so implemented verbs reach their handler.
+    """
+
+    def setUp(self):
+        self._saved_argv = sys.argv
+        dispatcher._typer_commands_cache = None
+        dispatcher._legacy_verbs_cache = None
+
+    def tearDown(self):
+        sys.argv = self._saved_argv
+        dispatcher._typer_commands_cache = None
+        dispatcher._legacy_verbs_cache = None
+
+    def test_is_implemented_legacy_verb(self):
+        with mock.patch.object(
+            dispatcher, "_get_legacy_verbs", return_value=frozenset({"thinking"})
+        ):
+            self.assertTrue(dispatcher._is_implemented_legacy_verb("thinking"))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb("nope"))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb(""))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb(None))
+
+    def test_excluded_verbs_are_not_implemented(self):
+        # ``containers``/``vector-stores`` withheld pending #4322 even though
+        # they appear in the legacy oracle.
+        with mock.patch.object(
+            dispatcher,
+            "_get_legacy_verbs",
+            return_value=frozenset({"containers", "vector-stores", "thinking"}),
+        ):
+            self.assertFalse(dispatcher._is_implemented_legacy_verb("containers"))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb("vector-stores"))
+            self.assertTrue(dispatcher._is_implemented_legacy_verb("thinking"))
+
+    def test_legacy_verb_routes_to_legacy_not_typer_run(self):
+        sys.argv = ["praisonai", "thinking", "status"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher, "_get_legacy_verbs", return_value=frozenset({"thinking"})
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once_with(["thinking", "status"])
+        run_typer.assert_not_called()
+
+    def test_excluded_legacy_verb_is_not_forced_to_legacy(self):
+        # A withheld verb (#4322) falls through to the existing bare-prompt path
+        # rather than being force-routed to legacy.
+        sys.argv = ["praisonai", "containers", "list"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_legacy_verbs",
+            return_value=frozenset({"containers"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_not_called()
+        run_typer.assert_called_once_with(["run", "containers list"])
+
+    def test_get_legacy_verbs_sources_the_authoritative_oracle(self):
+        verbs = dispatcher._get_legacy_verbs()
+        # A representative sample of implemented verbs from the legacy oracle.
+        for verb in ("thinking", "install", "persistence", "audio", "files"):
+            self.assertIn(verb, verbs)
+
+
 class TestBuildRunArgv(unittest.TestCase):
     """``_build_run_argv`` partitions a bare-prompt argv into a ``run`` call.
 

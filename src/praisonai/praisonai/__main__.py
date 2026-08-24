@@ -23,6 +23,21 @@ import threading
 _typer_commands_cache = None
 _typer_commands_lock = threading.Lock()
 
+# Cache for the legacy dispatcher's implemented-verb set. ``None`` means "not yet
+# computed"; a frozenset once derived. Populated lazily from the legacy
+# argparse builder's authoritative ``LEGACY_SPECIAL_COMMANDS`` oracle so the
+# unified dispatcher never reclassifies an *implemented* verb as free text and
+# bills it to an LLM (#4327).
+_legacy_verbs_cache = None
+_legacy_verbs_lock = threading.Lock()
+
+# Verbs excluded from the "route implemented verbs to legacy" guard. ``containers``
+# and ``vector-stores`` reach a capability that fabricates a success with zero
+# network (#4322); restoring their routing would promote that fabrication from
+# unreachable to user-visible, so they are held back until #4322 lands. They keep
+# their current behaviour rather than being rerouted here.
+_LEGACY_VERB_ROUTING_EXCLUSIONS = frozenset({"containers", "vector-stores"})
+
 # Cache for the run command's supported option names. ``None`` means "not yet
 # computed"; a tuple ``(all_opts, value_opts)`` once derived; ``False`` marks a
 # discovery failure so the conservative legacy fallback is used without retrying
@@ -261,6 +276,51 @@ def _get_typer_commands():
 
         _typer_commands_cache = commands
         return _typer_commands_cache
+
+
+def _get_legacy_verbs():
+    """Auto-discover the legacy dispatcher's implemented-verb set.
+
+    Sourced from the legacy argparse builder's authoritative
+    ``LEGACY_SPECIAL_COMMANDS`` oracle so this stays in lockstep with the verbs
+    legacy actually handles. Returns an empty set on import failure so callers
+    degrade to the pre-existing bare-prompt behaviour rather than crash.
+    """
+    global _legacy_verbs_cache
+
+    if _legacy_verbs_cache is not None:
+        return _legacy_verbs_cache
+
+    with _legacy_verbs_lock:
+        if _legacy_verbs_cache is not None:  # Double-check
+            return _legacy_verbs_cache
+
+        try:
+            from praisonai.cli.legacy.dispatch.argparse_builder import (
+                LEGACY_SPECIAL_COMMANDS,
+            )
+            verbs = frozenset(LEGACY_SPECIAL_COMMANDS)
+        except Exception:
+            # Do NOT poison the cache on failure — let the next caller retry.
+            return frozenset()
+
+        _legacy_verbs_cache = verbs
+        return _legacy_verbs_cache
+
+
+def _is_implemented_legacy_verb(first_cmd):
+    """True when ``first_cmd`` is a verb the legacy dispatcher implements.
+
+    Such a token is an *implemented command*, not free text — it must reach its
+    handler on the legacy path, never be joined/quoted and billed to an LLM by
+    the modern ``run`` forwarder (#4327). A small exclusion set
+    (:data:`_LEGACY_VERB_ROUTING_EXCLUSIONS`) is withheld pending #4322.
+    """
+    if not first_cmd:
+        return False
+    if first_cmd in _LEGACY_VERB_ROUTING_EXCLUSIONS:
+        return False
+    return first_cmd in _get_legacy_verbs()
 
 
 def _iter_argv_tokens(argv, value_opts=None):
@@ -608,6 +668,15 @@ def main():
     if first_cmd in _get_typer_commands():
         # Known Typer command → Typer
         _run_typer(argv)
+        return
+
+    # A verb the legacy dispatcher implements is a *command*, not free text.
+    # Without this guard it falls through to the bare-prompt rule below and is
+    # joined/quoted into a modern ``run`` prompt and billed to an LLM (#4327):
+    # ``praisonai thinking status`` costs ~2.5k tokens and exits 0 instead of
+    # reaching its handler. Route it to legacy, which owns the handler.
+    if _is_implemented_legacy_verb(first_cmd):
+        _run_legacy(argv)
         return
 
     # A lone token that is a near-miss for a registered command is a mistyped
