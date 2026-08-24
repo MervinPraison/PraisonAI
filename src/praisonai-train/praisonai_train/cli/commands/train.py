@@ -79,8 +79,12 @@ def train_llm(
     try:
         praison = PraisonAI()
         praison.main()
-    except SystemExit:
-        pass
+    except SystemExit as exc:
+        # Propagate a non-zero exit (e.g. missing training dependencies) so
+        # callers and CI gating on ``$?`` see the failure. A clean exit is
+        # swallowed so the command returns 0 as before.
+        if exc.code:
+            raise typer.Exit(exc.code if isinstance(exc.code, int) else 1) from exc
     finally:
         sys.argv = original_argv
 
