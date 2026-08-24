@@ -1568,7 +1568,18 @@ Write the complete compiled report:"""
                         result.get("_praison_retryable") is False):
                         result.pop("_praison_retryable", None)
                         return result
-                    
+
+                    # The body already ran and may have completed its side effect
+                    # before failing. Honour an explicit restart_safe=False /
+                    # idempotent=False declaration, exactly as the sync loops do
+                    # (tool_execution.py:884 and :2115). Without this the async
+                    # path accepts the declaration and silently re-runs the tool
+                    # up to max_attempts times -- charging a card three times for
+                    # a tool the author marked "must never be silently re-executed".
+                    if self._tool_declares_not_idempotent(function_name, tools_override):
+                        result.pop("_praison_retryable", None)
+                        return result
+
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
                     

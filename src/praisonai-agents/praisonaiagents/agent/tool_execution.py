@@ -2996,7 +2996,7 @@ class ToolExecutionMixin:
         else:
             return f"Unknown bridge tool: {function_name}"
 
-    def _tool_declares_not_idempotent(self, tool_name):
+    def _tool_declares_not_idempotent(self, tool_name, tools_override=None):
         """True only when the tool *explicitly* declares itself unsafe to re-run.
 
         Deliberately narrower than ``_is_tool_idempotent``, which answers False
@@ -3008,10 +3008,19 @@ class ToolExecutionMixin:
         73-name list maintained for the escalation loop guard, and using it here
         silently removed the retry from any *undeclared* tool that happened to
         share a name with an entry (``write_file``, ``store_memory``, ``mkdir``...).
+
+        ``tools_override`` mirrors the resolution order in ``_execute_tool_impl`` /
+        ``_execute_tool_async_impl``: a task-scoped tool passed via ``tools_override``
+        shadows an agent-level tool of the same name, so its declaration must win.
+        Without this an override-only ``restart_safe=False`` tool would be missed
+        here and silently retried.
         """
         tools = getattr(self, 'tools', [])
         if not isinstance(tools, (list, tuple)):
             tools = []
+        if isinstance(tools_override, (list, tuple)):
+            # Override tools take precedence and are searched first.
+            tools = list(tools_override) + list(tools)
         for tool in tools:
             name_attr = getattr(tool, '__name__', None) or getattr(tool, 'name', None)
             if name_attr == tool_name:
