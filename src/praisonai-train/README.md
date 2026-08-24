@@ -119,9 +119,9 @@ praisonai-train validate data/tamil.jsonl --out data/clean.jsonl
 purity floor for a *target Unicode block*, and that block defaults to Tamil
 (`script_range: [2944, 3071]  # U+0B80–U+0BFF`, see `praisonai_train/setup/validate.yaml`).
 For any other language, set `script_range` in your config (e.g. `[65, 591]` for
-Latin) — otherwise non-Tamil outputs are dropped as `low_script_purity`. Only
-`validate` rewrites `--out` atomically and leaves an existing file intact when
-zero rows survive.
+Latin) — otherwise non-Tamil outputs are dropped as `low_script_purity`. Like
+`generate` and `dedup`, `validate` rewrites `--out` atomically and leaves an
+existing file intact when zero rows survive.
 
 Add a language/domain by registering a `Recipe`, or a new QC rule by registering a
 `RowCheck` (see `praisonai_train/data/`), and they show up automatically.
@@ -162,9 +162,11 @@ zero-pass cases have nothing to export); tool-using runs are excluded by default
 maps every line to its case id, attempt index and score, and emission order is
 deterministic → reproducible files. Add `--qc` to run rows through the QC filter
 (dedup, boilerplate/refusal, length, diversity) — the Tamil script-purity check is
-skipped here since agent trajectories are English by construction; pass `qc_cfg`
-to `export_trials` to enable a script check for your language. Use `--format
-alpaca` for instruction/input/output.
+skipped here since agent trajectories are English by construction. To re-enable a
+script check for another language, pass `qc_cfg` to `export_trials` with a
+`script_range` (and/or an explicit `script_drop`/`script_flag`); any of those keys
+opts back into the check with the QC filter's own defaults. Use `--format alpaca`
+for instruction/input/output.
 
 > **Honest selection:** `only_passed` is *rejection sampling* — it amplifies
 > behaviour the agent already produces and inherits any bias in the scorer/judge

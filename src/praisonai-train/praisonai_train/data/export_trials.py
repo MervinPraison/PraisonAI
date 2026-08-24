@@ -334,13 +334,22 @@ def _export_qc_cfg(cfg: Optional[dict]) -> dict:
     turns, not a translation corpus. Applying the Tamil floor would drop 100% of
     them as ``low_script_purity``. So default ``script_drop``/``script_flag`` to 0
     (nothing can fall below the floor) while keeping dedup, boilerplate/refusal,
-    length and diversity intact. An explicit ``qc_cfg`` still wins for callers who
-    know their trajectories' script.
+    length and diversity intact.
+
+    The English-safe zeros are *defaults only* — never override an explicit
+    ``qc_cfg``. A caller who sets a ``script_range`` (or a ``script_drop`` /
+    ``script_flag`` threshold) is opting into a real script check for their
+    language, so the target-script thresholds keep the QC filter's own defaults
+    (0.50 / 0.70) instead of being force-zeroed. Otherwise a documented
+    ``qc_cfg={"script_range": [...]}`` would silently pass wrong-script rows.
     """
-    merged = {"script_drop": 0.0, "script_flag": 0.0}
-    if cfg:
-        merged.update(cfg)
-    return merged
+    cfg = dict(cfg or {})
+    wants_script_check = any(
+        k in cfg for k in ("script_range", "script_drop", "script_flag")
+    )
+    if wants_script_check:
+        return cfg
+    return {"script_drop": 0.0, "script_flag": 0.0, **cfg}
 
 
 def filter_rows_for_export(

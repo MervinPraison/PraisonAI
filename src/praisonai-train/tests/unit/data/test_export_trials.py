@@ -310,6 +310,36 @@ def test_qc_cfg_can_reenable_script_check(tmp_path):
     assert summary.qc_drops.get("low_script_purity", 0) == 1
 
 
+def test_qc_cfg_script_range_only_reenables_check(tmp_path):
+    """A ``script_range``-only qc_cfg opts back into the script check.
+
+    Selecting another language's Unicode block (the documented pattern) must
+    re-enable the target-script floor with the QC filter's own defaults — the
+    English-safe zeros are defaults, they must not override an explicit range and
+    silently pass wrong-script rows.
+    """
+    case = {
+        "case_id": "c1",
+        "attempts": [
+            _attempt("Entirely english output text here", score=1.0, passed=True),
+            _attempt("bad", score=0.0, passed=False),
+        ],
+    }
+    out = tmp_path / "train.jsonl"
+    # Latin block: an English output is fully in-range → high purity → kept.
+    kept = export_trials(
+        _report([case]), out, qc=True, qc_cfg={"script_range": (0x0041, 0x024F)})
+    assert kept.written == 1
+    assert kept.qc_drops.get("low_script_purity", 0) == 0
+
+    # Tamil block via range only: English output is out-of-range → dropped.
+    out2 = tmp_path / "train2.jsonl"
+    dropped = export_trials(
+        _report([case]), out2, qc=True, qc_cfg={"script_range": (0x0B80, 0x0BFF)})
+    assert dropped.written == 0
+    assert dropped.qc_drops.get("low_script_purity", 0) == 1
+
+
 def test_loads_report_from_path(tmp_path):
     case = {"case_id": "c1", "attempts": [
         _attempt("4", score=1.0, passed=True),
