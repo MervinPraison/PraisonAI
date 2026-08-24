@@ -202,6 +202,34 @@ def test_generators_signatures_accept_adapter_args():
     inspect.signature(AutoGenerator.generate).bind(None)
 
 
+def test_knowledge_query_forwards_limit_to_core():
+    """The advertised ``limit`` must reach ``Knowledge.search`` (issue #4304)."""
+    pytest.importorskip("praisonaiagents")
+    from praisonaiagents.knowledge import Knowledge
+
+    inspect.signature(Knowledge.search).bind(None, "q", limit=7)
+
+
+def test_a2a_send_forwards_task_id():
+    """``task_id`` must reach ``a2a_send`` (via **kwargs), not be discarded."""
+    pytest.importorskip("praisonai")
+    from praisonai_mcp._wrapper_bridge import wrapper_callable
+
+    fn = wrapper_callable("praisonai.capabilities", "a2a_send")
+    inspect.signature(fn).bind(target_agent="url", message="hi", task_id="t-1")
+
+
+def test_realtime_send_maps_message_to_data():
+    """The realtime message must bind to ``data`` with a real ``event_type``."""
+    pytest.importorskip("praisonai")
+    from praisonai_mcp._wrapper_bridge import wrapper_callable
+
+    fn = wrapper_callable("praisonai.capabilities", "realtime_send")
+    inspect.signature(fn).bind(
+        session_id="s", event_type="conversation.item.create", data="hello"
+    )
+
+
 def test_eval_evaluators_exist_and_accept_adapter_args():
     pytest.importorskip("praisonaiagents")
     from praisonaiagents.eval import AccuracyEvaluator, PerformanceEvaluator

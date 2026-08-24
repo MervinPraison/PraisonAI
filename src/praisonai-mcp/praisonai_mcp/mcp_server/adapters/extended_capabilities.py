@@ -342,9 +342,11 @@ def register_extended_capability_tools() -> None:
         """Send message to another agent via A2A protocol."""
         try:
             a2a_send = _cap("a2a_send")
+            extra = {"task_id": task_id} if task_id is not None else {}
             result = a2a_send(
                 target_agent=agent_url,
                 message=message,
+                **extra,
             )
             return str(result)
         except ImportError:
@@ -456,7 +458,11 @@ def register_extended_capability_tools() -> None:
         """Send message to realtime session."""
         try:
             realtime_send = _cap("realtime_send")
-            result = realtime_send(session_id=session_id, event_type=message)
+            result = realtime_send(
+                session_id=session_id,
+                event_type="conversation.item.create",
+                data=message,
+            )
             return str(result)
         except ImportError:
             return "Error: Realtime not available"

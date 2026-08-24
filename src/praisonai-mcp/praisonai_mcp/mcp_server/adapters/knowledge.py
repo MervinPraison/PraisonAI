@@ -46,7 +46,7 @@ def register_knowledge_tools() -> None:
             from praisonaiagents.knowledge import Knowledge
 
             knowledge = Knowledge()
-            results = knowledge.search(query)
+            results = knowledge.search(query, limit=limit)
             return str(results)
         except ImportError:
             return "Error: Knowledge module not available"
