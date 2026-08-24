@@ -468,3 +468,204 @@ class TestRegistryPermissionResolver:
         defs = reg.get_tool_definitions()
         names = {d.get("function", {}).get("name") for d in defs}
         assert "read_file" in names
+
+
+class TestApprovalConfigNeverWeakensDefault:
+    """Issue #4228 (a): configuring approval must not drop the default denials."""
+
+    def test_approval_config_keeps_default_denials(self):
+        """ApprovalConfig(timeout=30) is a configuration change, not a security decision."""
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        default = Agent(name="test", instructions="test")._perm_deny
+        configured = Agent(
+            name="test", instructions="test", approval=ApprovalConfig(timeout=30)
+        )._perm_deny
+        assert configured >= default
+        assert "execute_command" in configured
+        assert "delete_file" in configured
+
+    def test_dict_config_keeps_default_denials(self):
+        from praisonaiagents import Agent
+
+        default = Agent(name="test", instructions="test")._perm_deny
+        configured = Agent(
+            name="test", instructions="test", approval={"timeout": 30}
+        )._perm_deny
+        assert configured >= default
+        assert "execute_command" in configured
+
+    def test_config_with_permissions_defers_to_manager(self):
+        """An explicit declarative policy owns denial; the preset must not shadow it."""
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        agent = Agent(
+            name="test",
+            instructions="test",
+            approval=ApprovalConfig(permissions={"bash:rm *": "deny"}),
+        )
+        assert agent._perm_deny == frozenset()
+        assert agent._permission_manager is not None
+
+    def test_env_off_switch_still_disables_denials(self, monkeypatch):
+        """PRAISONAI_TOOL_SAFETY=off remains a full bypass even with a config object."""
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
+        agent = Agent(
+            name="test", instructions="test", approval=ApprovalConfig(timeout=30)
+        )
+        assert agent._perm_deny == frozenset()
+
+    def test_explicit_empty_permissions_policy_owns_denial(self):
+        """``permissions={}`` is an intentional (empty) policy, not an absent one.
+
+        An empty mapping must NOT inherit the default deny set — the caller
+        explicitly opted into a declarative policy that happens to allow all.
+        Only a genuinely absent policy (``permissions=None``) falls back to the
+        env-driven default denials.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        empty_config = Agent(
+            name="test", instructions="test",
+            approval=ApprovalConfig(permissions={}),
+        )._perm_deny
+        empty_dict = Agent(
+            name="test", instructions="test",
+            approval={"permissions": {}},
+        )._perm_deny
+        assert empty_config == frozenset()
+        assert empty_dict == frozenset()
+
+
+class TestArgumentScopedDeny:
+    """Issue #4228 (b): argument-level deny rules must reach the enforcement path."""
+
+    def _agent_with_rule(self, tmp_path, pattern, action="deny"):
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions import PermissionManager
+
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config({pattern: action})
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        agent._permission_manager = mgr
+        return agent
+
+    def test_argument_scoped_deny_blocks_only_matching_call(self, tmp_path):
+        """The rule engine matches arguments; the enforcement path must ask it."""
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+
+        blocked = agent._check_tool_approval_sync(
+            "execute_command", {"command": "rm -rf /tmp/x"}
+        )
+        assert isinstance(blocked, dict)
+        assert blocked.get("permission_denied") is True
+
+    def test_argument_scoped_deny_allows_non_matching_call(self, tmp_path):
+        from praisonaiagents.approval.protocols import ApprovalDecision
+
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+        with patch(
+            "praisonaiagents.approval.get_approval_registry"
+        ) as get_reg:
+            reg = MagicMock()
+            reg.approve_sync.return_value = ApprovalDecision(
+                approved=True, reason="mock"
+            )
+            reg.mark_approved = MagicMock()
+            get_reg.return_value = reg
+            result = agent._check_tool_approval_sync(
+                "execute_command", {"command": "ls -la"}
+            )
+        assert result is None or (isinstance(result, tuple) and len(result) == 2)
+
+    def test_argument_scoped_deny_async(self, tmp_path):
+        import asyncio
+
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+        blocked = asyncio.run(
+            agent._check_tool_approval_async(
+                "execute_command", {"command": "rm -rf /tmp/x"}
+            )
+        )
+        assert isinstance(blocked, dict)
+        assert blocked.get("permission_denied") is True
+
+    def test_name_level_deny_still_blocks_all(self, tmp_path):
+        """Backward compat: a bare name rule keeps its all-or-nothing behaviour."""
+        agent = self._agent_with_rule(tmp_path, "execute_command")
+        for command in ("rm -rf /tmp/x", "ls -la"):
+            result = agent._check_tool_approval_sync(
+                "execute_command", {"command": command}
+            )
+            assert isinstance(result, dict)
+            assert result.get("permission_denied") is True
+
+    def test_malformed_argument_key_cannot_evade_scoped_deny(self, tmp_path):
+        """A trailing-'=' kwarg (``command=``) normalises before dispatch, so the
+        deny gate must normalise it too — otherwise the scoped rule is bypassed
+        while the command still runs after ``_cast_arguments`` cleans the key."""
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+        blocked = agent._check_tool_approval_sync(
+            "execute_command", {"command=": "rm -rf /tmp/x"}
+        )
+        assert isinstance(blocked, dict)
+        assert blocked.get("permission_denied") is True
+
+    def test_modified_args_rechecked_against_scoped_deny(self, tmp_path):
+        """An approval backend rewriting args into a denied command must be
+        re-authorized — the first gate only saw the original (allowed) args."""
+        from praisonaiagents.approval.protocols import ApprovalDecision
+
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+        with patch("praisonaiagents.approval.get_approval_registry") as get_reg:
+            reg = MagicMock()
+            reg.mark_approved = MagicMock()
+            get_reg.return_value = reg
+            with patch.object(
+                agent, "_resolve_approval_decision",
+                return_value=ApprovalDecision(
+                    approved=True, reason="mock",
+                    modified_args={"command": "rm -rf /tmp/x"},
+                ),
+            ):
+                result = agent._check_tool_approval_sync(
+                    "execute_command", {"command": "ls -la"}
+                )
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
+
+    def test_modified_args_rechecked_async(self, tmp_path):
+        import asyncio
+        from praisonaiagents.approval.protocols import ApprovalDecision
+
+        agent = self._agent_with_rule(tmp_path, "bash:rm *")
+
+        async def _run():
+            with patch("praisonaiagents.approval.get_approval_registry") as get_reg:
+                reg = MagicMock()
+                reg.mark_approved = MagicMock()
+                get_reg.return_value = reg
+                with patch.object(
+                    agent, "_resolve_approval_decision"
+                ) as resolve:
+                    async def _decide(*a, **k):
+                        return ApprovalDecision(
+                            approved=True, reason="mock",
+                            modified_args={"command": "rm -rf /tmp/x"},
+                        )
+                    resolve.side_effect = _decide
+                    return await agent._check_tool_approval_async(
+                        "execute_command", {"command": "ls -la"}
+                    )
+
+        result = asyncio.run(_run())
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
