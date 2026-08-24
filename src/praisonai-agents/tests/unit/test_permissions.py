@@ -542,6 +542,45 @@ class TestApprovalConfigNeverWeakensDefault:
         assert empty_config == frozenset()
         assert empty_dict == frozenset()
 
+    def test_all_tools_opt_in_is_not_hard_denied(self):
+        """``all_tools=True`` is an affirmative "approve everything" opt-in.
+
+        Cross-package regression: the ``praisonai`` wrapper maps YAML
+        ``approve_all_tools: true`` onto ``ApprovalConfig(all_tools=True)`` with
+        no ``permissions`` policy. The default deny set must NOT be applied to
+        such a config — the ``_perm_deny`` fast-path fires before the approval
+        backend, so applying it would silently hard-block ``execute_command`` /
+        ``delete_file`` and override the user's explicit intent to route every
+        tool through auto-approval.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        config_obj = Agent(
+            name="test", instructions="test",
+            approval=ApprovalConfig(all_tools=True, timeout=0),
+        )._perm_deny
+        config_dict = Agent(
+            name="test", instructions="test",
+            approval={"all_tools": True, "timeout": 0},
+        )._perm_deny
+        assert config_obj == frozenset()
+        assert config_dict == frozenset()
+        assert "execute_command" not in config_obj
+        assert "execute_command" not in config_dict
+
+    def test_all_tools_false_still_keeps_default_denials(self):
+        """Only an explicit ``all_tools=True`` opts out; the default stays safe."""
+        from praisonaiagents import Agent
+        from praisonaiagents.approval.protocols import ApprovalConfig
+
+        configured = Agent(
+            name="test", instructions="test",
+            approval=ApprovalConfig(all_tools=False, timeout=30),
+        )._perm_deny
+        assert "execute_command" in configured
+        assert "delete_file" in configured
+
 
 class TestArgumentScopedDeny:
     """Issue #4228 (b): argument-level deny rules must reach the enforcement path."""

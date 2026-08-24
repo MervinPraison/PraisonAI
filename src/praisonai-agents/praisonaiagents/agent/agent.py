@@ -2582,8 +2582,14 @@ Your Goal: {self.goal}
             # of silently dropping all of them. ``is None`` (not falsiness) so an
             # explicit empty policy (``permissions={}``) is still an intentional
             # policy that owns denial — only a genuinely absent policy inherits
-            # the env-driven default deny set.
-            if self._approval_permissions is None:
+            # the env-driven default deny set. ``all_tools`` is an affirmative
+            # opt-in to route *every* tool through the approval backend (the same
+            # intent as ``approval="full"``); applying the hard deny set would
+            # silently override that (the deny fast-path fires before the backend
+            # ever sees the call), so an explicit ``all_tools=True`` is honoured
+            # and keeps ``_perm_deny`` empty — the wrapper's ``approve_all_tools:
+            # true`` YAML relies on this.
+            if self._approval_permissions is None and not self._approve_all_tools:
                 self._perm_deny = self._resolve_default_deny_set()
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
@@ -2596,8 +2602,11 @@ Your Goal: {self.goal}
             # See the ApprovalConfig branch above: never weaken the default
             # posture just because a config object was passed. ``is None`` so an
             # explicit empty policy (``approval={"permissions": {}}``) still owns
-            # denial rather than inheriting the default deny set.
-            if self._approval_permissions is None:
+            # denial rather than inheriting the default deny set. An explicit
+            # ``all_tools`` opt-in (``approval={"approve_all_tools": true}``) is
+            # honoured too — the deny fast-path would otherwise silently override
+            # the user's "approve everything" intent before the backend runs.
+            if self._approval_permissions is None and not self._approve_all_tools:
                 self._perm_deny = self._resolve_default_deny_set()
         else:
             # Plain backend object — dangerous tools only, backend default timeout
