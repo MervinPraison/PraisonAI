@@ -82,6 +82,7 @@ def register_agent_tools() -> None:
             generator = AgentsGenerator(
                 agent_file=temp_path,
                 framework="praisonai",
+                config_list=[],
             )
             result = generator.generate_crew_and_kickoff()
             return str(result)
@@ -100,6 +101,7 @@ def register_agent_tools() -> None:
             generator = AgentsGenerator(
                 agent_file=file_path,
                 framework="praisonai",
+                config_list=[],
             )
             result = generator.generate_crew_and_kickoff()
             return str(result)

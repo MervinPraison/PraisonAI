@@ -29,7 +29,7 @@ def register_capability_tools() -> None:
     ) -> str:
         """Transcribe audio file to text."""
         transcribe = _cap("transcribe")
-        result = transcribe(file=file_path, model=model, language=language)
+        result = transcribe(audio=file_path, model=model, language=language)
         return result.text if hasattr(result, "text") else str(result)
     
     @register_tool("praisonai.audio.speech")
@@ -40,7 +40,7 @@ def register_capability_tools() -> None:
     ) -> str:
         """Convert text to speech."""
         speech = _cap("speech")
-        result = speech(input=text, model=model, voice=voice)
+        result = speech(text=text, model=model, voice=voice)
         return f"Audio generated: {result}"
     
     # Image tools
@@ -141,7 +141,7 @@ def register_capability_tools() -> None:
     ) -> str:
         """Apply guardrail to text."""
         apply_guardrail = _cap("apply_guardrail")
-        result = apply_guardrail(text=text, guardrail_name=guardrail_name)
+        result = apply_guardrail(content=text, guardrail_name=guardrail_name)
         return str(result)
     
     logger.info("Registered capability MCP tools")

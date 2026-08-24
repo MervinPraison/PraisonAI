@@ -24,12 +24,12 @@ def register_mcp_resources() -> None:
     def memory_sessions_resource() -> dict:
         """List all memory sessions."""
         try:
-            from praisonaiagents.memory import Memory
-            memory = Memory()
-            sessions = memory.list_sessions()
+            from praisonaiagents.session import get_default_session_store
+            store = get_default_session_store()
+            sessions = store.list_sessions()
             return {"sessions": sessions}
         except ImportError:
-            return {"error": "Memory module not available", "sessions": []}
+            return {"error": "Session management not available", "sessions": []}
         except Exception as e:
             return {"error": str(e), "sessions": []}
     
@@ -82,7 +82,7 @@ def register_mcp_resources() -> None:
         try:
             from praisonaiagents.knowledge import Knowledge
             knowledge = Knowledge()
-            sources = knowledge.list_sources()
+            sources = knowledge.get_all()
             return {"sources": sources}
         except ImportError:
             return {"error": "Knowledge module not available", "sources": []}
