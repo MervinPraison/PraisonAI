@@ -31,6 +31,29 @@ _typer_commands_lock = threading.Lock()
 _legacy_verbs_cache = None
 _legacy_verbs_lock = threading.Lock()
 
+# Fail-closed fallback for :func:`_get_legacy_verbs`. If importing the
+# authoritative ``LEGACY_SPECIAL_COMMANDS`` oracle ever fails, we must NOT return
+# an empty set — that would let an *implemented* verb (``thinking status`` etc.)
+# fall through to the bare-prompt rule and be billed to an LLM, reintroducing the
+# #4327 regression. This static mirror keeps the routing guard functional so such
+# verbs still reach the legacy handler even when discovery is degraded. It only
+# needs to stay a *superset-safe* copy of the oracle; drift merely means a newly
+# added verb isn't recognised until the oracle import recovers, never a bill.
+_LEGACY_VERBS_FALLBACK = frozenset({
+    'chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research',
+    'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools',
+    'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile',
+    'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy',
+    'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images',
+    'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr',
+    'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag',
+    'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search',
+    'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall',
+    'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway',
+    'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw',
+    'github', 'managed', 'flow', 'dashboard', 'backends', 'audit',
+})
+
 # Verbs excluded from the "route implemented verbs to legacy" guard. ``containers``
 # and ``vector-stores`` reach a capability that fabricates a success with zero
 # network (#4322); restoring their routing would promote that fabrication from
@@ -283,8 +306,14 @@ def _get_legacy_verbs():
 
     Sourced from the legacy argparse builder's authoritative
     ``LEGACY_SPECIAL_COMMANDS`` oracle so this stays in lockstep with the verbs
-    legacy actually handles. Returns an empty set on import failure so callers
-    degrade to the pre-existing bare-prompt behaviour rather than crash.
+    legacy actually handles.
+
+    Fails *closed*: if the oracle import raises, return the static
+    :data:`_LEGACY_VERBS_FALLBACK` mirror rather than an empty set. An empty set
+    would let an implemented verb fall through to the bare-prompt rule and be
+    billed to an LLM — the #4327 regression this guard exists to prevent. The
+    fallback is *not* cached so a later caller can still pick up the authoritative
+    oracle once the transient import failure clears.
     """
     global _legacy_verbs_cache
 
@@ -301,8 +330,15 @@ def _get_legacy_verbs():
             )
             verbs = frozenset(LEGACY_SPECIAL_COMMANDS)
         except Exception:
-            # Do NOT poison the cache on failure — let the next caller retry.
-            return frozenset()
+            import logging
+            logging.getLogger("praisonai.__main__").warning(
+                "Legacy verb discovery failed; using static fallback registry so "
+                "implemented verbs still route to their handler (not the LLM).",
+                exc_info=True,
+            )
+            # Fail closed: recognise implemented verbs from the static mirror.
+            # Do NOT poison the cache — a later caller can still load the oracle.
+            return _LEGACY_VERBS_FALLBACK
 
         _legacy_verbs_cache = verbs
         return _legacy_verbs_cache

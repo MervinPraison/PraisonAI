@@ -898,6 +898,61 @@ class TestImplementedLegacyVerbRouting(unittest.TestCase):
         for verb in ("thinking", "install", "persistence", "audio", "files"):
             self.assertIn(verb, verbs)
 
+    def test_get_legacy_verbs_fails_closed_on_import_error(self):
+        # If the authoritative oracle import raises, discovery must NOT return an
+        # empty set (which would let an implemented verb be billed to an LLM).
+        # It falls back to the static mirror so verbs are still recognised.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "praisonai.cli.legacy.dispatch.argparse_builder":
+                raise ImportError("simulated discovery failure")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch.object(builtins, "__import__", side_effect=_boom):
+            verbs = dispatcher._get_legacy_verbs()
+        self.assertIn("thinking", verbs)
+        self.assertIn("install", verbs)
+        # Fallback must not be cached, so recovery is possible on the next call.
+        self.assertIsNone(dispatcher._legacy_verbs_cache)
+
+    def test_thinking_status_not_billed_when_discovery_fails(self):
+        # End-to-end: with discovery failing, ``praisonai thinking status`` must
+        # still route to the legacy handler, never to the modern ``run`` (LLM).
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "praisonai.cli.legacy.dispatch.argparse_builder":
+                raise ImportError("simulated discovery failure")
+            return real_import(name, *args, **kwargs)
+
+        sys.argv = ["praisonai", "thinking", "status"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(builtins, "__import__", side_effect=_boom), \
+             mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once_with(["thinking", "status"])
+        run_typer.assert_not_called()
+
+    def test_fallback_registry_stays_in_sync_with_oracle(self):
+        # The static fail-closed mirror must remain a faithful copy of the
+        # authoritative oracle, so a newly added legacy verb cannot silently
+        # become billable during a discovery failure. Catches drift in CI.
+        from praisonai.cli.legacy.dispatch.argparse_builder import (
+            LEGACY_SPECIAL_COMMANDS,
+        )
+
+        self.assertEqual(
+            dispatcher._LEGACY_VERBS_FALLBACK,
+            frozenset(LEGACY_SPECIAL_COMMANDS),
+        )
+
 
 class TestBuildRunArgv(unittest.TestCase):
     """``_build_run_argv`` partitions a bare-prompt argv into a ``run`` call.
