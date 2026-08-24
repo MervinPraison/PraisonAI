@@ -1744,7 +1744,7 @@ Your Goal: {self.goal}"""
             return max_retries
         return 2
 
-    def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
+    def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0, cancel_token=None):
         start_time = time.time()
 
         # --- Proactive Context Budget Management (default-on) ---
@@ -1849,6 +1849,7 @@ Your Goal: {self.goal}"""
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
                 streaming_response = self._chat_completion_with_retry(
+                    cancel_token=cancel_token,
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -1892,6 +1893,7 @@ Your Goal: {self.goal}"""
                 final_response = streaming_response
             else:
                 final_response = self._chat_completion_with_retry(
+                    cancel_token=cancel_token,
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -2043,7 +2045,8 @@ Your Goal: {self.goal}"""
                             truncated_messages, temperature, tools, stream, 
                             reasoning_steps, task_name, task_description, task_id, response_format, 
                             _retry_depth=_retry_depth + 1,
-                            _fallback_index=_fallback_index
+                            _fallback_index=_fallback_index,
+                            cancel_token=cancel_token
                         )
                 except Exception as compression_error:
                     logging.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -2089,7 +2092,8 @@ Your Goal: {self.goal}"""
                             messages, temperature, tools, stream,
                             reasoning_steps, task_name, task_description, task_id, response_format,
                             _retry_depth=_retry_depth + 1,
-                            _fallback_index=_fallback_index + 1
+                            _fallback_index=_fallback_index + 1,
+                            cancel_token=cancel_token
                         )
                     finally:
                         self.llm = original_llm
@@ -2106,7 +2110,8 @@ Your Goal: {self.goal}"""
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format, 
                         _retry_depth=_retry_depth + 1,
-                        _fallback_index=_fallback_index
+                        _fallback_index=_fallback_index,
+                        cancel_token=cancel_token
                     )
             
             # Include remediation hints for unimplemented recovery actions
@@ -2345,6 +2350,7 @@ Your Goal: {self.goal}"""
         response_format=None,
         stream_callback=None,
         emit_events=True,
+        cancel_token=None,
     ):
         """
         Execute unified chat completion using composition instead of runtime class mutation.
@@ -2377,6 +2383,7 @@ Your Goal: {self.goal}"""
                 if stream_callback is None and hasattr(self, 'stream_emitter'):
                     stream_callback = getattr(self.stream_emitter, 'emit', None)
                 final_response = self._unified_dispatcher.chat_completion(
+                    cancel_token=cancel_token,
                     messages=messages,
                     tools=tools,
                     tool_choice=getattr(self, 'tool_choice', None),
@@ -2422,6 +2429,7 @@ Your Goal: {self.goal}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = self._unified_dispatcher.chat_completion(
+                cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
                 tool_choice=getattr(self, 'tool_choice', None),
@@ -3396,7 +3404,7 @@ Your Goal: {self.goal}"""
 
                     # Apply guardrail validation for custom LLM response
                     try:
-                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                         # Execute callback and display after validation
                         self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return self._trigger_after_agent_hook(prompt, validated_response, start_time)
@@ -3496,7 +3504,12 @@ Your Goal: {self.goal}"""
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
+                        # G2 - thread the cancel token into the OpenAI-native tool
+                        # loop too. OpenAIClient.{a,}chat_completion_with_tools already
+                        # implements the between-iteration checks; without this hop they
+                        # are never armed, so /stop reports success while the remaining
+                        # tool calls keep executing.
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format, cancel_token=cancel_token)
                         if not response:
                             # Rollback chat history on response failure
                             self._rollback_chat_history_to(chat_history_length)
@@ -3515,7 +3528,7 @@ Your Goal: {self.goal}"""
                             self._persist_message("assistant", response_text)
                             # Apply guardrail validation even for JSON output
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -3536,7 +3549,7 @@ Your Goal: {self.goal}"""
                             if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
                                 # Apply guardrail to reasoning content
                                 try:
-                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -3547,7 +3560,7 @@ Your Goal: {self.goal}"""
                                     return None
                             # Apply guardrail to regular response
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -3571,7 +3584,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self._using_custom_llm or self._openai_client is None:
                                 # For custom LLMs, we need to handle reflection differently
                                 # Use non-streaming to get complete JSON response
-                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
                                 
                                 if not reflection_response or not reflection_response.choices:
                                     raise Exception("No response from reflection request")
@@ -3613,7 +3626,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     self._end_run(validated_response, "completed", {"duration_ms": (time.time() - start_time) * 1000})
@@ -3633,7 +3646,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after max reflections
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -3649,7 +3662,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # For reflection, always use non-streaming to ensure compatibility with sync adapters
                             # and to avoid streaming complexity during regeneration process
                             use_stream = False
-                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
                             content = response.choices[0].message.content
                             response_text = content.strip() if content else ""
                             reflection_count += 1
@@ -3669,7 +3682,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         _get_display_functions()['display_self_reflection']("Maximum reflection count reached after repeated parse errors, returning current response", console=self.console)
                                     self._append_to_chat_history({"role": "assistant", "content": response_text})
                                     try:
-                                        validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                        validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token)
                                         self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                         return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                     except Exception as guard_e:
@@ -5384,7 +5397,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             agent_id=getattr(self, 'name', None),
         )
 
-    def _chat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    def _chat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
         
@@ -5395,7 +5408,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if not retry_config:
             return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
                                        task_name, task_description, task_id, response_format,
-                                       stream_callback=stream_callback, emit_events=emit_events)
+                                       stream_callback=stream_callback, emit_events=emit_events,
+                                       cancel_token=cancel_token)
         
         from .retry_utils import jittered_backoff
         from ..hooks import HookEvent, OnRetryInput
@@ -5408,7 +5422,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Call the underlying unified chat completion directly to avoid infinite recursion
                 return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
                                            task_name, task_description, task_id, response_format,
-                                           stream_callback=stream_callback, emit_events=emit_events)
+                                           stream_callback=stream_callback, emit_events=emit_events,
+                                           cancel_token=cancel_token)
             
             except Exception as e:
                 from ..errors import LLMError
