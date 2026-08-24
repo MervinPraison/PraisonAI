@@ -6648,7 +6648,7 @@ Answer:"""
         else:
             return False, None, guardrail_result.error
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None):
         """Apply guardrail validation with retry logic (sync version)."""
         retry_count = 0
         current_response = response_text
@@ -6689,7 +6689,7 @@ Answer:"""
             # Regenerate response for retry
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
-                response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
+                response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
                 if response and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
