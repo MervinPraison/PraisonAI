@@ -377,13 +377,22 @@ class LazyCommandGroup(TyperGroup):
     def get_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
         """Lazily import and return the command, tagged with its help category."""
         command = self._resolve_command(ctx, name)
-        if command is not None and _help_panel_unset(command):
-            # Group the command into a categorised ``--help`` panel. This is the
-            # single hook Typer's rich renderer reads; setting it lazily here keeps
-            # the registry the source of truth without importing every command up
-            # front just to categorise it. Commands that explicitly declare their
-            # own ``rich_help_panel`` keep it.
-            command.rich_help_panel = category_for(name)
+        if command is not None:
+            # ``typer_get_command`` yields ``""`` for a ``typer.Typer(help=…)``
+            # declared without ``name=``, and collapses a single-command app to
+            # that command's own name. Either way the resulting ``command.name``
+            # does not match the registry key the user must actually type, so the
+            # ``--help`` panel renders a blank or wrong name. The registry key is
+            # the source of truth for the typeable name — pin it here.
+            if command.name != name:
+                command.name = name
+            if _help_panel_unset(command):
+                # Group the command into a categorised ``--help`` panel. This is
+                # the single hook Typer's rich renderer reads; setting it lazily
+                # here keeps the registry the source of truth without importing
+                # every command up front just to categorise it. Commands that
+                # explicitly declare their own ``rich_help_panel`` keep it.
+                command.rich_help_panel = category_for(name)
         return command
 
     def _resolve_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
