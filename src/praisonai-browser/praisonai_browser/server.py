@@ -536,6 +536,10 @@ class BrowserServer:
             }
 
         
+        # Per-session step limit (set from the start_session message) so a
+        # per-run --max-steps is honoured, falling back to the server default.
+        session_max_steps = getattr(agent, "max_steps", self.max_steps)
+
         # Update session
         if self._sessions:
             step_number = message.get("step_number", 0)
@@ -551,8 +555,8 @@ class BrowserServer:
                 thought=action.get("thought", ""),
             )
             
-            # Check if done or max steps
-            if action.get("done") or step_number >= self.max_steps:
+            # Check if done or max steps (per-session limit computed above).
+            if action.get("done") or step_number >= session_max_steps:
                 status = "completed" if action.get("done") else "stopped"
                 self._sessions.update_session(session_id, status=status)
         
@@ -575,7 +579,7 @@ class BrowserServer:
                     logger.error(f"[SERVER][ERROR] broadcast:server.py → {e}")
         
         # Also send completion status if done
-        if action.get("done") or message.get("step_number", 0) >= self.max_steps:
+        if action.get("done") or message.get("step_number", 0) >= session_max_steps:
             status = "completed" if action.get("done") else "stopped"
             status_msg = {
                 "type": "status",

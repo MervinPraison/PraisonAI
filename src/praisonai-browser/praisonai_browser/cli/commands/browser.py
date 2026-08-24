@@ -361,14 +361,36 @@ def _run_alternative_engine(
     if enable_vision:
         console.print(f"   [cyan]Vision mode: ON[/cyan]")
     
-    # Auto-create screenshot dir when record_video is enabled
+    # Auto-create screenshot dir when record_video is enabled. Only the cdp
+    # engine implements screencast/screenshots, so restrict the auto-dir and
+    # the "Recording to" notice to cdp; playwright/hybrid get a warning below.
     actual_screenshot_dir = screenshot_dir
-    if record_video and not actual_screenshot_dir:
+    if record_video and not actual_screenshot_dir and engine == "cdp":
         actual_screenshot_dir = str(Path.home() / ".praisonai" / "browser_screenshots" / datetime.now().strftime("%Y%m%d_%H%M%S"))
         Path(actual_screenshot_dir).mkdir(parents=True, exist_ok=True)
         console.print(f"   [green]📹 Recording to: {actual_screenshot_dir}[/green]")
-    elif actual_screenshot_dir:
+    elif actual_screenshot_dir and engine == "cdp":
         console.print(f"   [dim]Screenshots: {actual_screenshot_dir}[/dim]")
+
+    # playwright/hybrid honour goal, url, model and max_steps but do not
+    # implement the CDP-only extras. Warn instead of silently discarding them.
+    if engine in ("playwright", "hybrid"):
+        cdp_only = []
+        if enable_vision:
+            cdp_only.append("--vision")
+        if screenshot_dir:
+            cdp_only.append("--screenshots")
+        if record_video:
+            cdp_only.append("--record-video")
+        if max_retries != 3:
+            cdp_only.append("--max-retries")
+        if not record_session:
+            cdp_only.append("--no-record")
+        if cdp_only:
+            console.print(
+                f"[yellow]Ignored on the {engine} engine:[/yellow] {', '.join(cdp_only)}"
+            )
+            console.print("[dim]   These options require --engine cdp.[/dim]")
     console.print()
     
     async def run():
@@ -479,12 +501,13 @@ def run_agent(
         playwright: Cross-browser automation via Playwright
         hybrid: Auto-select best available engine
     
-    Features (require --engine cdp/playwright/hybrid; ignored on the default
-    extension engine, which only forwards goal, model and max-steps):
+    Features (require --engine cdp; ignored on the default extension engine,
+    which only forwards goal, model and max-steps. Playwright/hybrid honour
+    goal, url, model and max-steps but do not implement these extras):
         --max-retries: Automatic retry with alternative selectors on failures
         --vision: Enable vision-based element detection (requires gpt-4o)
         --screenshots: Save screenshots of each step for debugging
-        --no-record: Disable session recording (CDP engines only)
+        --no-record: Disable session recording (CDP engine only)
     
     Example:
         praisonai browser run "Search for PraisonAI on Google"
