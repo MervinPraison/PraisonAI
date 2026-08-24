@@ -262,13 +262,33 @@ class AsyncMongoDBStateStore(StateStore):
         return run_sync(self.async_hget(key, field))
 
     async def async_hset(self, key: str, field: str, value: Any) -> None:
-        """Set a field in a hash asynchronously."""
+        """Set a field in a hash asynchronously.
+
+        Fields are treated as opaque top-level dictionary keys so a field
+        containing a dot (e.g. ``"a.b"``) round-trips through ``hget`` /
+        ``hgetall`` instead of being reinterpreted as a nested MongoDB path.
+        """
         if not self._initialized:
             await self.init()
 
+        # ``$set`` on ``value.<field>`` would let a dotted field escape into a
+        # nested path, so target the whole ``value`` subdocument via a
+        # positional-free replacement keyed off the current contents.
         await self._collection.update_one(
             {"_id": key},
-            {"$set": {f"value.{field}": value, "updated_at": time.time()}},
+            [
+                {
+                    "$set": {
+                        "value": {
+                            "$mergeObjects": [
+                                {"$ifNull": ["$value", {}]},
+                                {field: value},
+                            ]
+                        },
+                        "updated_at": time.time(),
+                    }
+                }
+            ],
             upsert=True,
         )
 
@@ -291,13 +311,37 @@ class AsyncMongoDBStateStore(StateStore):
         return run_sync(self.async_hgetall(key))
 
     async def async_hdel(self, key: str, *fields: str) -> int:
-        """Delete fields from a hash asynchronously."""
+        """Delete fields from a hash asynchronously.
+
+        Returns the number of fields that were actually present and removed
+        (matching the ``StateStore`` contract and the Firestore/DynamoDB
+        backends), so deleting a mix of present and absent fields reports only
+        the real deletions. Fields are treated as opaque top-level keys, so a
+        dotted field written via ``hset`` can be deleted by the same name.
+        """
         if not self._initialized:
             await self.init()
 
-        unset = {f"value.{field}": "" for field in fields}
-        result = await self._collection.update_one({"_id": key}, {"$unset": unset})
-        return len(fields) if result.modified_count > 0 else 0
+        if not fields:
+            return 0
+
+        doc = await self._collection.find_one({"_id": key}, {"value": 1})
+        current = doc.get("value") if doc else None
+        if not isinstance(current, dict):
+            return 0
+
+        present = [f for f in fields if f in current]
+        if not present:
+            return 0
+
+        for field in present:
+            current.pop(field, None)
+
+        await self._collection.update_one(
+            {"_id": key},
+            {"$set": {"value": current, "updated_at": time.time()}},
+        )
+        return len(present)
 
     def hdel(self, key: str, *fields: str) -> int:
         """Sync wrapper for hdel."""
