@@ -361,14 +361,36 @@ def _run_alternative_engine(
     if enable_vision:
         console.print(f"   [cyan]Vision mode: ON[/cyan]")
     
-    # Auto-create screenshot dir when record_video is enabled
+    # Auto-create screenshot dir when record_video is enabled. Only the cdp
+    # engine implements screencast/screenshots, so restrict the auto-dir and
+    # the "Recording to" notice to cdp; playwright/hybrid get a warning below.
     actual_screenshot_dir = screenshot_dir
-    if record_video and not actual_screenshot_dir:
+    if record_video and not actual_screenshot_dir and engine == "cdp":
         actual_screenshot_dir = str(Path.home() / ".praisonai" / "browser_screenshots" / datetime.now().strftime("%Y%m%d_%H%M%S"))
         Path(actual_screenshot_dir).mkdir(parents=True, exist_ok=True)
         console.print(f"   [green]📹 Recording to: {actual_screenshot_dir}[/green]")
-    elif actual_screenshot_dir:
+    elif actual_screenshot_dir and engine == "cdp":
         console.print(f"   [dim]Screenshots: {actual_screenshot_dir}[/dim]")
+
+    # playwright/hybrid honour goal, url, model and max_steps but do not
+    # implement the CDP-only extras. Warn instead of silently discarding them.
+    if engine in ("playwright", "hybrid"):
+        cdp_only = []
+        if enable_vision:
+            cdp_only.append("--vision")
+        if screenshot_dir:
+            cdp_only.append("--screenshots")
+        if record_video:
+            cdp_only.append("--record-video")
+        if max_retries != 3:
+            cdp_only.append("--max-retries")
+        if not record_session:
+            cdp_only.append("--no-record")
+        if cdp_only:
+            console.print(
+                f"[yellow]Ignored on the {engine} engine:[/yellow] {', '.join(cdp_only)}"
+            )
+            console.print("[dim]   These options require --engine cdp.[/dim]")
     console.print()
     
     async def run():
@@ -405,6 +427,7 @@ def _run_alternative_engine(
                 enable_vision=enable_vision or record_video,
                 record_session=record_session,
                 screenshot_dir=actual_screenshot_dir,
+                record_video=record_video,
                 debug=debug,
             )
             
@@ -478,17 +501,19 @@ def run_agent(
         playwright: Cross-browser automation via Playwright
         hybrid: Auto-select best available engine
     
-    Features:
+    Features (require --engine cdp; ignored on the default extension engine,
+    which only forwards goal, model and max-steps. Playwright/hybrid honour
+    goal, url, model and max-steps but do not implement these extras):
         --max-retries: Automatic retry with alternative selectors on failures
         --vision: Enable vision-based element detection (requires gpt-4o)
         --screenshots: Save screenshots of each step for debugging
-        --no-record: Disable session recording to database
+        --no-record: Disable session recording (CDP engine only)
     
     Example:
         praisonai browser run "Search for PraisonAI on Google"
         praisonai browser run "task" --engine cdp --headless
         praisonai browser run "task" --engine hybrid --vision
-        praisonai browser run "task" --screenshots ./screenshots
+        praisonai browser run "task" --engine cdp --screenshots ./screenshots
     """
     import logging
     import json
@@ -519,10 +544,39 @@ def run_agent(
         )
         return
     
+    # The extension engine forwards only goal, model and max_steps to the bridge;
+    # the extension drives the tab the user already has open. Warn (rather than
+    # silently discard) when engine-only options are set on the default path, so
+    # the user isn't misled into thinking they took effect. Use --engine cdp for
+    # these features.
+    ignored = []
+    if enable_vision:
+        ignored.append("--vision")
+    if screenshot_dir:
+        ignored.append("--screenshots")
+    if record_video:
+        ignored.append("--record-video")
+    if max_retries != 3:
+        ignored.append("--max-retries")
+    if headless:
+        ignored.append("--headless")
+    if extension_path:
+        ignored.append("--extension")
+    if not record:
+        ignored.append("--no-record")
+    if ignored:
+        console.print(
+            f"[yellow]Ignored on the extension engine:[/yellow] {', '.join(ignored)}"
+        )
+        console.print(
+            "[dim]   These options require --engine cdp (or playwright/hybrid).[/dim]"
+        )
+    
     console.print("[bold blue]Starting browser agent[/bold blue]")
     console.print(f"   Goal: {goal}")
-    console.print(f"   URL: {url}")
+    console.print(f"   URL (context only; extension uses the active tab): {url}")
     console.print(f"   Model: {model}")
+    console.print(f"   Max steps: {max_steps}")
     if debug:
         console.print(f"   [dim]Debug mode: ON[/dim]")
     console.print()
@@ -548,7 +602,7 @@ def run_agent(
                     console.print("[dim]Connected to server[/dim]")
                     
                     # Send start_session
-                    msg = json.dumps({"type": "start_session", "goal": goal, "model": model})
+                    msg = json.dumps({"type": "start_session", "goal": goal, "model": model, "max_steps": max_steps})
                     await ws.send(msg)
                     console.print(f"[blue]Sent:[/blue] start_session")
                     
@@ -647,7 +701,7 @@ def run_agent(
         try:
             async with websockets.connect(ws_url, ping_interval=30) as ws:
                 # Start session
-                msg = json.dumps({"type": "start_session", "goal": goal, "model": model})
+                msg = json.dumps({"type": "start_session", "goal": goal, "model": model, "max_steps": max_steps})
                 await ws.send(msg)
                 
                 # Wait for session_id
