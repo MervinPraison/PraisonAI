@@ -57,6 +57,13 @@ def test_get_all_memories_returns_what_is_stored(store):
     kinds = {r.get("memory_type") or r.get("type") for r in got}
     assert kinds == {"short_term", "long_term"}
 
+    # Backward compatibility: the legacy path exposed each record's tier under
+    # the public `type` key, so adapter-backed records must too.
+    assert all(r.get("type") for r in got), (
+        "adapter-backed records dropped the public `type` field callers rely on"
+    )
+    assert {r["type"] for r in got} == {"short_term", "long_term"}
+
 
 def test_delete_by_id_erases_the_long_term_record(store):
     """The id `remember()` returns must delete the record it refers to."""
@@ -72,6 +79,9 @@ def test_delete_by_id_erases_the_long_term_record(store):
 
     assert _tier(store, "long_term") == [], (
         "the record the caller asked to erase is still present"
+    )
+    assert _tier(store, "short_term") == [], (
+        "the colliding short-term record was left behind"
     )
 
 

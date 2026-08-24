@@ -2305,7 +2305,18 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # they raise OperationalError, get swallowed, and return [] every time.
         if (getattr(self, "memory_adapter", None)
                 and hasattr(self.memory_adapter, "get_all_memories")):
-            return self.memory_adapter.get_all_memories()
+            # Adapters expose the tier under different keys (the SQLite adapter
+            # uses `memory_type`, others may use `type`). The legacy path below
+            # returns `type`, so normalize to keep that public field populated
+            # for backward compatibility while retaining any adapter-specific
+            # keys the record already carries.
+            return [
+                {
+                    **record,
+                    "type": record.get("type") or record.get("memory_type"),
+                }
+                for record in self.memory_adapter.get_all_memories()
+            ]
 
         all_memories = []
         
