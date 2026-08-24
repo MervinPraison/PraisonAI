@@ -310,6 +310,145 @@ class TestAckReactorIntegration:
         assert "self._ack.done" in source
 
 
+class TestAckScopeGating:
+    """Ack reactions must be scope-gated so busy groups aren't spammed."""
+
+    def test_default_scope_is_group_mentions(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        reactor = AckReactor(ack_emoji="⏳")
+        assert reactor.scope is AckScope.group_mentions
+
+    def test_ambient_group_message_not_acked_by_default(self):
+        from praisonai_bot.bots._ack import AckReactor
+
+        reactor = AckReactor(ack_emoji="⏳")
+        assert not reactor.should_ack(
+            is_direct=False, is_mention=False, is_ambient=True
+        )
+
+    def test_direct_and_mention_acked_by_default(self):
+        from praisonai_bot.bots._ack import AckReactor
+
+        reactor = AckReactor(ack_emoji="⏳")
+        assert reactor.should_ack(is_direct=True, is_mention=False, is_ambient=False)
+        assert reactor.should_ack(is_direct=False, is_mention=True, is_ambient=False)
+
+    def test_scope_off_never_acks_and_disables(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        reactor = AckReactor(ack_emoji="⏳", scope=AckScope.off)
+        assert not reactor.enabled
+        assert not reactor.should_ack(
+            is_direct=True, is_mention=True, is_ambient=False
+        )
+
+    def test_scope_all_acks_ambient(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        reactor = AckReactor(ack_emoji="⏳", scope=AckScope.all)
+        assert reactor.should_ack(
+            is_direct=False, is_mention=False, is_ambient=True
+        )
+
+    def test_scope_direct_only(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        reactor = AckReactor(ack_emoji="⏳", scope=AckScope.direct)
+        assert reactor.should_ack(is_direct=True, is_mention=False, is_ambient=False)
+        assert not reactor.should_ack(
+            is_direct=False, is_mention=True, is_ambient=False
+        )
+
+    def test_scope_group_all_acks_non_ambient(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        reactor = AckReactor(ack_emoji="⏳", scope=AckScope.group_all)
+        assert reactor.should_ack(
+            is_direct=False, is_mention=False, is_ambient=False
+        )
+        assert not reactor.should_ack(
+            is_direct=False, is_mention=False, is_ambient=True
+        )
+
+    def test_empty_emoji_never_acks(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        reactor = AckReactor(ack_emoji="", scope=AckScope.all)
+        assert not reactor.enabled
+        assert not reactor.should_ack(
+            is_direct=True, is_mention=True, is_ambient=False
+        )
+
+    def test_scope_coerce_from_string_and_default(self):
+        from praisonai_bot.bots._ack import AckReactor, AckScope
+
+        assert AckReactor(ack_emoji="⏳", scope="group-all").scope is AckScope.group_all
+        assert AckReactor(ack_emoji="⏳", scope="group_all").scope is AckScope.group_all
+        assert AckReactor(ack_emoji="⏳", scope="bogus").scope is AckScope.group_mentions
+
+    def test_should_ack_message_derives_from_bot_message(self):
+        from praisonai_bot.bots._ack import AckReactor
+        from praisonaiagents.bots.protocols import BotChannel, BotMessage
+
+        reactor = AckReactor(ack_emoji="⏳")
+
+        dm = BotMessage(content="hi", channel=BotChannel(channel_id="c", channel_type="dm"))
+        assert reactor.should_ack_message(dm)
+
+        group = BotMessage(
+            content="ambient", channel=BotChannel(channel_id="g", channel_type="group")
+        )
+        assert not reactor.should_ack_message(group)
+        assert reactor.should_ack_message(group, is_mention=True)
+
+        reply = BotMessage(
+            content="re",
+            channel=BotChannel(channel_id="g", channel_type="group"),
+            reply_to="123",
+        )
+        assert reactor.should_ack_message(reply)
+
+    def test_gateway_telegram_path_scope_gates_ack(self):
+        """Gateway-hosted Telegram must gate acks by scope, not just ``enabled``.
+
+        Greptile #4293: the gateway's own Telegram message handler previously
+        acked whenever the reactor was ``enabled``, bypassing ``ack_scope`` so
+        ambient group chatter still got a reaction. Assert the handler routes
+        through ``should_ack_message`` like the standalone adapter.
+        """
+        import inspect
+        from praisonai_bot.gateway import server
+
+        source = inspect.getsource(server)
+        assert "bot._ack.should_ack_message(message)" in source
+
+    def test_slack_thread_reply_treated_as_engaged(self):
+        """A Slack thread reply is engaged, not ambient, under group-mentions.
+
+        Greptile #4293: when ``mention_required`` is off, a follow-up reply in
+        an ongoing thread (no fresh @mention) is still processed; it must not be
+        classified as ambient or it would silently lose its ack. The adapter
+        treats ``thread_ts`` as a mention; verify the shared contract acks it.
+        """
+        from praisonai_bot.bots._ack import AckReactor
+
+        reactor = AckReactor(ack_emoji="⏳")
+        # thread reply -> adapter sets is_mention=True, is_ambient=False
+        assert reactor.should_ack(
+            is_direct=False, is_mention=True, is_ambient=False
+        )
+
+    def test_slack_adapter_uses_thread_ts_for_ack(self):
+        """Slack ack gate must consider ``thread_ts`` when deriving mention."""
+        import inspect
+        from praisonai_bot.bots.slack import SlackBot
+
+        source = inspect.getsource(SlackBot.start)
+        assert 'event.get("thread_ts")' in source
+        assert "_in_thread" in source
+
+
 class TestWhatsAppRateLimiterIntegration:
     """Tests for WhatsApp rate limiter integration."""
 

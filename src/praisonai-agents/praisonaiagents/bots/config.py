@@ -89,6 +89,11 @@ class BotConfig:
     # replaces it with done_emoji on completion (e.g. "✅").
     ack_emoji: str = ""
     done_emoji: str = "✅"
+    # Which inbound messages get an ack reaction. One of:
+    # "off" | "direct" | "group-mentions" | "group-all" | "all".
+    # Default "group-mentions": ack DMs and group mentions/replies, but stay
+    # quiet on ambient group chatter the bot won't answer.
+    ack_scope: str = "group-mentions"
     
     # Session TTL in seconds. 0 = disabled (sessions never expire).
     # When set, stale sessions older than this are auto-reaped.
@@ -158,6 +163,7 @@ class BotConfig:
             "debounce_ms": self.debounce_ms,
             "ack_emoji": self.ack_emoji,
             "done_emoji": self.done_emoji,
+            "ack_scope": self.ack_scope,
             "session_ttl": self.session_ttl,
             "busy_mode": self.busy_mode,
             "busy_ack": self.busy_ack,

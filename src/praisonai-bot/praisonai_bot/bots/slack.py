@@ -170,6 +170,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
+            scope=getattr(self.config, "ack_scope", "group-mentions"),
         )
         
         # Pairing system
@@ -562,8 +563,27 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 msg_ts = event.get("ts", "")
                 
                 # Ack reaction - show processing indicator
+                # (scope-gated: quiet on ambient channel chatter). A reply
+                # inside a thread (thread_ts present) counts as engaging the
+                # bot even without a fresh @mention, so a follow-up in an
+                # ongoing thread is acked under group-mentions instead of being
+                # misclassified as ambient (Greptile #4293).
+                _in_thread = bool(event.get("thread_ts"))
+                _is_mention = channel_type == "im" or _in_thread or (
+                    bool(self._bot_user)
+                    and f"<@{self._bot_user.user_id}>"
+                    in (event.get("text", "") or "")
+                )
                 ack_ctx = None
-                if self._ack.enabled and self._client:
+                if (
+                    self._ack.enabled
+                    and self._client
+                    and self._ack.should_ack(
+                        is_direct=channel_type == "im",
+                        is_mention=_is_mention,
+                        is_ambient=channel_type != "im" and not _is_mention,
+                    )
+                ):
                     async def _slack_react(emoji, **kw):
                         try:
                             # Slack uses emoji names without colons

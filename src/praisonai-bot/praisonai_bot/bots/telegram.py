@@ -181,6 +181,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
+            scope=getattr(self.config, "ack_scope", "group-mentions"),
         )
         
         # Pairing system
@@ -647,9 +648,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     logger.error(f"Message handler error: {e}")
             
             if self._agent and not message.is_command:
-                # Ack reaction
+                # Ack reaction (scope-gated: quiet on ambient group chatter)
                 ack_ctx = None
-                if self._ack.enabled:
+                if self._ack.enabled and self._ack.should_ack_message(message):
                     async def _tg_react(emoji, **kw):
                         try:
                             from telegram import ReactionTypeEmoji
