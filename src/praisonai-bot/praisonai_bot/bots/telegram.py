@@ -1568,7 +1568,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         reply_to: Optional[int] = None,
     ) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
-        from ._chunk import chunk_message
+        from ._chunk import chunk_message, enforce_hard_cap
 
         max_len = self.config.max_message_length
 
@@ -1593,6 +1593,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             )
         else:
             chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
+            # Guarantee no chunk exceeds the platform cap; an over-cap code
+            # fence would otherwise raise "Message is too long" and drop the
+            # entire reply (Issue #4319).
+            chunks = enforce_hard_cap(chunks, max_len)
             for i, chunk in enumerate(chunks):
                 kwargs = {"chat_id": chat_id, "text": chunk}
                 if i == 0 and reply_to:

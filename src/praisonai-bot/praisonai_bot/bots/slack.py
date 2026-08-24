@@ -964,7 +964,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     
     async def _send_long_message(self, say, text: str, thread_ts: Optional[str] = None) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
-        from ._chunk import chunk_message
+        from ._chunk import chunk_message, enforce_hard_cap
 
         max_len = min(self.config.max_message_length, 4000)
         
@@ -976,6 +976,10 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             await say(text=text.strip(), thread_ts=thread_ts)
         else:
             chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
+            # Guarantee no chunk exceeds the platform cap; an over-cap code
+            # fence would otherwise raise "msg_too_long" and drop the entire
+            # reply (Issue #4319).
+            chunks = enforce_hard_cap(chunks, max_len)
             for chunk in chunks:
                 if chunk and chunk.strip():
                     await say(text=chunk.strip(), thread_ts=thread_ts)

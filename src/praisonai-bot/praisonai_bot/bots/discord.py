@@ -561,7 +561,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
     async def _send_long_message(self, channel, text: str, reference=None) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
-        from ._chunk import chunk_message
+        from ._chunk import chunk_message, enforce_hard_cap
 
         max_len = min(self.config.max_message_length, 2000)
         
@@ -572,6 +572,10 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 await channel.send(text)
         else:
             chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
+            # Guarantee no chunk exceeds the 2000-char cap; an over-cap code
+            # fence would otherwise raise a 400 and drop the entire reply
+            # (Issue #4319).
+            chunks = enforce_hard_cap(chunks, max_len)
             for i, chunk in enumerate(chunks):
                 if i == 0 and reference:
                     await channel.send(chunk, reference=reference)

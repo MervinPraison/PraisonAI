@@ -107,6 +107,61 @@ def chunk_message(
     return chunks if chunks else [""]
 
 
+def enforce_hard_cap(
+    chunks: List[str],
+    max_length: int,
+    length_unit: str = "codepoints",
+) -> List[str]:
+    """Guarantee every chunk fits within *max_length*.
+
+    ``chunk_message`` intentionally emits an over-cap chunk when a single code
+    fence exceeds *max_length* (``preserve_fences``). No platform client splits
+    an oversized payload, so sending such a chunk raises "message too long" and
+    the whole reply is lost. Callers apply this final pass so delivery always
+    succeeds: any over-cap chunk is hard-split, and a split fence has its
+    ``` markers re-balanced so each piece stays valid markdown (Issue #4319).
+
+    Returns:
+        A list of chunks each at most *max_length* long.
+    """
+    result: List[str] = []
+    for chunk in chunks:
+        if _calculate_length(chunk, length_unit) <= max_length:
+            result.append(chunk)
+            continue
+
+        if _is_fence_block(chunk):
+            result.extend(_split_fence_block(chunk, max_length, length_unit))
+        else:
+            result.extend(_split_long_paragraph(chunk, max_length, length_unit))
+    return result
+
+
+def _split_fence_block(
+    text: str, max_length: int, length_unit: str = "codepoints"
+) -> List[str]:
+    """Hard-split an over-cap code fence, re-balancing ``` on each piece."""
+    stripped = text.strip()
+    lines = stripped.split("\n")
+    # Opening fence line carries the optional language hint (e.g. ```python).
+    fence_open = lines[0] if lines and lines[0].startswith("```") else "```"
+    fence_lang = fence_open[3:].strip()
+    reopen = "```" + fence_lang if fence_lang else "```"
+
+    # Body excludes the opening fence and a trailing closing fence if present.
+    body_lines = lines[1:]
+    if body_lines and body_lines[-1].strip() == "```":
+        body_lines = body_lines[:-1]
+    body = "\n".join(body_lines)
+
+    # Reserve room for the wrapping fences on each emitted piece.
+    wrapper = _calculate_length(reopen + "\n" + "\n```", length_unit)
+    inner_cap = max(1, max_length - wrapper)
+
+    pieces = _split_long_paragraph(body, inner_cap, length_unit)
+    return [f"{reopen}\n{piece}\n```" for piece in pieces if piece]
+
+
 def _is_fence_block(text: str) -> bool:
     """Check if text is (or contains) a code fence block."""
     stripped = text.strip()
