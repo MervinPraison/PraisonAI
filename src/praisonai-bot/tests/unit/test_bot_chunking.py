@@ -164,3 +164,63 @@ class TestEnforceHardCap:
         assert len(result) >= 2
         for piece in result:
             assert len(piece) <= 4096
+
+    def test_mixed_fence_and_prose_not_corrupted(self):
+        """A closed fence followed by prose must NOT be re-wrapped as code.
+
+        Greptile P1: ``_is_fence_block`` matched anything starting with ``` so a
+        chunk of "closed fence + trailing prose" was wrapped in a fresh fence,
+        rendering the prose as code. The chunk must instead be hard-split as
+        plain text (Issue #4319).
+        """
+        prose = "This is prose that must stay prose. " * 10
+        chunk = "```python\nprint('hi')\n```\n\n" + prose
+        assert len(chunk) > 100
+        result = self._cap([chunk], 100)
+        combined = "\n".join(result)
+        # The original prose survives verbatim somewhere in the output.
+        assert "This is prose that must stay prose." in combined
+        # No fabricated language-tagged fence wraps the prose.
+        assert combined.count("```python") <= 1
+        for piece in result:
+            assert len(piece) <= 100
+
+    def test_multiple_fences_in_one_chunk_not_rewrapped(self):
+        """Two fences in one over-cap chunk are hard-split, not merged as code."""
+        chunk = (
+            "```\n" + ("a" * 60) + "\n```\n\n"
+            "prose between fences\n\n"
+            "```\n" + ("b" * 60) + "\n```"
+        )
+        result = self._cap([chunk], 50)
+        combined = "\n".join(result)
+        assert "prose between fences" in combined
+        for piece in result:
+            assert len(piece) <= 50
+
+
+class TestUtf16LengthUnit:
+    """Telegram measures length in UTF-16 units, not codepoints (Issue #4319)."""
+
+    def test_emoji_chunks_respect_utf16_cap(self):
+        """Emoji-heavy text is capped by UTF-16 units so Telegram won't reject it."""
+        from praisonai_bot.bots._chunk import (
+            chunk_message,
+            enforce_hard_cap,
+            _calculate_length,
+        )
+
+        # Each 😀 is 1 codepoint but 2 UTF-16 units. 200 emoji = 400 UTF-16.
+        text = "😀" * 200
+        max_len = 100
+        chunks = chunk_message(text, max_length=max_len, length_unit="utf16")
+        chunks = enforce_hard_cap(chunks, max_len, length_unit="utf16")
+        for chunk in chunks:
+            assert _calculate_length(chunk, "utf16") <= max_len
+
+    def test_calculate_length_utf16_counts_surrogate_pairs(self):
+        """A supplementary-plane char counts as 2 UTF-16 units, 1 codepoint."""
+        from praisonai_bot.bots._chunk import _calculate_length
+
+        assert _calculate_length("😀", "codepoints") == 1
+        assert _calculate_length("😀", "utf16") == 2
