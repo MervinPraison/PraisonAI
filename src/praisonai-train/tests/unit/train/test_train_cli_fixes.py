@@ -55,6 +55,53 @@ def test_train_llm_forwards_dataset_as_option():
     assert argv[argv.index("--model") + 1] == "unsloth/Llama-3.1-8B"
 
 
+def test_train_llm_propagates_nonzero_exit():
+    """A failed router run (e.g. missing deps) must not be swallowed as exit 0.
+
+    The router raises ``SystemExit(1)`` when training dependencies are absent;
+    ``train_llm`` must re-raise a non-zero ``typer.Exit`` so callers / CI gating
+    on ``$?`` see the failure instead of a false green.
+    """
+    from praisonai_train.cli.commands import train as train_cmd
+
+    class _ExitingPraisonAI:
+        def __init__(self, *a, **k):
+            pass
+
+        def main(self):
+            raise SystemExit(1)
+
+    class _FakeModule:
+        PraisonAI = _ExitingPraisonAI
+
+    with patch("praisonai_train._code_bridge.import_code_module",
+               return_value=_FakeModule()):
+        with pytest.raises(typer.Exit) as excinfo:
+            train_cmd.train_llm("/data/ds.jsonl", model=None, verbose=False)
+
+    assert excinfo.value.exit_code == 1
+
+
+def test_train_llm_swallows_clean_exit():
+    """A clean ``SystemExit(0)`` from the router still returns 0 (no raise)."""
+    from praisonai_train.cli.commands import train as train_cmd
+
+    class _CleanExitPraisonAI:
+        def __init__(self, *a, **k):
+            pass
+
+        def main(self):
+            raise SystemExit(0)
+
+    class _FakeModule:
+        PraisonAI = _CleanExitPraisonAI
+
+    with patch("praisonai_train._code_bridge.import_code_module",
+               return_value=_FakeModule()):
+        # Must not raise: a clean exit is a success.
+        train_cmd.train_llm("/data/ds.jsonl", model=None, verbose=False)
+
+
 # --- Bug 2: an all-failures generate run must not destroy an existing file ----
 
 def test_generate_all_failures_does_not_truncate_existing_output(tmp_path):

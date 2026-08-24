@@ -453,6 +453,12 @@ class PraisonAI:
             elif args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
+            elif args.command == 'train':
+                # 'train' is a real command handled by the dedicated block below
+                # (see ``if args.command == 'train':``). Do not fall through to the
+                # bare-prompt handler, which would forward the literal word "train"
+                # to an LLM as a chat prompt and never launch the trainer.
+                pass
             else:
                 # Handle --compare flag for CLI mode comparison
                 if hasattr(args, 'compare') and args.compare:
