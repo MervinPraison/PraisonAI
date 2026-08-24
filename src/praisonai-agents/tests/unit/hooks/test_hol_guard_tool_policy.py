@@ -84,7 +84,9 @@ def test_block_verdict_does_not_execute():
 
     assert executed == []
     assert result.error is not None
-    assert result.result is None
+    # The denial message is surfaced in `result` too, because the agent tool
+    # executor returns `ToolResponse.result` to the model and discards `error`.
+    assert result.result == result.error
 
 
 def test_missing_cli_fails_closed():
@@ -120,6 +122,27 @@ def test_malformed_json_fails_closed():
 
     assert executed == []
     assert result.error is not None
+
+
+def test_non_object_json_fails_closed():
+    module = _load_example()
+    executed = []
+
+    def call_next(req):
+        executed.append(req)
+        return "ran"
+
+    for payload in ("[]", '"allow"', "null"):
+        with patch.object(module.shutil, "which", return_value="/usr/bin/hol-guard"), \
+             patch.object(
+                 module.subprocess,
+                 "run",
+                 return_value=_FakeCompleted(0, payload),
+             ):
+            result = module.hol_guard_tool_policy(_make_request(), call_next)
+
+        assert executed == []
+        assert result.error is not None
 
 
 def test_nonzero_exit_fails_closed():

@@ -65,6 +65,9 @@ def _inspect_with_hol_guard(command: str) -> bool:
     except (json.JSONDecodeError, ValueError):
         return False
 
+    if not isinstance(verdict, dict):
+        return False
+
     decision = str(verdict.get("decision", "")).lower()
     return decision in ("allow", "benign")
 
@@ -80,10 +83,15 @@ def hol_guard_tool_policy(request: ToolRequest, call_next):
     if _inspect_with_hol_guard(command):
         return call_next(request)
 
+    blocked_message = "Blocked by HOL Guard: command was not explicitly allowed."
+    # Surface the denial in `result` too: the agent tool executor returns
+    # `ToolResponse.result` to the model and discards `error`, so a denial with
+    # only `error` set would reach the model as a null result. Keeping `error`
+    # populated preserves the signal for after_tool hooks and logging.
     return ToolResponse(
         tool_name=request.tool_name,
-        result=None,
-        error="Blocked by HOL Guard: command was not explicitly allowed.",
+        result=blocked_message,
+        error=blocked_message,
         context=request.context,
     )
 
