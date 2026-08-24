@@ -73,7 +73,9 @@ export async function executeRun(args: string[], options: AgentsOptions): Promis
       // Default: create a researcher and writer
       agentList = [
         new Agent({
-          instructions: `Research the following topic thoroughly: ${prompt}`,
+          // Keep user-controlled task text in the task/user-message channel.
+          // It must not become part of the agent's trusted instructions.
+          instructions: 'Research the assigned topic thoroughly.',
           name: 'Researcher',
           llm: config.model,
           verbose: config.verbose
@@ -93,6 +95,9 @@ export async function executeRun(args: string[], options: AgentsOptions): Promis
 
     const agents = new Agents({
       agents: agentList,
+      // Pass the CLI prompt as a task, rather than interpolating it into
+      // trusted agent instructions (CWE-1427 prompt injection).
+      tasks: [prompt, 'Summarize and write a clear report based on the research provided.'],
       process: options.process || 'sequential',
       verbose: config.verbose
     });
