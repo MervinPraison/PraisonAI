@@ -3274,26 +3274,25 @@ CONCISE SUMMARY:"""
         except json.JSONDecodeError:
             pass
         
-        # 2. Try to extract JSON array from text using regex
-        # Match JSON arrays like ["item1", "item2"] or ['item1', 'item2']
-        json_array_pattern = r'\[(?:[^\[\]]*(?:"[^"]*"|\'[^\']*\')?[^\[\]]*)*\]'
-        matches = re.findall(json_array_pattern, text)
+        # 2. Search for an embedded JSON array without a backtracking regex.
+        # The previous nested-repeat pattern could take exponential time on
+        # adversarial bracket/quote input (CWE-1333/CWE-730). JSONDecoder
+        # validates each candidate using the JSON grammar in linear parsing time.
+        decoder = json.JSONDecoder()
+        max_scan_chars = 1_000_000
+        if len(text) > max_scan_chars:
+            logger.warning("Loop list text exceeds the safe parsing limit")
+            return [text]
         
-        for match in matches:
+        for start, char in enumerate(text):
+            if char != '[':
+                continue
             try:
-                # Try parsing as JSON
-                parsed = json.loads(match)
-                if isinstance(parsed, list) and len(parsed) > 0:
-                    return parsed
+                parsed, _ = decoder.raw_decode(text[start:])
             except json.JSONDecodeError:
-                # Try replacing single quotes with double quotes
-                try:
-                    fixed = match.replace("'", '"')
-                    parsed = json.loads(fixed)
-                    if isinstance(parsed, list) and len(parsed) > 0:
-                        return parsed
-                except json.JSONDecodeError:
-                    continue
+                continue
+            if isinstance(parsed, list) and len(parsed) > 0:
+                return parsed
         
         # 3. Fallback: wrap as single item
         return [text]
