@@ -246,6 +246,15 @@ class AzureProvider(BaseProvider):
                     region=self.config.region
                 )
             
+            if not self.config.subscription_id:
+                return DeployStatus(
+                    state=ServiceState.UNKNOWN,
+                    message="Subscription ID not configured",
+                    service_name=self.config.service_name,
+                    provider="azure",
+                    region=self.config.region
+                )
+            
             result = subprocess.run(
                 ['az', 'containerapp', 'show',
                  '--name', self.config.service_name,
@@ -331,6 +340,13 @@ class AzureProvider(BaseProvider):
                     success=False,
                     message="Resource group not configured",
                     error="Please specify resource_group in cloud config"
+                )
+            
+            if not self.config.subscription_id:
+                return DestroyResult(
+                    success=False,
+                    message="Subscription ID not configured",
+                    error="Please specify subscription_id in cloud config"
                 )
             
             deleted_resources = []
