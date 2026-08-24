@@ -108,6 +108,7 @@ class LinearBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
+            scope=getattr(self.config, "ack_scope", "group-mentions"),
         )
 
         # ChatCommandMixin setup

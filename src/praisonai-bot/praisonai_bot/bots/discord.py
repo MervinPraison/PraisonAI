@@ -126,6 +126,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
+            scope=getattr(self.config, "ack_scope", "group-mentions"),
         )
         
         # Pairing system
@@ -408,8 +409,15 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     user_id = str(message.author.id)
                     
                     # Ack reaction - show processing indicator
+                    # (scope-gated: quiet on ambient guild chatter)
+                    _is_mention = (
+                        message.guild is None
+                        or self._client.user.mentioned_in(message)
+                    )
                     ack_ctx = None
-                    if self._ack.enabled:
+                    if self._ack.enabled and self._ack.should_ack_message(
+                        bot_message, is_mention=_is_mention
+                    ):
                         async def _discord_react(emoji, **kw):
                             try:
                                 await message.add_reaction(emoji)

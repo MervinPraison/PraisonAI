@@ -227,6 +227,7 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
             done_emoji=self.config.done_emoji,
+            scope=getattr(self.config, "ack_scope", "group-mentions"),
         )
 
         # Web mode adapter (lazy initialized)
@@ -902,8 +903,9 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Route to agent
         if self._agent and (content or attachments):
             # Ack reaction - show processing indicator
+            # (scope-gated: quiet on ambient group chatter)
             ack_ctx = None
-            if self._ack.enabled:
+            if self._ack.enabled and self._ack.should_ack_message(bot_message):
                 async def _wa_react(emoji, **kw):
                     try:
                         await self.send_reaction(sender_id, msg_id, emoji)

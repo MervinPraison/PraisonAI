@@ -429,6 +429,7 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
         lines.append("                               # Set to false only if you add destructive tools AND have a chat-level approval flow.")
         lines.append('    ack_emoji: "⏳"            # Show processing indicator during long agent operations')
         lines.append('    done_emoji: "✅"           # Replace ack_emoji when operation completes')
+        lines.append('    ack_scope: "group-mentions" # Who gets acked: off | direct | group-mentions | group-all | all')
         if plat == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
         # Gateway-style routing (ignored by `bot start` which uses top-level routing).

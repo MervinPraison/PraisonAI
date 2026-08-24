@@ -17,9 +17,42 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class AckScope(str, Enum):
+    """Scope gate for ack reactions.
+
+    Controls which inbound messages get an ack reaction so busy groups
+    aren't spammed with ⏳ on ambient chatter the bot never answers.
+
+    - ``off``: never ack.
+    - ``direct``: ack direct/DM messages only.
+    - ``group_mentions``: ack DMs plus group messages that mention/reply the
+      bot (default). Ambient group chatter is not acked.
+    - ``group_all``: ack DMs plus any non-ambient group message.
+    - ``all``: ack every message (legacy all-or-nothing behaviour).
+    """
+    off = "off"
+    direct = "direct"
+    group_mentions = "group-mentions"
+    group_all = "group-all"
+    all = "all"
+
+    @classmethod
+    def coerce(cls, value: Any, default: "AckScope") -> "AckScope":
+        """Best-effort parse from a string/enum, falling back to ``default``."""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace("_", "-")
+            for member in cls:
+                if member.value == normalized:
+                    return member
+        return default
 
 
 @dataclass
@@ -35,15 +68,60 @@ class AckReactor:
     Args:
         ack_emoji: Emoji to react with on message receipt (empty = disabled).
         done_emoji: Emoji to react with on completion (default "✅").
+        scope: Which messages to ack (see :class:`AckScope`). Defaults to
+            ``group-mentions`` so ambient group chatter is not acked.
     """
 
-    def __init__(self, ack_emoji: str = "", done_emoji: str = "✅") -> None:
+    def __init__(
+        self,
+        ack_emoji: str = "",
+        done_emoji: str = "✅",
+        scope: Any = AckScope.group_mentions,
+    ) -> None:
         self._ack_emoji = ack_emoji
         self._done_emoji = done_emoji
+        self._scope = AckScope.coerce(scope, AckScope.group_mentions)
 
     @property
     def enabled(self) -> bool:
-        return bool(self._ack_emoji)
+        return bool(self._ack_emoji) and self._scope is not AckScope.off
+
+    @property
+    def scope(self) -> AckScope:
+        return self._scope
+
+    def should_ack(
+        self, *, is_direct: bool, is_mention: bool, is_ambient: bool
+    ) -> bool:
+        """Whether a message matching this addressing context should be acked."""
+        if not self._ack_emoji or self._scope is AckScope.off:
+            return False
+        if self._scope is AckScope.all:
+            return True
+        if self._scope is AckScope.direct:
+            return is_direct
+        if self._scope is AckScope.group_mentions:
+            return is_direct or is_mention
+        if self._scope is AckScope.group_all:
+            return is_direct or not is_ambient
+        return False
+
+    def should_ack_message(self, message: Any, *, is_mention: bool = False) -> bool:
+        """Derive addressing context from a ``BotMessage`` and gate the ack.
+
+        Direct-vs-group is read from ``message.channel.channel_type``; a
+        mention/reply is either passed explicitly by the adapter or inferred
+        from ``message.reply_to``. Ambient == a group message that neither
+        mentions nor replies the bot.
+        """
+        channel = getattr(message, "channel", None)
+        channel_type = getattr(channel, "channel_type", "") if channel else ""
+        is_direct = str(channel_type).lower() in ("dm", "private", "direct", "")
+        mentioned = bool(is_mention) or bool(getattr(message, "reply_to", None))
+        is_ambient = not is_direct and not mentioned
+        return self.should_ack(
+            is_direct=is_direct, is_mention=mentioned, is_ambient=is_ambient
+        )
 
     async def ack(
         self,
