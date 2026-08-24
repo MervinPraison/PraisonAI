@@ -30,6 +30,7 @@ from ._admission import AdmissionRejected
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
+    from praisonaiagents.gateway import WarmSession, MemoryPressureProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,11 @@ class BotSessionManager:
         self._platform = platform
         self._last_active: Dict[str, float] = {}
         self._last_reset: Dict[str, float] = {}  # Track last reset time per user
+        # Issue #3804: per-session in-flight turn counter (storage_key -> depth).
+        # A key is present with a positive count while a turn is executing
+        # against that cache; the memory-pressure sweep skips any such key so a
+        # live turn is never aborted. Empty in normal steady state.
+        self._in_flight: Dict[str, int] = {}
         # N4: optional inbound DLQ — when set, failed agent.chat() calls
         # are persisted for later replay. Default ``None`` preserves
         # legacy behaviour (exception bubbles up untouched).
@@ -1062,6 +1068,11 @@ class BotSessionManager:
         # finally below regardless of outcome). ``None`` when no gate is set.
         _admission_cm = None
         _admission_active = False
+        # Issue #3804: mark this session in-flight for the duration of the turn
+        # so the memory-pressure sweep never soft-evicts a cache with a live
+        # turn executing against it. Set inside the user_lock below, cleared in
+        # the outer finally on every exit path.
+        _inflight_key: Optional[str] = None
 
         try:
             # Claim journal entry if we have one
@@ -1096,6 +1107,10 @@ class BotSessionManager:
                 # The gate is held for the full turn; released in the outer
                 # finally below so a slot is never leaked on any exit path.
                 async with user_lock:
+                    # Issue #3804: this session now has a live turn; record it so
+                    # the pressure sweep skips it (never abort in-flight work).
+                    _inflight_key = self._storage_key(user_id, **route)
+                    self._in_flight[_inflight_key] = self._in_flight.get(_inflight_key, 0) + 1
                     # Load history (may hit disk via run_in_executor for async safety)
                     loop = asyncio.get_running_loop()
                     user_history = await loop.run_in_executor(
@@ -1385,6 +1400,15 @@ class BotSessionManager:
                     await claim_ctx.__aexit__(None, None, None)
                 return result or ""
         finally:
+            # Issue #3804: clear this turn's in-flight mark so the pressure
+            # sweep can once again consider this cache for eviction. Guarded by
+            # ``_inflight_key`` so a turn shed before the lock never underflows.
+            if _inflight_key is not None:
+                _n = self._in_flight.get(_inflight_key, 0) - 1
+                if _n > 0:
+                    self._in_flight[_inflight_key] = _n
+                else:
+                    self._in_flight.pop(_inflight_key, None)
             # Issue #2454: release the admission slot for this turn (frees a
             # global concurrency slot and lets a queued waiter proceed). Done
             # first so capacity is returned promptly on every exit path.
@@ -1611,6 +1635,111 @@ class BotSessionManager:
         if stale:
             logger.debug("BotSessionManager: reaped %d stale sessions", len(stale))
         return len(stale)
+
+    def warm_sessions(self) -> "List[WarmSession]":
+        """Snapshot the warm per-session caches as :class:`WarmSession` facts.
+
+        Issue #3804: carries just enough state for the pure core planner
+        (:func:`praisonaiagents.gateway.plan_pressure_evictions`) to name the
+        coldest *rebuildable* caches to soft-evict under memory pressure:
+
+        * ``last_activity`` — the LRU key (coldest evicted first).
+        * ``in_flight`` — a turn is executing against the cache (never evict).
+        * ``flushed`` — the transcript is durably persisted and therefore
+          rebuildable. Only true when a persistent ``store`` is configured;
+          without one there is nothing to rebuild from, so the cache is treated
+          as unflushed and never evicted (evicting it would lose data).
+        """
+        from praisonaiagents.gateway import WarmSession  # lazy, core contract
+
+        flushed = self._store is not None
+        return [
+            WarmSession(
+                session_id=key,
+                last_activity=self._last_active.get(key, 0.0),
+                in_flight=self._in_flight.get(key, 0) > 0,
+                flushed=flushed,
+            )
+            for key in list(self._histories.keys())
+        ]
+
+    def _soft_evict(self, storage_key: str) -> bool:
+        """Drop only the *in-memory* history for *storage_key* (no store touch).
+
+        The durable copy in the session store is left intact, so the next turn
+        transparently reloads the transcript — soft eviction is a lossless,
+        self-healing pressure valve, not a session teardown. Unlike
+        ``reap_stale`` it does NOT fire ``SESSION_END`` or clear the store.
+        Returns ``True`` if an in-memory cache was actually dropped.
+        """
+        if storage_key not in self._histories:
+            return False
+        self._histories.pop(storage_key, None)
+        # Reset the prompt-prefix baseline so the reloaded session starts a
+        # fresh baseline rather than firing a false invalidation (Issue #3352).
+        self._prefix_sig.pop(storage_key, None)
+        return True
+
+    def sweep_under_pressure(
+        self,
+        memory_pressure: "MemoryPressureProtocol",
+        headroom: float = 0.9,
+    ) -> int:
+        """Soft-evict the coldest rebuildable caches under memory pressure.
+
+        Issue #3804: the runtime enactor for the core planner. Reads the real
+        container budget/RSS from *memory_pressure* (a
+        :class:`praisonaiagents.gateway.MemoryPressureProtocol`), asks
+        :func:`plan_pressure_evictions` which caches to shed, and drops their
+        in-memory history LRU-first — re-sampling RSS as it goes so it stops as
+        soon as RSS is back within ``headroom`` of the budget (avoiding
+        over-shedding). In-flight and unflushed caches are never touched.
+
+        A no-op (returns ``0``) when the platform cannot report a budget, so a
+        host without a cgroup limit keeps today's behaviour exactly. Call it on
+        the gateway's existing periodic tick, alongside ``reap_stale``.
+        """
+        from praisonaiagents.gateway import plan_pressure_evictions  # lazy
+
+        try:
+            budget = memory_pressure.cgroup_limit_mb()
+            rss = memory_pressure.anon_rss_mb()
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("Memory-pressure probe failed; skipping sweep: %s", e)
+            return 0
+
+        plan = plan_pressure_evictions(
+            budget, rss, self.warm_sessions(), headroom_ratio=headroom
+        )
+        if not plan:
+            return 0
+
+        try:
+            target = float(budget) * float(headroom)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            target = 0.0
+
+        evicted = 0
+        for storage_key in plan:
+            # Re-check in-flight at enact time: a turn may have started against
+            # this cache after the plan was computed. Never abort live work.
+            if self._in_flight.get(storage_key, 0) > 0:
+                continue
+            if self._soft_evict(storage_key):
+                evicted += 1
+                # Re-sample and stop once back within budget so we shed the
+                # minimum number of caches (planner returns all, coldest-first).
+                try:
+                    if memory_pressure.anon_rss_mb() <= target:
+                        break
+                except Exception:  # pragma: no cover — defensive
+                    break
+        if evicted:
+            logger.info(
+                "BotSessionManager: soft-evicted %d cold session cache(s) "
+                "under memory pressure", evicted
+            )
+        return evicted
 
     def complete_last_journal_entry(self) -> bool:
         """Complete the last journal entry if one exists.
