@@ -43,7 +43,7 @@ import threading
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from praisonaiagents.approval import ApprovalStoreProtocol
@@ -102,6 +102,10 @@ class PendingRequest:
     agent_name: str = ""
     risk_level: str = "medium"
     created_at: float = field(default_factory=time.time)
+    # Optional per-request custody: reviewer identities authorised to resolve
+    # this request. ``None`` (default) keeps today's behaviour where any holder
+    # of the APPROVALS scope may resolve any request.
+    authorized_reviewers: Optional[frozenset] = None
     # Resolved via the asyncio Future
     _future: Optional[asyncio.Future] = field(default=None, repr=False)
     # Store the event loop at registration time for thread-safe resolution
@@ -121,6 +125,11 @@ class Resolution:
     scope_to_agent: bool = True
     # If True, also key the grant by the request's argument signature.
     scope_to_args: bool = False
+    # Identity of the principal resolving this request (operator/device/actor
+    # id). Recorded on the durable audit trail and the allow-always grant so a
+    # decision is attributable to a person. ``None`` (default) keeps today's
+    # anonymous ``"gateway"`` attribution.
+    resolver: Optional[str] = None
 
 
 # ── Durable, scoped allow-list store ─────────────────────────────────
@@ -638,6 +647,7 @@ class ExecApprovalManager:
                         logger.debug(
                             "Could not read stored expiry for %s", approval_id
                         )
+                reviewers = getattr(req, "authorized_reviewers", None)
                 self._pending[approval_id] = PendingRequest(
                     request_id=approval_id,
                     tool_name=req.tool_name,
@@ -645,6 +655,7 @@ class ExecApprovalManager:
                     agent_name=req.agent_name or "",
                     risk_level=req.risk_level,
                     created_at=created_at,
+                    authorized_reviewers=frozenset(reviewers) if reviewers else None,
                 )
                 count += 1
         if count:
@@ -659,12 +670,17 @@ class ExecApprovalManager:
         arguments: Dict[str, Any],
         agent_name: str = "",
         risk_level: str = "medium",
+        authorized_reviewers: Optional[Iterable[str]] = None,
     ) -> tuple:
         """Create a pending request and return ``(request_id, future)``.
 
         If a matching allow-always grant exists (scoped to this agent, or a
         legacy global grant), the future is resolved immediately with
         ``approved=True``.
+
+        ``authorized_reviewers`` optionally binds the request to a set of
+        reviewer identities; only those principals may resolve it. ``None``
+        (default) leaves resolution open to any holder of the APPROVALS scope.
         """
         # Fast path: already permanently allowed (scoped to this agent, its
         # argument signature, or a legacy global grant).
@@ -682,12 +698,14 @@ class ExecApprovalManager:
         loop = asyncio.get_running_loop()
         future = loop.create_future()
 
+        reviewers = frozenset(authorized_reviewers) if authorized_reviewers else None
         req = PendingRequest(
             request_id=request_id,
             tool_name=tool_name,
             arguments=arguments,
             agent_name=agent_name,
             risk_level=risk_level,
+            authorized_reviewers=reviewers,
             _future=future,
             _loop=loop,  # capture loop at registration for thread-safe resolve
         )
@@ -709,6 +727,9 @@ class ExecApprovalManager:
                         risk_level=risk_level,
                         agent_name=agent_name or None,
                         approval_id=request_id,
+                        authorized_reviewers=(
+                            sorted(reviewers) if reviewers else None
+                        ),
                     ),
                     expires_at=time.time() + self._ttl,
                 )
@@ -737,6 +758,22 @@ class ExecApprovalManager:
         if req is None:
             return False
 
+        # Per-request custody: if the request is bound to a set of authorised
+        # reviewers, only one of them may resolve it. Re-insert the request on
+        # rejection so an authorised reviewer can still resolve it later (the
+        # atomic pop above preserves first-answer-wins between authorised
+        # reviewers).
+        if req.authorized_reviewers and resolution.resolver not in req.authorized_reviewers:
+            with self._lock:
+                self._pending.setdefault(request_id, req)
+            logger.warning(
+                "Rejected approval resolution for %s: resolver %r not authorised",
+                request_id, resolution.resolver,
+            )
+            return False
+
+        approver = resolution.resolver or "gateway"
+
         if resolution.allow_always:
             # Scope the grant safely-by-default: to the requesting agent unless
             # the resolver explicitly widened it, and optionally to its
@@ -761,7 +798,7 @@ class ExecApprovalManager:
                     agent_id=agent_id,
                     tool_name=req.tool_name,
                     arg_signature=arg_sig,
-                    approver="gateway:human",
+                    approver=approver,
                 )
                 logger.info(
                     "Tool '%s' added to allow-always list (agent=%s, args=%s)",
@@ -775,7 +812,7 @@ class ExecApprovalManager:
             )
 
         # Record the decision to the durable audit trail (best-effort).
-        self._record_resolution(request_id, resolution)
+        self._record_resolution(request_id, resolution, approver=approver)
 
         logger.info(
             "Approval resolved: %s -> %s",
@@ -784,12 +821,22 @@ class ExecApprovalManager:
         )
         return True
 
-    def _record_resolution(self, request_id: str, resolution: Resolution) -> None:
+    def _record_resolution(
+        self,
+        request_id: str,
+        resolution: Resolution,
+        *,
+        approver: str = "gateway",
+    ) -> None:
         """Persist a decision to the durable store (sync, best-effort).
 
         Called from :meth:`resolve`, which may run on any thread. The store's
         ``resolve`` is async, so we schedule it on a running loop when one is
         available and otherwise run it synchronously.
+
+        ``approver`` is the resolving principal's identity (defaulting to the
+        anonymous ``"gateway"`` when no resolver was supplied) so the audit
+        trail can attribute the decision to a person.
         """
         if self._store is None:
             return
@@ -799,7 +846,7 @@ class ExecApprovalManager:
             decision = ApprovalDecision(
                 approved=resolution.approved,
                 reason=resolution.reason,
-                approver="gateway",
+                approver=approver,
             )
             coro = self._store.resolve(request_id, decision)
         except Exception:

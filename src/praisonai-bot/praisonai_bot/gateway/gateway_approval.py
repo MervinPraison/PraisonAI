@@ -89,6 +89,7 @@ class GatewayApprovalBackend:
             arguments=request.arguments,
             agent_name=request.agent_name or "",
             risk_level=request.risk_level,
+            authorized_reviewers=request.authorized_reviewers,
         )
 
         # Fire optional notification (fire-and-forget)

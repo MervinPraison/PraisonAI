@@ -32,6 +32,12 @@ class ApprovalRequest:
         approval_id: Stable correlation id that survives a process restart
                      and can be matched to an inbound channel callback.
                      Auto-generated when not supplied.
+        authorized_reviewers: Optional set of reviewer identities allowed to
+                     resolve this request. ``None`` (default) keeps today's
+                     behaviour (any scope-holder may resolve). When populated a
+                     backend may bind resolution to these reviewers so that in a
+                     multi-operator deployment a request addressed to one
+                     operator cannot be resolved by another.
     """
 
     tool_name: str
@@ -41,6 +47,7 @@ class ApprovalRequest:
     session_id: Optional[str] = None
     context: Dict[str, Any] = field(default_factory=dict)
     approval_id: str = field(default_factory=_new_approval_id)
+    authorized_reviewers: Optional[List[str]] = None
 
 
 @dataclass

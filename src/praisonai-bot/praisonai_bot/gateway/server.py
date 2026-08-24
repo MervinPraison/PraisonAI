@@ -1379,6 +1379,35 @@ class WebSocketGateway:
                 status_code=403,
             )
 
+        def _resolve_operator_identity(request) -> str:
+            """Derive a stable, non-secret operator identity for the audit trail.
+
+            Resolution order (most to least specific), so multi-operator
+            deployments can attribute decisions to an *individual* rather than
+            to a shared credential:
+
+            1. An explicit ``X-Operator-Id`` header (a non-secret, caller-supplied
+               operator handle). This distinguishes operators even when they
+               share a gateway token — a proxy/SSO layer can stamp it per user.
+            2. A short digest of the operator token. The token is a secret and
+               must never be logged, so we hash it; distinct tokens yield
+               distinct identities. Holders of the *same* token collapse to one
+               identity by design (that is the identity that token represents).
+            3. The client IP, then ``"gateway"`` when nothing else is available
+               (e.g. loopback bypass).
+            """
+            explicit = request.headers.get("x-operator-id", "").strip()
+            if explicit:
+                # Bound + sanitised so a header value can't bloat or corrupt the
+                # audit row; it is a handle, not a secret.
+                return f"operator:{explicit[:64]}"
+            token = _extract_request_token(request)
+            if token:
+                digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+                return f"operator:{digest}"
+            client_ip = request.client.host if request.client else None
+            return f"operator:{client_ip}" if client_ip else "gateway"
+
         async def info(request):
             auth_err = _check_auth(request)
             if auth_err:
@@ -1708,12 +1737,14 @@ class WebSocketGateway:
                 allow_always=bool(body.get("allow_always", False)),
                 scope_to_agent=bool(body.get("scope_to_agent", True)),
                 scope_to_args=bool(body.get("scope_to_args", False)),
+                resolver=_resolve_operator_identity(request),
             )
 
             found = _approval_mgr.resolve(request_id, resolution)
             if not found:
                 return JSONResponse(
-                    {"error": "Request not found or already resolved"},
+                    {"error": "Request not found, already resolved, or "
+                     "resolver not authorised"},
                     status_code=404,
                 )
 
