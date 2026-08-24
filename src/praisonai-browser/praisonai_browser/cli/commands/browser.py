@@ -405,6 +405,7 @@ def _run_alternative_engine(
                 enable_vision=enable_vision or record_video,
                 record_session=record_session,
                 screenshot_dir=actual_screenshot_dir,
+                record_video=record_video,
                 debug=debug,
             )
             
@@ -478,17 +479,18 @@ def run_agent(
         playwright: Cross-browser automation via Playwright
         hybrid: Auto-select best available engine
     
-    Features:
+    Features (require --engine cdp/playwright/hybrid; ignored on the default
+    extension engine, which only forwards goal, model and max-steps):
         --max-retries: Automatic retry with alternative selectors on failures
         --vision: Enable vision-based element detection (requires gpt-4o)
         --screenshots: Save screenshots of each step for debugging
-        --no-record: Disable session recording to database
+        --no-record: Disable session recording (CDP engines only)
     
     Example:
         praisonai browser run "Search for PraisonAI on Google"
         praisonai browser run "task" --engine cdp --headless
         praisonai browser run "task" --engine hybrid --vision
-        praisonai browser run "task" --screenshots ./screenshots
+        praisonai browser run "task" --engine cdp --screenshots ./screenshots
     """
     import logging
     import json
@@ -519,10 +521,39 @@ def run_agent(
         )
         return
     
+    # The extension engine forwards only goal, model and max_steps to the bridge;
+    # the extension drives the tab the user already has open. Warn (rather than
+    # silently discard) when engine-only options are set on the default path, so
+    # the user isn't misled into thinking they took effect. Use --engine cdp for
+    # these features.
+    ignored = []
+    if enable_vision:
+        ignored.append("--vision")
+    if screenshot_dir:
+        ignored.append("--screenshots")
+    if record_video:
+        ignored.append("--record-video")
+    if max_retries != 3:
+        ignored.append("--max-retries")
+    if headless:
+        ignored.append("--headless")
+    if extension_path:
+        ignored.append("--extension")
+    if not record:
+        ignored.append("--no-record")
+    if ignored:
+        console.print(
+            f"[yellow]Ignored on the extension engine:[/yellow] {', '.join(ignored)}"
+        )
+        console.print(
+            "[dim]   These options require --engine cdp (or playwright/hybrid).[/dim]"
+        )
+    
     console.print("[bold blue]Starting browser agent[/bold blue]")
     console.print(f"   Goal: {goal}")
-    console.print(f"   URL: {url}")
+    console.print(f"   URL (context only; extension uses the active tab): {url}")
     console.print(f"   Model: {model}")
+    console.print(f"   Max steps: {max_steps}")
     if debug:
         console.print(f"   [dim]Debug mode: ON[/dim]")
     console.print()
@@ -548,7 +579,7 @@ def run_agent(
                     console.print("[dim]Connected to server[/dim]")
                     
                     # Send start_session
-                    msg = json.dumps({"type": "start_session", "goal": goal, "model": model})
+                    msg = json.dumps({"type": "start_session", "goal": goal, "model": model, "max_steps": max_steps})
                     await ws.send(msg)
                     console.print(f"[blue]Sent:[/blue] start_session")
                     
@@ -647,7 +678,7 @@ def run_agent(
         try:
             async with websockets.connect(ws_url, ping_interval=30) as ws:
                 # Start session
-                msg = json.dumps({"type": "start_session", "goal": goal, "model": model})
+                msg = json.dumps({"type": "start_session", "goal": goal, "model": model, "max_steps": max_steps})
                 await ws.send(msg)
                 
                 # Wait for session_id
