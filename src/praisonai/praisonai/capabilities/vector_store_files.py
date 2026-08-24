@@ -68,26 +68,16 @@ def vector_store_file_create(
     
     call_kwargs.update(kwargs)
     
-    try:
-        response = litellm.create_vector_store_file(**call_kwargs)
-        
-        return VectorStoreFileResult(
-            id=getattr(response, 'id', ''),
-            object=getattr(response, 'object', 'vector_store.file'),
-            vector_store_id=getattr(response, 'vector_store_id', vector_store_id),
-            status=getattr(response, 'status', None),
-            created_at=getattr(response, 'created_at', None),
-            metadata=metadata or {},
-        )
-    except AttributeError:
-        # Fallback if function not available
-        import uuid
-        return VectorStoreFileResult(
-            id=f"vsfile-{uuid.uuid4().hex[:12]}",
-            vector_store_id=vector_store_id,
-            status="pending",
-            metadata={"file_id": file_id, **(metadata or {})},
-        )
+    response = litellm.vector_store_file_create(**call_kwargs)
+    
+    return VectorStoreFileResult(
+        id=getattr(response, 'id', ''),
+        object=getattr(response, 'object', 'vector_store.file'),
+        vector_store_id=getattr(response, 'vector_store_id', vector_store_id),
+        status=getattr(response, 'status', None),
+        created_at=getattr(response, 'created_at', None),
+        metadata=metadata or {},
+    )
 
 
 async def avector_store_file_create(
@@ -124,25 +114,16 @@ async def avector_store_file_create(
     
     call_kwargs.update(kwargs)
     
-    try:
-        response = await litellm.acreate_vector_store_file(**call_kwargs)
-        
-        return VectorStoreFileResult(
-            id=getattr(response, 'id', ''),
-            object=getattr(response, 'object', 'vector_store.file'),
-            vector_store_id=getattr(response, 'vector_store_id', vector_store_id),
-            status=getattr(response, 'status', None),
-            created_at=getattr(response, 'created_at', None),
-            metadata=metadata or {},
-        )
-    except AttributeError:
-        import uuid
-        return VectorStoreFileResult(
-            id=f"vsfile-{uuid.uuid4().hex[:12]}",
-            vector_store_id=vector_store_id,
-            status="pending",
-            metadata={"file_id": file_id, **(metadata or {})},
-        )
+    response = await litellm.avector_store_file_create(**call_kwargs)
+    
+    return VectorStoreFileResult(
+        id=getattr(response, 'id', ''),
+        object=getattr(response, 'object', 'vector_store.file'),
+        vector_store_id=getattr(response, 'vector_store_id', vector_store_id),
+        status=getattr(response, 'status', None),
+        created_at=getattr(response, 'created_at', None),
+        metadata=metadata or {},
+    )
 
 
 def vector_store_file_list(
@@ -185,24 +166,21 @@ def vector_store_file_list(
     
     call_kwargs.update(kwargs)
     
-    try:
-        response = litellm.list_vector_store_files(**call_kwargs)
-        
-        results = []
-        data = getattr(response, 'data', response) if hasattr(response, 'data') else response
-        if isinstance(data, list):
-            for item in data:
-                results.append(VectorStoreFileResult(
-                    id=getattr(item, 'id', ''),
-                    object=getattr(item, 'object', 'vector_store.file'),
-                    vector_store_id=getattr(item, 'vector_store_id', vector_store_id),
-                    status=getattr(item, 'status', None),
-                    created_at=getattr(item, 'created_at', None),
-                ))
-        
-        return results
-    except AttributeError:
-        return []
+    response = litellm.vector_store_file_list(**call_kwargs)
+    
+    results = []
+    data = getattr(response, 'data', response) if hasattr(response, 'data') else response
+    if isinstance(data, list):
+        for item in data:
+            results.append(VectorStoreFileResult(
+                id=getattr(item, 'id', ''),
+                object=getattr(item, 'object', 'vector_store.file'),
+                vector_store_id=getattr(item, 'vector_store_id', vector_store_id),
+                status=getattr(item, 'status', None),
+                created_at=getattr(item, 'created_at', None),
+            ))
+    
+    return results
 
 
 async def avector_store_file_list(
@@ -236,24 +214,21 @@ async def avector_store_file_list(
     
     call_kwargs.update(kwargs)
     
-    try:
-        response = await litellm.alist_vector_store_files(**call_kwargs)
-        
-        results = []
-        data = getattr(response, 'data', response) if hasattr(response, 'data') else response
-        if isinstance(data, list):
-            for item in data:
-                results.append(VectorStoreFileResult(
-                    id=getattr(item, 'id', ''),
-                    object=getattr(item, 'object', 'vector_store.file'),
-                    vector_store_id=getattr(item, 'vector_store_id', vector_store_id),
-                    status=getattr(item, 'status', None),
-                    created_at=getattr(item, 'created_at', None),
-                ))
-        
-        return results
-    except AttributeError:
-        return []
+    response = await litellm.avector_store_file_list(**call_kwargs)
+    
+    results = []
+    data = getattr(response, 'data', response) if hasattr(response, 'data') else response
+    if isinstance(data, list):
+        for item in data:
+            results.append(VectorStoreFileResult(
+                id=getattr(item, 'id', ''),
+                object=getattr(item, 'object', 'vector_store.file'),
+                vector_store_id=getattr(item, 'vector_store_id', vector_store_id),
+                status=getattr(item, 'status', None),
+                created_at=getattr(item, 'created_at', None),
+            ))
+    
+    return results
 
 
 def vector_store_file_delete(
@@ -292,11 +267,8 @@ def vector_store_file_delete(
     
     call_kwargs.update(kwargs)
     
-    try:
-        response = litellm.delete_vector_store_file(**call_kwargs)
-        return getattr(response, 'deleted', True)
-    except AttributeError:
-        return True
+    response = litellm.vector_store_file_delete(**call_kwargs)
+    return getattr(response, 'deleted', False)
 
 
 async def avector_store_file_delete(
@@ -327,8 +299,5 @@ async def avector_store_file_delete(
     
     call_kwargs.update(kwargs)
     
-    try:
-        response = await litellm.adelete_vector_store_file(**call_kwargs)
-        return getattr(response, 'deleted', True)
-    except AttributeError:
-        return True
+    response = await litellm.avector_store_file_delete(**call_kwargs)
+    return getattr(response, 'deleted', False)

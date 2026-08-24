@@ -49,18 +49,10 @@ def container_create(
         >>> result = container_create("python:3.11")
         >>> print(result.id)
     """
-    # Container functionality is provider-specific
-    # This is a placeholder that can be extended
-    import uuid
-    
-    container_id = f"container-{uuid.uuid4().hex[:12]}"
-    
-    return ContainerResult(
-        id=container_id,
-        status="created",
-        name=name,
-        image=image,
-        metadata=metadata or {},
+    raise NotImplementedError(
+        "container_create has no backend implementation yet. "
+        "Container management is not wired to a provider, so no container "
+        "is actually created. Track/implement this before relying on it."
     )
 
 
@@ -80,14 +72,8 @@ async def acontainer_create(
     
     See container_create() for full documentation.
     """
-    import uuid
-    
-    container_id = f"container-{uuid.uuid4().hex[:12]}"
-    
-    return ContainerResult(
-        id=container_id,
-        status="created",
-        name=name,
-        image=image,
-        metadata=metadata or {},
+    raise NotImplementedError(
+        "acontainer_create has no backend implementation yet. "
+        "Container management is not wired to a provider, so no container "
+        "is actually created. Track/implement this before relying on it."
     )
