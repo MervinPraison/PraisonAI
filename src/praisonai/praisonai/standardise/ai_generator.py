@@ -384,14 +384,30 @@ class AIGenerator:
             ]
         elif slug_str == "memory":
             caps["supports_dict"] = True
-            caps["supports_presets"] = ["sqlite", "redis", "postgres", "qdrant", "chroma"]
-            caps["supports_url"] = True
+            # Derive from the live resolver so the generator can never teach a
+            # dead backend. A literal here drifts every time a backend changes.
+            presets, url_schemes = self._live_memory_backends()
+            caps["supports_presets"] = presets
+            caps["supports_url_schemes"] = url_schemes
+            caps["supports_url"] = bool(url_schemes)
+            example_preset = next(
+                (p for p in ("sqlite", "file") if p in presets),
+                presets[0] if presets else "file",
+            )
+            example_scheme = "sqlite" if "sqlite" in url_schemes else (
+                url_schemes[0] if url_schemes else None
+            )
             caps["usage_forms"] = [
                 "- Boolean: `memory=True`",
-                "- Preset: `memory=\"sqlite\"` or `memory=\"redis\"`",
-                "- URL: `memory=\"redis://localhost:6379\"`",
-                "- Dict: `memory={\"provider\": \"qdrant\"}`",
+                f"- Preset: `memory=\"{example_preset}\"`",
             ]
+            if example_scheme:
+                caps["usage_forms"].append(
+                    f"- URL: `memory=\"{example_scheme}://...\"`"
+                )
+            caps["usage_forms"].append(
+                f"- Dict: `memory={{\"backend\": \"{example_preset}\"}}`"
+            )
         elif slug_str == "knowledge":
             caps["supports_dict"] = True
             caps["supports_list"] = True
@@ -420,7 +436,23 @@ class AIGenerator:
         
         logger.debug(f"Feature '{slug_str}' capabilities: {caps}")
         return caps
-    
+
+    @staticmethod
+    def _live_memory_backends() -> Tuple[List[str], List[str]]:
+        """Return (presets, url_schemes) memory actually resolves right now.
+
+        Read from the resolver registries rather than a literal so the
+        generator can never advertise a backend that raises at construction.
+        """
+        try:
+            from praisonaiagents.config.presets import (
+                MEMORY_PRESETS,
+                MEMORY_URL_SCHEMES,
+            )
+        except ImportError:
+            return ["file", "sqlite"], ["sqlite"]
+        return sorted(MEMORY_PRESETS), sorted(MEMORY_URL_SCHEMES)
+
     def _get_agent(self):
         """Lazy-load the generation agent."""
         if self._agent is None:

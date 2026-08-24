@@ -8,15 +8,15 @@ agent = Agent(
 )
 
 # With preset
-agent_redis = Agent(
+agent_sqlite = Agent(
     instructions="You are a helpful assistant.",
-    memory="redis",  # Uses redis preset
+    memory="sqlite",  # Uses sqlite preset
 )
 
 # With URL
-agent_postgres = Agent(
+agent_mongo = Agent(
     instructions="You are a helpful assistant.",
-    memory="postgresql://localhost/mydb",  # URL auto-detected
+    memory="mongodb://localhost/mydb",  # URL auto-detected
 )
 
 if __name__ == "__main__":

@@ -178,19 +178,19 @@ def example_url_parsing():
     print("\n=== Example 9: URL Parsing ===")
     
     # Memory supports URL connection strings
-    # Supported: postgresql://, redis://, sqlite:///, mongodb://
+    # Supported schemes: sqlite://, mongodb://, mongodb+srv://
     agent = Agent(
         instructions="You are a database-backed assistant",
-        memory="postgresql://postgres:password@localhost:5432/praisonai",
+        memory="mongodb://user:password@localhost:27017/praisonai",
     )
     print("Memory URL parsed: memory enabled")
     
     # Also works with presets
     agent2 = Agent(
-        instructions="You are a redis-backed assistant",
-        memory="redis",  # Preset name
+        instructions="You are a sqlite-backed assistant",
+        memory="sqlite",  # Preset name
     )
-    print("Memory preset 'redis': configured")
+    print("Memory preset 'sqlite': configured")
 
 
 def example_knowledge_sources():

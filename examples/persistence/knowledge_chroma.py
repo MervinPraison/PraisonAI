@@ -1,16 +1,18 @@
 """
-Qdrant Knowledge Store - Agent-First Example
+Chroma Knowledge Store - Agent-First Example
 
-Demonstrates using Qdrant for knowledge-based RAG with an Agent.
+Demonstrates using Chroma (a shipped vector store) for knowledge-based RAG
+with an Agent.
+
+To use a provider that is not shipped (e.g. Qdrant), register an adapter
+first with ``register_knowledge_adapter("qdrant", MyQdrantAdapter)`` and then
+pass ``"provider": "qdrant"``.
 
 Requirements:
     pip install "praisonai[tools]"
 
-Docker Setup:
-    docker run -d --name praison-qdrant -p 6333:6333 qdrant/qdrant
-
 Run:
-    python knowledge_qdrant.py
+    python knowledge_chroma.py
 
 Expected Output:
     Agent responds using knowledge from documents
@@ -44,17 +46,16 @@ doc_path = os.path.join(temp_dir, "guide.txt")
 with open(doc_path, "w") as f:
     f.write(sample_doc)
 
-print("=== Qdrant Knowledge Store Demo (Agent-First) ===")
+print("=== Chroma Knowledge Store Demo (Agent-First) ===")
 
-# Agent-first approach: use knowledge parameter with Qdrant
+# Agent-first approach: use knowledge parameter with a shipped vector store
 agent = Agent(
     name="KnowledgeAssistant",
     instructions="You are a helpful assistant with access to technical documentation.",
     knowledge={
         "sources": [doc_path],
         "vector_store": {
-            "provider": "qdrant",
-            "url": "http://localhost:6333",
+            "provider": "chroma",
         },
     }
 )
@@ -70,4 +71,4 @@ print("\n=== Demo Complete ===")
 
 # --- Advanced: Direct Store Usage ---
 # from praisonai.persistence.factory import create_knowledge_store
-# store = create_knowledge_store("qdrant", url="http://localhost:6333")
+# store = create_knowledge_store("chroma")
