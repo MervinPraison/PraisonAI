@@ -306,7 +306,14 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
         if not isinstance(envelopes, list):
             return
-        self._note_inbound()
+        # Only refresh inbound liveness when the bridge actually delivered an
+        # envelope. A successfully-empty poll must NOT count as activity: a
+        # silently half-open transport returns ``[]`` forever without raising,
+        # and noting that as inbound traffic would keep ``last_activity`` fresh
+        # and defeat the health monitor's STALE_SOCKET detection — leaving a
+        # "deaf" channel reported HEALTHY with no operator signal.
+        if envelopes:
+            self._note_inbound()
         for item in envelopes:
             try:
                 await self._handle_envelope(item)
