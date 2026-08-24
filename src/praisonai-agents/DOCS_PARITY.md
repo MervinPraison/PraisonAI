@@ -18,10 +18,10 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 53 | 17053 |
+| ✅ Agent | 22 | 53 | 17107 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
-| ✅ Approval | 1 | 5 | 2658 |
+| ✅ Approval | 1 | 5 | 2662 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3542 |
 | ✅ Autonomy | 3 | 7 | 2790 |
@@ -43,8 +43,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 81 | 29955 |
-| ✅ Guardrails | 4 | 4 | 2205 |
+| ✅ Gateway | 7 | 81 | 29957 |
+| ✅ Guardrails | 4 | 4 | 2228 |
 | ✅ Handoffs | 11 | 6 | 2626 |
 | ✅ Hooks | 2 | 9 | 4509 |
 | ✅ Image | 1 | 11 | 1255 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6959 lines)
+- ℹ️ Database (42 docs, 6963 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
