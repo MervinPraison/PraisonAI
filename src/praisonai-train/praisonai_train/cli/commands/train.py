@@ -84,7 +84,7 @@ def train_llm(
         # callers and CI gating on ``$?`` see the failure. A clean exit is
         # swallowed so the command returns 0 as before.
         if exc.code:
-            raise typer.Exit(exc.code if isinstance(exc.code, int) else 1)
+            raise typer.Exit(exc.code if isinstance(exc.code, int) else 1) from exc
     finally:
         sys.argv = original_argv
 
