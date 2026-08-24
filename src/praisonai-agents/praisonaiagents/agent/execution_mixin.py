@@ -1576,7 +1576,7 @@ Write the complete compiled report:"""
                     # path accepts the declaration and silently re-runs the tool
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
-                    if self._tool_declares_not_idempotent(function_name):
+                    if self._tool_declares_not_idempotent(function_name, tools_override):
                         result.pop("_praison_retryable", None)
                         return result
 
