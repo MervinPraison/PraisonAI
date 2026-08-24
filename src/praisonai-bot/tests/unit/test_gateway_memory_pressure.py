@@ -45,10 +45,17 @@ class _Pressure:
         return self._rss.pop(0) if len(self._rss) > 1 else self._rss[0]
 
 
-def _warm(mgr, key, last_active):
-    """Seed a warm in-memory cache with a given LRU timestamp."""
+def _warm(mgr, key, last_active, flushed=True):
+    """Seed a warm in-memory cache with a given LRU timestamp.
+
+    ``flushed`` mirrors a completed store write; when a store is configured the
+    cache is only rebuildable (and thus evictable) once its last persist
+    succeeded, so tests opt in explicitly.
+    """
     mgr._histories[key] = [{"role": "user", "content": "hi"}]
     mgr._last_active[key] = last_active
+    if flushed and mgr._store is not None:
+        mgr._flushed.add(key)
 
 
 def test_warm_sessions_reports_flushed_when_store_present():
@@ -170,3 +177,56 @@ def test_cgroup_reader_v2_unlimited_is_none(tmp_path, monkeypatch):
 
     monkeypatch.setattr("builtins.open", _fake_open)
     assert reader.cgroup_limit_mb() is None
+
+
+def test_cgroup_reader_prefers_nested_cgroup_limit(tmp_path, monkeypatch):
+    """A nested cgroup's lower limit is used instead of the root's (#4296 review)."""
+    reader = CgroupMemoryPressure()
+    proc = tmp_path / "cgroup"
+    proc.write_text("0::/mygroup\n")  # v2: process lives in /mygroup
+    nested = tmp_path / "nested_memory.max"
+    nested.write_text("268435456\n")  # 256 MiB (the real, lower ceiling)
+    real_open = open
+
+    def _fake_open(path, *a, **k):
+        if path == "/proc/self/cgroup":
+            return real_open(proc, *a, **k)
+        if path == "/sys/fs/cgroup/mygroup/memory.high":
+            raise OSError  # no soft limit at the nested level
+        if path == "/sys/fs/cgroup/mygroup/memory.max":
+            return real_open(nested, *a, **k)
+        raise OSError  # root files must NOT be consulted once nested resolves
+
+    monkeypatch.setattr("builtins.open", _fake_open)
+    assert reader.cgroup_limit_mb() == pytest.approx(256.0)
+
+
+def test_sweep_skips_cache_when_last_store_write_failed():
+    """A caught store-write failure marks the cache unflushed → never evicted.
+
+    Regression for the CodeRabbit data-loss finding: soft-evicting a cache
+    whose only current copy is in memory would restore a stale/empty transcript.
+    """
+    class _FlakyStore(_Store):
+        def __init__(self):
+            super().__init__()
+            self.fail = False
+
+        def set_chat_history(self, key, history):
+            if self.fail:
+                raise RuntimeError("backend down")
+            super().set_chat_history(key, history)
+
+    store = _FlakyStore()
+    mgr = BotSessionManager(store=store)
+    # First successful save marks the session flushed (rebuildable).
+    mgr._save_history("a", [{"role": "user", "content": "one"}])
+    assert mgr.warm_sessions()[0].flushed is True
+    # Next save fails to persist: in-memory diverges, marker must be cleared.
+    store.fail = True
+    mgr._save_history("a", [{"role": "user", "content": "two"}])
+    assert mgr.warm_sessions()[0].flushed is False
+    # Pressure sweep must therefore leave the only current copy intact.
+    mp = _Pressure(100.0, [1000.0])
+    assert mgr.sweep_under_pressure(mp) == 0
+    assert "a" in mgr._histories

@@ -145,6 +145,12 @@ class BotSessionManager:
         # against that cache; the memory-pressure sweep skips any such key so a
         # live turn is never aborted. Empty in normal steady state.
         self._in_flight: Dict[str, int] = {}
+        # Issue #3804: per-session durable-flush marker (storage_key present iff
+        # the in-memory cache is known to match a completed store write). Cleared
+        # before each store write and set only after it fully succeeds, so a
+        # failed/partial persist leaves the key absent and the memory-pressure
+        # sweep never evicts the only current copy (would lose data).
+        self._flushed: set[str] = set()
         # N4: optional inbound DLQ — when set, failed agent.chat() calls
         # are persisted for later replay. Default ``None`` preserves
         # legacy behaviour (exception bubbles up untouched).
@@ -723,9 +729,14 @@ class BotSessionManager:
             history = history[-self._max_history:]
 
         # Always update in-memory cache (keyed by storage key)
-        self._histories[self._storage_key(user_id, **route)] = history
+        storage_key = self._storage_key(user_id, **route)
+        self._histories[storage_key] = history
 
         if self._store is not None:
+            # The in-memory copy now diverges from the store until the write
+            # below fully succeeds; drop the flush marker so a concurrent
+            # pressure sweep cannot evict this (now sole) current copy.
+            self._flushed.discard(storage_key)
             key = self._session_key(user_id, **route)
             try:
                 if hasattr(self._store, "set_chat_history"):
@@ -741,6 +752,9 @@ class BotSessionManager:
                         )
             except Exception as e:
                 logger.warning("Failed to persist session to store: %s", e)
+            else:
+                # Store now durably holds this exact history — safe to evict.
+                self._flushed.add(storage_key)
 
     def set_pending_tool_policy(
         self, agent: "Agent", tool_policy: Optional[Any]
@@ -1625,6 +1639,7 @@ class BotSessionManager:
             # a fresh one instead of emitting a false invalidation (Issue #3352).
             self._prefix_sig.pop(storage_key, None)
             self._last_active.pop(storage_key, None)
+            self._flushed.discard(storage_key)
             self._locks.drop(storage_key)
             if self._store is not None:
                 key = self._persist_key(storage_key)
@@ -1646,19 +1661,21 @@ class BotSessionManager:
         * ``last_activity`` — the LRU key (coldest evicted first).
         * ``in_flight`` — a turn is executing against the cache (never evict).
         * ``flushed`` — the transcript is durably persisted and therefore
-          rebuildable. Only true when a persistent ``store`` is configured;
-          without one there is nothing to rebuild from, so the cache is treated
-          as unflushed and never evicted (evicting it would lose data).
+          rebuildable. Only true when a persistent ``store`` is configured *and*
+          this session's last write completed (tracked per key in
+          ``_flushed``). Without a store, or after a failed/partial persist,
+          the in-memory copy is the only current one, so it is treated as
+          unflushed and never evicted (evicting it would lose data).
         """
         from praisonaiagents.gateway import WarmSession  # lazy, core contract
 
-        flushed = self._store is not None
+        has_store = self._store is not None
         return [
             WarmSession(
                 session_id=key,
                 last_activity=self._last_active.get(key, 0.0),
                 in_flight=self._in_flight.get(key, 0) > 0,
-                flushed=flushed,
+                flushed=has_store and key in self._flushed,
             )
             for key in list(self._histories.keys())
         ]
@@ -1678,6 +1695,9 @@ class BotSessionManager:
         # Reset the prompt-prefix baseline so the reloaded session starts a
         # fresh baseline rather than firing a false invalidation (Issue #3352).
         self._prefix_sig.pop(storage_key, None)
+        # The in-memory copy is gone; its flush marker no longer applies (the
+        # next load re-establishes state from the store).
+        self._flushed.discard(storage_key)
         return True
 
     def sweep_under_pressure(

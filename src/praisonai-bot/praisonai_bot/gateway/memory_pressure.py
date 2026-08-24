@@ -47,16 +47,61 @@ class CgroupMemoryPressure:
         reclaims against) then ``memory.max`` (the hard OOM ceiling); falls back
         to cgroup v1 ``memory.limit_in_bytes``. Returns ``None`` when no finite
         limit is configured (unconstrained host).
+
+        The process may live in a *nested* cgroup whose limit is lower than the
+        filesystem root's, so each controller file is probed at the process's
+        own cgroup path first (resolved from ``/proc/self/cgroup``) and only
+        then at the root — the root remaining the fallback preserves behaviour
+        on hosts where the nested path is unreadable.
         """
-        for path in (
-            "/sys/fs/cgroup/memory.high",  # cgroup v2 soft limit
-            "/sys/fs/cgroup/memory.max",   # cgroup v2 hard limit
-        ):
-            mb = self._read_v2_limit(path)
+        v2_rel, v1_rel = self._self_cgroup_paths()
+        # cgroup v2: nested dir first, then filesystem root.
+        v2_dirs = []
+        if v2_rel:
+            v2_dirs.append("/sys/fs/cgroup/" + v2_rel.strip("/"))
+        v2_dirs.append("/sys/fs/cgroup")
+        for base in v2_dirs:
+            for leaf in ("memory.high", "memory.max"):
+                mb = self._read_v2_limit(base.rstrip("/") + "/" + leaf)
+                if mb is not None:
+                    return mb
+        # cgroup v1 fallback: nested memory-controller dir first, then root.
+        v1_paths = []
+        if v1_rel:
+            v1_paths.append(
+                "/sys/fs/cgroup/memory/" + v1_rel.strip("/") + "/memory.limit_in_bytes"
+            )
+        v1_paths.append("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+        for path in v1_paths:
+            mb = self._read_v1_limit(path)
             if mb is not None:
                 return mb
-        # cgroup v1 fallback
-        return self._read_v1_limit("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+        return None
+
+    @staticmethod
+    def _self_cgroup_paths() -> "tuple[Optional[str], Optional[str]]":
+        """Resolve this process's (v2, v1-memory) cgroup-relative paths.
+
+        Parses ``/proc/self/cgroup``. A v2 line is ``0::/<path>``; the v1 memory
+        controller is the entry whose second field contains ``memory``. Returns
+        ``(None, None)`` when unreadable so the caller falls back to the root.
+        """
+        v2: Optional[str] = None
+        v1: Optional[str] = None
+        try:
+            with open("/proc/self/cgroup", "r") as fh:
+                for line in fh:
+                    parts = line.strip().split(":", 2)
+                    if len(parts) != 3:
+                        continue
+                    _hid, controllers, path = parts
+                    if controllers == "" and v2 is None:
+                        v2 = path or "/"
+                    elif "memory" in controllers.split(",") and v1 is None:
+                        v1 = path or "/"
+        except OSError:
+            return None, None
+        return v2, v1
 
     def anon_rss_mb(self) -> float:
         """Return current anonymous (non-reclaimable) RSS in MiB.
