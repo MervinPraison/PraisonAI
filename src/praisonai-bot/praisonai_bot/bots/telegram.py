@@ -1572,11 +1572,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         reply_to: Optional[int] = None,
     ) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
-        from ._chunk import chunk_message
+        from ._chunk import chunk_message, enforce_hard_cap, _calculate_length
 
         max_len = self.config.max_message_length
+        # Telegram measures message length in UTF-16 code units, not Python
+        # codepoints — a single emoji is 2 UTF-16 units. Measuring in
+        # codepoints lets an emoji-heavy reply exceed 4096 UTF-16 units and be
+        # rejected as "message too long", so use the platform's declared unit
+        # (Issue #4319).
+        length_unit = self.platform_capabilities().length_unit
 
-        if len(text) <= max_len:
+        if _calculate_length(text, length_unit) <= max_len:
             kwargs = {"chat_id": chat_id, "text": text}
             if reply_to:
                 kwargs["reply_to_message_id"] = reply_to
@@ -1596,7 +1602,16 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 }
             )
         else:
-            chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
+            chunks = chunk_message(
+                text,
+                max_length=max_len,
+                preserve_fences=True,
+                length_unit=length_unit,
+            )
+            # Guarantee no chunk exceeds the platform cap; an over-cap code
+            # fence would otherwise raise "Message is too long" and drop the
+            # entire reply (Issue #4319).
+            chunks = enforce_hard_cap(chunks, max_len, length_unit=length_unit)
             for i, chunk in enumerate(chunks):
                 kwargs = {"chat_id": chat_id, "text": chunk}
                 if i == 0 and reply_to:

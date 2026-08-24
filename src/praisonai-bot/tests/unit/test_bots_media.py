@@ -69,6 +69,49 @@ class TestSplitMediaFromOutput:
         result = split_media_from_output("MEDIA:https://example.com/audio.mp3")
         assert "https://example.com/audio.mp3" in result["media_urls"]
 
+    def test_blank_line_between_paragraphs_preserved(self):
+        """A single blank line paragraph separator is preserved (Issue #4319)."""
+        result = split_media_from_output("Paragraph one.\n\nParagraph two.")
+        assert result["text"] == "Paragraph one.\n\nParagraph two."
+
+    def test_load_bearing_blank_line_preserved(self):
+        """The HTTP header/body separator blank line survives (Issue #4319)."""
+        text = (
+            "POST /v1/messages HTTP/1.1\n"
+            "Host: api.example.com\n"
+            "Content-Type: application/json\n"
+            "\n"
+            '{"model": "x", "messages": []}'
+        )
+        result = split_media_from_output(text)
+        assert result["text"] == text
+
+    def test_multiple_blank_lines_collapsed(self):
+        """Excess blank runs collapse to one paragraph break (Issue #4319)."""
+        result = split_media_from_output("A\n\n\n\n\nB")
+        assert result["text"] == "A\n\nB"
+
+    def test_no_blank_lines_stripped_without_media(self):
+        """A reply with no MEDIA: keeps all its blank lines (Issue #4319)."""
+        text = "Line1\n\nLine2\n\nLine3"
+        result = split_media_from_output(text)
+        assert result["text"].count("\n\n") == 2
+
+    def test_blank_lines_preserved_around_media(self):
+        """Stripping a MEDIA line does not destroy surrounding paragraphs."""
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            temp_path = f.name
+        try:
+            text = f"Intro paragraph.\n\nMEDIA:{temp_path}\n\nOutro paragraph."
+            result = split_media_from_output(text)
+            assert temp_path in result["media_urls"]
+            assert "Intro paragraph." in result["text"]
+            assert "Outro paragraph." in result["text"]
+            # The two real paragraphs remain separated by a blank line.
+            assert "\n\n" in result["text"]
+        finally:
+            os.unlink(temp_path)
+
 
 class TestIsAudioFile:
     """Tests for is_audio_file function."""

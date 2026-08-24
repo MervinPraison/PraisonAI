@@ -60,9 +60,14 @@ def split_media_from_output(text: str) -> Dict[str, Any]:
     
     # Remove MEDIA: lines from text
     clean = MEDIA_REGEX.sub("", clean)
-    
-    # Clean up whitespace
-    clean = "\n".join(line for line in clean.split("\n") if line.strip())
+
+    # Clean up whitespace.
+    # NOTE: only *excess* blank runs left behind by stripped MEDIA lines are
+    # collapsed. Legitimate blank lines are load-bearing on the outbound path —
+    # they are the paragraph separators for chunking and the only visual break in
+    # plain-text replies — so a single blank line between blocks is preserved
+    # (Issue #4319).
+    clean = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", clean)
     clean = clean.strip()
     
     return {
