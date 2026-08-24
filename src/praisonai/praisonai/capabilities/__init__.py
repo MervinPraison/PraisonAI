@@ -19,7 +19,7 @@ Capabilities:
 - fine_tuning: Model fine-tuning
 - responses: Response management
 - passthrough: Generic API passthrough
-- containers: Container management
+- containers: Container management (no backend yet; raises NotImplementedError)
 - search: Search capabilities
 - a2a: Agent-to-agent gateway
 """

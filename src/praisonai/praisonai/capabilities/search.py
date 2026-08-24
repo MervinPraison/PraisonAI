@@ -47,32 +47,28 @@ def search(
         >>> for r in result.results:
         ...     print(r['title'], r['url'])
     """
-    # Search can be implemented via various providers
-    # This is a placeholder that integrates with existing search tools
-    
+    # Search is backed by the DuckDuckGo tool shipped with praisonaiagents.
+    from praisonaiagents.tools.duckduckgo_tools import internet_search
+
+    search_results = internet_search(query, max_results=max_results)
+
     results = []
-    
-    # Try to use web search if available
-    try:
-        from praisonaiagents.tools.duckduckgo_tools import duckduckgo_search
-        search_results = duckduckgo_search(query, max_results=max_results)
-        
-        if isinstance(search_results, list):
-            for item in search_results:
-                results.append({
-                    'title': item.get('title', ''),
-                    'url': item.get('href', item.get('url', '')),
-                    'snippet': item.get('body', item.get('snippet', '')),
-                })
-        elif isinstance(search_results, str):
+    if isinstance(search_results, list):
+        for item in search_results:
+            if 'error' in item:
+                raise RuntimeError(item['error'])
             results.append({
-                'title': 'Search Result',
-                'url': '',
-                'snippet': search_results,
+                'title': item.get('title', ''),
+                'url': item.get('href', item.get('url', '')),
+                'snippet': item.get('body', item.get('snippet', '')),
             })
-    except ImportError:
-        pass
-    
+    elif isinstance(search_results, str):
+        results.append({
+            'title': 'Search Result',
+            'url': '',
+            'snippet': search_results,
+        })
+
     return SearchResult(
         results=results,
         query=query,

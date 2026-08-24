@@ -39,12 +39,9 @@ def container_file_read(
         >>> result = container_file_read("container-abc123", "/app/output.txt")
         >>> print(result.content)
     """
-    # Placeholder implementation
-    return ContainerFileResult(
-        path=path,
-        container_id=container_id,
-        content=None,
-        metadata={"status": "not_implemented", **(metadata or {})},
+    raise NotImplementedError(
+        "container_file_read has no backend implementation yet. "
+        "Container file access is not wired to a provider."
     )
 
 
@@ -86,12 +83,9 @@ def container_file_write(
     Returns:
         ContainerFileResult with write confirmation
     """
-    return ContainerFileResult(
-        path=path,
-        container_id=container_id,
-        content=content,
-        size=len(content),
-        metadata={"status": "not_implemented", **(metadata or {})},
+    raise NotImplementedError(
+        "container_file_write has no backend implementation yet. "
+        "Container file access is not wired to a provider."
     )
 
 
@@ -133,7 +127,10 @@ def container_file_list(
     Returns:
         List of ContainerFileResult objects
     """
-    return []
+    raise NotImplementedError(
+        "container_file_list has no backend implementation yet. "
+        "Container file access is not wired to a provider."
+    )
 
 
 async def acontainer_file_list(
