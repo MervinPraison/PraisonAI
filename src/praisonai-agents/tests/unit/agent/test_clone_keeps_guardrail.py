@@ -55,3 +55,26 @@ def test_approval_config_is_persisted_for_the_clone_to_read():
     )
     assert hasattr(agent, "_approval_config")
     assert agent._approval_config == "read_only"
+
+
+def test_clone_keeps_the_approval_policy():
+    """A served clone must reconstruct with the same approval policy, otherwise
+    the gateway serves untrusted traffic with the operator's policy dropped."""
+    agent = Agent(
+        name="Approving", instructions="i", llm="gpt-4o-mini", approval="read_only"
+    )
+    clone = agent.clone_for_channel()
+    assert clone._approval_config == "read_only", (
+        "clone_for_channel() produced an agent without the approval policy; "
+        "the gateway serves one such clone per channel"
+    )
+    assert clone._perm_deny == agent._perm_deny, (
+        "the read_only preset's enforced deny set was not preserved on the clone"
+    )
+
+
+def test_no_approval_stays_no_approval():
+    """A plain agent must not acquire a policy, and neither must its clone."""
+    plain = Agent(name="Plain", instructions="i", llm="gpt-4o-mini")
+    assert plain._approval_config is None
+    assert plain.clone_for_channel()._approval_config is None
