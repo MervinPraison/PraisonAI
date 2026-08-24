@@ -387,7 +387,11 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                             handler(bot_message)
                     except Exception as e:
                         logger.error(f"Command handler error: {e}")
-                return
+                    return
+                # Unknown/unimplemented slash command: fall through to normal
+                # agent dispatch below rather than a silent no-op, matching the
+                # Slack reference adapter so a misspelled or not-yet-implemented
+                # command reaches the agent instead of vanishing (Issue #4318).
             
             should_respond = False
             if message.guild is None:

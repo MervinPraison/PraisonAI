@@ -1915,6 +1915,12 @@ class BotSessionManager:
         self._clear_session_data(storage_key, self._persist_key(storage_key))
         self._last_active.pop(storage_key, None)
         self._last_reset[storage_key] = time.monotonic()
+        # Clear any per-user model override (set via /model) so a "start fresh"
+        # actually remedies a bad/unavailable model instead of every later turn
+        # silently failing at the provider (Issue #4318). Overrides are keyed by
+        # the per-user storage key (no route), exactly as /model and chat() key
+        # them, so a group /new still clears the issuing user's override.
+        self._model_overrides.pop(self._storage_key(user_id), None)
 
         # Fire SESSION_END lifecycle hook (no-op when no hooks registered),
         # then forget the session so a subsequent message re-opens it.
@@ -2065,6 +2071,9 @@ class BotSessionManager:
         # Clear prompt-prefix baselines alongside history so reopened sessions
         # each establish a fresh baseline (Issue #3352).
         self._prefix_sig.clear()
+        # Clear per-user model overrides too so a global reset actually starts
+        # every user fresh on the agent's configured model (Issue #4318).
+        self._model_overrides.clear()
         return count
 
     @property
