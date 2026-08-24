@@ -195,7 +195,7 @@ class ConfigValidator:
         for tool_name in tool_refs:
             try:
                 # Try to resolve the tool
-                resolved = self.tool_resolver.resolve_tool(tool_name)
+                resolved = self.tool_resolver.resolve(tool_name)
                 if resolved is None:
                     # Check if it might be a valid tool that's not installed
                     if self._is_known_optional_tool(tool_name):
