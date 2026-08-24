@@ -935,12 +935,16 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
                 # File-based custom slash commands (Issue #3729): resolve
                 # ``.praisonai/commands/{command}.md`` and submit the rendered
-                # body as a normal chat turn. Falls through to chat on a miss.
+                # body as a normal chat turn. On a miss (no such custom command)
+                # the raw command text is dispatched to the agent so an unknown
+                # or misspelled slash command is never a silent no-op — matching
+                # the Slack reference adapter's fall-through (Issue #4318).
                 text = update.message.text or ""
                 parts = text.split(maxsplit=1)
                 arguments = parts[1] if len(parts) > 1 else ""
                 rendered = self.render_custom_command(command, arguments)
-                if rendered is not None:
+                prompt = rendered if rendered is not None else text
+                if prompt is not None:
                     user_name = (
                         update.message.from_user.username
                         or update.message.from_user.first_name
@@ -948,7 +952,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     ) if update.message.from_user else ""
                     try:
                         response = await self._session.chat(
-                            self._agent, user_id, rendered,
+                            self._agent, user_id, prompt,
                             chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                             user_name=user_name,
                             message_id=str(update.message.message_id),
