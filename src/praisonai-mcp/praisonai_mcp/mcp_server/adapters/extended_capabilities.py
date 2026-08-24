@@ -253,7 +253,7 @@ def register_extended_capability_tools() -> None:
         """Extract text from image using OCR."""
         try:
             ocr = _cap("ocr")
-            result = ocr(file=image_path, model=model)
+            result = ocr(document=image_path, model=model)
             return str(result)
         except ImportError:
             return "Error: OCR not available"
@@ -343,9 +343,8 @@ def register_extended_capability_tools() -> None:
         try:
             a2a_send = _cap("a2a_send")
             result = a2a_send(
-                agent_url=agent_url,
+                target_agent=agent_url,
                 message=message,
-                task_id=task_id,
             )
             return str(result)
         except ImportError:
@@ -381,7 +380,7 @@ def register_extended_capability_tools() -> None:
             container_file_read = _cap("container_file_read")
             result = container_file_read(
                 container_id=container_id,
-                file_path=file_path,
+                path=file_path,
             )
             return str(result)
         except ImportError:
@@ -400,7 +399,7 @@ def register_extended_capability_tools() -> None:
             container_file_write = _cap("container_file_write")
             container_file_write(
                 container_id=container_id,
-                file_path=file_path,
+                path=file_path,
                 content=content,
             )
             return f"File {file_path} written to container {container_id}"
@@ -427,7 +426,7 @@ def register_extended_capability_tools() -> None:
         """Load a skill from path."""
         try:
             skill_load = _cap("skill_load")
-            result = skill_load(skill_path=skill_path)
+            result = skill_load(skill_name=skill_path)
             return str(result)
         except ImportError:
             return "Error: Skills not available"
@@ -457,7 +456,7 @@ def register_extended_capability_tools() -> None:
         """Send message to realtime session."""
         try:
             realtime_send = _cap("realtime_send")
-            result = realtime_send(session_id=session_id, message=message)
+            result = realtime_send(session_id=session_id, event_type=message)
             return str(result)
         except ImportError:
             return "Error: Realtime not available"

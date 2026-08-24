@@ -416,7 +416,12 @@ class MCPServer:
             else:
                 content = [{"type": "text", "text": str(result)}]
             
-            return {"content": content, "isError": False}
+            # Adapters that catch internally return an ``"Error: …"`` string
+            # instead of raising. Surface these as ``isError: True`` so MCP
+            # clients, routers and retry logic can tell the call failed —
+            # matching the convention already used for adapters that raise.
+            is_error = isinstance(result, str) and result.startswith("Error:")
+            return {"content": content, "isError": is_error}
         except Exception as e:
             logger.exception(f"Tool execution error: {tool_name}")
             return {

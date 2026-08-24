@@ -105,8 +105,8 @@ def register_cli_tools() -> None:
         try:
             from praisonai_mcp._wrapper_bridge import wrapper_callable
             AutoGenerator = wrapper_callable("praisonai.auto", "AutoGenerator")
-            generator = AutoGenerator(topic=topic)
-            result = generator.generate(pattern=pattern)
+            generator = AutoGenerator(topic=topic, pattern=pattern)
+            result = generator.generate()
             return str(result)
         except ImportError:
             return "Error: AutoGenerator not available"
@@ -207,9 +207,9 @@ def register_cli_tools() -> None:
     def hooks_list() -> str:
         """List registered hooks."""
         try:
-            from praisonaiagents.hooks import get_hook_manager
-            manager = get_hook_manager()
-            hooks = manager.list_hooks()
+            from praisonaiagents.hooks import get_default_registry
+            registry = get_default_registry()
+            hooks = registry.list_hooks()
             return str(hooks)
         except ImportError:
             return "Error: Hooks not available"
@@ -220,10 +220,9 @@ def register_cli_tools() -> None:
     def hooks_stats() -> str:
         """Get hook execution statistics."""
         try:
-            from praisonaiagents.hooks import get_hook_manager
-            manager = get_hook_manager()
-            stats = manager.get_stats()
-            return str(stats)
+            from praisonaiagents.hooks import get_default_registry
+            registry = get_default_registry()
+            return str(registry.list_hooks())
         except ImportError:
             return "Error: Hooks not available"
         except Exception as e:
@@ -234,9 +233,9 @@ def register_cli_tools() -> None:
     def session_list() -> str:
         """List active sessions."""
         try:
-            from praisonaiagents.session import SessionManager
-            manager = SessionManager()
-            sessions = manager.list_sessions()
+            from praisonaiagents.session import get_default_session_store
+            store = get_default_session_store()
+            sessions = store.list_sessions()
             return str(sessions)
         except ImportError:
             return "Error: Session management not available"
@@ -247,9 +246,9 @@ def register_cli_tools() -> None:
     def session_info(session_id: str) -> str:
         """Get session information."""
         try:
-            from praisonaiagents.session import SessionManager
-            manager = SessionManager()
-            info = manager.get_session(session_id)
+            from praisonaiagents.session import get_default_session_store
+            store = get_default_session_store()
+            info = store.get_session(session_id)
             return str(info)
         except ImportError:
             return "Error: Session management not available"
@@ -260,9 +259,9 @@ def register_cli_tools() -> None:
     def session_delete(session_id: str) -> str:
         """Delete a session."""
         try:
-            from praisonaiagents.session import SessionManager
-            manager = SessionManager()
-            manager.delete_session(session_id)
+            from praisonaiagents.session import get_default_session_store
+            store = get_default_session_store()
+            store.delete_session(session_id)
             return f"Session deleted: {session_id}"
         except ImportError:
             return "Error: Session management not available"
@@ -369,8 +368,8 @@ def register_cli_tools() -> None:
     def tools_list() -> str:
         """List available tools."""
         try:
-            from praisonaiagents.tools import get_available_tools
-            tools = get_available_tools()
+            from praisonaiagents.tools import list_tools
+            tools = list_tools()
             return str(tools)
         except ImportError:
             return "Error: Tools module not available"
@@ -381,8 +380,10 @@ def register_cli_tools() -> None:
     def tools_info(tool_name: str) -> str:
         """Get information about a tool."""
         try:
-            from praisonaiagents.tools import get_tool_info
-            info = get_tool_info(tool_name)
+            from praisonaiagents.tools import get_tool
+            info = get_tool(tool_name)
+            if info is None:
+                return f"Tool not found: {tool_name}"
             return str(info)
         except ImportError:
             return "Error: Tools module not available"
@@ -393,8 +394,8 @@ def register_cli_tools() -> None:
     def tools_search(query: str) -> str:
         """Search for tools by name or description."""
         try:
-            from praisonaiagents.tools import search_tools
-            results = search_tools(query)
+            from praisonaiagents.tools import list_tools
+            results = [t for t in list_tools() if query.lower() in str(t).lower()]
             return str(results)
         except ImportError:
             return "Error: Tools module not available"
@@ -531,19 +532,22 @@ def register_cli_tools() -> None:
         expected_output: str,
         iterations: int = 3,
     ) -> str:
-        """Run accuracy evaluation on an agent."""
+        """Run accuracy evaluation on an agent.
+
+        ``agent_config`` is used as the agent's instructions.
+        """
         try:
-            from praisonaiagents.eval import AccuracyEval
+            from praisonaiagents.eval import AccuracyEvaluator
             from praisonaiagents import Agent
             
-            agent = Agent.from_yaml(agent_config)
-            eval_runner = AccuracyEval(
+            agent = Agent(instructions=agent_config)
+            evaluator = AccuracyEvaluator(
                 agent=agent,
-                input=input_text,
+                input_text=input_text,
                 expected_output=expected_output,
                 num_iterations=iterations,
             )
-            result = eval_runner.run()
+            result = evaluator.run()
             return str(result)
         except ImportError:
             return "Error: Eval module not available"
@@ -556,17 +560,20 @@ def register_cli_tools() -> None:
         input_text: str,
         iterations: int = 10,
     ) -> str:
-        """Run performance evaluation on an agent."""
+        """Run performance evaluation on an agent.
+
+        ``agent_config`` is used as the agent's instructions.
+        """
         try:
-            from praisonaiagents.eval import PerformanceEval
+            from praisonaiagents.eval import PerformanceEvaluator
             from praisonaiagents import Agent
             
-            agent = Agent.from_yaml(agent_config)
-            eval_runner = PerformanceEval(
+            agent = Agent(instructions=agent_config)
+            evaluator = PerformanceEvaluator(
                 func=lambda: agent.chat(input_text),
                 num_iterations=iterations,
             )
-            result = eval_runner.run()
+            result = evaluator.run()
             return str(result)
         except ImportError:
             return "Error: Eval module not available"
