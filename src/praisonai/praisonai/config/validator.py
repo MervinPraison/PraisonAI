@@ -195,7 +195,7 @@ class ConfigValidator:
         for tool_name in tool_refs:
             try:
                 # Try to resolve the tool
-                resolved = self.tool_resolver.resolve_tool(tool_name)
+                resolved = self.tool_resolver.resolve(tool_name)
                 if resolved is None:
                     # Check if it might be a valid tool that's not installed
                     if self._is_known_optional_tool(tool_name):
@@ -249,7 +249,22 @@ class ConfigValidator:
             'KubernetesTool', 'DockerTool', 'TerraformTool',
         }
         
-        return tool_name in known_optional
+        if tool_name in known_optional:
+            return True
+        
+        # Also treat any tool declared in praisonaiagents' TOOL_MAPPINGS as a
+        # known tool. resolve() returns None for such tools when their optional
+        # dependencies aren't installed; that's a "needs deps" warning, not an
+        # "unknown tool" error.
+        try:
+            from praisonaiagents import tools as agent_tools
+            tool_mappings = getattr(agent_tools, 'TOOL_MAPPINGS', None)
+            if tool_mappings and tool_name in tool_mappings:
+                return True
+        except Exception:
+            pass
+        
+        return False
     
     def _check_unknown_fields(self, config: Dict[str, Any], file_prefix: str = "") -> List[str]:
         """Check for unknown fields in configuration.
