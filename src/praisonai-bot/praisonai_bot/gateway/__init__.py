@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .exec_approval import ExecApprovalManager, get_exec_approval_manager
     from .gateway_approval import GatewayApprovalBackend
     from .home_channels import HomeChannelRegistry, DeliveryResolver
+    from .memory_pressure import CgroupMemoryPressure
 
 def __getattr__(name: str):
     """Lazy loading of gateway components."""
@@ -58,6 +59,9 @@ def __getattr__(name: str):
     if name == "DeliveryResolver":
         from .home_channels import DeliveryResolver
         return DeliveryResolver
+    if name == "CgroupMemoryPressure":
+        from .memory_pressure import CgroupMemoryPressure
+        return CgroupMemoryPressure
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -74,4 +78,5 @@ __all__ = [
     "GatewayApprovalBackend",
     "HomeChannelRegistry",
     "DeliveryResolver",
+    "CgroupMemoryPressure",
 ]
