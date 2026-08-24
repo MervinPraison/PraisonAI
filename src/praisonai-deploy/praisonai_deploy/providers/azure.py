@@ -12,9 +12,20 @@ from ..doctor import DoctorReport, DoctorCheckResult, check_azure_cli
 class AzureProvider(BaseProvider):
     """Azure deployment provider using Container Apps."""
     
+    def _subscription_args(self) -> list:
+        """Return ``--subscription`` args when configured, else empty.
+
+        ``--subscription`` is a global ``az`` argument accepted by every
+        subcommand, so appending it targets the configured subscription rather
+        than whatever ``az`` happens to default to.
+        """
+        if self.config.subscription_id:
+            return ['--subscription', self.config.subscription_id]
+        return []
+    
     def doctor(self) -> DoctorReport:
         """Run Azure-specific health checks."""
-        checks = [check_azure_cli()]
+        checks = [check_azure_cli(self.config.subscription_id)]
         
         # Check if resource group exists
         if self.config.resource_group:
@@ -22,7 +33,7 @@ class AzureProvider(BaseProvider):
                 result = subprocess.run(
                     ['az', 'group', 'show',
                      '--name', self.config.resource_group,
-                     '--output', 'json'],
+                     '--output', 'json'] + self._subscription_args(),
                     capture_output=True,
                     text=True,
                     timeout=10
@@ -84,13 +95,22 @@ class AzureProvider(BaseProvider):
                     error="Please specify resource_group in cloud config"
                 )
             
+            if not self.config.subscription_id:
+                return DeployResult(
+                    success=False,
+                    message="Subscription ID is required for Azure deployment",
+                    error="Please specify subscription_id in cloud config"
+                )
+            
+            sub_args = self._subscription_args()
+            
             # Step 1: Create resource group if not exists
             print(f"[azure] Creating resource group: {self.config.resource_group}")
             try:
                 subprocess.run(
                     ['az', 'group', 'create',
                      '--name', self.config.resource_group,
-                     '--location', self.config.region],
+                     '--location', self.config.region] + sub_args,
                     capture_output=True,
                     timeout=30
                 )
@@ -106,7 +126,7 @@ class AzureProvider(BaseProvider):
                     ['az', 'containerapp', 'env', 'create',
                      '--name', env_name,
                      '--resource-group', self.config.resource_group,
-                     '--location', self.config.region],
+                     '--location', self.config.region] + sub_args,
                     capture_output=True,
                     timeout=120
                 )
@@ -128,7 +148,7 @@ class AzureProvider(BaseProvider):
                 '--memory', f"{self.config.memory}Gi",
                 '--min-replicas', str(self.config.min_instances),
                 '--max-replicas', str(self.config.max_instances)
-            ]
+            ] + sub_args
             
             # Add environment variables (space-separated under a single flag so
             # later pairs do not override earlier ones).
@@ -156,7 +176,7 @@ class AzureProvider(BaseProvider):
                     '--memory', f"{self.config.memory}Gi",
                     '--min-replicas', str(self.config.min_instances),
                     '--max-replicas', str(self.config.max_instances),
-                ]
+                ] + sub_args
                 if self.config.env_vars:
                     update_cmd.append('--set-env-vars')
                     update_cmd.extend(f"{k}={v}" for k, v in self.config.env_vars.items())
@@ -174,7 +194,7 @@ class AzureProvider(BaseProvider):
                         ['az', 'containerapp', 'show',
                          '--name', self.config.service_name,
                          '--resource-group', self.config.resource_group,
-                         '--output', 'json'],
+                         '--output', 'json'] + sub_args,
                         capture_output=True,
                         text=True,
                         timeout=30
@@ -230,7 +250,7 @@ class AzureProvider(BaseProvider):
                 ['az', 'containerapp', 'show',
                  '--name', self.config.service_name,
                  '--resource-group', self.config.resource_group,
-                 '--output', 'json'],
+                 '--output', 'json'] + self._subscription_args(),
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -321,7 +341,7 @@ class AzureProvider(BaseProvider):
                 ['az', 'containerapp', 'delete',
                  '--name', self.config.service_name,
                  '--resource-group', self.config.resource_group,
-                 '--yes'],
+                 '--yes'] + self._subscription_args(),
                 capture_output=True,
                 text=True,
                 timeout=120
@@ -345,7 +365,7 @@ class AzureProvider(BaseProvider):
                     ['az', 'containerapp', 'env', 'delete',
                      '--name', env_name,
                      '--resource-group', self.config.resource_group,
-                     '--yes'],
+                     '--yes'] + self._subscription_args(),
                     capture_output=True,
                     text=True,
                     timeout=120

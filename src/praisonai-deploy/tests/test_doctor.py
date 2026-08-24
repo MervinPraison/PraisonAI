@@ -188,6 +188,35 @@ def test_check_azure_cli_success(mock_run):
 
 
 @patch('subprocess.run')
+def test_check_azure_cli_subscription_mismatch(mock_run):
+    """Ambient subscription differing from configured one is flagged."""
+    from praisonai_deploy.doctor import check_azure_cli
+
+    mock_run.return_value = Mock(
+        returncode=0,
+        stdout='{"id": "sub-123", "name": "My Subscription", "state": "Enabled"}'
+    )
+
+    result = check_azure_cli(subscription_id="sub-999")
+    assert result.passed is False
+    assert "az account set" in result.fix_suggestion
+
+
+@patch('subprocess.run')
+def test_check_azure_cli_subscription_match(mock_run):
+    """Ambient subscription matching configured one passes."""
+    from praisonai_deploy.doctor import check_azure_cli
+
+    mock_run.return_value = Mock(
+        returncode=0,
+        stdout='{"id": "sub-123", "name": "My Subscription", "state": "Enabled"}'
+    )
+
+    result = check_azure_cli(subscription_id="sub-123")
+    assert result.passed is True
+
+
+@patch('subprocess.run')
 def test_check_azure_cli_not_logged_in(mock_run):
     """Test Azure CLI check when not logged in."""
     from praisonai_deploy.doctor import check_azure_cli
