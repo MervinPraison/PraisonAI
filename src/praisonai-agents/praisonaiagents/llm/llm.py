@@ -2410,8 +2410,8 @@ Respond with ONLY a valid JSON tool call in this format:
             # Handle Gemini internal tools (e.g., {"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}})
             elif isinstance(tool, dict) and len(tool) == 1:
                 tool_name = next(iter(tool.keys()))
-                gemini_internal_tools = {'googleSearch', 'urlContext', 'codeExecution'}
-                if tool_name in gemini_internal_tools:
+                from .model_capabilities import GEMINI_INTERNAL_TOOLS
+                if tool_name in GEMINI_INTERNAL_TOOLS:
                     logging.debug(f"Using Gemini internal tool: {tool_name}")
                     formatted_tools.append(tool)
                 else:

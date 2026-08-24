@@ -3012,6 +3012,19 @@ Your Goal: {self.goal}"""
 
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
+            # Honour configured throttling and cooperative cancellation before
+            # handing off to the managed backend, so backend requests obey the
+            # same request limits and cancel token as direct-LLM calls instead
+            # of bypassing both guards (parity with the async achat() path).
+            _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+            if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+                reason = getattr(_cancel, "reason", None) or "cancelled before backend call"
+                raise InterruptedError(f"Agent chat cancelled: {reason}")
+            if self._rate_limiter is not None:
+                self._rate_limiter.acquire()
+            if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+                reason = getattr(_cancel, "reason", None) or "cancelled before backend call"
+                raise InterruptedError(f"Agent chat cancelled: {reason}")
             # Extract kwargs for delegation, excluding 'self' and function locals
             delegation_kwargs = {
                 'temperature': temperature,
@@ -3729,9 +3742,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # handing off to the managed backend, so backend requests obey the
             # same request limits and cancel token as direct-LLM calls instead
             # of bypassing both guards.
+            _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+            if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+                reason = getattr(_cancel, "reason", None) or "cancelled before backend call"
+                raise InterruptedError(f"Agent chat cancelled: {reason}")
             if self._rate_limiter is not None:
                 await self._rate_limiter.acquire_async()
-            _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before backend call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
