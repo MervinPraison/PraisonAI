@@ -1032,7 +1032,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-mcp"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1072,7 +1072,7 @@ provides-extras = ["server", "auth", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.168"
+version = "1.7.1"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -1111,6 +1111,7 @@ requires-dist = [
     { name = "playwright", marker = "extra == 'crawl'", specifier = ">=1.47.0" },
     { name = "posthog", specifier = ">=3.0.0" },
     { name = "posthog", marker = "extra == 'telemetry'", specifier = ">=3.0.0" },
+    { name = "praisonai-sandbox", marker = "extra == 'sandbox'", specifier = ">=0.0.13" },
     { name = "praisonaiagents", extras = ["a2ui"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["api"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["auth"], marker = "extra == 'all'" },
@@ -1123,6 +1124,7 @@ requires-dist = [
     { name = "praisonaiagents", extras = ["memory"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["os"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["sandbox"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["search"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["telemetry"], marker = "extra == 'all'" },
     { name = "pydantic", specifier = ">=2.10.0" },
@@ -1139,7 +1141,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
+provides-extras = ["sandbox", "mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
 
 [[package]]
 name = "propcache"
