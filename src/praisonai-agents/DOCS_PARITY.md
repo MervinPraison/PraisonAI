@@ -25,14 +25,14 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 11 | 3542 |
 | ✅ Autonomy | 3 | 7 | 2790 |
-| ✅ Bots | 7 | 31 | 13411 |
+| ✅ Bots | 7 | 32 | 13612 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 36734 |
+| ✅ CLI | 5 | 122 | 36991 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1347 |
-| ✅ Configuration | 3 | 8 | 3139 |
+| ✅ Configuration | 3 | 8 | 3173 |
 | ✅ Context Management | 16 | 36 | 13988 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 81 | 29957 |
+| ✅ Gateway | 7 | 81 | 30011 |
 | ✅ Guardrails | 4 | 4 | 2228 |
 | ✅ Handoffs | 11 | 6 | 2626 |
 | ✅ Hooks | 2 | 9 | 4509 |
@@ -51,8 +51,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 16 | 4942 |
 | ✅ LLM | 3 | 15 | 5372 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 61 | 14135 |
-| ✅ Memory | 6 | 18 | 7187 |
+| ✅ MCP | 1 | 61 | 14160 |
+| ✅ Memory | 6 | 18 | 7193 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -66,16 +66,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ RAG | 5 | 15 | 3118 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 730 |
-| ✅ Retrieval | 2 | 5 | 1054 |
+| ✅ Retrieval | 2 | 5 | 1042 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3483 |
+| ✅ Sandbox | 5 | 7 | 3556 |
 | ✅ Security | 1 | 3 | 3482 |
 | ✅ Sessions | 4 | 19 | 7631 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 43113 |
+| ✅ Tools | 12 | 144 | 43191 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
