@@ -954,7 +954,7 @@ def get_command_names():
     names.update({"app", "standardise", "standardize"})
     # Dynamically registered retrieval commands (no static module entry)
     # NOTE: retrieval_module.register_commands(app) adds these commands dynamically
-    names.update({"index", "query"})
+    names.update({"index", "query", "search"})
     return names
 
 def register_commands():
