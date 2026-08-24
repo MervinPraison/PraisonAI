@@ -3,7 +3,7 @@ Deploy configuration models using Pydantic.
 """
 from enum import Enum
 from typing import Optional, Dict, List, Any, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DeployType(str, Enum):
@@ -73,6 +73,8 @@ def coerce_cloud_provider(value: "CloudProviderLike") -> "CloudProviderLike":
 
 class APIConfig(BaseModel):
     """Configuration for API server deployment."""
+    model_config = ConfigDict(extra="forbid")
+
     host: str = Field(default="127.0.0.1", description="Server host")
     port: int = Field(default=8005, description="Server port")
     workers: int = Field(default=1, description="Number of worker processes")
@@ -84,6 +86,8 @@ class APIConfig(BaseModel):
 
 class DockerConfig(BaseModel):
     """Configuration for Docker deployment."""
+    model_config = ConfigDict(extra="forbid")
+
     image_name: str = Field(default="praisonai-app", description="Docker image name")
     tag: str = Field(default="latest", description="Docker image tag")
     base_image: str = Field(default="python:3.11-slim", description="Base Docker image")
@@ -95,6 +99,8 @@ class DockerConfig(BaseModel):
 
 class CloudConfig(BaseModel):
     """Configuration for cloud deployment."""
+    model_config = ConfigDict(extra="forbid")
+
     provider: CloudProviderLike = Field(..., description="Cloud provider")
     region: str = Field(..., description="Deployment region")
     service_name: str = Field(..., description="Service/application name")

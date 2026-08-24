@@ -274,6 +274,74 @@ def test_validate_agents_yaml_file_not_found():
         validate_agents_yaml("/nonexistent/file.yaml")
 
 
+def test_validate_agents_yaml_misspelled_field_key(tmp_path):
+    """A misspelled *field* key must fail validation, not be silently dropped."""
+    from praisonai_deploy.schema import validate_agents_yaml
+
+    yaml_content = """
+name: Test Agent
+framework: praisonai
+
+deploy:
+  type: cloud
+  cloud:
+    provider: aws
+    region: us-east-1
+    service_name: my-agent-service
+    clustor_name: prod-shared-cluster
+"""
+
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        validate_agents_yaml(str(yaml_file))
+    assert "clustor_name" in str(exc_info.value)
+
+
+def test_validate_agents_yaml_misspelled_section_key(tmp_path):
+    """A misspelled *section* name must fail validation, not deploy defaults."""
+    from praisonai_deploy.schema import validate_agents_yaml
+
+    yaml_content = """
+name: Test Agent
+framework: praisonai
+
+deploy:
+  type: docker
+  dockerr:
+    image_name: my-agent
+    tag: v1.0.0
+"""
+
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        validate_agents_yaml(str(yaml_file))
+    assert "dockerr" in str(exc_info.value)
+
+
+def test_validate_agents_yaml_misspelled_docker_field(tmp_path):
+    """A misspelled docker field key must fail validation."""
+    from praisonai_deploy.schema import validate_agents_yaml
+
+    yaml_content = """
+name: Test Agent
+framework: praisonai
+
+deploy:
+  type: docker
+  docker:
+    image_name: my-agent
+    regsitry: ghcr.io/myorg
+"""
+
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        validate_agents_yaml(str(yaml_file))
+    assert "regsitry" in str(exc_info.value)
+
+
 def test_generate_sample_yaml_api():
     """Test generating sample YAML for API deploy."""
     from praisonai_deploy.schema import generate_sample_yaml
