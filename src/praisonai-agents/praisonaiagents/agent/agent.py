@@ -197,75 +197,6 @@ def _validate_preset_params(params):
         validate_preset_string(name, value, _PRESET_STRING_PARAMS[name]())
 
 
-class ServerRegistry:
-    """Registry for API server state per-port."""
-    
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._server_started = {}  # Dict of port -> started boolean
-        self._registered_agents = {}  # Dict of port -> Dict of path -> agent_id  
-        self._shared_apps = {}  # Dict of port -> FastAPI app
-    
-    # Class-level lock for thread-safe singleton creation
-    _instance_lock = threading.Lock()
-    
-
-
-    @staticmethod
-    def get_default_instance():
-        """Get default global registry for backward compatibility."""
-        if not hasattr(ServerRegistry, '_default_instance'):
-            # Double-checked locking pattern with shared class-level lock
-            with ServerRegistry._instance_lock:
-                if not hasattr(ServerRegistry, '_default_instance'):
-                    ServerRegistry._default_instance = ServerRegistry()
-        return ServerRegistry._default_instance
-    
-    def is_server_started(self, port: int) -> bool:
-        with self._lock:
-            return self._server_started.get(port, False)
-    
-    def set_server_started(self, port: int, started: bool) -> None:
-        with self._lock:
-            self._server_started[port] = started
-    
-    def get_shared_app(self, port: int):
-        with self._lock:
-            return self._shared_apps.get(port)
-    
-    def set_shared_app(self, port: int, app) -> None:
-        with self._lock:
-            self._shared_apps[port] = app
-    
-    def register_agent(self, port: int, path: str, agent_id: str) -> None:
-        with self._lock:
-            if port not in self._registered_agents:
-                self._registered_agents[port] = {}
-            self._registered_agents[port][path] = agent_id
-    
-    def get_registered_agents(self, port: int) -> dict:
-        with self._lock:
-            return self._registered_agents.get(port, {}).copy()
-
-    def cleanup_agent_registrations(self, agent_id: str) -> None:
-        """Remove all registrations for an agent ID and clean empty port state."""
-        with self._lock:
-            ports_to_clean = []
-            for port, path_dict in self._registered_agents.items():
-                paths_to_remove = [path for path, registered_id in path_dict.items() if registered_id == agent_id]
-                for path in paths_to_remove:
-                    del path_dict[path]
-                if not path_dict:
-                    ports_to_clean.append(port)
-
-            for port in ports_to_clean:
-                self._registered_agents.pop(port, None)
-                self._server_started.pop(port, None)
-
-# Backward compatibility - use default instance
-def _get_default_server_registry() -> ServerRegistry:
-    return ServerRegistry.get_default_instance()
-
 # Don't import FastAPI dependencies here - use lazy loading instead
 
 if TYPE_CHECKING:
@@ -7494,8 +7425,7 @@ Answer:"""
 
         try:
             # Tear down the routes launch() actually registered (module-level
-            # state in execution_mixin.py). ServerRegistry above is a separate,
-            # unpopulated structure and cleaning it up is a no-op.
+            # state in execution_mixin.py).
             from .execution_mixin import cleanup_launch_registration
             cleanup_launch_registration(self._agent_id)
 
