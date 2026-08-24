@@ -330,3 +330,51 @@ def test_allow_always_grant_persists_across_manager_restart(tmp_path):
     rid, res = asyncio.run(restart_fast_path())
     assert rid == "auto"
     assert res.approved is True
+
+
+def test_gateway_backend_forwards_authorized_reviewers(tmp_path):
+    """The production backend must bind per-request reviewer custody.
+
+    Regression guard: ``GatewayApprovalBackend`` previously dropped
+    ``ApprovalRequest.authorized_reviewers`` on the way to ``register()``,
+    leaving every request unbound. This verifies the custody set reaches the
+    manager so an unauthorised operator is rejected end-to-end.
+    """
+    from praisonaiagents.approval.protocols import ApprovalRequest
+    from praisonai_bot.gateway.gateway_approval import GatewayApprovalBackend
+
+    mgr = ExecApprovalManager(ttl=300, allowlist_path=tmp_path / "allow.sqlite")
+    backend = GatewayApprovalBackend(manager=mgr, timeout=5)
+
+    async def go():
+        request = ApprovalRequest(
+            tool_name="deploy",
+            arguments={"target": "prod"},
+            risk_level="high",
+            agent_name="deployer",
+            authorized_reviewers=["operator:alice"],
+        )
+        task = asyncio.create_task(backend.request_approval(request))
+        # Let the backend register the pending request.
+        await asyncio.sleep(0)
+        pending = mgr.list_pending()
+        assert len(pending) == 1
+        rid = pending[0]["request_id"]
+
+        # The bound pending request carries the custody set.
+        req = mgr.get_pending(rid)
+        assert req is not None
+        assert req.authorized_reviewers == frozenset({"operator:alice"})
+
+        # An unauthorised operator cannot resolve it.
+        assert mgr.resolve(
+            rid, Resolution(approved=True, resolver="operator:bob")
+        ) is False
+        # The authorised operator can, completing the awaited request.
+        assert mgr.resolve(
+            rid, Resolution(approved=True, resolver="operator:alice")
+        ) is True
+        decision = await task
+        assert decision.approved is True
+
+    asyncio.run(go())

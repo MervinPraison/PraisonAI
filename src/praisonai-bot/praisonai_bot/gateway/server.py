@@ -1382,11 +1382,25 @@ class WebSocketGateway:
         def _resolve_operator_identity(request) -> str:
             """Derive a stable, non-secret operator identity for the audit trail.
 
-            The operator token is a secret and must never be logged. We derive a
-            short, deterministic handle from it so decisions are attributable
-            without leaking the token. Falls back to the client IP (or
-            ``"gateway"``) when no token is present (e.g. loopback bypass).
+            Resolution order (most to least specific), so multi-operator
+            deployments can attribute decisions to an *individual* rather than
+            to a shared credential:
+
+            1. An explicit ``X-Operator-Id`` header (a non-secret, caller-supplied
+               operator handle). This distinguishes operators even when they
+               share a gateway token — a proxy/SSO layer can stamp it per user.
+            2. A short digest of the operator token. The token is a secret and
+               must never be logged, so we hash it; distinct tokens yield
+               distinct identities. Holders of the *same* token collapse to one
+               identity by design (that is the identity that token represents).
+            3. The client IP, then ``"gateway"`` when nothing else is available
+               (e.g. loopback bypass).
             """
+            explicit = request.headers.get("x-operator-id", "").strip()
+            if explicit:
+                # Bound + sanitised so a header value can't bloat or corrupt the
+                # audit row; it is a handle, not a secret.
+                return f"operator:{explicit[:64]}"
             token = _extract_request_token(request)
             if token:
                 digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
