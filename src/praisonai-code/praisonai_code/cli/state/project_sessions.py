@@ -286,13 +286,21 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
 
     history = store.get_chat_history(session_id) or []
     if history:
-        existing = {(m.get("role"), m.get("content")) for m in agent.chat_history}
-        for msg in history:
-            entry = {"role": msg["role"], "content": msg["content"]}
-            key = (entry["role"], entry["content"])
-            if key not in existing:
-                agent.chat_history.append(entry)
-                existing.add(key)
+        # Restore by position, not by content. Two identical user turns (e.g. a
+        # bare "yes" confirmation repeated across steps) are two distinct turns;
+        # a content-based filter silently deletes legitimate repeats and hands
+        # the model a conversation that never happened (Issue #4243). Only skip
+        # restoration when the stored history is already present verbatim as a
+        # prefix of chat_history, so a double-injection does not duplicate it.
+        stored = [
+            {"role": msg["role"], "content": msg["content"]} for msg in history
+        ]
+        current = [
+            {"role": m.get("role"), "content": m.get("content")}
+            for m in agent.chat_history[: len(stored)]
+        ]
+        if current != stored:
+            agent.chat_history.extend(stored)
         agent._auto_save_last_index = len(agent.chat_history)
 
     # Persist model/agent so a later resume is deterministic regardless of the

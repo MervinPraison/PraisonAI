@@ -17,11 +17,14 @@ Design (deliberately lightweight — stdlib only, no new dependencies):
 * Order matters: process-registered secrets first (most sensitive), then any
   detected key/token patterns, then absolute paths and the cwd, so a path that
   is part of a secret is not half-masked.
-* ``level="standard"`` redacts secrets and absolute paths in every string.
+* ``level="standard"`` redacts secrets and absolute paths in every string. This
+  includes any ``key: value`` / ``key = value`` pair whose key *contains* a
+  secret word (``api_key``, ``secret``, ``token``, ``password``, ``access_key``),
+  so shapes like ``AWS_SECRET_ACCESS_KEY=…`` and ``STRIPE_SECRET_KEY=…`` are
+  caught, not only keys that end in one.
   ``level="strict"`` additionally masks values that look like credentials in a
-  broader set of shapes (bearer tokens, PEM private-key blocks) and treats any
-  ``key: value`` / ``key = value`` pair whose key names a secret as sensitive —
-  trading a little readability for a stronger guarantee when sharing widely.
+  broader set of shapes (bearer tokens, PEM private-key blocks) — trading a
+  little readability for a stronger guarantee when sharing widely.
 """
 
 from __future__ import annotations
@@ -38,13 +41,21 @@ REDACT_LEVELS: Tuple[str, ...] = ("standard", "strict")
 # Token/secret shapes worth masking even when never registered as a resolved
 # secret. Kept intentionally small and high-signal to avoid over-redaction.
 _SECRET_PATTERNS: Tuple[re.Pattern, ...] = (
+    # Stripe live/test keys (sk_live_/sk_test_) and OpenAI-style sk- keys. The
+    # underscore form must precede the hyphen form so it is matched whole.
+    re.compile(r"sk_(?:live|test)_[A-Za-z0-9]{16,}"),  # Stripe secret keys
     re.compile(r"sk-[A-Za-z0-9_-]{16,}"),           # OpenAI-style keys
     re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),    # Slack tokens
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),      # GitHub tokens
     re.compile(r"AKIA[0-9A-Z]{16}"),                # AWS access key id
     re.compile(r"AIza[0-9A-Za-z_-]{30,}"),          # Google API key
     re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),  # JWT
-    re.compile(r"(?i)(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?([A-Za-z0-9_\-]{12,})"),
+    # key=value / key: value where the key *contains* a secret word anywhere
+    # (e.g. AWS_SECRET_ACCESS_KEY, STRIPE_SECRET_KEY), not only ends in one.
+    re.compile(
+        r"(?i)[A-Za-z0-9_.\-]*(?:api[_-]?key|secret|token|password|access[_-]?key)"
+        r"[A-Za-z0-9_.\-]*\s*[:=]\s*['\"]?([^\s'\"]{8,})"
+    ),
 )
 
 # Extra high-signal shapes only masked under ``strict`` — broader by design, so
