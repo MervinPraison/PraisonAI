@@ -23,6 +23,44 @@ import threading
 _typer_commands_cache = None
 _typer_commands_lock = threading.Lock()
 
+# Cache for the legacy dispatcher's implemented-verb set. ``None`` means "not yet
+# computed"; a frozenset once derived. Populated lazily from the legacy
+# argparse builder's authoritative ``LEGACY_SPECIAL_COMMANDS`` oracle so the
+# unified dispatcher never reclassifies an *implemented* verb as free text and
+# bills it to an LLM (#4327).
+_legacy_verbs_cache = None
+_legacy_verbs_lock = threading.Lock()
+
+# Fail-closed fallback for :func:`_get_legacy_verbs`. If importing the
+# authoritative ``LEGACY_SPECIAL_COMMANDS`` oracle ever fails, we must NOT return
+# an empty set — that would let an *implemented* verb (``thinking status`` etc.)
+# fall through to the bare-prompt rule and be billed to an LLM, reintroducing the
+# #4327 regression. This static mirror keeps the routing guard functional so such
+# verbs still reach the legacy handler even when discovery is degraded. It only
+# needs to stay a *superset-safe* copy of the oracle; drift merely means a newly
+# added verb isn't recognised until the oracle import recovers, never a bill.
+_LEGACY_VERBS_FALLBACK = frozenset({
+    'chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research',
+    'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools',
+    'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile',
+    'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy',
+    'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images',
+    'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr',
+    'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag',
+    'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search',
+    'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall',
+    'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway',
+    'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw',
+    'github', 'managed', 'flow', 'dashboard', 'backends', 'audit',
+})
+
+# Verbs excluded from the "route implemented verbs to legacy" guard. ``containers``
+# and ``vector-stores`` reach a capability that fabricates a success with zero
+# network (#4322); restoring their routing would promote that fabrication from
+# unreachable to user-visible, so they are held back until #4322 lands. They keep
+# their current behaviour rather than being rerouted here.
+_LEGACY_VERB_ROUTING_EXCLUSIONS = frozenset({"containers", "vector-stores"})
+
 # Cache for the run command's supported option names. ``None`` means "not yet
 # computed"; a tuple ``(all_opts, value_opts)`` once derived; ``False`` marks a
 # discovery failure so the conservative legacy fallback is used without retrying
@@ -261,6 +299,64 @@ def _get_typer_commands():
 
         _typer_commands_cache = commands
         return _typer_commands_cache
+
+
+def _get_legacy_verbs():
+    """Auto-discover the legacy dispatcher's implemented-verb set.
+
+    Sourced from the legacy argparse builder's authoritative
+    ``LEGACY_SPECIAL_COMMANDS`` oracle so this stays in lockstep with the verbs
+    legacy actually handles.
+
+    Fails *closed*: if the oracle import raises, return the static
+    :data:`_LEGACY_VERBS_FALLBACK` mirror rather than an empty set. An empty set
+    would let an implemented verb fall through to the bare-prompt rule and be
+    billed to an LLM — the #4327 regression this guard exists to prevent. The
+    fallback is *not* cached so a later caller can still pick up the authoritative
+    oracle once the transient import failure clears.
+    """
+    global _legacy_verbs_cache
+
+    if _legacy_verbs_cache is not None:
+        return _legacy_verbs_cache
+
+    with _legacy_verbs_lock:
+        if _legacy_verbs_cache is not None:  # Double-check
+            return _legacy_verbs_cache
+
+        try:
+            from praisonai.cli.legacy.dispatch.argparse_builder import (
+                LEGACY_SPECIAL_COMMANDS,
+            )
+            verbs = frozenset(LEGACY_SPECIAL_COMMANDS)
+        except Exception:
+            import logging
+            logging.getLogger("praisonai.__main__").warning(
+                "Legacy verb discovery failed; using static fallback registry so "
+                "implemented verbs still route to their handler (not the LLM).",
+                exc_info=True,
+            )
+            # Fail closed: recognise implemented verbs from the static mirror.
+            # Do NOT poison the cache — a later caller can still load the oracle.
+            return _LEGACY_VERBS_FALLBACK
+
+        _legacy_verbs_cache = verbs
+        return _legacy_verbs_cache
+
+
+def _is_implemented_legacy_verb(first_cmd):
+    """True when ``first_cmd`` is a verb the legacy dispatcher implements.
+
+    Such a token is an *implemented command*, not free text — it must reach its
+    handler on the legacy path, never be joined/quoted and billed to an LLM by
+    the modern ``run`` forwarder (#4327). A small exclusion set
+    (:data:`_LEGACY_VERB_ROUTING_EXCLUSIONS`) is withheld pending #4322.
+    """
+    if not first_cmd:
+        return False
+    if first_cmd in _LEGACY_VERB_ROUTING_EXCLUSIONS:
+        return False
+    return first_cmd in _get_legacy_verbs()
 
 
 def _iter_argv_tokens(argv, value_opts=None):
@@ -608,6 +704,15 @@ def main():
     if first_cmd in _get_typer_commands():
         # Known Typer command → Typer
         _run_typer(argv)
+        return
+
+    # A verb the legacy dispatcher implements is a *command*, not free text.
+    # Without this guard it falls through to the bare-prompt rule below and is
+    # joined/quoted into a modern ``run`` prompt and billed to an LLM (#4327):
+    # ``praisonai thinking status`` costs ~2.5k tokens and exits 0 instead of
+    # reaching its handler. Route it to legacy, which owns the handler.
+    if _is_implemented_legacy_verb(first_cmd):
+        _run_legacy(argv)
         return
 
     # A lone token that is a near-miss for a registered command is a mistyped

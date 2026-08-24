@@ -823,6 +823,137 @@ class TestMainRouting(unittest.TestCase):
         run_legacy.assert_not_called()
 
 
+class TestImplementedLegacyVerbRouting(unittest.TestCase):
+    """Implemented legacy verbs route to legacy, never billed as a prompt (#4327).
+
+    Since ``82f55c97b`` a first token that is not a *Typer* command was
+    reclassified as free text and forwarded to the modern ``run`` engine —
+    billing implemented verbs (``thinking``, ``install``, ``persistence`` …) to
+    ``/v1/responses``. The dispatcher now consults the legacy dispatcher's own
+    authoritative verb oracle so implemented verbs reach their handler.
+    """
+
+    def setUp(self):
+        self._saved_argv = sys.argv
+        dispatcher._typer_commands_cache = None
+        dispatcher._legacy_verbs_cache = None
+
+    def tearDown(self):
+        sys.argv = self._saved_argv
+        dispatcher._typer_commands_cache = None
+        dispatcher._legacy_verbs_cache = None
+
+    def test_is_implemented_legacy_verb(self):
+        with mock.patch.object(
+            dispatcher, "_get_legacy_verbs", return_value=frozenset({"thinking"})
+        ):
+            self.assertTrue(dispatcher._is_implemented_legacy_verb("thinking"))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb("nope"))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb(""))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb(None))
+
+    def test_excluded_verbs_are_not_implemented(self):
+        # ``containers``/``vector-stores`` withheld pending #4322 even though
+        # they appear in the legacy oracle.
+        with mock.patch.object(
+            dispatcher,
+            "_get_legacy_verbs",
+            return_value=frozenset({"containers", "vector-stores", "thinking"}),
+        ):
+            self.assertFalse(dispatcher._is_implemented_legacy_verb("containers"))
+            self.assertFalse(dispatcher._is_implemented_legacy_verb("vector-stores"))
+            self.assertTrue(dispatcher._is_implemented_legacy_verb("thinking"))
+
+    def test_legacy_verb_routes_to_legacy_not_typer_run(self):
+        sys.argv = ["praisonai", "thinking", "status"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher, "_get_legacy_verbs", return_value=frozenset({"thinking"})
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once_with(["thinking", "status"])
+        run_typer.assert_not_called()
+
+    def test_excluded_legacy_verb_is_not_forced_to_legacy(self):
+        # A withheld verb (#4322) falls through to the existing bare-prompt path
+        # rather than being force-routed to legacy.
+        sys.argv = ["praisonai", "containers", "list"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_legacy_verbs",
+            return_value=frozenset({"containers"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_not_called()
+        run_typer.assert_called_once_with(["run", "containers list"])
+
+    def test_get_legacy_verbs_sources_the_authoritative_oracle(self):
+        verbs = dispatcher._get_legacy_verbs()
+        # A representative sample of implemented verbs from the legacy oracle.
+        for verb in ("thinking", "install", "persistence", "audio", "files"):
+            self.assertIn(verb, verbs)
+
+    def test_get_legacy_verbs_fails_closed_on_import_error(self):
+        # If the authoritative oracle import raises, discovery must NOT return an
+        # empty set (which would let an implemented verb be billed to an LLM).
+        # It falls back to the static mirror so verbs are still recognised.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "praisonai.cli.legacy.dispatch.argparse_builder":
+                raise ImportError("simulated discovery failure")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch.object(builtins, "__import__", side_effect=_boom):
+            verbs = dispatcher._get_legacy_verbs()
+        self.assertIn("thinking", verbs)
+        self.assertIn("install", verbs)
+        # Fallback must not be cached, so recovery is possible on the next call.
+        self.assertIsNone(dispatcher._legacy_verbs_cache)
+
+    def test_thinking_status_not_billed_when_discovery_fails(self):
+        # End-to-end: with discovery failing, ``praisonai thinking status`` must
+        # still route to the legacy handler, never to the modern ``run`` (LLM).
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "praisonai.cli.legacy.dispatch.argparse_builder":
+                raise ImportError("simulated discovery failure")
+            return real_import(name, *args, **kwargs)
+
+        sys.argv = ["praisonai", "thinking", "status"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(builtins, "__import__", side_effect=_boom), \
+             mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once_with(["thinking", "status"])
+        run_typer.assert_not_called()
+
+    def test_fallback_registry_stays_in_sync_with_oracle(self):
+        # The static fail-closed mirror must remain a faithful copy of the
+        # authoritative oracle, so a newly added legacy verb cannot silently
+        # become billable during a discovery failure. Catches drift in CI.
+        from praisonai.cli.legacy.dispatch.argparse_builder import (
+            LEGACY_SPECIAL_COMMANDS,
+        )
+
+        self.assertEqual(
+            dispatcher._LEGACY_VERBS_FALLBACK,
+            frozenset(LEGACY_SPECIAL_COMMANDS),
+        )
+
+
 class TestBuildRunArgv(unittest.TestCase):
     """``_build_run_argv`` partitions a bare-prompt argv into a ``run`` call.
 
