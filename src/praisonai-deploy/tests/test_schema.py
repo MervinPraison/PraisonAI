@@ -342,6 +342,45 @@ deploy:
     assert "regsitry" in str(exc_info.value)
 
 
+def test_validate_agents_yaml_non_string_unknown_key(tmp_path):
+    """A non-string unknown deploy key must raise ValueError, not TypeError."""
+    from praisonai_deploy.schema import validate_agents_yaml
+
+    yaml_content = """
+name: Test Agent
+framework: praisonai
+
+deploy:
+  type: api
+  123: oops
+  true: nope
+"""
+
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        validate_agents_yaml(str(yaml_file))
+    assert "Unknown deploy config key" in str(exc_info.value)
+
+
+def test_validate_agents_yaml_deploy_not_a_mapping(tmp_path):
+    """A scalar `deploy` value must raise a clear ValueError."""
+    from praisonai_deploy.schema import validate_agents_yaml
+
+    yaml_content = """
+name: Test Agent
+framework: praisonai
+
+deploy: docker
+"""
+
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    with pytest.raises(ValueError) as exc_info:
+        validate_agents_yaml(str(yaml_file))
+    assert "must be a mapping" in str(exc_info.value)
+
+
 def test_generate_sample_yaml_api():
     """Test generating sample YAML for API deploy."""
     from praisonai_deploy.schema import generate_sample_yaml
