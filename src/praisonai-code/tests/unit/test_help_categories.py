@@ -83,6 +83,26 @@ def test_get_command_tags_help_panel():
         assert cmd.rich_help_panel == expected
 
 
+def test_resolved_commands_keep_their_typeable_name():
+    """Every resolvable command must render under the name a user can type.
+
+    Regression for issue #4323: ``typer_get_command`` yields ``""`` for a
+    ``typer.Typer(help=…)`` declared without ``name=`` and collapses a
+    single-command app to that command's own name, so the ``--help`` panel
+    printed blank or wrong names. ``get_command`` must pin ``command.name`` to
+    the registry key.
+    """
+    ctx = _root_context()
+    root = ctx.command
+    for name in root.list_commands(ctx):
+        cmd = root.get_command(ctx, name)
+        if cmd is None:
+            continue
+        assert cmd.name == name, (
+            f"command {name!r} resolved with mismatched name {cmd.name!r}"
+        )
+
+
 def test_help_output_is_grouped_not_flat():
     """The rendered help groups commands into categorised panels."""
     result = _invoke_help()
