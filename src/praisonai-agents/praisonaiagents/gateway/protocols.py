@@ -6275,8 +6275,16 @@ def resolve_required_scope(
 # status/read needs READ. Anything unregistered defaults to ADMIN (deny).
 def _register_core_gateway_methods() -> None:
     core: Dict[str, OperatorScope] = {
+        # Connection lifecycle. These run before a client can hold any scope, so
+        # they must not require one -- classifying them ADMIN by omission is what
+        # kept resolve_required_scope() from ever being wired into dispatch.
+        "hello": OperatorScope.READ,
+        "join": OperatorScope.READ,
+        "leave": OperatorScope.READ,
         "agent.message": OperatorScope.WRITE,
         "message": OperatorScope.WRITE,
+        # Aborting a turn mutates it, so it carries the same scope as sending one.
+        "abort": OperatorScope.WRITE,
         "session.status": OperatorScope.READ,
         "session.transcript": OperatorScope.READ,
         "approvals.resolve": OperatorScope.APPROVALS,
