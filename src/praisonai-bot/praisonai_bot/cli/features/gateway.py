@@ -842,6 +842,24 @@ class GatewayHandler:
                         f"{_time.strftime('%H:%M:%S', _time.localtime(data['last_inbound_at']))} "
                         f"({age:.0f}s ago)"
                     )
+                # Issue #4339: surface degraded owners (channels, providers, and
+                # now durability — a session/idempotency store that fell back to
+                # in-memory) so an operator is told when the bot is running
+                # non-durably instead of it being a silent log line. Always
+                # printed (not gated on ``deep``) since a degraded state is
+                # exactly what an at-a-glance status check should reveal.
+                degraded_owners = data.get("degraded_owners") or []
+                if degraded_owners:
+                    print("  Degraded:")
+                    for owner in degraded_owners:
+                        kind = owner.get("owner_kind", "?")
+                        oid = owner.get("owner_id", "?")
+                        reason = owner.get("reason", "—")
+                        hint = owner.get("retry_hint", "")
+                        line = f"    ✗ {kind}:{oid} — {reason}"
+                        if hint:
+                            line += f"  fix: {hint}"
+                        print(line)
                 channels = data.get("channels") or {}
                 if channels and deep:
                     print("  Channels:")

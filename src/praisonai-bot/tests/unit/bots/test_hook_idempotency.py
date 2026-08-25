@@ -152,12 +152,33 @@ class TestGatewayConfigWiring:
         )
         assert isinstance(srv._get_hook_idem_store(), SqliteIdempotencyStore)
 
-    def test_default_is_memory(self):
-        from praisonaiagents.gateway import InMemoryIdempotencyStore
+    def test_default_is_durable(self, tmp_path, monkeypatch):
+        # Issue #4339: an out-of-box gateway (no ``store_backend`` configured)
+        # must be durable by default so a redelivered webhook after a restart is
+        # suppressed rather than re-processed. ``memory`` is now an explicit
+        # opt-in only.
+        from praisonai_bot.bots import SqliteIdempotencyStore
 
+        monkeypatch.setattr(
+            "pathlib.Path.home", lambda: tmp_path, raising=True
+        )
         srv = self._bare_server()
         srv._apply_hooks_from_config({"hooks": []})
         assert srv._hook_idempotency_backend is None
+        assert isinstance(srv._get_hook_idem_store(), SqliteIdempotencyStore)
+
+    def test_explicit_memory_opt_in(self, tmp_path, monkeypatch):
+        # ``memory`` stays available as an explicit choice for ephemeral runs.
+        from praisonaiagents.gateway import InMemoryIdempotencyStore
+
+        monkeypatch.setattr(
+            "pathlib.Path.home", lambda: tmp_path, raising=True
+        )
+        srv = self._bare_server()
+        srv._apply_hooks_from_config(
+            {"hooks": {"idempotency": {"store_backend": "memory"}, "hooks": []}}
+        )
+        assert srv._hook_idempotency_backend == "memory"
         assert isinstance(srv._get_hook_idem_store(), InMemoryIdempotencyStore)
 
     def test_backend_change_rebuilds_store(self, tmp_path, monkeypatch):
@@ -168,7 +189,10 @@ class TestGatewayConfigWiring:
             "pathlib.Path.home", lambda: tmp_path, raising=True
         )
         srv = self._bare_server()
-        srv._apply_hooks_from_config({"hooks": []})
+        # Explicit ``memory`` opt-in, then hot-reload to durable sqlite.
+        srv._apply_hooks_from_config(
+            {"hooks": {"idempotency": {"store_backend": "memory"}, "hooks": []}}
+        )
         assert isinstance(srv._get_hook_idem_store(), InMemoryIdempotencyStore)
         # Hot-reload flips to sqlite: the cached in-memory store is discarded.
         srv._apply_hooks_from_config(
@@ -195,3 +219,85 @@ class TestBuildIdempotencyStore:
         from praisonai_bot.bots import build_idempotency_store
 
         assert isinstance(build_idempotency_store("redis"), InMemoryIdempotencyStore)
+
+    def test_none_backend_is_durable_by_default(self, tmp_path):
+        # Issue #4339: unset backend -> durable SQLite store, not in-memory.
+        from praisonai_bot.bots import SqliteIdempotencyStore, build_idempotency_store
+
+        store = build_idempotency_store(None, path=tmp_path / "idem.sqlite")
+        assert isinstance(store, SqliteIdempotencyStore)
+
+
+class TestDurabilityDegradation:
+    """Issue #4339: a durable store that cannot init is a *reported* fact."""
+
+    def test_idempotency_fallback_records_degraded(self, tmp_path):
+        from praisonai_bot.bots import build_idempotency_store
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+        )
+        from praisonaiagents.gateway import InMemoryIdempotencyStore
+
+        clear_durability_degraded("idempotency")
+        # A path under a file (not a dir) makes the SQLite store fail to open,
+        # exercising the recorded-degradation fallback.
+        bad_parent = tmp_path / "afile"
+        bad_parent.write_text("x")
+        bad_path = bad_parent / "idem.sqlite"
+        store = build_idempotency_store("sqlite", path=bad_path)
+        assert isinstance(store, InMemoryIdempotencyStore)
+        owners = durability_degraded_owners()
+        match = [o for o in owners if o.owner_id == "durability:idempotency"]
+        assert match
+        # #4339: the operator-facing reason must be redacted — the raw store
+        # path (and any backend detail) stays in logs, never in health/status.
+        assert str(bad_path) not in match[0].reason
+        clear_durability_degraded("idempotency")
+
+    def test_successful_build_clears_stale_degradation(self, tmp_path):
+        # #4339: a same-process rebuild (e.g. a config hot-reload) that restores
+        # the durable store must clear a prior degradation so health/status stop
+        # reporting non-durable operation after recovery.
+        from praisonai_bot.bots import (
+            SqliteIdempotencyStore,
+            build_idempotency_store,
+        )
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+            record_durability_degraded,
+        )
+
+        clear_durability_degraded("idempotency")
+        record_durability_degraded("idempotency", reason="store unavailable")
+        assert any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+        store = build_idempotency_store("sqlite", path=tmp_path / "idem.sqlite")
+        assert isinstance(store, SqliteIdempotencyStore)
+        assert not any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+        clear_durability_degraded("idempotency")
+
+    def test_record_and_clear_roundtrip(self):
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+            record_durability_degraded,
+        )
+
+        clear_durability_degraded("session")
+        record_durability_degraded("session", reason="store unavailable")
+        owners = durability_degraded_owners()
+        match = [o for o in owners if o.owner_id == "durability:session"]
+        assert match and match[0].owner_kind == "gateway"
+        assert match[0].retry_hint == "praisonai gateway doctor --fix"
+        clear_durability_degraded("session")
+        assert not any(
+            o.owner_id == "durability:session"
+            for o in durability_degraded_owners()
+        )

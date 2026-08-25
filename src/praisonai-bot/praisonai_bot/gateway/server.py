@@ -4268,8 +4268,12 @@ class WebSocketGateway:
             return self._hook_idem
         # Backend is captured from the parsed ``hooks.idempotency`` config in
         # ``_apply_hooks_from_config`` (``GatewayConfig`` carries no field for
-        # it). Default to the in-memory store when no config selected one.
-        backend = self._hook_idempotency_backend or "memory"
+        # it). Durable by default (Issue #4339): when no config selected a
+        # backend, ``None`` lets ``build_idempotency_store`` pick the durable
+        # SQLite store so an out-of-box gateway survives a restart rather than
+        # silently re-processing a redelivered webhook. ``"memory"`` stays an
+        # explicit opt-in for ephemeral runs.
+        backend = self._hook_idempotency_backend
         try:
             from pathlib import Path
             from praisonai_bot.bots import build_idempotency_store
@@ -5218,6 +5222,21 @@ class WebSocketGateway:
             if shared is not None:
                 for owner in shared.list_degraded():
                     registry.mark(owner)
+            # Issue #4339: surface durability degradation (a durable session or
+            # idempotency store that could not initialise and fell back to
+            # in-memory) the same way as channel degradation, so an operator is
+            # told their bot is running non-durably instead of it being a silent
+            # log line. Recorded by the boundaries that own that state in
+            # ``bots/_session.py`` / ``bots/_idempotency.py``.
+            try:
+                from praisonai_bot.bots._session import (
+                    durability_degraded_owners,
+                )
+
+                for owner in durability_degraded_owners():
+                    registry.mark(owner)
+            except Exception:
+                pass
             degraded_owners = registry.to_list()
             if degraded_owners:
                 result["degraded_owners"] = degraded_owners

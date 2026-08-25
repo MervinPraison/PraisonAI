@@ -3,9 +3,10 @@ Durable inbound webhook/trigger idempotency store for the PraisonAI gateway.
 
 The gateway's inbound HTTP hook surface deduplicates provider redeliveries so a
 webhook that re-POSTs an already-processed event does not start a second agent
-run (a duplicate reply, or a duplicate tool action). The core in-memory default
+run (a duplicate reply, or a duplicate tool action). The core in-memory store
 (``InMemoryIdempotencyStore``) is per-process and empty after a restart, so this
-SQLite-backed store persists the dedup key — mirroring the durability the
+SQLite-backed store — selected by default (Issue #4339) — persists the dedup key,
+mirroring the durability the
 ``InboundJournal`` and ``OutboundQueue`` already provide — so the dedup window
 survives a restart within a provider's retry window and, when the same DB file
 is shared, across replicas.
@@ -191,7 +192,7 @@ class SqliteIdempotencyStore:
 
 
 def build_idempotency_store(
-    backend: str,
+    backend: Union[str, None] = None,
     *,
     path: Union[str, Path, None] = None,
     max_size: int = _DEFAULT_MAX_SIZE,
@@ -200,10 +201,15 @@ def build_idempotency_store(
 ):
     """Build an idempotency store for the given ``backend``.
 
-    ``"memory"`` (default) returns the core in-memory store; ``"sqlite"``
-    returns the durable :class:`SqliteIdempotencyStore`. On any failure to build
-    the durable store, falls back to the in-memory default so inbound delivery
-    keeps working (dedup is best-effort within the process, as before).
+    Durable by default (Issue #4339): when ``backend`` is unset (``None``) a
+    durable :class:`SqliteIdempotencyStore` is chosen so an out-of-box gateway
+    survives a restart within a provider's retry window rather than silently
+    re-processing a redelivered webhook. ``"memory"`` stays available as an
+    **explicit** opt-in for tests / ephemeral runs, and ``"sqlite"`` forces the
+    durable store. If the durable store genuinely cannot be initialised, this
+    records a *durability-degraded* fact (surfaced by ``gateway doctor`` /
+    ``gateway status``) and falls back to in-memory so inbound delivery keeps
+    working — degradation is reported, not silent.
     """
     from praisonaiagents.gateway import InMemoryIdempotencyStore
 
@@ -212,25 +218,46 @@ def build_idempotency_store(
             max_entries=max_size, ttl_seconds=ttl_seconds
         )
 
+    def _default_path() -> Path:
+        return Path.home() / ".praisonai" / "state" / "hook_idempotency.sqlite"
+
+    # ``None`` means "no explicit choice" → durable by default. ``"memory"``
+    # must be asked for; only then do we run non-durably by intent.
+    if backend is None:
+        backend = "sqlite"
     backend = (backend or "memory").lower()
     if backend == "memory":
         return _memory()
     if backend == "sqlite":
         try:
-            store_path = path or (
-                Path.home() / ".praisonai" / "state" / "hook_idempotency.sqlite"
-            )
-            return SqliteIdempotencyStore(
+            store_path = Path(path) if path else _default_path()
+            store = SqliteIdempotencyStore(
                 store_path,
                 max_size=max_size,
                 ttl_seconds=ttl_seconds,
                 inflight_lease_seconds=inflight_lease_seconds,
             )
-        except Exception as e:  # pragma: no cover - defensive
+            # The durable store came up (fresh start, or a recovery after a
+            # prior failure/hot-reload): clear any stale degraded fact so a
+            # recovered gateway stops reporting non-durable idempotency (#4339).
+            from ._session import clear_durability_degraded
+
+            clear_durability_degraded("idempotency")
+            return store
+        except Exception as e:
+            # Keep the raw exception (which may embed a filesystem path) in the
+            # log only; the operator-facing reason stays redacted so health()
+            # and ``gateway status`` never echo backend paths (#4339).
             logger.warning(
                 "SqliteIdempotencyStore unavailable, falling back to in-memory "
                 "inbound dedup: %s",
                 e,
+            )
+            from ._session import record_durability_degraded
+
+            record_durability_degraded(
+                "idempotency",
+                reason="durable idempotency store unavailable (running in-memory)",
             )
             return _memory()
     # "redis" (multi-replica) is not yet implemented in the wrapper; fall back
