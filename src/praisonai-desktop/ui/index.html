@@ -395,6 +395,10 @@ body.training #thread,body.training #f{display:none}
 .trun .grow{flex:1}
 .tnote{font-size:.76rem;color:var(--bad);margin-top:.6rem}
 .tnote:empty{display:none}
+/* A class, not a style attribute: configuring a CSP makes Tauri stamp a nonce
+   on this <style> tag, which voids 'unsafe-inline' and stops every inline
+   style attribute in the document from applying. */
+.runshd{padding:0 0 .3rem}
 </style></head><body>
 <div class="titlebar" data-tauri-drag-region>
   <button class="modelpill" id="modelpill" type="button">
@@ -557,7 +561,7 @@ body.training #thread,body.training #f{display:none}
         </div>
 
         <div class="tcard" id="tHistoryCard" hidden>
-          <div class="sectlbl" style="padding:0 0 .3rem">Previous runs</div>
+          <div class="sectlbl runshd">Previous runs</div>
           <div id="tHistory"></div>
         </div>
       </div>
