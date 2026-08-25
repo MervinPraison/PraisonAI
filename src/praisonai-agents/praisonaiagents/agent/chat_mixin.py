@@ -5004,6 +5004,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Handle any tool calls that were accumulated
                     if tool_calls_data:
+                        # Mark where the tool turns begin so the follow-up can
+                        # append exactly the assistant tool-call and tool-result
+                        # messages onto the original request context below.
+                        tool_turn_start = len(self.chat_history)
                         # Add assistant message with tool calls to chat history
                         assistant_message = {"role": "assistant", "content": response_text}
                         if tool_calls_data:
@@ -5106,8 +5110,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # say. The non-streaming path already does this round
                         # trip, so the two disagreed about whether an answer
                         # existed at all.
+                        #
+                        # Reuse the original `messages` (system prompt, output
+                        # constraints, memory context and the user turn) rather
+                        # than `self.chat_history`, which omits the system turn
+                        # and would let the follow-up ignore the agent role and
+                        # output format. Append only the tool turns produced by
+                        # this round -- everything added to chat history since
+                        # the completion began.
                         followup_args = dict(completion_args)
-                        followup_args['messages'] = self.chat_history
+                        followup_args['messages'] = (
+                            list(messages) + self.chat_history[tool_turn_start:]
+                        )
                         followup_args['stream'] = True
                         # No tools on the follow-up: the model has its results
                         # and should now answer, not call another tool. That
@@ -5116,7 +5130,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         followup_args.pop('tool_choice', None)
                         followup_args.pop('parallel_tool_calls', None)
 
+                        # Bracket the follow-up with stream events so consumers
+                        # see request/terminal telemetry for the answer too --
+                        # the STREAM_END above referred only to the tool-call
+                        # round, before any answer existed.
+                        self.stream_emitter.emit(StreamEvent(
+                            type=StreamEventType.REQUEST_START,
+                            timestamp=time_module.perf_counter(),
+                            metadata={
+                                "model": self.llm,
+                                "message_count": len(followup_args['messages']),
+                                "phase": "post_tool_answer",
+                            }
+                        ))
+
                         followup_text = ""
+                        followup_last_content_time = None
                         for followup_chunk in self._openai_client.sync_client.chat.completions.create(
                             **followup_args
                         ):
@@ -5125,7 +5154,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             piece = followup_chunk.choices[0].delta.content
                             if piece:
                                 followup_text += piece
+                                followup_last_content_time = time_module.perf_counter()
                                 yield piece
+                        if followup_last_content_time:
+                            self.stream_emitter.emit(StreamEvent(
+                                type=StreamEventType.LAST_TOKEN,
+                                timestamp=followup_last_content_time
+                            ))
+                        self.stream_emitter.emit(StreamEvent(
+                            type=StreamEventType.STREAM_END,
+                            timestamp=time_module.perf_counter(),
+                            metadata={"response_length": len(followup_text)}
+                        ))
                         if followup_text:
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}

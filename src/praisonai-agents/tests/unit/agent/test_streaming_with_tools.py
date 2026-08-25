@@ -45,12 +45,21 @@ def test_a_plain_turn_streams():
 
 
 def test_a_tool_using_turn_still_streams_an_answer():
-    """The regression: a tool round-trip must not swallow the reply."""
-    chunks = [c for c in _agent().start(
-        "Call sentinel_tool and tell me exactly what it returned.", stream=True) if c]
-    assert chunks, (
+    """The regression: a tool round-trip must not swallow the reply.
+
+    Asserting the sentinel flows through the streamed answer proves the tool
+    branch actually ran -- a plain answer that never called the tool cannot
+    reproduce the marker, so a green test here cannot be a coincidence.
+    """
+    streamed = "".join(c for c in _agent().start(
+        "Call sentinel_tool and tell me exactly what it returned.", stream=True) if c)
+    assert streamed, (
         "streaming yielded nothing after a tool call; the follow-up completion "
         "that produces the final answer was never requested"
+    )
+    assert SENTINEL in streamed, (
+        "the sentinel never reached the streamed answer; the tool result was "
+        "not carried into the follow-up completion's request context"
     )
 
 
