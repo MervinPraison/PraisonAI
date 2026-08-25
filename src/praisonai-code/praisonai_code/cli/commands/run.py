@@ -2284,8 +2284,10 @@ def _wire_subtree_context_hook(
     ``already_loaded`` so nested files are not duplicated.
 
     No-op (leaving the default run unchanged) when the up-front rules are
-    disabled via ``--no-rules`` / ``PRAISON_NO_RULES`` or when the optional
-    helper is unavailable. Honours the existing ``PRAISON_CONTEXT_BUDGET``
+    disabled via ``--no-rules`` / ``PRAISON_NO_RULES``. The subtree-context
+    helper is now resident in ``praisonai_code`` so it works on a standalone
+    ``pip install praisonai-code`` without the optional ``praisonai_bot`` /
+    ``praisonai`` packages. Honours the existing ``PRAISON_CONTEXT_BUDGET``
     character budget shared with the interactive path.
     """
     import os
@@ -2300,15 +2302,18 @@ def _wire_subtree_context_hook(
     try:
         import importlib
 
-        # The subtree-context helper is optional. Its canonical home is the
-        # ``praisonai_bot`` support package; the ``praisonai`` wrapper only
-        # re-exports it via a compat shim. Prefer ``praisonai_bot`` so the hook
-        # is available on any install that ships it (matching ``chat``) without
-        # forcing the full wrapper, then fall back to the wrapper shim. Either
-        # way ``run.py`` avoids a module-level ``praisonai`` import (C7 gate).
+        # The subtree-context helper is now resident in ``praisonai_code`` so
+        # the standalone terminal product keeps first-class subtree instruction
+        # loading and ``--instructions`` resolution without the optional
+        # ``praisonai_bot`` support package or the ``praisonai`` wrapper (C7
+        # standalone contract). For backward compatibility we still prefer an
+        # installed ``praisonai_bot``/``praisonai`` copy when present (so a host
+        # that customised it keeps its behaviour), falling back to the resident
+        # implementation otherwise.
         context_files = None
         for _mod in ("praisonai_bot.integration.context_files",
-                     "praisonai.integration.context_files"):
+                     "praisonai.integration.context_files",
+                     "praisonai_code.integration.context_files"):
             try:
                 context_files = importlib.import_module(_mod)
                 break
