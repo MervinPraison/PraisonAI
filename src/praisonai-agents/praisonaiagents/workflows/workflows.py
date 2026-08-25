@@ -4736,6 +4736,94 @@ class WorkflowManager:
             else:
                 current_step_idx += 1
 
+    def _prepare_step_context(
+        self,
+        step: Task,
+        results: List[Dict[str, Any]],
+        all_variables: Dict[str, Any],
+        original_input: str,
+    ) -> Tuple[Optional["WorkflowContext"], Optional[Dict[str, Any]]]:
+        """Shared prep for the sync/async single-step runners.
+
+        Builds the handler ``WorkflowContext`` (only when a consumer exists) and
+        evaluates ``should_run``. Returns ``(context, early_result)`` where
+        ``early_result`` is the skip return-dict when ``should_run`` gates the
+        step out, otherwise ``None`` and ``context`` is ready for handler use.
+        """
+        # Get previous step output
+        previous_output = results[-1].get("output") if results else None
+
+        # Create context for step handlers (only when a consumer exists)
+        context = None
+        if step.should_run or step.handler:
+            context = WorkflowContext(
+                input=original_input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name,
+                variables=all_variables.copy()
+            )
+
+        # Check should_run condition if provided
+        if step.should_run:
+            try:
+                if not step.should_run(context):
+                    return context, {
+                        "success": True,
+                        "output": None,
+                        "skipped": True,
+                        "stop": False
+                    }
+            except Exception as e:
+                self._log(f"should_run check for step '{step.name}' failed: {e}")
+
+        return context, None
+
+    def _build_step_action(
+        self,
+        step: Task,
+        step_idx: int,
+        results: List[Dict[str, Any]],
+        all_variables: Dict[str, Any],
+    ) -> str:
+        """Shared prep: build step context, substitute variables, prepend context."""
+        # Build context from previous steps
+        context = self._build_step_context(step, step_idx, results, all_variables)
+
+        # Substitute variables in action
+        action = self._substitute_variables(step.action, all_variables)
+
+        # Prepend context to action if available
+        if context:
+            action = f"{context}# Current Task:\n{action}"
+
+        return action
+
+    def _finalize_step_result(
+        self,
+        step: Task,
+        output: Optional[str],
+        step_success: bool,
+        error: Optional[str],
+        all_variables: Dict[str, Any],
+        results: List[Dict[str, Any]],
+        on_result: Optional[Callable[[Task, str], None]],
+    ) -> Dict[str, Any]:
+        """Shared finalize for the sync/async single-step runners."""
+        # Update variables with step output
+        if output and step_success:
+            self._update_variables_with_output(step, output, all_variables, results)
+
+        # Callback after step
+        if on_result and output:
+            on_result(step, output)
+
+        return {
+            "success": step_success,
+            "output": output,
+            "stop": False,  # Normal execution doesn't request stop
+            "error": error
+        }
+
     def _execute_single_step(
         self,
         step: Task,
@@ -4753,32 +4841,13 @@ class WorkflowManager:
         original_input: str = ""
     ) -> Dict[str, Any]:
         """Execute a single workflow step."""
-        # Get previous step output
-        previous_output = results[-1].get("output") if results else None
-        
-        # Create context for step handlers (only when a consumer exists)
-        context = None
-        if step.should_run or step.handler:
-            context = WorkflowContext(
-                input=original_input,
-                previous_result=str(previous_output) if previous_output else None,
-                current_step=step.name,
-                variables=all_variables.copy()
-            )
-        
-        # Check should_run condition if provided
-        if step.should_run:
-            try:
-                if not step.should_run(context):
-                    return {
-                        "success": True,
-                        "output": None,
-                        "skipped": True,
-                        "stop": False
-                    }
-            except Exception as e:
-                self._log(f"should_run check for step '{step.name}' failed: {e}")
-        
+        # Shared prep: handler context + should_run gating
+        context, early_result = self._prepare_step_context(
+            step, results, all_variables, original_input
+        )
+        if early_result is not None:
+            return early_result
+
         # If step has a custom handler function
         if step.handler:
             try:
@@ -4809,15 +4878,8 @@ class WorkflowManager:
                     "error": str(e)
                 }
         
-        # Build context from previous steps
-        context = self._build_step_context(step, step_idx, results, all_variables)
-        
-        # Substitute variables in action
-        action = self._substitute_variables(step.action, all_variables)
-        
-        # Prepend context to action if available
-        if context:
-            action = f"{context}# Current Task:\n{action}"
+        # Shared prep: build step context + substitute variables
+        action = self._build_step_action(step, step_idx, results, all_variables)
         
         # Get or create executor for this step
         step_executor = executor
@@ -4870,20 +4932,10 @@ class WorkflowManager:
                 if retries <= step.max_retries:
                     self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
         
-        # Update variables with step output
-        if output and step_success:
-            self._update_variables_with_output(step, output, all_variables, results)
-        
-        # Callback after step
-        if on_result and output:
-            on_result(step, output)
-        
-        return {
-            "success": step_success,
-            "output": output,
-            "stop": False,  # Normal execution doesn't request stop
-            "error": error
-        }
+        # Shared finalize: variable propagation + on_result callback + return dict
+        return self._finalize_step_result(
+            step, output, step_success, error, all_variables, results, on_result
+        )
     
     async def aexecute(
         self,
@@ -4993,31 +5045,12 @@ class WorkflowManager:
         """
         import asyncio
 
-        # Get previous step output
-        previous_output = results[-1].get("output") if results else None
-
-        # Create context for step handlers (only when a consumer exists)
-        context = None
-        if step.should_run or step.handler:
-            context = WorkflowContext(
-                input=original_input,
-                previous_result=str(previous_output) if previous_output else None,
-                current_step=step.name,
-                variables=all_variables.copy()
-            )
-
-        # Check should_run condition if provided
-        if step.should_run:
-            try:
-                if not step.should_run(context):
-                    return {
-                        "success": True,
-                        "output": None,
-                        "skipped": True,
-                        "stop": False
-                    }
-            except Exception as e:
-                self._log(f"should_run check for step '{step.name}' failed: {e}")
+        # Shared prep: handler context + should_run gating
+        context, early_result = self._prepare_step_context(
+            step, results, all_variables, original_input
+        )
+        if early_result is not None:
+            return early_result
 
         # If step has a custom handler function
         if step.handler:
@@ -5050,15 +5083,8 @@ class WorkflowManager:
                     "error": str(e)
                 }
 
-        # Build context from previous steps
-        context = self._build_step_context(step, step_idx, results, all_variables)
-
-        # Substitute variables in action
-        action = self._substitute_variables(step.action, all_variables)
-
-        # Prepend context to action if available
-        if context:
-            action = f"{context}# Current Task:\n{action}"
+        # Shared prep: build step context + substitute variables
+        action = self._build_step_action(step, step_idx, results, all_variables)
 
         # Get or create executor for this step
         step_executor = executor
@@ -5120,20 +5146,10 @@ class WorkflowManager:
                 if retries <= step.max_retries:
                     self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
 
-        # Update variables with step output
-        if output and step_success:
-            self._update_variables_with_output(step, output, all_variables, results)
-
-        # Callback after step
-        if on_result and output:
-            on_result(step, output)
-
-        return {
-            "success": step_success,
-            "output": output,
-            "stop": False,
-            "error": error
-        }
+        # Shared finalize: variable propagation + on_result callback + return dict
+        return self._finalize_step_result(
+            step, output, step_success, error, all_variables, results, on_result
+        )
     
     def _create_step_agent(
         self,
