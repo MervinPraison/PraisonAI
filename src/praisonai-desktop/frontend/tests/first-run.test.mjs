@@ -99,7 +99,12 @@ test('the steps are listed before anything starts', async () => {
 test('the copy explains where things go, without jargon', async () => {
   const b = await boot();
   const lede = b.doc.querySelector('.setup .lede').textContent;
-  assert.match(lede, /Library/, 'does not say where it installs');
+  // Not /Library/: this suite runs on whatever CI the release uses, and the
+  // copy is now per-platform. Pinning the macOS wording made a Linux runner
+  // fail on correct behaviour -- and would have made anyone fixing the copy
+  // "break CI" for doing the right thing. Assert that it names *a* place.
+  assert.match(lede, /Library folder|app data folder|home directory/,
+               `does not say where it installs: ${lede}`);
   assert.match(lede, /once/, 'does not say this is one-time');
   for (const jargon of ['venv', 'uv ', 'PATH']) {
     assert.equal(lede.includes(jargon), false, `jargon in first-run copy: ${jargon}`);
