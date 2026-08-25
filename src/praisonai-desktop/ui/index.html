@@ -46,6 +46,8 @@ body{margin:0;background:var(--ground);color:var(--ink);font:.906rem/1.6 ui-sans
 .navbtn{display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;border-radius:7px;
   background:none;border:0;color:var(--ink);font:inherit;font-size:.86rem;cursor:pointer;text-align:left;width:100%}
 .navbtn:hover{background:var(--ground)}
+.navbtn.active{background:var(--ground);font-weight:650}
+.navbtn.active .ic{color:var(--accent)}
 .navbtn .k{margin-left:auto;font-size:.68rem;color:var(--soft);font-family:ui-monospace,Menlo,monospace}
 .navbtn .ic{width:.94rem;text-align:center;color:var(--soft)}
 .sectlbl{font-size:.62rem;text-transform:uppercase;letter-spacing:.11em;color:var(--soft);
@@ -332,6 +334,67 @@ button.stop{background:var(--bad)}
             cursor:pointer;user-select:none;display:flex;gap:.4rem;align-items:center}
 .think-body{display:none;white-space:pre-wrap;margin-top:.35rem;font-size:.82rem}
 .think.open .think-body{display:block}
+
+/* --- training ------------------------------------------------------------
+   Same tokens as chat, same centred column. A training view that invented its
+   own palette would read as a bolted-on second app, which is exactly what it
+   must not be: it is the same product doing a different job. */
+#train{flex:1;overflow-y:auto;padding:1.5rem 0;display:none}
+#train.on{display:block}
+body.training #thread,body.training #f{display:none}
+.trainhd{display:flex;align-items:baseline;gap:.6rem;margin:0 0 .2rem}
+.trainhd h2{font-size:1.05rem;margin:0;font-weight:650}
+.trainhd p{margin:0;color:var(--soft);font-size:.78rem}
+.tcard{border:1px solid var(--rule);background:var(--panel);border-radius:.6rem;
+       padding:.9rem 1rem;margin:.9rem 0}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.7rem .9rem}
+.tf{display:flex;flex-direction:column;gap:.25rem;min-width:0}
+.tf label{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);font-weight:700}
+.tf input,.tf select{background:var(--ground);color:var(--ink);border:1px solid var(--rule);
+  border-radius:.4rem;padding:.4rem .5rem;font:inherit;font-size:.82rem;min-width:0;width:100%;
+  box-sizing:border-box}
+.tf input:focus,.tf select:focus{outline:none;border-color:var(--accent)}
+.tf .hint{font-size:.68rem;color:var(--soft);opacity:.85}
+.tf.bad input{border-color:var(--bad)}
+.tf .err{font-size:.68rem;color:var(--bad);min-height:0}
+.trow{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
+.tbtn{background:var(--accent);color:var(--ground);border:0;border-radius:.4rem;
+      padding:.45rem .9rem;font:inherit;font-size:.82rem;font-weight:650;cursor:pointer}
+.tbtn[disabled]{opacity:.45;cursor:default}
+.tbtn.ghost{background:none;color:var(--ink);border:1px solid var(--rule-strong);font-weight:500}
+.tbtn.danger{background:var(--bad);color:var(--ground)}
+.tadv{margin-top:.7rem}
+.tadv summary{cursor:pointer;font-size:.72rem;color:var(--soft);text-transform:uppercase;
+  letter-spacing:.08em;font-weight:700;user-select:none;list-style:none}
+.tadv summary::-webkit-details-marker{display:none}
+.tadv summary::before{content:"\25B8 ";color:var(--soft)}
+.tadv[open] summary::before{content:"\25BE "}
+.tadv .tgrid{margin-top:.7rem}
+.pill{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;
+      border-radius:999px;padding:.16rem .55rem;border:1px solid var(--rule-strong);color:var(--soft)}
+.pill.running{color:var(--accent);border-color:var(--accent)}
+.pill.done{color:var(--accent);border-color:var(--accent)}
+.pill.failed,.pill.cancelled{color:var(--bad);border-color:var(--bad)}
+.pill.stopping{color:var(--soft)}
+.bar{height:.35rem;background:var(--rule);border-radius:999px;overflow:hidden;margin:.6rem 0 .3rem}
+.bar i{display:block;height:100%;background:var(--accent);width:0;
+       transition:width .3s ease;border-radius:999px}
+.no-motion .bar i{transition:none}
+.tstats{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.74rem;color:var(--soft)}
+.tstats b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+#loss{width:100%;height:5rem;display:block;margin-top:.6rem}
+#tlog{font-family:ui-monospace,Menlo,monospace;font-size:var(--fs-code);line-height:1.5;
+      background:var(--code);border:1px solid var(--rule);border-radius:.5rem;
+      padding:.6rem .7rem;max-height:16rem;overflow:auto;white-space:pre-wrap;
+      overflow-wrap:anywhere;color:var(--soft);margin-top:.6rem}
+#tlog:empty::before{content:"No output yet.";opacity:.6}
+.trun{display:flex;align-items:center;gap:.6rem;padding:.4rem .1rem;font-size:.78rem;
+      border-bottom:1px solid var(--rule)}
+.trun:last-child{border-bottom:0}
+.trun .rid{font-family:ui-monospace,Menlo,monospace;font-size:.72rem;color:var(--soft)}
+.trun .grow{flex:1}
+.tnote{font-size:.76rem;color:var(--bad);margin-top:.6rem}
+.tnote:empty{display:none}
 </style></head><body>
 <div class="titlebar" data-tauri-drag-region>
   <button class="modelpill" id="modelpill" type="button">
@@ -345,6 +408,12 @@ button.stop{background:var(--bad)}
 </div>
 <div id="body">
   <aside id="side" aria-label="Conversations">
+    <div class="sidetop" role="tablist" aria-label="Views">
+      <button class="navbtn" id="viewChat" type="button" role="tab" aria-selected="true"
+              aria-controls="thread"><span class="ic" aria-hidden="true">▫</span>Chat</button>
+      <button class="navbtn" id="viewTrain" type="button" role="tab" aria-selected="false"
+              aria-controls="train"><span class="ic" aria-hidden="true">◩</span>Train</button>
+    </div>
     <div class="sidetop">
       <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k">⌘N</span></button>
       <button class="navbtn" id="search" type="button"><span class="ic" aria-hidden="true">⌕</span>Search<span class="k">⌘K</span></button>
@@ -378,6 +447,121 @@ button.stop{background:var(--bad)}
     <button id="stop" class="stop" type="button" style="display:none">Stop</button>
   </div>
 </div></div></form>
+    <section id="train" role="tabpanel" aria-labelledby="viewTrain" aria-label="Training">
+      <div class="inner">
+        <div class="trainhd">
+          <h2>Fine-tune a model</h2>
+          <p>Runs locally through praisonai-train.</p>
+        </div>
+
+        <form id="trainForm" class="tcard">
+          <div class="tgrid">
+            <div class="tf">
+              <label for="tModel">Base model</label>
+              <input id="tModel" name="model_name" required
+                     value="unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"/>
+              <span class="hint">A Hugging Face id.</span>
+            </div>
+            <div class="tf">
+              <label for="tMethod">Method</label>
+              <select id="tMethod" name="method">
+                <option value="sft" selected>SFT — supervised fine-tuning</option>
+                <option value="cpt">CPT — continued pretraining</option>
+                <option value="dpo">DPO — direct preference optimisation</option>
+                <option value="orpo">ORPO — odds-ratio preference</option>
+                <option value="kto">KTO — binary preference</option>
+                <option value="grpo">GRPO — reward-model-free RL</option>
+                <option value="reward">Reward — train a reward model</option>
+                <option value="cpo">CPO — contrastive preference</option>
+              </select>
+              <span class="hint" id="tMethodHint">Trains on completions.</span>
+            </div>
+            <div class="tf">
+              <label for="tDataset">Dataset</label>
+              <input id="tDataset" name="dataset" required value="yahma/alpaca-cleaned"/>
+              <span class="hint">A Hugging Face dataset id.</span>
+            </div>
+            <div class="tf">
+              <label for="tSplit">Split</label>
+              <input id="tSplit" name="split_type" value="train"/>
+            </div>
+            <div class="tf">
+              <label for="tEpochs">Epochs</label>
+              <input id="tEpochs" name="num_train_epochs" type="number" min="0" step="0.1" value="1"/>
+            </div>
+            <div class="tf">
+              <label for="tSteps">Max steps</label>
+              <input id="tSteps" name="max_steps" type="number" min="0" step="1" value="60"/>
+              <span class="hint">0 runs the full epochs.</span>
+            </div>
+          </div>
+
+          <details class="tadv">
+            <summary>Advanced</summary>
+            <div class="tgrid">
+              <div class="tf">
+                <label for="tRank">LoRA rank</label>
+                <input id="tRank" name="lora_r" type="number" min="1" step="1" value="16"/>
+              </div>
+              <div class="tf">
+                <label for="tAlpha">LoRA alpha</label>
+                <input id="tAlpha" name="lora_alpha" type="number" min="1" step="1" value="16"/>
+              </div>
+              <div class="tf">
+                <label for="tLr">Learning rate</label>
+                <input id="tLr" name="learning_rate" value="2e-4"/>
+              </div>
+              <div class="tf">
+                <label for="tSeq">Max sequence length</label>
+                <input id="tSeq" name="max_seq_length" type="number" min="1" step="1" value="2048"/>
+              </div>
+              <div class="tf">
+                <label for="tBatch">Batch size per device</label>
+                <input id="tBatch" name="per_device_train_batch_size" type="number" min="1" step="1" value="2"/>
+              </div>
+              <div class="tf">
+                <label for="tAccum">Gradient accumulation</label>
+                <input id="tAccum" name="gradient_accumulation_steps" type="number" min="1" step="1" value="2"/>
+              </div>
+              <div class="tf">
+                <label for="tQuant">Load in 4-bit</label>
+                <select id="tQuant" name="load_in_4bit">
+                  <option value="true" selected>Yes — fits a consumer GPU</option>
+                  <option value="false">No — full precision</option>
+                </select>
+              </div>
+              <div class="tf">
+                <label for="tOut">Output directory</label>
+                <input id="tOut" name="output_dir" value="outputs"/>
+              </div>
+            </div>
+          </details>
+
+          <div class="trow">
+            <button class="tbtn" id="tStart" type="submit">Start training</button>
+            <button class="tbtn danger" id="tStop" type="button" hidden>Stop</button>
+            <span class="pill" id="tState" hidden></span>
+          </div>
+          <p class="tnote" id="tError" role="alert"></p>
+        </form>
+
+        <div class="tcard" id="tLive" hidden>
+          <div class="bar"><i id="tBar"></i></div>
+          <div class="tstats">
+            <span>Step <b id="tStep">—</b></span>
+            <span>Loss <b id="tLoss">—</b></span>
+            <span>Elapsed <b id="tElapsed">—</b></span>
+          </div>
+          <canvas id="loss" aria-label="Training loss over time" role="img"></canvas>
+          <div id="tlog" role="log" aria-live="off" aria-label="Training output"></div>
+        </div>
+
+        <div class="tcard" id="tHistoryCard" hidden>
+          <div class="sectlbl" style="padding:0 0 .3rem">Previous runs</div>
+          <div id="tHistory"></div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 <div id="overlay"><div class="panel" id="panel"></div></div>
@@ -1090,6 +1274,11 @@ const st=await invoke('engine_status');
 if(st.state==='ready'){
   PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
   box.disabled=send.disabled=false; box.focus(); refreshChats(); refreshModelName();
+  // The training view may have been restored before the engine had a port, in
+  // which case its first refresh returned empty. Ask again now there is one,
+  // so a fine-tune started in an earlier session reappears rather than looking
+  // like it never happened.
+  if(typeof refreshTraining==='function') refreshTraining();
   try{ CFG={...DEFAULTS,...await (await fetch(
         `http://127.0.0.1:${PORT}/settings`)).json()}; }catch{}
   applyTheme(CFG.theme);
@@ -1821,4 +2010,277 @@ document.addEventListener('click',e=>{
 box.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); document.getElementById('f').requestSubmit(); }
 });
+
+/* --- training ------------------------------------------------------------
+ *
+ * A fine-tune runs for hours and must survive the window being closed, so the
+ * view holds no run state of its own: it asks the engine what is happening and
+ * renders that. Reconnecting is a read from a cursor, not a subscription, which
+ * is why closing the app mid-run and reopening it resumes the log rather than
+ * showing an empty pane next to a job that is still going.
+ */
+const trainView=document.getElementById('train'),
+      viewChat=document.getElementById('viewChat'),
+      viewTrain=document.getElementById('viewTrain'),
+      trainForm=document.getElementById('trainForm'),
+      tStart=document.getElementById('tStart'), tStop=document.getElementById('tStop'),
+      tState=document.getElementById('tState'), tError=document.getElementById('tError'),
+      tLive=document.getElementById('tLive'), tBar=document.getElementById('tBar'),
+      tStepEl=document.getElementById('tStep'), tLossEl=document.getElementById('tLoss'),
+      tElapsed=document.getElementById('tElapsed'), tlog=document.getElementById('tlog'),
+      tHistory=document.getElementById('tHistory'),
+      tHistoryCard=document.getElementById('tHistoryCard'),
+      lossCanvas=document.getElementById('loss');
+
+const METHOD_HINTS={
+  sft:'Trains on completions.', cpt:'Raw-text corpus; embeddings get their own rate.',
+  dpo:'Needs prompt, chosen and rejected columns.',
+  orpo:'Preference tuning without a reference model.',
+  kto:'Binary thumbs up or down per sample.',
+  grpo:'Needs reward functions; no reward model.',
+  reward:'Trains a reward model, not a chat model.',
+  cpo:'Contrastive preference; no reference model.'};
+
+let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[];
+const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
+
+function showView(name){
+  const training=name==='train';
+  document.body.classList.toggle('training',training);
+  trainView.classList.toggle('on',training);
+  viewTrain.setAttribute('aria-selected',String(training));
+  viewChat.setAttribute('aria-selected',String(!training));
+  viewTrain.classList.toggle('active',training);
+  viewChat.classList.toggle('active',!training);
+  try{ localStorage.setItem('view',name); }catch(e){}
+  if(training) refreshTraining();
+}
+viewChat.addEventListener('click',()=>showView('chat'));
+viewTrain.addEventListener('click',()=>showView('train'));
+
+function setTrainState(state){
+  const live=state && !['done','failed','cancelled'].includes(state);
+  tState.hidden=!state;
+  tState.textContent=state||'';
+  tState.className='pill '+(state||'');
+  tStop.hidden=!live;
+  tStart.disabled=!!live;
+  tStart.textContent=live?'Training…':'Start training';
+}
+
+function trainConfig(){
+  const data=new FormData(trainForm), get=k=>String(data.get(k)||'').trim();
+  const num=(k,fallback)=>{ const v=parseFloat(get(k)); return Number.isFinite(v)?v:fallback; };
+  const config={
+    method:get('method'),
+    model_name:get('model_name'),
+    max_seq_length:num('max_seq_length',2048),
+    load_in_4bit:get('load_in_4bit')==='true',
+    lora_r:num('lora_r',16),
+    lora_alpha:num('lora_alpha',16),
+    num_train_epochs:num('num_train_epochs',1),
+    learning_rate:num('learning_rate',2e-4),
+    per_device_train_batch_size:num('per_device_train_batch_size',2),
+    gradient_accumulation_steps:num('gradient_accumulation_steps',2),
+    output_dir:get('output_dir')||'outputs',
+    // The trainer reads `dataset` as a list of sources, not a string. Sending a
+    // bare id here is the shape mismatch that would fail an hour into a run.
+    dataset:[{name:get('dataset'),split_type:get('split_type')||'train'}],
+    train:true, ollama_save:false, huggingface_save:false};
+  const steps=num('max_steps',0);
+  if(steps>0) config.max_steps=steps;   // omitted, not zero: 0 means "no cap"
+  return config;
+}
+
+function resetTrainDisplay(){
+  lossSeries=[]; logLines=[]; tlog.textContent=''; trainCursor=-1;
+  tBar.style.width='0'; tStepEl.textContent='—'; tLossEl.textContent='—';
+  tElapsed.textContent='—'; drawLoss();
+}
+
+trainForm.addEventListener('submit',async e=>{
+  e.preventDefault();
+  tError.textContent='';
+  const model=document.getElementById('tModel').value.trim();
+  const dataset=document.getElementById('tDataset').value.trim();
+  if(!model||!dataset){
+    tError.textContent='A base model and a dataset are both required.';
+    (model?document.getElementById('tDataset'):document.getElementById('tModel')).focus();
+    return;
+  }
+  tStart.disabled=true;
+  try{
+    const res=await fetch(`http://127.0.0.1:${PORT}/train/start`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({config:trainConfig()})});
+    const body=await res.json();
+    if(!res.ok){
+      // The engine's message names the run that is already going; showing our
+      // own wording instead would hide which job is blocking this one.
+      tError.textContent=body.error||`The engine refused the run (${res.status}).`;
+      tStart.disabled=false;
+      if(res.status===409) refreshTraining();
+      return;
+    }
+    resetTrainDisplay();
+    tLive.hidden=false;
+    trainRunId=body.run.id;
+    setTrainState(body.run.state);
+    follow(trainRunId);
+  }catch(err){
+    tError.textContent=`Could not reach the engine: ${err.message}`;
+    tStart.disabled=false;
+  }
+});
+
+tStop.addEventListener('click',async()=>{
+  tStop.disabled=true;
+  try{
+    const res=await fetch(`http://127.0.0.1:${PORT}/train/stop`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(!res.ok){ const b=await res.json(); tError.textContent=b.error||'Nothing was running.'; }
+  }catch(err){ tError.textContent=`Could not reach the engine: ${err.message}`; }
+  finally{ tStop.disabled=false; }
+});
+
+function follow(runId){
+  if(trainStream){ trainStream.close(); trainStream=null; }
+  const url=`http://127.0.0.1:${PORT}/train/progress?run=${encodeURIComponent(runId)}`
+          +`&cursor=${trainCursor}`;
+  const stream=new EventSource(url);
+  trainStream=stream;
+  const bump=d=>{ if(typeof d.cursor==='number') trainCursor=d.cursor; };
+  stream.addEventListener('resync',()=>{
+    // History was evicted mid-run. Say so rather than splicing a log with a
+    // hole in it and letting it read as continuous.
+    appendLog('… earlier output dropped; the full log is in the run directory.');
+    trainCursor=-1;
+  });
+  stream.addEventListener('start',e=>bump(JSON.parse(e.data)));
+  stream.addEventListener('state',e=>{ const d=JSON.parse(e.data); bump(d); setTrainState(d.state); });
+  stream.addEventListener('log',e=>{ const d=JSON.parse(e.data); bump(d); appendLog(d.line); });
+  stream.addEventListener('progress',e=>{
+    const d=JSON.parse(e.data); bump(d);
+    tStepEl.textContent=`${d.step} / ${d.total}`;
+    tBar.style.width=`${Math.min(100,(d.step/d.total)*100).toFixed(1)}%`;
+  });
+  stream.addEventListener('metric',e=>{
+    const d=JSON.parse(e.data); bump(d);
+    tLossEl.textContent=d.loss.toFixed(4);
+    lossSeries.push(d.loss); drawLoss();
+  });
+  stream.addEventListener('end',e=>{
+    const d=JSON.parse(e.data); bump(d);
+    setTrainState(d.state);
+    tElapsed.textContent=formatElapsed(d.elapsed);
+    if(d.error) tError.textContent=d.error;
+    if(d.state==='done') tBar.style.width='100%';
+    stream.close(); trainStream=null;
+    loadHistory();
+  });
+  stream.onerror=()=>{
+    // EventSource reconnects on its own, but it would reopen the original URL
+    // with the original cursor and replay everything. Close it and reconnect
+    // from where we actually are.
+    stream.close();
+    if(trainStream===stream){ trainStream=null; setTimeout(()=>follow(runId),1500); }
+  };
+}
+
+function appendLog(line){
+  logLines.push(line);
+  if(logLines.length>MAX_LOG_LINES) logLines=logLines.slice(-MAX_LOG_LINES);
+  const pinned=tlog.scrollTop+tlog.clientHeight>=tlog.scrollHeight-24;
+  tlog.textContent=logLines.join('\n');
+  if(pinned) tlog.scrollTop=tlog.scrollHeight;   // only follow if already following
+}
+
+function formatElapsed(seconds){
+  if(!Number.isFinite(seconds)) return '—';
+  const s=Math.round(seconds), h=Math.floor(s/3600), m=Math.floor(s%3600/60);
+  return h?`${h}h ${m}m`:m?`${m}m ${s%60}s`:`${s}s`;
+}
+
+function drawLoss(){
+  const ctx=lossCanvas.getContext('2d');
+  const ratio=window.devicePixelRatio||1;
+  const w=lossCanvas.clientWidth, h=lossCanvas.clientHeight;
+  if(!w||!h) return;
+  lossCanvas.width=w*ratio; lossCanvas.height=h*ratio;
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.clearRect(0,0,w,h);
+  if(lossSeries.length<2) return;
+  const css=getComputedStyle(document.documentElement);
+  const accent=css.getPropertyValue('--accent').trim()||'#7FD1B9';
+  const rule=css.getPropertyValue('--rule').trim()||'#262B33';
+  const lo=Math.min(...lossSeries), hi=Math.max(...lossSeries);
+  const span=(hi-lo)||1, pad=6;
+  const x=i=>pad+(i/(lossSeries.length-1))*(w-pad*2);
+  const y=v=>h-pad-((v-lo)/span)*(h-pad*2);
+  ctx.strokeStyle=rule; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad,h-pad); ctx.lineTo(w-pad,h-pad); ctx.stroke();
+  ctx.strokeStyle=accent; ctx.lineWidth=1.5; ctx.beginPath();
+  lossSeries.forEach((v,i)=>i?ctx.lineTo(x(i),y(v)):ctx.moveTo(x(i),y(v)));
+  ctx.stroke();
+  ctx.fillStyle=accent;
+  ctx.beginPath(); ctx.arc(x(lossSeries.length-1),y(lossSeries[lossSeries.length-1]),2.5,0,Math.PI*2); ctx.fill();
+}
+window.addEventListener('resize',()=>{ if(trainView.classList.contains('on')) drawLoss(); });
+
+async function loadHistory(){
+  try{
+    const {runs}=await (await fetch(`http://127.0.0.1:${PORT}/train/runs`)).json();
+    tHistoryCard.hidden=!runs.length;
+    tHistory.textContent='';
+    runs.forEach(run=>{
+      const row=document.createElement('div'); row.className='trun';
+      const pill=document.createElement('span');
+      pill.className='pill '+run.state; pill.textContent=run.state;
+      const id=document.createElement('span'); id.className='rid'; id.textContent=run.id;
+      const grow=document.createElement('span'); grow.className='grow';
+      const meta=document.createElement('span');
+      meta.style.color='var(--soft)'; meta.style.fontSize='.72rem';
+      meta.textContent=[run.last_loss!=null?`loss ${run.last_loss.toFixed(4)}`:null,
+                        formatElapsed(run.elapsed)].filter(Boolean).join(' · ');
+      row.append(pill,id,grow,meta);
+      if(run.error){ row.title=run.error; }
+      tHistory.appendChild(row);
+    });
+  }catch(e){ /* the history is a convenience; a failure here must not block training */ }
+}
+
+async function refreshTraining(){
+  if(!PORT) return;
+  try{
+    const {run,metrics}=await (await fetch(`http://127.0.0.1:${PORT}/train/status`)).json();
+    loadHistory();
+    if(!run){ setTrainState(null); return; }
+    // Reattach to whatever the engine is doing, including a run started before
+    // this window existed.
+    if(run.id!==trainRunId){ resetTrainDisplay(); trainRunId=run.id; }
+    tLive.hidden=false;
+    setTrainState(run.state);
+    if(run.total){ tStepEl.textContent=`${run.step} / ${run.total}`;
+      tBar.style.width=`${Math.min(100,(run.step/run.total)*100).toFixed(1)}%`; }
+    if(metrics&&metrics.length){
+      lossSeries=metrics.map(m=>m.loss);
+      tLossEl.textContent=lossSeries[lossSeries.length-1].toFixed(4);
+      drawLoss();
+    }
+    tElapsed.textContent=formatElapsed(run.elapsed);
+    if(run.error) tError.textContent=run.error;
+    if(!['done','failed','cancelled'].includes(run.state)) follow(run.id);
+  }catch(e){ /* the engine may still be booting; the next visit retries */ }
+}
+
+document.getElementById('tMethod').addEventListener('change',e=>{
+  document.getElementById('tMethodHint').textContent=METHOD_HINTS[e.target.value]||'';
+});
+
+// Always go through showView, including for the default: it is what sets the
+// selected state on the nav, and skipping it for 'chat' left neither tab
+// looking selected on first launch.
+let startView='chat';
+try{ if(localStorage.getItem('view')==='train') startView='train'; }catch(e){}
+showView(startView);
 </script></body></html>

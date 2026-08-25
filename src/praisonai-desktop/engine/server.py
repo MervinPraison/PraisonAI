@@ -66,6 +66,10 @@ CHATS_DIR = DATA_DIR / "chats"
 # tool trying to find a running engine -- had nothing to read. `pgrep -f` is not
 # a substitute: the shell running the pgrep matches the pattern itself.
 LOCK_PATH = DATA_DIR / "engine.lock"
+
+# Built on first use: importing the training module costs nothing until someone
+# opens the tab, and the engine must stay fast to start for chat.
+_TRAINER = None
 LOCK_FORMAT_VERSION = 2
 
 
@@ -893,7 +897,80 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # --- training -------------------------------------------------------
+    def _training(self):
+        """The one Trainer, built on first use so importing costs nothing."""
+        global _TRAINER
+        if _TRAINER is None:
+            from training import Trainer
+            _TRAINER = Trainer(DATA_DIR, sys.executable)
+        return _TRAINER
+
+    def _train_progress(self, run, cursor):
+        """Replay from `cursor`, then follow. Not a subscription: a client that
+        reconnects after a closed lid gets what it missed, which is the whole
+        reason events are kept rather than streamed and dropped."""
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        idle = 0
+        while True:
+            events, gap = run.since(cursor)
+            if gap:
+                # Say so rather than handing over events with a hole in them.
+                self.wfile.write(b"event: resync\ndata: {}\n\n")
+                self.wfile.flush()
+                cursor = -1
+                continue
+            for c, kind, payload in events:
+                cursor = c
+                body = json.dumps({"cursor": c, **payload})
+                self.wfile.write(
+                    f"id: {c}\nevent: {kind}\ndata: {body}\n\n".encode())
+            if events:
+                self.wfile.flush()
+                idle = 0
+            else:
+                idle += 1
+                if idle % 20 == 0:
+                    # A heartbeat, so a proxy does not reap an idle stream and
+                    # the client can tell "quiet" from "gone".
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+            if run.state in ("done", "failed", "cancelled") and not events:
+                return
+            time.sleep(0.25)
+
     def do_GET(self):
+        if self.path.startswith("/train/progress"):
+            trainer = self._training()
+            from urllib.parse import parse_qs, urlparse
+            query = parse_qs(urlparse(self.path).query)
+            run_id = (query.get("run") or [None])[0]
+            run = trainer.get(run_id) if run_id else trainer.current
+            if run is None:
+                self._json({"ok": False, "error": "no such run"}, 404)
+                return
+            cursor = int((query.get("cursor") or ["-1"])[0])
+            try:
+                self._train_progress(run, cursor)
+            except (BrokenPipeError, ConnectionResetError):
+                pass          # the window closed; the run keeps going
+            return
+
+        if self.path == "/train/runs":
+            self._json({"runs": [r.summary() for r in self._training().history[:50]]})
+            return
+
+        if self.path.startswith("/train/status"):
+            trainer = self._training()
+            run = trainer.current
+            self._json({"run": run.summary() if run else None,
+                        "metrics": run.metrics[-500:] if run else []})
+            return
+
         if self.path == "/settings":
             cfg = load_settings()
             # The UI only needs to know whether a key is set, never its value.
@@ -975,6 +1052,40 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
     def do_POST(self):
+        if self.path == "/train/start":
+            payload = self._body()
+            config = payload.get("config") or {}
+            if not config.get("model_name") or not config.get("dataset"):
+                self._json({"ok": False, "error":
+                            "config needs at least model_name and dataset"}, 400)
+                return
+            try:
+                run = self._training().start(config, payload.get("run_id"))
+            except ValueError as exc:
+                # A rejected run id is the caller's fault, not the server's.
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                # A live run is a conflict, not a server error: the client
+                # should show the running job, not a traceback.
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": True, "run": run.summary()})
+            return
+
+        if self.path.startswith("/train/stop"):
+            self._drain()
+            run_id = self.path.rsplit("/", 1)[-1] if "/train/stop/" in self.path else None
+            try:
+                stopped = self._training().stop(run_id)
+            except RuntimeError as exc:
+                self._json({"ok": False, "error": str(exc)}, 409)
+                return
+            self._json({"ok": stopped,
+                        "error": None if stopped else "nothing was running"},
+                       200 if stopped else 404)
+            return
+
         if self.path.startswith("/cancel/"):
             self._drain()
             run_id = self.path.rsplit("/", 1)[-1]
