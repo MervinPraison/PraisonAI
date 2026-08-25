@@ -34,6 +34,80 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------
+# Durability degradation registry (Issue #4339)
+#
+# Gateway state (webhook idempotency, session history) is durable by default.
+# When a durable store genuinely cannot be initialised the boundary that owns
+# it records a *durability-degraded* fact here instead of only logging a
+# warning, so the gateway can surface it through the surfaces operators already
+# read (``gateway doctor`` / ``gateway status``) — the same treatment channel
+# credential degradation already gets. This reuses the core degraded-owner
+# vocabulary (``owner_kind="gateway"``) so no new protocol is introduced; the
+# gateway's ``health()`` merges this process-local registry alongside its own.
+# --------------------------------------------------------------------------
+try:
+    from praisonaiagents.gateway import DegradedCapabilityRegistry as _DegRegistry
+    _DURABILITY_REGISTRY: Optional[Any] = _DegRegistry()
+except Exception:  # pragma: no cover - core registry unavailable
+    _DURABILITY_REGISTRY = None
+
+
+def record_durability_degraded(
+    component: str,
+    *,
+    reason: str,
+    recovery: str = "praisonai gateway doctor --fix",
+) -> None:
+    """Record that a durable store fell back to non-durable, in-memory operation.
+
+    ``component`` is the owned state that lost durability (e.g. ``"session"`` or
+    ``"idempotency"``); ``reason`` is a redacted, operator-safe explanation.
+    Best-effort and never raises into the caller's hot path — if the core
+    registry is unavailable this is a no-op (behaviour then matches the old
+    log-only path).
+    """
+    registry = _DURABILITY_REGISTRY
+    if registry is None:
+        return
+    try:
+        from praisonaiagents.gateway import DegradedOwner
+
+        registry.mark(
+            DegradedOwner(
+                owner_kind="gateway",
+                owner_id=f"durability:{component}",
+                state="cold",
+                reason=reason,
+                retry_hint=recovery,
+            )
+        )
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def clear_durability_degraded(component: str) -> None:
+    """Clear a previously-recorded durability degradation for ``component``."""
+    registry = _DURABILITY_REGISTRY
+    if registry is None:
+        return
+    try:
+        registry.clear("gateway", f"durability:{component}")
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def durability_degraded_owners() -> List[Any]:
+    """Return the current durability-degraded owners (empty when all durable)."""
+    registry = _DURABILITY_REGISTRY
+    if registry is None:
+        return []
+    try:
+        return list(registry.list_degraded())
+    except Exception:  # pragma: no cover - defensive
+        return []
+
+
 # Matches one or more leading arrival-time prefixes of the form
 # ``[… YYYY-MM-DD HH:MM …]`` (Issue #2834). Kept deliberately narrow — it only
 # strips bracketed groups that contain a ``YYYY-MM-DD HH:MM`` date-time — so a
@@ -2184,7 +2258,10 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     Returns:
         Configured BotSessionManager instance
     """
-    # Try to get the default session store
+    # Try to get the default session store. Sessions are durable by default;
+    # a genuine store-init failure is recorded as a durability-degraded fact
+    # (Issue #4339) — surfaced by ``gateway doctor`` / ``gateway status`` — not
+    # just logged, so an operator is told their bot is now running non-durably.
     try:
         from praisonaiagents.session import get_default_session_store
     except ImportError:
@@ -2198,7 +2275,15 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
                 "Default session store unavailable; falling back to in-memory store: %s",
                 exc,
             )
+            record_durability_degraded(
+                "session",
+                reason=f"session store unavailable (running in-memory): {exc}",
+            )
             store = None
+        else:
+            # Store came up (or was restored): clear any prior degraded fact so
+            # a recovered gateway no longer reports non-durable sessions.
+            clear_durability_degraded("session")
     
     # Extract reset policy from config
     reset_policy = None
