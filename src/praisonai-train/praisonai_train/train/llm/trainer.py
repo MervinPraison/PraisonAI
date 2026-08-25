@@ -910,7 +910,10 @@ class TrainModel:
             "report_to": self.config.get("report_to", default_report),
             "dataset_text_field": self.config.get("dataset_text_field", "text"),
             "max_length": self.config["max_seq_length"],
-            "dataset_num_proc": self.config.get("dataset_num_proc", 1),
+            # None, not 1: unsloth sizes this from available memory
+            # (rl.py:3396-3420). An explicit 1 defeated that policy and made
+            # map() single-process on every corpus, however large.
+            "dataset_num_proc": self.config.get("dataset_num_proc"),
             "packing": self._flag(self.config.get("packing"), default=False),
         }
         if self.config.get("run_name") or os.getenv("PRAISON_WANDB_RUN_NAME"):
