@@ -101,6 +101,42 @@ _MASK_LABELS = {
 }
 
 
+# Phrasings the four runtimes use for the same condition. `torch.cuda.OutOfMemoryError`
+# subclasses RuntimeError, so the CLI's catch-all swallowed it into a single ERROR
+# line carrying torch's raw allocator dump -- the most common fine-tuning failure,
+# and the one where a first-time user has no idea which number to change.
+_OOM_MARKERS = (
+    "out of memory",
+    "cuda out of memory",
+    "hip out of memory",
+    "outofmemoryerror",
+)
+
+# Ordered cheapest-first: sequence length is usually the biggest lever and the
+# least destructive to change. Same ordering unsloth validated in its studio
+# backend (studio/backend/core/training/worker.py:4834-4845).
+OOM_REMEDIATION = (
+    "The GPU ran out of memory. In order of what usually helps most:\n"
+    "  1. Lower max_seq_length (try 2048, or 4096 if you were higher)\n"
+    "  2. Set use_gradient_checkpointing: unsloth (if it is off)\n"
+    "  3. Lower per_device_train_batch_size, raising gradient_accumulation_steps\n"
+    "     by the same factor to keep the effective batch size\n"
+    "  4. Use a smaller model, or a 4-bit one (load_in_4bit: true)"
+)
+
+
+def is_out_of_memory(exc):
+    """True when this exception is a GPU OOM, whatever runtime raised it.
+
+    The class name is folded into the searched text rather than checked
+    separately: `torch.cuda.OutOfMemoryError` is matched by the
+    "outofmemoryerror" marker, so a separate `type(exc).__name__` branch was
+    code no test could distinguish from its absence.
+    """
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in text for marker in _OOM_MARKERS)
+
+
 def decide_masking(use_mask, supports_mask, markers):
     """Which masking route to take: False, or the name of the mechanism.
 
@@ -932,40 +968,47 @@ class TrainModel:
         # train_on_responses_only() masks by locating literal turn markers
         # instead and works on any template; it is applied to the built trainer
         # rather than through the config.
-        markers = resolve_response_markers(
-            self.config.get("chat_template"), self.config.get("model_name", ""))
-
-        mask_setting = self.config.get(
-            "assistant_only_loss", self.config.get("train_on_responses_only", "auto"))
-        supports_mask = self._supports_assistant_mask()
-        # `auto` means "mask if we can". Keying it off `supports_mask` alone sent
-        # every unsloth template (which lacks {% generation %}) down the unmasked
-        # path even when valid turn markers were available -- defeating the whole
-        # fallback. Enable it when EITHER route is usable, and let decide_masking
-        # pick which one.
-        if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
-            use_mask = supports_mask or bool(markers)
-        else:
-            use_mask = self._flag(mask_setting)
         self._response_markers = None
         self._masking_on = False
 
-        route = decide_masking(use_mask, supports_mask, markers)
-        if route == "assistant_only_loss":
-            sft_params["assistant_only_loss"] = True
-            self._masking_on = route
-        elif route == "train_on_responses_only":
-            self._response_markers = markers
-            self._masking_on = route
-        elif route is None:
-            raise ValueError(
-                f"assistant_only_loss is enabled but neither masking route is "
-                f"available for '{self.config['model_name']}': the chat template has "
-                f"no {{% generation %}} markers, and no turn markers are known for it. "
-                f"Set assistant_only_loss: false to train on the full sequence, or "
-                f"choose a chat_template from: "
-                f"{', '.join(sorted(set(TEMPLATE_TO_MARKERS)))}."
-            )
+        # Response-only masking is an SFT-only mechanism: it rewrites the label
+        # tensors of a completion-tokenised dataset. Preference trainers (DPO,
+        # ORPO, KTO) build their own labels from chosen/rejected pairs, so both
+        # masking routes are meaningless there and `train_on_responses_only`
+        # would corrupt the run. Skip the whole decision for those methods.
+        method = self.config.get("method", "sft")
+        if method == "sft":
+            markers = resolve_response_markers(
+                self.config.get("chat_template"), self.config.get("model_name", ""))
+
+            mask_setting = self.config.get(
+                "assistant_only_loss", self.config.get("train_on_responses_only", "auto"))
+            supports_mask = self._supports_assistant_mask()
+            # `auto` means "mask if we can". Keying it off `supports_mask` alone sent
+            # every unsloth template (which lacks {% generation %}) down the unmasked
+            # path even when valid turn markers were available -- defeating the whole
+            # fallback. Enable it when EITHER route is usable, and let decide_masking
+            # pick which one.
+            if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
+                use_mask = supports_mask or bool(markers)
+            else:
+                use_mask = self._flag(mask_setting)
+            route = decide_masking(use_mask, supports_mask, markers)
+            if route == "assistant_only_loss":
+                sft_params["assistant_only_loss"] = True
+                self._masking_on = route
+            elif route == "train_on_responses_only":
+                self._response_markers = markers
+                self._masking_on = route
+            elif route is None:
+                raise ValueError(
+                    f"assistant_only_loss is enabled but neither masking route is "
+                    f"available for '{self.config['model_name']}': the chat template has "
+                    f"no {{% generation %}} markers, and no turn markers are known for it. "
+                    f"Set assistant_only_loss: false to train on the full sequence, or "
+                    f"choose a chat_template from: "
+                    f"{', '.join(sorted(set(TEMPLATE_TO_MARKERS)))}."
+                )
 
         # --- Early stopping (optional; needs an eval set) ---
         callbacks = []
@@ -1031,7 +1074,6 @@ class TrainModel:
             print(f"WARNING: SFTConfig (this TRL version) does not accept {dropped}; ignoring.")
             sft_params = {k: v for k, v in sft_params.items() if k in valid_fields}
 
-        method = self.config.get("method", "sft")
         spec = TRAINING_METHODS[method]
 
         if method != "sft":
@@ -1557,7 +1599,12 @@ def main():
             trainer_obj = TrainModel(config_path=args.config)
             trainer_obj.run()
         except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
-            print(f"\nERROR: {exc}\n", file=sys.stderr)
+            # OutOfMemoryError is a RuntimeError, so without this the user got
+            # torch's allocator dump as one ERROR line and no idea what to change.
+            if is_out_of_memory(exc):
+                print(f"\nERROR: {exc}\n\n{OOM_REMEDIATION}\n", file=sys.stderr)
+            else:
+                print(f"\nERROR: {exc}\n", file=sys.stderr)
             sys.exit(1)
         except KeyboardInterrupt:
             print("\nInterrupted.", file=sys.stderr)

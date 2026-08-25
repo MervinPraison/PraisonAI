@@ -135,10 +135,10 @@ trainer-ready dataset — closing the loop from verification to data generation.
 
 ```bash
 # 1) export the passing attempts as a ShareGPT dataset (+ provenance sidecar)
-praisonai-train data from-trials trials.json -o data/train.jsonl
+praisonai-train from-trials trials.json -o data/train.jsonl
 
 # 2) fine-tune with the existing trainer, unchanged
-praisonai-train llm --dataset data/train.jsonl
+praisonai-train llm data/train.jsonl
 
 # 3) re-run the trials on the fine-tuned model and compare pass-rate to measure gain
 ```
