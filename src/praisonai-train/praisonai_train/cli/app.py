@@ -14,5 +14,6 @@ from praisonai_train.cli.commands.train import app
 from praisonai_train.cli.commands import data as _data  # noqa: F401  registers generate/validate
 from praisonai_train.cli.commands import benchmark as _benchmark  # noqa: F401  registers benchmark
 from praisonai_train.cli.commands import serve as _serve  # noqa: F401  registers serve
+from praisonai_train.cli.commands import remote as _remote  # noqa: F401  registers remote
 
 __all__ = ["app"]
