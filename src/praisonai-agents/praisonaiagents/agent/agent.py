@@ -5800,6 +5800,14 @@ Summary:"""
                 logging.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")
                 from ..memory.file_memory import FileMemory
                 self._memory_instance = FileMemory(user_id=mem_user_id)
+            except Exception as e:
+                # The backend package is installed but could not initialise
+                # (e.g. a SaaS backend like mem0 needs credentials/network).
+                # Honour the same "Falling back to FileMemory" contract used for
+                # missing dependencies so construction never hard-crashes.
+                logging.warning(f"Memory provider '{memory}' could not initialise ({e}). Falling back to FileMemory.")
+                from ..memory.file_memory import FileMemory
+                self._memory_instance = FileMemory(user_id=mem_user_id)
         elif isinstance(memory, dict):
             # Configuration dict
             provider = memory.get("provider", memory.get("backend", "file"))
