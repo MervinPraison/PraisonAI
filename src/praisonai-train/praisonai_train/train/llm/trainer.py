@@ -258,6 +258,7 @@ class TrainModel:
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
         "method", "beta", "max_prompt_length", "desirable_weight", "undesirable_weight",
+        "hf_private", "save_method", "commit_message", "tags",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
         # quantization / precision
         "dtype", "load_in_8bit", "full_finetuning",
@@ -1077,6 +1078,11 @@ class TrainModel:
         if "/" not in name.strip("/") and os.path.isdir(name):
             shutil.rmtree(name)
 
+    def hub_push_kwargs(self):
+        """Options shared by every Hub push. See praisonai_train/_hub.py."""
+        from praisonai_train._hub import hub_push_kwargs
+        return hub_push_kwargs(self.config, flag=self._flag)
+
     def save_model_merged(self):
         from huggingface_hub.utils import HfHubHTTPError
         repo = self.config["hf_model_name"]
@@ -1085,8 +1091,8 @@ class TrainModel:
             self.model.push_to_hub_merged(
                 repo,
                 self.hf_tokenizer,
-                save_method="merged_16bit",
-                token=os.getenv("HF_TOKEN")
+                save_method=self.config.get("save_method", "merged_16bit"),
+                **self.hub_push_kwargs()
             )
         except HfHubHTTPError as exc:
             self._raise_hf_push_error(exc, repo)
@@ -1099,7 +1105,7 @@ class TrainModel:
                 repo,
                 self.hf_tokenizer,
                 quantization_method=self.config.get("quantization_method", "q4_k_m"),
-                token=os.getenv("HF_TOKEN")
+                **self.hub_push_kwargs()
             )
         except HfHubHTTPError as exc:
             self._raise_hf_push_error(exc, repo)

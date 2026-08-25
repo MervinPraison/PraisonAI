@@ -7,6 +7,10 @@ adding vision-specific LoRA adapters, and training using TRL's SFTTrainer with U
 """
 
 import os
+
+from praisonai_train._hub import (
+    clean_local_repo_dir, hub_push_kwargs, raise_hf_push_error,
+)
 import sys
 import yaml
 import shutil
@@ -247,8 +251,8 @@ class TrainVisionModel:
         self.model.push_to_hub_merged(
             self.config["hf_model_name"],
             self.hf_tokenizer,
-            save_method="merged_16bit",
-            token=os.getenv("HF_TOKEN")
+            save_method=self.config.get("save_method", "merged_16bit"),
+            **hub_push_kwargs(self.config)
         )
 
     def push_model_gguf(self):
@@ -256,7 +260,7 @@ class TrainVisionModel:
             self.config["hf_model_name"],
             self.hf_tokenizer,
             quantization_method=self.config.get("quantization_method", "q4_k_m"),
-            token=os.getenv("HF_TOKEN")
+            **hub_push_kwargs(self.config)
         )
 
     def save_model_gguf(self):

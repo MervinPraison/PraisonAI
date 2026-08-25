@@ -6,6 +6,10 @@ It reads configuration from config.yaml and provides options to upload in differ
 """
 
 import os
+
+from praisonai_train._hub import (
+    clean_local_repo_dir, hub_push_kwargs, raise_hf_push_error,
+)
 import yaml
 import shutil
 import subprocess
@@ -50,13 +54,15 @@ class UploadVisionModel:
     def save_model_merged(self):
         """Save merged model to Hugging Face Hub."""
         print(f"DEBUG: Saving merged model to Hugging Face Hub: {self.config['hf_model_name']}")
-        if os.path.exists(self.config["hf_model_name"]):
-            shutil.rmtree(self.config["hf_model_name"])
+        # Guarded: the LLM path has always checked that this is a local
+        # directory name and not a Hub repo id. This copy did not, so a bare
+        # `hf_model_name` deleted a local directory of the same name.
+        clean_local_repo_dir(self.config["hf_model_name"])
         self.model.push_to_hub_merged(
             self.config["hf_model_name"],
             self.hf_tokenizer,
-            save_method="merged_16bit",
-            token=os.getenv("HF_TOKEN")
+            save_method=self.config.get("save_method", "merged_16bit"),
+            **hub_push_kwargs(self.config)
         )
         print("DEBUG: Model saved to Hugging Face Hub successfully.")
 
@@ -67,7 +73,7 @@ class UploadVisionModel:
             self.config["hf_model_name"],
             self.hf_tokenizer,
             quantization_method=self.config.get("quantization_method", "q4_k_m"),
-            token=os.getenv("HF_TOKEN")
+            **hub_push_kwargs(self.config)
         )
         print("DEBUG: GGUF model pushed to Hugging Face Hub successfully.")
 
