@@ -166,15 +166,25 @@ def train_llm(
     _materialize_config(resolved)
 
     argv = ['train']
-    if dataset:
-        # Belt and braces. The resolved config.yaml above already carries the
-        # dataset, but the dispatcher reads --dataset directly and an earlier
-        # incident had it dropped entirely: the run trained on a public Alpaca
-        # mirror and nobody knew until the GPU time was spent. Passing both
-        # means neither path can lose it.
-        argv.extend(['--dataset', str(dataset)])
-    if model:
-        argv.extend(['--model', str(model)])
+    # Deliberately NOT forwarding --dataset or --model.
+    #
+    # I added them as "belt and braces" and they were the opposite. The legacy
+    # dispatcher branches on `args.model or args.dataset != <default>`
+    # (praisonai_code/cli/legacy/praison_ai.py:676) and, on that branch, calls
+    # generate_config() with every tuning parameter None -- which REWRITES
+    # config.yaml from defaults. Measured effect of forwarding them:
+    #
+    #     lora_r 64 -> 16,  epochs 5 -> 1,  lr 1e-4 -> 2e-4,
+    #     max_seq_length 8192 -> 2048,  method dpo -> sft (not even a
+    #     generate_config parameter), and worst of all
+    #     huggingface_save false -> TRUE with hf_model_name defaulted to
+    #     someone else's Hub repo.
+    #
+    # So a --dry-run preview showed one config and a completely different one
+    # trained, and the run tried to publish to a third party's account. The
+    # materialised config.yaml above is the single source of truth; passing a
+    # bare `train` keeps the dispatcher on its "file exists, no override"
+    # branch, which reads that file as-is.
     if verbose:
         argv.append('--verbose')
 
@@ -245,6 +255,22 @@ def _materialize_config(resolved):
         to_write["dataset"] = [{"name": dataset}]
 
     config_path = Path.cwd() / "config.yaml"
+    # Back up whatever was there. This writes into the invocation directory
+    # unconditionally, so it has silently destroyed hand-written configs --
+    # including one in this repo's own working tree. The dispatcher only reads
+    # ./config.yaml, so the write has to happen; losing the previous contents
+    # does not.
+    if config_path.exists():
+        backup = config_path.with_suffix(".yaml.bak")
+        try:
+            previous = config_path.read_text()
+        except OSError:
+            previous = None
+        if previous is not None and previous != yaml.safe_dump(
+                to_write, sort_keys=True, default_flow_style=False):
+            backup.write_text(previous)
+            print(f"NOTE: {config_path.name} already existed; the previous "
+                  f"contents were saved to {backup.name}.")
     config_path.write_text(
         yaml.safe_dump(to_write, sort_keys=True, default_flow_style=False))
     return config_path
@@ -1065,3 +1091,28 @@ def _load_scenarios_from_file(file_path: str, output) -> Optional[list]:
     except json.JSONDecodeError as e:
         output.print_error(f"Invalid JSON: {e}")
         return None
+
+
+# --- sibling command registration -------------------------------------------
+#
+# Every other command module does `from ...commands.train import app` and
+# registers onto that object as an import side effect. `praisonai_train/cli/
+# app.py` imports them all — but the integrated CLI
+# (praisonai_code/cli/app.py:429) imports THIS module directly and never that
+# one, so `praisonai train` exposed 6 of 15 commands and the whole `remote`
+# group was unreachable.
+#
+# Imported at the bottom, after `app` exists, so the siblings' own
+# `from ...train import app` resolves. Failures are swallowed per module: a
+# missing optional dependency in one command must not take down the others.
+def _register_sibling_commands() -> None:
+    import importlib
+
+    for name in ("data", "benchmark", "serve", "remote", "run", "catalog"):
+        try:
+            importlib.import_module(f"praisonai_train.cli.commands.{name}")
+        except Exception:  # noqa: BLE001 - one bad command must not hide the rest
+            pass
+
+
+_register_sibling_commands()

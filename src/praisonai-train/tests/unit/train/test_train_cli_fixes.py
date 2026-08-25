@@ -21,8 +21,22 @@ import typer
 
 # --- Bug 1: the dataset argument must reach the trainer as --dataset ----------
 
-def test_train_llm_forwards_dataset_as_option():
-    """The user's dataset must be passed as --dataset, not a dropped positional."""
+def test_train_llm_forwards_dataset_as_option(tmp_path, monkeypatch):
+    """The user's dataset must reach the trainer, and the config must survive.
+
+    This asserted `--dataset` was in argv -- the mechanism, not the outcome --
+    and that let a much worse bug in. Forwarding --dataset/--model puts the
+    legacy dispatcher on its regeneration branch
+    (praisonai_code/cli/legacy/praison_ai.py:676), where generate_config() is
+    called with every tuning parameter None and rewrites config.yaml from
+    defaults: lora_r 64 -> 16, epochs 5 -> 1, method dpo -> sft, and
+    huggingface_save false -> TRUE with hf_model_name pointing at a third
+    party's Hub repo.
+
+    So the invariant is the one this test was always about -- the dataset is
+    not dropped -- checked where it now lives: the materialised config.
+    """
+    monkeypatch.chdir(tmp_path)
     from praisonai_train.cli.commands import train as train_cmd
 
     captured = {}
@@ -45,14 +59,19 @@ def test_train_llm_forwards_dataset_as_option():
         train_cmd.train_llm(
             "/data/my_tamil_sft.jsonl", model="unsloth/Llama-3.1-8B", verbose=False)
 
+    import yaml
+
+    written = yaml.safe_load((tmp_path / "config.yaml").read_text())
+    names = [d.get("name") for d in (written.get("dataset") or []) if isinstance(d, dict)]
+    assert "/data/my_tamil_sft.jsonl" in names, (
+        f"the dataset did not reach the config the trainer reads: {written}")
+    assert written.get("model_name") == "unsloth/Llama-3.1-8B"
+
+    # And the flags that trigger the destructive branch must NOT be forwarded.
     argv = captured["argv"]
-    # The dataset arrives as the value of --dataset (what the train branch reads),
-    # so it can no longer land in unknown_args and be discarded.
-    assert "--dataset" in argv
-    assert argv[argv.index("--dataset") + 1] == "/data/my_tamil_sft.jsonl"
-    # The model option still arrives (its presence is what made the bug invisible).
-    assert "--model" in argv
-    assert argv[argv.index("--model") + 1] == "unsloth/Llama-3.1-8B"
+    assert "--dataset" not in argv and "--model" not in argv, (
+        "forwarding these puts the dispatcher on the branch that rewrites "
+        f"config.yaml from defaults: {argv}")
 
 
 def test_train_llm_propagates_nonzero_exit():

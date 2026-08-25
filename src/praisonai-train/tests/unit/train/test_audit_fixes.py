@@ -1,0 +1,175 @@
+"""Four defects an adversarial audit found in the eleven merged PRs.
+
+Every one of them passed the suite that shipped it. The tests below are written
+to fail if the defect returns, and each was checked by reintroducing it.
+"""
+
+import inspect
+import io
+import contextlib
+
+import pytest
+
+from praisonai_train import _hub
+from praisonai_train.remote import runner as rr
+from praisonai_train.train.llm import trainer as trainer_mod
+
+
+# --------------------------------------------------------------------------- #
+# 1. cpt silently lost the one value it exists to set
+# --------------------------------------------------------------------------- #
+def test_config_fields_include_a_plain_init_subclass():
+    """`__dataclass_fields__` is INHERITED.
+
+    UnslothTrainingArguments (unsloth/trainer.py:445) is a plain __init__
+    subclass of TrainingArguments, so the attribute resolved to the PARENT's
+    fields and never contained embedding_learning_rate. The drop-unknown filter
+    then deleted it 45 lines after the cpt path set it -- along with
+    max_seq_length and packing. Nothing raised; the run used the adapter's
+    learning rate for the embeddings, which is the recipe the whole feature
+    exists to avoid.
+    """
+    from dataclasses import make_dataclass
+
+    Parent = make_dataclass("Parent", [("output_dir", object, None),
+                                       ("learning_rate", object, None)])
+
+    class Child(Parent):
+        # Deliberately NO **kwargs: with one, the helper returns None (filter
+        # nothing) and the assertion below would pass without the signature
+        # scan ever running -- which is how the first version of this test
+        # survived its own mutation.
+        def __init__(self, embedding_learning_rate=None, output_dir=None):
+            pass
+
+    accepted = trainer_mod._accepted_config_fields(Child)
+    assert accepted is not None, "the fake should be filterable"
+    assert "embedding_learning_rate" in accepted, (
+        "a value the class accepts would be filtered out")
+    assert "learning_rate" in accepted, "the parent's own fields were lost"
+
+
+def test_a_kwargs_config_filters_nothing():
+    # A class taking **kwargs accepts anything; filtering against a partial
+    # list would drop valid settings.
+    class KW:
+        def __init__(self, **kwargs):
+            pass
+
+    assert trainer_mod._accepted_config_fields(KW) is None
+
+
+def test_a_real_dataclass_still_filters():
+    from dataclasses import make_dataclass
+
+    D = make_dataclass("D", [("a", object, None)])
+    accepted = trainer_mod._accepted_config_fields(D)
+    assert accepted is not None and "a" in accepted and "zzz" not in accepted
+
+
+# --------------------------------------------------------------------------- #
+# 2. remote start could never train
+# --------------------------------------------------------------------------- #
+def test_the_remote_launch_puts_the_config_behind_its_flag():
+    """`llm` is `llm [DATASET] --config X`, not `llm CONFIG DATASET`.
+
+    Passing config.yaml as the positional meant two positionals and exit 2
+    before the GPU was touched -- or, with no dataset, config.yaml rewritten to
+    name itself as the corpus.
+    """
+    src = inspect.getsource(rr.RemoteRunner._launch_script)
+    assert "--config config.yaml" in src, "the config is not passed as an option"
+    assert "llm config.yaml" not in src, "the config is still a positional"
+
+
+# --------------------------------------------------------------------------- #
+# 3. remote command injection and path traversal
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("bad", [
+    "x;touch /tmp/pwned",      # the reported injection
+    "$(id)",
+    "`id`",
+    "a b",
+    "../escape",
+    "/absolute",
+    "",
+    "-leading-dash",
+])
+def test_a_run_id_that_is_not_an_identifier_is_refused(bad):
+    with pytest.raises(rr.RemoteError):
+        rr.validate_run_id(bad)
+
+
+def test_a_normal_run_id_is_accepted():
+    assert rr.validate_run_id("run-1787667005") == "run-1787667005"
+    assert rr.validate_run_id("my_run.2") == "my_run.2"
+
+
+@pytest.mark.parametrize("bad", [
+    "../../../../etc/passwd",   # passed the existence check and copied back
+    "/etc/passwd",
+    "a/../../b",
+    "",
+    "   ",
+])
+def test_a_fetch_path_leaving_the_run_directory_is_refused(bad):
+    with pytest.raises(rr.RemoteError):
+        rr.validate_remote_rel(bad)
+
+
+def test_fetch_validates_before_building_the_remote_path():
+    # Calling the validator in a test proves nothing if fetch never calls it.
+    src = inspect.getsource(rr.RemoteRunner.fetch)
+    check = src.index("validate_remote_rel")
+    build = src.index('remote_abs = f"')
+    assert check < build, "the path is built before it is checked"
+
+
+def test_a_normal_fetch_path_is_accepted():
+    assert rr.validate_remote_rel("lora_model") == "lora_model"
+    assert rr.validate_remote_rel("outputs/checkpoint-100") == "outputs/checkpoint-100"
+
+
+def test_the_scp_target_is_quoted_for_the_remote_shell():
+    # The far half of an scp target is expanded by a shell on the other side,
+    # so passing it as one argv element is not enough.
+    src = inspect.getsource(rr.RemoteRunner._ship)
+    assert "shlex.quote(remote_abs)" in src, "the scp target is unquoted"
+
+
+def test_start_validates_the_run_id_before_touching_the_host():
+    src = inspect.getsource(rr.RemoteRunner.start)
+    assert "validate_run_id" in src
+
+
+# --------------------------------------------------------------------------- #
+# 4. hf_private failed open
+# --------------------------------------------------------------------------- #
+def _private(value):
+    with contextlib.redirect_stdout(io.StringIO()):
+        return _hub.hub_push_kwargs({"hf_private": value})["private"]
+
+
+@pytest.mark.parametrize("value", [None, "private", "y", "enabled", 5, "", "maybe", []])
+def test_anything_unparseable_keeps_the_repository_private(value):
+    """The flag's whole purpose is "do not publish this".
+
+    The generic coercion read anything outside {true,1,yes,on} as False, so
+    hf_private: private -- a near miss someone would plausibly write -- made
+    the repository public.
+    """
+    assert _private(value) is True, f"{value!r} published the model"
+
+
+@pytest.mark.parametrize("value", ["false", "no", "0", "off", False])
+def test_publishing_still_works_when_asked_plainly(value):
+    assert _private(value) is False
+
+
+def test_an_unparseable_value_says_what_it_did():
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _hub.hub_push_kwargs({"hf_private": "enabled"})
+    out = buf.getvalue()
+    assert "PRIVATE" in out and "hf_private: false" in out, (
+        f"the decision was made silently: {out!r}")

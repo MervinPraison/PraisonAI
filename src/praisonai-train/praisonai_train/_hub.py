@@ -22,6 +22,30 @@ import os
 import shutil
 
 
+# Only these turn privacy OFF. Everything else -- including a near miss like
+# "private", "y", "enabled", or a bare 5 -- stays private.
+#
+# The generic coercion failed OPEN: anything outside {true,1,yes,on} read as
+# False and published the repo. For a flag whose entire purpose is "do not
+# publish this", an unparseable value has to mean the safe thing, and it has to
+# say so rather than deciding quietly.
+_PUBLISH = {"false", "no", "0", "off", "n"}
+_KEEP_PRIVATE = {"true", "yes", "1", "on", "y"}
+
+
+def _is_private(value):
+    if value is None:
+        return True
+    text = str(value).strip().lower()
+    if text in _PUBLISH:
+        return False
+    if text in _KEEP_PRIVATE:
+        return True
+    print(f"WARNING: hf_private={value!r} is not a yes/no value; keeping the "
+          "repository PRIVATE. Use hf_private: false to publish.")
+    return True
+
+
 def hub_push_kwargs(config, flag=None):
     """Keyword arguments common to `push_to_hub_merged` / `push_to_hub_gguf`.
 
@@ -37,9 +61,9 @@ def hub_push_kwargs(config, flag=None):
             return value
         return str(value).strip().lower() in ("true", "1", "yes", "on")
 
-    truthy = flag or _default_flag
     kwargs = {"token": os.getenv("HF_TOKEN")}
-    kwargs["private"] = truthy(config.get("hf_private"), default=True)
+    # Deliberately NOT the generic coercion: see _is_private.
+    kwargs["private"] = _is_private(config.get("hf_private"))
     for key in ("commit_message", "tags"):
         if config.get(key) is not None:
             kwargs[key] = config[key]

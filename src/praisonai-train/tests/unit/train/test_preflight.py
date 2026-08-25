@@ -13,7 +13,10 @@ CUDA build that can never run.
 """
 
 import re
-import tomllib
+try:
+    import tomllib                      # 3.11+
+except ModuleNotFoundError:             # 3.10, which pyproject still supports
+    import tomli as tomllib
 from pathlib import Path
 
 import pytest

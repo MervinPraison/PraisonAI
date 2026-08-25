@@ -282,5 +282,8 @@ def test_the_runner_needs_no_dependency_beyond_the_standard_library():
             imported.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             imported.add(node.module.split(".")[0])
-    third_party = imported - set(sys.stdlib_module_names) - {"praisonai_train"}
+    # sys.stdlib_module_names is 3.10+, but was only added for *some* names in
+    # 3.10; fall back to a check that works on the declared floor.
+    stdlib = set(getattr(sys, "stdlib_module_names", ()) or sys.builtin_module_names)
+    third_party = imported - stdlib - {"praisonai_train"}
     assert not third_party, f"the runner pulls in {sorted(third_party)}"

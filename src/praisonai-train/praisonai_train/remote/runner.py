@@ -16,6 +16,7 @@ without pulling in torch or unsloth.
 """
 from __future__ import annotations
 
+import pathlib
 import shlex
 import subprocess
 import time
@@ -158,6 +159,36 @@ class RemoteRun:
         return f"{self.remote_dir}/status"
 
 
+# A run id names a directory on the far host and is interpolated into remote
+# paths. Quoting makes it safe; this makes it *sane*, so a typo fails here
+# rather than creating a directory called `x;touch /tmp/pwned`.
+_RUN_ID_OK = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def validate_run_id(run_id: str) -> str:
+    """Reject anything that is not a plain identifier."""
+    if not isinstance(run_id, str) or not _RUN_ID_OK.match(run_id):
+        raise RemoteError(
+            f"run id {run_id!r} is not usable: letters, digits, dot, dash and "
+            "underscore only, starting with a letter or digit, up to 64 chars.")
+    return run_id
+
+
+def validate_remote_rel(path: str) -> str:
+    """Reject a fetch path that climbs out of the run directory.
+
+    `fetch <run> ../../../../etc/passwd` passed the existence check and copied
+    the file back, because the path is only ever joined, never checked.
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise RemoteError("nothing to fetch: give a path inside the run directory")
+    if path.startswith("/") or ".." in pathlib.PurePosixPath(path).parts:
+        raise RemoteError(
+            f"{path!r} points outside the run directory. Fetch paths are "
+            "relative to it, e.g. 'lora_model' or 'train.log'.")
+    return path
+
+
 def _new_run_id() -> str:
     # Sortable and unique enough for a per-user host; no dependency on uuid's
     # opacity when a timestamp reads better in `ls`.
@@ -243,7 +274,7 @@ class RemoteRunner:
         if not ready.ok:
             raise RemoteError(f"{self.host.alias}: {ready.why_not()}")
 
-        rid = run_id or _new_run_id()
+        rid = validate_run_id(run_id) if run_id else _new_run_id()
         base = self.host.resolve_workdir()
         remote_dir = f"{base}/{rid}"
         run = RemoteRun(
@@ -277,7 +308,7 @@ class RemoteRunner:
         cd = f"cd {shlex.quote(run.remote_dir)}"
         train = (
             f"{shlex.quote(self.host.python)} -m praisonai_train "
-            f"llm config.yaml{dataset_arg}"
+            f"llm{dataset_arg} --config config.yaml"
         )
         # Record status so `status` can tell how it ended; write the pid so
         # `stop` can signal the whole process group.
@@ -343,6 +374,7 @@ class RemoteRunner:
         """Bring an artifact back from the run directory to ``dest`` locally."""
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
+        remote_rel = validate_remote_rel(remote_rel)
         remote_abs = f"{run.remote_dir}/{remote_rel}"
 
         exists = self.host.run(f"test -e {shlex.quote(remote_abs)}")
@@ -385,8 +417,11 @@ class RemoteRunner:
 
     # -- helpers ---------------------------------------------------------- #
     def _ship(self, local: Path, remote_abs: str) -> None:
+        # The remote half of an scp target is expanded by a shell on the far
+        # side, so it has to be quoted for that shell -- not just passed as one
+        # argv element. Without this, --run-id 'x;touch /tmp/pwned' executed.
         argv = ["scp", *_SSH_OPTS, str(local),
-                f"{self.host.alias}:{remote_abs}"]
+                f"{self.host.alias}:{shlex.quote(remote_abs)}"]
         done = RemoteHost._exec(argv)
         if not done.ok:
             detail = (done.stderr or done.stdout or "").strip()
