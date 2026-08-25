@@ -41,7 +41,8 @@ class _Cols:
 # --------------------------------------------------------------------------- #
 def test_the_methods_unsloth_patches_are_all_offered():
     # If unsloth grows one and this does not, the gap reopens silently.
-    assert set(trainer_mod.TRAINING_METHODS) == {"sft", "cpt", "dpo", "orpo", "kto"}
+    assert set(trainer_mod.TRAINING_METHODS) == {
+        "sft", "cpt", "dpo", "orpo", "kto", "grpo", "reward", "cpo"}
 
 
 def test_every_method_declares_what_it_needs():

@@ -51,6 +51,23 @@ TRAINING_METHODS = {
         "columns": ("prompt", "chosen", "rejected"), "needs_ref_model": False,
         "summary": "odds-ratio preference optimisation, no reference model",
     },
+    "grpo": {
+        "trainer": "GRPOTrainer", "config": "GRPOConfig",
+        # GRPO generates its own completions, so the corpus is prompts only.
+        "columns": ("prompt",), "needs_ref_model": False,
+        "needs_rewards": True,
+        "summary": "group-relative policy optimisation, scored by reward functions",
+    },
+    "reward": {
+        "trainer": "RewardTrainer", "config": "RewardConfig",
+        "columns": ("chosen", "rejected"), "needs_ref_model": False,
+        "summary": "train a reward model on preference pairs",
+    },
+    "cpo": {
+        "trainer": "CPOTrainer", "config": "CPOConfig",
+        "columns": ("prompt", "chosen", "rejected"), "needs_ref_model": False,
+        "summary": "contrastive preference optimisation, no reference model",
+    },
     "kto": {
         "trainer": "KTOTrainer", "config": "KTOConfig",
         "columns": ("prompt", "completion", "label"), "needs_ref_model": True,
@@ -225,7 +242,8 @@ def _lazy_import_training_deps():
         # should still be able to run the others rather than failing at import.
         _pref = {}
         for _name in ("DPOTrainer", "DPOConfig", "ORPOTrainer", "ORPOConfig",
-                      "KTOTrainer", "KTOConfig"):
+                      "KTOTrainer", "KTOConfig", "GRPOTrainer", "GRPOConfig",
+                      "RewardTrainer", "RewardConfig", "CPOTrainer", "CPOConfig"):
             try:
                 _pref[_name] = getattr(__import__("trl", fromlist=[_name]), _name)
             except (ImportError, AttributeError):
@@ -432,6 +450,7 @@ class TrainModel:
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
         "method", "beta", "max_prompt_length", "desirable_weight", "undesirable_weight",
+        "reward_funcs", "num_generations", "max_completion_length",
         "embedding_learning_rate",
         "hf_private", "save_method", "commit_message", "tags",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
@@ -1162,6 +1181,20 @@ class TrainModel:
                         sft_params[w] = float(self.config[w])
             self._require_columns(raw_dataset, spec["columns"], method)
 
+        reward_fns = []
+        if spec.get("needs_rewards"):
+            # Resolved before the model loads: a bad import path is a typo, and
+            # finding it after a multi-gigabyte load is the difference between
+            # a five-second fix and a lost session.
+            from praisonai_train.rewards import RewardError, require, resolve_all
+            try:
+                reward_fns = require(method, resolve_all(self.config.get("reward_funcs")))
+            except RewardError as exc:
+                raise ValueError(f"method '{method}': {exc}") from exc
+            for key in ("num_generations", "max_completion_length"):
+                if self.config.get(key) is not None:
+                    sft_params[key] = int(self.config[key])
+
         cfg_cls = globals().get(spec["config"])
         trainer_cls = globals().get(spec["trainer"])
         if cfg_cls is None or trainer_cls is None:
@@ -1188,6 +1221,8 @@ class TrainModel:
             "args": training_args,
             "callbacks": callbacks or None,
         }
+        if reward_fns:
+            trainer_kwargs["reward_funcs"] = reward_fns
         if spec["needs_ref_model"]:
             # None means "use the frozen base weights". With a PEFT adapter that
             # is exactly right, and it avoids a second full model in VRAM.
