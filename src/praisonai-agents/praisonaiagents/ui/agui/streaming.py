@@ -28,6 +28,7 @@ from praisonaiagents.ui.agui.types import (
     StateSnapshotEvent,
 )
 from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
+from praisonaiagents.streaming.events import StreamEventType as _SE
 
 
 @dataclass
@@ -260,6 +261,38 @@ async def async_stream_response(
         yield create_run_error_event(str(e))
 
 
+# --- AG-UI disposition of every StreamEventType -------------------------------
+# Membership in these tables is a decision, not an omission. The adapter raises on
+# any type absent from all three, so adding a StreamEventType without choosing a
+# disposition fails tests/agui/test_streaming_completeness.py rather than silently
+# dropping the event at runtime.
+
+# Process-local timing and lifecycle markers with no AG-UI counterpart.
+# RUN_FINISHED is emitted by the enclosing run loop, so STREAM_END would double it.
+NOT_WIRE_VISIBLE = frozenset({
+    _SE.REQUEST_START,
+    _SE.HEADERS_RECEIVED,
+    _SE.FIRST_TOKEN,
+    _SE.LAST_TOKEN,
+    _SE.STREAM_END,
+})
+
+# The run continues, but a client that is never told cannot explain a stall or a
+# silently changed model. Carried as CustomEvent, not RunErrorEvent, because
+# RunErrorEvent is terminal in AG-UI and these are recovered conditions.
+_RECOVERABLE_EVENTS = {
+    _SE.RETRY: "praisonai.retry",
+    _SE.MODEL_FALLBACK: "praisonai.model_fallback",
+    _SE.STREAM_UNAVAILABLE: "praisonai.stream_unavailable",
+}
+
+# User-visible progress that AG-UI has no first-class frame for.
+_PROGRESS_EVENTS = {
+    _SE.TOOL_PROGRESS: "praisonai.tool_progress",
+    _SE.TODO_UPDATED: "praisonai.todo_updated",
+}
+
+
 def stream_event_to_agui_events(
     event: Any,
     message_id: str,
@@ -313,7 +346,58 @@ def stream_event_to_agui_events(
             )
         return events
 
-    return []
+    if event.type == StreamEventType.DELTA_TOOL_CALL and event.tool_call:
+        tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
+        delta = event.tool_call.get("arguments", event.content or "")
+        return [
+            ToolCallArgsEvent(
+                tool_call_id=tool_call_id,
+                delta=delta if isinstance(delta, str) else json.dumps(delta),
+            )
+        ]
+
+    if event.type == StreamEventType.TOOL_CALL_END and event.tool_call:
+        tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
+        buffer.end_tool_call(tool_call_id)
+        return [ToolCallEndEvent(tool_call_id=tool_call_id)]
+
+    if event.type == StreamEventType.ERROR:
+        return [create_run_error_event(event.error or event.content or "unknown error")]
+
+    # Recoverable conditions. These are not RunErrorEvent: the run continues, but
+    # a client that is never told cannot explain a stall or a changed model.
+    if event.type in _RECOVERABLE_EVENTS:
+        return [
+            CustomEvent(
+                name=_RECOVERABLE_EVENTS[event.type],
+                value={
+                    "message": event.error or event.content or "",
+                    "metadata": event.metadata or {},
+                },
+            )
+        ]
+
+    if event.type in _PROGRESS_EVENTS:
+        return [
+            CustomEvent(
+                name=_PROGRESS_EVENTS[event.type],
+                value={
+                    "content": event.content,
+                    "tool_call": event.tool_call,
+                    "metadata": event.metadata or {},
+                },
+            )
+        ]
+
+    if event.type in NOT_WIRE_VISIBLE:
+        return []
+
+    # Fail loudly rather than dropping: an unmapped type reaching here means a new
+    # StreamEventType was added without deciding its disposition.
+    raise ValueError(
+        f"StreamEventType.{getattr(event.type, 'name', event.type)} has no AG-UI "
+        "mapping and is not declared in NOT_WIRE_VISIBLE"
+    )
 
 
 def _infer_a2ui_surface_id(result: Dict[str, Any]) -> str:
