@@ -14,7 +14,8 @@ use std::time::Duration;
 
 use praisonai_desktop_core::adopt::Decision;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
-use praisonai_desktop_core::reclaim::{kill_pid, reclaim};
+use praisonai_desktop_core::platform::Platform;
+use praisonai_desktop_core::reclaim::{kill_pid, no_console, reclaim};
 use praisonai_desktop_core::engine_paths::{
     app_bundle, data_dir, python_candidates, resolve_engine, RealFs as PathFs,
 };
@@ -60,7 +61,8 @@ fn env_path(key: &str) -> Option<PathBuf> {
 /// Pick the interpreter, and prove it owns its own site-packages before using it.
 fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
     let candidates =
-        python_candidates(env_path("PRAISONAI_PYTHON").as_deref(), user_data, checkout_root().as_deref());
+        python_candidates(env_path("PRAISONAI_PYTHON").as_deref(), user_data,
+                          checkout_root().as_deref(), Platform::current());
     let mut tried = Vec::new();
     for candidate in candidates {
         if !candidate.is_file() {
@@ -69,7 +71,7 @@ fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
         }
         // Keep looking. Returning on the first bad candidate let a
         // half-built user-space venv permanently mask a working checkout one.
-        match venv_root_for_python(&candidate, &RealFs) {
+        match venv_root_for_python(&candidate, &RealFs, Platform::current()) {
             Ok(layout) if layout.site_packages.starts_with(&layout.root) => return Ok(candidate),
             Ok(layout) => tried.push(format!(
                 "{} (site-packages outside its venv: {})",
@@ -87,16 +89,45 @@ fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
 /// Emits `provision` events rather than returning a lump at the end: the whole
 /// run takes minutes on a cold machine, and a window that says nothing for
 /// three minutes is indistinguishable from one that has hung.
+/// The user's home directory, under whichever variable this platform uses.
+///
+/// `HOME` is normally unset on Windows -- it is `USERPROFILE` -- so a lookup
+/// that only knows the one name failed at the first step: no home, no data
+/// directory, no engine, and the orphan-reclaim path never ran at all.
+fn home_dir() -> Option<PathBuf> {
+    let platform = Platform::current();
+    std::env::var_os(platform.home_var())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+}
+
+/// %APPDATA% on Windows, $XDG_DATA_HOME on Linux, neither on macOS.
+fn app_data_root() -> Option<PathBuf> {
+    match Platform::current() {
+        Platform::Windows => std::env::var_os("APPDATA").map(PathBuf::from),
+        Platform::Linux => std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+        Platform::Mac => None,
+    }
+}
+
+fn user_data_dir() -> Option<PathBuf> {
+    data_dir(
+        env_path("PRAISONAI_DESKTOP_HOME").as_deref(),
+        home_dir().as_deref(),
+        Platform::current(),
+        app_data_root().as_deref(),
+    )
+}
+
 #[tauri::command]
 async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
     use praisonai_desktop_core::provision::{
-        locate_uv, plan, uv_candidates, venv_python, Uv, ENGINE_PACKAGES,
+        locate_uv, plan, uv_candidates, uv_installer, venv_python, Uv, ENGINE_PACKAGES,
     };
 
-    let home = std::env::var_os("HOME").map(PathBuf::from)
-        .ok_or_else(|| "no home directory".to_string())?;
-    let data = data_dir(env_path("PRAISONAI_DESKTOP_HOME").as_deref(), Some(&home))
-        .ok_or_else(|| "no data directory".to_string())?;
+    let platform = Platform::current();
+    let home = home_dir().ok_or_else(|| "no home directory".to_string())?;
+    let data = user_data_dir().ok_or_else(|| "no data directory".to_string())?;
     std::fs::create_dir_all(&data).map_err(|e| format!("cannot create {}: {e}", data.display()))?;
 
     let say = |id: &str, label: &str, state: &str, detail: &str| {
@@ -105,41 +136,58 @@ async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
         }));
     };
 
-    let uv = match locate_uv(&uv_candidates(&home, &data), |p| p.is_file()) {
+    let uv = match locate_uv(&uv_candidates(&home, &data, platform), |p| p.is_file()) {
         Uv::Found(p) => p,
         Uv::Fetch => {
             // The official installer, run with an explicit target so it cannot
             // land somewhere outside the directory we control.
             say("uv", "Fetching the installer", "running", "");
-            let script = std::process::Command::new("/usr/bin/curl")
-                .args(["-fsSL", "https://astral.sh/uv/install.sh"])
-                .output()
-                .map_err(|e| format!("could not reach astral.sh: {e}"))?;
-            if !script.status.success() {
-                return Err("could not download the installer".into());
+            let installer = uv_installer(platform, &data.join(platform.venv_bin_rel()));
+            let mut command = std::process::Command::new(&installer.program);
+            command.args(&installer.args);
+            for (key, value) in &installer.env {
+                command.env(key, value);
             }
-            let mut child = std::process::Command::new("/bin/sh")
-                .env("UV_INSTALL_DIR", data.join("bin"))
-                .env("UV_UNMANAGED_INSTALL", data.join("bin"))
-                .stdin(std::process::Stdio::piped())
+            no_console(&mut command);
+            command
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .map_err(|e| format!("could not run the installer: {e}"))?;
-            use std::io::Write;
-            child.stdin.take().unwrap().write_all(&script.stdout)
-                .map_err(|e| format!("installer refused input: {e}"))?;
-            let out = child.wait_with_output().map_err(|e| e.to_string())?;
+                .stderr(std::process::Stdio::piped());
+
+            let out = if let Some(url) = &installer.script_on_stdin {
+                // Downloaded separately and piped in, so "could not reach
+                // astral.sh" is distinguishable from "the installer failed".
+                // `curl` by name, not /usr/bin/curl: it lives in /bin on some
+                // distributions and is absent from minimal images entirely.
+                let mut fetch = std::process::Command::new("curl");
+                fetch.args(["-fsSL", url]);
+                no_console(&mut fetch);
+                let script = fetch
+                    .output()
+                    .map_err(|e| format!("could not reach astral.sh: {e}"))?;
+                if !script.status.success() {
+                    return Err("could not download the installer".into());
+                }
+                let mut child = command
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("could not run the installer: {e}"))?;
+                use std::io::Write;
+                child.stdin.take().unwrap().write_all(&script.stdout)
+                    .map_err(|e| format!("installer refused input: {e}"))?;
+                child.wait_with_output().map_err(|e| e.to_string())?
+            } else {
+                command.output().map_err(|e| format!("could not run the installer: {e}"))?
+            };
             if !out.status.success() {
                 return Err(format!("installer failed: {}",
                     String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")));
             }
             say("uv", "Fetching the installer", "done", "");
-            data.join("bin/uv")
+            data.join(platform.venv_bin_rel()).join(platform.uv_exe())
         }
     };
 
-    for step in plan(&uv, &data, ENGINE_PACKAGES) {
+    for step in plan(&uv, &data, ENGINE_PACKAGES, platform) {
         say(step.id, step.label, "running", "");
         let out = std::process::Command::new(&step.program)
             .args(&step.args)
@@ -155,7 +203,7 @@ async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
         say(step.id, step.label, "done", "");
     }
 
-    let py = venv_python(&data);
+    let py = venv_python(&data, platform);
     if !py.is_file() {
         return Err(format!("finished, but {} is not there", py.display()));
     }
@@ -170,10 +218,7 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
 
     // Not `app.path().app_data_dir()` -- that is the bundle identifier's
     // directory, which is not where the engine writes.
-    let user_data = data_dir(
-        env_path("PRAISONAI_DESKTOP_HOME").as_deref(),
-        std::env::var_os("HOME").map(PathBuf::from).as_deref(),
-    );
+    let user_data = user_data_dir();
     let resource_dir = app.path().resource_dir().ok();
 
     praisonai_desktop_core::tray::set_engine_label(&app, "Engine: starting\u{2026}");
@@ -193,7 +238,7 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
     // `kill -TERM` on the app left the Python child alive with a lockfile still
     // claiming it, and the next launch started a second engine beside it.
     if let Some(dir) = user_data.as_deref() {
-        let venv = venv_root_for_python(&python, &RealFs)
+        let venv = venv_root_for_python(&python, &RealFs, Platform::current())
             .map(|l| l.root.display().to_string())
             .unwrap_or_default();
         match reclaim(dir, &python.display().to_string(), &venv,

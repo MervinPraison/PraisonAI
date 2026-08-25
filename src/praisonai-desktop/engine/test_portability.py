@@ -274,6 +274,42 @@ class Encoding(unittest.TestCase):
         self.assertIn("then", got)
 
 
+class HashContract(unittest.TestCase):
+    """The engine and the Rust shell must fingerprint a process identically.
+
+    The same table is asserted in src-tauri/src/reclaim.rs. If either side's
+    hashing drifts, both suites fail rather than the two silently disagreeing
+    -- and disagreement here is invisible in the worst way: every live engine
+    looks like a recycled pid, so a second one is started beside it on every
+    launch, forever, with no error anywhere.
+    """
+
+    FIXTURES = [
+        (1234, 133_000_000_000_000_000, 8_396_559_443_335_285_342),
+        (1, 0, 4_995_674_065_236_331_046),
+        (65535, 9_223_372_036_854_775_815, 742_000_315_636_326_002),
+    ]
+
+    def test_the_windows_start_key_hashes_as_the_shell_expects(self):
+        for pid, stamp, expected in self.FIXTURES:
+            self.assertEqual(server._fnv1a64(f"{pid}:{stamp}"), expected,
+                             f"pid {pid} stamp {stamp}")
+
+    def test_the_rust_side_asserts_the_identical_table(self):
+        # A fixture table that lives in only one language is not a contract.
+        rust = pathlib.Path(__file__).resolve().parents[1] / "src-tauri/src/reclaim.rs"
+        self.assertTrue(rust.exists(), f"{rust} is missing")
+        text = rust.read_text(encoding="utf-8")
+        for _, _, expected in self.FIXTURES:
+            grouped = f"{expected:_}"          # Rust writes 8_396_559_443_335_285_342
+            self.assertTrue(grouped in text or str(expected) in text,
+                            f"the shell does not assert the fixture {expected}")
+
+    def test_fnv1a64_stays_a_64_bit_value(self):
+        for pid, stamp, _ in self.FIXTURES:
+            self.assertLess(server._fnv1a64(f"{pid}:{stamp}"), 2 ** 64)
+
+
 class SocketReuse(unittest.TestCase):
     """SO_REUSEADDR means different things on Windows and POSIX."""
 

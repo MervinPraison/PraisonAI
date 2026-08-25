@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use praisonai_desktop_core::platform::Platform;
 use praisonai_desktop_core::venv_resolve::{spawn_env, venv_root_for_python, RealFs};
 
 fn candidate_interpreters() -> Vec<PathBuf> {
@@ -44,7 +45,7 @@ fn every_real_venv_resolves_to_itself_and_never_to_a_sibling() {
 
     let mut seen_roots = Vec::new();
     for interpreter in &interpreters {
-        let layout = venv_root_for_python(interpreter, &RealFs)
+        let layout = venv_root_for_python(interpreter, &RealFs, Platform::current())
             .unwrap_or_else(|e| panic!("{}: {:?}", interpreter.display(), e));
 
         assert!(
@@ -60,7 +61,7 @@ fn every_real_venv_resolves_to_itself_and_never_to_a_sibling() {
             layout.root
         );
 
-        let env = spawn_env(&layout, &BTreeMap::new());
+        let env = spawn_env(&layout, &BTreeMap::new(), Platform::current());
         assert_eq!(env["VIRTUAL_ENV"], layout.root.display().to_string());
         assert!(!env.contains_key("PYTHONPATH"));
 
