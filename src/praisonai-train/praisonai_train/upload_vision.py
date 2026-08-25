@@ -8,7 +8,7 @@ It reads configuration from config.yaml and provides options to upload in differ
 import os
 
 from praisonai_train._hub import (
-    clean_local_repo_dir, hub_push_kwargs, raise_hf_push_error,
+    clean_local_repo_dir, hf_push_errors, hub_push_kwargs,
 )
 import yaml
 import shutil
@@ -58,23 +58,25 @@ class UploadVisionModel:
         # directory name and not a Hub repo id. This copy did not, so a bare
         # `hf_model_name` deleted a local directory of the same name.
         clean_local_repo_dir(self.config["hf_model_name"])
-        self.model.push_to_hub_merged(
-            self.config["hf_model_name"],
-            self.hf_tokenizer,
-            save_method=self.config.get("save_method", "merged_16bit"),
-            **hub_push_kwargs(self.config)
-        )
+        with hf_push_errors(self.config["hf_model_name"]):
+            self.model.push_to_hub_merged(
+                self.config["hf_model_name"],
+                self.hf_tokenizer,
+                save_method=self.config.get("save_method", "merged_16bit"),
+                **hub_push_kwargs(self.config)
+            )
         print("DEBUG: Model saved to Hugging Face Hub successfully.")
 
     def push_model_gguf(self):
         """Push model in GGUF format to Hugging Face Hub."""
         print(f"DEBUG: Pushing GGUF model to Hugging Face Hub: {self.config['hf_model_name']}")
-        self.model.push_to_hub_gguf(
-            self.config["hf_model_name"],
-            self.hf_tokenizer,
-            quantization_method=self.config.get("quantization_method", "q4_k_m"),
-            **hub_push_kwargs(self.config)
-        )
+        with hf_push_errors(self.config["hf_model_name"]):
+            self.model.push_to_hub_gguf(
+                self.config["hf_model_name"],
+                self.hf_tokenizer,
+                quantization_method=self.config.get("quantization_method", "q4_k_m"),
+                **hub_push_kwargs(self.config)
+            )
         print("DEBUG: GGUF model pushed to Hugging Face Hub successfully.")
 
     def prepare_modelfile_content(self):

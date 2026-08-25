@@ -17,6 +17,7 @@ Default is private. Publishing is one click in the Hub UI; unpublishing
 something already crawled is not.
 """
 
+import contextlib
 import os
 import shutil
 
@@ -25,9 +26,18 @@ def hub_push_kwargs(config, flag=None):
     """Keyword arguments common to `push_to_hub_merged` / `push_to_hub_gguf`.
 
     `flag` coerces a config value to bool; callers that have their own coercion
-    pass it so YAML's `"false"` behaves the same everywhere.
+    pass it so YAML's `"false"` behaves the same everywhere. The default coercion
+    is string-aware too, so a caller that omits `flag` still reads `"false"` /
+    `"0"` / `"no"` as opt-out rather than treating the nonempty string as true.
     """
-    truthy = flag or (lambda v, default=False: default if v is None else bool(v))
+    def _default_flag(value, default=False):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    truthy = flag or _default_flag
     kwargs = {"token": os.getenv("HF_TOKEN")}
     kwargs["private"] = truthy(config.get("hf_private"), default=True)
     for key in ("commit_message", "tags"):
@@ -61,3 +71,17 @@ def raise_hf_push_error(exc, repo):
             "the write scope."
         ) from exc
     raise RuntimeError(f"Hugging Face upload to '{repo}' failed: {exc}") from exc
+
+
+@contextlib.contextmanager
+def hf_push_errors(repo):
+    """Wrap a Hub push so a rejected token becomes actionable advice.
+
+    The LLM trainer already translates 401/403; this lets the two vision paths
+    share the same behaviour instead of surfacing a raw `HfHubHTTPError`.
+    """
+    from huggingface_hub.utils import HfHubHTTPError
+    try:
+        yield
+    except HfHubHTTPError as exc:
+        raise_hf_push_error(exc, repo)

@@ -40,6 +40,17 @@ def test_a_yaml_string_false_still_publishes():
     assert _hub.hub_push_kwargs({"hf_private": "true"}, flag=flag)["private"] is True
 
 
+def test_the_default_coercion_reads_string_false_as_public():
+    # The vision callers pass no `flag`, so the built-in coercion must itself
+    # read a YAML string "false"/"0"/"no" as opt-out — otherwise bool("false")
+    # is True and a stated public wish is silently kept private.
+    assert _hub.hub_push_kwargs({"hf_private": "false"})["private"] is False
+    assert _hub.hub_push_kwargs({"hf_private": "0"})["private"] is False
+    assert _hub.hub_push_kwargs({"hf_private": "no"})["private"] is False
+    assert _hub.hub_push_kwargs({"hf_private": "true"})["private"] is True
+    assert _hub.hub_push_kwargs({})["private"] is True
+
+
 def test_the_token_still_comes_from_the_environment(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_abc")
     assert _hub.hub_push_kwargs({})["token"] == "hf_abc"

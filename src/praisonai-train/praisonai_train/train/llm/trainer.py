@@ -222,9 +222,12 @@ class TrainModel:
         q = obj.config.get("quantization_method")
         # Configs written against older templates carry the single-element
         # list form. Accepting it costs one line and avoids failing a run for a
-        # shape the project itself shipped.
+        # shape the project itself shipped. Normalize back into config so the
+        # GGUF exporter (which re-reads self.config) receives the method string,
+        # not the list.
         if isinstance(q, (list, tuple)) and len(q) == 1:
             q = q[0]
+            obj.config["quantization_method"] = q
         if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
             raise ValueError(
                 f"quantization_method '{q}' is not valid. Choose one of: "
@@ -368,9 +371,12 @@ class TrainModel:
             q = self.config.get("quantization_method")
             # Configs written against older templates carry the single-element
             # list form. Accepting it costs one line and avoids failing a run
-            # for a shape the project itself shipped.
+            # for a shape the project itself shipped. Normalize back into config
+            # so the GGUF exporter (which re-reads self.config) receives the
+            # method string, not the list.
             if isinstance(q, (list, tuple)) and len(q) == 1:
                 q = q[0]
+                self.config["quantization_method"] = q
             if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
                 raise ValueError(
                     f"quantization_method '{q}' is not valid. Choose one of: "
