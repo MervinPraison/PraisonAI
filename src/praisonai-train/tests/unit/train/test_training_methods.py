@@ -142,3 +142,38 @@ def test_preference_keys_are_not_reported_as_unknown(key):
     # The validator warns on unrecognised keys; a key the feature needs must not
     # be one of them, or every DPO config prints a spurious warning.
     assert key in trainer_mod.TrainModel.KNOWN_KEYS, f"{key} would warn as unknown"
+
+
+# --------------------------------------------------------------------------- #
+# The dataset must survive long enough for the trainer to read it
+# --------------------------------------------------------------------------- #
+def test_a_preference_dataset_is_not_flattened_to_text():
+    """The defect that made the whole feature unreachable.
+
+    `process_dataset` ends with
+    `dataset.map(format_func, remove_columns=dataset.column_names)`, which
+    collapses every row to a single `text` column for SFT. Applied to a
+    preference dataset that destroys prompt/chosen/rejected *before* the trainer
+    reads them, so every DPO run died with "the dataset has ['text']" — the
+    method could never have worked on a real corpus.
+    """
+    import inspect
+
+    src = inspect.getsource(trainer_mod.TrainModel.process_dataset)
+    flatten = src.index("remove_columns=dataset.column_names")
+    guard = src.index('self.config.get("method", "sft") != "sft"')
+    assert guard < flatten, (
+        "process_dataset flattens the dataset before checking the method; "
+        "a preference dataset loses its columns")
+    # And the guard must return, not merely warn.
+    between = src[guard:flatten]
+    assert "return dataset" in between, "the method guard does not short-circuit"
+
+
+def test_sft_still_gets_its_text_column():
+    # The guard must not change the SFT path, which needs the flattening.
+    import inspect
+
+    src = inspect.getsource(trainer_mod.TrainModel.process_dataset)
+    assert "remove_columns=dataset.column_names" in src
+    assert "formatting_prompts_func" in src

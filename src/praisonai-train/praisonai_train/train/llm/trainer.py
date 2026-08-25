@@ -616,6 +616,20 @@ class TrainModel:
                 print("NOTE: num_samples takes the FIRST N rows before shuffle; "
                       "add shuffle: true to sample randomly.")
         print("DEBUG: Dataset columns:", dataset.column_names)
+
+        # SFT flattens every row to a single `text` column. A preference dataset
+        # must keep prompt/chosen/rejected (or prompt/completion/label) — the
+        # trainer reads those columns by name, and flattening them destroyed the
+        # dataset before the method ever saw it.
+        if self.config.get("method", "sft") != "sft":
+            method = self.config["method"]
+            if self._flag(dataset_info.get("shuffle"), default=False):
+                dataset = dataset.shuffle(
+                    seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
+            print(f"DEBUG: method={method}; keeping preference columns "
+                  f"{dataset.column_names} as-is.")
+            return dataset
+
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
             dataset = standardize_sharegpt(dataset)
