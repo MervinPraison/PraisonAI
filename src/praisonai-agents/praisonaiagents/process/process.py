@@ -1022,7 +1022,13 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
                     self.tasks[dep.id].status == "failed"
                     for dep in task.context if hasattr(dep, 'id') and dep.id in self.tasks
                 )
-                if deps_failed:
+                # Honor per-task graceful-degradation flags: a task that opted
+                # into skip_on_failure/on_error="continue" still runs even when
+                # an upstream dependency failed.
+                if deps_failed and not (
+                    getattr(task, 'skip_on_failure', False)
+                    or getattr(task, 'on_error', 'stop') == 'continue'
+                ):
                     task.status = "failed"
                     continue
             if task.status != "completed":
@@ -1627,7 +1633,13 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
                     self.tasks[dep.id].status == "failed"
                     for dep in task.context if hasattr(dep, 'id') and dep.id in self.tasks
                 )
-                if deps_failed:
+                # Honor per-task graceful-degradation flags: a task that opted
+                # into skip_on_failure/on_error="continue" still runs even when
+                # an upstream dependency failed.
+                if deps_failed and not (
+                    getattr(task, 'skip_on_failure', False)
+                    or getattr(task, 'on_error', 'stop') == 'continue'
+                ):
                     task.status = "failed"
                     continue
             if task.status != "completed":
