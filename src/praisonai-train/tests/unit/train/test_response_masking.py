@@ -154,23 +154,18 @@ def test_the_trainer_uses_the_shared_decision():
 # --------------------------------------------------------------------------- #
 # `auto` normalization feeding the router
 # --------------------------------------------------------------------------- #
-def _auto_use_mask(supports_mask, markers):
-    """The `auto` normalization exactly as train_model computes it.
-
-    decide_masking was tested in isolation, but the bug lived one line up: in
-    `auto`, use_mask was keyed off `supports_mask` alone, so a template with no
-    {% generation %} but valid turn markers still resolved to False -- and the
-    router never saw the markers. This mirrors that normalization so the two
-    pieces are tested together, which is where the defect actually was.
-    """
-    return supports_mask or bool(markers)
+# No local copy of the logic. The previous version of this file defined
+# _auto_use_mask() as a mirror of train_model's expression -- so reverting the
+# real line to the pre-fix behaviour left every test green. A test that
+# reimplements what it tests can only ever confirm itself.
+_flag = lambda v, default=False: default if v is None else bool(v)
 
 
 def test_auto_reaches_the_marker_fallback_when_trl_mask_is_unsupported():
     # Every unsloth template: no {% generation %} (supports_mask False) but valid
     # turn markers. `auto` must still mask -- via the marker route.
     markers = trainer_mod.RESPONSE_MARKERS["llama-3"]
-    use_mask = _auto_use_mask(supports_mask=False, markers=markers)
+    use_mask = trainer_mod.resolve_mask_setting("auto", False, markers, _flag)
     assert use_mask is True, "auto must enable masking when markers exist"
     assert trainer_mod.decide_masking(use_mask, False, markers) == \
         "train_on_responses_only"
@@ -178,7 +173,7 @@ def test_auto_reaches_the_marker_fallback_when_trl_mask_is_unsupported():
 
 def test_auto_prefers_trl_mask_when_the_template_supports_it():
     markers = trainer_mod.RESPONSE_MARKERS["llama-3"]
-    use_mask = _auto_use_mask(supports_mask=True, markers=markers)
+    use_mask = trainer_mod.resolve_mask_setting("auto", True, markers, _flag)
     assert trainer_mod.decide_masking(use_mask, True, markers) == \
         "assistant_only_loss"
 
@@ -186,6 +181,6 @@ def test_auto_prefers_trl_mask_when_the_template_supports_it():
 def test_auto_stays_unmasked_for_an_unknown_template_without_crashing():
     # No TRL support and no known markers: auto degrades to full-sequence loss
     # rather than raising. (The raise is reserved for an EXPLICIT request.)
-    use_mask = _auto_use_mask(supports_mask=False, markers=None)
+    use_mask = trainer_mod.resolve_mask_setting("auto", False, None, _flag)
     assert use_mask is False
     assert trainer_mod.decide_masking(use_mask, False, None) is False

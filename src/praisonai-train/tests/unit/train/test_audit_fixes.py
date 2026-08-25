@@ -77,9 +77,17 @@ def test_the_remote_launch_puts_the_config_behind_its_flag():
     before the GPU was touched -- or, with no dataset, config.yaml rewritten to
     name itself as the corpus.
     """
-    src = inspect.getsource(rr.RemoteRunner._launch_script)
-    assert "--config config.yaml" in src, "the config is not passed as an option"
-    assert "llm config.yaml" not in src, "the config is still a positional"
+    runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
+    runner.host = rr.RemoteHost(alias="h", python="python3", workdir="~/w")
+    run = rr.RemoteRun(host="h", run_id="run-1",
+                       remote_dir="/w/run-1", log_path="/w/run-1/train.log")
+
+    script = runner._launch_script(run, " ds.jsonl", None)
+
+    assert "--config config.yaml" in script, "the config is not passed as an option"
+    assert "llm config.yaml" not in script, "the config is still a positional"
+    # And the dataset stays where `llm` expects it: positional, before the flag.
+    assert script.index("ds.jsonl") < script.index("--config")
 
 
 # --------------------------------------------------------------------------- #

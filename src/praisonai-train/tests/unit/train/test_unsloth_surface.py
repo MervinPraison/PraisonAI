@@ -108,16 +108,8 @@ def test_nothing_is_passed_when_nothing_is_configured():
 
 
 def test_peft_selectors_reach_the_adapter():
-    """Checked by running the passthrough loop, not by reading it.
-
-    The list of forwarded options is data, so the test can exercise it the same
-    way prepare_model does rather than grepping the method.
-    """
-    import inspect
-
-    src = inspect.getsource(trainer_mod.TrainModel.prepare_model)
-    start = src.index("for opt in (")
-    names = set(re.findall(r'"(\w+)"', src[start:src.index(")", start)]))
+    """Reads the forwarding list, which is data, rather than the method."""
+    names = set(trainer_mod.PEFT_PASSTHROUGH)
     for opt in ("finetune_last_n_layers", "layers_to_transform", "layers_pattern",
                 "target_parameters", "init_lora_weights"):
         assert opt in names, f"{opt} is never forwarded to get_peft_model"
