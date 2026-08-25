@@ -32,6 +32,14 @@ TRAINING_METHODS = {
         "columns": (), "needs_ref_model": False,
         "summary": "supervised fine-tuning on completions",
     },
+    "cpt": {
+        # Continued pretraining. Same trainer as SFT, but the embedding layers
+        # need their own, much lower learning rate -- which lives on
+        # UnslothTrainer, not SFTTrainer (unsloth/trainer.py:445-524).
+        "trainer": "UnslothTrainer", "config": "UnslothTrainingArguments",
+        "columns": ("text",), "needs_ref_model": False,
+        "summary": "continued pretraining on a raw-text corpus",
+    },
     "dpo": {
         "trainer": "DPOTrainer", "config": "DPOConfig",
         "columns": ("prompt", "chosen", "rejected"), "needs_ref_model": True,
@@ -199,6 +207,10 @@ def _lazy_import_training_deps():
         from unsloth import FastLanguageModel, is_bfloat16_supported
         from unsloth.chat_templates import standardize_sharegpt, get_chat_template
         from trl import SFTTrainer, SFTConfig
+        try:
+            from unsloth import UnslothTrainer, UnslothTrainingArguments
+        except ImportError:      # older unsloth; cpt then reports what to upgrade
+            UnslothTrainer = UnslothTrainingArguments = None
         # Imported lazily and individually: a TRL old enough to lack one of these
         # should still be able to run the others rather than failing at import.
         _pref = {}
@@ -218,6 +230,8 @@ def _lazy_import_training_deps():
             'is_bfloat16_supported': is_bfloat16_supported,
             'SFTTrainer': SFTTrainer,
             'SFTConfig': SFTConfig,
+            'UnslothTrainer': UnslothTrainer,
+            'UnslothTrainingArguments': UnslothTrainingArguments,
             **_pref,
             'TrainingArguments': TrainingArguments,
             'load_dataset': load_dataset,
@@ -248,6 +262,20 @@ def formatting_prompts_func(examples, tokenizer):
     if _dbg:
         print("DEBUG: formatting_prompts_func() received batch with keys:", list(examples.keys()))
     texts = []
+    # A corpus that is already plain text needs no formatting at all.
+    #
+    # Without this branch a `text`-only dataset fell through to the Alpaca
+    # path, where examples.get("instruction", []) returns [], every row
+    # formatted to "", and the run died with "All examples formatted to empty
+    # text -- check dataset schema / chat_template". That message blames the
+    # dataset for a shape this function simply did not handle, and it made
+    # continued pretraining and domain adaptation impossible.
+    if "conversations" not in examples and "instruction" not in examples \
+            and "text" in examples:
+        if _dbg:
+            print("DEBUG: raw-text corpus; passing rows through unchanged.")
+        return {"text": [t if isinstance(t, str) else "" for t in examples["text"]]}
+
     # Check if the example has a "conversations" field.
     if "conversations" in examples:
         for convo in examples["conversations"]:
@@ -394,6 +422,7 @@ class TrainModel:
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
         "method", "beta", "max_prompt_length", "desirable_weight", "undesirable_weight",
+        "embedding_learning_rate",
         "hf_private", "save_method", "commit_message", "tags",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
         # quantization / precision
@@ -761,7 +790,7 @@ class TrainModel:
         # must keep prompt/chosen/rejected (or prompt/completion/label) — the
         # trainer reads those columns by name, and flattening them destroyed the
         # dataset before the method ever saw it.
-        if self.config.get("method", "sft") != "sft":
+        if self.config.get("method", "sft") not in ("sft", "cpt"):
             method = self.config["method"]
             if self._flag(dataset_info.get("shuffle"), default=False):
                 dataset = dataset.shuffle(
@@ -778,6 +807,7 @@ class TrainModel:
             dataset = standardize_sharegpt(dataset)
         else:
             print("DEBUG: Dataset does not have 'conversations'; assuming Alpaca format.")
+        columns_before = list(dataset.column_names)
         print("DEBUG: Applying formatting function to dataset...")
         format_func = partial(formatting_prompts_func, tokenizer=self.chat_tokenizer)
         dataset = dataset.map(format_func, batched=True, remove_columns=dataset.column_names)
@@ -790,7 +820,11 @@ class TrainModel:
                   f"formatted to empty text.")
         if len(dataset) == 0:
             raise ValueError(
-                "All examples formatted to empty text — check dataset schema / chat_template.")
+                "All examples formatted to empty text. The dataset columns are "
+                f"{columns_before}; this trainer understands ShareGPT "
+                "('conversations'), Alpaca ('instruction'/'input'/'output') and "
+                "raw text ('text'). Rename your columns to one of those shapes, "
+                "or set chat_template to match your data.")
         return dataset
 
     def load_datasets(self):
@@ -1076,7 +1110,20 @@ class TrainModel:
 
         spec = TRAINING_METHODS[method]
 
-        if method != "sft":
+        if method == "cpt":
+            # modules_to_save is what makes this continued pretraining rather
+            # than plain LoRA: the embeddings have to be trainable. Exposing it
+            # while giving it the adapters' learning rate is the known-bad
+            # recipe, so the embedding LR is set here and defaults to a tenth.
+            lr = float(sft_params.get("learning_rate", 2e-4))
+            sft_params["embedding_learning_rate"] = float(
+                self.config.get("embedding_learning_rate", lr / 10))
+            if not self.config.get("modules_to_save"):
+                print("NOTE: method: cpt without modules_to_save trains no "
+                      "embeddings. Set modules_to_save: [embed_tokens, lm_head] "
+                      "to adapt the vocabulary.")
+
+        if method not in ("sft", "cpt"):
             # SFT-only fields are not on a preference config and would be
             # rejected; the shared TrainingArguments fields are.
             for only_sft in ("dataset_text_field", "packing", "dataset_num_proc"):
