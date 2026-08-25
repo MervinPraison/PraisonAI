@@ -101,6 +101,42 @@ _MASK_LABELS = {
 }
 
 
+# Phrasings the four runtimes use for the same condition. `torch.cuda.OutOfMemoryError`
+# subclasses RuntimeError, so the CLI's catch-all swallowed it into a single ERROR
+# line carrying torch's raw allocator dump -- the most common fine-tuning failure,
+# and the one where a first-time user has no idea which number to change.
+_OOM_MARKERS = (
+    "out of memory",
+    "cuda out of memory",
+    "hip out of memory",
+    "outofmemoryerror",
+)
+
+# Ordered cheapest-first: sequence length is usually the biggest lever and the
+# least destructive to change. Same ordering unsloth validated in its studio
+# backend (studio/backend/core/training/worker.py:4834-4845).
+OOM_REMEDIATION = (
+    "The GPU ran out of memory. In order of what usually helps most:\n"
+    "  1. Lower max_seq_length (try 2048, or 4096 if you were higher)\n"
+    "  2. Set use_gradient_checkpointing: unsloth (if it is off)\n"
+    "  3. Lower per_device_train_batch_size, raising gradient_accumulation_steps\n"
+    "     by the same factor to keep the effective batch size\n"
+    "  4. Use a smaller model, or a 4-bit one (load_in_4bit: true)"
+)
+
+
+def is_out_of_memory(exc):
+    """True when this exception is a GPU OOM, whatever runtime raised it.
+
+    The class name is folded into the searched text rather than checked
+    separately: `torch.cuda.OutOfMemoryError` is matched by the
+    "outofmemoryerror" marker, so a separate `type(exc).__name__` branch was
+    code no test could distinguish from its absence.
+    """
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in text for marker in _OOM_MARKERS)
+
+
 def decide_masking(use_mask, supports_mask, markers):
     """Which masking route to take: False, or the name of the mechanism.
 
@@ -1557,7 +1593,12 @@ def main():
             trainer_obj = TrainModel(config_path=args.config)
             trainer_obj.run()
         except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
-            print(f"\nERROR: {exc}\n", file=sys.stderr)
+            # OutOfMemoryError is a RuntimeError, so without this the user got
+            # torch's allocator dump as one ERROR line and no idea what to change.
+            if is_out_of_memory(exc):
+                print(f"\nERROR: {exc}\n\n{OOM_REMEDIATION}\n", file=sys.stderr)
+            else:
+                print(f"\nERROR: {exc}\n", file=sys.stderr)
             sys.exit(1)
         except KeyboardInterrupt:
             print("\nInterrupted.", file=sys.stderr)
