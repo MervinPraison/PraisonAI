@@ -15,6 +15,21 @@ from .store import JobStore
 logger = logging.getLogger(__name__)
 
 
+class JobQueueFull(Exception):
+    """Raised when the executor is at its admission ceiling.
+
+    The router maps this to an HTTP 503 with a ``Retry-After`` header so
+    callers get honest backpressure instead of silent, unbounded memory
+    growth.
+    """
+
+    def __init__(self, retry_after: float = 1.0):
+        self.retry_after = retry_after
+        super().__init__(
+            f"Job queue is full; retry after {retry_after}s"
+        )
+
+
 class JobExecutor:
     """
     Executes jobs in the background using asyncio.
@@ -32,18 +47,27 @@ class JobExecutor:
         store: JobStore,
         max_concurrent: int = 10,
         default_timeout: int = 3600,
-        cleanup_interval: int = 300
+        cleanup_interval: int = 300,
+        max_queued: Optional[int] = None
     ):
         self.store = store
         self.max_concurrent = max_concurrent
         self.default_timeout = default_timeout
         self.cleanup_interval = cleanup_interval
+        # Admission ceiling: at most this many jobs may be admitted (queued +
+        # running) at once. ``max_concurrent`` still gates how many run their
+        # body concurrently; ``max_queued`` gates how many are accepted so a
+        # flood is rejected with backpressure instead of growing memory.
+        self.max_queued = max_queued if max_queued is not None else max_concurrent * 10
         
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
         self._shutdown = False
-        self._progress_callbacks: Dict[str, Callable] = {}
+        # Multiple viewers can subscribe to the same job's progress (e.g. two
+        # dashboard tabs streaming the same run), so keep a list of callbacks
+        # per job and fan-out to all of them.
+        self._progress_callbacks: Dict[str, list] = {}
     
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Lazily create semaphore to avoid event loop issues."""
@@ -100,17 +124,37 @@ class JobExecutor:
             
         Returns:
             The submitted job
+
+        Raises:
+            JobQueueFull: If the executor is already at its admission ceiling
+                (``max_queued``). The caller (router) maps this to a 503 so a
+                flood is rejected instead of growing memory unbounded.
         """
-        # Save job to store
-        await self.store.save(job)
-        
-        # Start execution task
+        # Fail fast if we're already over the admissions ceiling. This gates
+        # admission (queued + running), while the per-run semaphore in
+        # _execute_job continues to gate how many run concurrently.
+        #
+        # The check-and-reserve below runs synchronously (no ``await`` between
+        # the length check and the task insertion), so it is atomic under
+        # asyncio's cooperative scheduling: concurrent submits can't all pass
+        # the check and then over-admit past the ceiling. The task is created
+        # and registered first; the (awaiting) store.save happens only after the
+        # slot is reserved. If the persist fails we release the reserved slot.
+        if len(self._running_tasks) >= self.max_queued:
+            raise JobQueueFull(retry_after=1.0)
+
+        # Reserve the admission slot atomically by starting + registering the
+        # task before the first await. Because nothing is awaited between the
+        # ceiling check and this insertion, concurrent submits cannot both slip
+        # past the check and over-admit. Persisting the QUEUED state is the very
+        # first step of _execute_job (before the concurrency semaphore), so the
+        # store still reflects QUEUED even while the run waits for a slot.
         task = asyncio.create_task(self._execute_job(job))
         self._running_tasks[job.id] = task
-        
+
         # Clean up task reference when done
         task.add_done_callback(lambda t: self._running_tasks.pop(job.id, None))
-        
+
         logger.info(f"Job submitted: {job.id}")
         return job
     
@@ -144,15 +188,40 @@ class JobExecutor:
         return True
     
     def register_progress_callback(self, job_id: str, callback: Callable):
-        """Register a callback for job progress updates."""
-        self._progress_callbacks[job_id] = callback
+        """Register a callback for job progress updates.
+
+        Multiple callbacks may be registered for the same ``job_id`` (e.g. two
+        viewers streaming the same run); each is invoked on every update.
+        """
+        self._progress_callbacks.setdefault(job_id, []).append(callback)
     
-    def unregister_progress_callback(self, job_id: str):
-        """Unregister a progress callback."""
-        self._progress_callbacks.pop(job_id, None)
+    def unregister_progress_callback(self, job_id: str, callback: Optional[Callable] = None):
+        """Unregister a progress callback.
+
+        Removes the specific ``callback`` for ``job_id`` so co-registered
+        viewers keep receiving updates; the slot is only freed once its last
+        callback is removed. When ``callback`` is None, all callbacks for the
+        job are removed (backward-compatible shutdown path).
+        """
+        if callback is None:
+            self._progress_callbacks.pop(job_id, None)
+            return
+        bucket = self._progress_callbacks.get(job_id)
+        if not bucket:
+            return
+        try:
+            bucket.remove(callback)
+        except ValueError:
+            return
+        if not bucket:
+            self._progress_callbacks.pop(job_id, None)
     
     async def _execute_job(self, job: Job):
         """Execute a job."""
+        # Persist the QUEUED job before waiting on the concurrency semaphore so
+        # the store reflects it immediately (submit() reserved the admission slot
+        # synchronously and no longer saves, keeping the ceiling check atomic).
+        await self.store.save(job)
         async with self._get_semaphore():
             try:
                 # Mark as running
@@ -393,9 +462,13 @@ class JobExecutor:
         return result
     
     async def _notify_progress(self, job: Job):
-        """Notify progress callback if registered."""
-        callback = self._progress_callbacks.get(job.id)
-        if callback:
+        """Notify all registered progress callbacks for the job.
+
+        Fans out to every subscriber so concurrent viewers of the same run each
+        receive updates. Iterates over a snapshot so a callback that
+        (un)registers during dispatch can't mutate the list mid-iteration.
+        """
+        for callback in list(self._progress_callbacks.get(job.id, ())):
             try:
                 if asyncio.iscoroutinefunction(callback):
                     await callback(job)

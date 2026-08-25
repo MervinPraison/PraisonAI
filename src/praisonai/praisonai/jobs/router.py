@@ -22,7 +22,7 @@ from .models import (
     JobListResponse
 )
 from .store import JobStore
-from .executor import JobExecutor
+from .executor import JobExecutor, JobQueueFull
 from .path_validation import validate_agent_file_path
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,29 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
         effective_job = await store.save_if_absent(job)
         if effective_job.id == job.id:
             # We won the claim: hand off to the executor for actual execution.
-            await executor.submit(job)
+            # If the executor is saturated, surface honest backpressure (503 +
+            # Retry-After) instead of accepting an unbounded backlog.
+            try:
+                await executor.submit(job)
+            except JobQueueFull as exc:
+                # We persisted the job via save_if_absent but the executor
+                # rejected admission. Don't leave the record stranded as QUEUED
+                # forever (status/SSE would hang and /result would 409): delete
+                # it so the idempotency key is freed and the client can retry
+                # cleanly once capacity frees up. Best-effort — a failed delete
+                # must not mask the 503.
+                try:
+                    await store.delete(job.id)
+                except Exception:  # pragma: no cover - defensive cleanup
+                    logger.warning(
+                        "Failed to remove stranded queued job %s after JobQueueFull",
+                        job.id,
+                    )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Job queue is full; retry later.",
+                    headers={"Retry-After": str(int(exc.retry_after))},
+                ) from exc
         else:
             job = effective_job
         
@@ -322,7 +344,9 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
                             "data": f'{{"timestamp": "{datetime.now(timezone.utc).isoformat()}"}}'
                         }
             finally:
-                executor.unregister_progress_callback(job_id)
+                # Unregister only THIS viewer's callback so other concurrent
+                # viewers of the same job keep receiving updates.
+                executor.unregister_progress_callback(job_id, on_progress)
         
         return EventSourceResponse(event_generator())
     

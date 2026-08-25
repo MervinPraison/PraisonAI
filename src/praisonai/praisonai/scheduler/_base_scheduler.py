@@ -218,6 +218,80 @@ def build_from_recipe(
     return scheduler
 
 
+def build_from_blueprint(
+    scheduler_cls: Type,
+    agent_cls: Type,
+    blueprint_name: str,
+    *,
+    slots: Optional[Dict[str, Any]] = None,
+    deliver: str = "",
+    agent_id: str = "",
+    interval_override: Optional[str] = None,
+    max_retries_override: Optional[int] = None,
+    timeout_override: Optional[int] = None,
+    max_cost_override: Optional[float] = None,
+    on_success: Optional[Callable] = None,
+    on_failure: Optional[Callable] = None,
+) -> "_BaseAgentScheduler":
+    """Construct a scheduler from a blueprint template.
+
+    Shared by both the sync ``AgentScheduler`` and async
+    ``AsyncAgentScheduler`` so blueprint resolution lives in one place.
+    ``scheduler_cls`` selects the scheduler type and ``agent_cls`` selects the
+    blueprint-agent wrapper (``BlueprintAgent`` vs ``AsyncBlueprintAgent``) —
+    the only pieces that differ between the two surfaces.
+    """
+    from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
+
+    catalogue = BlueprintCatalogue()
+    bp = catalogue.get_blueprint(blueprint_name)
+    if bp is None:
+        available = [b.name for b in catalogue.list_blueprints()]
+        raise ValueError(
+            f"Blueprint '{blueprint_name}' not found. "
+            f"Available: {available}"
+        )
+
+    resolved_slots = catalogue.resolve_slots(bp, slots or {})
+    prompt = catalogue.materialize_prompt(bp, resolved_slots)
+    schedule_expr = catalogue.materialize_schedule(bp, resolved_slots)
+
+    config: Dict[str, Any] = {
+        "blueprint": blueprint_name,
+        "resolved_slots": resolved_slots,
+        "deliver": deliver or bp.default_deliver,
+        "agent_id": agent_id or bp.default_agent,
+    }
+
+    agent = agent_cls(prompt, blueprint_name)
+
+    timeout = timeout_override or 300
+    max_cost = max_cost_override if max_cost_override is not None else 1.00
+
+    scheduler = scheduler_cls(
+        agent=agent,
+        task=prompt,
+        config=config,
+        timeout=timeout,
+        max_cost=max_cost,
+        on_success=on_success,
+        on_failure=on_failure,
+        deliver=config.get("deliver", ""),
+    )
+
+    scheduler._blueprint_name = blueprint_name
+    scheduler._blueprint_slots = resolved_slots
+    scheduler._yaml_schedule_config = {
+        'interval': interval_override or schedule_expr,
+        'max_retries': max_retries_override if max_retries_override is not None else 3,
+        'run_immediately': False,
+        'timeout': timeout,
+        'max_cost': max_cost,
+    }
+
+    return scheduler
+
+
 class _BaseAgentScheduler:
     """Shared, lock-agnostic scheduler logic — used by both sync and async variants."""
 
