@@ -185,6 +185,16 @@ def _accepted_config_fields(cfg_cls):
     return fields or None
 
 
+# LoRA options forwarded verbatim to get_peft_model. A module constant rather
+# than a literal in the loop, so a test can read the list instead of grepping
+# the method for each name -- the shape that let eight mutations survive.
+PEFT_PASSTHROUGH = (
+    "modules_to_save", "rank_pattern", "alpha_pattern", "use_dora",
+    "finetune_last_n_layers", "layers_to_transform", "layers_pattern",
+    "target_parameters", "init_lora_weights",
+)
+
+
 def model_access_kwargs(config, flag):
     """Everything that decides WHICH weights load, and how they are reached.
 
@@ -209,6 +219,22 @@ def model_access_kwargs(config, flag):
             if config.get(key) is not None:
                 kwargs[key] = config[key]
     return kwargs
+
+
+def resolve_mask_setting(mask_setting, supports_mask, markers, flag):
+    """Turn the configured value into "should we mask at all".
+
+    Extracted so a test can CALL it. Its test used to hold a copy of this
+    expression, which meant reverting the real line to the pre-fix
+    `supports_mask` alone changed nothing the suite could see -- the one defect
+    that whole PR existed to fix was undetectable by its own test file.
+
+    `auto` enables masking when EITHER route is usable; decide_masking then
+    picks which.
+    """
+    if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
+        return supports_mask or bool(markers)
+    return flag(mask_setting)
 
 
 def decide_masking(use_mask, supports_mask, markers):
@@ -847,9 +873,7 @@ class TrainModel:
             loftq_config=self.config.get("loftq_config", None),
         )
         # Optional advanced LoRA knobs (only passed when set).
-        for opt in ("modules_to_save", "rank_pattern", "alpha_pattern", "use_dora",
-                    "finetune_last_n_layers", "layers_to_transform",
-                    "layers_pattern", "target_parameters", "init_lora_weights"):
+        for opt in PEFT_PASSTHROUGH:
             if self.config.get(opt) is not None:
                 peft_kwargs[opt] = self.config[opt]
         self.model = FastLanguageModel.get_peft_model(self.model, **peft_kwargs)
@@ -1151,10 +1175,8 @@ class TrainModel:
             # path even when valid turn markers were available -- defeating the whole
             # fallback. Enable it when EITHER route is usable, and let decide_masking
             # pick which one.
-            if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
-                use_mask = supports_mask or bool(markers)
-            else:
-                use_mask = self._flag(mask_setting)
+            use_mask = resolve_mask_setting(
+                mask_setting, supports_mask, markers, self._flag)
             route = decide_masking(use_mask, supports_mask, markers)
             if route == "assistant_only_loss":
                 sft_params["assistant_only_loss"] = True
