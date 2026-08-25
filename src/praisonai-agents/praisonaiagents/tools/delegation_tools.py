@@ -52,7 +52,6 @@ class DelegationTools:
                     role=role,
                     goal=f"Complete delegated {agent_type} tasks accurately.",
                     llm=llm,
-                    verbose=False,
                 )
 
             spawn = create_subagent_tool(agent_factory=_agent_factory)["function"]

@@ -263,7 +263,7 @@ def create_memory_flush_agent(
 ) -> Any:
     """Create a restricted child agent sharing only the parent's memory store."""
     from ..agent.agent import Agent
-    from ..config.feature_configs import ExecutionConfig
+    from ..config.feature_configs import ExecutionConfig, OutputConfig
     from ..tools.memory import search_memory, store_memory
 
     llm = config.llm or getattr(parent_agent, "llm", None)
@@ -286,8 +286,7 @@ def create_memory_flush_agent(
             else getattr(parent_agent, "_memory_instance", None)
         ),
         execution=ExecutionConfig(context_compaction=False, max_steps=3),
-        verbose=False,
-        stream=False,
+        output=OutputConfig(verbose=False, stream=False),
     )
 
 
