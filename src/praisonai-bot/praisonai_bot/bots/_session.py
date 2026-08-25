@@ -2271,13 +2271,16 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
         try:
             store = get_default_session_store()
         except Exception as exc:
+            # Raw exception (which may embed a filesystem path) stays in the log
+            # only; the operator-facing reason is redacted so health() and
+            # ``gateway status`` never echo backend paths (#4339).
             logger.warning(
                 "Default session store unavailable; falling back to in-memory store: %s",
                 exc,
             )
             record_durability_degraded(
                 "session",
-                reason=f"session store unavailable (running in-memory): {exc}",
+                reason="session store unavailable (running in-memory)",
             )
             store = None
         else:

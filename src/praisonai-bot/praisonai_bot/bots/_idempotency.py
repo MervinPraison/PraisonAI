@@ -231,13 +231,23 @@ def build_idempotency_store(
     if backend == "sqlite":
         try:
             store_path = Path(path) if path else _default_path()
-            return SqliteIdempotencyStore(
+            store = SqliteIdempotencyStore(
                 store_path,
                 max_size=max_size,
                 ttl_seconds=ttl_seconds,
                 inflight_lease_seconds=inflight_lease_seconds,
             )
+            # The durable store came up (fresh start, or a recovery after a
+            # prior failure/hot-reload): clear any stale degraded fact so a
+            # recovered gateway stops reporting non-durable idempotency (#4339).
+            from ._session import clear_durability_degraded
+
+            clear_durability_degraded("idempotency")
+            return store
         except Exception as e:
+            # Keep the raw exception (which may embed a filesystem path) in the
+            # log only; the operator-facing reason stays redacted so health()
+            # and ``gateway status`` never echo backend paths (#4339).
             logger.warning(
                 "SqliteIdempotencyStore unavailable, falling back to in-memory "
                 "inbound dedup: %s",
@@ -247,7 +257,7 @@ def build_idempotency_store(
 
             record_durability_degraded(
                 "idempotency",
-                reason=f"durable idempotency store unavailable: {e}",
+                reason="durable idempotency store unavailable (running in-memory)",
             )
             return _memory()
     # "redis" (multi-replica) is not yet implemented in the wrapper; fall back

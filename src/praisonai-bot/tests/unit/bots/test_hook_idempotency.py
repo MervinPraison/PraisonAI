@@ -244,10 +244,43 @@ class TestDurabilityDegradation:
         # exercising the recorded-degradation fallback.
         bad_parent = tmp_path / "afile"
         bad_parent.write_text("x")
-        store = build_idempotency_store("sqlite", path=bad_parent / "idem.sqlite")
+        bad_path = bad_parent / "idem.sqlite"
+        store = build_idempotency_store("sqlite", path=bad_path)
         assert isinstance(store, InMemoryIdempotencyStore)
         owners = durability_degraded_owners()
-        assert any(o.owner_id == "durability:idempotency" for o in owners)
+        match = [o for o in owners if o.owner_id == "durability:idempotency"]
+        assert match
+        # #4339: the operator-facing reason must be redacted — the raw store
+        # path (and any backend detail) stays in logs, never in health/status.
+        assert str(bad_path) not in match[0].reason
+        clear_durability_degraded("idempotency")
+
+    def test_successful_build_clears_stale_degradation(self, tmp_path):
+        # #4339: a same-process rebuild (e.g. a config hot-reload) that restores
+        # the durable store must clear a prior degradation so health/status stop
+        # reporting non-durable operation after recovery.
+        from praisonai_bot.bots import (
+            SqliteIdempotencyStore,
+            build_idempotency_store,
+        )
+        from praisonai_bot.bots._session import (
+            clear_durability_degraded,
+            durability_degraded_owners,
+            record_durability_degraded,
+        )
+
+        clear_durability_degraded("idempotency")
+        record_durability_degraded("idempotency", reason="store unavailable")
+        assert any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
+        store = build_idempotency_store("sqlite", path=tmp_path / "idem.sqlite")
+        assert isinstance(store, SqliteIdempotencyStore)
+        assert not any(
+            o.owner_id == "durability:idempotency"
+            for o in durability_degraded_owners()
+        )
         clear_durability_degraded("idempotency")
 
     def test_record_and_clear_roundtrip(self):
