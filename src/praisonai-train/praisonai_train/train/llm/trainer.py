@@ -185,6 +185,32 @@ def _accepted_config_fields(cfg_cls):
     return fields or None
 
 
+def model_access_kwargs(config, flag):
+    """Everything that decides WHICH weights load, and how they are reached.
+
+    A function rather than two inline blocks so a test can call it. The first
+    version of its test reimplemented this assembly -- in the very change that
+    banned reimplementing tested logic -- and would have passed with the
+    forwarding deleted.
+
+    `token` is the unsloth keyword; the config name is `hf_token` so it cannot
+    collide with the trainer's own token handling.
+    """
+    kwargs = {}
+    for key in ("trust_remote_code", "revision"):
+        if config.get(key) is not None:
+            kwargs[key] = config[key]
+    if config.get("hf_token"):
+        kwargs["token"] = config["hf_token"]
+    # vLLM rollouts, which GRPO wants and never had.
+    if flag(config.get("fast_inference"), default=False):
+        kwargs["fast_inference"] = True
+        for key in ("gpu_memory_utilization", "max_lora_rank"):
+            if config.get(key) is not None:
+                kwargs[key] = config[key]
+    return kwargs
+
+
 def decide_masking(use_mask, supports_mask, markers):
     """Which masking route to take: False, or the name of the mechanism.
 
@@ -233,10 +259,31 @@ def resolve_response_markers(chat_template, model_name=""):
 # GGUF / Ollama quantization methods supported by Unsloth's exporter. Validated up
 # front so a typo (e.g. "q4km") fails fast with a clear message instead of after a
 # long training run when the export step finally rejects it.
-VALID_QUANTIZATION_METHODS = frozenset({
-    "q4_k_m", "q5_k_m", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1",
-    "q3_k_m", "q6_k", "f16", "bf16", "q2_k",
+# Every quant unsloth's exporter accepts, not a hand-picked twelve.
+#
+# The old list rejected half of unsloth's own: q3_k_l, q4_k_s, q5_k_s,
+# f32 and the aliases were all legal upstream and refused here before
+# unsloth was ever asked. The IQ family was unreachable entirely, which
+# is how a 30B model fits on a laptop.
+#
+# A literal, not an import: this validates a config long before the ML
+# stack loads, and importing unsloth here would pull torch into
+# `praisonai-train llm --dry-run`. A test asserts the two agree.
+ALLOWED_QUANTS = frozenset({
+    "bf16", "f16", "f32", "fast_quantized", "not_quantized", "q2_k",
+    "q2_k_l", "q3_k_l", "q3_k_m", "q3_k_s", "q3_k_xs", "q4_0",
+    "q4_1", "q4_k", "q4_k_m", "q4_k_s", "q5_0", "q5_1",
+    "q5_k", "q5_k_m", "q5_k_s", "q6_k", "q8_0", "quantized",
 })
+
+# Importance-matrix quants. unsloth resolves the matrix itself,
+# downloading it from unsloth/<base>-GGUF when none is supplied.
+IMATRIX_QUANTS = frozenset({
+    "iq1_m", "iq1_s", "iq2_m", "iq2_s", "iq2_xs", "iq2_xxs",
+    "iq3_m", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs",
+})
+
+VALID_QUANTIZATION_METHODS = ALLOWED_QUANTS | IMATRIX_QUANTS
 
 
 def _lazy_import_training_deps():
@@ -476,6 +523,19 @@ class TrainModel:
         "reward_funcs", "num_generations", "max_completion_length",
         "embedding_learning_rate",
         "hf_private", "save_method", "commit_message", "tags",
+        # Model access: a gated repo (Llama, Gemma) needs a token, a
+        # custom-code model needs trust_remote_code, and a multi-day run needs
+        # a pinned revision to be reproducible. All three were unreachable.
+        "hf_token", "trust_remote_code", "revision",
+        # vLLM rollouts. GRPO always ran the slow HF-generate path because
+        # fast_inference was never passed (unsloth/models/loader.py:429).
+        "fast_inference", "gpu_memory_utilization", "max_lora_rank",
+        # PEFT selectors. The target-module list was hardcoded to seven names,
+        # so last-N-layer tuning and MoE expert adapters were impossible.
+        "finetune_last_n_layers", "layers_to_transform", "layers_pattern",
+        "target_parameters", "init_lora_weights",
+        # Offline merged export; merged weights could only be PUSHED before.
+        "merged_save_dir", "imatrix_file",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
         # quantization / precision
         "dtype", "load_in_8bit", "full_finetuning",
@@ -728,6 +788,7 @@ class TrainModel:
         )
         if self.config.get("load_in_8bit") is not None:
             load_kwargs["load_in_8bit"] = self._flag(self.config["load_in_8bit"])
+        load_kwargs.update(model_access_kwargs(self.config, self._flag))
         if self.config.get("full_finetuning") is not None:
             load_kwargs["full_finetuning"] = self._flag(self.config["full_finetuning"])
         if load_kwargs.get("load_in_4bit") and load_kwargs.get("load_in_8bit"):
@@ -786,7 +847,9 @@ class TrainModel:
             loftq_config=self.config.get("loftq_config", None),
         )
         # Optional advanced LoRA knobs (only passed when set).
-        for opt in ("modules_to_save", "rank_pattern", "alpha_pattern", "use_dora"):
+        for opt in ("modules_to_save", "rank_pattern", "alpha_pattern", "use_dora",
+                    "finetune_last_n_layers", "layers_to_transform",
+                    "layers_pattern", "target_parameters", "init_lora_weights"):
             if self.config.get(opt) is not None:
                 peft_kwargs[opt] = self.config[opt]
         self.model = FastLanguageModel.get_peft_model(self.model, **peft_kwargs)
@@ -1357,6 +1420,7 @@ class TrainModel:
             load_kwargs["load_in_8bit"] = self._flag(self.config["load_in_8bit"])
             if load_kwargs["load_in_8bit"]:
                 load_kwargs["load_in_4bit"] = False
+        load_kwargs.update(model_access_kwargs(self.config, self._flag))
         if self.config.get("full_finetuning") is not None:
             load_kwargs["full_finetuning"] = self._flag(self.config["full_finetuning"])
         model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
@@ -1393,6 +1457,24 @@ class TrainModel:
         from praisonai_train._hub import hub_push_kwargs
         return hub_push_kwargs(self.config, flag=self._flag)
 
+    def save_merged_locally(self):
+        """Write merged weights to a directory instead of a Hub repo.
+
+        `save_pretrained_merged` (unsloth/save.py:2356) was never called, so the
+        only way to get merged weights was to push them -- which needs a Hub
+        account, a token, and a network. "Merge my adapter into a folder on this
+        disk" is the most common post-training request and was impossible.
+        """
+        target = self.config.get("merged_save_dir")
+        if not target:
+            return None
+        method = self.config.get("save_method", "merged_16bit")
+        print(f"DEBUG: writing {method} weights to {target}")
+        self.model.save_pretrained_merged(
+            target, self.hf_tokenizer, save_method=method)
+        print(f"Merged model written to {target}")
+        return target
+
     def save_model_merged(self):
         from huggingface_hub.utils import HfHubHTTPError
         repo = self.config["hf_model_name"]
@@ -1415,6 +1497,8 @@ class TrainModel:
                 repo,
                 self.hf_tokenizer,
                 quantization_method=self.config.get("quantization_method", "q4_k_m"),
+                **({"imatrix_file": self.config["imatrix_file"]}
+                   if self.config.get("imatrix_file") else {}),
                 **self.hub_push_kwargs()
             )
         except HfHubHTTPError as exc:
@@ -1702,6 +1786,7 @@ class TrainModel:
         # of crashing on a missing repo name or pushing to someone else's account.
         if self._flag(self.config.get("huggingface_save")) and self.config.get("hf_model_name"):
             self.save_model_merged()
+        self.save_merged_locally()
         if self._flag(self.config.get("huggingface_save_gguf")) and self.config.get("hf_model_name"):
             self.push_model_gguf()
         if self._flag(self.config.get("ollama_save")) and self.config.get("ollama_model"):
