@@ -16,6 +16,7 @@ import os
 import pathlib
 import secrets
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -55,10 +56,37 @@ PROTOCOL_VERSION = 2
 # Transcripts live outside the app bundle, in the user's own space, so an app
 # update can never take them with it. Append-only JSON per conversation: the
 # format a user can read, diff and back up without our help.
-DATA_DIR = pathlib.Path(
-    os.environ.get("PRAISONAI_DESKTOP_HOME")
-    or (pathlib.Path.home() / "Library/Application Support/PraisonAI")
-)
+APP_NAME = "PraisonAI"
+
+
+def default_data_dir(platform=None, home=None, env=None):
+    """Where the app keeps transcripts, settings and the lockfile.
+
+    Taken per platform rather than hardcoded to the macOS location. On Windows
+    a "Library/Application Support" folder is not merely unconventional -- it
+    is excluded from roaming profiles and from most backup tooling, so a user's
+    entire history would silently fail to follow them to a new machine.
+
+    The Rust shell derives the same path in engine_paths.rs; the two must agree
+    or the shell will look for an engine where the engine is not.
+    """
+    platform = sys.platform if platform is None else platform
+    env = os.environ if env is None else env
+    home = pathlib.Path.home() if home is None else home
+    override = env.get("PRAISONAI_DESKTOP_HOME")
+    if override:
+        return pathlib.Path(override)
+    if platform == "darwin":
+        return home / "Library/Application Support" / APP_NAME
+    if platform.startswith("win"):
+        roaming = env.get("APPDATA")
+        return (pathlib.Path(roaming) if roaming else home / "AppData/Roaming") / APP_NAME
+    # Linux and the BSDs: the XDG base directory spec.
+    xdg = env.get("XDG_DATA_HOME")
+    return (pathlib.Path(xdg) if xdg else home / ".local/share") / APP_NAME
+
+
+DATA_DIR = pathlib.Path(default_data_dir())
 CHATS_DIR = DATA_DIR / "chats"
 
 # The shell's src-tauri/src/lockfile.rs has always specified this file's format
@@ -91,13 +119,129 @@ def _start_time(pid: "int | None" = None) -> int:
     something else and never agreed, so a live engine always looked like a
     recycled pid and a second one was started beside it.
     """
-    import subprocess
+    pid = pid or os.getpid()
+    if sys.platform.startswith("win"):
+        return _windows_start_time(pid)
     try:
-        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid or os.getpid())],
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
                              capture_output=True, text=True, timeout=3).stdout
-    except Exception:
+    except Exception:  # noqa: BLE001
         return 0
     return _fnv1a64(out.strip()) if out.strip() else 0
+
+
+def _windows_start_time(pid: int) -> int:
+    """The process creation time, hashed the same way as the ps output.
+
+    Windows has no `ps`, so the POSIX path returns 0 for every process -- and
+    0 is the "I could not tell" value, which means every recycled pid compares
+    equal and an unrelated process gets adopted as the engine. GetProcessTimes
+    gives a real 100-nanosecond creation stamp.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return 0                       # no such process, or not ours to ask
+        try:
+            created = wintypes.FILETIME()
+            spare = wintypes.FILETIME()
+            ok = kernel32.GetProcessTimes(
+                handle, ctypes.byref(created), ctypes.byref(spare),
+                ctypes.byref(spare), ctypes.byref(spare))
+            if not ok:
+                return 0
+            stamp = (created.dwHighDateTime << 32) | created.dwLowDateTime
+            return _fnv1a64(f"{pid}:{stamp}")
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def register_exit_signals(handler, module=None):
+    """Register `handler` for every termination signal this platform has.
+
+    The names are looked up one at a time rather than gathered into a tuple.
+    Building `(SIGTERM, SIGINT, SIGHUP)` dereferences SIGHUP before any `try`
+    runs, and Windows has no SIGHUP -- so the AttributeError escaped, and it
+    escaped *after* the port had been announced and the lockfile written. The
+    shell would adopt an engine that was already dead, and every request would
+    look like a network fault rather than a crash.
+    """
+    module = signal if module is None else module
+    for name in ("SIGTERM", "SIGINT", "SIGHUP", "SIGBREAK"):
+        sig = getattr(module, name, None)
+        if sig is None:
+            continue                      # this platform does not have it
+        try:
+            module.signal(sig, handler)
+        except (ValueError, OSError):
+            pass                          # not the main thread, or not allowed
+
+
+def write_lock_text(path: pathlib.Path, body: str) -> pathlib.Path:
+    """Write the lockfile atomically, always as UTF-8.
+
+    The encoding is explicit because the Rust side reads this file as strict
+    UTF-8 and maps invalid bytes to "absent" -- and absent means spawn. A user
+    whose home directory is not ASCII would otherwise get a second engine
+    beside the live one on every launch, which is the exact orphan leak the
+    lockfile exists to prevent.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".lock.tmp")
+    tmp.write_text(body, encoding="utf-8")
+    _replace_with_retry(tmp, path)
+    return path
+
+
+def _replace_with_retry(tmp: pathlib.Path, target: pathlib.Path, attempts: int = 4) -> None:
+    """os.replace, tolerating a Windows reader holding the destination open.
+
+    The call is atomic on all three platforms, but Windows raises
+    PermissionError if any process has the target open -- a real risk for a
+    lockfile the shell polls, and for a settings file an antivirus scanner is
+    reading. Retrying briefly is the standard mitigation; the last attempt is
+    allowed to raise so a genuine failure is not swallowed.
+    """
+    for attempt in range(attempts):
+        try:
+            tmp.replace(target)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
+
+
+def read_text_file(path) -> str:
+    """Read a text file as UTF-8, replacing anything undecodable.
+
+    Without an explicit encoding this decodes in the locale encoding -- cp1252
+    on a default Windows box -- and because errors are replaced rather than
+    raised, the caller is handed plausible-looking mojibake and never finds
+    out. A model asked to reason over it will do so confidently.
+    """
+    return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+
+
+def allow_address_reuse(platform=None) -> bool:
+    """Whether the listening socket should set SO_REUSEADDR.
+
+    On POSIX it means "reuse an address still in TIME_WAIT" and is what we
+    want. On Windows the same flag means "another process may bind this exact
+    address while I am still listening" -- and this server is unauthenticated
+    loopback HTTP carrying API keys and transcripts, so a local process that
+    guessed the port could take over connections. Windows sockets are
+    exclusive by default, which is the behaviour we want there.
+    """
+    platform = sys.platform if platform is None else platform
+    return not platform.startswith("win")
 
 
 def write_lock(port: int) -> pathlib.Path:
@@ -117,11 +261,7 @@ def write_lock(port: int) -> pathlib.Path:
             f"interpreter={interpreter}\n"
             f"venv_root={venv_root}\n"
             f"config_hash={config_hash}\n")
-    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = LOCK_PATH.with_suffix(".lock.tmp")
-    tmp.write_text(body)
-    tmp.replace(LOCK_PATH)
-    return LOCK_PATH
+    return write_lock_text(LOCK_PATH, body)
 
 
 def clear_lock() -> None:
@@ -374,7 +514,7 @@ def _builtin_tools():
             return f"No such file: {f}"
         if f.stat().st_size > 200_000:
             return f"File too large ({f.stat().st_size} bytes); read a smaller file."
-        return f.read_text(errors="replace")
+        return read_text_file(f)
 
     def list_directory(path: str = ".") -> str:
         """List the entries in a directory.
@@ -505,35 +645,243 @@ DEFAULT_SETTINGS = {
 # Secrets go to the macOS keychain, never into settings.json. One reference app
 # keyrings its API keys and then writes its proxy password to the settings file
 # in plaintext -- the split is easy to get half-right, so it is centralised here.
-KEYCHAIN_SERVICE = "ai.praison.desktop"
+# Overridable so a test never writes into the developer's real keychain.
+# PRAISONAI_DESKTOP_HOME isolates the data directory but not the system
+# keyring, which is shared per user -- a test run against the default service
+# silently overwrites whatever key the person is actually using, and there is
+# no way to put it back. Asking for isolation must isolate everything.
+KEYCHAIN_SERVICE = os.environ.get("PRAISONAI_KEYCHAIN_SERVICE", "ai.praison.desktop")
 SECRET_KEYS = {"api_key"}
 
 
+def _quiet_subprocess_kwargs():
+    """Keep a console window from flashing on Windows.
+
+    A Tauri app is a GUI process with no console attached, so every bare Popen
+    of a helper pops a black box on screen. load_settings() reads a secret on
+    every turn, which would make this a flash per message.
+    """
+    if not sys.platform.startswith("win"):
+        return {}
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+
+
+class KeychainSecretStore:
+    """The macOS keychain, via the `security` binary."""
+
+    path = None
+
+    def set(self, name: str, value: str) -> bool:
+        try:
+            if value:
+                subprocess.run(["security", "add-generic-password", "-U",
+                                "-s", KEYCHAIN_SERVICE, "-a", name, "-w", value],
+                               check=True, capture_output=True, timeout=10,
+                               **_quiet_subprocess_kwargs())
+            else:
+                subprocess.run(["security", "delete-generic-password",
+                                "-s", KEYCHAIN_SERVICE, "-a", name],
+                               capture_output=True, timeout=10,
+                               **_quiet_subprocess_kwargs())
+            return True
+        except Exception:  # noqa: BLE001 - a keychain failure must not lose the turn
+            return False
+
+    def get(self, name: str) -> str:
+        try:
+            r = subprocess.run(["security", "find-generic-password",
+                                "-s", KEYCHAIN_SERVICE, "-a", name, "-w"],
+                               capture_output=True, timeout=10, text=True,
+                               **_quiet_subprocess_kwargs())
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+
+class SecretToolSecretStore:
+    """The freedesktop secret service, via libsecret's `secret-tool`."""
+
+    path = None
+
+    def set(self, name: str, value: str) -> bool:
+        try:
+            if value:
+                subprocess.run(["secret-tool", "store", "--label",
+                                f"{KEYCHAIN_SERVICE} {name}",
+                                "service", KEYCHAIN_SERVICE, "account", name],
+                               input=value.encode(), check=True,
+                               capture_output=True, timeout=10)
+            else:
+                subprocess.run(["secret-tool", "clear",
+                                "service", KEYCHAIN_SERVICE, "account", name],
+                               capture_output=True, timeout=10)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def get(self, name: str) -> str:
+        try:
+            r = subprocess.run(["secret-tool", "lookup",
+                                "service", KEYCHAIN_SERVICE, "account", name],
+                               capture_output=True, timeout=10, text=True)
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+
+class DpapiSecretStore:
+    """Windows DPAPI: encrypted to the logged-in user, no extra dependency."""
+
+    def __init__(self, data_dir):
+        self.path = pathlib.Path(data_dir) / "secrets.dat"
+
+    def _crypt(self, blob, protect):
+        import ctypes
+        from ctypes import wintypes
+
+        class Blob(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD),
+                        ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+        buffer = ctypes.create_string_buffer(blob, len(blob))
+        source = Blob(len(blob), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char)))
+        result = Blob()
+        crypt32 = ctypes.windll.crypt32
+        call = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
+        args = ([ctypes.byref(source), None, None, None, None, 0, ctypes.byref(result)]
+                if protect else
+                [ctypes.byref(source), None, None, None, None, 0, ctypes.byref(result)])
+        if not call(*args):
+            raise OSError("DPAPI call failed")
+        try:
+            return ctypes.string_at(result.pbData, result.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(result.pbData)
+
+    def _read(self):
+        try:
+            return json.loads(self._crypt(self.path.read_bytes(), False).decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def set(self, name: str, value: str) -> bool:
+        try:
+            store = self._read()
+            if value:
+                store[name] = value
+            else:
+                store.pop(name, None)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            blob = self._crypt(json.dumps(store).encode("utf-8"), True)
+            tmp = self.path.with_suffix(".dat.tmp")
+            tmp.write_bytes(blob)
+            _replace_with_retry(tmp, self.path)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def get(self, name: str) -> str:
+        return str(self._read().get(name, ""))
+
+
+class FileSecretStore:
+    """A 0600 file beside the settings, for when nothing better is available.
+
+    Not encryption -- it is file permissions, which is what an unlocked
+    keyring amounts to in practice anyway. The point is that a secret is never
+    written into settings.json, which users paste into issues.
+    """
+
+    def __init__(self, data_dir):
+        self.path = pathlib.Path(data_dir) / "secrets.json"
+
+    def _read(self) -> dict:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def set(self, name: str, value: str) -> bool:
+        try:
+            store = self._read()
+            if value:
+                store[name] = value
+            else:
+                store.pop(name, None)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".json.tmp")
+            # Created 0600 *before* anything is written to it, so the secret is
+            # never briefly world-readable between creation and chmod.
+            handle = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                json.dump(store, out)
+            _replace_with_retry(tmp, self.path)
+            try:
+                os.chmod(str(self.path), 0o600)
+            except OSError:
+                pass                      # Windows has no POSIX mode bits
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def get(self, name: str) -> str:
+        return str(self._read().get(name, ""))
+
+
+class FallbackSecretStore:
+    """Try the platform store; fall back rather than lose the secret.
+
+    Without this, a machine with no keyring daemon -- a headless Linux box, a
+    fresh container, a locked login keyring -- makes the app permanently
+    unauthenticated with no user-visible cause: the write reports failure and
+    the read reports the key as unset, forever.
+    """
+
+    def __init__(self, primary, secondary):
+        self.primary, self.secondary = primary, secondary
+
+    @property
+    def path(self):
+        return self.secondary.path
+
+    def set(self, name: str, value: str) -> bool:
+        if self.primary.set(name, value):
+            return True
+        return self.secondary.set(name, value)
+
+    def get(self, name: str) -> str:
+        return self.primary.get(name) or self.secondary.get(name)
+
+
+def secret_store_for(platform=None, data_dir=None):
+    """The best available secret store for this platform, with a fallback."""
+    platform = sys.platform if platform is None else platform
+    data_dir = DATA_DIR if data_dir is None else data_dir
+    fallback = FileSecretStore(data_dir)
+    if platform == "darwin":
+        return FallbackSecretStore(KeychainSecretStore(), fallback)
+    if platform.startswith("win"):
+        return FallbackSecretStore(DpapiSecretStore(data_dir), fallback)
+    return FallbackSecretStore(SecretToolSecretStore(), fallback)
+
+
+_SECRETS = None
+
+
+def _secrets():
+    global _SECRETS
+    if _SECRETS is None:
+        _SECRETS = secret_store_for()
+    return _SECRETS
+
+
 def keychain_set(name: str, value: str) -> bool:
-    import subprocess
-    try:
-        if value:
-            subprocess.run(["security", "add-generic-password", "-U",
-                            "-s", KEYCHAIN_SERVICE, "-a", name, "-w", value],
-                           check=True, capture_output=True, timeout=10)
-        else:
-            subprocess.run(["security", "delete-generic-password",
-                            "-s", KEYCHAIN_SERVICE, "-a", name],
-                           capture_output=True, timeout=10)
-        return True
-    except Exception:  # noqa: BLE001 - a keychain failure must not lose the turn
-        return False
+    return _secrets().set(name, value)
 
 
 def keychain_get(name: str) -> str:
-    import subprocess
-    try:
-        r = subprocess.run(["security", "find-generic-password",
-                            "-s", KEYCHAIN_SERVICE, "-a", name, "-w"],
-                           capture_output=True, timeout=10, text=True)
-        return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
-        return ""
+    return _secrets().get(name)
 
 
 def load_settings() -> dict:
@@ -1424,17 +1772,16 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     # Port 0: the kernel assigns a free one, so a collision is impossible.
+    # Set before construction: the socket is bound inside __init__, so a later
+    # assignment would come too late to affect it.
+    ThreadingHTTPServer.allow_reuse_address = allow_address_reuse()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = server.server_address[1]
     print(f"{PORT_MARKER}{port}", flush=True)
     print(f"praisonai runtime listening on 127.0.0.1:{port}", flush=True)
     write_lock(port)
     atexit.register(clear_lock)
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        try:
-            signal.signal(sig, lambda *_: sys.exit(0))
-        except (ValueError, OSError):
-            pass   # not the main thread, or the platform lacks it
+    register_exit_signals(lambda *_: sys.exit(0))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -13,6 +13,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::platform::Platform;
+
 /// One step, as the user sees it. The copy is deliberately about outcomes
 /// rather than commands: "Installing Python" means something to someone who
 /// does not know what a venv is.
@@ -45,13 +47,86 @@ pub fn locate_uv(candidates: &[PathBuf], exists: impl Fn(&Path) -> bool) -> Uv {
 }
 
 /// The standard places `uv` lands, in the order they should be tried.
-pub fn uv_candidates(home: &Path, data_dir: &Path) -> Vec<PathBuf> {
+pub fn uv_candidates(home: &Path, data_dir: &Path, platform: Platform) -> Vec<PathBuf> {
+    let exe = platform.uv_exe();
+    let bin = platform.venv_bin_rel();
+    let mut out = vec![
+        data_dir.join(bin).join(exe),     // ours, from a previous provision
+        home.join(".local/bin").join(exe), // the official installer's default
+    ];
+    match platform {
+        Platform::Windows => {
+            // Where uv's own installer and winget put it. The Homebrew paths
+            // below do not exist on Windows and only slow the search down.
+            out.push(home.join("AppData/Local/uv/bin").join(exe));
+            out.push(home.join("AppData/Roaming/uv/bin").join(exe));
+        }
+        Platform::Mac => {
+            out.push(PathBuf::from("/opt/homebrew/bin/uv"));
+            out.push(PathBuf::from("/usr/local/bin/uv"));
+        }
+        Platform::Linux => {
+            out.push(PathBuf::from("/usr/local/bin/uv"));
+            out.push(PathBuf::from("/usr/bin/uv"));
+        }
+    }
+    out
+}
+
+/// How to fetch `uv` when it is not already installed, per platform.
+///
+/// Astral publish two installers -- a shell script and a PowerShell script --
+/// and there is no `/bin/sh` on Windows to run the first one with. The command
+/// is returned as data rather than run here so the choice can be tested.
+///
+/// The PowerShell flags are deliberate. `-ExecutionPolicy RemoteSigned` rather
+/// than `Bypass`, and no `-WindowStyle Hidden`: that pair is a known malware
+/// detection signature and gets installers flagged. The console is suppressed
+/// with a creation flag instead, which is not a behavioural signal.
+pub fn uv_installer(platform: Platform, install_dir: &Path) -> UvInstaller {
+    match platform {
+        Platform::Windows => UvInstaller {
+            program: "powershell.exe".into(),
+            args: vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-ExecutionPolicy".into(),
+                "RemoteSigned".into(),
+                "-Command".into(),
+                "irm https://astral.sh/uv/install.ps1 | iex".into(),
+            ],
+            env: uv_installer_env(install_dir),
+            script_on_stdin: None,
+        },
+        _ => UvInstaller {
+            program: "sh".into(),
+            args: vec!["-s".into()],
+            env: uv_installer_env(install_dir),
+            // Downloaded separately and piped in, so the download failing is
+            // distinguishable from the install failing.
+            script_on_stdin: Some("https://astral.sh/uv/install.sh".into()),
+        },
+    }
+}
+
+fn uv_installer_env(install_dir: &Path) -> Vec<(String, String)> {
     vec![
-        data_dir.join("bin/uv"),          // ours, from a previous provision
-        home.join(".local/bin/uv"),       // the official installer's default
-        PathBuf::from("/opt/homebrew/bin/uv"),
-        PathBuf::from("/usr/local/bin/uv"),
+        ("UV_INSTALL_DIR".into(), install_dir.display().to_string()),
+        ("UV_UNMANAGED_INSTALL".into(), install_dir.display().to_string()),
+        // Otherwise the installer edits the user's shell profiles, which is
+        // not something an app should do to get its own dependency.
+        ("UV_NO_MODIFY_PATH".into(), "1".into()),
     ]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UvInstaller {
+    pub program: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    /// A URL to download and feed to the program on stdin, if it needs one.
+    pub script_on_stdin: Option<String>,
 }
 
 /// Python version to provision.
@@ -68,12 +143,12 @@ pub fn venv_dir(data_dir: &Path) -> PathBuf {
 }
 
 /// The interpreter that venv will contain, once built.
-pub fn venv_python(data_dir: &Path) -> PathBuf {
-    venv_dir(data_dir).join("bin/python3")
+pub fn venv_python(data_dir: &Path, platform: Platform) -> PathBuf {
+    venv_dir(data_dir).join(platform.venv_python_rel())
 }
 
 /// The whole plan, in order. `uv` is the resolved binary path.
-pub fn plan(uv: &Path, data_dir: &Path, packages: &[&str]) -> Vec<Step> {
+pub fn plan(uv: &Path, data_dir: &Path, packages: &[&str], platform: Platform) -> Vec<Step> {
     let venv = venv_dir(data_dir);
     let s = |id, label, args: Vec<String>| Step {
         id,
@@ -104,7 +179,7 @@ pub fn plan(uv: &Path, data_dir: &Path, packages: &[&str]) -> Vec<Step> {
         "pip".into(),
         "install".into(),
         "--python".into(),
-        venv_python(data_dir).display().to_string(),
+        venv_python(data_dir, platform).display().to_string(),
     ];
     install.extend(packages.iter().map(|p| p.to_string()));
     steps.push(s("deps", "Installing PraisonAI", install));
@@ -127,7 +202,7 @@ mod tests {
 
     #[test]
     fn an_installed_uv_is_preferred_over_downloading_one() {
-        let c = uv_candidates(Path::new("/Users/me"), Path::new("/data"));
+        let c = uv_candidates(Path::new("/Users/me"), Path::new("/data"), Platform::Mac);
         let got = locate_uv(&c, present(&["/opt/homebrew/bin/uv"]));
         assert_eq!(got, Uv::Found(PathBuf::from("/opt/homebrew/bin/uv")));
     }
@@ -136,15 +211,87 @@ mod tests {
     fn our_own_copy_wins_over_the_systems() {
         // A provision that already ran should not depend on a system uv that
         // might be upgraded or removed underneath it.
-        let c = uv_candidates(Path::new("/Users/me"), Path::new("/data"));
+        let c = uv_candidates(Path::new("/Users/me"), Path::new("/data"), Platform::Mac);
         let got = locate_uv(&c, present(&["/data/bin/uv", "/opt/homebrew/bin/uv"]));
         assert_eq!(got, Uv::Found(PathBuf::from("/data/bin/uv")));
     }
 
     #[test]
     fn no_uv_anywhere_means_fetch() {
-        let c = uv_candidates(Path::new("/Users/me"), Path::new("/data"));
+        let c = uv_candidates(Path::new("/Users/me"), Path::new("/data"), Platform::Mac);
         assert_eq!(locate_uv(&c, present(&[])), Uv::Fetch);
+    }
+
+    #[test]
+    fn a_windows_venv_interpreter_is_scripts_python_exe() {
+        // venv_python returned bin/python3 unconditionally, so after a
+        // *successful* uv venv the app reported the interpreter "is not there".
+        let p = venv_python(Path::new(r"C:\data"), Platform::Windows);
+        let shown = p.to_string_lossy().to_string();
+        assert!(shown.contains("Scripts"), "{shown}");
+        assert!(shown.ends_with("python.exe"), "{shown}");
+    }
+
+    #[test]
+    fn windows_looks_for_uv_where_windows_puts_it() {
+        let c = uv_candidates(Path::new(r"C:\Users\me"), Path::new(r"C:\data"), Platform::Windows);
+        let shown: Vec<String> = c.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        assert!(shown.iter().all(|p| p.ends_with("uv.exe")), "{shown:?}");
+        assert!(shown.iter().any(|p| p.contains("AppData")), "{shown:?}");
+        assert!(!shown.iter().any(|p| p.contains("homebrew")), "{shown:?}");
+    }
+
+    #[test]
+    fn linux_does_not_search_homebrew() {
+        let c = uv_candidates(Path::new("/home/me"), Path::new("/data"), Platform::Linux);
+        let shown: Vec<String> = c.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        assert!(!shown.iter().any(|p| p.contains("homebrew")), "{shown:?}");
+        assert!(shown.iter().any(|p| p.contains(".local/bin")), "{shown:?}");
+    }
+
+    #[test]
+    fn windows_installs_uv_with_powershell_not_a_shell_that_does_not_exist() {
+        let i = uv_installer(Platform::Windows, Path::new(r"C:\data\bin"));
+        assert!(i.program.contains("powershell"), "{}", i.program);
+        assert!(i.script_on_stdin.is_none(), "there is no /bin/sh to pipe into");
+    }
+
+    #[test]
+    fn the_windows_installer_avoids_the_flags_that_get_it_flagged_as_malware() {
+        // -WindowStyle Hidden together with -ExecutionPolicy Bypass is a known
+        // detection signature. The console is suppressed with a creation flag.
+        let i = uv_installer(Platform::Windows, Path::new(r"C:\data\bin"));
+        assert!(!i.args.iter().any(|a| a == "Bypass"), "{:?}", i.args);
+        assert!(!i.args.iter().any(|a| a.contains("Hidden")), "{:?}", i.args);
+        assert!(i.args.iter().any(|a| a == "RemoteSigned"), "{:?}", i.args);
+        assert!(i.args.iter().any(|a| a == "-NonInteractive"), "{:?}", i.args);
+    }
+
+    #[test]
+    fn the_posix_installer_pipes_the_shell_script_in() {
+        let i = uv_installer(Platform::Mac, Path::new("/data/bin"));
+        assert_eq!(i.program, "sh");
+        assert!(i.script_on_stdin.as_deref().unwrap().ends_with("install.sh"));
+    }
+
+    #[test]
+    fn no_installer_edits_the_users_shell_profiles() {
+        for platform in [Platform::Mac, Platform::Windows, Platform::Linux] {
+            let i = uv_installer(platform, Path::new("/data/bin"));
+            assert!(
+                i.env.iter().any(|(k, v)| k == "UV_NO_MODIFY_PATH" && v == "1"),
+                "{platform:?} would rewrite the user's rc files to install its own dependency"
+            );
+        }
+    }
+
+    #[test]
+    fn every_installer_targets_the_directory_we_control() {
+        for platform in [Platform::Mac, Platform::Windows, Platform::Linux] {
+            let i = uv_installer(platform, Path::new("/data/bin"));
+            assert!(i.env.iter().any(|(k, v)| k == "UV_INSTALL_DIR" && v.contains("/data/bin")),
+                    "{platform:?}");
+        }
     }
 
     #[test]
@@ -158,7 +305,7 @@ mod tests {
 
     #[test]
     fn the_plan_is_python_then_venv_then_dependencies() {
-        let steps = plan(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES);
+        let steps = plan(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES, Platform::Mac);
         assert_eq!(
             steps.iter().map(|s| s.id).collect::<Vec<_>>(),
             ["python", "venv", "deps"]
@@ -169,7 +316,7 @@ mod tests {
     fn dependencies_are_installed_in_one_resolution() {
         // Separate invocations can each succeed and still leave a closure that
         // does not resolve together.
-        let steps = plan(Path::new("/uv"), Path::new("/data"), &["a", "b", "c"]);
+        let steps = plan(Path::new("/uv"), Path::new("/data"), &["a", "b", "c"], Platform::Mac);
         let deps: Vec<_> = steps.iter().filter(|s| s.id == "deps").collect();
         assert_eq!(deps.len(), 1);
         for p in ["a", "b", "c"] {
@@ -181,15 +328,15 @@ mod tests {
     fn the_install_targets_the_venv_we_just_made() {
         // Without --python, uv installs into whatever it considers current,
         // and the engine starts against an environment with no dependencies.
-        let steps = plan(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES);
+        let steps = plan(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES, Platform::Mac);
         let deps = steps.iter().find(|s| s.id == "deps").unwrap();
         let i = deps.args.iter().position(|a| a == "--python").unwrap();
-        assert_eq!(deps.args[i + 1], venv_python(Path::new("/data")).display().to_string());
+        assert_eq!(deps.args[i + 1], venv_python(Path::new("/data"), Platform::Mac).display().to_string());
     }
 
     #[test]
     fn every_step_has_copy_a_person_can_read() {
-        for s in plan(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES) {
+        for s in plan(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES, Platform::Mac) {
             assert!(!s.label.is_empty());
             assert!(s.label.chars().next().unwrap().is_uppercase(), "{}", s.label);
             assert!(!s.label.contains("venv"), "jargon in user copy: {}", s.label);

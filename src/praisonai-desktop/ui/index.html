@@ -74,7 +74,12 @@ body{margin:0;background:var(--ground);color:var(--ink);font:.906rem/1.6 ui-sans
 .chat.corrupt .t{color:var(--bad);font-style:italic}
 #main{flex:1;display:flex;flex-direction:column;min-width:0}
 .titlebar{height:2.75rem;-webkit-app-region:drag;flex:none;display:flex;align-items:center;
-          gap:.6rem;padding:0 .9rem 0 5.2rem;border-bottom:1px solid var(--rule)}
+          gap:.6rem;padding:0 .9rem;border-bottom:1px solid var(--rule)}
+/* Room for the traffic lights, which only macOS puts inside the window and
+   only on the left. Reserving it everywhere left dead space on Windows and
+   Linux -- and there the native controls are top-right, over .tb-right. */
+:root[data-os="mac"] .titlebar{padding-left:5.2rem}
+:root[data-os="win"] .tb-right,:root[data-os="linux"] .tb-right{margin-right:.2rem}
 .modelpill{-webkit-app-region:no-drag;display:flex;align-items:center;gap:.35rem;
   background:none;border:0;color:var(--ink);font:inherit;font-size:.85rem;font-weight:600;
   padding:.25rem .5rem;border-radius:7px;cursor:pointer}
@@ -415,14 +420,14 @@ body.training #thread,body.training #f{display:none}
               aria-controls="train"><span class="ic" aria-hidden="true">◩</span>Train</button>
     </div>
     <div class="sidetop">
-      <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k">⌘N</span></button>
-      <button class="navbtn" id="search" type="button"><span class="ic" aria-hidden="true">⌕</span>Search<span class="k">⌘K</span></button>
+      <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k" data-chord="N"></span></button>
+      <button class="navbtn" id="search" type="button"><span class="ic" aria-hidden="true">⌕</span>Search<span class="k" data-chord="K"></span></button>
     </div>
     <div class="sectlbl">Recents</div>
     <div id="chats" role="group" aria-label="Recent conversations"></div>
     <div class="sidefoot">
       <button class="navbtn" id="logsBtn" type="button"><span class="ic" aria-hidden="true">▤</span>Engine log</button>
-      <button class="navbtn" id="settings" type="button"><span class="ic" aria-hidden="true">⚙</span>Settings<span class="k">⌘,</span></button>
+      <button class="navbtn" id="settings" type="button"><span class="ic" aria-hidden="true">⚙</span>Settings<span class="k" data-chord=","></span></button>
     </div>
   </aside>
   <main id="main">
@@ -814,6 +819,50 @@ let regenerateOf=null;
 let CFG={...DEFAULTS};
 /** The text size the stylesheet was authored against; --ui-scale is relative
  *  to this, so 15 leaves the interface exactly as designed. */
+/**
+ * Which desktop we are running on.
+ *
+ * Read from the user agent because the webview is a different engine on each
+ * platform and Tauri's os plugin is not loaded here. Set on <html> before the
+ * first paint so CSS can key off it without a reflow.
+ */
+const OS=(()=>{
+  // Three signals, most specific first. userAgentData is what WebView2
+  // reports on Windows; navigator.platform is what WKWebView and WebKitGTK
+  // still give ("MacIntel", "Linux x86_64"); the user agent string is the
+  // last resort because it is the easiest of the three to be wrong about --
+  // a webview whose UA said only "(darwin)" matched none of the names and
+  // fell through to Linux on a Mac.
+  const hints=[navigator.userAgentData&&navigator.userAgentData.platform,
+               navigator.platform, navigator.userAgent].filter(Boolean).join(' ');
+  if(/Mac|darwin|iPhone|iPad/i.test(hints)) return 'mac';
+  if(/Win/i.test(hints)) return 'win';
+  return 'linux';
+})();
+document.documentElement.dataset.os=OS;
+
+/** The modifier key this keyboard actually has. */
+const MOD=OS==='mac'?'\u2318':'Ctrl';
+/** How a shortcut is written in a hint, e.g. ⌘N or Ctrl+N. */
+const chord=key=>OS==='mac'?`${MOD}${key}`:`${MOD}+${key}`;
+
+/** Where the engine keeps transcripts and settings, per platform.
+ *
+ * Must match `default_data_dir` in engine/server.py. Offering to copy a path
+ * that does not exist on the machine reading it is worse than not offering. */
+function dataFolderPath(){
+  if(OS==='mac') return '~/Library/Application Support/PraisonAI';
+  if(OS==='win') return '%APPDATA%\\PraisonAI';
+  return '~/.local/share/PraisonAI';
+}
+window.dataFolderPath=dataFolderPath;
+
+// Fill every shortcut hint from one place, so a new one cannot be added with
+// a hardcoded modifier that is wrong on two of the three platforms.
+document.querySelectorAll('[data-chord]').forEach(el=>{
+  el.textContent=chord(el.dataset.chord);
+});
+
 const BASE_TEXT_PX=15;
 /**
  * In-app confirmation, because `window.confirm` does not work here.
@@ -1323,7 +1372,7 @@ function firstRun(st){
     +'<p class="why"></p>';
   w.querySelector('.lede').textContent=
     'PraisonAI needs a Python environment to run its engine. This downloads it '
-    +'into your Library folder \u2014 nothing is installed system-wide, and it '
+    +`into ${OS==='mac'?'your Library folder':OS==='win'?'your app data folder':'your home directory'} \u2014 nothing is installed system-wide, and it `
     +'only happens once.';
   w.querySelector('.why').textContent=st.detail||'';
   const list=w.querySelector('.steps');
@@ -1760,8 +1809,8 @@ async function runAction(def){
     for(const c of chats) await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id,{method:'DELETE'});
     chatId=rid(); turns.innerHTML=''; syncEmpty(); refreshChats(); closeOverlay();
   } else if(def.action==='reveal'){
-    await navigator.clipboard.writeText('~/Library/Application Support/PraisonAI');
-    toast('Path copied: ~/Library/Application Support/PraisonAI');
+    await navigator.clipboard.writeText(dataFolderPath());
+    toast(`Path copied: ${dataFolderPath()}`);
   } else if(def.action==='update'){
     const u=await (await fetch('http://127.0.0.1:'+PORT+'/update')).json();
     toast(u.message || ('PraisonAI Desktop '+u.current));

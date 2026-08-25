@@ -11,6 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::platform::Platform;
+
 pub trait Fs {
     fn is_file(&self, p: &Path) -> bool;
     fn is_dir(&self, p: &Path) -> bool;
@@ -86,17 +88,23 @@ pub fn python_candidates(
     env_override: Option<&Path>,
     user_data: Option<&Path>,
     checkout_root: Option<&Path>,
+    platform: Platform,
 ) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(p) = env_override {
         out.push(p.to_path_buf());
     }
+    // A Windows venv keeps its interpreter in `Scripts\python.exe`. Looking
+    // only for `bin/python3` meant every candidate failed `is_file()` and the
+    // app reported "no usable Python found" on every launch, including
+    // immediately after provisioning one successfully.
+    let rel = platform.venv_python_rel();
     if let Some(d) = user_data {
-        out.push(d.join("venv/bin/python3"));
+        out.push(d.join("venv").join(rel));
     }
     if let Some(root) = checkout_root {
-        for rel in ["src/praisonai-agents/.venv", "src/praisonai-agents/venv", "venv"] {
-            out.push(root.join(rel).join("bin/python3"));
+        for venv in ["src/praisonai-agents/.venv", "src/praisonai-agents/venv", "venv"] {
+            out.push(root.join(venv).join(rel));
         }
     }
     out
@@ -110,11 +118,31 @@ pub fn python_candidates(
 /// `app_data_dir()` meant the shell looked for the lockfile somewhere the
 /// engine never wrote one, so every launch decided `Spawn(NoLock)` and an
 /// orphaned engine was never reclaimed.
-pub fn data_dir(env_override: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+pub fn data_dir(
+    env_override: Option<&Path>,
+    home: Option<&Path>,
+    platform: Platform,
+    app_data: Option<&Path>,
+) -> Option<PathBuf> {
     if let Some(p) = env_override {
         return Some(p.to_path_buf());
     }
-    home.map(|h| h.join("Library/Application Support/PraisonAI"))
+    // Must match `default_data_dir` in engine/server.py exactly. If the two
+    // disagree the shell looks for a lockfile the engine never wrote there,
+    // decides `Spawn(NoLock)` every launch, and orphans accumulate.
+    match platform {
+        Platform::Mac => home.map(|h| h.join("Library/Application Support/PraisonAI")),
+        // %APPDATA% on Windows, $XDG_DATA_HOME on Linux -- passed in as
+        // `app_data` so the lookup stays testable.
+        Platform::Windows => app_data
+            .map(Path::to_path_buf)
+            .or_else(|| home.map(|h| h.join("AppData/Roaming")))
+            .map(|base| base.join("PraisonAI")),
+        Platform::Linux => app_data
+            .map(Path::to_path_buf)
+            .or_else(|| home.map(|h| h.join(".local/share")))
+            .map(|base| base.join("PraisonAI")),
+    }
 }
 
 /// The `.app` the executable is running from, if any.
@@ -225,6 +253,7 @@ mod tests {
             None,
             Some(Path::new("/Users/me/Library/Application Support/PraisonAI")),
             Some(Path::new("/repo")),
+            Platform::Mac,
         );
         assert!(c[0].starts_with("/Users/me/Library"), "{c:?}");
         assert!(c.iter().any(|p| p.starts_with("/repo")));
@@ -232,25 +261,94 @@ mod tests {
 
     #[test]
     fn python_override_is_first() {
-        let c = python_candidates(Some(Path::new("/usr/bin/python3")), Some(Path::new("/d")), None);
+        let c = python_candidates(
+            Some(Path::new("/usr/bin/python3")),
+            Some(Path::new("/d")),
+            None,
+            Platform::Mac,
+        );
         assert_eq!(c[0], PathBuf::from("/usr/bin/python3"));
+    }
+
+    #[test]
+    fn a_windows_venv_is_looked_for_in_scripts_not_bin() {
+        // Every candidate ended in bin/python3, so `is_file()` failed on all of
+        // them and the app said "no usable Python found" even straight after
+        // provisioning one successfully.
+        let c = python_candidates(None, Some(Path::new(r"C:\d")), None, Platform::Windows);
+        assert!(
+            c.iter().all(|p| p.to_string_lossy().contains("Scripts")),
+            "{c:?}"
+        );
+        assert!(
+            !c.iter().any(|p| p.to_string_lossy().contains("bin/python3")),
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn linux_venvs_use_the_posix_layout() {
+        let c = python_candidates(None, Some(Path::new("/home/me/.local/share/PraisonAI")), None,
+                                  Platform::Linux);
+        assert!(c[0].ends_with("venv/bin/python3"), "{c:?}");
     }
 
     #[test]
     fn the_data_dir_matches_what_the_engine_writes() {
         // engine/server.py: home / "Library/Application Support/PraisonAI"
         assert_eq!(
-            data_dir(None, Some(Path::new("/Users/me"))),
+            data_dir(None, Some(Path::new("/Users/me")), Platform::Mac, None),
             Some(PathBuf::from("/Users/me/Library/Application Support/PraisonAI"))
         );
     }
 
     #[test]
-    fn the_data_dir_honours_the_same_override_the_engine_does() {
-        assert_eq!(
-            data_dir(Some(Path::new("/tmp/alt")), Some(Path::new("/Users/me"))),
-            Some(PathBuf::from("/tmp/alt"))
+    fn windows_keeps_its_data_in_appdata_not_a_library_folder() {
+        let got = data_dir(
+            None,
+            Some(Path::new(r"C:\Users\me")),
+            Platform::Windows,
+            Some(Path::new(r"C:\Users\me\AppData\Roaming")),
         );
+        let shown = got.as_ref().unwrap().to_string_lossy().to_string();
+        assert!(shown.contains("AppData"), "{shown}");
+        assert!(!shown.contains("Library"), "{shown}");
+    }
+
+    #[test]
+    fn windows_without_appdata_still_lands_under_the_home_directory() {
+        let got = data_dir(None, Some(Path::new(r"C:\Users\me")), Platform::Windows, None);
+        let shown = got.as_ref().unwrap().to_string_lossy().to_string();
+        assert!(shown.contains("AppData"), "{shown}");
+        assert!(!shown.contains("Library"), "{shown}");
+    }
+
+    #[test]
+    fn linux_follows_the_xdg_data_directory() {
+        // A value that is NOT the fallback, so this proves the variable is
+        // read rather than merely matching the default by coincidence.
+        let got = data_dir(None, Some(Path::new("/home/me")), Platform::Linux,
+                           Some(Path::new("/mnt/data/xdg")));
+        assert_eq!(got, Some(PathBuf::from("/mnt/data/xdg/PraisonAI")));
+    }
+
+    #[test]
+    fn linux_without_xdg_uses_the_spec_default() {
+        assert_eq!(
+            data_dir(None, Some(Path::new("/home/me")), Platform::Linux, None),
+            Some(PathBuf::from("/home/me/.local/share/PraisonAI"))
+        );
+    }
+
+    #[test]
+    fn the_data_dir_honours_the_same_override_the_engine_does() {
+        for platform in [Platform::Mac, Platform::Windows, Platform::Linux] {
+            assert_eq!(
+                data_dir(Some(Path::new("/tmp/alt")), Some(Path::new("/Users/me")), platform, None),
+                Some(PathBuf::from("/tmp/alt")),
+                "{platform:?}"
+            );
+        }
     }
 
     #[test]

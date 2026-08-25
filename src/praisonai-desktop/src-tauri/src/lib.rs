@@ -5,6 +5,7 @@
 //! certificate, a network, or an installed Python. The Tauri layer is a thin
 //! adapter over this crate.
 
+pub mod platform;
 pub mod venv_resolve;
 pub mod health;
 pub mod readiness;

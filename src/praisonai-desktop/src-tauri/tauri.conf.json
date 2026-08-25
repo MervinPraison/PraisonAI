@@ -14,13 +14,11 @@
         "height": 720,
         "minWidth": 560,
         "minHeight": 420,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "visible": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:*"
     },
     "withGlobalTauri": true
   },
@@ -28,14 +26,41 @@
     "active": true,
     "targets": [
       "app",
-      "dmg"
+      "dmg",
+      "nsis",
+      "deb"
     ],
     "icon": [
-      "icons/icon.png",
-      "icons/icon.icns"
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ],
+    "publisher": "Praison AI",
+    "copyright": "Copyright (c) Praison AI",
+    "category": "DeveloperTool",
+    "shortDescription": "Local AI agents on your desktop",
+    "longDescription": "PraisonAI runs AI agents locally. Chat with a model, give it tools and files, and fine-tune your own.",
     "macOS": {
       "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "languages": ["English"],
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
     },
     "resources": {
       "../engine": "engine"

@@ -11,6 +11,7 @@
 //!             the ABI matches, nothing raises, and the process runs against
 //!             dependencies it never resolved.
 
+use crate::platform::Platform;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -46,7 +47,11 @@ const POISONING_VARS: [&str; 3] = ["PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"];
 ///
 /// Errors are distinct rather than collapsed into `None`, because the caller
 /// must restart in one case and refuse in another.
-pub fn venv_root_for_python(interpreter: &Path, fs: &dyn VenvFs) -> Result<VenvLayout, VenvError> {
+pub fn venv_root_for_python(
+    interpreter: &Path,
+    fs: &dyn VenvFs,
+    platform: Platform,
+) -> Result<VenvLayout, VenvError> {
     let root = interpreter
         .ancestors()
         .skip(1)
@@ -61,10 +66,18 @@ pub fn venv_root_for_python(interpreter: &Path, fs: &dyn VenvFs) -> Result<VenvL
     let version = parse_version(&contents)
         .ok_or_else(|| VenvError::NoVersionInConfig { path: config_path.clone() })?;
 
-    let site_packages = root
-        .join("lib")
-        .join(format!("python{}", major_minor(&version)))
-        .join("site-packages");
+    // A Windows venv is `Lib\site-packages` with no version segment; the
+    // POSIX layout is `lib/python3.13/site-packages`. Deriving the POSIX shape
+    // on Windows produced a path that does not exist -- and the caller's only
+    // check is that it sits under the venv root, so the guard passed while
+    // pointing at nothing, which is worse than failing.
+    let site_packages = match platform {
+        Platform::Windows => root.join("Lib").join("site-packages"),
+        _ => root
+            .join("lib")
+            .join(format!("python{}", major_minor(&version)))
+            .join("site-packages"),
+    };
 
     Ok(VenvLayout {
         root: root.to_path_buf(),
@@ -107,6 +120,7 @@ fn major_minor(version: &str) -> String {
 pub fn spawn_env(
     layout: &VenvLayout,
     inherited: &BTreeMap<String, String>,
+    platform: Platform,
 ) -> BTreeMap<String, String> {
     let mut env: BTreeMap<String, String> = inherited
         .iter()
@@ -114,15 +128,101 @@ pub fn spawn_env(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
 
-    let bin = layout.root.join("bin");
+    let bin = layout.root.join(platform.venv_bin_rel());
+    let separator = platform.path_separator();
     let path = match inherited.get("PATH") {
-        Some(existing) => format!("{}:{}", bin.display(), existing),
+        Some(existing) => format!("{}{separator}{}", bin.display(), existing),
         None => bin.display().to_string(),
     };
 
     env.insert("VIRTUAL_ENV".to_string(), layout.root.display().to_string());
     env.insert("PATH".to_string(), path);
     env
+}
+
+#[cfg(test)]
+mod platform_layout {
+    //! The two places a venv's layout differs between platforms.
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn windows_layout() -> VenvLayout {
+        VenvLayout {
+            root: PathBuf::from("C:/data/venv"),
+            interpreter: PathBuf::from("C:/data/venv/Scripts/python.exe"),
+            site_packages: PathBuf::from("C:/data/venv/Lib/site-packages"),
+            version: "3.12.4".to_string(),
+        }
+    }
+
+    #[test]
+    fn windows_path_entries_are_separated_by_semicolons() {
+        // Joining with ':' turns the whole PATH into one unusable entry, and
+        // nothing reports it -- the venv's tools simply are not found.
+        let inherited: BTreeMap<String, String> =
+            [("PATH".to_string(), "C:/Windows/System32".to_string())]
+                .into_iter()
+                .collect();
+        // The whole value, not a substring search: a drive letter contains a
+        // colon of its own, so "does it contain ':'" cannot tell a separator
+        // from a path and would pass either way.
+        let env = spawn_env(&windows_layout(), &inherited, Platform::Windows);
+        assert_eq!(env["PATH"], "C:/data/venv/Scripts;C:/Windows/System32");
+    }
+
+    #[test]
+    fn windows_prepends_scripts_not_bin() {
+        let env = spawn_env(&windows_layout(), &BTreeMap::new(), Platform::Windows);
+        assert!(env["PATH"].contains("Scripts"), "{}", env["PATH"]);
+    }
+
+    #[test]
+    fn posix_still_uses_colons_and_bin() {
+        let inherited: BTreeMap<String, String> =
+            [("PATH".to_string(), "/usr/bin".to_string())].into_iter().collect();
+        let layout = VenvLayout {
+            root: PathBuf::from("/data/venv"),
+            interpreter: PathBuf::from("/data/venv/bin/python3"),
+            site_packages: PathBuf::from("/data/venv/lib/python3.12/site-packages"),
+            version: "3.12.4".to_string(),
+        };
+        let env = spawn_env(&layout, &inherited, Platform::Mac);
+        assert_eq!(env["PATH"], "/data/venv/bin:/usr/bin");
+    }
+
+    #[test]
+    fn a_windows_venv_derives_lib_site_packages_with_no_version_segment() {
+        // Forward slashes, which Windows accepts equally: `Path::ancestors`
+        // splits on the *host* separator, so a backslash path is a single
+        // component when this runs on macOS or Linux CI. What is under test is
+        // which directory names are chosen, not how Windows parses a
+        // separator -- that is only ever exercised on Windows itself.
+        struct Fs;
+        impl VenvFs for Fs {
+            fn is_file(&self, p: &Path) -> bool {
+                p == Path::new("C:/data/venv/pyvenv.cfg")
+            }
+            fn read_to_string(&self, p: &Path) -> Option<String> {
+                if p == Path::new("C:/data/venv/pyvenv.cfg") {
+                    Some("version = 3.12.4\n".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        let layout = venv_root_for_python(
+            Path::new("C:/data/venv/Scripts/python.exe"),
+            &Fs,
+            Platform::Windows,
+        )
+        .expect("a real Windows venv layout should resolve");
+        let shown = layout.site_packages.to_string_lossy().to_string();
+        assert!(shown.contains("Lib"), "{shown}");
+        assert!(!shown.contains("python3.12"), "no version segment on Windows: {shown}");
+        // The caller's only check is that it sits under the root, so a wrong
+        // path passes the guard while pointing at nothing.
+        assert!(layout.site_packages.starts_with(&layout.root), "{shown}");
+    }
 }
 
 #[cfg(test)]
@@ -168,7 +268,7 @@ mod tests {
     fn venv_root_for_python_returns_the_venv_that_owns_the_interpreter() {
         let fs = real_world_fs();
         let layout =
-            venv_root_for_python(Path::new("/repo/src/praisonai-agents/venv/bin/python3"), &fs)
+            venv_root_for_python(Path::new("/repo/src/praisonai-agents/venv/bin/python3"), &fs, Platform::Mac)
                 .expect("interpreter is inside a venv");
 
         // 1. the root is the venv containing the interpreter, not the outermost venv
@@ -185,7 +285,7 @@ mod tests {
         );
         // 4. the spawn environment cannot point elsewhere -- this is the assertion
         //    that catches the silent case, where paths match but the venv does not
-        let env = spawn_env(&layout, &BTreeMap::new());
+        let env = spawn_env(&layout, &BTreeMap::new(), Platform::Mac);
         assert_eq!(env.get("VIRTUAL_ENV").map(String::as_str), Some("/repo/src/praisonai-agents/venv"));
     }
 
@@ -195,8 +295,8 @@ mod tests {
         // matches, so pairing them raises nothing at all -- only the venv root
         // distinguishes them.
         let fs = real_world_fs();
-        let a = venv_root_for_python(Path::new("/repo/src/praisonai-agents/venv/bin/python3"), &fs).unwrap();
-        let b = venv_root_for_python(Path::new("/repo/src/praisonai-agents/.venv/bin/python3"), &fs).unwrap();
+        let a = venv_root_for_python(Path::new("/repo/src/praisonai-agents/venv/bin/python3"), &fs, Platform::Mac).unwrap();
+        let b = venv_root_for_python(Path::new("/repo/src/praisonai-agents/.venv/bin/python3"), &fs, Platform::Mac).unwrap();
 
         assert_eq!(
             a.site_packages.strip_prefix(&a.root),
@@ -215,7 +315,7 @@ mod tests {
         // a 3.13 interpreter -- coherent-looking, and wrong.
         let fs = real_world_fs();
         let layout =
-            venv_root_for_python(Path::new("/repo/src/praisonai-agents/venv/bin/python3"), &fs)
+            venv_root_for_python(Path::new("/repo/src/praisonai-agents/venv/bin/python3"), &fs, Platform::Mac)
                 .unwrap();
 
         assert_eq!(layout.root, PathBuf::from("/repo/src/praisonai-agents/venv"));
@@ -231,7 +331,7 @@ mod tests {
     #[test]
     fn an_interpreter_outside_any_venv_is_an_error_not_a_guess() {
         let fs = real_world_fs();
-        let err = venv_root_for_python(Path::new("/usr/bin/python3"), &fs)
+        let err = venv_root_for_python(Path::new("/usr/bin/python3"), &fs, Platform::Mac)
             .expect_err("a system interpreter owns no venv");
         assert_eq!(
             err,
@@ -245,7 +345,7 @@ mod tests {
             ("/repo/broken/pyvenv.cfg", "home = /opt/py/bin\n"),
             ("/repo/broken/bin/python3", ""),
         ]);
-        let err = venv_root_for_python(Path::new("/repo/broken/bin/python3"), &fs)
+        let err = venv_root_for_python(Path::new("/repo/broken/bin/python3"), &fs, Platform::Mac)
             .expect_err("no version means we cannot know site-packages");
         assert_eq!(
             err,
@@ -258,13 +358,13 @@ mod tests {
         // An inherited PYTHONPATH is how a coherent venv still ends up importing
         // another venv's packages. The fix is to never carry it, not to overwrite it.
         let fs = real_world_fs();
-        let layout = venv_root_for_python(Path::new("/repo/venv/bin/python3"), &fs).unwrap();
+        let layout = venv_root_for_python(Path::new("/repo/venv/bin/python3"), &fs, Platform::Mac).unwrap();
         let inherited = BTreeMap::from([
             ("PYTHONPATH".to_string(), "/some/other/venv/site-packages".to_string()),
             ("PYTHONHOME".to_string(), "/opt/py311".to_string()),
             ("HOME".to_string(), "/Users/x".to_string()),
         ]);
-        let env = spawn_env(&layout, &inherited);
+        let env = spawn_env(&layout, &inherited, Platform::Mac);
 
         assert!(!env.contains_key("PYTHONPATH"), "PYTHONPATH must be removed, not overwritten");
         assert!(!env.contains_key("PYTHONHOME"), "PYTHONHOME redirects the stdlib and must be removed");
