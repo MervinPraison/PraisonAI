@@ -6,16 +6,22 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use praisonai_desktop_core::supervisor::{self, StartError};
+use praisonai_desktop_core::adopt::Decision;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+use praisonai_desktop_core::reclaim::{kill_pid, reclaim};
+use praisonai_desktop_core::engine_paths::{
+    app_bundle, data_dir, python_candidates, resolve_engine, RealFs as PathFs,
+};
+use praisonai_desktop_core::supervisor::{self, Engine, StartError};
 use praisonai_desktop_core::venv_resolve::{venv_root_for_python, RealFs};
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[derive(Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -28,49 +34,153 @@ enum EngineStatus {
 }
 
 struct AppState {
-    engine: Mutex<Option<u16>>,
+    /// The child is *held*, not forgotten. `std::mem::forget` left one orphaned
+    /// Python per launch: quitting the app dropped every handle to it without
+    /// ever waiting on it, so `pgrep python` grew by one each time.
+    engine: Mutex<Option<Engine>>,
 }
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .map(Path::to_path_buf)
-        .unwrap_or_default()
+/// The checkout this binary was built in -- development fallback only, and
+/// only when it still exists. `resolve_engine` consults it last.
+fn checkout_root() -> Option<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3)?.to_path_buf();
+    root.is_dir().then_some(root)
+}
+
+/// Say what happened to the previous run's engine. Silence here is how an
+/// orphan goes unnoticed for weeks.
+fn log_decision(d: &Decision) {
+    eprintln!("[praisonai] previous engine: {d:?}");
+}
+
+fn env_path(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
 /// Pick the interpreter, and prove it owns its own site-packages before using it.
-fn resolve_python() -> Result<PathBuf, String> {
-    let repo = repo_root();
-    for relative in ["src/praisonai-agents/.venv", "src/praisonai-agents/venv", "venv"] {
-        let candidate = repo.join(relative).join("bin/python3");
+fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
+    let candidates =
+        python_candidates(env_path("PRAISONAI_PYTHON").as_deref(), user_data, checkout_root().as_deref());
+    let mut tried = Vec::new();
+    for candidate in candidates {
         if !candidate.is_file() {
+            tried.push(candidate.display().to_string());
             continue;
         }
+        // Keep looking. Returning on the first bad candidate let a
+        // half-built user-space venv permanently mask a working checkout one.
         match venv_root_for_python(&candidate, &RealFs) {
             Ok(layout) if layout.site_packages.starts_with(&layout.root) => return Ok(candidate),
-            Ok(layout) => {
-                return Err(format!(
-                    "{} resolves to site-packages outside its own venv ({})",
-                    candidate.display(),
-                    layout.site_packages.display()
-                ))
-            }
-            Err(e) => return Err(format!("{}: {:?}", candidate.display(), e)),
+            Ok(layout) => tried.push(format!(
+                "{} (site-packages outside its venv: {})",
+                candidate.display(),
+                layout.site_packages.display()
+            )),
+            Err(e) => tried.push(format!("{} ({:?})", candidate.display(), e)),
         }
     }
-    Err("no virtual environment found in this checkout".to_string())
+    Err(format!("no usable Python found. Tried: {}", tried.join("; ")))
+}
+
+/// Build the engine's Python environment, reporting each step as it starts.
+///
+/// Emits `provision` events rather than returning a lump at the end: the whole
+/// run takes minutes on a cold machine, and a window that says nothing for
+/// three minutes is indistinguishable from one that has hung.
+#[tauri::command]
+async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
+    use praisonai_desktop_core::provision::{
+        locate_uv, plan, uv_candidates, venv_python, Uv, ENGINE_PACKAGES,
+    };
+
+    let home = std::env::var_os("HOME").map(PathBuf::from)
+        .ok_or_else(|| "no home directory".to_string())?;
+    let data = data_dir(env_path("PRAISONAI_DESKTOP_HOME").as_deref(), Some(&home))
+        .ok_or_else(|| "no data directory".to_string())?;
+    std::fs::create_dir_all(&data).map_err(|e| format!("cannot create {}: {e}", data.display()))?;
+
+    let say = |id: &str, label: &str, state: &str, detail: &str| {
+        let _ = app.emit("provision", serde_json::json!({
+            "id": id, "label": label, "state": state, "detail": detail,
+        }));
+    };
+
+    let uv = match locate_uv(&uv_candidates(&home, &data), |p| p.is_file()) {
+        Uv::Found(p) => p,
+        Uv::Fetch => {
+            // The official installer, run with an explicit target so it cannot
+            // land somewhere outside the directory we control.
+            say("uv", "Fetching the installer", "running", "");
+            let script = std::process::Command::new("/usr/bin/curl")
+                .args(["-fsSL", "https://astral.sh/uv/install.sh"])
+                .output()
+                .map_err(|e| format!("could not reach astral.sh: {e}"))?;
+            if !script.status.success() {
+                return Err("could not download the installer".into());
+            }
+            let mut child = std::process::Command::new("/bin/sh")
+                .env("UV_INSTALL_DIR", data.join("bin"))
+                .env("UV_UNMANAGED_INSTALL", data.join("bin"))
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("could not run the installer: {e}"))?;
+            use std::io::Write;
+            child.stdin.take().unwrap().write_all(&script.stdout)
+                .map_err(|e| format!("installer refused input: {e}"))?;
+            let out = child.wait_with_output().map_err(|e| e.to_string())?;
+            if !out.status.success() {
+                return Err(format!("installer failed: {}",
+                    String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")));
+            }
+            say("uv", "Fetching the installer", "done", "");
+            data.join("bin/uv")
+        }
+    };
+
+    for step in plan(&uv, &data, ENGINE_PACKAGES) {
+        say(step.id, step.label, "running", "");
+        let out = std::process::Command::new(&step.program)
+            .args(&step.args)
+            .output()
+            .map_err(|e| format!("{}: {e}", step.label))?;
+        if !out.status.success() {
+            // The last stderr line is what a user can act on; the rest is noise.
+            let why = String::from_utf8_lossy(&out.stderr)
+                .lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
+            say(step.id, step.label, "failed", &why);
+            return Err(format!("{} failed. {why}", step.label));
+        }
+        say(step.id, step.label, "done", "");
+    }
+
+    let py = venv_python(&data);
+    if !py.is_file() {
+        return Err(format!("finished, but {} is not there", py.display()));
+    }
+    Ok(py.display().to_string())
 }
 
 #[tauri::command]
-fn engine_status(state: tauri::State<'_, AppState>) -> EngineStatus {
-    if let Some(port) = *state.engine.lock().unwrap() {
-        return EngineStatus::Ready { port, python: "already running".into() };
+fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> EngineStatus {
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        return EngineStatus::Ready { port: engine.port, python: "already running".into() };
     }
 
-    let python = match resolve_python() {
+    // Not `app.path().app_data_dir()` -- that is the bundle identifier's
+    // directory, which is not where the engine writes.
+    let user_data = data_dir(
+        env_path("PRAISONAI_DESKTOP_HOME").as_deref(),
+        std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+    );
+    let resource_dir = app.path().resource_dir().ok();
+
+    praisonai_desktop_core::tray::set_engine_label(&app, "Engine: starting\u{2026}");
+    let python = match resolve_python(user_data.as_deref()) {
         Ok(p) => p,
         Err(e) => {
+            praisonai_desktop_core::tray::set_engine_label(&app, "Engine: no Python found");
             return EngineStatus::Failed {
                 reason: "No usable Python".into(),
                 detail: e,
@@ -78,20 +188,63 @@ fn engine_status(state: tauri::State<'_, AppState>) -> EngineStatus {
             }
         }
     };
-    let script = repo_root().join("src/praisonai-desktop/engine/server.py");
+    // Reap or adopt whatever the last run left. Neither `Drop` nor the reap on
+    // exit runs when the shell is killed by a signal, and that was observed:
+    // `kill -TERM` on the app left the Python child alive with a lockfile still
+    // claiming it, and the next launch started a second engine beside it.
+    if let Some(dir) = user_data.as_deref() {
+        let venv = venv_root_for_python(&python, &RealFs)
+            .map(|l| l.root.display().to_string())
+            .unwrap_or_default();
+        match reclaim(dir, &python.display().to_string(), &venv,
+                      supervisor::probe_health, kill_pid) {
+            Decision::Adopt { port } => {
+                log_decision(&Decision::Adopt { port });
+                praisonai_desktop_core::tray::set_engine_label(
+                    &app, &format!("Engine: adopted on :{port}"));
+                *state.engine.lock().unwrap() = None;
+                return EngineStatus::Ready { port, python: python.display().to_string() };
+            }
+            other => log_decision(&other),
+        }
+    }
+
+    let layout = match resolve_engine(
+        env_path("PRAISONAI_ENGINE").as_deref(),
+        resource_dir.as_deref(),
+        checkout_root().as_deref(),
+        &PathFs,
+    ) {
+        Ok(l) => l,
+        Err(e) => {
+            return EngineStatus::Failed {
+                reason: "Engine not found".into(),
+                detail: e,
+                tail: String::new(),
+            }
+        }
+    };
+
+    // The engine writes the login item, and can only do so against a real
+    // bundle -- so tell it whether there is one instead of letting it guess.
+    match std::env::current_exe().ok().as_deref().and_then(app_bundle) {
+        Some(b) => std::env::set_var("PRAISONAI_APP_BUNDLE", b),
+        None => std::env::remove_var("PRAISONAI_APP_BUNDLE"),
+    }
 
     match supervisor::start(
         &python.display().to_string(),
-        &script.display().to_string(),
+        &layout.script.display().to_string(),
         Duration::from_secs(30),
     ) {
         Ok(engine) => {
-            *state.engine.lock().unwrap() = Some(engine.port);
-            std::mem::forget(engine); // keep the child alive for the app's lifetime
-            EngineStatus::Ready {
-                port: *state.engine.lock().unwrap().as_ref().unwrap(),
-                python: python.display().to_string(),
-            }
+            let port = engine.port;
+            *state.engine.lock().unwrap() = Some(engine);
+            // The menubar read "Engine: starting..." forever: this function
+            // existed and had no callers.
+            praisonai_desktop_core::tray::set_engine_label(
+                &app, &format!("Engine: ready on :{port}"));
+            EngineStatus::Ready { port, python: python.display().to_string() }
         }
         Err(e) => {
             let (reason, detail, tail) = match e {
@@ -105,18 +258,79 @@ fn engine_status(state: tauri::State<'_, AppState>) -> EngineStatus {
                     ("Engine did not report ready in time".into(), "30s".into(), tail)
                 }
             };
+            praisonai_desktop_core::tray::set_engine_label(
+                &app, &format!("Engine: {reason}"));
             EngineStatus::Failed { reason, detail, tail }
         }
     }
 }
 
+/// Debounce flag for geometry saves; see the window event handler.
+static SAVE_PENDING: AtomicBool = AtomicBool::new(false);
+
 fn main() {
     tauri::Builder::default()
+        // Must be registered first: the guard has to run before anything else
+        // touches the lockfile or the engine.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // A second launch raises the window that already exists rather than
+            // starting a rival shell.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(AppState { engine: Mutex::new(None) });
+            praisonai_desktop_core::tray::build(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine_status])
-        .run(tauri::generate_context!())
-        .expect("error while running the PraisonAI desktop shell");
+        .on_window_event(|window, event| {
+            // With a menubar item present, closing the window means "put it
+            // away", not "quit" -- tearing down an engine that takes seconds to
+            // start because someone hit the red button is the wrong trade.
+            // Persist geometry as it changes, not only at exit. Saving on
+            // close and exit alone means a crash or a signal kill loses
+            // whatever size the user chose -- and neither handler runs on
+            // SIGTERM, which is how this went unverified in the first place.
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                let app = window.app_handle().clone();
+                // Coalesced: a drag emits these continuously, and each save is
+                // a file write.
+                if !SAVE_PENDING.swap(true, Ordering::SeqCst) {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(400));
+                        SAVE_PENDING.store(false, Ordering::SeqCst);
+                        let _ = app.save_window_state(StateFlags::all());
+                    });
+                }
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Save before hiding. The plugin persists on a real close, and
+                // this window never has one -- so without this the geometry a
+                // user chose is only ever written if the process happens to
+                // exit cleanly, which a signal kill does not.
+                let _ = window.app_handle().save_window_state(StateFlags::all());
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![engine_status, provision_engine])
+        .build(tauri::generate_context!())
+        .expect("error while building the PraisonAI desktop shell")
+        .run(|app, event| {
+            // Dropping managed state on exit is not guaranteed, so reap here
+            // explicitly. Verified by `pgrep -f server.py` after quit.
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                let _ = app.save_window_state(StateFlags::all());
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Some(mut engine) = state.engine.lock().unwrap().take() {
+                        engine.shutdown();
+                    }
+                }
+            }
+        });
 }

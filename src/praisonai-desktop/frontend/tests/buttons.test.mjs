@@ -13,7 +13,7 @@ import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const HTML = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
 import { createServer } from 'node:http';
 import { extname } from 'node:path';
 // jsdom will not resolve a relative ES module import from a file: URL, so the
@@ -22,7 +22,7 @@ import { extname } from 'node:path';
 const SRV = createServer((req, res) => {
   const f = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   try {
-    const b = readFileSync(new URL('../ui' + f, import.meta.url));
+    const b = readFileSync(new URL('../../ui' + f, import.meta.url));
     res.writeHead(200, { 'content-type': extname(f) === '.js' ? 'text/javascript' : 'text/html' });
     res.end(b);
   } catch { res.writeHead(404); res.end(); }
@@ -221,4 +221,114 @@ test('every shell button produces its own observable effect', async () => {
     assert.ok(doc.getElementById(id), `#${id} missing from the DOM`);
     assert.ok(await run(), `#${id} produced no observable effect`);
   }
+});
+
+// ---- message queue -------------------------------------------------------
+// A turn is held open by a never-resolving stream so "while running" is a real
+// state rather than a race the test hopes to win.
+async function bootStreaming() {
+  const calls = [];
+  let releaseStream;
+  const held = new Promise((r) => { releaseStream = r; });
+  const dom = new JSDOM(HTML, {
+    runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
+    beforeParse(w) {
+      w.__TAURI__ = { core: { invoke: async () => ({ state: 'ready', port: PORT }) } };
+      w.fetch = async (url, opts = {}) => {
+        calls.push(`${opts.method || 'GET'} ${String(url).replace(`http://127.0.0.1:${PORT}`, '')}`);
+        if (String(url).includes('/chat')) {
+          return { ok: true, body: { getReader: () => ({
+            read: () => held.then(() => ({ done: true })), cancel: async () => {} }) } };
+        }
+        return { ok: true, json: async () => ({ chats: [], lines: [], hits: [],
+          model: 'gpt-4o-mini', theme: 'system' }), text: async () => '' };
+      };
+      w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+      w.navigator.clipboard = { writeText: async () => {} };
+      w.confirm = () => true; w.alert = () => {};
+      Object.defineProperty(w.HTMLElement.prototype, 'scrollIntoView', { value() {} });
+    },
+  });
+  const { window } = dom;
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    if (!window.document.getElementById('p').disabled) break;
+  }
+  return { doc: window.document, window, calls, releaseStream };
+}
+
+const send = (doc, window, text) => {
+  doc.getElementById('p').value = text;
+  doc.getElementById('f').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+};
+
+test('the composer stays usable while a turn is running', async () => {
+  const { doc, window } = await bootStreaming();
+  send(doc, window, 'first');
+  await settle();
+  assert.equal(doc.getElementById('p').disabled, false,
+    'the composer was disabled mid-run, so a queued thought cannot be typed');
+  assert.notEqual(doc.getElementById('stop').style.display, 'none', 'Stop not shown');
+});
+
+test('a message typed mid-run is queued, not sent', async () => {
+  const { doc, window, calls } = await bootStreaming();
+  send(doc, window, 'first');
+  await settle();
+  const chatCalls = calls.filter((c) => c.includes('/chat')).length;
+  send(doc, window, 'second');
+  await settle();
+  assert.equal(calls.filter((c) => c.includes('/chat')).length, chatCalls,
+    'the queued message was sent immediately instead of queued');
+  const rows = doc.querySelectorAll('.qrow');
+  assert.equal(rows.length, 1, 'the queue is not shown to the user');
+  assert.match(rows[0].textContent, /second/);
+});
+
+test('the queue preserves order and shows its position', async () => {
+  const { doc, window } = await bootStreaming();
+  send(doc, window, 'first');
+  await settle();
+  send(doc, window, 'alpha'); await settle();
+  send(doc, window, 'beta');  await settle();
+  const rows = [...doc.querySelectorAll('.qrow')];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].textContent, /1 of 2/);
+  assert.match(rows[0].textContent, /alpha/);
+  assert.match(rows[1].textContent, /beta/);
+});
+
+test('a queued message can be removed before it runs', async () => {
+  const { doc, window } = await bootStreaming();
+  send(doc, window, 'first');
+  await settle();
+  send(doc, window, 'discard me'); await settle();
+  click(doc.querySelector('.qrow .x'));
+  await settle();
+  assert.equal(doc.querySelectorAll('.qrow').length, 0, 'removing a queued message did nothing');
+});
+
+test('the queue drains when the turn finishes', async () => {
+  const { doc, window, calls, releaseStream } = await bootStreaming();
+  send(doc, window, 'first');
+  await settle();
+  send(doc, window, 'queued one'); await settle();
+  const before = calls.filter((c) => c.includes('/chat')).length;
+  releaseStream();
+  await new Promise((r) => setTimeout(r, 400));
+  assert.ok(calls.filter((c) => c.includes('/chat')).length > before,
+    'the queued message never sent after the turn ended');
+  assert.equal(doc.querySelectorAll('.qrow').length, 0, 'the queue row was not cleared');
+});
+
+test('Stop discards the queue rather than silently starting the next turn', async () => {
+  const { doc, window } = await bootStreaming();
+  send(doc, window, 'first');
+  await settle();
+  send(doc, window, 'should not run'); await settle();
+  assert.equal(doc.querySelectorAll('.qrow').length, 1);
+  click(doc.getElementById('stop'));
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(doc.querySelectorAll('.qrow').length, 0,
+    'stopping a turn left the queue armed, so the next prompt runs unasked');
 });

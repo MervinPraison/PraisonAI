@@ -1,22 +1,9 @@
 /**
- * Settings as data.
+ * Settings as data -- GENERATED. Do not edit.
  *
- * Every setting is one object. Row rendering, persistence, defaults, per-field
- * reset, validation, conditional visibility, restart notices and search all
- * derive from this list, so adding a setting is one entry and nothing else.
- *
- * The alternative -- hand-written form sections -- drifts the moment one
- * section is carved out: a reference app has an 847-line Appearance page
- * outside its own registry, and 7 of its ~15 rows are unreachable by search
- * because they were never given anchors.
- *
- * Four things the references could not express, added here deliberately:
- *   default          so per-field reset is free (none of the three has it)
- *   validate         so a threshold cannot be set negative
- *   requiresRestart  so a row can say so instead of a comment saying it
- *   confirm          so a destructive transition is gated
+ * The shipped copy is the block inlined in ui/index.html. Regenerate with
+ * `node tools/sync-registry.mjs`; `--check` verifies without writing.
  */
-
 export const SECTIONS = [
   { id: "general",    label: "General",    icon: "⚙" },
   { id: "model",      label: "Models",     icon: "◈" },
@@ -24,6 +11,7 @@ export const SECTIONS = [
   { id: "appearance", label: "Appearance", icon: "◐" },
   { id: "safety",     label: "Safety",     icon: "⚿" },
   { id: "data",       label: "Data",       icon: "▤" },
+  { id: "integrations", label: "Integrations", icon: "⧉" },
   { id: "about",      label: "About",      icon: "ⓘ" },
 ];
 
@@ -33,7 +21,7 @@ const clampNum = (min, max) => (v) =>
   : Number(v) < min ? `Must be at least ${min}`
   : Number(v) > max ? `Must be at most ${max}` : null;
 
-export const SETTINGS = [
+const SETTINGS = [
   // ---- Models -------------------------------------------------------------
   { key: "model", section: "model", label: "Default model",
     description: "Any OpenAI-compatible model id. New chats use this.",
@@ -66,9 +54,15 @@ export const SETTINGS = [
     default: "", requiresRestart: true },
 
   { key: "api_key", section: "model", label: "API key",
-    description: "Stored on this machine only. Leave blank to use the environment.",
+    description: "Stored in the macOS keychain, never in the settings file. Blank uses the environment.",
     keywords: ["token", "secret", "credential", "openai"],
     control: { kind: "text", secret: true },
+    // The engine refuses to export anything shorter than 20 characters, so
+    // without this the field accepted a typo, stored it, echoed it back masked
+    // as if it were set, and every turn failed as though no key existed.
+    validate: (v) => (!v || String(v).length >= 20
+      ? null
+      : "That looks too short for an API key. Leave it blank to use the environment."),
     default: "", requiresRestart: true },
 
   // ---- Chat ---------------------------------------------------------------
@@ -110,9 +104,12 @@ export const SETTINGS = [
     default: "system" },
 
   { key: "font_size", section: "appearance", label: "Text size",
+    description: "Scales the whole interface \u2014 messages, sidebar, settings and composer.",
+    keywords: ["scale", "zoom", "bigger", "smaller", "interface"],
     control: { kind: "select", options: [
-      { value: 14, label: "14 px" }, { value: 15, label: "15 px" },
-      { value: 16, label: "16 px" }, { value: 18, label: "18 px" }]},
+      { value: 13, label: "13 px" }, { value: 14, label: "14 px" },
+      { value: 15, label: "15 px" }, { value: 16, label: "16 px" },
+      { value: 18, label: "18 px" }, { value: 20, label: "20 px" }]},
     default: 15 },
 
   { key: "code_font_size", section: "appearance", label: "Code text size",
@@ -152,6 +149,46 @@ export const SETTINGS = [
 
   { key: "check_updates", section: "general", label: "Check for updates automatically",
     control: { kind: "toggle" }, default: true },
+
+  // ---- Data ---------------------------------------------------------------
+  // Actions, not values. They carry no `default` and are skipped by save,
+  // reset and search-by-value, but still get a row and an anchor for free.
+  { key: "export_chats", section: "data", label: "Export all conversations",
+    description: "Downloads every transcript as JSON.",
+    keywords: ["backup", "download", "json"],
+    control: { kind: "action", verb: "Export" }, action: "export" },
+
+  { key: "open_data_dir", section: "data", label: "Data folder",
+    description: "Transcripts and settings live outside the app bundle, so an update cannot take them with it.",
+    keywords: ["storage", "location", "finder", "backup"],
+    control: { kind: "action", verb: "Show path" }, action: "reveal" },
+
+  { key: "clear_chats", section: "data", label: "Delete all conversations",
+    description: "Cannot be undone.",
+    keywords: ["reset", "wipe", "clear"],
+    control: { kind: "action", verb: "Delete all", danger: true }, action: "clear",
+    confirm: { when: () => true,
+               message: "Delete every conversation? This cannot be undone." } },
+
+  // ---- About --------------------------------------------------------------
+  { key: "version", section: "about", label: "PraisonAI Desktop",
+    control: { kind: "readout", value: () => "0.1.0" } },
+
+  { key: "engine_status", section: "about", label: "Engine",
+    description: "The Python process this window is talking to.",
+    control: { kind: "readout", value: (ctx) => ctx.engine || "not connected" } },
+
+  { key: "logs_link", section: "about", label: "Engine log",
+    control: { kind: "action", verb: "Open" }, action: "logs" },
+
+  { key: "check_now", section: "about", label: "Check for updates",
+    control: { kind: "action", verb: "Check" }, action: "update" },
+
+  // ---- Integrations -------------------------------------------------------
+  { key: "mcp_servers", section: "integrations", label: "MCP servers",
+    description: "Tool servers launched over stdio. Each is disabled until you enable it.",
+    keywords: ["tools", "model context protocol", "stdio", "extensions"],
+    control: { kind: "action", verb: "Manage" }, action: "mcp" },
 ];
 
 // A duplicate key would silently shadow, so fail at load instead.
@@ -161,7 +198,7 @@ for (const s of SETTINGS) {
   seen.add(s.key);
 }
 
-export const DEFAULTS = Object.fromEntries(SETTINGS.map((s) => [s.key, s.default]));
+const DEFAULTS = Object.fromEntries(SETTINGS.map((s) => [s.key, s.default]));
 
 /** Search entries derive from the registry, never a parallel list, and respect
  *  visibleWhen -- so search can never return a row that cannot be shown. */

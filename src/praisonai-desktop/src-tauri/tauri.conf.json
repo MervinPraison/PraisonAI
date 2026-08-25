@@ -15,7 +15,8 @@
         "minWidth": 560,
         "minHeight": 420,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "visible": true
       }
     ],
     "security": {
@@ -35,6 +36,9 @@
     ],
     "macOS": {
       "minimumSystemVersion": "10.15"
+    },
+    "resources": {
+      "../engine": "engine"
     }
   }
 }

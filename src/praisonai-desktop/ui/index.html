@@ -5,37 +5,73 @@
 <style>
 :root{--ground:#0F1114;--panel:#171A1F;--ink:#E8EAED;--soft:#9AA1AC;--rule:#262B33;
       --accent:#7FD1B9;--bad:#E58B86;--user:#1E2430;--code:#0B0D10}
-@media(prefers-color-scheme:light){:root{--ground:#FBFBFC;--panel:#FFF;--ink:#14171C;--soft:#5B636E;
+html{font-size:calc(16px * var(--ui-scale,1))}
+:root{--fs:15px;--fs-code:12px;--ui-scale:1;--tok-k:#C792EA;--tok-s:#C3E88D;--tok-n:#F78C6C;--tok-f:#82AAFF;--rule-strong:#454F5D;
+  /* The reading column. The transcript and the composer both derive from
+     these two, so they cannot end up on different centre lines. */
+  --col:46rem;--gutter:1.5rem}
+.no-motion *{animation:none!important;transition:none!important}
+#toast{position:fixed;left:50%;transform:translateX(-50%);top:3.5rem;z-index:70;background:var(--panel);color:var(--ink);border:1px solid var(--rule);border-radius:.5rem;padding:.5rem .875rem;font-size:.78rem;opacity:0;pointer-events:none;transition:opacity .18s ease;box-shadow:0 6px 20px rgba(0,0,0,.22)}
+#toast.show{opacity:1}
+.confirm-back{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;
+  display:flex;align-items:center;justify-content:center;padding:1.5rem}
+.confirm-box{background:var(--panel);border:1px solid var(--rule-strong);border-radius:12px;
+  padding:1.1rem 1.2rem;width:min(24rem,100%);box-shadow:0 18px 48px rgba(0,0,0,.45)}
+.confirm-box p{margin:0 0 1rem;font-size:.88rem;line-height:1.5}
+.confirm-box .row{display:flex;gap:.5rem;justify-content:flex-end}
+.confirm-box .ok.danger{background:var(--bad)}
+.updbar .updx{font-size:.72rem;padding:.25rem .6rem}
+/* In normal flow above the composer. Fixed-position at bottom:18px put it
+   directly on top of the text field -- and a composer that grows to ten
+   lines would have made it worse, not better. */
+.updbar{width:100%;max-width:var(--col);margin:0 auto .55rem;display:flex;gap:.6rem;
+  align-items:center;justify-content:space-between;background:var(--panel);color:var(--ink);
+  border:1px solid var(--rule);border-radius:10px;padding:.5rem .55rem .5rem .8rem;
+  font-size:.78rem}
+.updbar span{color:var(--soft)}
+:root[data-theme="light"]{--tok-k:#8250DF;--tok-s:#0A6E3E;--tok-n:#B34700;--tok-f:#0550AE;--rule-strong:#A8B1BC;--ground:#FBFBFC;--panel:#FFF;--ink:#14171C;--soft:#5B636E;
+  --rule:#E2E5EA;--accent:#1F7A63;--bad:#A6413C;--user:#EEF2F7;--code:#F2F4F7}
+:root[data-theme="dark"]{--tok-k:#C792EA;--tok-s:#C3E88D;--tok-n:#F78C6C;--tok-f:#82AAFF;--rule-strong:#454F5D;--ground:#0F1114;--panel:#171A1F;--ink:#E8EAED;--soft:#9AA1AC;
+  --rule:#262B33;--accent:#7FD1B9;--bad:#E58B86;--user:#1E2430;--code:#0B0D10}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--tok-k:#8250DF;--tok-s:#0A6E3E;--tok-n:#B34700;--tok-f:#0550AE;--rule-strong:#A8B1BC;--ground:#FBFBFC;--panel:#FFF;--ink:#14171C;--soft:#5B636E;
       --rule:#E2E5EA;--accent:#1F7A63;--bad:#A6413C;--user:#EEF2F7;--code:#F2F4F7}}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--ground);color:var(--ink);font:14.5px/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif;
+body{margin:0;background:var(--ground);color:var(--ink);font:.906rem/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif;
      -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
 #body{flex:1;display:flex;min-height:0}
-#side{width:248px;flex:none;border-right:1px solid var(--rule);background:var(--panel);
+#side{width:15.5rem;flex:none;border-right:1px solid var(--rule);background:var(--panel);
       display:flex;flex-direction:column;overflow:hidden}
 .sidetop{padding:.6rem .55rem .35rem;display:flex;flex-direction:column;gap:.15rem}
 .navbtn{display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;border-radius:7px;
   background:none;border:0;color:var(--ink);font:inherit;font-size:.86rem;cursor:pointer;text-align:left;width:100%}
 .navbtn:hover{background:var(--ground)}
 .navbtn .k{margin-left:auto;font-size:.68rem;color:var(--soft);font-family:ui-monospace,Menlo,monospace}
-.navbtn .ic{width:15px;text-align:center;color:var(--soft)}
+.navbtn .ic{width:.94rem;text-align:center;color:var(--soft)}
 .sectlbl{font-size:.62rem;text-transform:uppercase;letter-spacing:.11em;color:var(--soft);
   font-weight:700;padding:.9rem .75rem .35rem}
 .sidefoot{border-top:1px solid var(--rule);padding:.45rem .55rem}
 #side.hidden{display:none}
 #chats{flex:1;overflow-y:auto;padding:.5rem}
-.chat{padding:.45rem .6rem;border-radius:6px;cursor:pointer;font-size:.82rem;
+.chat{padding:.4rem .6rem;border-radius:6px;cursor:pointer;font-size:.82rem;
       display:flex;justify-content:space-between;gap:.4rem;align-items:center;color:var(--soft)}
+.chat .ct{flex:1;min-width:0;display:flex;flex-direction:column;gap:.08rem}
+/* Without this, five conversations that opened with the same sentence are five
+   identical rows and the list is unusable. */
+.chat .meta{font-size:.66rem;color:var(--soft);opacity:.72;overflow:hidden;
+            text-overflow:ellipsis;white-space:nowrap}
+.chat.active .meta{opacity:.85}
 .chat:hover{background:var(--ground)}
 .chat.active{background:var(--ground);color:var(--ink);font-weight:600}
 .chat .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chat .x{opacity:0;font-size:.9rem;line-height:1;padding:0 .15rem}
+.chat .x{opacity:0;font-size:.9rem;line-height:1;padding:0 .15rem;transition:opacity .12s}
+.chat:hover .x,.chat:focus-within .x,.chat:focus-visible .x{opacity:.75}
+.chat .x:hover{opacity:1;color:var(--bad)}
 .chat:hover .x{opacity:.55}
 .chat .x:hover{opacity:1;color:var(--bad)}
 .chat.corrupt .t{color:var(--bad);font-style:italic}
 #main{flex:1;display:flex;flex-direction:column;min-width:0}
-.titlebar{height:44px;-webkit-app-region:drag;flex:none;display:flex;align-items:center;
+.titlebar{height:2.75rem;-webkit-app-region:drag;flex:none;display:flex;align-items:center;
           gap:.6rem;padding:0 .9rem 0 5.2rem;border-bottom:1px solid var(--rule)}
 .modelpill{-webkit-app-region:no-drag;display:flex;align-items:center;gap:.35rem;
   background:none;border:0;color:var(--ink);font:inherit;font-size:.85rem;font-weight:600;
@@ -52,15 +88,33 @@ body{margin:0;background:var(--ground);color:var(--ink);font:14.5px/1.6 ui-sans-
 #thread.empty #hero{display:block}
 #hero h1{font-size:1.7rem;font-weight:600;margin:0 0 .4rem;letter-spacing:-.02em}
 #hero p{color:var(--soft);margin:0;font-size:.9rem}
-.mark{width:46px;height:46px;border-radius:13px;background:var(--accent);margin:0 auto .9rem;
-  display:flex;align-items:center;justify-content:center;color:var(--ground);
-  font-weight:800;font-size:1.15rem;font-family:ui-monospace,Menlo,monospace}
-.inner{max-width:46rem;margin:0 auto;padding:0 1.5rem}
-.turn{margin-bottom:1.4rem;content-visibility:auto;contain-intrinsic-size:auto 90px}
+.mark{width:2.875rem;height:2.875rem;border-radius:.8rem;margin:0 auto .9rem;display:block}
+.inner{width:100%;max-width:var(--col);margin:0 auto;padding:0 var(--gutter)}
+/*
+ * width:100% is load-bearing. #thread is a flex column, and an auto margin on
+ * the cross axis of a flex item overrides `stretch` -- so `margin:0 auto`
+ * alone made #turns shrink-wrap its content and centre *itself*, while the
+ * composer (a block child of a block form) stayed full width. The two ended up
+ * on different centre lines, ~240px apart. With an explicit width there is no
+ * free space to absorb until max-width actually bites.
+ */
+.turn{margin-bottom:.9rem;content-visibility:auto;contain-intrinsic-size:auto 46rem auto 5.6rem}
+/* The person's turn hugs its text and sits to the right; the answer runs the
+   full column. Two shapes, so no label is needed to tell them apart. */
+.turn.u{display:flex;flex-direction:column;align-items:flex-end}
+.turn.u{margin-top:2rem}
+.turn.u:first-child{margin-top:0}
 .turn.live{content-visibility:visible}
-.who{font-size:.65rem;text-transform:uppercase;letter-spacing:.11em;color:var(--soft);
-     font-weight:700;margin-bottom:.35rem}
-.bubble{word-wrap:break-word;overflow-wrap:anywhere}
+/*
+ * The label is kept for screen readers and removed from the page. A .65rem
+ * uppercase "YOU" / "PRAISONAI" above every single turn is louder than the
+ * message and carries information the layout already gives: a filled bubble on
+ * the right is the person, full-width prose on the left is the answer. jan,
+ * hermes and ollama all do it this way.
+ */
+.who{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+     clip-path:inset(50%);white-space:nowrap;border:0}
+.bubble{word-break:break-word;overflow-wrap:break-word;font-size:var(--fs);line-height:1.62}
 .bubble.plain{white-space:pre-wrap}
 .bubble>*:first-child{margin-top:0}.bubble>*:last-child{margin-bottom:0}
 .bubble h1,.bubble h2,.bubble h3{font-weight:650;line-height:1.3;margin:1.1em 0 .45em}
@@ -69,14 +123,15 @@ body{margin:0;background:var(--ground);color:var(--ink);font:14.5px/1.6 ui-sans-
 .bubble ul,.bubble ol{margin:0 0 .75em;padding-left:1.4em}
 .bubble li{margin:.2em 0}
 .bubble code{background:var(--code);border:1px solid var(--rule);border-radius:4px;
-  padding:.1em .34em;font-family:ui-monospace,Menlo,monospace;font-size:.86em}
+  padding:.1em .34em;font-family:ui-monospace,Menlo,monospace;font-size:var(--fs-code)}
 .bubble pre{background:var(--code);border:1px solid var(--rule);border-radius:8px;
   padding:.75rem .9rem;overflow-x:auto;margin:0 0 .8em;position:relative}
-.bubble pre code{background:none;border:0;padding:0;font-size:.8rem;line-height:1.5}
+.bubble pre code{background:none;border:0;padding:0;font-size:var(--fs-code);line-height:1.5}
 .bubble blockquote{margin:0 0 .8em;padding-left:.85em;border-left:3px solid var(--rule);color:var(--soft)}
 .bubble a{color:var(--accent)}
 .bubble hr{border:0;border-top:1px solid var(--rule);margin:1.1em 0}
-.bubble table{border-collapse:collapse;margin:0 0 .8em;font-size:.9em;display:block;overflow-x:auto}
+.bubble table{border-collapse:collapse;display:block;width:max-content;max-width:100%;
+  overflow-x:auto;margin:0 0 .8em;font-size:.9em}
 .bubble th,.bubble td{border:1px solid var(--rule);padding:.35em .6em;text-align:left}
 .bubble th{background:var(--code);font-weight:650}
 .copy{position:absolute;top:.4rem;right:.4rem;font-size:.62rem;padding:.2rem .45rem;
@@ -84,21 +139,61 @@ body{margin:0;background:var(--ground);color:var(--ink);font:14.5px/1.6 ui-sans-
   cursor:pointer;opacity:0;transition:opacity .12s}
 .bubble pre:hover .copy{opacity:1}
 .copy:hover{color:var(--ink)}
-.turn.u .bubble{background:var(--user);padding:.7rem .95rem;border-radius:9px}
+.turn.u .bubble{background:var(--user);padding:.6rem .9rem;border-radius:14px 14px 4px 14px;
+  max-width:min(80%,34rem);width:fit-content}
+.turn.u .acts{justify-content:flex-end}
 .err{border-left:3px solid var(--bad);background:var(--panel);padding:.8rem 1rem;
      border-radius:0 8px 8px 0;font-size:.85rem}
 .err b{color:var(--bad);display:block;margin-bottom:.3rem}
+.errbtns{display:flex;gap:.4rem;margin-top:.6rem}
+.setup{max-width:26rem;margin:2rem auto;text-align:center}
+.setup h2{margin:.2rem 0 .5rem;font-size:1.25rem;font-weight:650;letter-spacing:-.01em}
+.setup .lede{color:var(--soft);font-size:.85rem;line-height:1.55;margin:0 0 1.3rem}
+.setup .steps{list-style:none;margin:0 0 1.3rem;padding:0;text-align:left;
+  display:flex;flex-direction:column;gap:.5rem}
+.setup .steps li{display:flex;align-items:center;gap:.6rem;font-size:.82rem;
+  color:var(--soft);opacity:.55}
+.setup .steps li.running,.setup .steps li.done,.setup .steps li.failed{opacity:1}
+.setup .steps li.done{color:var(--ink)}
+.setup .steps li.failed{color:var(--bad)}
+.setup .dot{width:.5rem;height:.5rem;border-radius:50%;background:var(--rule-strong);flex:none}
+.setup li.running .dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
+.setup li.done .dot{background:var(--accent)}
+.setup li.failed .dot{background:var(--bad)}
+.setup .dt{margin-left:auto;font-size:.68rem;opacity:.8;text-align:right;
+  max-width:12rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.setup .row{display:flex;justify-content:center}
+.setup .why{margin:1rem 0 0;font-size:.74rem;color:var(--soft);line-height:1.5}
+.setup .why.bad{color:var(--bad)}
+@keyframes pulse{50%{opacity:.35}}
+.vnav{display:flex;align-items:center;gap:.1rem;margin-top:.35rem;color:var(--soft)}
+.vnav .vb{background:none;border:0;color:var(--soft);cursor:pointer;font-size:.85rem;
+  line-height:1;padding:.1rem .35rem;border-radius:5px}
+.vnav .vb:hover:not(:disabled){background:var(--code);color:var(--ink)}
+.vnav .vb:disabled{opacity:.3;cursor:default}
+.vnav .vn{font-size:.68rem;font-variant-numeric:tabular-nums;min-width:2.2em;text-align:center}
+:where(button,[role="button"],.chat,textarea,input,select,a):focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.fi:focus-within{border-color:var(--accent)!important;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+button:active:not(:disabled){filter:brightness(.93)}
+#send:hover:not(:disabled){filter:brightness(1.09)}
+.bubble pre:hover .copy,.copy:focus-visible{opacity:1}
 .err pre{margin:.5rem 0 0;background:var(--code);border:1px solid var(--rule);border-radius:6px;
          padding:.55rem .7rem;font-size:.72rem;overflow-x:auto;white-space:pre-wrap}
-.caret{display:inline-block;width:7px;height:1.05em;background:var(--accent);
+.caret{display:inline-block;width:.44rem;height:1.05em;background:var(--accent);
        vertical-align:-2px;animation:b 1.1s steps(2) infinite}
 @keyframes b{50%{opacity:0}}
-form{flex:none;padding:0 1.5rem 1.1rem}
-.fi{max-width:46rem;margin:0 auto;background:var(--panel);border:1px solid var(--rule);
+/* The gutter lives on .inner now, for the transcript and the composer alike.
+   A top fade separates the last message from the field it scrolls under. */
+form{flex:none;padding:.75rem 0 1.1rem;
+  background:linear-gradient(to top,var(--ground) 68%,transparent)}
+.fi{width:100%;border-color:var(--rule-strong)!important;background:var(--panel);border:1px solid var(--rule);
     border-radius:14px;padding:.7rem .8rem .55rem;transition:border-color .12s}
 .fi:focus-within{border-color:color-mix(in srgb,var(--accent) 55%,var(--rule))}
 textarea{width:100%;resize:none;background:none;color:var(--ink);border:0;
-         padding:.1rem .1rem .4rem;font:inherit;max-height:10rem;outline:none}
+         padding:.1rem .1rem .4rem;font:inherit;font-size:var(--fs);line-height:1.6;
+         min-height:1.625rem;max-height:10rem;overflow-y:auto;outline:none}
 textarea::placeholder{color:var(--soft)}
 .ctools{display:flex;align-items:center;gap:.15rem}
 .ctool{background:none;border:0;color:var(--soft);cursor:pointer;padding:.3rem .45rem;
@@ -106,20 +201,33 @@ textarea::placeholder{color:var(--soft)}
 .ctool:hover{background:var(--ground);color:var(--ink)}
 .ctool.on{color:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.4rem}
+.queued{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.45rem}
+.qrow{display:flex;align-items:center;gap:.5rem;background:var(--ground);
+  border:1px solid var(--rule);border-left:2px solid var(--accent);
+  border-radius:6px;padding:.3rem .5rem;font-size:.78rem;color:var(--soft)}
+.qrow .n{font-family:ui-monospace,Menlo,monospace;font-size:.68rem;flex:none;
+  color:var(--accent);font-weight:700}
+.qrow .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.qrow .x{cursor:pointer;flex:none;opacity:.5}
+.qrow .x:hover{opacity:1;color:var(--bad)}
 .chip{display:flex;align-items:center;gap:.35rem;background:var(--ground);border:1px solid var(--rule);
   border-radius:6px;padding:.2rem .45rem;font-size:.73rem;color:var(--soft)}
 .chip b{color:var(--ink);font-weight:600}
 .chip .x{cursor:pointer}.chip .x:hover{color:var(--bad)}
-.tok-k{color:#c792ea}.tok-s{color:#c3e88d}.tok-c{color:var(--soft);font-style:italic}
-.tok-n{color:#f78c6c}.tok-f{color:#82aaff}
+/* Was Material Palenight hardcoded with no light-theme override: strings
+   measured 1.25:1 and keywords 2.18:1 against the light --code, i.e. syntax
+   highlighting was effectively invisible in one of the two themes. */
+.tok-k{color:var(--tok-k)}.tok-s{color:var(--tok-s)}
+.tok-c{color:var(--soft);font-style:italic}
+.tok-n{color:var(--tok-n)}.tok-f{color:var(--tok-f)}
 .drop{outline:2px dashed var(--accent);outline-offset:-6px}
 .grow{flex:1}
 button{background:var(--accent);color:var(--ground);border:0;border-radius:8px;padding:0 1.1rem;
        font-weight:650;cursor:pointer;font-size:.85rem}
-#send{width:30px;height:30px;padding:0;border-radius:50%;display:flex;align-items:center;
+#send{width:1.875rem;height:1.875rem;padding:0;border-radius:50%;display:flex;align-items:center;
       justify-content:center;font-size:.95rem;line-height:1}
 button:disabled{opacity:.35;cursor:default}
-#stop{width:auto;padding:0 .8rem;height:30px;border-radius:15px;font-size:.78rem}
+#stop{width:auto;padding:0 .8rem;height:1.875rem;border-radius:1rem;font-size:.78rem}
 button.stop{background:var(--bad)}
 .ghost{background:none;border:1px solid var(--rule);color:var(--soft);padding:.25rem .6rem;
   font-size:.68rem;font-weight:650;border-radius:6px;cursor:pointer;-webkit-app-region:no-drag}
@@ -127,27 +235,28 @@ button.stop{background:var(--bad)}
 .tb-right{position:absolute;right:.9rem;display:flex;gap:.4rem}
 .titlebar{position:relative}
 .stats{font-size:.66rem;color:var(--soft);margin-top:.45rem;font-variant-numeric:tabular-nums}
+.approval{border-left:3px solid var(--accent);background:var(--panel);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;margin:.5rem 0;font-size:.83rem}
+.approval b{display:block;margin-bottom:.15rem}
+.approval code{font-size:.78rem}
+.approval .btns{display:flex;gap:.5rem;margin-top:.6rem}
+.approval button{font-size:.76rem;padding:.3rem .7rem;border-radius:6px}
+.approval .deny{background:none;border:1px solid var(--rule);color:var(--soft)}
+.approval .deny:hover{color:var(--bad);border-color:var(--bad)}
+.approval .always{background:none;border:1px solid var(--rule);color:var(--soft)}
 .cancelled{font-size:.7rem;color:var(--bad);margin-top:.4rem;font-weight:650}
 .drafting{font-size:.75rem;color:var(--soft);margin:.4rem 0;font-style:italic}
-.approval{border:1px solid var(--soft);border-radius:.5rem;padding:.6rem .7rem;margin:.45rem 0;background:var(--bg)}
-.approval-head{font-size:.72rem;font-weight:650;margin-bottom:.3rem}
-.approval-args{font-size:.68rem;color:var(--soft);white-space:pre-wrap;word-break:break-all;margin:.2rem 0 .5rem;font-variant-numeric:tabular-nums}
-.approval-btns{display:flex;gap:.4rem;flex-wrap:wrap}
-.approval-btns button{font-size:.68rem;cursor:pointer;border:1px solid var(--soft);border-radius:.35rem;padding:.2rem .55rem;background:none;color:var(--ink)}
-.approval-btns button:hover:not(:disabled){border-color:var(--ink)}
-.approval-btns button:disabled{opacity:.5;cursor:default}
-.approval-btns .allow{color:var(--good,#2a9d5c)}
-.approval-btns .deny{color:var(--bad)}
-.approval.resolved{opacity:.7}
-.approval-outcome{font-size:.68rem;color:var(--soft);margin-top:.35rem}
-.acts{display:flex;gap:.5rem;margin-top:.4rem;opacity:0;transition:opacity .12s}
-.turn:hover .acts{opacity:1}
-.act{font-size:.68rem;color:var(--soft);cursor:pointer;background:none;border:0;padding:.1rem .2rem}
+.acts{display:flex;gap:.15rem;margin-top:.35rem;opacity:0;transition:opacity .12s}
+.turn:hover .acts,.turn:focus-within .acts{opacity:1}
+.act{font-size:.68rem;color:var(--soft);cursor:pointer;background:none;border:0;
+  padding:.2rem .4rem;border-radius:5px;transition:background .12s,color .12s}
+.act:hover{background:var(--code);color:var(--ink)}
+.act:focus-visible{outline:2px solid var(--accent);outline-offset:1px;opacity:1}
 .act:hover{color:var(--ink)}
-#overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:50;
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:80;
          align-items:flex-start;justify-content:center;padding-top:8vh}
 #overlay.open{display:flex}
-.panel{background:var(--panel);border:1px solid var(--rule);border-radius:12px;width:min(560px,92vw);
+.panel{background:var(--panel);border:1px solid var(--rule-strong);border-radius:12px;width:min(35rem,92vw);
        max-height:76vh;overflow-y:auto;padding:1.4rem 1.6rem;box-shadow:0 20px 60px -20px rgba(0,0,0,.6)}
 .panel h2{margin:0 0 1.1rem;font-size:1.05rem;font-family:ui-monospace,Menlo,monospace}
 .fld{margin-bottom:1.1rem}
@@ -162,7 +271,7 @@ button.stop{background:var(--bad)}
 .res:hover{background:var(--ground)}
 .res b{display:block}
 .setnav{display:flex;gap:1.4rem;align-items:flex-start}
-.setside{width:150px;flex:none;display:flex;flex-direction:column;gap:.1rem}
+.setside{width:9.4rem;flex:none;display:flex;flex-direction:column;gap:.1rem}
 .setside button{background:none;border:0;color:var(--soft);font:inherit;font-size:.83rem;
   text-align:left;padding:.4rem .55rem;border-radius:6px;cursor:pointer;display:flex;gap:.5rem}
 .setside button:hover{background:var(--ground);color:var(--ink)}
@@ -174,17 +283,17 @@ button.stop{background:var(--bad)}
 .srow-lbl{flex:1;min-width:0}
 .srow-lbl b{display:block;font-weight:600;font-size:.88rem}
 .srow-lbl span{display:block;color:var(--soft);font-size:.76rem;margin-top:.1rem}
-.srow-ctl{flex:none;min-width:150px;display:flex;justify-content:flex-end;align-items:center;gap:.4rem}
+.srow-ctl{flex:none;min-width:9.4rem;display:flex;justify-content:flex-end;align-items:center;gap:.4rem}
 .srow-ctl input[type=text],.srow-ctl input[type=password],.srow-ctl input[type=number],
-.srow-ctl select{width:150px;background:var(--ground);color:var(--ink);border:1px solid var(--rule);
+.srow-ctl select{width:9.4rem;background:var(--ground);color:var(--ink);border:1px solid var(--rule);
   border-radius:6px;padding:.35rem .5rem;font:inherit;font-size:.83rem}
 .srow-ctl textarea{width:100%;min-height:4.5rem}
 .srow-wide{margin-top:.5rem}
 .srow-wide textarea{width:100%;background:var(--ground);color:var(--ink);border:1px solid var(--rule);
   border-radius:6px;padding:.5rem .6rem;font:inherit;font-size:.83rem;resize:vertical}
-.sw{width:34px;height:19px;border-radius:10px;background:var(--rule);position:relative;cursor:pointer;flex:none}
+.sw{width:2.125rem;height:1.19rem;border-radius:.6rem;background:var(--rule);position:relative;cursor:pointer;flex:none}
 .sw.on{background:var(--accent)}
-.sw i{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+.sw i{position:absolute;top:.125rem;left:.125rem;width:.94rem;height:.94rem;border-radius:50%;
   background:var(--panel);transition:transform .13s}
 .sw.on i{transform:translateX(15px)}
 .seg{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden}
@@ -194,14 +303,14 @@ button.stop{background:var(--bad)}
 .rst{background:none;border:0;color:var(--soft);cursor:pointer;font-size:.72rem;padding:0 .2rem}
 .rst:hover{color:var(--ink)}
 .warn{font-size:.72rem;color:var(--bad);margin-top:.25rem}
-.restart{font-size:.68rem;color:var(--estimated,var(--soft));margin-top:.2rem}
+.restart{font-size:.68rem;color:var(--soft);margin-top:.2rem}
 .setsearch{width:100%;margin-bottom:.9rem}
 .res span{color:var(--soft);font-size:.75rem}
 .tool{border:1px solid var(--rule);border-radius:8px;background:var(--panel);margin:.5rem 0;
       font-size:.82rem;overflow:hidden}
 .tool-head{display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;cursor:pointer;user-select:none}
 .tool-head:hover{background:var(--code)}
-.tool-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--soft)}
+.tool-dot{width:.44rem;height:.44rem;border-radius:50%;flex:none;background:var(--soft)}
 .tool.running .tool-dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
 .tool.ok .tool-dot{background:var(--accent)}
 .tool.err .tool-dot{background:var(--bad)}
@@ -224,46 +333,52 @@ button.stop{background:var(--bad)}
 .think-body{display:none;white-space:pre-wrap;margin-top:.35rem;font-size:.82rem}
 .think.open .think-body{display:block}
 </style></head><body>
-<div class="titlebar">
+<div class="titlebar" data-tauri-drag-region>
   <button class="modelpill" id="modelpill" type="button">
     <span id="modelname">Select model</span><span class="chev">▼</span></button>
-  <span id="status" class="s-boot">starting engine</span>
-  <div class="tb-right">
-    <button class="ghost" id="toggle" type="button">☰</button>
+  <span id="status" class="s-boot" role="status" aria-live="polite"
+        data-tauri-drag-region>starting engine</span>
+  <div class="tb-right" data-tauri-drag-region>
+    <button class="ghost" id="toggle" type="button" aria-label="Toggle sidebar"
+            aria-expanded="true" aria-controls="side">☰</button>
   </div>
 </div>
 <div id="body">
-  <aside id="side">
+  <aside id="side" aria-label="Conversations">
     <div class="sidetop">
-      <button class="navbtn" id="newchat" type="button"><span class="ic">✎</span>New chat<span class="k">⌘N</span></button>
-      <button class="navbtn" id="search" type="button"><span class="ic">⌕</span>Search<span class="k">⌘K</span></button>
+      <button class="navbtn" id="newchat" type="button"><span class="ic" aria-hidden="true">✎</span>New chat<span class="k">⌘N</span></button>
+      <button class="navbtn" id="search" type="button"><span class="ic" aria-hidden="true">⌕</span>Search<span class="k">⌘K</span></button>
     </div>
     <div class="sectlbl">Recents</div>
-    <div id="chats"></div>
+    <div id="chats" role="group" aria-label="Recent conversations"></div>
     <div class="sidefoot">
-      <button class="navbtn" id="logsBtn" type="button"><span class="ic">▤</span>Engine log</button>
-      <button class="navbtn" id="settings" type="button"><span class="ic">⚙</span>Settings<span class="k">⌘,</span></button>
+      <button class="navbtn" id="logsBtn" type="button"><span class="ic" aria-hidden="true">▤</span>Engine log</button>
+      <button class="navbtn" id="settings" type="button"><span class="ic" aria-hidden="true">⚙</span>Settings<span class="k">⌘,</span></button>
     </div>
   </aside>
-  <div id="main">
+  <main id="main">
     <div id="thread" class="empty">
-      <div id="hero"><div class="mark">P</div>
+      <div id="hero"><img class="mark" src="logo.png" alt="" width="46" height="46"/>
         <h1>Ready when you are</h1><p>Ask anything, or give it a task.</p></div>
-      <div class="inner" id="turns"></div>
+      <div class="inner" id="turns" role="log" aria-live="polite" aria-relevant="additions"
+           aria-label="Conversation"></div>
     </div>
-    <form id="f"><div class="fi">
+    <form id="f"><div class="inner"><div class="fi">
+  <div class="queued" id="queued"></div>
   <div class="chips" id="chips"></div>
   <textarea id="p" rows="1" placeholder="Ask anything…" disabled></textarea>
   <input type="file" id="filein" multiple style="display:none"/>
   <div class="ctools">
-    <button class="ctool" id="attach" type="button" title="Attach a file">＋</button>
-    <button class="ctool on" id="toolsBtn" type="button" title="Tools enabled">⚒ Tools</button>
+    <button class="ctool" id="attach" type="button" title="Attach a file"
+            aria-label="Attach a file">+</button>
+    <button class="ctool on" id="toolsBtn" type="button" title="Tools enabled"
+            aria-pressed="true">⚒ Tools</button>
     <span class="grow"></span>
-    <button id="send" disabled title="Send">↑</button>
+    <button id="send" disabled title="Send" aria-label="Send message">↑</button>
     <button id="stop" class="stop" type="button" style="display:none">Stop</button>
   </div>
-</div></form>
-  </div>
+</div></div></form>
+  </main>
 </div>
 <div id="overlay"><div class="panel" id="panel"></div></div>
 <script>
@@ -340,6 +455,12 @@ const SETTINGS = [
     description: "Stored in the macOS keychain, never in the settings file. Blank uses the environment.",
     keywords: ["token", "secret", "credential", "openai"],
     control: { kind: "text", secret: true },
+    // The engine refuses to export anything shorter than 20 characters, so
+    // without this the field accepted a typo, stored it, echoed it back masked
+    // as if it were set, and every turn failed as though no key existed.
+    validate: (v) => (!v || String(v).length >= 20
+      ? null
+      : "That looks too short for an API key. Leave it blank to use the environment."),
     default: "", requiresRestart: true },
 
   // ---- Chat ---------------------------------------------------------------
@@ -381,9 +502,12 @@ const SETTINGS = [
     default: "system" },
 
   { key: "font_size", section: "appearance", label: "Text size",
+    description: "Scales the whole interface \u2014 messages, sidebar, settings and composer.",
+    keywords: ["scale", "zoom", "bigger", "smaller", "interface"],
     control: { kind: "select", options: [
-      { value: 14, label: "14 px" }, { value: 15, label: "15 px" },
-      { value: 16, label: "16 px" }, { value: 18, label: "18 px" }]},
+      { value: 13, label: "13 px" }, { value: 14, label: "14 px" },
+      { value: 15, label: "15 px" }, { value: 16, label: "16 px" },
+      { value: 18, label: "18 px" }, { value: 20, label: "20 px" }]},
     default: 15 },
 
   { key: "code_font_size", section: "appearance", label: "Code text size",
@@ -499,6 +623,73 @@ const { invoke } = window.__TAURI__.core;
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
 let PORT=null, atBottom=true, activeRun=null, activeReader=null;
+/** Set by Regenerate for exactly one submit, then cleared. */
+let regenerateOf=null;
+// The renderer honours these directly -- everything in here was previously
+// written to settings.json and read by nothing.
+let CFG={...DEFAULTS};
+/** The text size the stylesheet was authored against; --ui-scale is relative
+ *  to this, so 15 leaves the interface exactly as designed. */
+const BASE_TEXT_PX=15;
+/**
+ * In-app confirmation, because `window.confirm` does not work here.
+ *
+ * A WKWebView under Tauri implements no JS dialog panel, so `confirm()` returns
+ * false immediately without ever showing anything. Every guard written as
+ * `if (!confirm(...)) return;` therefore took the cancel branch every time --
+ * which is how adding `confirm_delete` silently broke deleting a conversation
+ * outright. Returns a promise so callers read the same way they did.
+ */
+function askConfirm(message, {danger=true, ok='Delete', cancel='Cancel'}={}){
+  return new Promise(resolve=>{
+    const back=document.createElement('div'); back.className='confirm-back';
+    back.innerHTML='<div class="confirm-box" role="alertdialog" aria-modal="true">'
+      +'<p></p><div class="row"><button type="button" class="ghost cx"></button>'
+      +'<button type="button" class="ok"></button></div></div>';
+    back.querySelector('p').textContent=message;
+    const okBtn=back.querySelector('.ok'), cxBtn=back.querySelector('.cx');
+    okBtn.textContent=ok; cxBtn.textContent=cancel;
+    if(danger) okBtn.classList.add('danger');
+    const close=v=>{ back.remove(); document.removeEventListener('keydown',key); resolve(v); };
+    const key=e=>{ if(e.key==='Escape'){ e.preventDefault(); close(false); } };
+    okBtn.onclick=()=>close(true); cxBtn.onclick=()=>close(false);
+    back.onclick=e=>{ if(e.target===back) close(false); };
+    document.addEventListener('keydown',key);
+    document.body.appendChild(back);
+    okBtn.focus();
+  });
+}
+
+let toastTimer=null;
+/** Brief, non-blocking confirmation. Silence after an action the user did not
+ *  explicitly ask for -- a paste turning into a chip -- reads as a bug. */
+function toast(msg){
+  let t=document.getElementById('toast');
+  if(!t){ t=document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),2600);
+}
+function applyPrefs(c){
+  const r=document.documentElement.style;
+  const size=Number(c.font_size)||15;
+  // Text size used to set --fs, which only .bubble read -- so the chat text
+  // changed and the sidebar, titlebar, settings and composer did not. Driving
+  // the rem root instead scales the whole interface, because everything else
+  // in the stylesheet is expressed in rem. 15 is the default and corresponds
+  // to the 16px root the sheet was designed against.
+  const scale=size/BASE_TEXT_PX;
+  r.setProperty('--ui-scale', String(scale));
+  // Derived from the same scale rather than restated, and code scales with
+  // prose instead of staying at its absolute setting while everything grows.
+  r.setProperty('--fs', size+'px');
+  r.setProperty('--fs-code', ((Number(c.code_font_size)||12)*scale).toFixed(2)+'px');
+  const motion = c.reduce_motion === undefined ? 'system' : String(c.reduce_motion);
+  const reduce = motion === 'on'
+    || (motion === 'system'
+        && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true);
+  document.documentElement.classList.toggle('no-motion', reduce);
+}
 const stopBtn=document.getElementById('stop'), newChat=document.getElementById('newchat');
 const rid=()=>Math.random().toString(36).slice(2)+Date.now().toString(36);
 const modelName=document.getElementById('modelname');
@@ -507,6 +698,22 @@ const hero=document.getElementById('hero');
 // out of sync with whether the transcript actually has content.
 const syncEmpty=()=>thread.classList.toggle('empty', turns.children.length===0);
 let toolsOn=true;
+// Messages typed while a turn is running. All three reference apps allow this;
+// blocking the composer mid-run makes a user wait to record a thought they
+// already had. Queued prompts send in order as each turn settles.
+const queue=[]; let running=false;
+const queuedEl=document.getElementById('queued');
+function renderQueue(){
+  queuedEl.innerHTML='';
+  queue.forEach((q,i)=>{
+    const r=document.createElement('div'); r.className='qrow';
+    r.innerHTML='<span class="n"></span><span class="t"></span><span class="x" title="Remove">×</span>';
+    r.querySelector('.n').textContent=(i+1)+' of '+queue.length;
+    r.querySelector('.t').textContent=q;
+    r.querySelector('.x').onclick=()=>{ queue.splice(i,1); renderQueue(); };
+    queuedEl.appendChild(r);
+  });
+}
 const chatsEl=document.getElementById('chats');
 let chatId=rid();
 
@@ -525,11 +732,25 @@ async function refreshChats(){
       for(const c of groups[g]){
       const d=document.createElement('div');
       d.className='chat'+(c.id===chatId?' active':'')+(c.corrupt?' corrupt':'');
-      d.innerHTML=`<span class="t"></span><span class="x" title="Delete">×</span>`;
+      d.innerHTML='<span class="ct"><span class="t"></span><span class="meta"></span></span>'
+                 +'<span class="x" title="Delete">\u00d7</span>';
       d.querySelector('.t').textContent=c.title;
-      d.querySelector('.t').onclick=()=>openChat(c.id);
+      d.querySelector('.meta').textContent=
+        [relTime(c.updated), c.count ? c.count+' messages' : null]
+          .filter(Boolean).join(' \u00b7 ');
+      d.querySelector('.t').title=c.title;   // truncated titles are unreadable otherwise
+      d.tabIndex=0;
+      d.setAttribute('role','button');
+      d.setAttribute('aria-label',c.title);
+      if(c.id===chatId) d.setAttribute('aria-current','true');
+      d.onclick=ev=>{ if(!ev.target.closest('.x')) openChat(c.id); };
+      d.onkeydown=ev=>{
+        if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); openChat(c.id); }
+      };
       d.querySelector('.x').onclick=async ev=>{
         ev.stopPropagation();
+        if(CFG.confirm_delete!==false && !await askConfirm(
+             `Delete \u201c${c.title}\u201d? This cannot be undone.`)) return;
         await fetch(`http://127.0.0.1:${PORT}/chats/${c.id}`,{method:'DELETE'});
         if(c.id===chatId){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
         refreshChats();
@@ -551,13 +772,23 @@ async function refreshChats(){
 async function openChat(id){
   chatId=id; turns.innerHTML=''; syncEmpty();
   try{
-    const c=await (await fetch(`http://127.0.0.1:${PORT}/chats/${id}`)).json();
-    for(const m of c.messages||[]){
+    const r=await fetch(`http://127.0.0.1:${PORT}/chats/${id}`);
+    if(!r.ok){ fail('Conversation not found',
+      'It may have been deleted in another window.',''); refreshChats(); return; }
+    const c=await r.json();
+    const msgs=c.messages||[];
+    msgs.forEach((m,i)=>{
       const b=turn(m.role==='user'?'u':'a', m.role==='user'?'You':'PraisonAI');
       if(m.role==='user'){ b.classList.add('plain'); b.textContent=m.content; }
       else b.innerHTML=md(m.content);
       b.parentElement.classList.remove('live');
-    }
+      // Stored position, not DOM position -- see addActions.
+      b.parentElement.dataset.msgIndex=String(i);
+      if(m.role!=='user'){
+        addActions(b.parentElement, msgs[i-1]?.content||'', m.content, i-1,
+                   m.version_count||1, m.version_active||0);
+      }
+    });
   }catch{}
   refreshChats(); atBottom=true; stick();
 }
@@ -681,62 +912,109 @@ function toolResult(host,callId,name,ok,output,seconds){
   if(!ok) el.classList.add('open');   // failures open themselves; successes stay quiet
   stick();
 }
-// A tool the user must approve before it runs. The engine is blocked in
-// _await_decision until we POST /approve/{id}; ignoring the event would stall
-// the turn for the full 300s timeout. The buttons resolve it immediately.
-function approvalCard(host,data){
-  const el=document.createElement('div');
-  el.className='approval'; el.dataset.approval=data.approval_id;
-  el.innerHTML=`<div class="approval-head"></div>
-    <pre class="approval-args"></pre>
-    <div class="approval-btns">
-      <button class="allow" type="button">Allow</button>
-      <button class="always" type="button">Always allow</button>
-      <button class="deny" type="button">Deny</button>
-    </div>`;
-  el.querySelector('.approval-head').textContent=`Allow ${data.name}?`;
-  el.querySelector('.approval-args').textContent=
-    typeof data.args==='string'?data.args:JSON.stringify(data.args??{},null,2);
-  const btns=[...el.querySelectorAll('.approval-btns button')];
-  const done=(label)=>{
-    btns.forEach(b=>b.disabled=true);
-    el.classList.add('resolved');
-    const o=document.createElement('div'); o.className='approval-outcome';
-    o.textContent=label; el.appendChild(o);
-  };
-  const decide=async(choice,label)=>{
-    done(label);
-    try{ await fetch(`http://127.0.0.1:${PORT}/approve/${data.approval_id}`,
-      {method:'POST',headers:{'content-type':'application/json'},
-       body:JSON.stringify({choice})}); }catch{}
-  };
-  el.querySelector('.allow').onclick=()=>decide('allow','Allowed');
-  el.querySelector('.always').onclick=()=>decide('always',`Always allowing ${data.name}`);
-  el.querySelector('.deny').onclick=()=>decide('deny','Denied');
-  host.appendChild(el); stick();
-  return el;
-}
 // Copy / regenerate / delete, attached once a turn settles.
-function addActions(turnEl, prompt, answer){
+/**
+ * `userIndex` is the position the user message actually occupies on disk, sent
+ * by the engine on `end`. It used to be derived from DOM position -- but a
+ * cancelled or errored turn stays on screen and is never persisted, so every
+ * later Fork and Delete pointed one exchange too far. The 404 that came back
+ * was ignored and the turn was removed from the screen regardless, so it looked
+ * deleted and reappeared on reopen.
+ *
+ * A null index means the turn was never stored; Fork and Delete are then not
+ * offered at all, rather than offered and silently wrong.
+ */
+/**
+ * `< 2/3 >` over the stored answers to one prompt.
+ *
+ * Regenerating used to replace the previous answer, so comparing two of them
+ * meant copying one out first. The engine now keeps them all and this selects
+ * which is live.
+ */
+function versionNav(turnEl, userIndex, count, active){
+  turnEl.querySelector('.vnav')?.remove();
+  if(!(count>1)) return;
+  const nav=document.createElement('div'); nav.className='vnav';
+  nav.innerHTML='<button type="button" class="vb" aria-label="Previous version">\u2039</button>'
+    +'<span class="vn"></span>'
+    +'<button type="button" class="vb" aria-label="Next version">\u203a</button>';
+  const [prev,next]=nav.querySelectorAll('.vb');
+  const label=nav.querySelector('.vn');
+  const paint=()=>{
+    label.textContent=`${active+1}/${count}`;
+    prev.disabled=active===0; next.disabled=active===count-1;
+  };
+  const go=async d=>{
+    const want=active+d;
+    if(want<0||want>=count) return;
+    try{
+      const r=await fetch(`http://127.0.0.1:${PORT}/version/${chatId}/${userIndex}/${want}`,
+        {method:'POST'});
+      const j=await r.json();
+      if(!r.ok||!j.ok){ fail('Could not switch version', j.error||`HTTP ${r.status}`,''); return; }
+      active=want;
+      turnEl.querySelector('.bubble').innerHTML=md(j.content);
+      paint(); stick();
+    }catch(e){ fail('Could not switch version', String(e),''); }
+  };
+  prev.onclick=()=>go(-1); next.onclick=()=>go(1);
+  paint();
+  turnEl.appendChild(nav);
+}
+
+function addActions(turnEl, prompt, answer, userIndex, versions, active){
+  versionNav(turnEl, userIndex, versions||1, active||0);
   if(turnEl.querySelector('.acts')) return;
   const bar=document.createElement('div'); bar.className='acts';
   const mk=(label,fn)=>{ const b=document.createElement('button');
     b.className='act'; b.type='button'; b.textContent=label; b.onclick=fn; bar.appendChild(b); };
   mk('Copy',()=>{ navigator.clipboard.writeText(answer); });   // the source text, not the DOM
-  mk('Regenerate',()=>{ box.value=prompt; document.getElementById('f').requestSubmit(); });
-  mk('Fork',async()=>{
-    const idx=[...turns.querySelectorAll('.turn.u')].findIndex(u=>u.nextElementSibling===turnEl);
-    if(idx<0) return;
-    const r=await (await fetch('http://127.0.0.1:'+PORT+'/fork/'+chatId+'/'+(idx*2+1),
-      {method:'POST'})).json();
-    if(r.ok){ openChat(r.id); }
+  mk('Regenerate',()=>{
+    // Named so the engine files the answer against the same prompt rather than
+    // appending a second copy of the question.
+    regenerateOf = Number.isInteger(userIndex) ? userIndex : null;
+    setComposer(prompt);
+    document.getElementById('f').requestSubmit();
   });
-  mk('Delete',async()=>{
-    const idx=[...turns.querySelectorAll('.turn.u')].findIndex(u=>u.nextElementSibling===turnEl);
-    if(idx>=0) await fetch(`http://127.0.0.1:${PORT}/messages/${chatId}/${idx*2}`,{method:'POST'});
-    turnEl.previousElementSibling?.remove(); turnEl.remove(); refreshChats();
-  });
+  if(Number.isInteger(userIndex)){
+    mk('Fork',async()=>{
+      try{
+        const r=await fetch(`http://127.0.0.1:${PORT}/fork/${chatId}/${userIndex+1}`,
+          {method:'POST'});
+        const j=await r.json();
+        if(r.ok && j.ok) openChat(j.id);
+        else fail('Could not fork', j.error||`The engine returned ${r.status}.`,'');
+      }catch(e){ fail('Could not fork', String(e),''); }
+    });
+    mk('Delete',async()=>{
+      if(CFG.confirm_delete!==false && !await askConfirm(
+           'Delete this exchange? This cannot be undone.')) return;
+      try{
+        const r=await fetch(`http://127.0.0.1:${PORT}/messages/${chatId}/${userIndex}`,
+          {method:'POST'});
+        if(!r.ok){
+          // Removing it from the screen anyway is how a message looked deleted
+          // and came back on reopen.
+          fail('Could not delete', `The engine returned ${r.status}.`,''); return;
+        }
+      }catch(e){ fail('Could not delete', String(e),''); return; }
+      turnEl.previousElementSibling?.remove(); turnEl.remove();
+      openChat(chatId);   // re-read, so every remaining index is authoritative
+    });
+  }
   turnEl.appendChild(bar);
+}
+
+/** "just now" / "14m" / "3h" / "Tue" / "12 Mar" -- short enough for a sidebar. */
+function relTime(epochSeconds){
+  if(!epochSeconds) return '';
+  const d=Math.max(0,Math.floor(Date.now()/1000-epochSeconds));
+  if(d<60) return 'just now';
+  if(d<3600) return Math.floor(d/60)+'m ago';
+  if(d<86400) return Math.floor(d/3600)+'h ago';
+  const then=new Date(epochSeconds*1000);
+  if(d<604800) return then.toLocaleDateString(undefined,{weekday:'short'});
+  return then.toLocaleDateString(undefined,{day:'numeric',month:'short'});
 }
 
 function thinkBlock(host){
@@ -744,6 +1022,7 @@ function thinkBlock(host){
   el.className='think';
   el.innerHTML=`<div class="think-head"><span class="tool-chev">▶</span><span class="lbl">Thinking…</span></div>
                 <div class="think-body"></div>`;
+  if(CFG.collapse_reasoning!==true) el.classList.add('open');
   el.querySelector('.think-head').onclick=()=>el.classList.toggle('open');
   host.appendChild(el); stick();
   return el;
@@ -754,21 +1033,54 @@ function turn(cls,who){
   d.innerHTML=`<div class="who">${who}</div><div class="bubble"></div>`;
   turns.appendChild(d); syncEmpty(); stick(); return d.querySelector('.bubble');
 }
-function fail(title,detail,tail){
+/**
+ * `retry` is the prompt to re-send. When present the banner carries a button,
+ * because an error the user can act on and an error they can only read are
+ * different things -- ours only ever did the second.
+ */
+function fail(title,detail,tail,retry){
   const d=document.createElement('div'); d.className='turn';
-  d.innerHTML=`<div class="err"><b>${title}</b>${detail||''}${tail?`<pre>${tail}</pre>`:''}</div>`;
-  turns.appendChild(d); stick();
+  d.innerHTML='<div class="err"><b></b><span></span></div>';
+  d.querySelector('b').textContent=title;
+  d.querySelector('span').textContent=detail||'';
+  if(tail){ const pre=document.createElement('pre'); pre.textContent=tail;
+            d.querySelector('.err').appendChild(pre); }
+  if(retry){
+    const row=document.createElement('div'); row.className='errbtns';
+    const again=document.createElement('button');
+    again.type='button'; again.className='ghost'; again.textContent='Try again';
+    again.onclick=()=>{ d.remove(); syncEmpty(); setComposer(retry);
+                        document.getElementById('f').requestSubmit(); };
+    const copy=document.createElement('button');
+    copy.type='button'; copy.className='ghost'; copy.textContent='Copy details';
+    copy.onclick=()=>{ navigator.clipboard.writeText(
+      [title,detail,tail].filter(Boolean).join('\n\n'));
+      copy.textContent='Copied'; setTimeout(()=>copy.textContent='Copy details',1200); };
+    row.append(again,copy); d.querySelector('.err').appendChild(row);
+  }
+  turns.appendChild(d); syncEmpty(); stick();
+  return d;
 }
 
 // Publish at most once per frame. Without this the render cost scales with token
 // count instead of elapsed time, and the app degrades exactly when the model is fastest.
+// Ported verbatim from frontend/src/stream-pacing.ts, which is the tested
+// implementation. The earlier copy here omitted clearTimeout, so the fallback
+// timer from one cycle fired during the next and reopened the gate early --
+// pacing that quietly stopped pacing. shipped-gate.test.mjs runs the module's
+// own assertions against *this* function so the two cannot drift again.
+const MAX_HELD_CHARS=256, UNPAINTED_REOPEN_MS=500;
 function gate(){
-  let open=true, publishedAt=0;
-  return n=>{
-    if(!open && n-publishedAt<256) return false;
-    publishedAt=n;
-    if(open){ open=false; const reopen=()=>open=true;
-      requestAnimationFrame(reopen); setTimeout(reopen,500); }
+  let open=true, publishedAt=0, timer=null;
+  return streamed=>{
+    if(!open && streamed-publishedAt<MAX_HELD_CHARS) return false;
+    publishedAt=streamed;
+    if(open){
+      open=false;
+      const reopen=()=>{ open=true; if(timer!==null){ clearTimeout(timer); timer=null; } };
+      requestAnimationFrame(reopen);
+      timer=setTimeout(reopen,UNPAINTED_REOPEN_MS);
+    }
     return true;
   };
 }
@@ -778,25 +1090,111 @@ const st=await invoke('engine_status');
 if(st.state==='ready'){
   PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
   box.disabled=send.disabled=false; box.focus(); refreshChats(); refreshModelName();
+  try{ CFG={...DEFAULTS,...await (await fetch(
+        `http://127.0.0.1:${PORT}/settings`)).json()}; }catch{}
+  applyTheme(CFG.theme);
+  applyPrefs(CFG);
+  if(CFG.check_updates!==false) checkUpdates();
+}else if(st.reason==='No usable Python'){
+  // A clean machine has nothing to run the engine with. Offering to build it
+  // is the difference between a product and an error message: "No usable
+  // Python" is true and useless to someone who has never installed one.
+  status.textContent='setup needed'; status.className='s-boot';
+  firstRun(st);
 }else{
   status.textContent='engine failed'; status.className='s-fail';
   fail(st.reason, st.detail, st.tail);
 }
+}
+
+/** The steps the shell reports, in the order it runs them. */
+const SETUP_STEPS=[
+  {id:'uv',     label:'Fetching the installer'},
+  {id:'python', label:'Installing Python'},
+  {id:'venv',   label:'Creating the environment'},
+  {id:'deps',   label:'Installing PraisonAI'},
+];
+
+/**
+ * First run: build the engine's environment, showing what is happening.
+ *
+ * The whole thing takes minutes on a cold machine. A window that says nothing
+ * for three minutes is indistinguishable from one that has hung, so every step
+ * is listed up front and marked as it completes.
+ */
+function firstRun(st){
+  thread.classList.remove('empty');
+  turns.innerHTML='';
+  const w=document.createElement('div'); w.className='setup';
+  w.innerHTML='<img class="mark" src="logo.png" alt="" width="46" height="46"/>'
+    +'<h2>One-time setup</h2>'
+    +'<p class="lede"></p>'
+    +'<ol class="steps"></ol>'
+    +'<div class="row"><button type="button" class="go">Set up PraisonAI</button></div>'
+    +'<p class="why"></p>';
+  w.querySelector('.lede').textContent=
+    'PraisonAI needs a Python environment to run its engine. This downloads it '
+    +'into your Library folder \u2014 nothing is installed system-wide, and it '
+    +'only happens once.';
+  w.querySelector('.why').textContent=st.detail||'';
+  const list=w.querySelector('.steps');
+  const rows={};
+  for(const s of SETUP_STEPS){
+    const li=document.createElement('li');
+    li.innerHTML='<span class="dot"></span><span class="lb"></span><span class="dt"></span>';
+    li.querySelector('.lb').textContent=s.label;
+    list.appendChild(li); rows[s.id]=li;
+  }
+  const go=w.querySelector('.go');
+  turns.appendChild(w); syncEmpty();
+
+  const mark=(id,state,detail)=>{
+    const li=rows[id]; if(!li) return;
+    li.className=state;
+    li.querySelector('.dt').textContent=detail||'';
+  };
+
+  go.onclick=async()=>{
+    go.disabled=true; go.textContent='Setting up\u2026';
+    w.querySelector('.why').textContent='';
+    let un=null;
+    try{
+      un=await window.__TAURI__.event.listen('provision',e=>{
+        const {id,state,detail}=e.payload||{};
+        mark(id,state,detail);
+      });
+      await invoke('provision_engine');
+      // The engine is spawned by engine_status, so the shortest correct path
+      // from here is to start over with an interpreter that now exists.
+      go.textContent='Starting\u2026';
+      await boot();
+      if(PORT!==null) w.remove();
+    }catch(err){
+      go.disabled=false; go.textContent='Try again';
+      const why=w.querySelector('.why');
+      why.textContent=String(err&&err.message||err);
+      why.className='why bad';
+    }finally{ if(un) un(); }
+  };
 }
 boot();
 
 document.getElementById('f').addEventListener('submit',async e=>{
   e.preventDefault();
   const text=box.value.trim(); if(!text||!PORT) return;
-  box.value=''; box.disabled=send.disabled=true;
-  send.style.display='none'; stopBtn.style.display='';
+  setComposer('');
+  if(running){ queue.push(text); renderQueue(); return; }
+  running=true;
+  send.style.display='none'; stopBtn.style.display=''; box.focus();
   const runId=rid(); activeRun=runId;
   const sent=attached; attached=[]; renderChips();
   const ub=turn('u','You'); ub.classList.add('plain'); ub.textContent=text;
   const out=turn('a','PraisonAI');
   out.innerHTML='<span class="caret"></span>';
 
-  let acc='', streamed=0; const canPublish=gate();
+  let acc='', streamed=0, userIndex=null, versions=1, vactive=0;
+  const regen=regenerateOf; regenerateOf=null;   // consumed by this submit only
+  const canPublish=gate();
   const host=out.parentElement;
   let think=null, thinkText='', thinkStart=0, thinkTimer=null, draft=null;
   const paint=()=>{ out.innerHTML=md(acc); stick(); };
@@ -804,8 +1202,10 @@ document.getElementById('f').addEventListener('submit',async e=>{
   try{
     // SSE straight from the webview to the engine. Nothing streams through IPC.
     const res=await fetch(`http://127.0.0.1:${PORT}/chat`,{
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:text})});
-    const reader=res.body.getReader(), dec=new TextDecoder();
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:text,chat_id:chatId,session:chatId,run_id:runId,
+      attachments:sent,tools:toolsOn,regenerate_of:regen})});
+    const reader=res.body.getReader(); activeReader=reader;
+    const dec=new TextDecoder();
     let buf='';
     for(;;){
       const {done,value}=await reader.read(); if(done) break;
@@ -829,14 +1229,47 @@ document.getElementById('f').addEventListener('submit',async e=>{
             thinkTimer=setInterval(()=>{ if(think) think.querySelector('.lbl').textContent=
               `Thinking… ${((Date.now()-thinkStart)/1000).toFixed(1)}s`; },100); }
           thinkText+=data.text; think.querySelector('.think-body').textContent=thinkText; stick(); }
+        else if(ev==='approval_request'){
+          // Without this the engine blocks for the full approval timeout and
+          // then declines -- a five-minute freeze showing only a caret.
+          const el=document.createElement('div'); el.className='approval';
+          el.innerHTML='<b></b><code></code><div class="btns">'
+            +'<button class="allow">Allow once</button>'
+            +'<button class="always">Always allow</button>'
+            +'<button class="deny">Deny</button></div>';
+          el.querySelector('b').textContent='Allow '+data.name+'?';
+          el.querySelector('code').textContent=JSON.stringify(data.args||{});
+          const answer=async choice=>{
+            const btns=el.querySelector('.btns');
+            // Only report the decision once the engine has acknowledged it.
+            // Announcing it first meant a failed request still read as
+            // "Allowed" while the run sat blocked until its timeout.
+            btns.innerHTML='<span class="hint">Sending\u2026</span>';
+            try{
+              const r=await fetch('http://127.0.0.1:'+PORT+'/approve/'+data.approval_id,
+                {method:'POST',headers:{'content-type':'application/json'},
+                 body:JSON.stringify({choice})});
+              if(!r.ok) throw new Error('engine returned '+r.status);
+              btns.innerHTML='<span class="hint">'
+                +(choice==='deny'?'Denied':'Allowed')+'</span>';
+            }catch(e){
+              btns.innerHTML='<span class="hint" style="color:var(--bad)">'
+                +'Could not send your decision \u2014 '+e.message+'</span>';
+              const retry=document.createElement('button');
+              retry.className='ctool'; retry.textContent='Retry';
+              retry.onclick=()=>answer(choice); btns.appendChild(retry);
+            }
+          };
+          el.querySelector('.allow').onclick=()=>answer('allow');
+          el.querySelector('.always').onclick=()=>answer('always');
+          el.querySelector('.deny').onclick=()=>answer('deny');
+          host.appendChild(el); stick(); }
         else if(ev==='tool_drafting'){
           // A status, not a row. Materialising a card from a name-only event
           // strands an argless placeholder if the call is abandoned.
           if(!draft){ draft=document.createElement('div'); draft.className='drafting';
                       host.appendChild(draft); }
           draft.textContent=`Preparing ${data.name}…`; stick(); }
-        else if(ev==='approval_request'){ paint(); draft?.remove(); draft=null;
-                                   approvalCard(host,data); }
         else if(ev==='tool_call'){ paint(); draft?.remove(); draft=null;
                                    toolCard(host,data.call_id,data.name,data.args); }
         else if(ev==='tool_result'){ toolResult(host,data.call_id,data.name,data.ok,data.output,data.seconds); }
@@ -848,24 +1281,32 @@ document.getElementById('f').addEventListener('submit',async e=>{
         else if(ev==='error'){ out.innerHTML=md(acc);
           const titles={auth:'Authentication failed',rate_limit:'Rate limited',
                         empty:'No output',internal:'The engine reported an error'};
-          fail(titles[data.kind]||titles.internal, data.message,''); }
+          fail(titles[data.kind]||titles.internal, data.message,'', text); }
         else if(ev==='cancelled'){ paint();
           const c=document.createElement('div'); c.className='cancelled';
           c.textContent='Stopped'; out.parentElement.appendChild(c); }
-        else if(ev==='end'){ paint(); }
+        else if(ev==='end'){ paint(); userIndex=data?.user_index ?? null;
+          versions=data?.versions ?? 1; vactive=data?.active ?? 0; }
       }
     }
     paint();
-    if(!acc) fail('No output','The engine finished without producing any text.','');
-  }catch(err){ fail('Connection to the engine failed', String(err),''); }
+    if(!acc) fail('No output','The engine finished without producing any text.','',text);
+  }catch(err){ fail('Connection to the engine failed', String(err),'', text); }
   finally{
     clearInterval(thinkTimer); draft?.remove();
-    addActions(out.parentElement, text, acc);
+    addActions(out.parentElement, text, acc, userIndex, versions, vactive);
     out.parentElement.classList.remove('live');
     activeRun=null; activeReader=null;
     stopBtn.style.display='none'; send.style.display='';
-    box.disabled=send.disabled=false; box.focus();
+    box.focus();
     refreshChats();
+    running=false;
+    // Drain one at a time so ordering is preserved and a queued prompt cannot
+    // start before the turn ahead of it has been persisted.
+    if(queue.length){
+      const next=queue.shift(); renderQueue();
+      setComposer(next); document.getElementById('f').requestSubmit();
+    }
   }
 });
 
@@ -876,6 +1317,7 @@ stopBtn.addEventListener('click',async()=>{
   // would leave the engine generating into a socket nobody reads.
   try{ await fetch(`http://127.0.0.1:${PORT}/cancel/${activeRun}`,{method:'POST'}); }catch{}
   try{ await activeReader?.cancel(); }catch{}
+  if(queue.length){ queue.length=0; renderQueue(); }
   stopBtn.disabled=false;
 });
 
@@ -883,13 +1325,40 @@ newChat.addEventListener('click',()=>{
   chatId=rid(); turns.innerHTML=''; syncEmpty(); box.focus(); refreshChats();
 });
 
-document.getElementById('toggle').addEventListener('click',()=>{
-  document.getElementById('side').classList.toggle('hidden');
+document.getElementById('toggle').addEventListener('click',e=>{
+  const hidden=document.getElementById('side').classList.toggle('hidden');
+  e.currentTarget.setAttribute('aria-expanded',String(!hidden));
 });
 
 // ---- overlay: settings and search share one panel ----
 const overlay=document.getElementById('overlay'), panel=document.getElementById('panel');
-const closeOverlay=()=>overlay.classList.remove('open');
+overlay.setAttribute('role','dialog');
+overlay.setAttribute('aria-modal','true');
+panel.setAttribute('tabindex','-1');
+/** Whatever had focus before the overlay opened, so Escape can give it back. */
+let returnFocusTo=null;
+document.addEventListener('focusin',e=>{
+  if(!overlay.classList.contains('open')) returnFocusTo=e.target;
+},true);
+const closeOverlay=()=>{
+  overlay.classList.remove('open');
+  // Focus was inside a panel that no longer exists; without this it falls to
+  // <body> and the next Tab starts from the top of the page.
+  if(returnFocusTo && document.contains(returnFocusTo)) returnFocusTo.focus();
+};
+
+/** Keep Tab inside the open dialog. A modal the user can tab out of is not
+ *  modal, and everything behind it is inert to the eye but not the keyboard. */
+overlay.addEventListener('keydown',e=>{
+  if(e.key!=='Tab' || !overlay.classList.contains('open')) return;
+  const focusable=[...panel.querySelectorAll(
+    'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+    .filter(el=>!el.disabled && el.offsetParent!==null);
+  if(!focusable.length) return;
+  const first=focusable[0], last=focusable[focusable.length-1];
+  if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+  else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+});
 overlay.addEventListener('click',e=>{ if(e.target===overlay) closeOverlay(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&overlay.classList.contains('open')) closeOverlay(); });
 
@@ -903,6 +1372,7 @@ document.getElementById('modelpill').addEventListener('click',
 document.getElementById('toolsBtn').addEventListener('click',e=>{
   toolsOn=!toolsOn;
   e.currentTarget.classList.toggle('on',toolsOn);
+  e.currentTarget.setAttribute('aria-pressed',String(toolsOn));
   e.currentTarget.title = toolsOn ? 'Tools enabled' : 'Tools disabled for this turn';
 });
 
@@ -931,6 +1401,20 @@ async function addFiles(list){
   }
   renderChips();
 }
+// condense_paste: a wall of pasted text becomes an attachment chip instead of
+// filling the composer. Done here rather than in the engine, because condensing
+// after the prompt is already assembled saves nothing -- the text still travels.
+box.addEventListener('paste',ev=>{
+  const limit=Number(CFG.condense_paste)||0;
+  if(!limit) return;
+  const text=(ev.clipboardData||window.clipboardData)?.getData('text')||'';
+  if(text.length<=limit) return;
+  ev.preventDefault();
+  attached.push({name:`pasted-${attached.length+1}.txt`, text:text.slice(0,MAX_ATT)});
+  renderChips();
+  toast(`Pasted ${text.length.toLocaleString()} characters as an attachment.`);
+});
+
 document.getElementById('attach').addEventListener('click',()=>filein.click());
 filein.addEventListener('change',e=>{ addFiles(e.target.files); filein.value=''; });
 const fiEl=document.querySelector('.fi');
@@ -940,7 +1424,10 @@ fiEl.addEventListener('drop',e=>{ if(e.dataTransfer&&e.dataTransfer.files.length
 
 // ---- engine log ----
 document.getElementById('logsBtn').addEventListener('click',async()=>{
-  const r=await (await fetch('http://127.0.0.1:'+PORT+'/logs')).json();
+  if(!requireEngine('The engine log')) return;
+  let r;
+  try{ r=await (await fetch('http://127.0.0.1:'+PORT+'/logs')).json(); }
+  catch(e){ engineDownPanel('The engine log'); return; }
   const body=r.lines.length ? r.lines.map(l=>esc(l)).join('\n') : '(nothing yet)';
   panel.innerHTML='<h2>Engine log</h2><pre style="max-height:52vh;overflow:auto;font-size:.74rem">'
     +body+'</pre><div class="row"><button class="ghost" id="l-close">Close</button></div>';
@@ -949,13 +1436,50 @@ document.getElementById('logsBtn').addEventListener('click',async()=>{
 });
 
 
+/** Grow the composer with its content, up to the CSS max-height. */
+function autosize(){
+  box.style.height='auto';
+  box.style.height=Math.min(box.scrollHeight,MAX_COMPOSER_PX)+'px';
+}
+const MAX_COMPOSER_PX=160;
+box.addEventListener('input',autosize);
+/** Set the composer's text from code. Assigning `.value` fires no input
+ *  event, so every programmatic path has to resize explicitly or the box stays
+ *  whatever height the last typed character left it. */
+function setComposer(text){ box.value=text; autosize(); }
+
 // Keyboard shortcuts matching the references.
 document.addEventListener('keydown',e=>{
   if(!(e.metaKey||e.ctrlKey)) return;
   if(e.key==='n'){ e.preventDefault(); newChat.click(); }
   else if(e.key==='k'){ e.preventDefault(); document.getElementById('search').click(); }
   else if(e.key===','){ e.preventDefault(); document.getElementById('settings').click(); }
+  else if(e.key==='b'){ e.preventDefault(); document.getElementById('toggle').click(); }
+  // Zoom drives the same text-size setting the Appearance panel does, so the
+  // keyboard and the settings screen can never disagree about the current size.
+  else if(e.key==='='||e.key==='+'){ e.preventDefault(); stepTextSize(+1); }
+  else if(e.key==='-'||e.key==='_'){ e.preventDefault(); stepTextSize(-1); }
+  else if(e.key==='0'){ e.preventDefault(); setTextSize(BASE_TEXT_PX); }
 });
+
+/** The sizes the Appearance control offers, so both paths stay in step. */
+function textSizes(){
+  const def=SETTINGS.find(d=>d.key==='font_size');
+  return def.control.options.map(o=>Number(o.value));
+}
+function setTextSize(px){
+  saveCfg({font_size:px});
+  toast('Text size '+px+' px');
+}
+function stepTextSize(dir){
+  const sizes=textSizes();
+  const now=Number(CFG.font_size)||BASE_TEXT_PX;
+  let i=sizes.indexOf(now);
+  if(i<0){ i=sizes.reduce((best,v,k)=>
+    Math.abs(v-now)<Math.abs(sizes[best]-now)?k:best,0); }
+  const next=sizes[Math.min(sizes.length-1,Math.max(0,i+dir))];
+  if(next!==now) setTextSize(next);
+}
 
 
 // ---- settings panel, rendered entirely from the registry ----
@@ -963,6 +1487,7 @@ let cfg = {};
 const cfgGet = k => (k in cfg ? cfg[k] : DEFAULTS[k]);
 
 async function saveCfg(patch){
+  CFG={...CFG,...patch}; applyPrefs(CFG);
   cfg = {...cfg, ...patch};
   await fetch('http://127.0.0.1:'+PORT+'/settings',{method:'POST',
     headers:{'content-type':'application/json'},body:JSON.stringify(patch)});
@@ -1031,7 +1556,7 @@ function control(def, onChange){
 }
 
 async function runAction(def){
-  if(def.confirm && !window.confirm(def.confirm.message)) return;
+  if(def.confirm && !await askConfirm(def.confirm.message,{ok:'Continue'})) return;
   if(def.action==='export'){
     const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
     const all=[];
@@ -1039,8 +1564,7 @@ async function runAction(def){
     // A sandboxed webview blocks a download the page starts itself, so the
     // export goes to the clipboard and says so rather than failing silently.
     await navigator.clipboard.writeText(JSON.stringify(all,null,2));
-    fail('Copied to clipboard',
-         all.length+' conversation(s) exported as JSON. Paste into a file to save.','');
+    toast(all.length+' conversation(s) copied as JSON. Paste into a file to save.');
     closeOverlay();
   } else if(def.action==='clear'){
     const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
@@ -1048,10 +1572,10 @@ async function runAction(def){
     chatId=rid(); turns.innerHTML=''; syncEmpty(); refreshChats(); closeOverlay();
   } else if(def.action==='reveal'){
     await navigator.clipboard.writeText('~/Library/Application Support/PraisonAI');
-    fail('Path copied','~/Library/Application Support/PraisonAI','');
+    toast('Path copied: ~/Library/Application Support/PraisonAI');
   } else if(def.action==='update'){
     const u=await (await fetch('http://127.0.0.1:'+PORT+'/update')).json();
-    fail('PraisonAI Desktop '+u.current, u.message, '');
+    toast(u.message || ('PraisonAI Desktop '+u.current));
   } else if(def.action==='mcp'){
     const {servers}=await (await fetch('http://127.0.0.1:'+PORT+'/mcp')).json();
     panel.innerHTML='<h2>MCP servers</h2><div id="mcplist"></div>'
@@ -1074,7 +1598,7 @@ async function runAction(def){
         runAction(def);
       };
       d.querySelector('.rst').onclick=async()=>{
-        if(!confirm('Remove '+sv.name+'?')) return;
+        if(!await askConfirm('Remove '+sv.name+'?',{ok:'Remove'})) return;
         await fetch('http://127.0.0.1:'+PORT+'/mcp',{method:'POST',
           headers:{'content-type':'application/json'},
           body:JSON.stringify({action:'remove',name:sv.name})});
@@ -1116,7 +1640,7 @@ function settingRow(def){
     if(msg){ err.textContent=msg; err.style.display=''; return; }
     err.style.display='none';
     if(def.confirm && def.confirm.when(cfgGet(def.key),nv)
-       && !window.confirm(def.confirm.message)) { renderSettings(); return; }
+       && !await askConfirm(def.confirm.message,{ok:'Continue'})) { renderSettings(); return; }
     await saveCfg({[def.key]:nv});
     if(def.key==='theme') applyTheme(nv);
     if(def.key==='model') modelName.textContent=nv;
@@ -1151,6 +1675,25 @@ function settingRow(def){
   return row;
 }
 
+/** Open the overlay with an explanation instead of doing nothing. */
+function engineDownPanel(what){
+  panel.innerHTML='<h2></h2><p class="hint"></p>'
+    +'<div class="row"><button class="ghost" id="ed-close">Close</button></div>';
+  panel.querySelector('h2').textContent=what+' needs the engine';
+  panel.querySelector('.hint').textContent=
+    'The engine is not running, so there is nothing to read yet. '
+    +'The status in the title bar says why it failed to start.';
+  panel.querySelector('#ed-close').onclick=closeOverlay;
+  overlay.classList.add('open');
+}
+
+/** True when the engine is reachable; otherwise explains and returns false. */
+function requireEngine(what){
+  if(PORT!==null && PORT!==undefined) return true;
+  engineDownPanel(what);
+  return false;
+}
+
 let activeSection='model', settingsQuery='';
 function renderSettings(){
   const matches = settingsQuery ? searchSettings(settingsQuery,cfgGet) : null;
@@ -1183,38 +1726,33 @@ function renderSettings(){
 }
 
 document.getElementById('settings').addEventListener('click',async()=>{
-  cfg = await (await fetch('http://127.0.0.1:'+PORT+'/settings')).json();
+  if(!requireEngine('Settings')) return;
+  try{
+    cfg = await (await fetch('http://127.0.0.1:'+PORT+'/settings')).json();
+  }catch(e){ engineDownPanel('Settings'); return; }
   settingsQuery=''; renderSettings(); overlay.classList.add('open');
   panel.querySelector('#setq').focus();
 });
 
-document.getElementById('__old_settings__')?.addEventListener('click',async()=>{
-  const cfg=await (await fetch(`http://127.0.0.1:${PORT}/settings`)).json();
-  panel.innerHTML=`<h2>Settings</h2>
-    <div class="fld"><label>Model</label>
-      <input id="s-model" value="${cfg.model}" placeholder="gpt-4o-mini"/>
-      <div class="hint">Any OpenAI-compatible model id. Changing this starts a fresh agent.</div></div>
-    <div class="fld"><label>System prompt</label>
-      <textarea id="s-prompt" placeholder="Leave blank for the default.">${cfg.system_prompt||''}</textarea></div>
-    <div class="fld"><label>Theme</label>
-      <select id="s-theme">
-        <option value="system">Follow system</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option></select></div>
-    <div class="row"><button class="ghost" id="s-cancel">Cancel</button>
-                     <button id="s-save">Save</button></div>`;
-  panel.querySelector('#s-theme').value=cfg.theme||'system';
-  panel.querySelector('#s-cancel').onclick=closeOverlay;
-  panel.querySelector('#s-save').onclick=async()=>{
-    const body={model:panel.querySelector('#s-model').value.trim()||'gpt-4o-mini',
-                system_prompt:panel.querySelector('#s-prompt').value,
-                theme:panel.querySelector('#s-theme').value};
-    await fetch(`http://127.0.0.1:${PORT}/settings`,{method:'POST',
-      headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-    applyTheme(body.theme); modelName.textContent=body.model; closeOverlay();
-  };
-  overlay.classList.add('open'); panel.querySelector('#s-model').focus();
-});
+async function checkUpdates(){
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/update`);
+    if(!r.ok) return;
+    const u=await r.json();
+    if(!u.update_available) return;
+    const b=document.createElement('div'); b.className='updbar';
+    if(document.getElementById('updbar')) return;
+    b.id='updbar';
+    b.innerHTML='<span></span><button type="button" class="ghost updx">Dismiss</button>';
+    b.querySelector('span').textContent=
+      `praisonaiagents ${u.latest} is available (you have ${u.current}).`;
+    b.querySelector('button').onclick=()=>b.remove();
+    // Before the form, inside the same column, so it can never cover the
+    // control the user is trying to type into.
+    const form=document.getElementById('f');
+    form.parentElement.insertBefore(b, form);
+  }catch{}
+}
 
 function applyTheme(t){
   document.documentElement.removeAttribute('data-theme');
@@ -1222,6 +1760,7 @@ function applyTheme(t){
 }
 
 document.getElementById('search').addEventListener('click',()=>{
+  if(!requireEngine('Search')) return;
   panel.innerHTML=`<h2>Search conversations</h2>
     <div class="fld"><input id="q" placeholder="Type to search…" autocomplete="off"/></div>
     <div id="results"></div>`;
@@ -1232,10 +1771,17 @@ document.getElementById('search').addEventListener('click',()=>{
     t=setTimeout(async()=>{
       const term=q.value.trim();
       if(!term){ out.innerHTML=''; return; }
-      const {hits}=await (await fetch(
-        `http://127.0.0.1:${PORT}/search?q=${encodeURIComponent(term)}`)).json();
+      let hits;
+      try{
+        ({hits}=await (await fetch(
+          `http://127.0.0.1:${PORT}/search?q=${encodeURIComponent(term)}`)).json());
+      }catch(e){
+        out.innerHTML='<div class="hint"></div>';
+        out.querySelector('.hint').textContent='Could not reach the engine to search.';
+        return;
+      }
       out.innerHTML = hits.length
-        ? hits.map(h=>`<div class="res" data-id="${h.id}"><b></b><span></span></div>`).join('')
+        ? hits.map(()=>'<div class="res"><b></b><span></span></div>').join('')
         : '<div class="hint">No conversations matched.</div>';
       [...out.querySelectorAll('.res')].forEach((el,i)=>{
         el.querySelector('b').textContent=hits[i].title;
@@ -1247,8 +1793,23 @@ document.getElementById('search').addEventListener('click',()=>{
   overlay.classList.add('open'); q.focus();
 });
 
-fetch(`http://127.0.0.1:${PORT}/settings`).then(r=>r.json())
-  .then(c=>{applyTheme(c.theme); modelName.textContent=c.model;}).catch(()=>{});
+// A webview has no browser chrome, so target="_blank" opens nothing at all.
+// Route external links to the OS instead of letting the click die silently.
+document.addEventListener('click',async e=>{
+  const a=e.target.closest('a[href]');
+  if(!a) return;
+  const href=a.getAttribute('href')||'';
+  if(!/^https?:/i.test(href)) return;   // never hand javascript:/data: to the shell
+  e.preventDefault();
+  try{
+    const opener=window.__TAURI__?.opener?.openUrl
+      || window.__TAURI__?.shell?.open;
+    if(opener) await opener(href);
+    else window.open(href,'_blank');
+  }catch(err){
+    fail('Could not open the link', href, '');
+  }
+});
 
 document.addEventListener('click',e=>{
   if(!e.target.classList.contains('copy')) return;
