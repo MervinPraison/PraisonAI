@@ -6640,6 +6640,39 @@ class WebSocketGateway:
             )
             return None
 
+    def _resolve_profile_for_message(
+        self,
+        channel_name: str,
+        facts: Optional[Any] = None,
+    ) -> Optional[str]:
+        """Resolve the per-route tenant profile for an inbound message (#4341).
+
+        Returns the ``profile`` name declared by the matching route binding, or
+        ``None`` when no binding matched or the matched route names no profile.
+        The gateway stages this on the session so memory/session state is keyed
+        per tenant for the turn — without it, ``RouteMatch.profile`` resolves but
+        has no runtime effect and every route silently shares one memory store.
+        A ``None`` return fails closed: an unscoped route never borrows another
+        tenant's namespace.
+        """
+        if facts is None:
+            return None
+        bindings = self._routing_bindings.get(channel_name) or []
+        if not bindings:
+            return None
+        try:
+            from praisonaiagents.gateway import resolve_route
+
+            match = resolve_route(bindings, facts)
+            if getattr(match, "binding", None) is None:
+                return None
+            return getattr(match, "profile", None)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                f"Profile resolution failed for {channel_name}: {exc}"
+            )
+            return None
+
     @staticmethod
     def _build_route_facts(
         chat_type: str,
@@ -7657,6 +7690,19 @@ class WebSocketGateway:
                         channel_name, facts=facts
                     )
                     session.set_pending_tool_policy(agent, tool_policy)
+                # Per-tenant profile scope (Issue #4341): enter the resolved
+                # route's profile namespace so this turn's memory/session state
+                # is keyed per tenant. Staged right before the adapter's own
+                # ``_session.chat()`` in the same synchronous dispatch. ``None``
+                # clears any prior scope so an unscoped route never inherits
+                # another tenant's namespace (fail-closed).
+                if session is not None and hasattr(session, "set_profile_namespace"):
+                    session.set_profile_namespace(
+                        gateway._resolve_profile_for_message(
+                            channel_name, facts=facts
+                        ),
+                        agent,
+                    )
 
         logger.info(f"Injected routing handler for channel '{channel_name}'")
 
@@ -7743,6 +7789,18 @@ class WebSocketGateway:
             tool_policy = gateway._resolve_tool_policy_for_message(
                 channel_name, facts=facts
             )
+            # Per-tenant profile scope (Issue #4341): enter the resolved route's
+            # profile namespace on the session so this turn's memory/session
+            # state is keyed per tenant. ``None`` clears any prior scope so an
+            # unscoped route never inherits another tenant's namespace.
+            _tg_session = getattr(bot, "_session", None)
+            if _tg_session is not None and hasattr(
+                _tg_session, "set_profile_namespace"
+            ):
+                _tg_session.set_profile_namespace(
+                    gateway._resolve_profile_for_message(channel_name, facts=facts),
+                    agent,
+                )
 
             # Ack reaction — show processing indicator.
             # Scope-gated like the standalone Telegram adapter so ambient group
