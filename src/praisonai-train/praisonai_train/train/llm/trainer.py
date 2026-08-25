@@ -638,14 +638,14 @@ class TrainModel:
                   f"{dataset.column_names} as-is.")
             return dataset
 
+        if self._flag(dataset_info.get("shuffle"), default=False):
+            dataset = dataset.shuffle(
+                seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
             dataset = standardize_sharegpt(dataset)
         else:
             print("DEBUG: Dataset does not have 'conversations'; assuming Alpaca format.")
-        if self._flag(dataset_info.get("shuffle"), default=False):
-            dataset = dataset.shuffle(
-                seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
         print("DEBUG: Applying formatting function to dataset...")
         format_func = partial(formatting_prompts_func, tokenizer=self.chat_tokenizer)
         dataset = dataset.map(format_func, batched=True, remove_columns=dataset.column_names)
@@ -667,11 +667,11 @@ class TrainModel:
             # Advertised in the shipped templates but never read. Saying so beats
             # silently discarding a formatter the user believed was running.
             if dataset_info.get("processing_func"):
-                logger.warning(
-                    "dataset.processing_func (%s) is not supported and will be "
-                    "ignored; formatting is chosen automatically from the "
-                    "dataset's columns.",
-                    dataset_info["processing_func"],
+                print(
+                    f"WARNING: dataset.processing_func "
+                    f"({dataset_info['processing_func']}) is not supported and will "
+                    f"be ignored; formatting is chosen automatically from the "
+                    f"dataset's columns."
                 )
             print("DEBUG: Processing dataset info:", dataset_info)
             # A validation/test split loaded here is CONCATENATED into training, not
