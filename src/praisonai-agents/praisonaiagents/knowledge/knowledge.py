@@ -675,6 +675,9 @@ class Knowledge:
                     all_results.append(memory_result.id)
                 elif hasattr(memory_result, 'results'):
                     all_results.extend(memory_result.results)
+                elif isinstance(memory_result, str):
+                    # Some backends (e.g. MongoDB) return a bare document id.
+                    all_results.append(memory_result)
 
         self._emit_knowledge_event(
             "add", source=url, chunk_count=len(memories),

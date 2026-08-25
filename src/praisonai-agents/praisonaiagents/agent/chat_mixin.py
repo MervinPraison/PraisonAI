@@ -5416,6 +5416,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             self._middleware_manager = manager
         return manager if manager.has_model_hooks else None
 
+    @staticmethod
+    def _unwrap_model_response(response):
+        """Unwrap a middleware ModelResponse back to the agent's return shape.
+
+        Preserves ``after_model``/``wrap_model_call`` mutations: if a hook
+        rewrote ``response.content``, that string wins. The original SDK object
+        stashed in ``extra["raw"]`` is only returned when the hook left content
+        untouched (so non-string provider payloads pass through unchanged on the
+        no-transform fast path).
+        """
+        from ..hooks import ModelResponse
+        if not isinstance(response, ModelResponse):
+            return response
+        raw = response.extra.get("raw")
+        if isinstance(raw, str):
+            # Content was derived from a string raw; hook edits live on content.
+            return response.content
+        # Non-string raw: return raw only if content still matches the value we
+        # synthesized from it (i.e. hook didn't rewrite content).
+        synthesized = raw if isinstance(raw, str) else (raw or "")
+        if response.content == synthesized:
+            return raw
+        return response.content
+
     def _chat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
@@ -5430,16 +5454,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if manager is not None:
             from ..hooks import ModelRequest, ModelResponse, InvocationContext
 
-            def _core(req):
-                return self._chat_completion_with_retry_core(
-                    req.messages, temperature, tools, stream, reasoning_steps,
-                    task_name, task_description, task_id, response_format,
-                    stream_callback=stream_callback, emit_events=emit_events,
-                    cancel_token=cancel_token,
-                )
-
             def _model_fn(req):
-                result = _core(req)
+                # Honor before_model/wrap_model_call mutations by threading the
+                # (possibly rewritten) request fields into the retry core rather
+                # than the outer captured values.
+                effective_temperature = req.temperature if req.temperature is not None else temperature
+                effective_tools = req.tools if req.tools is not None else tools
+                result = self._chat_completion_with_retry_core(
+                    req.messages, effective_temperature, effective_tools, stream,
+                    reasoning_steps, task_name, task_description, task_id,
+                    response_format, stream_callback=stream_callback,
+                    emit_events=emit_events, cancel_token=cancel_token,
+                )
                 return ModelResponse(
                     content=result if isinstance(result, str) else (result or ""),
                     model=str(getattr(self, 'llm', '') or ''),
@@ -5459,12 +5485,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 ),
             )
             response = manager.execute_model_call(request, _model_fn)
-            if isinstance(response, ModelResponse):
-                raw = response.extra.get("raw")
-                if raw is not None and not isinstance(raw, str):
-                    return raw
-                return response.content
-            return response
+            return self._unwrap_model_response(response)
 
         return self._chat_completion_with_retry_core(
             messages, temperature, tools, stream, reasoning_steps,
@@ -5564,6 +5585,62 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         This method wraps the async chat completion call and adds retry capability for 
         transient failures like rate limits, network errors, and service outages.
         """
+        # Route through user-supplied model middleware (Agent(hooks=[...])) when
+        # before_model/after_model/wrap_model_call hooks are registered, mirroring
+        # the sync path so achat() honors the same hooks. The middleware chain is
+        # synchronous; run it in an executor and bridge back to the async retry
+        # core via the running loop so we never block or nest event loops.
+        manager = self._get_model_middleware_manager()
+        if manager is not None:
+            import asyncio
+            from ..hooks import ModelRequest, ModelResponse, InvocationContext
+
+            loop = asyncio.get_running_loop()
+
+            def _model_fn(req):
+                effective_temperature = req.temperature if req.temperature is not None else temperature
+                effective_tools = req.tools if req.tools is not None else tools
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._achat_completion_with_retry_core(
+                        req.messages, effective_temperature, effective_tools, stream,
+                        reasoning_steps, task_name, task_description, task_id,
+                        response_format, stream_callback=stream_callback,
+                        emit_events=emit_events,
+                    ),
+                    loop,
+                )
+                result = fut.result()
+                return ModelResponse(
+                    content=result if isinstance(result, str) else (result or ""),
+                    model=str(getattr(self, 'llm', '') or ''),
+                    extra={"raw": result},
+                )
+
+            request = ModelRequest(
+                messages=messages,
+                model=str(getattr(self, 'llm', '') or ''),
+                temperature=temperature if temperature is not None else 1.0,
+                tools=tools,
+                context=InvocationContext(
+                    agent_id=self.name,
+                    run_id=getattr(self, '_current_run_id', 'unknown'),
+                    session_id=getattr(self, '_session_id', None) or 'default',
+                    model_name=str(getattr(self, 'llm', '') or ''),
+                ),
+            )
+            response = await loop.run_in_executor(
+                None, lambda: manager.execute_model_call(request, _model_fn)
+            )
+            return self._unwrap_model_response(response)
+
+        return await self._achat_completion_with_retry_core(
+            messages, temperature, tools, stream, reasoning_steps,
+            task_name, task_description, task_id, response_format,
+            stream_callback=stream_callback, emit_events=emit_events,
+        )
+
+    async def _achat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """Async retry/backoff core for chat completion (middleware-agnostic)."""
         retry_config = getattr(self, '_retry_config', None)
         if not retry_config:
             return await self._execute_unified_achat_completion(
