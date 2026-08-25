@@ -162,6 +162,29 @@ def is_out_of_memory(exc):
     return any(marker in text for marker in _OOM_MARKERS)
 
 
+def _accepted_config_fields(cfg_cls):
+    """Every key `cfg_cls` will accept, from its dataclass fields AND __init__.
+
+    `__dataclass_fields__` is inherited, so a plain __init__ subclass of a
+    dataclass reports its PARENT's fields and none of its own.
+    UnslothTrainingArguments is exactly that (unsloth/trainer.py:445), so the
+    drop-unknown filter deleted embedding_learning_rate -- the single value
+    continued pretraining exists to set -- along with max_seq_length and
+    packing. Nothing failed; the run just used the wrong learning rate.
+    """
+    import inspect
+
+    fields = set(getattr(cfg_cls, "__dataclass_fields__", None) or ())
+    try:
+        params = inspect.signature(cfg_cls.__init__).parameters
+    except (TypeError, ValueError):
+        return fields or None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return None          # **kwargs: it accepts anything, filter nothing
+    fields.update(n for n in params if n != "self")
+    return fields or None
+
+
 def decide_masking(use_mask, supports_mask, markers):
     """Which masking route to take: False, or the name of the mechanism.
 
@@ -1204,7 +1227,7 @@ class TrainModel:
 
         # The same drop-unknown-fields guard the SFT path uses: a preference
         # config is a different class with a different field set.
-        valid = getattr(cfg_cls, "__dataclass_fields__", None)
+        valid = _accepted_config_fields(cfg_cls)
         if valid:
             dropped = [k for k in sft_params if k not in valid]
             if dropped:

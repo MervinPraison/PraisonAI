@@ -101,8 +101,9 @@ jobs:
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
           - shard: train
             workdir: src/praisonai-train
+            # tests/unit/data/ (96 tests) was collected by no workflow at all.
             paths: >-
-              tests/unit/train/
+              tests/unit/train/ tests/unit/data/
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
