@@ -72,3 +72,30 @@ def test_mapped_events_still_map():
         StreamEventType.TOOL_CALL_RESULT,
     ):
         assert stream_event_to_agui_events(_event(event_type), "m1", EventBuffer())
+
+
+def test_tool_call_delta_id_survives_id_less_chunks():
+    """Providers send the id once; later argument chunks must keep that id.
+
+    A fresh UUID per chunk would orphan the arguments from the invocation the
+    AG-UI client is assembling.
+    """
+    buffer = EventBuffer()
+
+    start = StreamEvent(
+        type=StreamEventType.TOOL_CALL_START,
+        tool_call={"id": "call-42", "name": "f", "arguments": {}},
+    )
+    (start_out := stream_event_to_agui_events(start, "m1", buffer))
+    assert any(getattr(e, "tool_call_id", None) == "call-42" for e in start_out)
+
+    chunk = StreamEvent(
+        type=StreamEventType.DELTA_TOOL_CALL,
+        tool_call={"arguments": '{"x":'},
+    )
+    chunk_out = stream_event_to_agui_events(chunk, "m1", buffer)
+    assert [e.tool_call_id for e in chunk_out] == ["call-42"]
+
+    end = StreamEvent(type=StreamEventType.TOOL_CALL_END, tool_call={})
+    end_out = stream_event_to_agui_events(end, "m1", buffer)
+    assert [e.tool_call_id for e in end_out] == ["call-42"]

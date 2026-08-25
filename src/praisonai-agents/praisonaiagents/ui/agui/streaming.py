@@ -40,15 +40,35 @@ class EventBuffer:
     current_text_message_id: str = ""
     next_text_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     pending_tool_calls_parent_id: str = ""
+    current_tool_call_id: str = ""
     
     def start_tool_call(self, tool_call_id: str) -> None:
         """Start a new tool call."""
         self.active_tool_call_ids.add(tool_call_id)
+        self.current_tool_call_id = tool_call_id
     
     def end_tool_call(self, tool_call_id: str) -> None:
         """End a tool call."""
         self.active_tool_call_ids.discard(tool_call_id)
         self.ended_tool_call_ids.add(tool_call_id)
+        if self.current_tool_call_id == tool_call_id:
+            self.current_tool_call_id = ""
+    
+    def resolve_tool_call_id(self, provided_id: Optional[str]) -> str:
+        """Resolve the tool_call_id for a delta that may omit it.
+
+        Providers commonly send the id only on the first chunk of a tool call
+        and omit it on subsequent argument deltas. Falling back to the last
+        started tool call keeps every chunk correlated to one invocation instead
+        of minting an orphan UUID per chunk.
+        """
+        if provided_id:
+            return provided_id
+        if self.current_tool_call_id:
+            return self.current_tool_call_id
+        new_id = str(uuid.uuid4())
+        self.current_tool_call_id = new_id
+        return new_id
     
     def start_text_message(self) -> str:
         """Start a new text message and return its ID."""
@@ -346,9 +366,10 @@ def stream_event_to_agui_events(
             )
         return events
 
-    if event.type == StreamEventType.DELTA_TOOL_CALL and event.tool_call:
-        tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
-        delta = event.tool_call.get("arguments", event.content or "")
+    if event.type == StreamEventType.DELTA_TOOL_CALL:
+        tool_call = event.tool_call or {}
+        tool_call_id = buffer.resolve_tool_call_id(tool_call.get("id"))
+        delta = tool_call.get("arguments", event.content or "")
         return [
             ToolCallArgsEvent(
                 tool_call_id=tool_call_id,
@@ -356,8 +377,9 @@ def stream_event_to_agui_events(
             )
         ]
 
-    if event.type == StreamEventType.TOOL_CALL_END and event.tool_call:
-        tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
+    if event.type == StreamEventType.TOOL_CALL_END:
+        tool_call = event.tool_call or {}
+        tool_call_id = buffer.resolve_tool_call_id(tool_call.get("id"))
         buffer.end_tool_call(tool_call_id)
         return [ToolCallEndEvent(tool_call_id=tool_call_id)]
 
