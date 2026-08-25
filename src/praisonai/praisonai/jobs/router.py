@@ -22,7 +22,7 @@ from .models import (
     JobListResponse
 )
 from .store import JobStore
-from .executor import JobExecutor
+from .executor import JobExecutor, JobQueueFull
 from .path_validation import validate_agent_file_path
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,16 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
         effective_job = await store.save_if_absent(job)
         if effective_job.id == job.id:
             # We won the claim: hand off to the executor for actual execution.
-            await executor.submit(job)
+            # If the executor is saturated, surface honest backpressure (503 +
+            # Retry-After) instead of accepting an unbounded backlog.
+            try:
+                await executor.submit(job)
+            except JobQueueFull as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Job queue is full; retry later.",
+                    headers={"Retry-After": str(int(exc.retry_after))},
+                ) from exc
         else:
             job = effective_job
         
@@ -322,7 +331,9 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
                             "data": f'{{"timestamp": "{datetime.now(timezone.utc).isoformat()}"}}'
                         }
             finally:
-                executor.unregister_progress_callback(job_id)
+                # Unregister only THIS viewer's callback so other concurrent
+                # viewers of the same job keep receiving updates.
+                executor.unregister_progress_callback(job_id, on_progress)
         
         return EventSourceResponse(event_generator())
     

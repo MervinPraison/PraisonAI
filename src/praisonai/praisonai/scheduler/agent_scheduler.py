@@ -16,6 +16,7 @@ from .shared import ScheduleTicker, backoff_delay
 from ._base_scheduler import (
     _BaseAgentScheduler,
     _compute_run_cost,
+    build_from_blueprint,
     build_from_recipe,
     build_from_yaml,
 )
@@ -33,6 +34,21 @@ class RecipeExecutorAgent:
     def start(self, task: str) -> Any:
         from praisonai.recipe.bridge import execute_resolved_recipe
         return execute_resolved_recipe(self.resolved)
+
+
+class BlueprintAgent:
+    """Wrapper that lets a blueprint prompt drive the sync scheduler."""
+
+    def __init__(self, prompt_text: str, blueprint_name: str):
+        self.prompt_text = prompt_text
+        self.name = f"Blueprint:{blueprint_name}"
+
+    def start(self, task: str) -> Any:
+        from praisonaiagents import Agent
+        from praisonai._async_bridge import run_sync
+        from praisonai.scheduler._dispatch import adispatch_agent
+        agent = Agent(instructions=self.prompt_text)
+        return run_sync(adispatch_agent(agent, self.prompt_text))
 
 
 class AgentScheduler(_BaseAgentScheduler):
@@ -637,72 +653,20 @@ class AgentScheduler(_BaseAgentScheduler):
             )
             scheduler.start(schedule_expr=scheduler._yaml_schedule_config["interval"])
         """
-        from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
-
-        catalogue = BlueprintCatalogue()
-        bp = catalogue.get_blueprint(blueprint_name)
-        if bp is None:
-            available = [b.name for b in catalogue.list_blueprints()]
-            raise ValueError(
-                f"Blueprint '{blueprint_name}' not found. "
-                f"Available: {available}"
-            )
-
-        resolved_slots = catalogue.resolve_slots(bp, slots or {})
-        prompt = catalogue.materialize_prompt(bp, resolved_slots)
-        schedule_expr = catalogue.materialize_schedule(bp, resolved_slots)
-
-        # Build a config dict recording the blueprint resolution
-        config: Dict[str, Any] = {
-            "blueprint": blueprint_name,
-            "resolved_slots": resolved_slots,
-            "deliver": deliver or bp.default_deliver,
-            "agent_id": agent_id or bp.default_agent,
-        }
-
-        # Create a lightweight wrapper that makes a blueprint prompt
-        # look like an agent to the scheduler (mirrors RecipeExecutorAgent).
-        class BlueprintAgent:
-            """Wrapper that lets a blueprint prompt drive the scheduler."""
-
-            def __init__(self, prompt_text: str):
-                self.prompt_text = prompt_text
-                self.name = f"Blueprint:{blueprint_name}"
-
-            def start(self, task: str):
-                from praisonaiagents import Agent
-                from praisonai._async_bridge import run_sync
-                from praisonai.scheduler._dispatch import adispatch_agent
-                agent = Agent(instructions=self.prompt_text)
-                return run_sync(adispatch_agent(agent, self.prompt_text))
-
-        agent = BlueprintAgent(prompt)
-
-        timeout = timeout_override or 300
-        max_cost = max_cost_override if max_cost_override is not None else 1.00
-
-        scheduler = cls(
-            agent=agent,
-            task=prompt,
-            config=config,
-            timeout=timeout,
-            max_cost=max_cost,
+        return build_from_blueprint(
+            cls,
+            BlueprintAgent,
+            blueprint_name,
+            slots=slots,
+            deliver=deliver,
+            agent_id=agent_id,
+            interval_override=interval_override,
+            max_retries_override=max_retries_override,
+            timeout_override=timeout_override,
+            max_cost_override=max_cost_override,
             on_success=on_success,
             on_failure=on_failure,
-            deliver=config.get("deliver", ""),
         )
-
-        scheduler._blueprint_name = blueprint_name
-        scheduler._blueprint_slots = resolved_slots
-        scheduler._yaml_schedule_config = {
-            'interval': interval_override or schedule_expr,
-            'max_retries': max_retries_override if max_retries_override is not None else 3,
-            'run_immediately': False,
-            'timeout': timeout,
-            'max_cost': max_cost,
-        }
-
-        return scheduler
 
 
 def create_agent_scheduler(
