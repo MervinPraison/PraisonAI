@@ -5097,6 +5097,39 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Flush deferred media follow-ups after all tool replies.
                         for _m in _deferred_media_followups:
                             self._append_to_chat_history(_m)
+
+                        # Ask the model for the answer now that the tools have
+                        # run. Without this the generator ends here: the tool
+                        # results sit in chat history, nothing is yielded, and
+                        # the caller receives an empty stream with no error --
+                        # indistinguishable from a model that had nothing to
+                        # say. The non-streaming path already does this round
+                        # trip, so the two disagreed about whether an answer
+                        # existed at all.
+                        followup_args = dict(completion_args)
+                        followup_args['messages'] = self.chat_history
+                        followup_args['stream'] = True
+                        # No tools on the follow-up: the model has its results
+                        # and should now answer, not call another tool. That
+                        # also bounds the turn to a single round of tools.
+                        followup_args.pop('tools', None)
+                        followup_args.pop('tool_choice', None)
+                        followup_args.pop('parallel_tool_calls', None)
+
+                        followup_text = ""
+                        for followup_chunk in self._openai_client.sync_client.chat.completions.create(
+                            **followup_args
+                        ):
+                            if not followup_chunk.choices:
+                                continue
+                            piece = followup_chunk.choices[0].delta.content
+                            if piece:
+                                followup_text += piece
+                                yield piece
+                        if followup_text:
+                            self._append_to_chat_history(
+                                {"role": "assistant", "content": followup_text}
+                            )
                     else:
                         # Add complete response to chat history (text-only response)
                         if response_text:
