@@ -801,9 +801,28 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         _cloned_fallback_models = legacy_kwargs.pop("fallback_models", None)
         _unknown = set(legacy_kwargs) - _legacy_defaults.keys()
         if _unknown:
+            # Unknown kwargs are rejected rather than swallowed, so a typo can
+            # never silently disable the behaviour it was meant to configure.
+            # Some names are near-universal in this ecosystem, though -- and
+            # `verbose` is accepted by six sibling classes here -- so name the
+            # supported alternative instead of leaving the user to search a
+            # 41-parameter signature for something that is not in it.
+            _HINTS = {
+                "verbose": (
+                    "verbosity moved into output=; use output='verbose' "
+                    "(or output=OutputConfig(verbose=True))."
+                ),
+                "stream": (
+                    "streaming moved into output=; use "
+                    "output=OutputConfig(stream=True)."
+                ),
+            }
+            _hint = "".join(
+                f"\n  {name}: {_HINTS[name]}" for name in sorted(_unknown) if name in _HINTS
+            )
             raise TypeError(
                 f"Agent.__init__() got unexpected keyword argument(s): "
-                f"{', '.join(sorted(_unknown))}"
+                f"{', '.join(sorted(_unknown))}{_hint}"
             )
         allow_delegation = legacy_kwargs.get("allow_delegation", _legacy_defaults["allow_delegation"])
         allow_code_execution = legacy_kwargs.get("allow_code_execution", _legacy_defaults["allow_code_execution"])
@@ -5779,14 +5798,6 @@ Summary:"""
                 self._memory_instance = Memory(config)
             except ImportError:
                 logging.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")
-                from ..memory.file_memory import FileMemory
-                self._memory_instance = FileMemory(user_id=mem_user_id)
-            except Exception as e:
-                # The backend package is installed but could not initialise
-                # (e.g. a SaaS backend like mem0 needs credentials/network).
-                # Honour the same "Falling back to FileMemory" contract used for
-                # missing dependencies so construction never hard-crashes.
-                logging.warning(f"Memory provider '{memory}' could not initialise ({e}). Falling back to FileMemory.")
                 from ..memory.file_memory import FileMemory
                 self._memory_instance = FileMemory(user_id=mem_user_id)
         elif isinstance(memory, dict):
