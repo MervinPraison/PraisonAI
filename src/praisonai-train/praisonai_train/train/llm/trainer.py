@@ -17,6 +17,39 @@ import contextlib
 import subprocess
 from functools import partial
 
+# Preference-tuning methods. Unsloth patches TRL's DPO, ORPO and KTO trainers
+# alongside SFT (unsloth/__init__.py lists them in the trainers it rewrites), but
+# this module could only ever run SFT -- so a dataset of chosen/rejected pairs had
+# nowhere to go and the whole preference-tuning half of the library was
+# unreachable from PraisonAI.
+#
+# Each entry names the TRL trainer and config class, the columns the dataset must
+# provide, and whether the method needs a frozen reference model. Adding a method
+# is one entry plus its import.
+TRAINING_METHODS = {
+    "sft": {
+        "trainer": "SFTTrainer", "config": "SFTConfig",
+        "columns": (), "needs_ref_model": False,
+        "summary": "supervised fine-tuning on completions",
+    },
+    "dpo": {
+        "trainer": "DPOTrainer", "config": "DPOConfig",
+        "columns": ("prompt", "chosen", "rejected"), "needs_ref_model": True,
+        "summary": "direct preference optimisation on chosen/rejected pairs",
+    },
+    "orpo": {
+        "trainer": "ORPOTrainer", "config": "ORPOConfig",
+        # ORPO folds the reference model into its loss, so there is none to hold.
+        "columns": ("prompt", "chosen", "rejected"), "needs_ref_model": False,
+        "summary": "odds-ratio preference optimisation, no reference model",
+    },
+    "kto": {
+        "trainer": "KTOTrainer", "config": "KTOConfig",
+        "columns": ("prompt", "completion", "label"), "needs_ref_model": True,
+        "summary": "Kahneman-Tversky optimisation on thumbs-up/down labels",
+    },
+}
+
 # GGUF / Ollama quantization methods supported by Unsloth's exporter. Validated up
 # front so a typo (e.g. "q4km") fails fast with a clear message instead of after a
 # long training run when the export step finally rejects it.
@@ -34,6 +67,15 @@ def _lazy_import_training_deps():
         from unsloth import FastLanguageModel, is_bfloat16_supported
         from unsloth.chat_templates import standardize_sharegpt, get_chat_template
         from trl import SFTTrainer, SFTConfig
+        # Imported lazily and individually: a TRL old enough to lack one of these
+        # should still be able to run the others rather than failing at import.
+        _pref = {}
+        for _name in ("DPOTrainer", "DPOConfig", "ORPOTrainer", "ORPOConfig",
+                      "KTOTrainer", "KTOConfig"):
+            try:
+                _pref[_name] = getattr(__import__("trl", fromlist=[_name]), _name)
+            except (ImportError, AttributeError):
+                pass
         from datasets import load_dataset, concatenate_datasets
         from psutil import virtual_memory
         # Make available in global scope for the rest of the module
@@ -44,6 +86,7 @@ def _lazy_import_training_deps():
             'is_bfloat16_supported': is_bfloat16_supported,
             'SFTTrainer': SFTTrainer,
             'SFTConfig': SFTConfig,
+            **_pref,
             'TrainingArguments': TrainingArguments,
             'load_dataset': load_dataset,
             'concatenate_datasets': concatenate_datasets,
@@ -178,6 +221,14 @@ class TrainModel:
         # training validate_config, so an invalid --quant would otherwise only
         # fail deep inside Unsloth / `ollama create`.
         q = obj.config.get("quantization_method")
+        # Configs written against older templates carry the single-element
+        # list form. Accepting it costs one line and avoids failing a run for a
+        # shape the project itself shipped. Normalize back into config so the
+        # GGUF exporter (which re-reads self.config) receives the method string,
+        # not the list.
+        if isinstance(q, (list, tuple)) and len(q) == 1:
+            q = q[0]
+            obj.config["quantization_method"] = q
         if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
             raise ValueError(
                 f"quantization_method '{q}' is not valid. Choose one of: "
@@ -210,6 +261,8 @@ class TrainModel:
         "optim", "weight_decay", "lr_scheduler_type", "seed", "output_dir",
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
+        "method", "beta", "max_prompt_length", "desirable_weight", "undesirable_weight",
+        "hf_private", "save_method", "commit_message", "tags",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
         # quantization / precision
         "dtype", "load_in_8bit", "full_finetuning",
@@ -232,7 +285,21 @@ class TrainModel:
         "mtp_draft", "mtp_draft_repo", "mtp_draft_file", "spec_draft_n_max",
     })
 
+    @staticmethod
+    def resolve_method(config):
+        """Normalise and check `method`, returning it. Kept separate from
+        `validate_config` so it can be exercised without a CUDA import."""
+        method = str(config.get("method", "sft")).lower()
+        if method not in TRAINING_METHODS:
+            raise ValueError(
+                f"method '{method}' is not supported. Choose one of: "
+                + ", ".join(f"{k} ({v['summary']})" for k, v in TRAINING_METHODS.items()))
+        config["method"] = method
+        return method
+
     def validate_config(self):
+        self.resolve_method(self.config)
+
         required = ["model_name", "max_seq_length", "dataset"]
         missing = [k for k in required if not self.config.get(k)]
         if missing:
@@ -303,6 +370,14 @@ class TrainModel:
             self.config.get("ollama_save")
         ):
             q = self.config.get("quantization_method")
+            # Configs written against older templates carry the single-element
+            # list form. Accepting it costs one line and avoids failing a run
+            # for a shape the project itself shipped. Normalize back into config
+            # so the GGUF exporter (which re-reads self.config) receives the
+            # method string, not the list.
+            if isinstance(q, (list, tuple)) and len(q) == 1:
+                q = q[0]
+                self.config["quantization_method"] = q
             if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
                 raise ValueError(
                     f"quantization_method '{q}' is not valid. Choose one of: "
@@ -318,6 +393,24 @@ class TrainModel:
                 suggestion = f"  (did you mean '{match[0]}'?)" if match else ""
                 lines.append(f"  - {key}{suggestion}")
             print("\n".join(lines))
+
+    @staticmethod
+    def _require_columns(dataset, columns, method):
+        """Fail before the run starts, naming the columns that are missing.
+
+        TRL's own error for a wrongly-shaped preference dataset surfaces deep in
+        the collator -- minutes in, after the model is loaded and quantised, and
+        worded in terms of tensors rather than the file the user pointed at.
+        """
+        if not columns:
+            return
+        have = set(getattr(dataset, "column_names", None) or [])
+        missing = [c for c in columns if c not in have]
+        if missing:
+            raise ValueError(
+                f"method '{method}' needs the column(s) {missing} and the dataset has "
+                f"{sorted(have) or 'none'}. A {method} dataset needs "
+                f"{list(columns)} per row.")
 
     @staticmethod
     def _flag(value, default=False):
@@ -531,6 +624,20 @@ class TrainModel:
                 print("NOTE: num_samples takes the FIRST N rows before shuffle; "
                       "add shuffle: true to sample randomly.")
         print("DEBUG: Dataset columns:", dataset.column_names)
+
+        # SFT flattens every row to a single `text` column. A preference dataset
+        # must keep prompt/chosen/rejected (or prompt/completion/label) — the
+        # trainer reads those columns by name, and flattening them destroyed the
+        # dataset before the method ever saw it.
+        if self.config.get("method", "sft") != "sft":
+            method = self.config["method"]
+            if self._flag(dataset_info.get("shuffle"), default=False):
+                dataset = dataset.shuffle(
+                    seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
+            print(f"DEBUG: method={method}; keeping preference columns "
+                  f"{dataset.column_names} as-is.")
+            return dataset
+
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
             dataset = standardize_sharegpt(dataset)
@@ -557,6 +664,15 @@ class TrainModel:
     def load_datasets(self):
         datasets = []
         for dataset_info in self.config["dataset"]:
+            # Advertised in the shipped templates but never read. Saying so beats
+            # silently discarding a formatter the user believed was running.
+            if dataset_info.get("processing_func"):
+                logger.warning(
+                    "dataset.processing_func (%s) is not supported and will be "
+                    "ignored; formatting is chosen automatically from the "
+                    "dataset's columns.",
+                    dataset_info["processing_func"],
+                )
             print("DEBUG: Processing dataset info:", dataset_info)
             # A validation/test split loaded here is CONCATENATED into training, not
             # held out — an easy way to contaminate eval without noticing. Warn, and
@@ -792,15 +908,56 @@ class TrainModel:
             print(f"WARNING: SFTConfig (this TRL version) does not accept {dropped}; ignoring.")
             sft_params = {k: v for k, v in sft_params.items() if k in valid_fields}
 
-        training_args = SFTConfig(**sft_params)
-        trainer = SFTTrainer(
-            model=self.model,
-            processing_class=self.hf_tokenizer,
-            train_dataset=raw_dataset,
-            eval_dataset=eval_dataset,
-            args=training_args,
-            callbacks=callbacks or None,
-        )
+        method = self.config.get("method", "sft")
+        spec = TRAINING_METHODS[method]
+
+        if method != "sft":
+            # SFT-only fields are not on a preference config and would be
+            # rejected; the shared TrainingArguments fields are.
+            for only_sft in ("dataset_text_field", "packing", "dataset_num_proc"):
+                sft_params.pop(only_sft, None)
+            sft_params["max_length"] = self.config["max_seq_length"]
+            sft_params["max_prompt_length"] = int(self.config.get(
+                "max_prompt_length", self.config["max_seq_length"] // 2))
+            if self.config.get("beta") is not None:
+                sft_params["beta"] = float(self.config["beta"])
+            if method == "kto":
+                for w in ("desirable_weight", "undesirable_weight"):
+                    if self.config.get(w) is not None:
+                        sft_params[w] = float(self.config[w])
+            self._require_columns(raw_dataset, spec["columns"], method)
+
+        cfg_cls = globals().get(spec["config"])
+        trainer_cls = globals().get(spec["trainer"])
+        if cfg_cls is None or trainer_cls is None:
+            raise RuntimeError(
+                f"method '{method}' needs {spec['trainer']} and {spec['config']} from TRL, "
+                f"which this TRL version does not provide. Upgrade trl, or use method: sft.")
+
+        # The same drop-unknown-fields guard the SFT path uses: a preference
+        # config is a different class with a different field set.
+        valid = getattr(cfg_cls, "__dataclass_fields__", None)
+        if valid:
+            dropped = [k for k in sft_params if k not in valid]
+            if dropped:
+                print(f"WARNING: {spec['config']} does not accept "
+                      f"{sorted(dropped)}; ignoring.")
+                sft_params = {k: v for k, v in sft_params.items() if k in valid}
+
+        training_args = cfg_cls(**sft_params)
+        trainer_kwargs = {
+            "model": self.model,
+            "processing_class": self.hf_tokenizer,
+            "train_dataset": raw_dataset,
+            "eval_dataset": eval_dataset,
+            "args": training_args,
+            "callbacks": callbacks or None,
+        }
+        if spec["needs_ref_model"]:
+            # None means "use the frozen base weights". With a PEFT adapter that
+            # is exactly right, and it avoids a second full model in VRAM.
+            trainer_kwargs["ref_model"] = None
+        trainer = trainer_cls(**trainer_kwargs)
         final_dir = self.config.get("final_model_dir", "lora_model")
         # One clear summary of what will run — so people and agents can confirm the
         # config resolved as intended without reading the DEBUG noise.
@@ -928,6 +1085,11 @@ class TrainModel:
         if "/" not in name.strip("/") and os.path.isdir(name):
             shutil.rmtree(name)
 
+    def hub_push_kwargs(self):
+        """Options shared by every Hub push. See praisonai_train/_hub.py."""
+        from praisonai_train._hub import hub_push_kwargs
+        return hub_push_kwargs(self.config, flag=self._flag)
+
     def save_model_merged(self):
         from huggingface_hub.utils import HfHubHTTPError
         repo = self.config["hf_model_name"]
@@ -936,8 +1098,8 @@ class TrainModel:
             self.model.push_to_hub_merged(
                 repo,
                 self.hf_tokenizer,
-                save_method="merged_16bit",
-                token=os.getenv("HF_TOKEN")
+                save_method=self.config.get("save_method", "merged_16bit"),
+                **self.hub_push_kwargs()
             )
         except HfHubHTTPError as exc:
             self._raise_hf_push_error(exc, repo)
@@ -950,7 +1112,7 @@ class TrainModel:
                 repo,
                 self.hf_tokenizer,
                 quantization_method=self.config.get("quantization_method", "q4_k_m"),
-                token=os.getenv("HF_TOKEN")
+                **self.hub_push_kwargs()
             )
         except HfHubHTTPError as exc:
             self._raise_hf_push_error(exc, repo)

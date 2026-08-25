@@ -7,6 +7,10 @@ adding vision-specific LoRA adapters, and training using TRL's SFTTrainer with U
 """
 
 import os
+
+from praisonai_train._hub import (
+    clean_local_repo_dir, hf_push_errors, hub_push_kwargs,
+)
 import sys
 import yaml
 import shutil
@@ -242,22 +246,23 @@ class TrainVisionModel:
         print("DEBUG: Vision inference output:", self.hf_tokenizer.batch_decode(outputs))
 
     def save_model_merged(self):
-        if os.path.exists(self.config["hf_model_name"]):
-            shutil.rmtree(self.config["hf_model_name"])
-        self.model.push_to_hub_merged(
-            self.config["hf_model_name"],
-            self.hf_tokenizer,
-            save_method="merged_16bit",
-            token=os.getenv("HF_TOKEN")
-        )
+        clean_local_repo_dir(self.config["hf_model_name"])
+        with hf_push_errors(self.config["hf_model_name"]):
+            self.model.push_to_hub_merged(
+                self.config["hf_model_name"],
+                self.hf_tokenizer,
+                save_method=self.config.get("save_method", "merged_16bit"),
+                **hub_push_kwargs(self.config)
+            )
 
     def push_model_gguf(self):
-        self.model.push_to_hub_gguf(
-            self.config["hf_model_name"],
-            self.hf_tokenizer,
-            quantization_method=self.config.get("quantization_method", "q4_k_m"),
-            token=os.getenv("HF_TOKEN")
-        )
+        with hf_push_errors(self.config["hf_model_name"]):
+            self.model.push_to_hub_gguf(
+                self.config["hf_model_name"],
+                self.hf_tokenizer,
+                quantization_method=self.config.get("quantization_method", "q4_k_m"),
+                **hub_push_kwargs(self.config)
+            )
 
     def save_model_gguf(self):
         self.model.save_pretrained_gguf(
