@@ -193,6 +193,16 @@ VALID_QUANTIZATION_METHODS = frozenset({
 
 def _lazy_import_training_deps():
     """Import heavy training dependencies only when needed."""
+    # Check the floors first. They were pip metadata only, and pip is routinely
+    # bypassed -- --no-deps, a hand-built conda env, setup_conda_env.sh pinning
+    # its own torch. Without this the failure arrives as whatever traceback the
+    # mismatched package happens to raise, several imports deep.
+    from praisonai_train.preflight import check, describe
+    problems = check()
+    if problems:
+        raise ImportError(
+            "Training dependencies are missing or too old.\n" + describe(problems))
+
     try:
         import torch
         from transformers import TextStreamer, TrainingArguments
