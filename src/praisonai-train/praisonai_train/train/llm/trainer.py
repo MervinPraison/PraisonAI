@@ -49,6 +49,102 @@ TRAINING_METHODS = {
     },
 }
 
+# Turn markers for masking the prompt out of the loss.
+#
+# TRL's `assistant_only_loss` needs `{% generation %}` in the chat template, and
+# NONE of unsloth's 43 templates contain it (verified: grep -c "generation %}"
+# unsloth/chat_templates.py -> 0). So `assistant_only_loss: auto` resolved to
+# False for every template a user can actually select, and every instruction
+# run trained on the prompt as well as the answer -- a quality loss with no
+# error, announced only by a summary line reading "Loss mask: full sequence".
+#
+# Unsloth's own answer is `train_on_responses_only(trainer, instruction_part,
+# response_part)` (unsloth/chat_templates.py:58-87), which masks by locating
+# literal marker strings and works on any template. It needs the two markers,
+# which vary by family -- hence this table.
+RESPONSE_MARKERS = {
+    "llama-3": ("<|start_header_id|>user<|end_header_id|>\n\n",
+                "<|start_header_id|>assistant<|end_header_id|>\n\n"),
+    "chatml": ("<|im_start|>user\n", "<|im_start|>assistant\n"),
+    "gemma": ("<start_of_turn>user\n", "<start_of_turn>model\n"),
+    "mistral": ("[INST]", "[/INST]"),
+    "phi": ("<|user|>\n", "<|assistant|>\n"),
+    "zephyr": ("<|user|>\n", "<|assistant|>\n"),
+}
+
+# Which markers a chat_template name uses. Matched longest-first so "llama-3.1"
+# does not fall through to a shorter, wrong prefix.
+TEMPLATE_TO_MARKERS = {
+    "llama-3": "llama-3", "llama3": "llama-3", "llama-3.1": "llama-3",
+    "llama-31": "llama-3", "llama": "llama-3",
+    "chatml": "chatml", "qwen-2.5": "chatml", "qwen25": "chatml",
+    "qwen2.5": "chatml", "qwen-25": "chatml", "qwen-3": "chatml",
+    "qwen3": "chatml", "qwen3-instruct": "chatml", "qwen3-thinking": "chatml",
+    "phi-4": "chatml", "gptoss": "chatml", "gpt-oss": "chatml",
+    "yi-chat": "chatml", "unsloth": "chatml",
+    "gemma": "gemma", "gemma2": "gemma", "gemma-3": "gemma", "gemma3": "gemma",
+    "gemma-3n": "gemma", "gemma3n": "gemma", "gemma-4": "gemma", "gemma4": "gemma",
+    "gemma_chatml": "chatml", "gemma2_chatml": "chatml",
+    "mistral": "mistral",
+    "phi-3": "phi", "phi-35": "phi", "phi-3.5": "phi",
+    "zephyr": "zephyr",
+}
+
+
+# The summary line has to name *which* route masked, because the two have very
+# different coverage and "assistant replies only" hid that distinction.
+_MASK_LABELS = {
+    False: "full sequence (training on prompts too)",
+    "assistant_only_loss": "assistant replies only (TRL assistant_only_loss)",
+    "train_on_responses_only": "assistant replies only (unsloth turn markers)",
+}
+
+
+def decide_masking(use_mask, supports_mask, markers):
+    """Which masking route to take: False, or the name of the mechanism.
+
+    Separate from the trainer so the decision can be tested directly. A test
+    that reads `train_model`'s source for the string "train_on_responses_only"
+    passes even when the branch that calls it is disabled -- which is how this
+    defect survived in the first place.
+    """
+    if not use_mask:
+        return False
+    if supports_mask:
+        return "assistant_only_loss"
+    if markers:
+        return "train_on_responses_only"
+    return None      # asked for, and neither route available
+
+
+def resolve_response_markers(chat_template, model_name=""):
+    """(instruction_part, response_part) for a template, or None if unknown.
+
+    Falls back to the model name when no explicit chat_template is configured,
+    because the model's own template is then in use. Returns None rather than
+    guessing: masking on the wrong markers silently trains on nothing, which is
+    worse than not masking at all.
+    """
+    for source, is_model in ((chat_template, False), (model_name, True)):
+        if not source:
+            continue
+        key = str(source).strip().lower()
+        if is_model:
+            # Match the repo name, not the org. Every unsloth model is
+            # "unsloth/<name>", and "unsloth" is itself a template key -- so
+            # scanning the full id sent every one of them to the chatml markers,
+            # including Gemma and Llama models whose real markers are different.
+            key = key.rsplit("/", 1)[-1]
+        if key in TEMPLATE_TO_MARKERS:
+            return RESPONSE_MARKERS[TEMPLATE_TO_MARKERS[key]]
+        for name in sorted(TEMPLATE_TO_MARKERS, key=len, reverse=True):
+            # Longest-first so "llama-3.1" beats "llama". Hyphens and dots are
+            # written both ways in the wild ("gemma-2" vs "gemma2").
+            if name in key or name.replace("-", "") in key.replace("-", ""):
+                return RESPONSE_MARKERS[TEMPLATE_TO_MARKERS[name]]
+    return None
+
+
 # GGUF / Ollama quantization methods supported by Unsloth's exporter. Validated up
 # front so a typo (e.g. "q4km") fails fast with a clear message instead of after a
 # long training run when the export step finally rejects it.
@@ -825,16 +921,36 @@ class TrainModel:
             use_mask = supports_mask
         else:
             use_mask = self._flag(mask_setting)
-        if use_mask and not supports_mask:
-            raise ValueError(
-                f"assistant_only_loss is enabled but the chat template for "
-                f"'{self.config['model_name']}' has no assistant-turn markers "
-                f"({{% generation %}}). Set assistant_only_loss: auto (recommended) or "
-                f"false, or use a chat_template that supports masking."
-            )
-        if use_mask:
+        # Two ways to mask, and the second is why this is not a one-liner.
+        #
+        # TRL's assistant_only_loss needs `{% generation %}` in the template.
+        # None of unsloth's 43 templates have it, so on its own that setting
+        # resolves to False for every template a user can pick -- and the run
+        # trains on the prompt with no error. Unsloth's own
+        # train_on_responses_only() masks by locating literal turn markers
+        # instead and works on any template; it is applied to the built trainer
+        # rather than through the config.
+        markers = resolve_response_markers(
+            self.config.get("chat_template"), self.config.get("model_name", ""))
+        self._response_markers = None
+        self._masking_on = False
+
+        route = decide_masking(use_mask, supports_mask, markers)
+        if route == "assistant_only_loss":
             sft_params["assistant_only_loss"] = True
-        self._masking_on = use_mask
+            self._masking_on = route
+        elif route == "train_on_responses_only":
+            self._response_markers = markers
+            self._masking_on = route
+        elif route is None:
+            raise ValueError(
+                f"assistant_only_loss is enabled but neither masking route is "
+                f"available for '{self.config['model_name']}': the chat template has "
+                f"no {{% generation %}} markers, and no turn markers are known for it. "
+                f"Set assistant_only_loss: false to train on the full sequence, or "
+                f"choose a chat_template from: "
+                f"{', '.join(sorted(set(TEMPLATE_TO_MARKERS)))}."
+            )
 
         # --- Early stopping (optional; needs an eval set) ---
         callbacks = []
@@ -950,6 +1066,16 @@ class TrainModel:
             # is exactly right, and it avoids a second full model in VRAM.
             trainer_kwargs["ref_model"] = None
         trainer = trainer_cls(**trainer_kwargs)
+
+        if self._response_markers:
+            # Applied to the trainer, not the config: this rewrites the label
+            # tensors on the already-tokenised dataset.
+            from unsloth.chat_templates import train_on_responses_only
+            instruction_part, response_part = self._response_markers
+            trainer = train_on_responses_only(
+                trainer, instruction_part=instruction_part, response_part=response_part)
+            print(f"DEBUG: masking prompt tokens via train_on_responses_only "
+                  f"(instruction={instruction_part!r}, response={response_part!r})")
         final_dir = self.config.get("final_model_dir", "lora_model")
         # One clear summary of what will run — so people and agents can confirm the
         # config resolved as intended without reading the DEBUG noise.
@@ -964,7 +1090,7 @@ class TrainModel:
             "\n──────────── PraisonAI Train ────────────\n"
             f"  Model:       {self.config['model_name']}\n"
             f"  Examples:    {len(raw_dataset)}{eval_str}\n"
-            f"  Loss mask:   {'assistant replies only' if self._masking_on else 'full sequence'}\n"
+            f"  Loss mask:   {_MASK_LABELS[self._masking_on]}\n"
             f"  Steps:       {steps}  ·  batch {sft_params['per_device_train_batch_size']}"
             f" × accum {sft_params['gradient_accumulation_steps']}{gpu_str}\n"
             f"  Checkpoints: {ckpt_str}  ·  Output: {final_dir}/\n"
