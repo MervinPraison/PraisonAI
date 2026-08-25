@@ -31,9 +31,20 @@ def test_generator_never_advertises_a_removed_backend():
 
 
 def test_every_advertised_preset_resolves():
-    """Each preset the generator teaches must construct without raising."""
+    """Each preset the generator teaches must resolve to a live backend.
+
+    A preset "resolves" when the resolver routes it to a real backend. Some
+    backends (e.g. mem0's managed client) additionally require credentials at
+    construction time; a missing-credential error still proves the preset is
+    live, so it is treated as resolved. What must never happen is the resolver
+    itself rejecting the preset as unknown/removed.
+    """
     for preset in _memory_caps()["supports_presets"]:
-        Agent(instructions="t", memory=preset)
+        try:
+            Agent(instructions="t", memory=preset)
+        except ValueError as exc:
+            if "api key" not in str(exc).lower():
+                raise
 
 
 def test_every_advertised_url_scheme_resolves():
