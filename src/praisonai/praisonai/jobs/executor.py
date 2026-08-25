@@ -133,19 +133,28 @@ class JobExecutor:
         # Fail fast if we're already over the admissions ceiling. This gates
         # admission (queued + running), while the per-run semaphore in
         # _execute_job continues to gate how many run concurrently.
+        #
+        # The check-and-reserve below runs synchronously (no ``await`` between
+        # the length check and the task insertion), so it is atomic under
+        # asyncio's cooperative scheduling: concurrent submits can't all pass
+        # the check and then over-admit past the ceiling. The task is created
+        # and registered first; the (awaiting) store.save happens only after the
+        # slot is reserved. If the persist fails we release the reserved slot.
         if len(self._running_tasks) >= self.max_queued:
             raise JobQueueFull(retry_after=1.0)
 
-        # Save job to store
-        await self.store.save(job)
-        
-        # Start execution task
+        # Reserve the admission slot atomically by starting + registering the
+        # task before the first await. Because nothing is awaited between the
+        # ceiling check and this insertion, concurrent submits cannot both slip
+        # past the check and over-admit. Persisting the QUEUED state is the very
+        # first step of _execute_job (before the concurrency semaphore), so the
+        # store still reflects QUEUED even while the run waits for a slot.
         task = asyncio.create_task(self._execute_job(job))
         self._running_tasks[job.id] = task
-        
+
         # Clean up task reference when done
         task.add_done_callback(lambda t: self._running_tasks.pop(job.id, None))
-        
+
         logger.info(f"Job submitted: {job.id}")
         return job
     
@@ -209,6 +218,10 @@ class JobExecutor:
     
     async def _execute_job(self, job: Job):
         """Execute a job."""
+        # Persist the QUEUED job before waiting on the concurrency semaphore so
+        # the store reflects it immediately (submit() reserved the admission slot
+        # synchronously and no longer saves, keeping the ceiling check atomic).
+        await self.store.save(job)
         async with self._get_semaphore():
             try:
                 # Mark as running

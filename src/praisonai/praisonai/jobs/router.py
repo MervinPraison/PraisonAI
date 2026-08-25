@@ -108,6 +108,19 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
             try:
                 await executor.submit(job)
             except JobQueueFull as exc:
+                # We persisted the job via save_if_absent but the executor
+                # rejected admission. Don't leave the record stranded as QUEUED
+                # forever (status/SSE would hang and /result would 409): delete
+                # it so the idempotency key is freed and the client can retry
+                # cleanly once capacity frees up. Best-effort — a failed delete
+                # must not mask the 503.
+                try:
+                    await store.delete(job.id)
+                except Exception:  # pragma: no cover - defensive cleanup
+                    logger.warning(
+                        "Failed to remove stranded queued job %s after JobQueueFull",
+                        job.id,
+                    )
                 raise HTTPException(
                     status_code=503,
                     detail="Job queue is full; retry later.",
