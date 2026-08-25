@@ -12,6 +12,7 @@ from praisonai.standardise.ai_generator import AIGenerator
 
 
 def _memory_caps():
+    """Return the memory capabilities the generator advertises to the model."""
     gen = AIGenerator.__new__(AIGenerator)
     return AIGenerator._detect_feature_capabilities(gen, "memory", {})
 
@@ -30,12 +31,14 @@ def _resolve_memory(value):
 
 
 def test_generator_presets_match_the_live_resolver():
+    """Advertised presets/URL schemes must mirror the live resolver registries."""
     caps = _memory_caps()
     assert caps["supports_presets"] == sorted(MEMORY_PRESETS)
     assert caps["supports_url_schemes"] == sorted(MEMORY_URL_SCHEMES)
 
 
 def test_generator_never_advertises_a_removed_backend():
+    """The generator must not name backends that were removed from the resolver."""
     caps = _memory_caps()
     blob = repr(caps)
     for dead in ("redis", "postgres", "postgresql", "qdrant"):
