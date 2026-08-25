@@ -1,0 +1,1215 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PraisonAI</title>
+<style>
+:root{--ground:#0F1114;--panel:#171A1F;--ink:#E8EAED;--soft:#9AA1AC;--rule:#262B33;
+      --accent:#7FD1B9;--bad:#E58B86;--user:#1E2430;--code:#0B0D10}
+@media(prefers-color-scheme:light){:root{--ground:#FBFBFC;--panel:#FFF;--ink:#14171C;--soft:#5B636E;
+      --rule:#E2E5EA;--accent:#1F7A63;--bad:#A6413C;--user:#EEF2F7;--code:#F2F4F7}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);color:var(--ink);font:14.5px/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif;
+     -webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+#body{flex:1;display:flex;min-height:0}
+#side{width:248px;flex:none;border-right:1px solid var(--rule);background:var(--panel);
+      display:flex;flex-direction:column;overflow:hidden}
+.sidetop{padding:.6rem .55rem .35rem;display:flex;flex-direction:column;gap:.15rem}
+.navbtn{display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;border-radius:7px;
+  background:none;border:0;color:var(--ink);font:inherit;font-size:.86rem;cursor:pointer;text-align:left;width:100%}
+.navbtn:hover{background:var(--ground)}
+.navbtn .k{margin-left:auto;font-size:.68rem;color:var(--soft);font-family:ui-monospace,Menlo,monospace}
+.navbtn .ic{width:15px;text-align:center;color:var(--soft)}
+.sectlbl{font-size:.62rem;text-transform:uppercase;letter-spacing:.11em;color:var(--soft);
+  font-weight:700;padding:.9rem .75rem .35rem}
+.sidefoot{border-top:1px solid var(--rule);padding:.45rem .55rem}
+#side.hidden{display:none}
+#chats{flex:1;overflow-y:auto;padding:.5rem}
+.chat{padding:.45rem .6rem;border-radius:6px;cursor:pointer;font-size:.82rem;
+      display:flex;justify-content:space-between;gap:.4rem;align-items:center;color:var(--soft)}
+.chat:hover{background:var(--ground)}
+.chat.active{background:var(--ground);color:var(--ink);font-weight:600}
+.chat .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat .x{opacity:0;font-size:.9rem;line-height:1;padding:0 .15rem}
+.chat:hover .x{opacity:.55}
+.chat .x:hover{opacity:1;color:var(--bad)}
+.chat.corrupt .t{color:var(--bad);font-style:italic}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+.titlebar{height:44px;-webkit-app-region:drag;flex:none;display:flex;align-items:center;
+          gap:.6rem;padding:0 .9rem 0 5.2rem;border-bottom:1px solid var(--rule)}
+.modelpill{-webkit-app-region:no-drag;display:flex;align-items:center;gap:.35rem;
+  background:none;border:0;color:var(--ink);font:inherit;font-size:.85rem;font-weight:600;
+  padding:.25rem .5rem;border-radius:7px;cursor:pointer}
+.modelpill:hover{background:var(--panel)}
+.modelpill .chev{color:var(--soft);font-size:.62rem}
+#status{font-size:.62rem;padding:.1rem .4rem;border-radius:3px;margin-left:.6rem;letter-spacing:.06em}
+.s-boot{color:var(--soft);background:color-mix(in srgb,var(--soft) 14%,transparent)}
+.s-ready{color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.s-fail{color:var(--bad);background:color-mix(in srgb,var(--bad) 16%,transparent)}
+#thread{flex:1;overflow-y:auto;padding:1.5rem 0;overflow-anchor:none;display:flex;flex-direction:column}
+#thread.empty{justify-content:center}
+#hero{display:none;text-align:center;padding:0 1.5rem 2rem}
+#thread.empty #hero{display:block}
+#hero h1{font-size:1.7rem;font-weight:600;margin:0 0 .4rem;letter-spacing:-.02em}
+#hero p{color:var(--soft);margin:0;font-size:.9rem}
+.mark{width:46px;height:46px;border-radius:13px;background:var(--accent);margin:0 auto .9rem;
+  display:flex;align-items:center;justify-content:center;color:var(--ground);
+  font-weight:800;font-size:1.15rem;font-family:ui-monospace,Menlo,monospace}
+.inner{max-width:46rem;margin:0 auto;padding:0 1.5rem}
+.turn{margin-bottom:1.4rem;content-visibility:auto;contain-intrinsic-size:auto 90px}
+.turn.live{content-visibility:visible}
+.who{font-size:.65rem;text-transform:uppercase;letter-spacing:.11em;color:var(--soft);
+     font-weight:700;margin-bottom:.35rem}
+.bubble{word-wrap:break-word;overflow-wrap:anywhere}
+.bubble.plain{white-space:pre-wrap}
+.bubble>*:first-child{margin-top:0}.bubble>*:last-child{margin-bottom:0}
+.bubble h1,.bubble h2,.bubble h3{font-weight:650;line-height:1.3;margin:1.1em 0 .45em}
+.bubble h1{font-size:1.3em}.bubble h2{font-size:1.15em}.bubble h3{font-size:1.03em}
+.bubble p{margin:0 0 .75em}
+.bubble ul,.bubble ol{margin:0 0 .75em;padding-left:1.4em}
+.bubble li{margin:.2em 0}
+.bubble code{background:var(--code);border:1px solid var(--rule);border-radius:4px;
+  padding:.1em .34em;font-family:ui-monospace,Menlo,monospace;font-size:.86em}
+.bubble pre{background:var(--code);border:1px solid var(--rule);border-radius:8px;
+  padding:.75rem .9rem;overflow-x:auto;margin:0 0 .8em;position:relative}
+.bubble pre code{background:none;border:0;padding:0;font-size:.8rem;line-height:1.5}
+.bubble blockquote{margin:0 0 .8em;padding-left:.85em;border-left:3px solid var(--rule);color:var(--soft)}
+.bubble a{color:var(--accent)}
+.bubble hr{border:0;border-top:1px solid var(--rule);margin:1.1em 0}
+.bubble table{border-collapse:collapse;margin:0 0 .8em;font-size:.9em;display:block;overflow-x:auto}
+.bubble th,.bubble td{border:1px solid var(--rule);padding:.35em .6em;text-align:left}
+.bubble th{background:var(--code);font-weight:650}
+.copy{position:absolute;top:.4rem;right:.4rem;font-size:.62rem;padding:.2rem .45rem;
+  background:var(--panel);border:1px solid var(--rule);border-radius:4px;color:var(--soft);
+  cursor:pointer;opacity:0;transition:opacity .12s}
+.bubble pre:hover .copy{opacity:1}
+.copy:hover{color:var(--ink)}
+.turn.u .bubble{background:var(--user);padding:.7rem .95rem;border-radius:9px}
+.err{border-left:3px solid var(--bad);background:var(--panel);padding:.8rem 1rem;
+     border-radius:0 8px 8px 0;font-size:.85rem}
+.err b{color:var(--bad);display:block;margin-bottom:.3rem}
+.err pre{margin:.5rem 0 0;background:var(--code);border:1px solid var(--rule);border-radius:6px;
+         padding:.55rem .7rem;font-size:.72rem;overflow-x:auto;white-space:pre-wrap}
+.caret{display:inline-block;width:7px;height:1.05em;background:var(--accent);
+       vertical-align:-2px;animation:b 1.1s steps(2) infinite}
+@keyframes b{50%{opacity:0}}
+form{flex:none;padding:0 1.5rem 1.1rem}
+.fi{max-width:46rem;margin:0 auto;background:var(--panel);border:1px solid var(--rule);
+    border-radius:14px;padding:.7rem .8rem .55rem;transition:border-color .12s}
+.fi:focus-within{border-color:color-mix(in srgb,var(--accent) 55%,var(--rule))}
+textarea{width:100%;resize:none;background:none;color:var(--ink);border:0;
+         padding:.1rem .1rem .4rem;font:inherit;max-height:10rem;outline:none}
+textarea::placeholder{color:var(--soft)}
+.ctools{display:flex;align-items:center;gap:.15rem}
+.ctool{background:none;border:0;color:var(--soft);cursor:pointer;padding:.3rem .45rem;
+  border-radius:6px;font-size:.8rem;display:flex;align-items:center;gap:.3rem}
+.ctool:hover{background:var(--ground);color:var(--ink)}
+.ctool.on{color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.4rem}
+.chip{display:flex;align-items:center;gap:.35rem;background:var(--ground);border:1px solid var(--rule);
+  border-radius:6px;padding:.2rem .45rem;font-size:.73rem;color:var(--soft)}
+.chip b{color:var(--ink);font-weight:600}
+.chip .x{cursor:pointer}.chip .x:hover{color:var(--bad)}
+.tok-k{color:#c792ea}.tok-s{color:#c3e88d}.tok-c{color:var(--soft);font-style:italic}
+.tok-n{color:#f78c6c}.tok-f{color:#82aaff}
+.drop{outline:2px dashed var(--accent);outline-offset:-6px}
+.grow{flex:1}
+button{background:var(--accent);color:var(--ground);border:0;border-radius:8px;padding:0 1.1rem;
+       font-weight:650;cursor:pointer;font-size:.85rem}
+#send{width:30px;height:30px;padding:0;border-radius:50%;display:flex;align-items:center;
+      justify-content:center;font-size:.95rem;line-height:1}
+button:disabled{opacity:.35;cursor:default}
+#stop{width:auto;padding:0 .8rem;height:30px;border-radius:15px;font-size:.78rem}
+button.stop{background:var(--bad)}
+.ghost{background:none;border:1px solid var(--rule);color:var(--soft);padding:.25rem .6rem;
+  font-size:.68rem;font-weight:650;border-radius:6px;cursor:pointer;-webkit-app-region:no-drag}
+.ghost:hover{color:var(--ink);border-color:var(--soft)}
+.tb-right{position:absolute;right:.9rem;display:flex;gap:.4rem}
+.titlebar{position:relative}
+.stats{font-size:.66rem;color:var(--soft);margin-top:.45rem;font-variant-numeric:tabular-nums}
+.cancelled{font-size:.7rem;color:var(--bad);margin-top:.4rem;font-weight:650}
+.drafting{font-size:.75rem;color:var(--soft);margin:.4rem 0;font-style:italic}
+.acts{display:flex;gap:.5rem;margin-top:.4rem;opacity:0;transition:opacity .12s}
+.turn:hover .acts{opacity:1}
+.act{font-size:.68rem;color:var(--soft);cursor:pointer;background:none;border:0;padding:.1rem .2rem}
+.act:hover{color:var(--ink)}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:50;
+         align-items:flex-start;justify-content:center;padding-top:8vh}
+#overlay.open{display:flex}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:12px;width:min(560px,92vw);
+       max-height:76vh;overflow-y:auto;padding:1.4rem 1.6rem;box-shadow:0 20px 60px -20px rgba(0,0,0,.6)}
+.panel h2{margin:0 0 1.1rem;font-size:1.05rem;font-family:ui-monospace,Menlo,monospace}
+.fld{margin-bottom:1.1rem}
+.fld label{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;
+           color:var(--soft);font-weight:700;margin-bottom:.3rem}
+.fld input,.fld select,.fld textarea{width:100%;background:var(--ground);color:var(--ink);
+  border:1px solid var(--rule);border-radius:7px;padding:.5rem .65rem;font:inherit;font-size:.87rem}
+.fld textarea{min-height:5rem;resize:vertical}
+.hint{font-size:.72rem;color:var(--soft);margin-top:.25rem}
+.row{display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.2rem}
+.res{padding:.5rem .6rem;border-radius:6px;cursor:pointer;font-size:.82rem}
+.res:hover{background:var(--ground)}
+.res b{display:block}
+.setnav{display:flex;gap:1.4rem;align-items:flex-start}
+.setside{width:150px;flex:none;display:flex;flex-direction:column;gap:.1rem}
+.setside button{background:none;border:0;color:var(--soft);font:inherit;font-size:.83rem;
+  text-align:left;padding:.4rem .55rem;border-radius:6px;cursor:pointer;display:flex;gap:.5rem}
+.setside button:hover{background:var(--ground);color:var(--ink)}
+.setside button.on{background:var(--ground);color:var(--ink);font-weight:600}
+.setbody{flex:1;min-width:0}
+.srow{padding:.75rem 0;border-bottom:1px solid var(--rule)}
+.srow:last-child{border-bottom:0}
+.srow-top{display:flex;gap:1rem;align-items:flex-start}
+.srow-lbl{flex:1;min-width:0}
+.srow-lbl b{display:block;font-weight:600;font-size:.88rem}
+.srow-lbl span{display:block;color:var(--soft);font-size:.76rem;margin-top:.1rem}
+.srow-ctl{flex:none;min-width:150px;display:flex;justify-content:flex-end;align-items:center;gap:.4rem}
+.srow-ctl input[type=text],.srow-ctl input[type=password],.srow-ctl input[type=number],
+.srow-ctl select{width:150px;background:var(--ground);color:var(--ink);border:1px solid var(--rule);
+  border-radius:6px;padding:.35rem .5rem;font:inherit;font-size:.83rem}
+.srow-ctl textarea{width:100%;min-height:4.5rem}
+.srow-wide{margin-top:.5rem}
+.srow-wide textarea{width:100%;background:var(--ground);color:var(--ink);border:1px solid var(--rule);
+  border-radius:6px;padding:.5rem .6rem;font:inherit;font-size:.83rem;resize:vertical}
+.sw{width:34px;height:19px;border-radius:10px;background:var(--rule);position:relative;cursor:pointer;flex:none}
+.sw.on{background:var(--accent)}
+.sw i{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:var(--panel);transition:transform .13s}
+.sw.on i{transform:translateX(15px)}
+.seg{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--soft);font:inherit;font-size:.76rem;
+  padding:.28rem .55rem;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--ground);font-weight:650}
+.rst{background:none;border:0;color:var(--soft);cursor:pointer;font-size:.72rem;padding:0 .2rem}
+.rst:hover{color:var(--ink)}
+.warn{font-size:.72rem;color:var(--bad);margin-top:.25rem}
+.restart{font-size:.68rem;color:var(--estimated,var(--soft));margin-top:.2rem}
+.setsearch{width:100%;margin-bottom:.9rem}
+.res span{color:var(--soft);font-size:.75rem}
+.tool{border:1px solid var(--rule);border-radius:8px;background:var(--panel);margin:.5rem 0;
+      font-size:.82rem;overflow:hidden}
+.tool-head{display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;cursor:pointer;user-select:none}
+.tool-head:hover{background:var(--code)}
+.tool-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--soft)}
+.tool.running .tool-dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
+.tool.ok .tool-dot{background:var(--accent)}
+.tool.err .tool-dot{background:var(--bad)}
+@keyframes pulse{50%{opacity:.3}}
+.tool-name{font-family:ui-monospace,Menlo,monospace;font-weight:650}
+.tool-meta{margin-left:auto;color:var(--soft);font-size:.72rem;font-variant-numeric:tabular-nums}
+.tool-chev{color:var(--soft);font-size:.7rem;transition:transform .12s}
+.tool.open .tool-chev{transform:rotate(90deg)}
+.tool-body{display:none;border-top:1px solid var(--rule);padding:.6rem .7rem}
+.tool.open .tool-body{display:block}
+.tool-label{font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;color:var(--soft);
+            font-weight:700;margin:.4rem 0 .25rem}
+.tool-label:first-child{margin-top:0}
+.tool pre{margin:0;font-size:.74rem;max-height:16rem;overflow:auto;background:var(--code);
+          border:1px solid var(--rule);border-radius:6px;padding:.5rem .6rem;white-space:pre-wrap}
+.tool .more{font-size:.7rem;color:var(--accent);cursor:pointer;margin-top:.3rem;display:inline-block}
+.think{border-left:2px solid var(--rule);padding-left:.8rem;margin:.5rem 0;color:var(--soft);font-size:.86rem}
+.think-head{font-size:.66rem;text-transform:uppercase;letter-spacing:.09em;font-weight:700;
+            cursor:pointer;user-select:none;display:flex;gap:.4rem;align-items:center}
+.think-body{display:none;white-space:pre-wrap;margin-top:.35rem;font-size:.82rem}
+.think.open .think-body{display:block}
+</style></head><body>
+<div class="titlebar">
+  <button class="modelpill" id="modelpill" type="button">
+    <span id="modelname">Select model</span><span class="chev">▼</span></button>
+  <span id="status" class="s-boot">starting engine</span>
+  <div class="tb-right">
+    <button class="ghost" id="toggle" type="button">☰</button>
+  </div>
+</div>
+<div id="body">
+  <aside id="side">
+    <div class="sidetop">
+      <button class="navbtn" id="newchat" type="button"><span class="ic">✎</span>New chat<span class="k">⌘N</span></button>
+      <button class="navbtn" id="search" type="button"><span class="ic">⌕</span>Search<span class="k">⌘K</span></button>
+    </div>
+    <div class="sectlbl">Recents</div>
+    <div id="chats"></div>
+    <div class="sidefoot">
+      <button class="navbtn" id="logsBtn" type="button"><span class="ic">▤</span>Engine log</button>
+      <button class="navbtn" id="settings" type="button"><span class="ic">⚙</span>Settings<span class="k">⌘,</span></button>
+    </div>
+  </aside>
+  <div id="main">
+    <div id="thread" class="empty">
+      <div id="hero"><div class="mark">P</div>
+        <h1>Ready when you are</h1><p>Ask anything, or give it a task.</p></div>
+      <div class="inner" id="turns"></div>
+    </div>
+    <form id="f"><div class="fi">
+  <div class="chips" id="chips"></div>
+  <textarea id="p" rows="1" placeholder="Ask anything…" disabled></textarea>
+  <input type="file" id="filein" multiple style="display:none"/>
+  <div class="ctools">
+    <button class="ctool" id="attach" type="button" title="Attach a file">＋</button>
+    <button class="ctool on" id="toolsBtn" type="button" title="Tools enabled">⚒ Tools</button>
+    <span class="grow"></span>
+    <button id="send" disabled title="Send">↑</button>
+    <button id="stop" class="stop" type="button" style="display:none">Stop</button>
+  </div>
+</div></form>
+  </div>
+</div>
+<div id="overlay"><div class="panel" id="panel"></div></div>
+<script>
+/* --- settings registry, inlined at build time --- */
+/**
+ * Settings as data.
+ *
+ * Every setting is one object. Row rendering, persistence, defaults, per-field
+ * reset, validation, conditional visibility, restart notices and search all
+ * derive from this list, so adding a setting is one entry and nothing else.
+ *
+ * The alternative -- hand-written form sections -- drifts the moment one
+ * section is carved out: a reference app has an 847-line Appearance page
+ * outside its own registry, and 7 of its ~15 rows are unreachable by search
+ * because they were never given anchors.
+ *
+ * Four things the references could not express, added here deliberately:
+ *   default          so per-field reset is free (none of the three has it)
+ *   validate         so a threshold cannot be set negative
+ *   requiresRestart  so a row can say so instead of a comment saying it
+ *   confirm          so a destructive transition is gated
+ */
+
+const SECTIONS = [
+  { id: "general",    label: "General",    icon: "⚙" },
+  { id: "model",      label: "Models",     icon: "◈" },
+  { id: "chat",       label: "Chat",       icon: "◇" },
+  { id: "appearance", label: "Appearance", icon: "◐" },
+  { id: "safety",     label: "Safety",     icon: "⚿" },
+  { id: "data",       label: "Data",       icon: "▤" },
+  { id: "integrations", label: "Integrations", icon: "⧉" },
+  { id: "about",      label: "About",      icon: "ⓘ" },
+];
+
+const clampNum = (min, max) => (v) =>
+  v === "" || v === null ? null
+  : Number.isNaN(Number(v)) ? "Must be a number"
+  : Number(v) < min ? `Must be at least ${min}`
+  : Number(v) > max ? `Must be at most ${max}` : null;
+
+const SETTINGS = [
+  // ---- Models -------------------------------------------------------------
+  { key: "model", section: "model", label: "Default model",
+    description: "Any OpenAI-compatible model id. New chats use this.",
+    keywords: ["llm", "gpt", "claude", "provider"],
+    control: { kind: "combobox", suggestions: [
+      "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "o4-mini",
+      "claude-sonnet-4-20250514", "claude-opus-4-20250514",
+      "gemini-2.0-flash", "ollama/llama3.2",
+    ]},
+    default: "gpt-4o-mini" },
+
+  { key: "temperature", section: "model", label: "Temperature",
+    description: "Higher is more varied. 0 is nearly deterministic.",
+    control: { kind: "slider", min: 0, max: 2, step: 0.05 },
+    default: 0.7, validate: clampNum(0, 2) },
+
+  { key: "max_tokens", section: "model", label: "Max output tokens",
+    description: "0 lets the model decide.",
+    control: { kind: "number", min: 0, max: 128000, step: 256 },
+    default: 0, validate: clampNum(0, 128000) },
+
+  { key: "top_p", section: "model", label: "Top-p",
+    control: { kind: "slider", min: 0, max: 1, step: 0.01 },
+    default: 1, validate: clampNum(0, 1) },
+
+  { key: "base_url", section: "model", label: "Base URL override",
+    description: "Point at a proxy, Azure, or a local server. Blank uses the provider default.",
+    keywords: ["endpoint", "proxy", "azure", "ollama", "lm studio"],
+    control: { kind: "text", placeholder: "https://api.openai.com/v1" },
+    default: "", requiresRestart: true },
+
+  { key: "api_key", section: "model", label: "API key",
+    description: "Stored in the macOS keychain, never in the settings file. Blank uses the environment.",
+    keywords: ["token", "secret", "credential", "openai"],
+    control: { kind: "text", secret: true },
+    default: "", requiresRestart: true },
+
+  // ---- Chat ---------------------------------------------------------------
+  { key: "system_prompt", section: "chat", label: "System prompt",
+    description: "Prepended to every conversation. Blank uses the default.",
+    keywords: ["personality", "instructions", "persona"],
+    control: { kind: "text", multiline: true, placeholder: "You are a careful assistant…" },
+    default: "" },
+
+  { key: "auto_title", section: "chat", label: "Name chats automatically",
+    description: "Uses the first message as the title.",
+    control: { kind: "toggle" }, default: true },
+
+  { key: "show_reasoning", section: "chat", label: "Show reasoning",
+    description: "Display the model's thinking when it emits any.",
+    control: { kind: "toggle" }, default: true },
+
+  { key: "collapse_reasoning", section: "chat", label: "Collapse reasoning by default",
+    control: { kind: "toggle" }, default: false,
+    visibleWhen: (g) => g("show_reasoning") === true },
+
+  { key: "show_stats", section: "chat", label: "Show token stats",
+    description: "Characters, duration and time to first token under each reply.",
+    control: { kind: "toggle" }, default: true },
+
+  { key: "condense_paste", section: "chat", label: "Condense long pastes",
+    description: "Text longer than this becomes an attachment instead of filling the context.",
+    keywords: ["clipboard", "context"],
+    control: { kind: "select", options: [
+      { value: 0, label: "Off" }, { value: 2000, label: "2,000 characters" },
+      { value: 4000, label: "4,000 characters" }, { value: 8000, label: "8,000 characters" },
+    ]}, default: 4000 },
+
+  // ---- Appearance ---------------------------------------------------------
+  { key: "theme", section: "appearance", label: "Theme",
+    control: { kind: "segmented", options: [
+      { value: "system", label: "System" }, { value: "light", label: "Light" },
+      { value: "dark", label: "Dark" }]},
+    default: "system" },
+
+  { key: "font_size", section: "appearance", label: "Text size",
+    control: { kind: "select", options: [
+      { value: 14, label: "14 px" }, { value: 15, label: "15 px" },
+      { value: 16, label: "16 px" }, { value: 18, label: "18 px" }]},
+    default: 15 },
+
+  { key: "code_font_size", section: "appearance", label: "Code text size",
+    control: { kind: "number", min: 10, max: 20, step: 1 },
+    default: 12, validate: clampNum(10, 20) },
+
+  { key: "reduce_motion", section: "appearance", label: "Reduce motion",
+    control: { kind: "segmented", options: [
+      { value: "system", label: "System" }, { value: "on", label: "On" },
+      { value: "off", label: "Off" }]},
+    default: "system" },
+
+  // ---- Safety -------------------------------------------------------------
+  { key: "approval_mode", section: "safety", label: "Tool approval",
+    description: "How tool calls that touch your files are approved before running.",
+    keywords: ["permissions", "confirm", "yolo", "sandbox"],
+    control: { kind: "select", options: [
+      { value: "ask",   label: "Ask every time" },
+      { value: "smart", label: "Ask for risky actions" },
+      { value: "never", label: "Never ask" }]},
+    default: "ask",
+    confirm: { when: (_p, n) => n === "never",
+               message: "Tools will read your files without asking. Continue?" } },
+
+  { key: "approval_timeout", section: "safety", label: "Approval timeout",
+    description: "Seconds to wait before declining an unanswered request.",
+    control: { kind: "number", min: 10, max: 3600, step: 10, unit: "s" },
+    default: 300, validate: clampNum(10, 3600),
+    visibleWhen: (g) => g("approval_mode") !== "never" },
+
+  { key: "confirm_delete", section: "safety", label: "Confirm before deleting a chat",
+    control: { kind: "toggle" }, default: true },
+
+  // ---- General ------------------------------------------------------------
+  { key: "launch_at_login", section: "general", label: "Open at login",
+    control: { kind: "toggle" }, default: false, requiresRestart: true },
+
+  { key: "check_updates", section: "general", label: "Check for updates automatically",
+    control: { kind: "toggle" }, default: true },
+
+  // ---- Data ---------------------------------------------------------------
+  // Actions, not values. They carry no `default` and are skipped by save,
+  // reset and search-by-value, but still get a row and an anchor for free.
+  { key: "export_chats", section: "data", label: "Export all conversations",
+    description: "Downloads every transcript as JSON.",
+    keywords: ["backup", "download", "json"],
+    control: { kind: "action", verb: "Export" }, action: "export" },
+
+  { key: "open_data_dir", section: "data", label: "Data folder",
+    description: "Transcripts and settings live outside the app bundle, so an update cannot take them with it.",
+    keywords: ["storage", "location", "finder", "backup"],
+    control: { kind: "action", verb: "Show path" }, action: "reveal" },
+
+  { key: "clear_chats", section: "data", label: "Delete all conversations",
+    description: "Cannot be undone.",
+    keywords: ["reset", "wipe", "clear"],
+    control: { kind: "action", verb: "Delete all", danger: true }, action: "clear",
+    confirm: { when: () => true,
+               message: "Delete every conversation? This cannot be undone." } },
+
+  // ---- About --------------------------------------------------------------
+  { key: "version", section: "about", label: "PraisonAI Desktop",
+    control: { kind: "readout", value: () => "0.1.0" } },
+
+  { key: "engine_status", section: "about", label: "Engine",
+    description: "The Python process this window is talking to.",
+    control: { kind: "readout", value: (ctx) => ctx.engine || "not connected" } },
+
+  { key: "logs_link", section: "about", label: "Engine log",
+    control: { kind: "action", verb: "Open" }, action: "logs" },
+
+  { key: "check_now", section: "about", label: "Check for updates",
+    control: { kind: "action", verb: "Check" }, action: "update" },
+
+  // ---- Integrations -------------------------------------------------------
+  { key: "mcp_servers", section: "integrations", label: "MCP servers",
+    description: "Tool servers launched over stdio. Each is disabled until you enable it.",
+    keywords: ["tools", "model context protocol", "stdio", "extensions"],
+    control: { kind: "action", verb: "Manage" }, action: "mcp" },
+];
+
+// A duplicate key would silently shadow, so fail at load instead.
+const seen = new Set();
+for (const s of SETTINGS) {
+  if (seen.has(s.key)) throw new Error(`duplicate setting key: ${s.key}`);
+  seen.add(s.key);
+}
+
+const DEFAULTS = Object.fromEntries(SETTINGS.map((s) => [s.key, s.default]));
+
+/** Search entries derive from the registry, never a parallel list, and respect
+ *  visibleWhen -- so search can never return a row that cannot be shown. */
+function searchSettings(query, get) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const terms = q.split(/\s+/);
+  const scored = [];
+  for (const s of SETTINGS) {
+    if (s.visibleWhen && !s.visibleWhen(get)) continue;
+    const hay = [s.label, s.description || "", ...(s.keywords || []), s.key]
+      .join(" ").toLowerCase();
+    if (!terms.every((t) => hay.includes(t))) continue;
+    const l = s.label.toLowerCase();
+    scored.push({ s, score: l === q ? 100 : l.startsWith(q) ? 90
+      : l.includes(q) ? 80 : (s.keywords || []).some((k) => k.includes(q)) ? 70 : 50 });
+  }
+  return scored.sort((a, b) => b.score - a.score).map((x) => x.s);
+}
+
+window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
+
+const { invoke } = window.__TAURI__.core;
+const turns=document.getElementById('turns'), thread=document.getElementById('thread');
+const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
+let PORT=null, atBottom=true, activeRun=null, activeReader=null;
+const stopBtn=document.getElementById('stop'), newChat=document.getElementById('newchat');
+const rid=()=>Math.random().toString(36).slice(2)+Date.now().toString(36);
+const modelName=document.getElementById('modelname');
+const hero=document.getElementById('hero');
+// The hero is shown by a class on the thread, so the empty state cannot drift
+// out of sync with whether the transcript actually has content.
+const syncEmpty=()=>thread.classList.toggle('empty', turns.children.length===0);
+let toolsOn=true;
+const chatsEl=document.getElementById('chats');
+let chatId=rid();
+
+async function refreshChats(){
+  if(!PORT) return;
+  try{
+    const {chats}=await (await fetch(`http://127.0.0.1:${PORT}/chats`)).json();
+    chatsEl.innerHTML='';
+    const groups={};
+    for(const c of chats){ (groups[c.project||'']??=[]).push(c); }
+    const order=Object.keys(groups).sort((a,b)=>a===''?1:b===''?-1:a.localeCompare(b));
+    for(const g of order){
+      if(g){ const lbl=document.createElement('div'); lbl.className='sectlbl';
+             lbl.style.padding='.7rem .75rem .2rem'; lbl.textContent=g;
+             chatsEl.appendChild(lbl); }
+      for(const c of groups[g]){
+      const d=document.createElement('div');
+      d.className='chat'+(c.id===chatId?' active':'')+(c.corrupt?' corrupt':'');
+      d.innerHTML=`<span class="t"></span><span class="x" title="Delete">×</span>`;
+      d.querySelector('.t').textContent=c.title;
+      d.querySelector('.t').onclick=()=>openChat(c.id);
+      d.querySelector('.x').onclick=async ev=>{
+        ev.stopPropagation();
+        await fetch(`http://127.0.0.1:${PORT}/chats/${c.id}`,{method:'DELETE'});
+        if(c.id===chatId){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
+        refreshChats();
+      };
+      d.oncontextmenu=async ev=>{
+        ev.preventDefault();
+        const name=prompt('Move to project (blank to remove):', c.project||'');
+        if(name===null) return;
+        await fetch('http://127.0.0.1:'+PORT+'/project/'+c.id,{method:'POST',
+          headers:{'content-type':'application/json'},body:JSON.stringify({project:name})});
+        refreshChats();
+      };
+      chatsEl.appendChild(d);
+      }
+    }
+  }catch{}
+}
+
+async function openChat(id){
+  chatId=id; turns.innerHTML=''; syncEmpty();
+  try{
+    const c=await (await fetch(`http://127.0.0.1:${PORT}/chats/${id}`)).json();
+    for(const m of c.messages||[]){
+      const b=turn(m.role==='user'?'u':'a', m.role==='user'?'You':'PraisonAI');
+      if(m.role==='user'){ b.classList.add('plain'); b.textContent=m.content; }
+      else b.innerHTML=md(m.content);
+      b.parentElement.classList.remove('live');
+    }
+  }catch{}
+  refreshChats(); atBottom=true; stick();
+}
+
+// Follow the tail only while the reader is already at the bottom. WebKit has no
+// overflow-anchor, so this is explicit rather than delegated to the browser.
+thread.addEventListener('scroll',()=>{
+  atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
+});
+const stick=()=>{ if(atBottom) thread.scrollTop=thread.scrollHeight; };
+
+// Compact markdown renderer. Deliberately small and dependency-free: a CDN is
+// unavailable to a packaged app, and the alternative -- shipping a full parser --
+// is a decision to make with measurements, not by default.
+const esc=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Small tokeniser rather than a highlighter library: a CDN is unreachable from a
+// packaged app, and shipping a grammar engine is a decision to make with
+// measurements. Strings and comments match first, so a keyword inside one is
+// never recoloured.
+const KW = /\b(const|let|var|function|return|if|else|for|while|class|import|from|export|async|await|new|try|catch|finally|throw|def|elif|lambda|pass|with|as|in|is|not|and|or|None|True|False|self|fn|mut|pub|impl|struct|enum|match|use|type|interface|public|private|static|void)\b/g;
+const STR = /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/[^\n]*|#[^\n]*)/g;
+function hl(code){
+  const plain = t => esc(t)
+    .replace(KW, '<span class="tok-k">$1</span>')
+    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-n">$1</span>')
+    .replace(/\b([A-Za-z_]\w*)\s*\(/g, '<span class="tok-f">$1</span>(');
+  const out = []; let i = 0, m;
+  STR.lastIndex = 0;
+  while ((m = STR.exec(code))) {
+    out.push(plain(code.slice(i, m.index)));
+    const cls = /^(\/\/|#)/.test(m[0]) ? 'tok-c' : 'tok-s';
+    out.push('<span class="' + cls + '">' + esc(m[0]) + '</span>');
+    i = m.index + m[0].length;
+  }
+  out.push(plain(code.slice(i)));
+  return out.join('');
+}
+
+function md(src){
+  const blocks=[]; // pull fenced code out first so nothing inside it is transformed
+  src=src.replace(/```([\w-]*)\n([\s\S]*?)```/g,(m,lang,code)=>{
+    blocks.push(`<pre><button class="copy">copy</button><code data-lang="${esc(lang)}">${hl(code.replace(/\n$/,''))}</code></pre>`);
+    return `\u0000${blocks.length-1}\u0000`;
+  });
+  const inline=t=>esc(t)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  const out=[]; let list=null;
+  const closeList=()=>{ if(list){ out.push(`</${list}>`); list=null; } };
+  for(const raw of src.split('\n')){
+    const line=raw.replace(/\s+$/,'');
+    if(/^\u0000\d+\u0000$/.test(line)){ closeList(); out.push(line); continue; }
+    if(!line.trim()){ closeList(); continue; }
+    let m;
+    if((m=line.match(/^(#{1,3})\s+(.*)$/))){ closeList(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); continue; }
+    if(/^(---|\*\*\*|___)\s*$/.test(line)){ closeList(); out.push('<hr>'); continue; }
+    if((m=line.match(/^>\s?(.*)$/))){ closeList(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); continue; }
+    if((m=line.match(/^\s*[-*+]\s+(.*)$/))){ if(list!=='ul'){closeList();out.push('<ul>');list='ul';} out.push(`<li>${inline(m[1])}</li>`); continue; }
+    if((m=line.match(/^\s*\d+[.)]\s+(.*)$/))){ if(list!=='ol'){closeList();out.push('<ol>');list='ol';} out.push(`<li>${inline(m[1])}</li>`); continue; }
+    closeList(); out.push(`<p>${inline(line)}</p>`);
+  }
+  closeList();
+  return out.join('').replace(/\u0000(\d+)\u0000/g,(m,i)=>blocks[+i]);
+}
+
+// One card per tool call, keyed by call_id so a result finds its own call even
+// when several run in parallel. State lives on the element, not in a lookup that
+// could drift from the DOM.
+const MAX_OUTPUT=20000, MAX_LINES=2000;
+function toolCard(host,callId,name,args){
+  const el=document.createElement('div');
+  el.className='tool running'; el.dataset.call=callId;
+  el.innerHTML=`<div class="tool-head"><span class="tool-dot"></span>
+      <span class="tool-name"></span><span class="tool-meta">running…</span>
+      <span class="tool-chev">▶</span></div>
+    <div class="tool-body"><div class="tool-label">Arguments</div><pre class="args"></pre>
+      <div class="out-wrap" style="display:none">
+        <div class="tool-label">Result</div><pre class="out"></pre></div></div>`;
+  el.querySelector('.tool-name').textContent=name;
+  el.querySelector('.args').textContent=
+    typeof args==='string'?args:JSON.stringify(args??{},null,2);
+  el.querySelector('.tool-head').onclick=()=>el.classList.toggle('open');
+  host.appendChild(el); stick();
+  return el;
+}
+function toolResult(host,callId,name,ok,output,seconds){
+  let el=host.querySelector(`.tool[data-call="${CSS.escape(callId||'')}"]`);
+  // A result with no matching call still gets a card: dropping it would hide a
+  // tool that ran, which is worse than showing one we cannot pair up.
+  if(!el) el=toolCard(host,callId,name,{});
+  el.className=`tool ${ok?'ok':'err'}`+(el.classList.contains('open')?' open':'');
+  el.querySelector('.tool-meta').textContent=
+    (ok?'':'failed · ')+(seconds!=null?`${seconds}s`:'done');
+  const w=el.querySelector('.out-wrap'), pre=el.querySelector('.out');
+  w.style.display='';
+  const full=String(output??'');
+  // Keep the TAIL, not the head. For command output the end is the part that
+  // matters -- the error, the summary, the last line -- and head-truncating
+  // hides exactly what the user opened the card to read.
+  const lines=full.split('\n');
+  let visible=full, hiddenLines=0;
+  if(lines.length>MAX_LINES){ hiddenLines=lines.length-MAX_LINES; visible=lines.slice(hiddenLines).join('\n'); }
+  if(visible.length>MAX_OUTPUT){ visible=visible.slice(visible.length-MAX_OUTPUT); }
+  pre.textContent=visible;
+  if(visible!==full){
+    const more=document.createElement('span'); more.className='more';
+    more.textContent=hiddenLines
+      ? `Show all — ${hiddenLines.toLocaleString()} earlier lines hidden`
+      : `Show all ${full.length.toLocaleString()} characters`;
+    more.onclick=()=>{pre.textContent=full;more.remove();};
+    w.appendChild(more);
+  }
+  // Copy always yields the UNCAPPED text, never what is on screen.
+  const cp=document.createElement('span'); cp.className='more'; cp.style.marginLeft='.7rem';
+  cp.textContent='Copy output';
+  cp.onclick=()=>{navigator.clipboard.writeText(full);
+    cp.textContent='Copied'; setTimeout(()=>cp.textContent='Copy output',1200);};
+  w.appendChild(cp);
+  if(!ok) el.classList.add('open');   // failures open themselves; successes stay quiet
+  stick();
+}
+// Copy / regenerate / delete, attached once a turn settles.
+function addActions(turnEl, prompt, answer){
+  if(turnEl.querySelector('.acts')) return;
+  const bar=document.createElement('div'); bar.className='acts';
+  const mk=(label,fn)=>{ const b=document.createElement('button');
+    b.className='act'; b.type='button'; b.textContent=label; b.onclick=fn; bar.appendChild(b); };
+  mk('Copy',()=>{ navigator.clipboard.writeText(answer); });   // the source text, not the DOM
+  mk('Regenerate',()=>{ box.value=prompt; document.getElementById('f').requestSubmit(); });
+  mk('Fork',async()=>{
+    const idx=[...turns.querySelectorAll('.turn.u')].findIndex(u=>u.nextElementSibling===turnEl);
+    if(idx<0) return;
+    const r=await (await fetch('http://127.0.0.1:'+PORT+'/fork/'+chatId+'/'+(idx*2+1),
+      {method:'POST'})).json();
+    if(r.ok){ openChat(r.id); }
+  });
+  mk('Delete',async()=>{
+    const idx=[...turns.querySelectorAll('.turn.u')].findIndex(u=>u.nextElementSibling===turnEl);
+    if(idx>=0) await fetch(`http://127.0.0.1:${PORT}/messages/${chatId}/${idx*2}`,{method:'POST'});
+    turnEl.previousElementSibling?.remove(); turnEl.remove(); refreshChats();
+  });
+  turnEl.appendChild(bar);
+}
+
+function thinkBlock(host){
+  const el=document.createElement('div');
+  el.className='think';
+  el.innerHTML=`<div class="think-head"><span class="tool-chev">▶</span><span class="lbl">Thinking…</span></div>
+                <div class="think-body"></div>`;
+  el.querySelector('.think-head').onclick=()=>el.classList.toggle('open');
+  host.appendChild(el); stick();
+  return el;
+}
+
+function turn(cls,who){
+  const d=document.createElement('div'); d.className=`turn ${cls} live`;
+  d.innerHTML=`<div class="who">${who}</div><div class="bubble"></div>`;
+  turns.appendChild(d); syncEmpty(); stick(); return d.querySelector('.bubble');
+}
+function fail(title,detail,tail){
+  const d=document.createElement('div'); d.className='turn';
+  d.innerHTML=`<div class="err"><b>${title}</b>${detail||''}${tail?`<pre>${tail}</pre>`:''}</div>`;
+  turns.appendChild(d); stick();
+}
+
+// Publish at most once per frame. Without this the render cost scales with token
+// count instead of elapsed time, and the app degrades exactly when the model is fastest.
+function gate(){
+  let open=true, publishedAt=0;
+  return n=>{
+    if(!open && n-publishedAt<256) return false;
+    publishedAt=n;
+    if(open){ open=false; const reopen=()=>open=true;
+      requestAnimationFrame(reopen); setTimeout(reopen,500); }
+    return true;
+  };
+}
+
+async function boot(){
+const st=await invoke('engine_status');
+if(st.state==='ready'){
+  PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
+  box.disabled=send.disabled=false; box.focus(); refreshChats(); refreshModelName();
+}else{
+  status.textContent='engine failed'; status.className='s-fail';
+  fail(st.reason, st.detail, st.tail);
+}
+}
+boot();
+
+document.getElementById('f').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const text=box.value.trim(); if(!text||!PORT) return;
+  box.value=''; box.disabled=send.disabled=true;
+  send.style.display='none'; stopBtn.style.display='';
+  const runId=rid(); activeRun=runId;
+  const sent=attached; attached=[]; renderChips();
+  const ub=turn('u','You'); ub.classList.add('plain'); ub.textContent=text;
+  const out=turn('a','PraisonAI');
+  out.innerHTML='<span class="caret"></span>';
+
+  let acc='', streamed=0; const canPublish=gate();
+  const host=out.parentElement;
+  let think=null, thinkText='', thinkStart=0, thinkTimer=null, draft=null;
+  const paint=()=>{ out.innerHTML=md(acc); stick(); };
+
+  try{
+    // SSE straight from the webview to the engine. Nothing streams through IPC.
+    const res=await fetch(`http://127.0.0.1:${PORT}/chat`,{
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:text})});
+    const reader=res.body.getReader(), dec=new TextDecoder();
+    let buf='';
+    for(;;){
+      const {done,value}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('\n\n'))>=0){
+        const frame=buf.slice(0,i); buf=buf.slice(i+2);
+        const ev=(frame.match(/^event: (.+)$/m)||[])[1];
+        const dl=(frame.match(/^data: (.+)$/m)||[])[1];
+        if(!ev) continue;
+        const data=dl?JSON.parse(dl):{};
+        if(ev==='delta'){
+          if(think){ clearInterval(thinkTimer);
+            think.querySelector('.lbl').textContent=
+              `Thought for ${((Date.now()-thinkStart)/1000).toFixed(1)}s`;
+            think=null; }
+          acc+=data.text; streamed+=data.text.length;
+          if(canPublish(streamed)) paint(); }
+        else if(ev==='reasoning'){
+          if(!think){ think=thinkBlock(host); thinkStart=Date.now();
+            thinkTimer=setInterval(()=>{ if(think) think.querySelector('.lbl').textContent=
+              `Thinking… ${((Date.now()-thinkStart)/1000).toFixed(1)}s`; },100); }
+          thinkText+=data.text; think.querySelector('.think-body').textContent=thinkText; stick(); }
+        else if(ev==='tool_drafting'){
+          // A status, not a row. Materialising a card from a name-only event
+          // strands an argless placeholder if the call is abandoned.
+          if(!draft){ draft=document.createElement('div'); draft.className='drafting';
+                      host.appendChild(draft); }
+          draft.textContent=`Preparing ${data.name}…`; stick(); }
+        else if(ev==='tool_call'){ paint(); draft?.remove(); draft=null;
+                                   toolCard(host,data.call_id,data.name,data.args); }
+        else if(ev==='tool_result'){ toolResult(host,data.call_id,data.name,data.ok,data.output,data.seconds); }
+        else if(ev==='usage'){
+          const st=document.createElement('div'); st.className='stats';
+          st.textContent=`${data.chars} chars · ${data.seconds}s`
+            +(data.ttft!=null?` · ${data.ttft}s to first token`:'');
+          host.appendChild(st); }
+        else if(ev==='error'){ out.innerHTML=md(acc);
+          const titles={auth:'Authentication failed',rate_limit:'Rate limited',
+                        empty:'No output',internal:'The engine reported an error'};
+          fail(titles[data.kind]||titles.internal, data.message,''); }
+        else if(ev==='cancelled'){ paint();
+          const c=document.createElement('div'); c.className='cancelled';
+          c.textContent='Stopped'; out.parentElement.appendChild(c); }
+        else if(ev==='end'){ paint(); }
+      }
+    }
+    paint();
+    if(!acc) fail('No output','The engine finished without producing any text.','');
+  }catch(err){ fail('Connection to the engine failed', String(err),''); }
+  finally{
+    clearInterval(thinkTimer); draft?.remove();
+    addActions(out.parentElement, text, acc);
+    out.parentElement.classList.remove('live');
+    activeRun=null; activeReader=null;
+    stopBtn.style.display='none'; send.style.display='';
+    box.disabled=send.disabled=false; box.focus();
+    refreshChats();
+  }
+});
+
+stopBtn.addEventListener('click',async()=>{
+  if(!activeRun) return;
+  stopBtn.disabled=true;
+  // Tell the engine first, then drop the reader. Cancelling only client-side
+  // would leave the engine generating into a socket nobody reads.
+  try{ await fetch(`http://127.0.0.1:${PORT}/cancel/${activeRun}`,{method:'POST'}); }catch{}
+  try{ await activeReader?.cancel(); }catch{}
+  stopBtn.disabled=false;
+});
+
+newChat.addEventListener('click',()=>{
+  chatId=rid(); turns.innerHTML=''; syncEmpty(); box.focus(); refreshChats();
+});
+
+document.getElementById('toggle').addEventListener('click',()=>{
+  document.getElementById('side').classList.toggle('hidden');
+});
+
+// ---- overlay: settings and search share one panel ----
+const overlay=document.getElementById('overlay'), panel=document.getElementById('panel');
+const closeOverlay=()=>overlay.classList.remove('open');
+overlay.addEventListener('click',e=>{ if(e.target===overlay) closeOverlay(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&overlay.classList.contains('open')) closeOverlay(); });
+
+async function refreshModelName(){
+  try{ const c=await (await fetch(`http://127.0.0.1:${PORT}/settings`)).json();
+       modelName.textContent=c.model; }catch{}
+}
+document.getElementById('modelpill').addEventListener('click',
+  ()=>document.getElementById('settings').click());
+
+document.getElementById('toolsBtn').addEventListener('click',e=>{
+  toolsOn=!toolsOn;
+  e.currentTarget.classList.toggle('on',toolsOn);
+  e.currentTarget.title = toolsOn ? 'Tools enabled' : 'Tools disabled for this turn';
+});
+
+
+// ---- attachments ----
+const chips=document.getElementById('chips'), filein=document.getElementById('filein');
+let attached=[]; const MAX_ATT=100000;
+function renderChips(){
+  chips.innerHTML='';
+  attached.forEach((a,i)=>{
+    const c=document.createElement('span'); c.className='chip';
+    c.innerHTML='<b></b><span></span><span class="x">&times;</span>';
+    c.querySelector('b').textContent=a.name;
+    c.querySelector('span').textContent=(a.text.length/1024).toFixed(1)+' kB';
+    c.querySelector('.x').onclick=()=>{ attached.splice(i,1); renderChips(); };
+    chips.appendChild(c);
+  });
+}
+async function addFiles(list){
+  for(const f of [...list].slice(0,5)){
+    if(f.size>2000000){ fail('File too large', f.name+' is over 2 MB.',''); continue; }
+    const text=await f.text();
+    // Clipped here, while the chip reports the real size, so a truncated file
+    // can never be mistaken for a complete one.
+    attached.push({name:f.name, text:text.slice(0,MAX_ATT)});
+  }
+  renderChips();
+}
+document.getElementById('attach').addEventListener('click',()=>filein.click());
+filein.addEventListener('change',e=>{ addFiles(e.target.files); filein.value=''; });
+const fiEl=document.querySelector('.fi');
+['dragenter','dragover'].forEach(ev=>fiEl.addEventListener(ev,e=>{e.preventDefault();fiEl.classList.add('drop');}));
+['dragleave','drop'].forEach(ev=>fiEl.addEventListener(ev,e=>{e.preventDefault();fiEl.classList.remove('drop');}));
+fiEl.addEventListener('drop',e=>{ if(e.dataTransfer&&e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+// ---- engine log ----
+document.getElementById('logsBtn').addEventListener('click',async()=>{
+  const r=await (await fetch('http://127.0.0.1:'+PORT+'/logs')).json();
+  const body=r.lines.length ? r.lines.map(l=>esc(l)).join('\n') : '(nothing yet)';
+  panel.innerHTML='<h2>Engine log</h2><pre style="max-height:52vh;overflow:auto;font-size:.74rem">'
+    +body+'</pre><div class="row"><button class="ghost" id="l-close">Close</button></div>';
+  panel.querySelector('#l-close').onclick=closeOverlay;
+  overlay.classList.add('open');
+});
+
+
+// Keyboard shortcuts matching the references.
+document.addEventListener('keydown',e=>{
+  if(!(e.metaKey||e.ctrlKey)) return;
+  if(e.key==='n'){ e.preventDefault(); newChat.click(); }
+  else if(e.key==='k'){ e.preventDefault(); document.getElementById('search').click(); }
+  else if(e.key===','){ e.preventDefault(); document.getElementById('settings').click(); }
+});
+
+
+// ---- settings panel, rendered entirely from the registry ----
+let cfg = {};
+const cfgGet = k => (k in cfg ? cfg[k] : DEFAULTS[k]);
+
+async function saveCfg(patch){
+  cfg = {...cfg, ...patch};
+  await fetch('http://127.0.0.1:'+PORT+'/settings',{method:'POST',
+    headers:{'content-type':'application/json'},body:JSON.stringify(patch)});
+}
+
+function control(def, onChange){
+  const c = def.control, v = cfgGet(def.key), wrap = document.createElement('div');
+  wrap.className = 'srow-ctl';
+  const set = nv => onChange(nv);
+  if (c.kind === 'toggle'){
+    const sw = document.createElement('div');
+    sw.className = 'sw' + (v ? ' on' : ''); sw.innerHTML = '<i></i>';
+    sw.onclick = () => set(!cfgGet(def.key));
+    wrap.appendChild(sw);
+  } else if (c.kind === 'segmented'){
+    const g = document.createElement('div'); g.className = 'seg';
+    c.options.forEach(o => { const b = document.createElement('button');
+      b.type='button'; b.textContent=o.label; b.className = o.value===v?'on':'';
+      b.onclick = () => set(o.value); g.appendChild(b); });
+    wrap.appendChild(g);
+  } else if (c.kind === 'select'){
+    const sel = document.createElement('select');
+    c.options.forEach(o => { const op=document.createElement('option');
+      op.value=String(o.value); op.textContent=o.label; sel.appendChild(op); });
+    sel.value = String(v);
+    sel.onchange = () => { const o=c.options.find(x=>String(x.value)===sel.value); set(o.value); };
+    wrap.appendChild(sel);
+  } else if (c.kind === 'slider'){
+    const r=document.createElement('input'); r.type='range';
+    r.min=c.min; r.max=c.max; r.step=c.step; r.value=v; r.style.width='110px';
+    const n=document.createElement('span'); n.style.cssText='font-size:.78rem;min-width:30px;text-align:right';
+    n.textContent=v;
+    r.oninput=()=>{n.textContent=r.value;}; r.onchange=()=>set(Number(r.value));
+    wrap.append(r,n);
+  } else if (c.kind === 'number'){
+    const i=document.createElement('input'); i.type='number';
+    if(c.min!=null)i.min=c.min; if(c.max!=null)i.max=c.max; if(c.step)i.step=c.step;
+    i.value=v; i.onchange=()=>set(i.value===''?'':Number(i.value));
+    wrap.appendChild(i);
+  } else if (c.kind === 'combobox'){
+    const i=document.createElement('input'); i.type='text'; i.value=v??'';
+    i.setAttribute('list','dl-'+def.key);
+    const dl=document.createElement('datalist'); dl.id='dl-'+def.key;
+    (typeof c.suggestions==='function'?c.suggestions(cfgGet):c.suggestions)
+      .forEach(x=>{const o=document.createElement('option');o.value=x;dl.appendChild(o);});
+    i.onchange=()=>set(i.value);
+    wrap.append(i,dl);
+  } else if (c.kind === 'action'){
+    const b=document.createElement('button');
+    b.type='button'; b.className='ghost'; b.textContent=c.verb;
+    if(c.danger) b.style.borderColor='var(--bad)', b.style.color='var(--bad)';
+    b.onclick=()=>runAction(def);
+    wrap.appendChild(b);
+  } else if (c.kind === 'readout'){
+    const t=document.createElement('span');
+    t.style.cssText='font-size:.82rem;color:var(--soft);font-family:ui-monospace,Menlo,monospace';
+    t.textContent=c.value({engine:PORT?('127.0.0.1:'+PORT):null});
+    wrap.appendChild(t);
+  } else if (c.kind === 'text' && !c.multiline){
+    const i=document.createElement('input'); i.type=c.secret?'password':'text';
+    i.value=v??''; if(c.placeholder)i.placeholder=c.placeholder;
+    i.onchange=()=>set(i.value);
+    wrap.appendChild(i);
+  }
+  return wrap;
+}
+
+async function runAction(def){
+  if(def.confirm && !window.confirm(def.confirm.message)) return;
+  if(def.action==='export'){
+    const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
+    const all=[];
+    for(const c of chats) all.push(await (await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id)).json());
+    // A sandboxed webview blocks a download the page starts itself, so the
+    // export goes to the clipboard and says so rather than failing silently.
+    await navigator.clipboard.writeText(JSON.stringify(all,null,2));
+    fail('Copied to clipboard',
+         all.length+' conversation(s) exported as JSON. Paste into a file to save.','');
+    closeOverlay();
+  } else if(def.action==='clear'){
+    const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
+    for(const c of chats) await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id,{method:'DELETE'});
+    chatId=rid(); turns.innerHTML=''; syncEmpty(); refreshChats(); closeOverlay();
+  } else if(def.action==='reveal'){
+    await navigator.clipboard.writeText('~/Library/Application Support/PraisonAI');
+    fail('Path copied','~/Library/Application Support/PraisonAI','');
+  } else if(def.action==='update'){
+    const u=await (await fetch('http://127.0.0.1:'+PORT+'/update')).json();
+    fail('PraisonAI Desktop '+u.current, u.message, '');
+  } else if(def.action==='mcp'){
+    const {servers}=await (await fetch('http://127.0.0.1:'+PORT+'/mcp')).json();
+    panel.innerHTML='<h2>MCP servers</h2><div id="mcplist"></div>'
+      +'<div class="fld"><label>Name</label><input id="m-name" placeholder="filesystem"/></div>'
+      +'<div class="fld"><label>Command</label><input id="m-cmd" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp"/></div>'
+      +'<div class="row"><button class="ghost" id="m-close">Close</button><button id="m-add">Add server</button></div>';
+    const list=panel.querySelector('#mcplist');
+    if(!servers.length) list.innerHTML='<div class="hint">No servers configured.</div>';
+    servers.forEach(sv=>{
+      const d=document.createElement('div'); d.className='srow';
+      d.innerHTML='<div class="srow-top"><div class="srow-lbl"><b></b><span></span></div>'
+        +'<div class="srow-ctl"><div class="sw'+(sv.enabled?' on':'')+'"><i></i></div>'
+        +'<button class="rst" title="Remove">✕</button></div></div>';
+      d.querySelector('b').textContent=sv.name;
+      d.querySelector('span').textContent=sv.command||'(no command)';
+      d.querySelector('.sw').onclick=async()=>{
+        await fetch('http://127.0.0.1:'+PORT+'/mcp',{method:'POST',
+          headers:{'content-type':'application/json'},
+          body:JSON.stringify({action:'toggle',name:sv.name})});
+        runAction(def);
+      };
+      d.querySelector('.rst').onclick=async()=>{
+        if(!confirm('Remove '+sv.name+'?')) return;
+        await fetch('http://127.0.0.1:'+PORT+'/mcp',{method:'POST',
+          headers:{'content-type':'application/json'},
+          body:JSON.stringify({action:'remove',name:sv.name})});
+        runAction(def);
+      };
+      list.appendChild(d);
+    });
+    panel.querySelector('#m-close').onclick=closeOverlay;
+    panel.querySelector('#m-add').onclick=async()=>{
+      const name=panel.querySelector('#m-name').value.trim();
+      const cmd=panel.querySelector('#m-cmd').value.trim();
+      if(!name){ alert('A name is required.'); return; }
+      const r=await (await fetch('http://127.0.0.1:'+PORT+'/mcp',{method:'POST',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({action:'add',name,command:cmd,enabled:false})})).json();
+      if(!r.ok){ alert(r.error); return; }
+      runAction(def);
+    };
+    overlay.classList.add('open');
+  } else if(def.action==='logs'){
+    closeOverlay(); document.getElementById('logsBtn').click();
+  }
+}
+
+function settingRow(def){
+  const row=document.createElement('div');
+  row.className='srow'; row.id='setting-'+def.key;
+  row.dataset.settingsLabel=def.label;
+  const top=document.createElement('div'); top.className='srow-top';
+  const lbl=document.createElement('div'); lbl.className='srow-lbl';
+  lbl.innerHTML='<b></b>'+(def.description?'<span></span>':'');
+  lbl.querySelector('b').textContent=def.label;
+  if(def.description) lbl.querySelector('span').textContent=def.description;
+  top.appendChild(lbl);
+
+  const err=document.createElement('div'); err.className='warn'; err.style.display='none';
+  const apply=async nv=>{
+    const msg=def.validate?def.validate(nv,cfgGet):null;
+    if(msg){ err.textContent=msg; err.style.display=''; return; }
+    err.style.display='none';
+    if(def.confirm && def.confirm.when(cfgGet(def.key),nv)
+       && !window.confirm(def.confirm.message)) { renderSettings(); return; }
+    await saveCfg({[def.key]:nv});
+    if(def.key==='theme') applyTheme(nv);
+    if(def.key==='model') modelName.textContent=nv;
+    renderSettings();
+  };
+
+  const multiline = def.control.kind==='text' && def.control.multiline;
+  if(!multiline) top.appendChild(control(def,apply));
+
+  // Per-field reset, free because the registry stores the default.
+  if(def.default!==undefined && JSON.stringify(cfgGet(def.key))!==JSON.stringify(def.default)){
+    const r=document.createElement('button');
+    r.className='rst'; r.type='button'; r.title='Reset to default'; r.textContent='↺';
+    r.onclick=()=>apply(def.default);
+    (multiline?top:top.querySelector('.srow-ctl')).appendChild(r);
+  }
+  row.appendChild(top);
+
+  if(multiline){
+    const w=document.createElement('div'); w.className='srow-wide';
+    const ta=document.createElement('textarea');
+    ta.value=cfgGet(def.key)??''; if(def.control.placeholder)ta.placeholder=def.control.placeholder;
+    ta.onchange=()=>apply(ta.value);
+    w.appendChild(ta); row.appendChild(w);
+  }
+  row.appendChild(err);
+  if(def.requiresRestart){
+    const n=document.createElement('div'); n.className='restart';
+    n.textContent='Takes effect after the engine restarts.';
+    row.appendChild(n);
+  }
+  return row;
+}
+
+let activeSection='model', settingsQuery='';
+function renderSettings(){
+  const matches = settingsQuery ? searchSettings(settingsQuery,cfgGet) : null;
+  panel.innerHTML='<h2>Settings</h2>'
+    +'<input class="setsearch" id="setq" placeholder="Search settings…" autocomplete="off"/>'
+    +'<div class="setnav"><div class="setside" id="setside"></div><div class="setbody" id="setbody"></div></div>';
+  const q=panel.querySelector('#setq'); q.value=settingsQuery;
+  q.oninput=()=>{ settingsQuery=q.value; renderSettings();
+                  panel.querySelector('#setq').focus(); };
+  const side=panel.querySelector('#setside'), body=panel.querySelector('#setbody');
+
+  if(matches){
+    side.style.display='none';
+    if(!matches.length){ body.innerHTML='<div class="hint">No settings matched.</div>'; return; }
+    matches.forEach(d=>body.appendChild(settingRow(d)));
+    return;
+  }
+  SECTIONS.forEach(sec=>{
+    const b=document.createElement('button'); b.type='button';
+    b.className=sec.id===activeSection?'on':'';
+    b.innerHTML='<span>'+sec.icon+'</span>'+sec.label;
+    b.onclick=()=>{ activeSection=sec.id; renderSettings(); };
+    side.appendChild(b);
+  });
+  const rows=SETTINGS.filter(d=>d.section===activeSection
+    && (!d.visibleWhen || d.visibleWhen(cfgGet)));
+  if(!rows.length){
+    body.innerHTML='<div class="hint">Nothing to configure here yet.</div>';
+  } else rows.forEach(d=>body.appendChild(settingRow(d)));
+}
+
+document.getElementById('settings').addEventListener('click',async()=>{
+  cfg = await (await fetch('http://127.0.0.1:'+PORT+'/settings')).json();
+  settingsQuery=''; renderSettings(); overlay.classList.add('open');
+  panel.querySelector('#setq').focus();
+});
+
+document.getElementById('__old_settings__')?.addEventListener('click',async()=>{
+  const cfg=await (await fetch(`http://127.0.0.1:${PORT}/settings`)).json();
+  panel.innerHTML=`<h2>Settings</h2>
+    <div class="fld"><label>Model</label>
+      <input id="s-model" value="${cfg.model}" placeholder="gpt-4o-mini"/>
+      <div class="hint">Any OpenAI-compatible model id. Changing this starts a fresh agent.</div></div>
+    <div class="fld"><label>System prompt</label>
+      <textarea id="s-prompt" placeholder="Leave blank for the default.">${cfg.system_prompt||''}</textarea></div>
+    <div class="fld"><label>Theme</label>
+      <select id="s-theme">
+        <option value="system">Follow system</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option></select></div>
+    <div class="row"><button class="ghost" id="s-cancel">Cancel</button>
+                     <button id="s-save">Save</button></div>`;
+  panel.querySelector('#s-theme').value=cfg.theme||'system';
+  panel.querySelector('#s-cancel').onclick=closeOverlay;
+  panel.querySelector('#s-save').onclick=async()=>{
+    const body={model:panel.querySelector('#s-model').value.trim()||'gpt-4o-mini',
+                system_prompt:panel.querySelector('#s-prompt').value,
+                theme:panel.querySelector('#s-theme').value};
+    await fetch(`http://127.0.0.1:${PORT}/settings`,{method:'POST',
+      headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    applyTheme(body.theme); modelName.textContent=body.model; closeOverlay();
+  };
+  overlay.classList.add('open'); panel.querySelector('#s-model').focus();
+});
+
+function applyTheme(t){
+  document.documentElement.removeAttribute('data-theme');
+  if(t==='light'||t==='dark') document.documentElement.setAttribute('data-theme',t);
+}
+
+document.getElementById('search').addEventListener('click',()=>{
+  panel.innerHTML=`<h2>Search conversations</h2>
+    <div class="fld"><input id="q" placeholder="Type to search…" autocomplete="off"/></div>
+    <div id="results"></div>`;
+  const q=panel.querySelector('#q'), out=panel.querySelector('#results');
+  let t=null;
+  q.addEventListener('input',()=>{
+    clearTimeout(t);
+    t=setTimeout(async()=>{
+      const term=q.value.trim();
+      if(!term){ out.innerHTML=''; return; }
+      const {hits}=await (await fetch(
+        `http://127.0.0.1:${PORT}/search?q=${encodeURIComponent(term)}`)).json();
+      out.innerHTML = hits.length
+        ? hits.map(h=>`<div class="res" data-id="${h.id}"><b></b><span></span></div>`).join('')
+        : '<div class="hint">No conversations matched.</div>';
+      [...out.querySelectorAll('.res')].forEach((el,i)=>{
+        el.querySelector('b').textContent=hits[i].title;
+        el.querySelector('span').textContent=hits[i].snippet;
+        el.onclick=()=>{ openChat(hits[i].id); closeOverlay(); };
+      });
+    },160);
+  });
+  overlay.classList.add('open'); q.focus();
+});
+
+fetch(`http://127.0.0.1:${PORT}/settings`).then(r=>r.json())
+  .then(c=>{applyTheme(c.theme); modelName.textContent=c.model;}).catch(()=>{});
+
+document.addEventListener('click',e=>{
+  if(!e.target.classList.contains('copy')) return;
+  const code=e.target.parentElement.querySelector('code');
+  navigator.clipboard.writeText(code.textContent);   // the source text, never the rendered DOM
+  e.target.textContent='copied'; setTimeout(()=>e.target.textContent='copy',1200);
+});
+
+box.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); document.getElementById('f').requestSubmit(); }
+});
+</script></body></html>
