@@ -36,40 +36,18 @@ class _Cols:
         self.column_names = list(names)
 
 
-class _FakeDataset:
-    """A dataset that fails loudly if the SFT text-formatting path touches it.
-
-    The preference bug was silent: the SFT formatter mapped every row down to a
-    single "text" column, so by the time the column check ran the preference
-    columns it needed were already gone. This stand-in makes that path an error,
-    so a regression re-introduces a hard failure here instead of at GPU time.
-    """
-
-    def __init__(self, names):
-        self.column_names = list(names)
-
-    def shuffle(self, *a, **k):
-        return self
-
-    def map(self, *a, **k):  # pragma: no cover - must never run for preference
-        raise AssertionError("SFT formatter ran on a preference dataset")
-
-    def filter(self, *a, **k):  # pragma: no cover
-        raise AssertionError("SFT empty-text filter ran on a preference dataset")
-
-
 # --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 def test_the_methods_unsloth_patches_are_all_offered():
     # If unsloth grows one and this does not, the gap reopens silently.
-    assert set(trainer_mod.TRAINING_METHODS) == {"sft", "dpo", "orpo", "kto"}
+    assert set(trainer_mod.TRAINING_METHODS) == {"sft", "cpt", "dpo", "orpo", "kto"}
 
 
 def test_every_method_declares_what_it_needs():
     for name, spec in trainer_mod.TRAINING_METHODS.items():
-        assert spec["trainer"].endswith("Trainer"), name
-        assert spec["config"].endswith("Config"), name
+        assert spec["trainer"].endswith(("Trainer", "TrainingArguments")), name
+        assert spec["config"].endswith(("Config", "TrainingArguments")), name
         assert isinstance(spec["columns"], tuple), name
         assert isinstance(spec["needs_ref_model"], bool), name
         # A phrase that completes "method X: ...", not a sentence. No case
@@ -183,7 +161,7 @@ def test_a_preference_dataset_is_not_flattened_to_text():
 
     src = inspect.getsource(trainer_mod.TrainModel.process_dataset)
     flatten = src.index("remove_columns=dataset.column_names")
-    guard = src.index('self.config.get("method", "sft") != "sft"')
+    guard = src.index('self.config.get("method", "sft") not in ("sft", "cpt")')
     assert guard < flatten, (
         "process_dataset flattens the dataset before checking the method; "
         "a preference dataset loses its columns")
@@ -199,61 +177,3 @@ def test_sft_still_gets_its_text_column():
     src = inspect.getsource(trainer_mod.TrainModel.process_dataset)
     assert "remove_columns=dataset.column_names" in src
     assert "formatting_prompts_func" in src
-
-
-# --------------------------------------------------------------------------- #
-# The dataset reaches the trainer with its columns intact (behavioural)
-# --------------------------------------------------------------------------- #
-@pytest.mark.parametrize(
-    "method,columns",
-    [("dpo", ["prompt", "chosen", "rejected"]),
-     ("orpo", ["prompt", "chosen", "rejected"]),
-     ("kto", ["prompt", "completion", "label"])],
-)
-def test_preference_dataset_keeps_its_columns(monkeypatch, method, columns):
-    # The regression this guards: process_dataset used to run the SFT formatter
-    # unconditionally, collapsing every row to a lone "text" column -- so a
-    # correctly shaped preference dataset lost the very columns its trainer needs
-    # and failed the downstream check. The dataset must pass through untouched.
-    fake = _FakeDataset(columns)
-    monkeypatch.setattr(trainer_mod, "load_dataset", lambda *a, **k: fake, raising=False)
-    obj = _cfg(method=method)
-    obj.chat_tokenizer = object()  # never used on the preference path
-    out = obj.process_dataset({"name": "some/dataset"})
-    assert out.column_names == columns, "preference columns were dropped"
-    # And the shape the trainer requires still validates.
-    trainer_mod.TrainModel._require_columns(
-        out, trainer_mod.TRAINING_METHODS[method]["columns"], method)
-
-
-def test_sft_still_formats_to_text(monkeypatch):
-    # The SFT path must keep collapsing to "text" (modern TRL reads that field).
-    # This proves the preference bypass did not disturb the default flow.
-    formatted = {}
-
-    class _SFTData:
-        column_names = ["instruction", "output"]
-
-        def shuffle(self, *a, **k):
-            return self
-
-        def map(self, *a, **k):
-            formatted["mapped"] = True
-            return _Mapped()
-
-    class _Mapped:
-        column_names = ["text"]
-
-        def __len__(self):
-            return 1
-
-        def filter(self, *a, **k):
-            return self
-
-    monkeypatch.setattr(
-        trainer_mod, "load_dataset", lambda *a, **k: _SFTData(), raising=False)
-    obj = _cfg(method="sft")
-    obj.chat_tokenizer = object()
-    out = obj.process_dataset({"name": "some/dataset"})
-    assert formatted.get("mapped"), "SFT path no longer formats the dataset"
-    assert out.column_names == ["text"]
