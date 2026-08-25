@@ -53,6 +53,53 @@ else
     exit 1
 fi
 
+# --- What GPU is actually here? --------------------------------------------
+#
+# Every Linux host got `pytorch-cuda=12.4` regardless of hardware. On an AMD
+# box or a Blackwell card that produces a working-LOOKING environment which
+# fails at the first kernel; on a CPU-only host it installs a CUDA build that
+# can never run. Probe before pinning.
+detect_accelerator() {
+    if command -v nvidia-smi &> /dev/null && nvidia-smi -L 2>/dev/null | grep -q GPU; then
+        echo "cuda"; return
+    fi
+    # nvidia-smi can be absent on a machine that does have the driver.
+    if [ -d /proc/driver/nvidia/gpus ] && [ -n "$(ls -A /proc/driver/nvidia/gpus 2>/dev/null)" ]; then
+        echo "cuda"; return
+    fi
+    if command -v rocminfo &> /dev/null || command -v amd-smi &> /dev/null; then
+        echo "rocm"; return
+    fi
+    echo "cpu"
+}
+
+ACCELERATOR="$(detect_accelerator)"
+echo "Detected accelerator: $ACCELERATOR"
+
+# The pytorch-cuda pin, or nothing at all. Kept in one place so the two
+# create-environment branches below cannot disagree.
+TORCH_SPEC="pytorch=2.6.0"
+TORCH_CHANNELS="-c pytorch"
+case "$ACCELERATOR" in
+    cuda)
+        TORCH_SPEC="pytorch=2.6.0 pytorch-cuda=12.4"
+        TORCH_CHANNELS="-c pytorch -c nvidia"
+        ;;
+    rocm)
+        echo "WARNING: an AMD GPU was detected. This installer only knows the CUDA"
+        echo "         and CPU builds, so it will install the CPU one. Follow"
+        echo "         https://pytorch.org/get-started/locally/ for a ROCm build,"
+        echo "         then re-run this script."
+        ;;
+    cpu)
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            echo "WARNING: no GPU detected. Fine-tuning needs one -- praisonai-train"
+            echo "         llm refuses to run on CPU. The environment will still be"
+            echo "         usable for dataset work and exports."
+        fi
+        ;;
+esac
+
 # Check if conda is installed
 if ! command -v conda &> /dev/null; then
     echo "Conda is not installed. Installing Miniconda..."
@@ -69,18 +116,10 @@ ENV_NAME="praison_env"
 if conda info --envs | grep -q "$ENV_NAME"; then
     echo "Environment $ENV_NAME already exists. Recreating..."
     conda env remove -y -n "$ENV_NAME"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 -c pytorch -y
-    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 pytorch-cuda=12.4 -c pytorch -c nvidia -y
-    fi
+    conda create --name "$ENV_NAME" python=3.11 $TORCH_SPEC $TORCH_CHANNELS -y
 else
     echo "Creating new environment $ENV_NAME..."
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 -c pytorch -y
-    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        conda create --name "$ENV_NAME" python=3.11 pytorch=2.6.0 pytorch-cuda=12.4 -c pytorch -c nvidia -y
-    fi
+    conda create --name "$ENV_NAME" python=3.11 $TORCH_SPEC $TORCH_CHANNELS -y
 fi
 
 # Activate the environment
