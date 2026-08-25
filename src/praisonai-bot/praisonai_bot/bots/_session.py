@@ -291,6 +291,12 @@ class BotSessionManager:
         # Keyed by ``id(agent)`` so a shared session serving multiple agents
         # never crosses policies.
         self._pending_tool_policies: Dict[int, Any] = {}
+        # Per-tenant profile namespace staged by a routing handler (Issue #4341).
+        # When a route resolves to a ``profile``, the gateway stages its
+        # namespace here so ``_storage_key`` prefixes memory/session keys with
+        # the tenant scope for the turn. Empty/``None`` means unscoped — a route
+        # with no profile never borrows another tenant's memory.
+        self._profile_namespace: Optional[str] = None
         # Session reset policy for automatic lifecycle management
         self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
         # Per-user last agent-emitted presentation. ``chat()`` keeps the return
@@ -592,13 +598,23 @@ class BotSessionManager:
         if self._scope_for(effective_chat_type) == "per_chat" and chat_id:
             prefix = self._platform or "bot"
             account_key = account or "default"
-            return f"{prefix}:acct:{account_key}:chat:{chat_id}:{thread_id}"
-        if self._identity_resolver is not None and self._platform:
+            base = f"{prefix}:acct:{account_key}:chat:{chat_id}:{thread_id}"
+        elif self._identity_resolver is not None and self._platform:
             try:
-                return self._identity_resolver.resolve(self._platform, user_id)
+                base = self._identity_resolver.resolve(self._platform, user_id)
             except Exception as e:  # pragma: no cover — defensive
                 logger.warning("identity resolver failed: %s", e)
-        return user_id
+                base = user_id
+        else:
+            base = user_id
+        # Per-tenant memory isolation (Issue #4341): when a route resolved to a
+        # ``profile``, the gateway stages its namespace here so every storage key
+        # is prefixed with the tenant scope. This keys memory/session state per
+        # profile so two routes on one process never share a transcript. A route
+        # with no profile stays unprefixed and never falls into a tenant's scope.
+        if self._profile_namespace:
+            return f"profile:{self._profile_namespace}:{base}"
+        return base
 
     def _persist_key(self, storage_key: str) -> str:
         """Derive the persistent-store key from an in-memory storage key.
@@ -850,6 +866,20 @@ class BotSessionManager:
             self._pending_tool_policies.pop(key, None)
         else:
             self._pending_tool_policies[key] = tool_policy
+
+    def set_profile_namespace(self, profile: Optional[str]) -> None:
+        """Enter (or clear) a per-tenant profile scope for this session.
+
+        Used by the gateway's routing handler when a route resolves to a
+        ``profile`` (Issue #4341). Staging the namespace here makes every
+        subsequent ``_storage_key`` for this session prefix its memory/session
+        key with ``profile:<name>:`` — so two routes multiplexed on one process
+        never share a transcript. Passing ``None``/blank clears any prior scope
+        so a route with no profile never inherits another tenant's namespace
+        (fail-closed: unscoped routes stay unscoped, never borrowed).
+        """
+        cleaned = str(profile).strip() if profile is not None else ""
+        self._profile_namespace = cleaned or None
 
     @staticmethod
     def _apply_tool_policy(
