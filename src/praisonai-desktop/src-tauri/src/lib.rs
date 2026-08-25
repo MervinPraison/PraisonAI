@@ -14,3 +14,7 @@ pub mod lockfile;
 pub mod verify;
 pub mod port_announce;
 pub mod supervisor;
+pub mod tray;
+pub mod engine_paths;
+pub mod reclaim;
+pub mod provision;

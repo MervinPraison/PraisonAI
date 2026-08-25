@@ -7,11 +7,15 @@ never cross the Tauri IPC bridge, which is the one design point all four
 reference apps converge on.
 """
 
+import atexit
 import collections
+import hashlib
 import json
+import logging
 import os
 import pathlib
 import secrets
+import signal
 import sys
 import threading
 import time
@@ -29,6 +33,22 @@ if (_SOURCE / "praisonaiagents" / "__init__.py").is_file():
     sys.path.insert(0, str(_SOURCE))
 
 
+MIN_API_KEY_CHARS = 20
+
+# What this process exported, so clearing a setting removes our value and never
+# a value the user's shell provided.
+_EXPORTED: dict = {}
+
+
+def _export(name: str, value: str) -> None:
+    _EXPORTED[name] = value
+    os.environ[name] = value
+
+
+def _unset_if_ours(name: str) -> None:
+    ours = _EXPORTED.pop(name, None)
+    if ours is not None and os.environ.get(name) == ours:
+        del os.environ[name]
 PORT_MARKER = "PRAISONAI_PORT="
 PROTOCOL_VERSION = 2
 
@@ -40,6 +60,71 @@ DATA_DIR = pathlib.Path(
     or (pathlib.Path.home() / "Library/Application Support/PraisonAI")
 )
 CHATS_DIR = DATA_DIR / "chats"
+
+# The shell's src-tauri/src/lockfile.rs has always specified this file's format
+# precisely and nothing ever wrote one, so the whole adoption path -- and any
+# tool trying to find a running engine -- had nothing to read. `pgrep -f` is not
+# a substitute: the shell running the pgrep matches the pattern itself.
+LOCK_PATH = DATA_DIR / "engine.lock"
+LOCK_FORMAT_VERSION = 2
+
+
+def _fnv1a64(text: str) -> int:
+    """FNV-1a. Small, exact, and identical to the Rust side by construction."""
+    h = 0xCBF29CE484222325
+    for b in text.encode():
+        h = ((h ^ b) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def _start_time(pid: "int | None" = None) -> int:
+    """A fingerprint of when this pid started, so a recycled pid is not us.
+
+    This hashes `ps -o lstart=` verbatim rather than parsing it. The date `ps`
+    prints is locale-dependent -- on this machine it is "Tue 25 Aug 15:26:04
+    2026", day before month, which neither `time.strptime` nor
+    `date -j -f "%a %b %e %T %Y"` accepts. Both sides silently fell back to
+    something else and never agreed, so a live engine always looked like a
+    recycled pid and a second one was started beside it.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid or os.getpid())],
+                             capture_output=True, text=True, timeout=3).stdout
+    except Exception:
+        return 0
+    return _fnv1a64(out.strip()) if out.strip() else 0
+
+
+def write_lock(port: int) -> pathlib.Path:
+    """Write the lockfile in exactly the format lockfile.rs parses.
+
+    Written to a temporary file and renamed, because the parser treats a
+    zero-length file as a crash mid-write -- so we must never produce one.
+    """
+    interpreter = sys.executable or "unknown"
+    venv_root = sys.prefix
+    config_hash = hashlib.sha256(
+        json.dumps(load_settings(), sort_keys=True).encode()).hexdigest()[:16]
+    body = (f"format_version={LOCK_FORMAT_VERSION}\n"
+            f"pid={os.getpid()}\n"
+            f"start_time={_start_time()}\n"
+            f"port={port}\n"
+            f"interpreter={interpreter}\n"
+            f"venv_root={venv_root}\n"
+            f"config_hash={config_hash}\n")
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = LOCK_PATH.with_suffix(".lock.tmp")
+    tmp.write_text(body)
+    tmp.replace(LOCK_PATH)
+    return LOCK_PATH
+
+
+def clear_lock() -> None:
+    try:
+        LOCK_PATH.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _chat_path(cid: str) -> pathlib.Path:
@@ -467,7 +552,8 @@ def save_settings(patch: dict) -> dict:
             merged[k] = patch[k]
     for k in SECRET_KEYS:
         if k in patch:
-            keychain_set(k, str(patch[k] or ""))
+            if not keychain_set(k, str(patch[k] or "")):
+                raise RuntimeError(f"could not store {k} in the keychain")
             merged[k] = patch[k]
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = SETTINGS_PATH.with_suffix(".tmp")
@@ -505,41 +591,122 @@ def _llm_overrides(cfg: dict) -> dict:
 
 def _apply_env(cfg: dict) -> None:
     """Credentials and endpoint go to the environment, which the OpenAI client
-    reads directly -- the constructor parameter routes through the heavier path.
-
-    A cleared value must *remove* the variable, not be skipped: leaving a stale
-    key or base_url in os.environ would keep routing subsequent turns to the
-    credential or endpoint the user just deleted.
-    """
+    reads directly -- the constructor parameter routes through the heavier path."""
     if cfg.get("base_url"):
         # Set as an env var rather than base_url=, which routes through a
         # heavier code path for identical intent.
-        os.environ["OPENAI_API_BASE"] = cfg["base_url"]
-    elif "base_url" in cfg:
-        os.environ.pop("OPENAI_API_BASE", None)
-    if cfg.get("api_key"):
-        os.environ["OPENAI_API_KEY"] = cfg["api_key"]
-    elif "api_key" in cfg:
-        os.environ.pop("OPENAI_API_KEY", None)
+        _export("OPENAI_API_BASE", cfg["base_url"])
+    else:
+        # Clearing the setting clears only what *we* exported. Popping
+        # unconditionally deleted the key inherited from the user's shell --
+        # and this setting is documented as "blank uses the environment", so
+        # that turned every request into an auth error.
+        _unset_if_ours("OPENAI_API_BASE")
+    key = cfg.get("api_key") or ""
+    # A too-short value is a typo or a test fixture, not a credential. Exporting
+    # it would replace a working environment key with a guaranteed 401. The UI
+    # refuses it at entry (see api_key's validate) so this is a backstop, not
+    # the only guard -- silently ignoring it is what made a bad key look set.
+    if len(key) >= MIN_API_KEY_CHARS:
+        _export("OPENAI_API_KEY", key)
+    elif not key:
+        _unset_if_ours("OPENAI_API_KEY")
 
 
-def _get_agent(session_id: str = "default"):
+def _installed_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("praisonaiagents")
+    except Exception:
+        return "unknown"
+
+
+def _vtuple(v: str):
+    out = []
+    for part in v.split(".")[:4]:
+        digits = "".join(c for c in part if c.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def check_for_update(timeout: float = 4.0) -> dict:
+    """Ask PyPI what the newest praisonaiagents is.
+
+    Reports `checked: False` on any failure rather than "up to date" -- a check
+    that did not happen must not read as a check that passed.
+    """
+    current = _installed_version()
+    if not load_settings().get("check_updates", True):
+        return {"current": current, "checked": False,
+                "update_available": False, "message": "Update checks are off."}
+    try:
+        import urllib.request
+        with urllib.request.urlopen(
+            "https://pypi.org/pypi/praisonaiagents/json", timeout=timeout
+        ) as r:
+            latest = json.loads(r.read().decode())["info"]["version"]
+    except Exception as exc:
+        return {"current": current, "checked": False, "update_available": False,
+                "message": f"Could not reach PyPI: {exc.__class__.__name__}"}
+    newer = current != "unknown" and _vtuple(latest) > _vtuple(current)
+    return {"current": current, "latest": latest, "checked": True,
+            "update_available": newer,
+            "message": (f"praisonaiagents {latest} is available."
+                        if newer else "You are on the latest version.")}
+
+
+LAUNCH_AGENT = pathlib.Path(
+    "~/Library/LaunchAgents/ai.praison.desktop.plist").expanduser()
+
+
+def set_launch_at_login(on: bool) -> dict:
+    """Write or remove the LaunchAgent that opens the app at login.
+
+    Uses the running .app bundle, so this is a no-op in dev where there is no
+    bundle to open -- reported as such rather than silently succeeding.
+    """
+    app = os.environ.get("PRAISONAI_APP_BUNDLE") or ""
+    if not on:
+        try:
+            LAUNCH_AGENT.unlink()
+        except FileNotFoundError:
+            pass
+        return {"ok": True, "enabled": False}
+    if not app.endswith(".app") or not os.path.isdir(app):
+        return {"ok": False, "enabled": False,
+                "message": "Only available in the installed app."}
+    LAUNCH_AGENT.parent.mkdir(parents=True, exist_ok=True)
+    LAUNCH_AGENT.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>\n'
+        '  <key>Label</key><string>ai.praison.desktop</string>\n'
+        '  <key>ProgramArguments</key>'
+        f'<array><string>/usr/bin/open</string><string>{app}</string></array>\n'
+        '  <key>RunAtLoad</key><true/>\n'
+        '</dict></plist>\n')
+    return {"ok": True, "enabled": True, "path": str(LAUNCH_AGENT)}
+
+
+def _get_agent(session_id: str = "default", tools: bool = True):
     """One agent per session, built lazily: importing the engine costs more than
     binding a socket, and the window should be interactive before that is paid."""
     with _agent_lock:
-        if session_id not in _agents:
+        key = session_id if tools else session_id + "\x00notools"
+        if key not in _agents:
             from praisonaiagents import Agent
 
             cfg = load_settings()
-            _agents[session_id] = Agent(
+            _agents[key] = Agent(
                 name="PraisonAI",
                 role="Assistant",
                 goal="Answer the user clearly and concisely.",
                 instructions=cfg["system_prompt"] or None,
                 llm=cfg["model"],
-                tools=_builtin_tools(),
+                tools=_builtin_tools() if tools else None,
             )
-        return _agents[session_id]
+        return _agents[key]
 
 
 # --- stream protocol v2 -------------------------------------------------------
@@ -592,20 +759,84 @@ def _classify_stream_item(item):
     return "delta", {"text": str(item)}
 
 
-def _persist(chat_id: str, prompt: str, reply: list) -> None:
-    """Append one exchange. Called only after a run completes, never per token --
-    a per-token write is how a chat app burns through an SSD's write endurance."""
+def version_info(chat_id: str, user_index: "int | None") -> tuple:
+    """(count, active) for the answer to `user_index`. (1, 0) when unversioned."""
+    if user_index is None:
+        return (1, 0)
+    try:
+        msgs = load_chat(chat_id)["messages"]
+        msg = msgs[user_index + 1]
+        versions = msg.get("versions")
+        if not versions:
+            return (1, 0)
+        return (len(versions), min(max(int(msg.get("active", 0)), 0), len(versions) - 1))
+    except Exception:  # noqa: BLE001
+        return (1, 0)
+
+
+def _active(msg: dict) -> str:
+    """The text of an assistant message's currently selected version.
+
+    A message written before versioning has no `versions` key and is its own
+    only version, so this reads correctly for every chat already on disk.
+    """
+    versions = msg.get("versions")
+    if not versions:
+        return msg.get("content", "")
+    i = min(max(int(msg.get("active", 0)), 0), len(versions) - 1)
+    return versions[i]
+
+
+def _persist(chat_id: str, prompt: str, reply: list,
+             regenerate_of: "int | None" = None) -> "int | None":
+    """Append one exchange and return the index the user message landed at.
+
+    The index has to come from here because the client cannot compute it: a
+    cancelled or errored turn is never persisted, yet it stays on screen. The UI
+    used to derive `idx*2` from DOM position, so one unpersisted turn shifted
+    every subsequent Fork and Delete onto the wrong message -- and the resulting
+    404 was ignored, so the turn vanished from the screen and stayed on disk.
+
+    Returns None if the write failed, which is the caller's signal that Fork and
+    Delete must not be offered for this turn at all.
+    """
     try:
         chat = load_chat(chat_id)
         chat["id"] = chat_id
+        text = "".join(reply)
+
+        # Regenerating keeps the previous answer as a prior version rather than
+        # discarding it. Without this the only way to compare two answers is to
+        # copy one out before asking for the other.
+        if regenerate_of is not None:
+            msgs = chat["messages"]
+            a = regenerate_of + 1
+            if 0 <= regenerate_of < len(msgs) and a < len(msgs) \
+                    and msgs[a].get("role") == "assistant":
+                target = msgs[a]
+                versions = target.get("versions") or [target.get("content", "")]
+                versions.append(text)
+                target["versions"] = versions
+                target["active"] = len(versions) - 1
+                target["content"] = text        # readers that predate versions
+                chat["updated"] = int(time.time())
+                save_chat(chat)
+                return regenerate_of
+            # The turn it named is gone: fall through and append a new exchange
+            # rather than silently writing nothing.
+
+        user_index = len(chat["messages"])
         chat["messages"].append({"role": "user", "content": prompt})
-        chat["messages"].append({"role": "assistant", "content": "".join(reply)})
-        if chat.get("title") in (None, "", "New chat"):
+        chat["messages"].append({"role": "assistant", "content": text})
+        if load_settings().get("auto_title", True) and chat.get("title") in (
+            None, "", "New chat"
+        ):
             chat["title"] = (prompt[:48] + "…") if len(prompt) > 48 else prompt
         chat["updated"] = int(time.time())
         save_chat(chat)
+        return user_index
     except Exception:  # noqa: BLE001 - persistence must never break a reply
-        pass
+        return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -624,6 +855,35 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _drain(self) -> bytes:
+        """Read the request body exactly once, and return it.
+
+        HTTP/1.1 keep-alive reuses the connection, so a body left unread is
+        parsed as the start of the next request -- the following GET came back
+        as 501 Unsupported method ('{}GET'). Every handler must therefore
+        drain, including the ones that ignore the body.
+
+        It returns the bytes because the first version did not: handlers that
+        *did* want the body called `_drain()` and then `rfile.read(length)`,
+        and the second read blocked forever on an empty socket. /approve and
+        /project hung for the full approval timeout. A read that can only
+        happen in one place cannot be done twice.
+        """
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        return self.rfile.read(n) if n > 0 else b""
+
+    def _body(self) -> dict:
+        """The request body as a dict; `{}` for absent or malformed JSON."""
+        raw = self._drain()
+        try:
+            value = json.loads(raw or b"{}")
+        except (ValueError, TypeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
     def _json(self, payload, status=200):
         body = json.dumps(payload).encode()
         self.send_response(status)
@@ -635,7 +895,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/settings":
-            self._json(load_settings())
+            cfg = load_settings()
+            # The UI only needs to know whether a key is set, never its value.
+            cfg["api_key"] = "\u2022" * 8 if cfg.get("api_key") else ""
+            self._json(cfg)
             return
         if self.path == "/projects":
             names = sorted({(load_chat(c["id"]).get("project") or "")
@@ -646,10 +909,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"servers": load_mcp()})
             return
         if self.path == "/update":
-            # Honest: no release feed is wired yet, so say that rather than
-            # reporting "up to date" for a check that never happened.
-            self._json({"current": APP_VERSION, "checked": False,
-                        "message": "Update checks are not configured yet."})
+            self._json(check_for_update())
             return
         if self.path == "/logs":
             # The engine's own recent activity, so a user can see what happened
@@ -674,7 +934,22 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"chats": list_chats()})
             return
         if self.path.startswith("/chats/"):
-            self._json(load_chat(self.path.rsplit("/", 1)[-1]))
+            # 404 rather than an empty chat: /fork and /messages already refuse
+            # an unknown id, and fabricating one here meant opening a deleted
+            # conversation showed a blank transcript instead of saying so.
+            cid = self.path.rsplit("/", 1)[-1]
+            if not _chat_path(cid).is_file():
+                self._json({"ok": False, "error": "no such conversation"}, 404)
+                return
+            chat = load_chat(cid)
+            for m in chat.get("messages", []):
+                if m.get("role") == "assistant" and m.get("versions"):
+                    m["content"] = _active(m)
+                    m["version_count"] = len(m["versions"])
+                    m["version_active"] = min(
+                        max(int(m.get("active", 0)), 0), len(m["versions"]) - 1)
+                    m.pop("versions", None)   # the client only needs the one
+            self._json(chat)
             return
         if self.path != "/health":
             self.send_error(404)
@@ -701,6 +976,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path.startswith("/cancel/"):
+            self._drain()
             run_id = self.path.rsplit("/", 1)[-1]
             known = cancel_run(run_id)
             body = json.dumps({"ok": known, "run_id": run_id,
@@ -715,11 +991,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/approve/"):
             aid = self.path.rsplit("/", 1)[-1]
-            length = int(self.headers.get("Content-Length") or 0)
-            try:
-                choice = json.loads(self.rfile.read(length) or b"{}").get("choice", "deny")
-            except (ValueError, TypeError):
-                choice = "deny"   # a malformed body must never mean "allow"
+            # A malformed or absent body must never mean "allow".
+            choice = self._body().get("choice", "deny")
             ok = resolve_approval(aid, choice)
             self._json({"ok": ok, "error": None if ok else "no such pending approval"},
                        200 if ok else 404)
@@ -732,7 +1005,12 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 self.send_error(400)
                 return
-            self._json(save_settings(patch))
+            saved = save_settings(patch)
+            if "launch_at_login" in patch:
+                saved = dict(saved)
+                saved["launch_at_login_result"] = set_launch_at_login(
+                    bool(patch["launch_at_login"]))
+            self._json(saved)
             return
 
         if self.path == "/mcp":
@@ -767,12 +1045,43 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "servers": servers})
             return
 
+        if self.path.startswith("/version/"):
+            # Select which stored answer is the live one.
+            self._drain()
+            _, _, rest = self.path.partition("/version/")
+            cid, _, rest2 = rest.partition("/")
+            idx, _, want = rest2.partition("/")
+            try:
+                chat = load_chat(cid)
+                if not _chat_path(cid).is_file():
+                    raise KeyError
+                msg = chat["messages"][int(idx) + 1]
+                versions = msg.get("versions") or []
+                n = int(want)
+                if msg.get("role") != "assistant" or not versions \
+                        or not 0 <= n < len(versions):
+                    raise KeyError
+                msg["active"] = n
+                msg["content"] = versions[n]
+                chat["id"] = cid
+                chat["updated"] = int(time.time())
+                save_chat(chat)
+                self._json({"ok": True, "active": n, "count": len(versions),
+                            "content": versions[n]})
+            except (ValueError, KeyError, IndexError):
+                self._json({"ok": False, "error": "no such version"}, 404)
+            return
+
         if self.path.startswith("/fork/"):
+            self._drain()
             # Copy a transcript up to and including message N into a new chat,
             # leaving the original untouched -- a fork, not a rewrite.
             _, _, rest = self.path.partition("/fork/")
             cid, _, idx = rest.partition("/")
             try:
+                if not _chat_path(cid).is_file():
+                    self._json({"ok": False, "error": "no such conversation"}, 404)
+                    return
                 src = load_chat(cid)
                 n = int(idx) + 1
                 new_id = f"{cid}-f{secrets.token_urlsafe(4)}"
@@ -788,11 +1097,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/project/"):
             cid = self.path.rsplit("/", 1)[-1]
-            length = int(self.headers.get("Content-Length") or 0)
-            try:
-                name = json.loads(self.rfile.read(length) or b"{}").get("project", "")
-            except (ValueError, TypeError):
-                name = ""
+            name = self._body().get("project", "")
             chat = load_chat(cid)
             chat["id"] = cid
             chat["project"] = str(name)[:80]
@@ -801,12 +1106,21 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/messages/"):
+            self._drain()
             # Drop one exchange (a user turn and the reply it produced).
             _, _, rest = self.path.partition("/messages/")
             cid, _, idx = rest.partition("/")
             try:
+                if not _chat_path(cid).is_file():
+                    self._json({"ok": False, "error": "no such conversation"}, 404)
+                    return
                 chat = load_chat(cid)
                 i = int(idx)
+                if i < 0 or i >= len(chat["messages"]):
+                    # A slice delete silently succeeds out of range, so the
+                    # bound is checked rather than inferred from an exception.
+                    self._json({"ok": False, "error": "no such message"}, 404)
+                    return
                 del chat["messages"][i:i + 2]
                 save_chat(chat)
                 self._json({"ok": True, "remaining": len(chat["messages"])})
@@ -841,6 +1155,8 @@ class Handler(BaseHTTPRequestHandler):
             run_id = str(payload.get("run_id") or "")
             session = payload.get("session", "default")
             chat_id = payload.get("chat_id") or session
+            regenerate_of = payload.get("regenerate_of")
+            tools_on = payload.get("tools", True) is not False
             for att in (payload.get("attachments") or [])[:5]:
                 nm = str(att.get("name", "file"))[:120]
                 body = str(att.get("text", ""))[:100_000]
@@ -866,17 +1182,31 @@ class Handler(BaseHTTPRequestHandler):
         if run_id:
             with _cancel_lock:
                 _active_runs.add(run_id)
+        cfg_now = load_settings()
         started = time.perf_counter()
         first_token_at = None
         chars = 0
         reply = []
         tool_started = {}
+        # praisonaiagents logs provider failures and falls back rather than
+        # raising, so a 401 reaches us as an empty stream. Capture the log line
+        # so the user is told "invalid API key" instead of "no output".
+        captured = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                if record.levelno >= logging.ERROR:
+                    captured.append(record.getMessage())
+
+        _cap = _Capture()
+        logging.getLogger().addHandler(_cap)
         try:
             log(f"turn start chat={chat_id} run={run_id or '-'}")
             _set_emitter(emit)
             _ensure_callbacks()
             _tool_queue().clear()
-            agent = _get_agent(session)
+            _apply_env(load_settings())
+            agent = _get_agent(session, tools=tools_on)
             emit("start", {"run_id": run_id})
             streamed = False
             def _emit_drafting(name):
@@ -903,9 +1233,9 @@ class Handler(BaseHTTPRequestHandler):
                     # explicitly rather than inferring it from a stream that ends.
                     emit("cancelled", {"run_id": run_id})
                     break
-                event, payload = _classify_stream_item(chunk)
+                event, frame = _classify_stream_item(chunk)
                 if event == "delta":
-                    text = payload["text"]
+                    text = frame["text"]
                     if not text:
                         continue
                     if first_token_at is None:
@@ -913,31 +1243,52 @@ class Handler(BaseHTTPRequestHandler):
                     streamed = True
                     chars += len(text)
                     reply.append(text)
-                    emit("delta", payload)
+                    emit("delta", frame)
+                elif event == "reasoning":
+                    if cfg_now.get("show_reasoning", True):
+                        emit("reasoning", frame)
                 elif event == "tool_call":
-                    tool_started[payload["call_id"]] = time.perf_counter()
-                    emit("tool_call", payload)
+                    tool_started[frame["call_id"]] = time.perf_counter()
+                    emit("tool_call", frame)
                 elif event == "tool_result":
-                    began = tool_started.pop(payload["call_id"], None)
+                    began = tool_started.pop(frame["call_id"], None)
                     if began is not None:
-                        payload["seconds"] = round(time.perf_counter() - began, 2)
-                    emit("tool_result", payload)
+                        frame["seconds"] = round(time.perf_counter() - began, 2)
+                    emit("tool_result", frame)
                 else:
-                    emit(event, payload)
+                    emit(event, frame)
             else:
                 if not streamed:
-                    # A stream that yielded nothing is a failure, not an empty answer.
-                    emit("error", {"message": "the engine produced no output", "kind": "empty"})
+                    # A stream that yielded nothing is a failure, not an empty
+                    # answer -- and the cause is usually in the logs, not here.
+                    detail = next((c for c in captured
+                                   if "401" in c or "api key" in c.lower()), None)
+                    if detail:
+                        emit("error", {"kind": "auth", "message":
+                             "The provider rejected the API key. Check it in "
+                             "Settings \u2192 Models. " + detail[:200]})
+                    elif captured:
+                        emit("error", {"kind": "internal",
+                                       "message": captured[-1][:300]})
+                    else:
+                        emit("error", {"message": "the engine produced no output",
+                                       "kind": "empty"})
                 else:
                     _drain_tools()
                     elapsed = time.perf_counter() - started
-                    _persist(chat_id, prompt, reply)
-                    emit("usage", {
-                        "chars": chars,
-                        "seconds": round(elapsed, 2),
-                        "ttft": round(first_token_at - started, 2) if first_token_at else None,
-                    })
-                    emit("end")
+                    user_index = _persist(chat_id, prompt, reply, regenerate_of)
+                    if cfg_now.get("show_stats", True):
+                        emit("usage", {
+                            "chars": chars,
+                            "seconds": round(elapsed, 2),
+                            "ttft": (round(first_token_at - started, 2)
+                                     if first_token_at else None),
+                        })
+                    vinfo = version_info(chat_id, user_index)
+                    emit("end", {"user_index": user_index,
+                                 "assistant_index": None if user_index is None
+                                 else user_index + 1,
+                                 "versions": vinfo[0], "active": vinfo[1]})
         except Exception as exc:  # noqa: BLE001 - the client must see the cause
             # `kind` lets the UI offer the right recovery: a missing key needs
             # settings, a rate limit needs retry, a bug needs the log.
@@ -948,6 +1299,10 @@ class Handler(BaseHTTPRequestHandler):
             log(f"ERROR {name}: {exc}")
             emit("error", {"message": f"{name}: {exc}", "kind": kind})
         finally:
+            try:
+                logging.getLogger().removeHandler(_cap)
+            except Exception:  # noqa: BLE001
+                pass
             _set_emitter(None)
             _tool_queue().clear()
             if run_id:
@@ -962,10 +1317,19 @@ def main():
     port = server.server_address[1]
     print(f"{PORT_MARKER}{port}", flush=True)
     print(f"praisonai runtime listening on 127.0.0.1:{port}", flush=True)
+    write_lock(port)
+    atexit.register(clear_lock)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(sig, lambda *_: sys.exit(0))
+        except (ValueError, OSError):
+            pass   # not the main thread, or the platform lacks it
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        clear_lock()
 
 
 if __name__ == "__main__":

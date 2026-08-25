@@ -17,7 +17,14 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+# The window came up at the configured 980x720 on every launch, discarding
+# whatever size and position the user had chosen.
+tauri-plugin-window-state = "2"
+# Without this a second launch starts a second shell against the same lockfile,
+# and the two race over one engine.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

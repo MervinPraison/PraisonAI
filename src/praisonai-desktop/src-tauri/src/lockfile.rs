@@ -22,7 +22,7 @@ pub enum LockState {
     Incompatible { found: u32, supported: u32 },
 }
 
-pub const LOCK_FORMAT_VERSION: u32 = 1;
+pub const LOCK_FORMAT_VERSION: u32 = 2;
 
 /// Parse lockfile contents. `None` input means the file does not exist --
 /// distinct from existing-but-empty, which is a truncated write.
@@ -163,8 +163,14 @@ mod tests {
     fn a_future_format_version_is_incompatible_not_corrupt() {
         // These differ: corrupt warrants investigating an orphan, incompatible
         // means a newer build wrote it and we should not guess at its fields.
-        let bumped = render(&lock()).replace("format_version=1", "format_version=99");
-        assert_eq!(parse(Some(&bumped)), LockState::Incompatible { found: 99, supported: 1 });
+        // Derived from the constant: hardcoding "1" here meant bumping the
+        // format broke the test that guards the format.
+        let bumped = render(&lock()).replace(
+            &format!("format_version={LOCK_FORMAT_VERSION}"), "format_version=99");
+        assert_eq!(
+            parse(Some(&bumped)),
+            LockState::Incompatible { found: 99, supported: LOCK_FORMAT_VERSION }
+        );
     }
 
     #[test]
