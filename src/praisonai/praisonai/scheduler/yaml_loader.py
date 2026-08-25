@@ -174,7 +174,7 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
         goal=goal,
         instructions=instructions,
         tools=tools,
-        verbose=verbose
+        output="verbose" if verbose else "silent",
     )
     
     return agent
