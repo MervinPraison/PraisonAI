@@ -910,17 +910,11 @@ class TrainModel:
             if os.getenv("HF_TOKEN"):
                 sft_params["hub_token"] = os.getenv("HF_TOKEN")
         # Response-only loss: compute loss only on the assistant's replies (better
-        # instruction tuning). Default "auto" enables it only when the model's chat
-        # template actually supports masking, so beginners get the quality win with
-        # zero risk of TRL's "no assistant tokens" crash. true/false force it.
+        # instruction tuning). Default "auto" enables it whenever a masking route is
+        # available -- TRL's assistant_only_loss when the template supports it, else
+        # unsloth's turn-marker masking -- so beginners get the quality win with zero
+        # risk of TRL's "no assistant tokens" crash. true/false force it.
         # `train_on_responses_only` is accepted as a familiar alias.
-        mask_setting = self.config.get(
-            "assistant_only_loss", self.config.get("train_on_responses_only", "auto"))
-        supports_mask = self._supports_assistant_mask()
-        if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
-            use_mask = supports_mask
-        else:
-            use_mask = self._flag(mask_setting)
         # Two ways to mask, and the second is why this is not a one-liner.
         #
         # TRL's assistant_only_loss needs `{% generation %}` in the template.
@@ -932,6 +926,19 @@ class TrainModel:
         # rather than through the config.
         markers = resolve_response_markers(
             self.config.get("chat_template"), self.config.get("model_name", ""))
+
+        mask_setting = self.config.get(
+            "assistant_only_loss", self.config.get("train_on_responses_only", "auto"))
+        supports_mask = self._supports_assistant_mask()
+        # `auto` means "mask if we can". Keying it off `supports_mask` alone sent
+        # every unsloth template (which lacks {% generation %}) down the unmasked
+        # path even when valid turn markers were available -- defeating the whole
+        # fallback. Enable it when EITHER route is usable, and let decide_masking
+        # pick which one.
+        if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
+            use_mask = supports_mask or bool(markers)
+        else:
+            use_mask = self._flag(mask_setting)
         self._response_markers = None
         self._masking_on = False
 

@@ -149,3 +149,43 @@ def test_the_trainer_uses_the_shared_decision():
     build = src.index("trainer = trainer_cls(")
     apply = src.index("from unsloth.chat_templates import train_on_responses_only")
     assert build < apply, "masking is applied before the trainer exists"
+
+
+# --------------------------------------------------------------------------- #
+# `auto` normalization feeding the router
+# --------------------------------------------------------------------------- #
+def _auto_use_mask(supports_mask, markers):
+    """The `auto` normalization exactly as train_model computes it.
+
+    decide_masking was tested in isolation, but the bug lived one line up: in
+    `auto`, use_mask was keyed off `supports_mask` alone, so a template with no
+    {% generation %} but valid turn markers still resolved to False -- and the
+    router never saw the markers. This mirrors that normalization so the two
+    pieces are tested together, which is where the defect actually was.
+    """
+    return supports_mask or bool(markers)
+
+
+def test_auto_reaches_the_marker_fallback_when_trl_mask_is_unsupported():
+    # Every unsloth template: no {% generation %} (supports_mask False) but valid
+    # turn markers. `auto` must still mask -- via the marker route.
+    markers = trainer_mod.RESPONSE_MARKERS["llama-3"]
+    use_mask = _auto_use_mask(supports_mask=False, markers=markers)
+    assert use_mask is True, "auto must enable masking when markers exist"
+    assert trainer_mod.decide_masking(use_mask, False, markers) == \
+        "train_on_responses_only"
+
+
+def test_auto_prefers_trl_mask_when_the_template_supports_it():
+    markers = trainer_mod.RESPONSE_MARKERS["llama-3"]
+    use_mask = _auto_use_mask(supports_mask=True, markers=markers)
+    assert trainer_mod.decide_masking(use_mask, True, markers) == \
+        "assistant_only_loss"
+
+
+def test_auto_stays_unmasked_for_an_unknown_template_without_crashing():
+    # No TRL support and no known markers: auto degrades to full-sequence loss
+    # rather than raising. (The raise is reserved for an EXPLICIT request.)
+    use_mask = _auto_use_mask(supports_mask=False, markers=None)
+    assert use_mask is False
+    assert trainer_mod.decide_masking(use_mask, False, None) is False
