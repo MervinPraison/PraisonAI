@@ -6,6 +6,7 @@
 //! adapter over this crate.
 
 pub mod platform;
+pub mod x11_threads;
 pub mod venv_resolve;
 pub mod health;
 pub mod readiness;

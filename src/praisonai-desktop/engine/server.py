@@ -140,6 +140,9 @@ def _windows_start_time(pid: int) -> int:
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         kernel32 = ctypes.windll.kernel32
+        # HANDLE is pointer-sized; the default c_int return truncates it above
+        # 2**31. Unreachable in practice, but wrong for free.
+        kernel32.OpenProcess.restype = ctypes.c_void_p
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
             return 0                       # no such process, or not ours to ask
@@ -294,7 +297,7 @@ def save_chat(chat: dict) -> None:
     # support ticket.
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(chat, indent=1))
-    tmp.replace(path)
+    _replace_with_retry(tmp, path)
 
 
 def list_chats() -> list:
@@ -607,7 +610,7 @@ def save_mcp(servers: list) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = MCP_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps({"servers": servers}, indent=1))
-    tmp.replace(MCP_PATH)
+    _replace_with_retry(tmp, MCP_PATH)
 # Mirrors frontend/dist/settings-registry.js. The registry is the source of
 # truth for the UI; this is the storage contract, and load_settings() drops
 # unknown keys and defaults missing ones so a hand-edited or older file can
@@ -744,10 +747,11 @@ class DpapiSecretStore:
         result = Blob()
         crypt32 = ctypes.windll.crypt32
         call = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
-        args = ([ctypes.byref(source), None, None, None, None, 0, ctypes.byref(result)]
-                if protect else
-                [ctypes.byref(source), None, None, None, None, 0, ctypes.byref(result)])
-        if not call(*args):
+        # Both functions take the same seven arguments: the blob in, a
+        # description, optional entropy, a reserved pointer, a prompt struct,
+        # flags, and the blob out.
+        if not call(ctypes.byref(source), None, None, None, None, 0,
+                    ctypes.byref(result)):
             raise OSError("DPAPI call failed")
         try:
             return ctypes.string_at(result.pbData, result.cbData)
@@ -755,14 +759,23 @@ class DpapiSecretStore:
             ctypes.windll.kernel32.LocalFree(result.pbData)
 
     def _read(self):
+        """The stored secrets, or {} if there are none.
+
+        A missing file means "nothing stored yet". A file that will not decrypt
+        means something else entirely -- a Windows password reset or a roamed
+        profile can invalidate the DPAPI key -- and treating that as empty made
+        the next `set` write a fresh blob over it, destroying every other
+        secret in the file. So only absence is silent.
+        """
         try:
-            return json.loads(self._crypt(self.path.read_bytes(), False).decode("utf-8"))
-        except Exception:  # noqa: BLE001
+            raw = self.path.read_bytes()
+        except FileNotFoundError:
             return {}
+        return json.loads(self._crypt(raw, False).decode("utf-8"))
 
     def set(self, name: str, value: str) -> bool:
         try:
-            store = self._read()
+            store = self._read()          # raises if the blob will not decrypt
             if value:
                 store[name] = value
             else:
@@ -777,7 +790,10 @@ class DpapiSecretStore:
             return False
 
     def get(self, name: str) -> str:
-        return str(self._read().get(name, ""))
+        try:
+            return str(self._read().get(name, ""))
+        except Exception:  # noqa: BLE001 - unreadable is not the caller's problem
+            return ""
 
 
 class FileSecretStore:
@@ -807,9 +823,17 @@ class FileSecretStore:
                 store.pop(name, None)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".json.tmp")
-            # Created 0600 *before* anything is written to it, so the secret is
-            # never briefly world-readable between creation and chmod.
-            handle = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            # O_EXCL, not just O_CREAT: the mode argument applies only when
+            # the file is *created*, so a leftover temp file from an
+            # interrupted write keeps its old permissions and the secret goes
+            # into it world-readable until the chmod after the rename. On
+            # Linux ~/.local/share is 0755, so that window is real. O_EXCL
+            # also closes the symlink-follow hole.
+            try:
+                os.unlink(str(tmp))
+            except FileNotFoundError:
+                pass
+            handle = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(handle, "w", encoding="utf-8") as out:
                 json.dump(store, out)
             _replace_with_retry(tmp, self.path)
@@ -842,7 +866,20 @@ class FallbackSecretStore:
         return self.secondary.path
 
     def set(self, name: str, value: str) -> bool:
+        """Write to the best store that will take it -- but delete from both.
+
+        A delete that stopped at the first success left the other copy behind,
+        and `get` served it: clearing an API key reported success while the key
+        kept working and its plaintext stayed on disk. The same applies to a
+        *new* value, which must not leave the superseded one readable in the
+        fallback, so the secondary is cleared after a successful primary write.
+        """
+        if not value:
+            cleared_primary = self.primary.set(name, "")
+            cleared_secondary = self.secondary.set(name, "")
+            return cleared_primary or cleared_secondary
         if self.primary.set(name, value):
+            self.secondary.set(name, "")   # never leave a stale plaintext copy
             return True
         return self.secondary.set(name, value)
 
@@ -908,7 +945,7 @@ def save_settings(patch: dict) -> dict:
     # Secrets never reach the file.
     on_disk = {k: v for k, v in merged.items() if k not in SECRET_KEYS}
     tmp.write_text(json.dumps(on_disk, indent=1))
-    tmp.replace(SETTINGS_PATH)
+    _replace_with_retry(tmp, SETTINGS_PATH)
     # Settings change the agent's identity, so cached agents must go or the
     # next turn would silently run on the previous model.
     with _agent_lock:
@@ -1303,8 +1340,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         # ok:true plus a version, so the supervisor can tell "engine healthy"
-        # from "something else answered on this port".
-        body = json.dumps({"ok": True, "version": PROTOCOL_VERSION}).encode()
+        # from "something else answered on this port". data_dir is included
+        # because the UI offers to copy that path, and it can be overridden by
+        # PRAISONAI_DESKTOP_HOME or XDG_DATA_HOME -- so the page must ask
+        # rather than reproduce the default and hand the user a path the app
+        # is not actually using.
+        body = json.dumps({"ok": True, "version": PROTOCOL_VERSION,
+                           "data_dir": str(DATA_DIR)}).encode()
         self.send_response(200)
         self._cors()
         self.send_header("Content-Type", "application/json")

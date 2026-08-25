@@ -62,18 +62,71 @@ pub enum StartError {
     Timeout { tail: String },
 }
 
+/// Put the child in its own process group, so stopping it stops its children.
+///
+/// Without this, SIGTERM to the engine pid leaves anything the engine spawned
+/// running -- and the engine spawns training runs, which hold a GPU.
+fn detach_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+/// Read lines, replacing undecodable bytes rather than stopping at them.
+///
+/// `BufRead::lines()` yields `Err(InvalidData)` on invalid UTF-8, and
+/// `map_while(Result::ok)` *stops the iterator* on the first error rather than
+/// skipping it -- so a single stray byte from a non-UTF-8 locale silently
+/// ended the reader thread for the rest of the session. The port announcement
+/// after it would never be seen, and the log would simply stop.
+pub fn read_lines_lossy(stream: impl std::io::Read) -> impl Iterator<Item = String> {
+    let mut reader = BufReader::new(stream);
+    std::iter::from_fn(move || {
+        let mut raw = Vec::new();
+        match reader.read_until(b'\n', &mut raw) {
+            Ok(0) => None,
+            Ok(_) => {
+                while matches!(raw.last(), Some(b'\n') | Some(b'\r')) {
+                    raw.pop();
+                }
+                Some(String::from_utf8_lossy(&raw).into_owned())
+            }
+            Err(_) => None,
+        }
+    })
+}
+
 /// Start the engine, returning once it has announced a usable port.
 ///
 /// Output is captured from the instant of spawn -- attaching a reader later is
 /// how a first-run failure ends up reported as an exit code with no explanation.
 pub fn start(python: &str, script: &str, timeout: Duration) -> Result<Engine, StartError> {
-    let mut child = Command::new(python)
+    let mut command = Command::new(python);
+    command
         .arg("-u") // unbuffered, or the announcement sits in a pipe buffer
         .arg(script)
+        // Force UTF-8 on both sides of the pipe. Python encodes redirected
+        // streams with the locale code page on Windows -- cp1252, or cp932 on
+        // a Japanese install -- and those bytes are not valid UTF-8. One of
+        // them arriving before the port announcement makes startup fail at the
+        // 30-second deadline with "Engine did not report ready in time", which
+        // is a lie about what happened and depends on the user's locale.
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| StartError::Spawn(e.to_string()))?;
+        .stderr(Stdio::piped());
+    // No console window, and its own process group so stopping the engine also
+    // stops what the engine spawned -- a training run must not outlive the app
+    // holding a GPU.
+    crate::reclaim::no_console(&mut command);
+    detach_group(&mut command);
+    let mut child = command.spawn().map_err(|e| StartError::Spawn(e.to_string()))?;
 
     let stdout = child.stdout.take().expect("piped");
     let stderr = child.stderr.take().expect("piped");
@@ -84,7 +137,7 @@ pub fn start(python: &str, script: &str, timeout: Duration) -> Result<Engine, St
         (Box::new(stderr) as Box<dyn std::io::Read + Send>, tx),
     ] {
         std::thread::spawn(move || {
-            for line in BufReader::new(stream).lines().map_while(Result::ok) {
+            for line in read_lines_lossy(stream) {
                 if tx.send(line).is_err() {
                     break;
                 }
@@ -179,4 +232,54 @@ pub fn probe_health(port: u16) -> bool {
 
 fn tail(buffer: &str) -> String {
     buffer.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n")
+}
+
+#[cfg(test)]
+mod lossy_reader {
+    //! One undecodable byte must cost one character, not the whole session.
+    use super::read_lines_lossy;
+
+    #[test]
+    fn a_bad_byte_does_not_end_the_stream() {
+        // cp1252 output from a non-English Windows install. The previous reader
+        // used lines().map_while(Result::ok), which *stops* on the first
+        // Err(InvalidData) rather than skipping it -- so everything after this
+        // byte, including the port announcement, was never seen, and startup
+        // failed 30 seconds later blaming a timeout.
+        let raw: &[u8] = b"before\n\xff\xfe bad\nPRAISONAI_PORT=54321\nafter\n";
+        let lines: Vec<String> = read_lines_lossy(raw).collect();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert_eq!(lines[0], "before");
+        assert!(lines[1].contains("bad"), "{:?}", lines[1]);
+        assert_eq!(lines[2], "PRAISONAI_PORT=54321", "the port announcement was lost");
+        assert_eq!(lines[3], "after");
+    }
+
+    #[test]
+    fn ordinary_utf8_survives_unchanged() {
+        let raw = "caf\u{e9} \u{2014} \u{1f9a5}\n".as_bytes();
+        let lines: Vec<String> = read_lines_lossy(raw).collect();
+        assert_eq!(lines, vec!["caf\u{e9} \u{2014} \u{1f9a5}"]);
+    }
+
+    #[test]
+    fn windows_line_endings_leave_no_stray_carriage_return() {
+        let raw: &[u8] = b"one\r\ntwo\r\n";
+        let lines: Vec<String> = read_lines_lossy(raw).collect();
+        assert_eq!(lines, vec!["one", "two"]);
+    }
+
+    #[test]
+    fn a_final_line_without_a_newline_is_still_delivered() {
+        // A crashing engine's last words usually arrive without a newline.
+        let raw: &[u8] = b"traceback line";
+        let lines: Vec<String> = read_lines_lossy(raw).collect();
+        assert_eq!(lines, vec!["traceback line"]);
+    }
+
+    #[test]
+    fn an_empty_stream_yields_nothing_rather_than_hanging() {
+        let lines: Vec<String> = read_lines_lossy(&b""[..]).collect();
+        assert!(lines.is_empty());
+    }
 }

@@ -16,6 +16,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -206,6 +207,125 @@ class TestIsolation(unittest.TestCase):
         finally:
             os.environ.pop("PRAISONAI_KEYCHAIN_SERVICE", None)
             importlib.reload(server)
+
+
+class HealthReportsWhereItLives(unittest.TestCase):
+    """The UI offers to copy the data folder, so the engine must name it.
+
+    The path can be overridden by PRAISONAI_DESKTOP_HOME, and on Linux by
+    XDG_DATA_HOME, so a page that reproduces the default hands the user a
+    directory the app is not using.
+    """
+
+    def test_the_health_response_names_the_directory_in_use(self):
+        import json as _json
+        import subprocess as _sp
+        import sys as _sys
+        import urllib.request as _url
+
+        home = tempfile.mkdtemp(prefix="praison-health-")
+        engine = os.path.join(os.path.dirname(os.path.abspath(server.__file__)), "server.py")
+        proc = _sp.Popen([_sys.executable, "-u", engine],
+                         env=dict(os.environ, PRAISONAI_DESKTOP_HOME=home,
+                                  PRAISONAI_KEYCHAIN_SERVICE="ai.praison.desktop.test"),
+                         stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True)
+        try:
+            port = None
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                if "PRAISONAI_PORT=" in line:
+                    port = int(line.split("PRAISONAI_PORT=")[1].strip())
+                    break
+            self.assertIsNotNone(port, "the engine never announced a port")
+            with _url.urlopen(f"http://127.0.0.1:{port}/health", timeout=15) as r:
+                health = _json.loads(r.read())
+            self.assertEqual(health.get("data_dir"), home,
+                             "health does not report the directory actually in use")
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+            shutil.rmtree(home, ignore_errors=True)
+
+
+class SecretDeletion(unittest.TestCase):
+    """Clearing a secret must clear it everywhere it could have landed.
+
+    The fallback exists so a machine with no keyring can still save a key. The
+    consequence nobody planned for: once a secret has been written to *both*
+    stores -- keyring unavailable, then available again -- a delete that
+    short-circuits on the first success leaves the other copy behind, and the
+    read path happily serves it. "Remove my API key" then reports success and
+    the key keeps working, with the plaintext still on disk.
+    """
+
+    class Flaky:
+        """A store that can be switched off, like a locked keyring."""
+
+        path = None
+
+        def __init__(self):
+            self.values, self.up = {}, True
+
+        def get(self, name):
+            return self.values.get(name, "") if self.up else ""
+
+        def set(self, name, value):
+            if not self.up:
+                return False
+            if value:
+                self.values[name] = value
+            else:
+                self.values.pop(name, None)
+            return True
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-del-")
+        self.primary = self.Flaky()
+        self.file = server.FileSecretStore(pathlib.Path(self.home))
+        self.store = server.FallbackSecretStore(self.primary, self.file)
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def test_a_secret_written_to_both_stores_is_deleted_from_both(self):
+        self.primary.up = False
+        self.store.set("api_key", "sk-old")             # lands in the file
+        self.primary.up = True
+        self.store.set("api_key", "sk-new")             # lands in the keyring
+        self.assertEqual(self.store.get("api_key"), "sk-new")
+
+        self.assertTrue(self.store.set("api_key", ""))  # the user clears it
+        self.assertEqual(self.store.get("api_key"), "",
+                         "the old key was resurrected from the fallback store")
+        self.assertEqual(self.file.get("api_key"), "",
+                         "the plaintext copy is still on disk after a delete")
+
+    def test_a_delete_reaches_the_fallback_even_when_the_primary_works(self):
+        self.store.set("api_key", "sk-value")
+        self.file.set("api_key", "sk-stale-copy")       # however it got there
+        self.store.set("api_key", "")
+        self.assertEqual(self.file.get("api_key"), "")
+
+    def test_a_delete_that_no_store_can_satisfy_reports_failure(self):
+        self.primary.up = False
+        broken = server.FileSecretStore(pathlib.Path("/nonexistent/nope"))
+        store = server.FallbackSecretStore(self.primary, broken)
+        self.assertFalse(store.set("api_key", ""),
+                         "a delete nothing could perform reported success")
+
+    def test_writing_a_new_secret_does_not_leave_the_old_one_in_the_fallback(self):
+        self.primary.up = False
+        self.store.set("api_key", "sk-old")
+        self.primary.up = True
+        self.store.set("api_key", "sk-new")
+        self.assertNotEqual(self.file.get("api_key"), "sk-old",
+                            "a superseded key is still readable in plaintext")
 
 
 class Encoding(unittest.TestCase):

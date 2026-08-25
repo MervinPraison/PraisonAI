@@ -46,7 +46,7 @@ const AGENTS = {
   },
 };
 
-async function boot(os, { engineState = 'ready' } = {}) {
+async function boot(os, { engineState = 'ready', reason, tail } = {}) {
   const copied = [];
   const dom = new JSDOM(HTML, {
     runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
@@ -62,7 +62,7 @@ async function boot(os, { engineState = 'ready' } = {}) {
       w.__TAURI__ = { core: { invoke: async () =>
         (engineState === 'ready'
           ? { state: 'ready', port: PORT, python: '/py' }
-          : { state: 'failed', reason: 'No usable Python' }) } };
+          : { state: 'failed', reason: reason || 'No usable Python', tail }) } };
       w.fetch = async (url) => {
         const u = String(url);
         const body = u.includes('/settings')
@@ -190,4 +190,62 @@ test('copying the data folder copies this platform\'s path', async () => {
       assert.ok(!/Library/.test(fn()), `${os} copies a macOS path: ${fn()}`);
     }
   }
+});
+
+
+/**
+ * An interrupted first install must not be a dead end.
+ *
+ * If setup is killed during the dependency step, the venv is complete and
+ * empty: `pyvenv.cfg` exists, so the interpreter is accepted, and the engine
+ * then dies on `ModuleNotFoundError`. That reason is not the one string the
+ * setup screen keys off, so the user got a wall of text with no button at
+ * all -- on every launch, forever, with no way back except deleting the venv
+ * by hand. This is the ComfyUI failure, and it is the worst kind: caused by
+ * one interruption, permanent, and invisible to us.
+ */
+test('a half-installed environment offers to finish the install', async () => {
+  const { doc } = await boot('mac', {
+    engineState: 'failed',
+    reason: 'Engine exited before it was ready',
+    tail: "ModuleNotFoundError: No module named 'praisonaiagents'",
+  });
+  await settle();
+  const setup = doc.querySelector('.setup');
+  assert.ok(setup, 'a half-built environment shows an error with no way to repair it');
+  assert.ok(/set up|install|environment/i.test(setup.textContent),
+            `the setup screen does not offer to build anything: ${setup.textContent.slice(0, 200)}`);
+});
+
+test('the repair button actually opens setup, not just exists', async () => {
+  // The first version of this only asserted the button was present, so
+  // replacing its handler with an empty function changed nothing and the test
+  // still passed. A control that does nothing is worse than no control.
+  const { doc } = await boot('mac', {
+    engineState: 'failed',
+    reason: 'Engine did not report ready in time',
+    tail: 'some traceback',
+  });
+  await settle();
+  const setup = [...doc.querySelectorAll('.errbtns button')]
+    .find((b) => /set up/i.test(b.textContent));
+  assert.ok(setup, 'no repair button on a failure banner');
+  assert.equal(doc.querySelector('.setup'), null, 'setup was already showing');
+  setup.dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+  await settle();
+  assert.ok(doc.querySelector('.setup'), 'the repair button did nothing when clicked');
+});
+
+test('any other engine failure still offers a way to act', async () => {
+  // Not every failure is repairable, but every failure must leave the user
+  // able to do something -- at minimum copy the details for a bug report.
+  const { doc } = await boot('mac', {
+    engineState: 'failed',
+    reason: 'Engine did not report ready in time',
+    tail: 'some traceback',
+  });
+  await settle();
+  const buttons = [...doc.querySelectorAll('.errbtns button')].map((b) => b.textContent);
+  assert.ok(buttons.length, 'the failure banner has no buttons at all');
+  assert.ok(buttons.some((b) => /copy/i.test(b)), `no way to copy details: ${buttons}`);
 });
