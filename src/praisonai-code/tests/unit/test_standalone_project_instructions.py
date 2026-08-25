@@ -181,3 +181,66 @@ def test_rules_clear_native(tmp_path, monkeypatch, capsys):
     rules_cmd.rules_clear()
     clear_out = capsys.readouterr().out
     assert "Cleared" in clear_out
+
+
+def test_rules_clear_preserves_project_instruction_files(
+    tmp_path, monkeypatch, capsys
+):
+    """``rules clear`` must NOT delete hand-authored AGENTS.md/CLAUDE.md.
+
+    Only ``workspace``-scoped rules created via ``rules add`` should be removed;
+    discovered project instruction files and global/nested rules are left
+    untouched (regression for the destructive over-clear bug).
+    """
+    agents = tmp_path / "AGENTS.md"
+    claude = tmp_path / "CLAUDE.md"
+    agents.write_text("be concise")
+    claude.write_text("prefer stdlib")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        rules_cmd,
+        "_fallback",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no fallback")),
+    )
+
+    rules_cmd.rules_add("style", "use tabs")
+    capsys.readouterr()
+
+    rules_cmd.rules_clear()
+
+    # The CLI-created workspace rule is gone, but the user's instruction files
+    # must survive.
+    assert agents.exists(), "rules clear deleted a hand-authored AGENTS.md"
+    assert claude.exists(), "rules clear deleted a hand-authored CLAUDE.md"
+
+
+def test_remote_fetch_pins_to_validated_ip(monkeypatch):
+    """The pinned opener re-validates at connect time (DNS-rebinding guard).
+
+    Simulate a rebind: the up-front check sees a public address, but the
+    connect-time resolution returns a loopback address. The pinned connection
+    must refuse rather than contact the internal address.
+    """
+    from praisonai_code.integration import context_files as ctx
+
+    calls = {"n": 0}
+
+    def _rebinding_resolver(host):
+        # First resolution (up-front validation) is public; a later resolution
+        # (connect time) rebinds to loopback -> must be refused.
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ["93.184.216.34"]
+        return []
+
+    monkeypatch.setattr(ctx, "_resolve_public_addrs", _rebinding_resolver)
+    monkeypatch.setattr(ctx, "_allow_local_urls", lambda: False)
+
+    # Up-front guard passes on the first (public) resolution.
+    assert ctx._url_is_fetchable("http://rebind.example/instructions.md")
+
+    # But the pinned connect re-resolves and refuses the rebound address.
+    result = ctx._fetch_remote_source(
+        "http://rebind.example/instructions.md"
+    )
+    assert result is None

@@ -179,6 +179,52 @@ def _allow_local_urls() -> bool:
     )
 
 
+def _is_blocked_ip(addr: str) -> bool:
+    """Whether a resolved address string is in a non-global (blocked) range."""
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    except ValueError:
+        return True
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _resolve_public_addrs(host: str) -> Optional[List[str]]:
+    """Resolve ``host`` and return its addresses only if *all* are global.
+
+    Returns the list of resolved address strings when every resolution is a
+    public/global address, ``None`` when the host is unresolvable (let urlopen
+    surface the failure downstream), or an empty list when any resolved address
+    is in a blocked (private/loopback/link-local/reserved) range so the caller
+    fails closed. Returning the concrete addresses lets the fetch *pin* the
+    connection to a validated IP, closing the DNS-rebinding (TOCTOU) window
+    where a re-resolution at connect time could return an internal address.
+    """
+    import socket
+
+    if not host:
+        return []
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return None
+    addrs: List[str] = []
+    for info in infos:
+        addr = info[4][0]
+        if _is_blocked_ip(addr):
+            return []
+        addrs.append(addr)
+    return addrs
+
+
 def _is_blocked_host(host: str) -> bool:
     """Whether ``host`` resolves to a private/loopback/link-local/reserved IP.
 
@@ -188,32 +234,11 @@ def _is_blocked_host(host: str) -> bool:
     (fail-closed on resolution errors). Bypassable via ``_ALLOW_LOCAL_URL_ENV``
     for trusted internal setups.
     """
-    import ipaddress
-    import socket
-
-    if not host:
-        return True
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
+    addrs = _resolve_public_addrs(host)
+    if addrs is None:
         # Unresolvable — let urlopen surface the failure/warning downstream.
         return False
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr.split("%", 1)[0])
-        except ValueError:
-            return True
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            return True
-    return False
+    return len(addrs) == 0
 
 
 def _url_is_fetchable(url: str) -> bool:
@@ -236,31 +261,110 @@ def _url_is_fetchable(url: str) -> bool:
     return True
 
 
+class _PinnedSSRFError(Exception):
+    """Raised at connect time when a host re-resolves to a blocked address."""
+
+
+def _build_pinned_opener():
+    """Build a urllib opener that pins each connection to a validated IP.
+
+    Closes the DNS-rebinding (TOCTOU) window: the up-front
+    :func:`_url_is_fetchable` check resolves the host once, but a plain
+    ``urlopen`` re-resolves at connect time, so an attacker-controlled hostname
+    can rebind to an internal address between the two resolutions. Here each
+    ``HTTP(S)Connection`` re-resolves *and re-validates* the host at connect
+    time and connects to that exact validated IP, so the address checked is the
+    address contacted. The original hostname is preserved for the ``Host``
+    header and TLS SNI so virtual-hosted and HTTPS endpoints still work.
+
+    Redirects are additionally re-validated by a guarded redirect handler, and
+    the ``_allow_local_urls`` opt-in bypasses pinning entirely for trusted
+    internal setups.
+    """
+    import http.client
+    import socket
+    import urllib.request
+
+    def _pinned_connect(conn):
+        # Re-validate at the moment of connection so a rebind since the
+        # up-front check is caught, then connect to the validated address.
+        addrs = _resolve_public_addrs(conn.host)
+        if not addrs:  # empty (blocked) or None (unresolvable) -> refuse
+            raise _PinnedSSRFError(
+                f"host {conn.host!r} did not resolve to a public address"
+            )
+        last_err: Optional[Exception] = None
+        for addr in addrs:
+            try:
+                conn.sock = socket.create_connection(
+                    (addr, conn.port), timeout=conn.timeout
+                )
+                if getattr(conn, "_tunnel_host", None):
+                    conn._tunnel()
+                return
+            except OSError as exc:  # try the next validated address
+                last_err = exc
+        raise last_err or OSError(f"could not connect to {conn.host!r}")
+
+    class _PinnedHTTPConnection(http.client.HTTPConnection):
+        def connect(self):
+            _pinned_connect(self)
+
+    class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+        def connect(self):
+            _pinned_connect(self)
+            # Wrap the raw socket with TLS using the original hostname for SNI
+            # and certificate verification (not the pinned IP).
+            self.sock = self._context.wrap_socket(
+                self.sock, server_hostname=self.host
+            )
+
+    class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req):
+            return self.do_open(_PinnedHTTPConnection, req)
+
+    class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(_PinnedHTTPSConnection, req)
+
+    class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not _url_is_fetchable(newurl):
+                return None
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    return urllib.request.build_opener(
+        _PinnedHTTPHandler(),
+        _PinnedHTTPSHandler(),
+        _GuardedRedirectHandler(),
+    )
+
+
 def _fetch_remote_source(url: str) -> Optional[str]:
     """Fetch a remote instruction source, best-effort and size-bounded.
 
     Uses the stdlib ``urllib`` (lazily imported) so no heavy dependency is
     added. Destinations are validated against an SSRF guard (see
     :func:`_url_is_fetchable`) that rejects private/loopback/link-local hosts,
-    and redirects are re-validated so a public URL cannot bounce to an internal
-    one. A slow, unreachable, or oversized response is handled gracefully:
-    failures return ``None`` (with a warning) so the run continues, and bodies
-    larger than ``_REMOTE_MAX_BYTES`` are truncated with a marker.
+    the connection is *pinned* to the validated IP (see
+    :func:`_build_pinned_opener`) so a DNS rebind cannot redirect it to an
+    internal service, and redirects are re-validated so a public URL cannot
+    bounce to an internal one. A slow, unreachable, or oversized response is
+    handled gracefully: failures return ``None`` (with a warning) so the run
+    continues, and bodies larger than ``_REMOTE_MAX_BYTES`` are truncated with a
+    marker.
     """
     if not _url_is_fetchable(url):
         return None
     try:
-        import urllib.request
+        if _allow_local_urls():
+            # Trusted internal setup: skip IP pinning so a legitimately private
+            # instruction host is reachable.
+            import urllib.request
 
-        class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                if not _url_is_fetchable(newurl):
-                    return None
-                return super().redirect_request(
-                    req, fp, code, msg, headers, newurl
-                )
-
-        opener = urllib.request.build_opener(_GuardedRedirectHandler())
+            opener = urllib.request.build_opener()
+        else:
+            opener = _build_pinned_opener()
         with opener.open(url, timeout=_REMOTE_TIMEOUT) as resp:  # nosec B310
             raw = resp.read(_REMOTE_MAX_BYTES + 1)
     except Exception as exc:  # noqa: BLE001 - best-effort; never block the run
