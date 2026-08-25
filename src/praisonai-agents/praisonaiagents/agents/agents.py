@@ -1546,6 +1546,20 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         return False
 
+    def _should_continue_on_dep_failure(self, task_id):
+        """True if the task opted into graceful degradation via its own flags.
+
+        Honors the documented per-task flow-control knobs ``skip_on_failure``
+        and ``on_error`` (``"continue"``). When set, a dependent task still runs
+        (in degraded mode) instead of being force-failed when an upstream
+        dependency fails.
+        """
+        task = self.tasks.get(task_id)
+        if task is None:
+            return False
+        return bool(getattr(task, 'skip_on_failure', False)) or \
+            getattr(task, 'on_error', 'stop') == 'continue'
+
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
         process = Process(
@@ -1568,8 +1582,9 @@ class AgentTeam(SpawnAnnounceProtocol):
                         await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
                         # A just-flushed prerequisite may now be failed; don't
-                        # queue a dependent that would run with missing context.
-                        if self._deps_failed(task_id):
+                        # queue a dependent that would run with missing context
+                        # unless it opted into graceful degradation.
+                        if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
                             self.tasks[task_id].status = "failed"
                             continue
                     tasks_to_run.append((task_id, self.arun_task(task_id)))
@@ -1608,8 +1623,9 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if self._depends_on_pending(task, async_tasks_to_run):
                         await flush_async_tasks()
                         # A just-flushed prerequisite may now be failed; don't
-                        # queue a dependent that would run with missing context.
-                        if self._deps_failed(task_id):
+                        # queue a dependent that would run with missing context
+                        # unless it opted into graceful degradation.
+                        if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
                             self.tasks[task_id].status = "failed"
                             continue
                     # Collect async tasks to run in parallel
@@ -1618,8 +1634,9 @@ class AgentTeam(SpawnAnnounceProtocol):
                     # Before running a sync task, execute all pending async tasks
                     await flush_async_tasks()
                     # A just-flushed async prerequisite may now be failed; skip
-                    # the dependent so we don't run it with missing upstream context.
-                    if self._deps_failed(task_id):
+                    # the dependent so we don't run it with missing upstream
+                    # context, unless it opted into graceful degradation.
+                    if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
                         self.tasks[task_id].status = "failed"
                         continue
                     # Run sync task in an executor to avoid blocking the event loop
