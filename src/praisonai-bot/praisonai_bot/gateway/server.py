@@ -7700,7 +7700,8 @@ class WebSocketGateway:
                     session.set_profile_namespace(
                         gateway._resolve_profile_for_message(
                             channel_name, facts=facts
-                        )
+                        ),
+                        agent,
                     )
 
         logger.info(f"Injected routing handler for channel '{channel_name}'")
@@ -7797,7 +7798,8 @@ class WebSocketGateway:
                 _tg_session, "set_profile_namespace"
             ):
                 _tg_session.set_profile_namespace(
-                    gateway._resolve_profile_for_message(channel_name, facts=facts)
+                    gateway._resolve_profile_for_message(channel_name, facts=facts),
+                    agent,
                 )
 
             # Ack reaction — show processing indicator.
