@@ -505,13 +505,22 @@ def _llm_overrides(cfg: dict) -> dict:
 
 def _apply_env(cfg: dict) -> None:
     """Credentials and endpoint go to the environment, which the OpenAI client
-    reads directly -- the constructor parameter routes through the heavier path."""
+    reads directly -- the constructor parameter routes through the heavier path.
+
+    A cleared value must *remove* the variable, not be skipped: leaving a stale
+    key or base_url in os.environ would keep routing subsequent turns to the
+    credential or endpoint the user just deleted.
+    """
     if cfg.get("base_url"):
         # Set as an env var rather than base_url=, which routes through a
         # heavier code path for identical intent.
         os.environ["OPENAI_API_BASE"] = cfg["base_url"]
+    elif "base_url" in cfg:
+        os.environ.pop("OPENAI_API_BASE", None)
     if cfg.get("api_key"):
         os.environ["OPENAI_API_KEY"] = cfg["api_key"]
+    elif "api_key" in cfg:
+        os.environ.pop("OPENAI_API_KEY", None)
 
 
 def _get_agent(session_id: str = "default"):

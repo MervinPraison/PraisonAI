@@ -129,6 +129,17 @@ button.stop{background:var(--bad)}
 .stats{font-size:.66rem;color:var(--soft);margin-top:.45rem;font-variant-numeric:tabular-nums}
 .cancelled{font-size:.7rem;color:var(--bad);margin-top:.4rem;font-weight:650}
 .drafting{font-size:.75rem;color:var(--soft);margin:.4rem 0;font-style:italic}
+.approval{border:1px solid var(--soft);border-radius:.5rem;padding:.6rem .7rem;margin:.45rem 0;background:var(--bg)}
+.approval-head{font-size:.72rem;font-weight:650;margin-bottom:.3rem}
+.approval-args{font-size:.68rem;color:var(--soft);white-space:pre-wrap;word-break:break-all;margin:.2rem 0 .5rem;font-variant-numeric:tabular-nums}
+.approval-btns{display:flex;gap:.4rem;flex-wrap:wrap}
+.approval-btns button{font-size:.68rem;cursor:pointer;border:1px solid var(--soft);border-radius:.35rem;padding:.2rem .55rem;background:none;color:var(--ink)}
+.approval-btns button:hover:not(:disabled){border-color:var(--ink)}
+.approval-btns button:disabled{opacity:.5;cursor:default}
+.approval-btns .allow{color:var(--good,#2a9d5c)}
+.approval-btns .deny{color:var(--bad)}
+.approval.resolved{opacity:.7}
+.approval-outcome{font-size:.68rem;color:var(--soft);margin-top:.35rem}
 .acts{display:flex;gap:.5rem;margin-top:.4rem;opacity:0;transition:opacity .12s}
 .turn:hover .acts{opacity:1}
 .act{font-size:.68rem;color:var(--soft);cursor:pointer;background:none;border:0;padding:.1rem .2rem}
@@ -670,6 +681,41 @@ function toolResult(host,callId,name,ok,output,seconds){
   if(!ok) el.classList.add('open');   // failures open themselves; successes stay quiet
   stick();
 }
+// A tool the user must approve before it runs. The engine is blocked in
+// _await_decision until we POST /approve/{id}; ignoring the event would stall
+// the turn for the full 300s timeout. The buttons resolve it immediately.
+function approvalCard(host,data){
+  const el=document.createElement('div');
+  el.className='approval'; el.dataset.approval=data.approval_id;
+  el.innerHTML=`<div class="approval-head"></div>
+    <pre class="approval-args"></pre>
+    <div class="approval-btns">
+      <button class="allow" type="button">Allow</button>
+      <button class="always" type="button">Always allow</button>
+      <button class="deny" type="button">Deny</button>
+    </div>`;
+  el.querySelector('.approval-head').textContent=`Allow ${data.name}?`;
+  el.querySelector('.approval-args').textContent=
+    typeof data.args==='string'?data.args:JSON.stringify(data.args??{},null,2);
+  const btns=[...el.querySelectorAll('.approval-btns button')];
+  const done=(label)=>{
+    btns.forEach(b=>b.disabled=true);
+    el.classList.add('resolved');
+    const o=document.createElement('div'); o.className='approval-outcome';
+    o.textContent=label; el.appendChild(o);
+  };
+  const decide=async(choice,label)=>{
+    done(label);
+    try{ await fetch(`http://127.0.0.1:${PORT}/approve/${data.approval_id}`,
+      {method:'POST',headers:{'content-type':'application/json'},
+       body:JSON.stringify({choice})}); }catch{}
+  };
+  el.querySelector('.allow').onclick=()=>decide('allow','Allowed');
+  el.querySelector('.always').onclick=()=>decide('always',`Always allowing ${data.name}`);
+  el.querySelector('.deny').onclick=()=>decide('deny','Denied');
+  host.appendChild(el); stick();
+  return el;
+}
 // Copy / regenerate / delete, attached once a turn settles.
 function addActions(turnEl, prompt, answer){
   if(turnEl.querySelector('.acts')) return;
@@ -789,6 +835,8 @@ document.getElementById('f').addEventListener('submit',async e=>{
           if(!draft){ draft=document.createElement('div'); draft.className='drafting';
                       host.appendChild(draft); }
           draft.textContent=`Preparing ${data.name}…`; stick(); }
+        else if(ev==='approval_request'){ paint(); draft?.remove(); draft=null;
+                                   approvalCard(host,data); }
         else if(ev==='tool_call'){ paint(); draft?.remove(); draft=null;
                                    toolCard(host,data.call_id,data.name,data.args); }
         else if(ev==='tool_result'){ toolResult(host,data.call_id,data.name,data.ok,data.output,data.seconds); }
