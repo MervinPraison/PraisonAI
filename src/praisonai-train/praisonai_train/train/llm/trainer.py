@@ -461,6 +461,16 @@ class TrainModel:
     def validate_config(self):
         self.resolve_method(self.config)
 
+        # A warning, not a refusal: unsloth loads plenty of models it does not
+        # map (loader.py falls through to a generic path), so refusing would
+        # block working configurations. But "I typed it wrong" should not cost
+        # a download to discover.
+        name = self.config.get("model_name")
+        if name:
+            from praisonai_train.models import describe_unknown, is_known
+            if not is_known(name):
+                print(f"WARNING: {describe_unknown(name)}")
+
         required = ["model_name", "max_seq_length", "dataset"]
         missing = [k for k in required if not self.config.get(k)]
         if missing:
