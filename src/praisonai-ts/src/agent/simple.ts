@@ -597,6 +597,7 @@ export class Agent {
             results.push({
               role: 'tool',
               tool_call_id: id,
+              name,
               content: `Error: Tool call "${name}" was denied by the approval gate.`
             });
             continue;
