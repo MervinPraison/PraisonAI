@@ -55,6 +55,7 @@ jobs:
           set -euo pipefail
           rsync -a --delete \
             --exclude '.git/' \
+            --exclude '.github/' \
             --exclude 'node_modules/' \
             --exclude 'dist/' \
             --exclude 'coverage/' \
@@ -69,13 +70,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Preserve praisonai-js automation (rsync source has no .github/)
-          if git diff --quiet; then
+          # Stage first so newly added files are detected (git diff alone ignores untracked)
+          git add -A
+          if git diff --cached --quiet; then
             echo "No changes — praisonai-js already matches ${SOURCE_PATH} on monorepo main."
             exit 0
           fi
 
-          git add -A
           msg="sync: update from monorepo ${SOURCE_PATH}"
 
           if [ "${{ inputs.mode }}" = "commit" ]; then
