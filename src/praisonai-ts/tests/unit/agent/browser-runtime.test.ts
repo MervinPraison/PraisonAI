@@ -9,7 +9,7 @@
  * The test deletes the global rather than mocking `getEnv`, because mocking the
  * accessor would pass even if a new raw `process.env` deref were added.
  */
-import { Agent } from '../../../src/agent/simple';
+import { Agent, writeTokenToStdout } from '../../../src/agent/simple';
 
 describe('Agent in a runtime with no process global', () => {
   const saved = (globalThis as any).process;
@@ -43,5 +43,32 @@ describe('Agent in a runtime with no process global', () => {
     const agent = new Agent({ instructions: 'x' });
     expect((agent as any).verbose).toBe(true);
     expect((agent as any).pretty).toBe(false);
+  });
+});
+
+describe('Agent streaming in a runtime with no process global', () => {
+  const saved = (globalThis as any).process;
+
+  afterEach(() => {
+    (globalThis as any).process = saved;
+  });
+
+  it('the default token sink does not throw when stdout is absent', () => {
+    // start() with no onToken defaults to writing to stdout. On a webview that
+    // deref threw on the FIRST token, so streaming died the moment it began --
+    // after the constructor had already succeeded, which is why the constructor
+    // test above does not cover it.
+    const agent: any = new Agent({ instructions: 'x' });
+    delete (globalThis as any).process;
+    expect(() => writeTokenToStdout('hello')).not.toThrow();
+    expect(agent.name).toBeDefined();
+  });
+
+  it('still writes to stdout when one is present', () => {
+    // The pair: "never write" would pass the test above and silently break the CLI.
+    const written: string[] = [];
+    (globalThis as any).process = { ...saved, stdout: { write: (t: string) => written.push(t) } };
+    writeTokenToStdout('hello');
+    expect(written).toEqual(['hello']);
   });
 });

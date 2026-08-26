@@ -9,6 +9,19 @@ import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 import { getEnv } from '../llm/openaiClientOptions';
 
 /**
+ * The default token sink for `start()` when no `onToken` is supplied.
+ *
+ * Exported so a test can call it rather than re-implementing the guard. A
+ * webview has no `stdout`: unguarded, this threw on the FIRST streamed token,
+ * so streaming died immediately even though the constructor had succeeded.
+ */
+export function writeTokenToStdout(token: string): void {
+  if (typeof process !== 'undefined' && process.stdout) {
+    process.stdout.write(token);
+  }
+}
+
+/**
  * Agent Configuration
  * 
  * The Agent class is the primary entry point for PraisonAI.
@@ -703,7 +716,7 @@ export class Agent {
     // Token sink: when a caller (e.g. stream()) supplies onToken, tokens go
     // there instead of the terminal. Defaulting to stdout preserves CLI
     // behaviour without leaking process.stdout into non-terminal hosts.
-    const emitToken = onToken ?? ((token: string) => { process.stdout.write(token); });
+    const emitToken = onToken ?? writeTokenToStdout;
 
     // Explicit per-call signal wins over the agent-level default (mirrors
     // Python's resolution: cancel_token overrides interrupt_controller).
