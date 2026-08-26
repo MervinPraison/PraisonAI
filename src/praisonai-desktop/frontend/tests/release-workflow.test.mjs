@@ -171,3 +171,49 @@ test('the macOS window overlay repeats the base window faithfully', () => {
   assert.equal(mac.titleBarStyle, 'Overlay');
   assert.equal(mac.hiddenTitle, true);
 });
+
+test('the macOS bundle is configured to be signed', () => {
+  // Without an identity Tauri never runs codesign on the bundle, and the only
+  // signature left is the one rustc's linker applies to the bare executable.
+  // That signature's CodeDirectory declares a resource seal the unsigned
+  // bundle does not have, so macOS calls the app "damaged and can't be
+  // opened" -- not "unidentified developer" -- and right-click -> Open cannot
+  // bypass it. v4.7.2 shipped exactly that.
+  //
+  // "-" is the ad-hoc identity. It is not a Developer ID and does not make the
+  // app trusted; it makes the signature *valid*, which is the difference
+  // between "damaged" and a warning the user can click past.
+  const mac = config.bundle.macOS;
+  assert.ok(mac, 'no macOS bundle config at all');
+  assert.ok(mac.signingIdentity,
+            'no signingIdentity: the bundle will ship with an invalid signature');
+});
+
+test('the release build verifies the signature before uploading', () => {
+  // The config alone is not enough -- if Tauri ever stops honouring it, the
+  // build must fail rather than attach another unopenable DMG.
+  //
+  // Comments are stripped first. The first version of this matched the phrase
+  // "codesign --verify" inside the comment that explains the gate, so deleting
+  // the actual command changed nothing and the test still passed.
+  const runnable = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  assert.match(runnable, /codesign\s+--verify\s+--deep\s+--strict/,
+               'nothing checks the signature before the bundle is attached');
+  assert.ok(runnable.indexOf('codesign --verify') < runnable.indexOf('gh release upload'),
+            'the signature is verified after upload, which is too late');
+});
+
+test('the macOS overlay does not drop the bundle configuration', () => {
+  // Tauri merges the overlay with RFC 7386, which replaces rather than merges.
+  // An overlay that grew a "bundle" key would silently discard the signing
+  // identity along with everything else under it.
+  const overlay = JSON.parse(
+    readFileSync(new URL('src/praisonai-desktop/src-tauri/tauri.macos.conf.json', root), 'utf8'));
+  if (overlay.bundle) {
+    assert.ok(overlay.bundle.macOS?.signingIdentity,
+              'the overlay defines bundle but omits signingIdentity, which replaces it away');
+  }
+});

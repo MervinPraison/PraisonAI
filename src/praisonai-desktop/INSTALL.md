@@ -26,9 +26,10 @@ wording and the exact click are below.
 Not sure which Mac you have:  → About This Mac. "Chip" means Apple silicon,
 "Processor" means Intel.
 
-Gatekeeper refuses an unsigned app on a double-click with *"PraisonAI is
-damaged and can't be opened"* — which is misleading. Nothing is damaged; the
-app simply has no signature.
+Gatekeeper refuses an app it cannot verify. The app carries an ad-hoc
+signature, which makes the signature *valid* but not *trusted* — so macOS says
+it cannot check for malicious software, or that the developer is
+unidentified.
 
 1. Drag **PraisonAI** to Applications.
 2. **Right-click** it → **Open** → **Open**.
@@ -41,6 +42,18 @@ it downloaded the file:
 ```sh
 xattr -dr com.apple.quarantine /Applications/PraisonAI.app
 ```
+
+### If you see *"PraisonAI is damaged and can't be opened"*
+
+That message means something different, and right-click → Open will **not**
+get past it: macOS says "damaged" when a signature is present but *invalid*,
+not when one is merely untrusted.
+
+**v4.7.2 shipped in exactly that state.** The bundle was never signed, so the
+only signature on it was the one the Rust linker leaves on the executable, and
+that signature declares a resource seal an unsigned bundle does not have. Every
+Mac rejected it. Use v4.7.3 or later; the release build now refuses to attach a
+macOS bundle whose signature does not verify.
 
 ## Windows
 
