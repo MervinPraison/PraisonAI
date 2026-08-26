@@ -478,9 +478,19 @@ class MCP:
         )
         self.runner = MCPToolRunner(self.server_params, timeout)
         
-        # Wait for initialization
+        # Wait for initialization. Fail closed on timeout so callers never
+        # receive a usable-but-empty MCP object that silently degrades an
+        # Agent into a tool-less chat (issue #4375).
         if not self.runner.initialized.wait(timeout=self.timeout):
-            print(f"Warning: MCP initialization timed out after {self.timeout} seconds")
+            raise TimeoutError(
+                f"MCP initialization timed out after {self.timeout} seconds "
+                f"(command={cmd!r} args={arguments!r})."
+            )
+        if getattr(self.runner, "_init_error", None):
+            raise RuntimeError(
+                f"MCP initialization failed: {self.runner._init_error} "
+                f"(command={cmd!r} args={arguments!r})."
+            )
         
         # Automatically detect if this is an NPX command
         base_cmd = os.path.basename(cmd) if isinstance(cmd, str) else cmd
@@ -499,6 +509,19 @@ class MCP:
         else:
             # Generate tool functions immediately and store them
             self._tools = self._apply_tool_filters(self._generate_tool_functions())
+
+        # Fail closed if a stdio server initialized but produced no tools.
+        # Returning an empty iterable here would let Agent(tools=mcp) run as a
+        # tool-less chat and hallucinate answers (issue #4375). An explicit
+        # allow/deny filter that removes every tool is a deliberate config and
+        # is left untouched.
+        if not self._tools and not self.allowed_tools and not self.disabled_tools:
+            err = getattr(self.runner, "_init_error", None)
+            raise RuntimeError(
+                f"MCP server produced 0 tools (command={cmd!r} args={arguments!r}). "
+                f"init_error={err!r}. On Windows pass command='npx.cmd' explicitly "
+                f"or use a Python MCP server (command=sys.executable, args=[server.py])."
+            )
     
     def _generate_tool_functions(self) -> List[Callable]:
         """
