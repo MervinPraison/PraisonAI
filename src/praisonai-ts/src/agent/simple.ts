@@ -1062,21 +1062,26 @@ export class Agent {
     // Own controller so breaking the consumer's `for await` (which runs the
     // iterator's `return()`, landing in the finally below) aborts the upstream
     // provider request — otherwise tokens keep generating and billing after
-    // the consumer stopped reading. A caller-supplied `opts.signal` is chained
-    // in: aborting it aborts ours, so both paths stop the same request.
+    // the consumer stopped reading. Both the turn-scoped `opts.signal` and the
+    // agent-level `this.signal` are chained in: aborting either aborts ours, so
+    // every cancellation path stops the same request. Listeners are bound to
+    // `controller.signal` so they auto-detach when the controller aborts in the
+    // finally, preventing accumulation on long-lived caller/agent signals.
     const controller = new AbortController();
-    const callerSignal = opts?.signal;
-    if (callerSignal) {
-      if (callerSignal.aborted) {
-        controller.abort((callerSignal as any).reason);
+    const chainAbort = (source?: AbortSignal) => {
+      if (!source) return;
+      if (source.aborted) {
+        controller.abort((source as any).reason);
       } else {
-        callerSignal.addEventListener(
+        source.addEventListener(
           'abort',
-          () => controller.abort((callerSignal as any).reason),
-          { once: true }
+          () => controller.abort((source as any).reason),
+          { once: true, signal: controller.signal }
         );
       }
-    }
+    };
+    chainAbort(opts?.signal);
+    chainAbort(this.signal);
 
     const wake = () => { const n = notify; notify = null; n?.(); };
     const onToken = (token: string) => {
@@ -1110,9 +1115,13 @@ export class Agent {
     } finally {
       // Breaking the consumer's loop lands here: stop feeding the sink and
       // abort the in-flight request so the provider stops generating (and
-      // billing) rather than running to completion detached.
+      // billing) rather than running to completion detached. Await the
+      // in-flight run so `start()`'s catch settles `lastStopReason` to
+      // 'cancelled' before `return()` resolves — a caller reading it right
+      // after the loop then observes the final state, not stale/null.
       cancelled = true;
       controller.abort();
+      await run;
     }
   }
 

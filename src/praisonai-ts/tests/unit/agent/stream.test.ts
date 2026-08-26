@@ -184,4 +184,75 @@ describe('Agent.stream()', () => {
     expect(sawAbort).toBe(true);
     expect(agent.lastStopReason).toBe('cancelled');
   });
+
+  it('honours the agent-level config signal during streaming', async () => {
+    let sawAbort = false;
+    jest
+      .spyOn(OpenAIService.prototype, 'streamChat')
+      .mockImplementation(async (_messages, _temp, onToken, signal) => {
+        const emitted: string[] = [];
+        for (let i = 0; i < 40; i++) {
+          if (signal?.aborted) {
+            sawAbort = true;
+            throw (signal as any).reason ?? new Error('The operation was aborted');
+          }
+          const t = String(i);
+          emitted.push(t);
+          onToken(t);
+          await new Promise((r) => setImmediate(r));
+        }
+        return emitted.join('');
+      });
+
+    const controller = new AbortController();
+    const agent = new Agent({
+      instructions: 'be helpful',
+      llm: 'gpt-4o-mini',
+      stream: true,
+      verbose: false,
+      signal: controller.signal,
+    });
+
+    let n = 0;
+    // Aborting the agent-level signal must reach the upstream request even
+    // when no per-turn opts.signal is supplied.
+    await expect(
+      (async () => {
+        for await (const _ of agent.stream('hi')) {
+          if (++n === 3) controller.abort();
+        }
+      })()
+    ).rejects.toBeDefined();
+
+    expect(sawAbort).toBe(true);
+    expect(agent.lastStopReason).toBe('cancelled');
+  });
+
+  it('reads lastStopReason immediately after breaking (state settled)', async () => {
+    jest
+      .spyOn(OpenAIService.prototype, 'streamChat')
+      .mockImplementation(async (_messages, _temp, onToken, signal) => {
+        const emitted: string[] = [];
+        for (let i = 0; i < 40; i++) {
+          if (signal?.aborted) {
+            throw (signal as any).reason ?? new Error('The operation was aborted');
+          }
+          const t = String(i);
+          emitted.push(t);
+          onToken(t);
+          await new Promise((r) => setImmediate(r));
+        }
+        return emitted.join('');
+      });
+
+    const agent = makeAgent();
+    let n = 0;
+    for await (const _ of agent.stream('hi')) {
+      if (++n === 3) break;
+    }
+
+    // No extra event-loop turn: the finally awaits the in-flight run so the
+    // cancellation reason is already settled when the loop exits.
+    expect(agent.lastStopReason).toBe('cancelled');
+  });
 });
