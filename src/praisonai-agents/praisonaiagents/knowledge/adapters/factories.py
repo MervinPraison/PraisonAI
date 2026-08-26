@@ -149,6 +149,10 @@ class ChromaKnowledgeAdapter:
                 path=persist_dir,
                 settings=chromadb.config.Settings(anonymized_telemetry=False)
             )
+        except (KeyboardInterrupt, SystemExit, GeneratorExit):
+            # Interpreter control-flow signals must propagate untouched so a
+            # Ctrl+C / interpreter shutdown is not masked as a backend failure.
+            raise
         except BaseException as exc:
             raise RuntimeError(
                 f"Chroma persist failed at {persist_dir!r} "

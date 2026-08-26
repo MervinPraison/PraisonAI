@@ -364,3 +364,20 @@ class TestChromaDefaultPersistPath:
                     markitdown=MagicMock(),
                     config={"vector_store": {"config": {"path": tmp}}},
                 )
+
+    def test_persistent_client_keyboardinterrupt_propagates(self):
+        """Ctrl+C during init must propagate, not be masked as a backend RuntimeError."""
+        import tempfile
+        from unittest.mock import MagicMock
+        from praisonaiagents.knowledge.adapters.factories import ChromaKnowledgeAdapter
+
+        fake_chromadb = MagicMock()
+        fake_chromadb.PersistentClient.side_effect = KeyboardInterrupt()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with pytest.raises(KeyboardInterrupt):
+                ChromaKnowledgeAdapter(
+                    chromadb=fake_chromadb,
+                    markitdown=MagicMock(),
+                    config={"vector_store": {"config": {"path": tmp}}},
+                )
