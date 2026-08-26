@@ -114,6 +114,89 @@ def build_permission_target(
     return f"tool:{tool_name}"
 
 
+def build_diff_preview(
+    tool_name: str, arguments: Optional[Dict[str, Any]] = None
+) -> Optional[str]:
+    """Build a readable unified diff for a file-mutating tool call.
+
+    Lets an approval prompt show the *actual* pending change (path plus
+    ``+``/``-`` hunks) instead of a truncated argument dump. Uses only the
+    stdlib :mod:`difflib`; no new dependencies. Returns ``None`` for tools that
+    are not file mutations (or when the diff cannot be computed) so callers can
+    fall back to the existing argument summary.
+
+    Supported tools:
+
+    * ``edit_file`` / ``acp_edit_file`` — ``old_string`` -> ``new_string`` at
+      ``filepath``/``path``.
+    * ``write_file`` / ``acp_create_file`` — new ``content`` against the
+      current on-disk file (empty when the file does not yet exist).
+    * ``apply_patch`` — the ``patch`` text is already a unified diff, returned
+      verbatim.
+    """
+    import difflib
+    import os
+
+    args = arguments or {}
+
+    def _path() -> str:
+        for key in _PATH_KEYS:
+            value = args.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return tool_name
+
+    def _read_existing(path: str) -> str:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                return fh.read()
+        except (OSError, UnicodeDecodeError):
+            return ""
+
+    def _unified(old: str, new: str, path: str) -> Optional[str]:
+        diff = "".join(
+            difflib.unified_diff(
+                old.splitlines(keepends=True),
+                new.splitlines(keepends=True),
+                fromfile=f"{path} (before)",
+                tofile=f"{path} (after)",
+                n=3,
+            )
+        )
+        return diff or None
+
+    try:
+        if tool_name in ("edit_file", "acp_edit_file"):
+            old_string = args.get("old_string")
+            new_string = args.get("new_string")
+            if not isinstance(old_string, str) or not isinstance(new_string, str):
+                return None
+            path = _path()
+            existing = _read_existing(path)
+            if existing and old_string and old_string in existing:
+                new_content = existing.replace(old_string, new_string)
+                return _unified(existing, new_content, path)
+            return _unified(old_string, new_string, path)
+
+        if tool_name in ("write_file", "acp_create_file"):
+            content = args.get("content")
+            if not isinstance(content, str):
+                return None
+            path = _path()
+            existing = _read_existing(path) if os.path.exists(path) else ""
+            return _unified(existing, content, path)
+
+        if tool_name == "apply_patch":
+            patch = args.get("patch")
+            if isinstance(patch, str) and patch.strip():
+                return patch
+            return None
+    except Exception:  # noqa: BLE001 — preview is advisory; never break approval
+        return None
+
+    return None
+
+
 def run_coroutine_safely(
     coro: Awaitable[T], 
     timeout: Optional[float] = None
