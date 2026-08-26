@@ -298,6 +298,41 @@ _LAZY_IMPORTS = {
             assert tool_gap['status'] == 'TODO'
             assert tool_gap['typescript'] is False
     
+    def test_markdown_states_it_measures_names_not_behaviour(self):
+        """Markdown must disclose it measures exported names, not behaviour.
+
+        Guards against the false-confidence bug where an exported-but-unreachable
+        symbol (e.g. ApprovalCallback) is read as a working capability.
+        """
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_dir = Path(tmpdir) / "src" / "praisonai-agents" / "praisonaiagents"
+            pkg_dir.mkdir(parents=True)
+            (pkg_dir / "__init__.py").write_text('''
+_LAZY_IMPORTS = {
+    'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'Tool': ('praisonaiagents.tools.base', 'Tool'),
+}
+''')
+
+            ts_dir = Path(tmpdir) / "src" / "praisonai-ts" / "src"
+            ts_dir.mkdir(parents=True)
+            (ts_dir / "index.ts").write_text("export { Agent } from './agent';")
+
+            wrapper_dir = Path(tmpdir) / "src" / "praisonai" / "praisonai" / "cli" / "features"
+            wrapper_dir.mkdir(parents=True)
+
+            generator = ParityTrackerGenerator(Path(tmpdir))
+            md = generator.generate_markdown()
+
+            # Header discloses the methodology limitation
+            assert "What this measures" in md
+            assert "exported symbol name" in md
+            # An exported name is labelled "exported", not "DONE"/"works"
+            assert "✅ exported" in md
+            assert "✅ DONE" not in md
+
     def test_write_typescript_creates_file(self):
         """Test that write_typescript creates the output file."""
         from praisonai._dev.parity.generator import ParityTrackerGenerator
