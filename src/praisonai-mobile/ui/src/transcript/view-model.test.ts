@@ -368,3 +368,57 @@ test("a long tool output is previewed without breaking an emoji", () => {
   assert.equal(row.preview.includes("\n"), false);
   assert.ok(row.output.length > row.preview.length, "the full output is still available");
 });
+
+// ---- render order ----------------------------------------------------------
+
+test("a tool row is drawn between the paragraphs it ran between", () => {
+  // This view used to emit all the text and then all the tools, because
+  // TurnState could not express anything else. It can now, and this is the
+  // test that stops it regressing to the old shape.
+  const turn = run(
+    start,
+    delta("Let me check. "),
+    { type: "tool_call", msgId: M, callId: "c1", name: "search", args: {} },
+    { type: "tool_result", msgId: M, callId: "c1", name: "search", ok: true, output: "42", seconds: 1 },
+    delta("The answer is 42."),
+    endAt(0),
+  );
+  const view = buildTranscript(turn);
+  assert.deepEqual(view.rows.map((r) => r.kind), ["text", "tool", "text"]);
+});
+
+test("only the last text block streams", () => {
+  // An earlier paragraph was closed by the tool call after it. Showing a live
+  // caret on it would claim two places are being written at once.
+  const turn = run(
+    start,
+    delta("first "),
+    { type: "tool_call", msgId: M, callId: "c1", name: "t", args: {} },
+    { type: "tool_result", msgId: M, callId: "c1", name: "t", ok: true, output: "x", seconds: 1 },
+    delta("second"),
+  );
+  const texts = buildTranscript(turn).rows.filter((r) => r.kind === "text");
+  assert.equal(texts.length, 2);
+  assert.equal(texts[0]?.kind === "text" && texts[0].streaming, false);
+  assert.equal(texts[1]?.kind === "text" && texts[1].streaming, true);
+});
+
+test("text rows get distinct ids", () => {
+  // Two rows sharing an id is how a keyed renderer reuses the wrong node and
+  // paints the second paragraph's text into the first one's position.
+  const turn = run(
+    start,
+    delta("a"),
+    { type: "tool_call", msgId: M, callId: "c1", name: "t", args: {} },
+    { type: "tool_result", msgId: M, callId: "c1", name: "t", ok: true, output: "x", seconds: 1 },
+    delta("b"),
+  );
+  const ids = buildTranscript(turn).rows.map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length, "every row id must be unique");
+});
+
+test("a plain answer is still a single text row", () => {
+  // The pair: the common case must not gain structure it does not need.
+  const view = buildTranscript(run(start, delta("hello"), endAt(0)));
+  assert.deepEqual(view.rows.map((r) => r.kind), ["text"]);
+});

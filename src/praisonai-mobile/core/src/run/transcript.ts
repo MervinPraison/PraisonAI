@@ -41,6 +41,26 @@ export interface Dropped {
   readonly detail: string;
 }
 
+/**
+ * The turn in render order.
+ *
+ * `text` alone cannot express a tool call that happened BETWEEN two
+ * paragraphs, which is how every chat UI renders a multi-step turn -- with
+ * only an accumulated string and a parallel `tools` array, a view can render
+ * all the prose and then all the tools, and nothing else.
+ *
+ * A text block holds its own slice, so `blocks` and `text` must agree:
+ * concatenating every text block reproduces `text` exactly. That is asserted,
+ * because two representations of the same thing drift the moment one of them
+ * gains a case the other does not.
+ *
+ * A tool block carries only the callId. The row itself stays in `tools`, so a
+ * `tool_result` updates one place and every view sees it.
+ */
+export type Block =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "tool"; readonly callId: string };
+
 export interface TurnState {
   readonly phase: "idle" | "streaming" | "ended";
   readonly msgId: string | null;
@@ -50,6 +70,8 @@ export interface TurnState {
   /** The name of a tool being drafted, or null. NEVER a row -- see below. */
   readonly drafting: string | null;
   readonly tools: readonly ToolRow[];
+  /** Text and tool rows in the order they actually happened. */
+  readonly blocks: readonly Block[];
   readonly approvals: readonly PendingApproval[];
   readonly usage: { readonly chars: number; readonly seconds: number; readonly ttftSeconds: number | null } | null;
   readonly outcome: Outcome | null;
@@ -71,6 +93,7 @@ export const initialTurn: TurnState = {
   reasoning: "",
   drafting: null,
   tools: [],
+  blocks: [],
   approvals: [],
   usage: null,
   outcome: null,
@@ -125,8 +148,16 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
   }
 
   switch (event.type) {
-    case "delta":
-      return { ...state, text: state.text + event.text };
+    case "delta": {
+      // Extend the trailing text block if one is open; otherwise start a new
+      // one. A tool block in between is exactly what closes the previous run
+      // of text, which is the whole point of the list.
+      const last = state.blocks.at(-1);
+      const blocks: Block[] = last?.kind === "text"
+        ? [...state.blocks.slice(0, -1), { kind: "text", text: last.text + event.text }]
+        : [...state.blocks, { kind: "text", text: event.text }];
+      return { ...state, text: state.text + event.text, blocks };
+    }
 
     case "reasoning":
       return { ...state, reasoning: state.reasoning + event.text };
@@ -141,6 +172,7 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
       return {
         ...state,
         drafting: null,
+        blocks: [...state.blocks, { kind: "tool", callId: event.callId }],
         tools: [
           ...state.tools,
           {
@@ -169,7 +201,13 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
         // A result for a call we never saw. Creating the row is right: the
         // call event may simply have been lost, and dropping the result would
         // discard the one piece of information that actually matters.
-        return { ...state, tools: [...state.tools, resolved] };
+        // It needs a position too, or a view rendering from `blocks` shows a
+        // row that exists in `tools` and nowhere on screen.
+        return {
+          ...state,
+          tools: [...state.tools, resolved],
+          blocks: [...state.blocks, { kind: "tool", callId: event.callId }],
+        };
       }
       const tools = [...state.tools];
       tools[existing] = resolved;

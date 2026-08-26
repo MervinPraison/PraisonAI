@@ -195,3 +195,111 @@ test("a start after a finished turn opens a fresh turn but keeps the drop record
   assert.equal(second.phase, "streaming");
   assert.equal(second.dropped.length, 1, "the earlier drop must still be visible");
 });
+
+// ---- render order ----------------------------------------------------------
+
+/** Every text block concatenated. Must always reproduce `state.text`. */
+const textOf = (state: TurnState): string =>
+  state.blocks.filter((b) => b.kind === "text").map((b) => (b.kind === "text" ? b.text : "")).join("");
+
+test("a tool call lands BETWEEN the paragraphs it happened between", () => {
+  // The whole reason blocks exist. With only an accumulated string and a
+  // parallel tools array, a view can render all the prose and then all the
+  // tools, and nothing else -- which is not how any chat UI shows a
+  // multi-step turn.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "delta", msgId: M, text: "Let me check. " },
+    { type: "tool_call", msgId: M, callId: "c1", name: "search", args: {} },
+    { type: "tool_result", msgId: M, callId: "c1", name: "search", ok: true, output: "42", seconds: 1 },
+    { type: "delta", msgId: M, text: "The answer is 42." },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.deepEqual(s.blocks.map((b) => b.kind), ["text", "tool", "text"]);
+  const [b0, , b2] = s.blocks;
+  assert.equal(b0?.kind === "text" ? b0.text : null, "Let me check. ");
+  assert.equal(b2?.kind === "text" ? b2.text : null, "The answer is 42.");
+});
+
+test("consecutive deltas extend one block rather than making one each", () => {
+  // A block per token would be thousands of nodes for one answer, and would
+  // make the interleaving test above pass for entirely the wrong reason.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "delta", msgId: M, text: "a" },
+    { type: "delta", msgId: M, text: "b" },
+    { type: "delta", msgId: M, text: "c" },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.equal(s.blocks.length, 1);
+  const only = s.blocks[0];
+  assert.equal(only?.kind === "text" ? only.text : null, "abc");
+});
+
+test("blocks and text never disagree", () => {
+  // THE INVARIANT. Two representations of the same thing drift the moment one
+  // gains a case the other does not, and the drift is silent.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "delta", msgId: M, text: "one " },
+    { type: "tool_call", msgId: M, callId: "c1", name: "t", args: {} },
+    { type: "delta", msgId: M, text: "two " },
+    { type: "tool_call", msgId: M, callId: "c2", name: "t", args: {} },
+    { type: "delta", msgId: M, text: "three" },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.equal(textOf(s), s.text);
+  assert.equal(s.text, "one two three");
+  assert.deepEqual(s.blocks.map((b) => b.kind), ["text", "tool", "text", "tool", "text"]);
+});
+
+test("a turn with no tools is a single text block", () => {
+  // The common case must not pay for the rare one.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "delta", msgId: M, text: "hello" },
+  ] as RunEvent[]) s = apply(s, e);
+  assert.deepEqual(s.blocks, [{ kind: "text", text: "hello" }]);
+  assert.equal(textOf(s), s.text);
+});
+
+test("a tool result for a call that was never seen still gets a position", () => {
+  // Otherwise the row exists in `tools` and appears nowhere on screen, which
+  // is the same silent-loss failure the reducer creates the row to avoid.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "tool_result", msgId: M, callId: "ghost", name: "t", ok: true, output: "x", seconds: null },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.equal(s.tools.length, 1);
+  assert.deepEqual(s.blocks, [{ kind: "tool", callId: "ghost" }]);
+});
+
+test("a tool result does not add a second block for a call already placed", () => {
+  // The pair for the test above: creating a block on every result would
+  // duplicate every tool row in the transcript.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "tool_call", msgId: M, callId: "c1", name: "t", args: {} },
+    { type: "tool_result", msgId: M, callId: "c1", name: "t", ok: true, output: "x", seconds: 1 },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.equal(s.blocks.length, 1);
+  assert.equal(s.tools.length, 1);
+});
+
+test("a dropped event changes no blocks", () => {
+  // Identity, not deep-equality: an unknown event must return the SAME object,
+  // and a new blocks array would break that guarantee silently.
+  let s = apply(initialTurn, { type: "start", msgId: M, runId: "r1" } as RunEvent);
+  s = apply(s, { type: "delta", msgId: M, text: "a" } as RunEvent);
+  const before = s;
+  const after = apply(s, { type: "delta", msgId: "wrong-msg", text: "no" } as RunEvent);
+  assert.equal(after.blocks, before.blocks, "blocks must be the same array reference");
+});

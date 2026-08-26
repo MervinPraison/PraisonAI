@@ -95,7 +95,7 @@ fixed, because each needs a decision rather than an edit.
 
 ## Open
 
-### 1. `TurnState` loses the interleaving of text and tool calls
+### ~~1. `TurnState` loses the interleaving of text and tool calls~~ — CLOSED
 
 `text` is one accumulated string and `tools` is a parallel array, so there is no
 way to place a tool row *between* the two paragraphs it actually happened
@@ -105,9 +105,20 @@ currently emits all text, then all tool rows.
 Closing it needs an ordered block list in the reducer:
 `blocks: ({ kind: "text"; … } | { kind: "tool"; callId: string })[]`.
 
-**Not urgent for the shipping engine.** praisonai-ts emits no tool events at all
-(`capabilities.tools: false`), so this is invisible until the `remote-http`
-engine is the default. It should be closed before that happens.
+**Closed.** `TurnState` now carries `blocks: Block[]` — the turn in the order it
+actually happened. A delta extends the open text block or starts a new one; a
+`tool_call` appends a tool block; a result for a call never seen gets a
+position too, or its row would exist in `tools` and appear nowhere on screen.
+
+The invariant that stops the two representations drifting is asserted: every
+text block concatenated reproduces `text` exactly. Verified by mutation — every
+delta opening its own block fails one case, and a `tool_call` adding no block
+fails three.
+
+`buildTranscript` now walks `blocks`, so a tool row renders between the
+paragraphs it ran between, and only the LAST text block streams (an earlier one
+was closed by the tool call after it, and a caret on it would claim two places
+are being written at once).
 
 ### 2. `settle()` empties `approvals`, so an ended turn cannot show what was approved
 

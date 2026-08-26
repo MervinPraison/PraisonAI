@@ -274,15 +274,30 @@ export function buildTranscript(
     rows.push({ kind: "reasoning", id: "reasoning", text: turn.reasoning });
   }
 
-  // An empty string is not an empty bubble. `error{kind:'empty'}` is the event
-  // for "the model said nothing", and painting a blank message instead makes a
-  // failure look like a short answer.
-  if (turn.text !== "") {
-    rows.push({ kind: "text", id: "text", text: turn.text, streaming });
-  }
-
+  // Walk `turn.blocks`, which is the turn in the order it actually happened --
+  // so a tool row sits BETWEEN the two paragraphs it ran between, rather than
+  // all the prose being drawn and then all the tools. `text` alone could not
+  // express that, and this view used to emit exactly that wrong shape.
+  //
+  // An empty text block is not an empty bubble. `error{kind:'empty'}` is the
+  // event for "the model said nothing", and painting a blank message instead
+  // makes a failure look like a short answer.
   const attached = new Set<string>();
-  for (const tool of turn.tools) {
+  const byCallId = new Map(turn.tools.map((t) => [t.callId, t]));
+  let textIndex = 0;
+
+  for (const block of turn.blocks) {
+    if (block.kind === "text") {
+      if (block.text === "") continue;
+      // Only the LAST text block is still streaming; an earlier one was closed
+      // by the tool call that follows it and must not show a live caret.
+      const isLast = block === turn.blocks.at(-1);
+      rows.push({ kind: "text", id: `text:${textIndex++}`, text: block.text, streaming: streaming && isLast });
+      continue;
+    }
+
+    const tool = byCallId.get(block.callId);
+    if (tool === undefined) continue; // a block with no row cannot be drawn
     rows.push(toolRow(tool));
     for (const pending of turn.approvals) {
       if (pending.callId !== tool.callId) continue;
