@@ -28,7 +28,7 @@ class DataDirectory(unittest.TestCase):
 
     def test_macos_uses_application_support(self):
         got = server.default_data_dir("darwin", home=pathlib.PurePosixPath("/Users/x"), env={})
-        self.assertEqual(got, pathlib.Path("/Users/x/Library/Application Support/PraisonAI"))
+        self.assertEqual(got.as_posix(), "/Users/x/Library/Application Support/PraisonAI")
 
     def test_windows_uses_appdata_not_a_library_folder(self):
         got = server.default_data_dir(
@@ -51,18 +51,18 @@ class DataDirectory(unittest.TestCase):
         got = server.default_data_dir(
             "linux", home=pathlib.PurePosixPath("/home/x"),
             env={"XDG_DATA_HOME": "/mnt/data/xdg"})
-        self.assertEqual(got, pathlib.Path("/mnt/data/xdg/PraisonAI"))
+        self.assertEqual(got.as_posix(), "/mnt/data/xdg/PraisonAI")
 
     def test_linux_without_xdg_falls_back_to_the_spec_default(self):
         got = server.default_data_dir("linux", home=pathlib.PurePosixPath("/home/x"), env={})
-        self.assertEqual(got, pathlib.Path("/home/x/.local/share/PraisonAI"))
+        self.assertEqual(got.as_posix(), "/home/x/.local/share/PraisonAI")
 
     def test_the_explicit_override_wins_everywhere(self):
         for platform in ("darwin", "win32", "linux"):
             got = server.default_data_dir(
                 platform, home=pathlib.PurePosixPath("/home/x"),
                 env={"PRAISONAI_DESKTOP_HOME": "/tmp/chosen"})
-            self.assertEqual(got, pathlib.Path("/tmp/chosen"), platform)
+            self.assertEqual(got.as_posix(), "/tmp/chosen", platform)
 
 
 class SignalRegistration(unittest.TestCase):

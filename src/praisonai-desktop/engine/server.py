@@ -199,7 +199,12 @@ def write_lock_text(path: pathlib.Path, body: str) -> pathlib.Path:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".lock.tmp")
-    tmp.write_text(body, encoding="utf-8")
+    # write_bytes, not write_text: text mode translates "\n" to "\r\n" on
+    # Windows, so the file was not the bytes this function says it writes. The
+    # Rust parser trims each line and would have coped, but a lockfile that
+    # differs by platform is a difference waiting to matter, and the encode is
+    # the only conversion that should be happening here.
+    tmp.write_bytes(body.encode("utf-8"))
     _replace_with_retry(tmp, path)
     return path
 

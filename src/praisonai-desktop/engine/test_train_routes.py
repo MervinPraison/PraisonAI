@@ -7,8 +7,11 @@ skipped all eleven of its tests for months because it probed for the engine in
 a way that could not work, so these fail loudly rather than skip.
 """
 
+import atexit
+import hashlib
 import json
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
@@ -88,15 +91,30 @@ class EngineProcess:
         shutil.rmtree(self.home, ignore_errors=True)
 
 
+_SCRIPTS = tempfile.mkdtemp(prefix="praison-train-scripts-")
+atexit.register(shutil.rmtree, _SCRIPTS, True)
+
+
 def _python(body):
     """A PRAISONAI_TRAIN_CMD that runs `body` instead of a real fine-tune.
 
-    shlex.quote, not json.dumps: the engine splits this with shlex, and JSON
-    escaping turns a newline into a literal backslash-n, which reached the
-    interpreter as a syntax error partway through a script that had already
-    printed its first line -- a half-run that looked like a trainer crash.
+    The body goes into a file rather than `-c`. The engine splits this command
+    with POSIX rules on Unix and Windows rules on Windows, and the two disagree
+    about a string containing a quote: shlex.quote escapes an inner `'` as the
+    concatenation `'"'"'`, which POSIX reassembles into one token and Windows
+    splits into seven. Every script here prints something, so every one of them
+    contains a quote, and the whole training suite failed on Windows for that
+    reason alone.
+
+    A path has no newlines and no quotes, so both rule sets agree about it.
     """
-    return f"{shlex.quote(sys.executable)} -u -c {shlex.quote(body)}"
+    # A content hash, not hash(): the built-in is salted per process, and two
+    # different bodies landing on one filename would have the second silently
+    # overwrite the first.
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    script = pathlib.Path(_SCRIPTS) / f"case-{digest}.py"
+    script.write_text(body, encoding="utf-8")
+    return f"{shlex.quote(sys.executable)} -u {shlex.quote(str(script))}"
 
 
 def _wait(predicate, timeout=30):
