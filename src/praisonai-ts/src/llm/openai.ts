@@ -1,15 +1,7 @@
 import OpenAI from 'openai';
-import dotenv from 'dotenv';
 import { buildOpenAIClientOptions, getEnv } from './openaiClientOptions';
 import { Logger } from '../utils/logger';
 import type { ChatCompletionTool, ChatCompletionToolChoiceOption, ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-
-// Load environment variables once at the application level. Guarded so that
-// importing this module never throws in browser-like runtimes where `process`
-// (and the filesystem dotenv reads) are unavailable.
-if (typeof process !== 'undefined' && process.env) {
-    dotenv.config();
-}
 
 // The API-key check lives in getOpenAIClient(), where the client is actually
 // created — importing the package must not throw for users of non-OpenAI

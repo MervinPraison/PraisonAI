@@ -8,9 +8,19 @@ export enum LogLevel {
 }
 
 export class Logger {
-    private static level: LogLevel = process.env.LOGLEVEL === 'debug' ? LogLevel.DEBUG : LogLevel.INFO;
+    private static _level?: LogLevel;
     private static verbose: boolean = true;
     private static pretty: boolean = false;
+
+    private static get level(): LogLevel {
+        if (this._level === undefined) {
+            const logLevel = typeof process !== 'undefined' && process.env
+                ? process.env.LOGLEVEL
+                : undefined;
+            this._level = logLevel === 'debug' ? LogLevel.DEBUG : LogLevel.INFO;
+        }
+        return this._level;
+    }
 
     private static getCircularReplacer() {
         const seen = new WeakSet();
