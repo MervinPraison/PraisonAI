@@ -107,6 +107,30 @@ describe('esm-shim needsCjsBanner (genuine CJS usage)', () => {
     expect(needsCjsBanner(code)).toBe(false);
     expect(hasBanner(applyBanner(code))).toBe(false);
   });
+
+  it('DOES banner require after a regex literal containing } inside an interpolation', () => {
+    // A `}` in the regex character class must not close the interpolation early
+    // and hide the genuine require(...) that follows it.
+    const code =
+      'const v = `x=${/[}]/.test(s) ? require("fs").readFileSync("a") : 0}`;\n';
+    expect(needsCjsBanner(code)).toBe(true);
+    expect(hasBanner(applyBanner(code))).toBe(true);
+  });
+
+  it('DOES banner require after a comment containing } inside an interpolation', () => {
+    const line =
+      'const v = `x=${(() => { // note }\n return require("fs"); })()}`;\n';
+    const block =
+      'const v = `x=${(function(){ /* } */ return require("fs"); })()}`;\n';
+    expect(needsCjsBanner(line)).toBe(true);
+    expect(needsCjsBanner(block)).toBe(true);
+  });
+
+  it('does NOT confuse a division operator inside an interpolation for a regex', () => {
+    const code = 'const v = `x=${a / b + c}`;\n';
+    expect(needsCjsBanner(code)).toBe(false);
+    expect(hasBanner(applyBanner(code))).toBe(false);
+  });
 });
 
 describe('esm-shim applyBanner', () => {

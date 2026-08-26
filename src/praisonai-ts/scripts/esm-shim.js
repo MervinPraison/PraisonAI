@@ -166,11 +166,46 @@ function stripStringsAndComments(code) {
           out += '${';
           let k = j + 2;
           let depth = 1;
+          // Tracks the last significant (non-space) character consumed so we can
+          // tell a regex literal (/.../ in expression position) from a division
+          // operator (a / b). A regex may follow (, {, [, comma, operators or the
+          // interpolation start; it never follows an identifier/number/), ], }.
+          let prevSig = '';
           while (k < n && depth > 0) {
             const c = code[k];
-            if (c === '\\') { k += 2; continue; }
-            if (c === '{') { depth++; k++; continue; }
-            if (c === '}') { depth--; k++; continue; }
+            if (c === '\\') { k += 2; prevSig = ''; continue; }
+            // Skip line/block comments so a `}` inside them can't close the
+            // interpolation early and hide executable CJS that follows.
+            if (c === '/' && code[k + 1] === '/') {
+              k += 2;
+              while (k < n && code[k] !== '\n') k++;
+              continue;
+            }
+            if (c === '/' && code[k + 1] === '*') {
+              k += 2;
+              while (k < n && !(code[k] === '*' && code[k + 1] === '/')) k++;
+              k = Math.min(k + 2, n);
+              continue;
+            }
+            // Regex literal in expression position: its interior (including a `}`
+            // in a character class) must not affect brace depth.
+            if (c === '/' && (prevSig === '' || '([{,;:=!&|?+-*%^~<>'.includes(prevSig))) {
+              k++;
+              let inClass = false;
+              while (k < n) {
+                const rc = code[k];
+                if (rc === '\\') { k += 2; continue; }
+                if (rc === '[') { inClass = true; k++; continue; }
+                if (rc === ']') { inClass = false; k++; continue; }
+                if (rc === '/' && !inClass) { k++; break; }
+                if (rc === '\n') break;
+                k++;
+              }
+              prevSig = '/';
+              continue;
+            }
+            if (c === '{') { depth++; k++; prevSig = '{'; continue; }
+            if (c === '}') { depth--; k++; prevSig = '}'; continue; }
             if (c === '`' || c === '"' || c === "'") {
               // Skip nested string/template as-is; the recursive strip below
               // handles its interior.
@@ -181,8 +216,10 @@ function stripStringsAndComments(code) {
                 if (code[k] === q) { k++; break; }
                 k++;
               }
+              prevSig = q;
               continue;
             }
+            if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') prevSig = c;
             k++;
           }
           // The interpolation body excludes the trailing '}'.
