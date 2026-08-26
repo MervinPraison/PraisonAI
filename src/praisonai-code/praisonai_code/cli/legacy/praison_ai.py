@@ -1366,9 +1366,15 @@ class PraisonAI:
                 # (issue #4374). Route file targets to the modern Typer agent
                 # runner so the README example works; keep job verbs on jobs.
                 first = unknown_args[0] if unknown_args else None
+                # Reserved async-job verbs must win over a same-named path in the
+                # cwd (e.g. a stray ``submit`` file) so ``run submit ...`` still
+                # reaches the jobs API. An explicit path like ``./submit`` (which
+                # keeps its separator) is unaffected and still routes to YAML.
+                job_verbs = {"submit", "status", "result", "cancel", "list", "stream"}
                 is_yaml_target = bool(
                     first
                     and not first.startswith('-')
+                    and first not in job_verbs
                     and (
                         first.lower().endswith(('.yaml', '.yml'))
                         or os.path.exists(first)

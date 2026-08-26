@@ -89,5 +89,22 @@ def test_run_submit_still_reaches_jobs(monkeypatch, tmp_path):
     assert code == 0
 
 
+def test_run_submit_wins_over_same_named_path(monkeypatch, tmp_path):
+    pa = _load_module()
+    _require_wrapper_argparse()
+
+    # A stray file named after a job verb must NOT steal the jobs invocation.
+    (tmp_path / "submit").write_text("not yaml")
+    monkeypatch.chdir(tmp_path)
+
+    calls, code = _run_with_argv(
+        monkeypatch, pa, ["praisonai", "run", "submit", "do a thing"]
+    )
+
+    assert calls["run_app"] is None
+    assert calls["jobs"] == ["submit", "do a thing"]
+    assert code == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
