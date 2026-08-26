@@ -3,7 +3,7 @@ import { Logger } from '../utils/logger';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import type { DbAdapter, DbMessage, DbRun } from '../db/types';
 import { randomUUID } from 'crypto';
-import type { LLMProvider } from '../llm/providers/types';
+import type { LLMProvider, ProviderConfig } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
 import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 import { getEnv } from '../llm/openaiClientOptions';
@@ -217,6 +217,10 @@ export class Agent {
   private _backendPromise: Promise<BackendResolutionResult> | null = null;
   private _backendSource: 'ai-sdk' | 'native' | 'custom' | 'legacy' = 'legacy';
   private _useAISDKBackend: boolean = false;
+  // Provider transport config (apiKey/baseURL/fetch) forwarded to the resolved
+  // native/AI SDK backend so an injected `config.fetch` reaches Anthropic/Google
+  // — not just the OpenAI path. Keeps webview/native-egress support consistent.
+  private _providerConfig: ProviderConfig;
 
   constructor(config: SimpleAgentConfig) {
     // Build instructions from either simple or advanced mode
@@ -284,6 +288,13 @@ export class Agent {
       baseURL: config.baseURL,
       fetch: config.fetch,
     });
+    // Preserve the transport config so getBackend() can forward it to the
+    // resolved provider (Anthropic/Google honour config.fetch via getFetch()).
+    this._providerConfig = {
+      apiKey: config.apiKey,
+      baseUrl: config.baseURL,
+      fetch: config.fetch,
+    };
 
     // Configure logging
     Logger.setVerbose(this.verbose);
@@ -1215,6 +1226,7 @@ export class Agent {
       this._backendPromise = (async () => {
         const { resolveBackend } = await import('../llm/backend-resolver');
         const result = await resolveBackend(this.llm, {
+          config: this._providerConfig,
           attribution: {
             agentId: this.name,
             runId: this.runId,

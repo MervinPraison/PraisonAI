@@ -47,8 +47,10 @@ export abstract class BaseProvider implements LLMProvider {
    * Resolve the fetch implementation for this provider.
    *
    * Prefers the caller-injected `config.fetch` (which lets a host route egress
-   * through native code, keeping the API key out of the JS heap and avoiding
-   * webview CORS) and falls back to the global `fetch` otherwise.
+   * through native code — e.g. a Tauri command — and avoid webview CORS) and
+   * falls back to the global `fetch` otherwise. Note: request headers/URLs are
+   * still built in JS, so this does not by itself remove the API key from the
+   * JS heap; use a credential-aware native transport if that is required.
    */
   protected getFetch(): typeof fetch {
     return this.config.fetch ?? fetch;

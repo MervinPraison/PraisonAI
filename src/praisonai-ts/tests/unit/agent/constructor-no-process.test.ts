@@ -46,4 +46,27 @@ describe('Agent constructor process guard (issue #4425)', () => {
             new AgentTeam({ agents: [agent] });
         }).not.toThrow();
     });
+
+    it('default token sink does not deref process.stdout when process is undefined', async () => {
+        jest.resetModules();
+
+        const { Agent } = require('../../../src/agent/simple');
+        const agent = new Agent({ instructions: 'You are helpful', llm: 'gpt-4o-mini' });
+
+        // Emit a token through the default sink (no onToken supplied). The mock
+        // exercises the OpenAI streaming path where emitToken() runs.
+        agent.llmService.streamChat = jest.fn(
+            async (_messages: any, _temp: any, onToken: (t: string) => void) => {
+                onToken('hello');
+                return 'hello';
+            }
+        );
+
+        // Simulate a webview: process (and process.stdout) is gone at call time.
+        savedProcess = (globalThis as any).process;
+        delete (globalThis as any).process;
+
+        await expect(agent.start('hi')).resolves.toBe('hello');
+        expect(agent.llmService.streamChat).toHaveBeenCalled();
+    });
 });
