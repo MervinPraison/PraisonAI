@@ -10,7 +10,7 @@
 
 // Core exports - the main API surface
 export { Agent, AgentTeam, PraisonAIAgents, Agents } from './simple';
-export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig } from './simple';
+export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, AgentEvent, AgentStreamOptions } from './simple';
 
 // AudioAgent - Speech synthesis and transcription
 export { AudioAgent, createAudioAgent } from './audio';
