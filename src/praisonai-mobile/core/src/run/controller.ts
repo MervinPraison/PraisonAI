@@ -58,6 +58,8 @@ export interface ControllerDeps {
   readonly time: TimePort;
   /** Called when the view should re-render. */
   readonly onPublish: (view: RunView) => void;
+  /** The chat the first run belongs to. Changed later with `setChat`. */
+  readonly chatId?: string;
   /** Bytes per frame and the delay ceiling. Defaults chosen for a phone. */
   readonly maxBytes?: number;
   readonly maxDelayMs?: number;
@@ -65,6 +67,16 @@ export interface ControllerDeps {
 
 export interface RunController {
   send(text: string, attachments?: readonly Attachment[]): Promise<void>;
+  /**
+   * Which chat the next run belongs to.
+   *
+   * The runner used to hardcode `chatId: "current"`, so every turn from every
+   * conversation carried the same literal and an engine had no way to tell
+   * them apart. Switching chats mid-stream is the case that matters: the
+   * answer still in flight belongs to the chat it started in.
+   */
+  setChat(chatId: string): void;
+  chatId(): string;
   stop(): Promise<boolean>;
   decide(approvalId: string, choice: ApprovalChoice): Promise<void>;
   view(): RunView;
@@ -78,6 +90,9 @@ export function createRunController(deps: ControllerDeps): RunController {
   const maxDelayMs = deps.maxDelayMs ?? 16;
 
   let turn: TurnState = initialTurn;
+  // Not a literal. See setChat's comment: an engine cannot tell two
+  // conversations apart if every turn claims the same id.
+  let chatId = deps.chatId ?? "unassigned";
   let approvals: ApprovalTable = emptyApprovals;
   let queue: PromptQueue = emptyQueue;
   let publishes = 0;
@@ -111,7 +126,7 @@ export function createRunController(deps: ControllerDeps): RunController {
 
     const request: RunRequest = {
       prompt: prompt.text,
-      chatId: "current",
+      chatId,
       runId,
       tools: true,
       regenerateOf: null,
@@ -183,6 +198,11 @@ export function createRunController(deps: ControllerDeps): RunController {
   }
 
   return {
+    setChat(next: string) {
+      chatId = next;
+    },
+    chatId: () => chatId,
+
     async send(text, attachments = []) {
       queue = enqueue(queue, { id: nextId("p"), text, attachments });
       publish();

@@ -51,7 +51,19 @@ export function markBusy(queue: PromptQueue): PromptQueue {
 }
 
 /**
- * A turn finished AND was persisted.
+ * A turn SETTLED: it finished streaming and its outcome is final.
+ *
+ * The header's invariant is about ordering, and it is satisfied because
+ * persistence happens before `end` is emitted -- the engine records the turn
+ * and reports the indices it actually wrote. So by the time a caller reaches
+ * this, a successful turn is already on disk.
+ *
+ * A cancelled or errored turn is deliberately NOT persisted, and calling this
+ * anyway is correct rather than a violation: the alternative is a queue that
+ * stays busy forever after one failure, which deadlocks every prompt behind
+ * it. Nothing is at risk, because indices are computed from stored messages
+ * only -- an unpersisted turn contributes none, so the next turn numbers from
+ * what is really there. core/src/chat/session.ts asserts exactly that.
  *
  * Deliberately one function rather than two: separating "streaming ended" from
  * "safe to continue" is what lets a caller drain early by mistake.
