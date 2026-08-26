@@ -1,8 +1,14 @@
 """
 PraisonAIDB adapter - implements the DbAdapter protocol from praisonaiagents.
 
-This module provides the bridge between the core Agent's db interface
-and the wrapper's persistence layer (PersistenceOrchestrator).
+This is the single owner of the "agent lifecycle -> conversation/state/knowledge
+store" hooks for the wrapper. It is the live path core routes to via
+``MemoryConfig(db=PraisonAIDB(...))`` (see ``praisonaiagents/db/__init__.py``).
+
+``PersistenceOrchestrator`` (``persistence/orchestrator.py``) is a thin,
+higher-level façade that delegates its message-write and session-end hooks to an
+instance of this adapter (built through :meth:`PraisonAIDB._from_stores`) so the
+store-write logic lives here in one place instead of being duplicated.
 """
 
 import asyncio
@@ -86,6 +92,36 @@ class PraisonAIDB:
         self._init_failed_at: float = 0.0
         # Seconds to suppress retries after an init failure before re-attempting.
         self._init_retry_cooldown: float = float(init_retry_cooldown)
+
+    @classmethod
+    def _from_stores(
+        cls,
+        conversation_store=None,
+        state_store=None,
+        knowledge_store=None,
+    ) -> "PraisonAIDB":
+        """Build an adapter around already-constructed store instances.
+
+        Used by :class:`~praisonai.persistence.orchestrator.PersistenceOrchestrator`
+        so it can reuse this adapter's lifecycle-hook + dispatch logic without
+        re-parsing URLs or re-building stores. The stores are treated as fully
+        initialised, so the lazy URL-based construction path is bypassed.
+        """
+        self = cls.__new__(cls)
+        self._database_url = None
+        self._state_url = None
+        self._knowledge_url = None
+        self._options = {}
+        self._conversation_store = conversation_store
+        self._state_store = state_store
+        self._knowledge_store = knowledge_store
+        self._initialized = True
+        self._init_lock = threading.Lock()
+        self._ainit_lock = None
+        self._init_failed = None
+        self._init_failed_at = 0.0
+        self._init_retry_cooldown = 30.0
+        return self
 
     def _build_stores(self):
         """Construct the backing stores (blocking I/O). Caller handles locking."""
