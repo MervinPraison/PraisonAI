@@ -12,6 +12,15 @@
 | `.github/scripts/merge-gate.js` | FINAL scope includes `src/praisonai-ts/`; no `tsMirrorPathReasons` block |
 | `.github/workflows/claude-merge-gate.yml` | No BLOCK for src/praisonai-ts/ |
 | `CONTRIBUTING.md` | TS fixes in monorepo |
+| `.github/workflows/sync-to-praisonai-js.yml` | Mirror sync: monorepo → praisonai-js |
+
+## Mirror sync (after TS merge)
+
+```bash
+gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI
+```
+
+Direction: **`src/praisonai-ts/` → praisonai-js** (not the reverse).
 
 ## Tests
 
@@ -30,8 +39,8 @@ cd src/praisonai-ts && npm install && npm run build && npm test
 | Wrong | Right |
 |-------|-------|
 | Route TS fix to praisonai-js in merge gate / Claude | Fix in `src/praisonai-ts/` |
-| Block `src/praisonai-ts/` PRs as "must sync from praisonai-js" | Allow normal TS PRs |
+| Sync praisonai-js → monorepo | Sync **monorepo → praisonai-js** after merge |
 
-## Optional: praisonai-js mirror
+## praisonai-js mirror
 
-Separate repo may mirror for npm; not referenced in issue→fix automation.
+npm repo; updated from monorepo via `Sync to praisonai-js`. See praisonai-js `SYNC.md`.

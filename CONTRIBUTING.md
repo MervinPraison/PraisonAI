@@ -23,3 +23,4 @@ Thank you for your interest! Here's how to get started:
 - Add tests for new features
 - Update documentation as needed
 - TypeScript changes: implement in `src/praisonai-ts/` and run `npm test` there
+- After merge, sync the npm mirror: `gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI`

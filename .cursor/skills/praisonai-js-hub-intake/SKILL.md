@@ -13,7 +13,7 @@ description: >-
 
 **Issues and fixes both live in `MervinPraison/PraisonAI`.** TypeScript code path: `src/praisonai-ts/`.
 
-Do **not** route TS fixes to external repos in automation prompts. The separate [praisonai-js](https://github.com/MervinPraison/praisonai-js) repo is optional for npm publishing/mirror — not the fix target for hub issues.
+Do **not** route TS fixes to external repos in automation prompts. The separate [praisonai-js](https://github.com/MervinPraison/praisonai-js) repo is an npm mirror updated **from** the monorepo (`Sync to praisonai-js` workflow).
 
 ## Routing table
 

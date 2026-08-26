@@ -1,0 +1,106 @@
+name: Sync to praisonai-js
+
+# Canonical TS source: src/praisonai-ts/ in this monorepo.
+# This workflow pushes the mirror to MervinPraison/praisonai-js (npm repo).
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Target branch on MervinPraison/praisonai-js'
+        required: false
+        default: main
+        type: string
+      mode:
+        description: 'pr = open pull request (default); commit = push directly to target branch'
+        required: false
+        default: pr
+        type: choice
+        options:
+          - pr
+          - commit
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      TARGET_REPO: MervinPraison/praisonai-js
+      SOURCE_PATH: src/praisonai-ts
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+    steps:
+      - name: Validate token
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "GH_TOKEN secret is required (PAT with repo write access to praisonai-js)."
+            exit 1
+          fi
+
+      - name: Checkout PraisonAI monorepo
+        uses: actions/checkout@v4
+
+      - name: Checkout praisonai-js
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          token: ${{ secrets.GH_TOKEN }}
+          path: praisonai-js-target
+          ref: ${{ env.TARGET_BRANCH }}
+
+      - name: Sync monorepo path into praisonai-js
+        run: |
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            --exclude 'dist/' \
+            --exclude 'coverage/' \
+            --exclude '.DS_Store' \
+            --exclude '*.tsbuildinfo' \
+            "${SOURCE_PATH}/" praisonai-js-target/
+
+      - name: Push changes
+        working-directory: praisonai-js-target
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Preserve praisonai-js automation (rsync source has no .github/)
+          if git diff --quiet; then
+            echo "No changes — praisonai-js already matches ${SOURCE_PATH} on monorepo main."
+            exit 0
+          fi
+
+          git add -A
+          msg="sync: update from monorepo ${SOURCE_PATH}"
+
+          if [ "${{ inputs.mode }}" = "commit" ]; then
+            git commit -m "$msg"
+            git push origin "HEAD:${TARGET_BRANCH}"
+            echo "Committed and pushed directly to ${TARGET_BRANCH} on praisonai-js."
+            exit 0
+          fi
+
+          branch="sync/monorepo-praisonai-ts-$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -b "$branch"
+          git commit -m "$msg"
+          git push origin "$branch"
+
+          gh pr create \
+            --repo "$TARGET_REPO" \
+            --base "$TARGET_BRANCH" \
+            --head "$branch" \
+            --title "$msg" \
+            --body "$(cat <<EOF
+Automated sync from [\`MervinPraison/PraisonAI\`](https://github.com/MervinPraison/PraisonAI) \`${SOURCE_PATH}/\` into the npm mirror repo.
+
+Canonical development is in the monorepo; this PR updates the public \`praisonai-js\` checkout.
+
+Excludes from rsync source: \`node_modules/\`, \`dist/\`, \`coverage/\`. \`.github/\` on praisonai-js is unchanged.
+EOF
+)"
+          echo "Opened PR on ${TARGET_REPO} (${branch} → ${TARGET_BRANCH})."
