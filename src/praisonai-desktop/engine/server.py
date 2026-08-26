@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
 # The shell matches this exact prefix. Printed once, after the socket is bound,
 # so a port announced here is always a port that is actually listening.
@@ -919,11 +920,20 @@ class Handler(BaseHTTPRequestHandler):
         while True:
             events, gap = run.since(cursor)
             if gap:
-                # Say so rather than handing over events with a hole in them.
+                # Say so rather than handing over events with a hole in them,
+                # then resume at the oldest event still held.
+                #
+                # Resuming at -1 instead made the *next* since() compute a gap
+                # again -- every ring that has ever evicted satisfies
+                # `0 < oldest` -- so the stream resynced forever, and the
+                # `continue` skipped both the sleep and the terminal check.
+                # A run past 4000 events (about twenty minutes of tqdm) showed
+                # the viewer nothing at all while pinning a core, and kept
+                # doing so after the run had finished. Falling through here
+                # delivers the events instead of discarding them.
                 self.wfile.write(b"event: resync\ndata: {}\n\n")
                 self.wfile.flush()
-                cursor = -1
-                continue
+                cursor = events[0][0] - 1 if events else cursor
             for c, kind, payload in events:
                 cursor = c
                 body = json.dumps({"cursor": c, **payload})
@@ -953,7 +963,13 @@ class Handler(BaseHTTPRequestHandler):
             if run is None:
                 self._json({"ok": False, "error": "no such run"}, 404)
                 return
-            cursor = int((query.get("cursor") or ["-1"])[0])
+            try:
+                cursor = int((query.get("cursor") or ["-1"])[0])
+            except ValueError:
+                # A malformed cursor used to escape as an unhandled exception,
+                # which drops the connection with no response at all.
+                self._json({"ok": False, "error": "cursor must be an integer"}, 400)
+                return
             try:
                 self._train_progress(run, cursor)
             except (BrokenPipeError, ConnectionResetError):
@@ -961,14 +977,19 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/train/runs":
-            self._json({"runs": [r.summary() for r in self._training().history[:50]]})
+            # list() first: history is a bounded deque, which cannot be
+            # sliced. The cap is MAX_HISTORY, so this slice is belt and braces.
+            history = list(self._training().history)[:50]
+            self._json({"runs": [r.summary() for r in history]})
             return
 
         if self.path.startswith("/train/status"):
             trainer = self._training()
             run = trainer.current
             self._json({"run": run.summary() if run else None,
-                        "metrics": run.metrics[-500:] if run else []})
+                        # list() first: metrics is a bounded deque, and a
+                        # deque cannot be sliced.
+                        "metrics": list(run.metrics)[-500:] if run else []})
             return
 
         if self.path == "/settings":
@@ -1060,6 +1081,9 @@ class Handler(BaseHTTPRequestHandler):
                             "config needs at least model_name and dataset"}, 400)
                 return
             try:
+                # Reject what cannot work before a single byte is downloaded.
+                from training import check_method_requirements
+                check_method_requirements(config)
                 run = self._training().start(config, payload.get("run_id"))
             except ValueError as exc:
                 # A rejected run id is the caller's fault, not the server's.
@@ -1070,12 +1094,27 @@ class Handler(BaseHTTPRequestHandler):
                 # should show the running job, not a traceback.
                 self._json({"ok": False, "error": str(exc)}, 409)
                 return
+            except OSError as exc:
+                # An unwritable runs directory escaped as an unhandled
+                # exception, so the connection dropped with no response and
+                # the UI reported "could not reach the engine" -- sending the
+                # user after the wrong problem entirely.
+                self._json({"ok": False, "error":
+                            f"could not create the run directory: {exc}"}, 500)
+                return
             self._json({"ok": True, "run": run.summary()})
             return
 
-        if self.path.startswith("/train/stop"):
+        # Parse the path, don't pattern-match the raw string. rsplit("/") on
+        # "/train/stop/<stale-id>/" yielded "", which is falsy -- so the
+        # stale-tab guard was skipped and a stale tab killed whatever run was
+        # live. A bare startswith() also matched "/train/stopXXXX", and a
+        # query string ("?force=1") was read as part of the run id, so a
+        # legitimate stop was refused.
+        route = urlparse(self.path).path
+        if route == "/train/stop" or route.startswith("/train/stop/"):
             self._drain()
-            run_id = self.path.rsplit("/", 1)[-1] if "/train/stop/" in self.path else None
+            run_id = route[len("/train/stop"):].strip("/") or None
             try:
                 stopped = self._training().stop(run_id)
             except RuntimeError as exc:
