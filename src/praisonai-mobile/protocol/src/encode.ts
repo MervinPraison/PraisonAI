@@ -45,7 +45,7 @@ export function encodeEvent(event: RunEvent): Record<string, unknown> {
         args: event.args,
       };
     case "usage":
-      return { ...base, chars: event.chars, seconds: event.seconds, ttft: event.ttft };
+      return { ...base, chars: event.chars, seconds: event.seconds, ttft: event.ttftSeconds };
     case "cancelled":
       return { ...base, run_id: event.runId };
     case "error":

@@ -328,20 +328,20 @@ test("row ids are derived from identity, not from position", () => {
 });
 
 test("an unreported time-to-first-token is unknown rather than zero", () => {
-  // `ttft` is null when nothing ever streamed, which is a different fact from
+  // `ttftSeconds` is null when nothing ever streamed, which is a different fact from
   // "the first token arrived immediately".
   const view = buildTranscript(
-    run(start, delta("x"), { type: "usage", msgId: M, chars: 1, seconds: 2, ttft: null }, endAt(0)),
+    run(start, delta("x"), { type: "usage", msgId: M, chars: 1, seconds: 2, ttftSeconds: null }, endAt(0)),
   );
   assert.equal(view.usage?.ttftKnown, false);
-  assert.equal(view.usage?.ttft, UNKNOWN);
+  assert.equal(view.usage?.ttftSeconds, UNKNOWN);
 });
 
 test("a reported usage line is formatted", () => {
   // The pair to the null case above.
   const view = buildTranscript(scripted("happy"));
   assert.equal(view.usage?.ttftKnown, true);
-  assert.equal(view.usage?.ttft, "0.2s");
+  assert.equal(view.usage?.ttftSeconds, "0.2s");
   assert.equal(view.usage?.chars, "17");
 });
 

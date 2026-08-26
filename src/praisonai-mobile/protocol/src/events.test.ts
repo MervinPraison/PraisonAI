@@ -49,7 +49,7 @@ const SAMPLES: { readonly [K in RunEventName]: RunEvent & { type: K } } = {
     name: "read_file",
     args: {},
   },
-  usage: { type: "usage", msgId: "m1", chars: 12, seconds: 1.5, ttft: 0.2 },
+  usage: { type: "usage", msgId: "m1", chars: 12, seconds: 1.5, ttftSeconds: 0.2 },
   cancelled: { type: "cancelled", msgId: "m1", runId: "r1" },
   error: { type: "error", msgId: "m1", kind: "auth", message: "bad key" },
   end: { type: "end", msgId: "m1", userIndex: 4, assistantIndex: 5, versions: 1, active: 0 },

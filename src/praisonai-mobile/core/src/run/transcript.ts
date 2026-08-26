@@ -51,7 +51,7 @@ export interface TurnState {
   readonly drafting: string | null;
   readonly tools: readonly ToolRow[];
   readonly approvals: readonly PendingApproval[];
-  readonly usage: { readonly chars: number; readonly seconds: number; readonly ttft: number | null } | null;
+  readonly usage: { readonly chars: number; readonly seconds: number; readonly ttftSeconds: number | null } | null;
   readonly outcome: Outcome | null;
   /**
    * Every event this turn refused, with a reason.
@@ -196,7 +196,7 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
     case "usage":
       return {
         ...state,
-        usage: { chars: event.chars, seconds: event.seconds, ttft: event.ttft },
+        usage: { chars: event.chars, seconds: event.seconds, ttftSeconds: event.ttftSeconds },
       };
 
     case "cancelled":

@@ -149,12 +149,16 @@ export interface ApprovalRequestEvent extends EventBase {
   readonly args: Readonly<Record<string, unknown>>;
 }
 
-/** OPTIONAL. Gated by a setting. `ttft` is null when nothing ever streamed. */
+/** OPTIONAL. Gated by a setting. `ttftSeconds` is null when nothing ever
+ *  streamed. Named with its unit because its sibling is `seconds`: an
+ *  unqualified `ttft` left a reader guessing between seconds and milliseconds,
+ *  and the two differ by 1000x in a number the user reads. The wire key stays
+ *  `ttft` -- decode.ts is where that translation belongs. */
 export interface UsageEvent extends EventBase {
   readonly type: "usage";
   readonly chars: number;
   readonly seconds: number;
-  readonly ttft: number | null;
+  readonly ttftSeconds: number | null;
 }
 
 /**
@@ -193,7 +197,13 @@ export interface EndEvent extends EventBase {
   readonly type: "end";
   readonly userIndex: number | null;
   readonly assistantIndex: number | null;
+  /** How many regenerated variants of this answer exist, counting the first.
+   *  Always >= 1. Drives a version switcher; 1 means there is nothing to switch. */
   readonly versions: number;
+  /** Which variant is currently shown, zero-indexed, so it is always in
+   *  [0, versions - 1] -- decode.ts clamps it into that range rather than
+   *  trusting it, because an out-of-range index selects nothing and the
+   *  message renders blank. */
   readonly active: number;
 }
 

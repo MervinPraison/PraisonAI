@@ -29,7 +29,7 @@ export const SCRIPTS: Record<ScenarioName, readonly RunEvent[]> = {
     { type: "reasoning", msgId: M, text: "considering" },
     delta("The answer "),
     delta("is 42."),
-    { type: "usage", msgId: M, chars: 17, seconds: 1.1, ttft: 0.2 },
+    { type: "usage", msgId: M, chars: 17, seconds: 1.1, ttftSeconds: 0.2 },
     endOk,
   ],
 

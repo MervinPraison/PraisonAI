@@ -200,13 +200,13 @@ export function decodeEvent(raw: unknown): Decoded {
       const seconds = asNumber(o["seconds"]);
       if (chars === null) return need("chars");
       if (seconds === null) return need("seconds");
-      const ttft = asNullableNumber(o, "ttft");
+      const ttft = asNullableNumber(o, "ttft"); // wire key, snake_case
       return ok({
         type: "usage",
         msgId,
         chars,
         seconds,
-        ttft: ttft === undefined ? null : ttft,
+        ttftSeconds: ttft === undefined ? null : ttft,
       });
     }
 

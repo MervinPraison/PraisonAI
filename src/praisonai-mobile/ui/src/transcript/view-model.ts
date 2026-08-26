@@ -147,7 +147,7 @@ export interface TurnActions {
 export interface UsageView {
   readonly chars: string;
   readonly elapsed: string;
-  readonly ttft: string;
+  readonly ttftSeconds: string;
   readonly ttftKnown: boolean;
 }
 
@@ -345,8 +345,8 @@ export function buildTranscript(
         : {
             chars: formatCount(turn.usage.chars),
             elapsed: formatElapsed(turn.usage.seconds),
-            ttft: turn.usage.ttft === null ? UNKNOWN : formatElapsed(turn.usage.ttft),
-            ttftKnown: turn.usage.ttft !== null,
+            ttftSeconds: turn.usage.ttftSeconds === null ? UNKNOWN : formatElapsed(turn.usage.ttftSeconds),
+            ttftKnown: turn.usage.ttftSeconds !== null,
           },
     busy: streaming,
   };

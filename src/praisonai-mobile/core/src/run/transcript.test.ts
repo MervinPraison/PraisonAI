@@ -172,12 +172,12 @@ test("a full turn accumulates text, reasoning and usage", () => {
     { type: "reasoning", msgId: M, text: "let me think" },
     delta("The answer "),
     delta("is 42."),
-    { type: "usage", msgId: M, chars: 14, seconds: 1.2, ttft: 0.3 },
+    { type: "usage", msgId: M, chars: 14, seconds: 1.2, ttftSeconds: 0.3 },
     { type: "end", msgId: M, userIndex: 4, assistantIndex: 5, versions: 1, active: 0 },
   );
   assert.equal(state.text, "The answer is 42.");
   assert.equal(state.reasoning, "let me think");
-  assert.equal(state.usage?.ttft, 0.3);
+  assert.equal(state.usage?.ttftSeconds, 0.3);
   assert.equal(state.phase, "ended");
   assert.equal(isPersisted(state), true);
   assert.deepEqual(state.dropped, [], "a clean stream drops nothing");

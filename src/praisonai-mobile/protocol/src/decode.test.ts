@@ -88,7 +88,7 @@ test("a well-formed frame for every declared event decodes to that event", () =>
       name: "rm",
       args: {},
     },
-    { type: "usage", msgId: "m1", chars: 3, seconds: 1, ttft: 0.1 },
+    { type: "usage", msgId: "m1", chars: 3, seconds: 1, ttftSeconds: 0.1 },
     { type: "cancelled", msgId: "m1", runId: "r1" },
     { type: "error", msgId: "m1", kind: "auth", message: "nope" },
     { type: "end", msgId: "m1", userIndex: 2, assistantIndex: 3, versions: 1, active: 0 },

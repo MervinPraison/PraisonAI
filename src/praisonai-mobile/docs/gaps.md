@@ -74,3 +74,78 @@ remain on that graph and will need a bundler alias or an upstream change:
 available in every target webview, so this is a small upstream fix rather than a
 polyfill. It is an **import-time** failure, which makes it more severe than a
 guarded read: it takes the whole bundle down before any code runs.
+
+---
+
+# Design gaps found while building the UI layer
+
+Raised by the `ui/` build against the existing `core/` and `protocol/` types.
+Two were fixed immediately (below); the rest are recorded here rather than
+fixed, because each needs a decision rather than an edit.
+
+## Fixed
+
+- **`UsageEvent.ttft` had no unit** while its sibling was `seconds`, so a
+  renderer had to guess between seconds and milliseconds — a 1000x difference
+  in a number the user reads. The TS field is now `ttftSeconds`; the wire key
+  stays `ttft`, translated in `decode.ts`, which is where that belongs.
+- **`EndEvent.versions` / `active` had no documented meaning**, so the UI
+  dropped them. Both are now documented, including why `decode.ts` clamps
+  `active` into `[0, versions - 1]` rather than trusting it.
+
+## Open
+
+### 1. `TurnState` loses the interleaving of text and tool calls
+
+`text` is one accumulated string and `tools` is a parallel array, so there is no
+way to place a tool row *between* the two paragraphs it actually happened
+between — which is how every chat UI renders a multi-step turn. The view model
+currently emits all text, then all tool rows.
+
+Closing it needs an ordered block list in the reducer:
+`blocks: ({ kind: "text"; … } | { kind: "tool"; callId: string })[]`.
+
+**Not urgent for the shipping engine.** praisonai-ts emits no tool events at all
+(`capabilities.tools: false`), so this is invisible until the `remote-http`
+engine is the default. It should be closed before that happens.
+
+### 2. `settle()` empties `approvals`, so an ended turn cannot show what was approved
+
+Right for actionability — a settled approval is not pressable — but wrong as an
+audit trail: after the turn ends the transcript can never say "you allowed
+`rm -rf /`". A `resolved: true` flag kept on the entry would give the UI both.
+
+### 3. `PendingApproval` and `ApprovalEntry` are the same four fields in two places
+
+`transcript.ts` and `approvals.ts` each declare them, so the view model joins by
+`approvalId` at render time. Making `ApprovalEntry` literally
+`PendingApproval & { state }` removes a join — and that join is exactly where a
+future author reintroduces index-pairing, which is the bug the whole
+`approvalId` design exists to prevent.
+
+### 4. There is no user-message side, and no stable identity for a live turn
+
+`TurnState` is assistant-only; `StoredChat.messages` has a different shape
+(`role`/`content`/`at`). `end.userIndex` is the only link and it is `null` until
+the turn ends, so a live turn cannot be keyed the same way before and after
+persistence. **This stitching is currently owned by no layer** — it needs to
+land in the composition root or in `core/`, deliberately, before two callers
+invent two different answers.
+
+### 5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback
+
+First paint therefore has to assume height 0. Correct on a cold launch, wrong on
+a warm resume with a hardware or floating keyboard already up: one wrong frame,
+then a jump — the exact "web page in a box" tell the synchronous `insets`
+snapshot was introduced to avoid. A `readonly keyboardHeightPx: number` would
+apply the reasoning already written into that port to its sibling event.
+
+### 6. `SettingsFacade` cannot enumerate or observe
+
+No `keys()`, no change notification, and `SettingDef[]` is not reachable from
+the facade — so a settings screen must hard-code the key list that already
+exists as data, and re-render blindly after every `set()`.
+
+### 7. `Dropped.reason` has no user-facing text
+
+The diagnostic row renders raw reason strings. Honest, but not readable.
