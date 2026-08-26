@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1121 |
-| ✅ Agent | 66 | 7 | 2103 |
+| ✅ Agent | 68 | 7 | 2103 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 9 | 1 | 165 |
 | ✅ Audio | 8 | 1 | 162 |
