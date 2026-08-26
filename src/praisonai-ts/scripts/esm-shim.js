@@ -112,14 +112,69 @@ const CJS_BANNER = [
   'const module = { exports: {} };',
 ].join('\n');
 
+function stripStringsAndComments(code) {
+  // Blank out comments and string/template literals so the CJS-usage detectors
+  // below only ever see real code. `/\brequire\b/` on raw text matched the word
+  // inside error messages like "Zod schemas require zod-to-json-schema", giving
+  // 24/288 ESM files a createRequire banner (and hard imports of module/url/path)
+  // they never needed. Replace each token with same-length whitespace so any
+  // surviving offsets stay meaningful; newlines are preserved.
+  let out = '';
+  let i = 0;
+  const n = code.length;
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  while (i < n) {
+    const ch = code[i];
+    const next = code[i + 1];
+    // Line comment
+    if (ch === '/' && next === '/') {
+      let j = i + 2;
+      while (j < n && code[j] !== '\n') j++;
+      out += blank(code.slice(i, j));
+      i = j;
+      continue;
+    }
+    // Block comment
+    if (ch === '/' && next === '*') {
+      let j = i + 2;
+      while (j < n && !(code[j] === '*' && code[j + 1] === '/')) j++;
+      j = Math.min(j + 2, n);
+      out += blank(code.slice(i, j));
+      i = j;
+      continue;
+    }
+    // String / template literal
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch;
+      let j = i + 1;
+      while (j < n) {
+        if (code[j] === '\\') { j += 2; continue; }
+        if (code[j] === quote) { j++; break; }
+        j++;
+      }
+      out += blank(code.slice(i, j));
+      i = j;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 function needsCjsBanner(code) {
+  // Test against code with strings/comments removed so a literal word like
+  // "require" inside an error message never triggers the banner. Match real CJS
+  // usage: require(...) call expressions and __dirname/__filename/module in
+  // identifier positions (not property accesses like obj.require).
+  const src = stripStringsAndComments(code);
   return (
-    /\brequire\b/.test(code) ||
-    /\b__dirname\b/.test(code) ||
-    /\b__filename\b/.test(code) ||
-    /\bmodule\.exports\b/.test(code) ||
-    /===\s*module\b/.test(code) ||
-    /\bmodule\s*===/.test(code)
+    /(^|[^.\w$])require\s*\(/.test(src) ||
+    /(^|[^.\w$])__dirname\b/.test(src) ||
+    /(^|[^.\w$])__filename\b/.test(src) ||
+    /\bmodule\.exports\b/.test(src) ||
+    /===\s*module\b/.test(src) ||
+    /\bmodule\s*===/.test(src)
   );
 }
 
@@ -158,4 +213,11 @@ function main() {
   console.log(`esm-shim: processed ${files.length} files in dist/esm`);
 }
 
-main();
+// Only run automatically when invoked as a script (node scripts/esm-shim.js).
+// When required from a test the helpers are exercised directly without touching
+// dist/esm or writing package.json.
+if (require.main === module) {
+  main();
+}
+
+module.exports = { needsCjsBanner, applyBanner, stripStringsAndComments };
