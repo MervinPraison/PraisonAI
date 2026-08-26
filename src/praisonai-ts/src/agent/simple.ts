@@ -505,7 +505,7 @@ export class Agent {
    * @param toolCalls Tool calls from the model
    * @returns Array of tool results
    */
-  private async processToolCalls(toolCalls: Array<any>): Promise<Array<{role: string, tool_call_id: string, content: string}>> {
+  private async processToolCalls(toolCalls: Array<any>): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
     const results = [];
     
     for (const toolCall of toolCalls) {
@@ -534,10 +534,13 @@ export class Agent {
             ? ''
             : JSON.stringify(result);
 
-        // Add result to messages
+        // Add result to messages. `name` is required so the AI SDK adapter
+        // (toAISDKPrompt) can set a non-empty toolName on the tool-result part —
+        // without it, non-OpenAI providers reject the tool follow-up.
         results.push({
           role: 'tool',
           tool_call_id: id,
+          name,
           content
         });
         
@@ -547,6 +550,7 @@ export class Agent {
         results.push({
           role: 'tool',
           tool_call_id: id,
+          name,
           content: `Error: ${error.message || 'Unknown error'}`
         });
       }
@@ -615,7 +619,23 @@ export class Agent {
               messages.push(...toolResults);
               continueConversation = true;
             } else {
-              finalResponse = result.text || '';
+              // Tool loop is done. When outputSchema is also configured, honor
+              // it instead of dropping it: re-issue the final turn through
+              // generateObject so structured output survives alongside tools —
+              // mirrors the OpenAI native path threading responseFormat through
+              // the loop.
+              if (this.outputSchema) {
+                const structured = await backend.generateObject({
+                  messages,
+                  schema: this.outputSchema,
+                  temperature: 0.7,
+                });
+                finalResponse = typeof structured.object === 'string'
+                  ? structured.object
+                  : JSON.stringify(structured.object);
+              } else {
+                finalResponse = result.text || '';
+              }
               continueConversation = false;
             }
           }

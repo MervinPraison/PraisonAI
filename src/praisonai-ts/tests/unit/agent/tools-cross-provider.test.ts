@@ -87,6 +87,52 @@ describe('tools survive on every non-OpenAI provider', () => {
 
     // The tool result must be fed back into the follow-up request.
     const secondCallMessages = generateText.mock.calls[1][0].messages;
-    expect(secondCallMessages.some((m: any) => m.role === 'tool')).toBe(true);
+    const toolMsg = secondCallMessages.find((m: any) => m.role === 'tool');
+    expect(toolMsg).toBeDefined();
+    // The tool name must survive so the AI SDK adapter can set a non-empty
+    // toolName on the tool-result part — otherwise non-OpenAI providers reject
+    // the follow-up request.
+    expect(toolMsg.name).toBe('getWeather');
+  });
+
+  it('honors outputSchema alongside tools on a non-OpenAI provider', async () => {
+    const schema = {
+      type: 'object',
+      properties: { temp: { type: 'number' } },
+      required: ['temp'],
+    };
+    const agent = new Agent({
+      instructions: 'weather',
+      tools: [getWeather],
+      outputSchema: schema,
+      llm: 'anthropic/claude-3-5-sonnet-latest',
+      verbose: false,
+    });
+
+    // Tool loop resolves in one turn (no tool calls), then the final answer
+    // must go through generateObject rather than dropping the schema.
+    const generateText = jest.fn().mockResolvedValue({
+      text: 'ignored raw text',
+      toolCalls: undefined,
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      finishReason: 'stop',
+    });
+    const generateObject = jest.fn().mockResolvedValue({
+      object: { temp: 20 },
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      finishReason: 'stop',
+    });
+
+    jest.spyOn(agent as any, 'getBackend').mockResolvedValue({
+      generateText,
+      streamText: jest.fn(),
+      generateObject,
+    });
+
+    const out = await agent.start('weather in Paris?');
+    // Structured output wins — the raw text is not returned.
+    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject.mock.calls[0][0].schema).toBe(schema);
+    expect(JSON.parse(out)).toEqual({ temp: 20 });
   });
 });
