@@ -173,15 +173,21 @@ export class AISDKBackend implements LLMProvider {
     const maxRetries = this.config.maxRetries || SAFE_DEFAULTS.maxRetries;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // Caller cancellation is terminal — never spend a retry (and its
+      // backoff) on an already-aborted request.
+      if (options.signal?.aborted) {
+        throw new AISDKError('Request cancelled by caller', 'CANCELLED', false, options.signal.reason);
+      }
       try {
         // Create abort controller for timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
           controller.abort();
         }, this.config.timeout || SAFE_DEFAULTS.timeout);
+        const merged = mergeSignals(controller.signal, options.signal);
         
         try {
-          callOptions.abortSignal = controller.signal;
+          callOptions.abortSignal = merged.signal;
           
           const result = await ai.generateText(callOptions as any);
           
@@ -199,9 +205,16 @@ export class AISDKBackend implements LLMProvider {
           });
         } finally {
           clearTimeout(timeoutId);
+          merged.cleanup();
         }
       } catch (error) {
         lastError = error;
+        
+        // If the caller aborted, stop immediately (don't misclassify as a
+        // retryable timeout).
+        if (options.signal?.aborted) {
+          throw new AISDKError('Request cancelled by caller', 'CANCELLED', false, error);
+        }
         
         const classifiedError = classifyError(error);
         
@@ -261,7 +274,8 @@ export class AISDKBackend implements LLMProvider {
       controller.abort();
     }, this.config.timeout || SAFE_DEFAULTS.timeout);
     
-    callOptions.abortSignal = controller.signal;
+    const merged = mergeSignals(controller.signal, options.signal);
+    callOptions.abortSignal = merged.signal;
     
     const self = this;
     const onToken = options.onToken;
@@ -330,6 +344,7 @@ export class AISDKBackend implements LLMProvider {
           throw classifyError(error);
         } finally {
           clearTimeout(timeoutId);
+          merged.cleanup();
         }
       }
     };
@@ -367,8 +382,9 @@ export class AISDKBackend implements LLMProvider {
       controller.abort();
     }, this.config.timeout || SAFE_DEFAULTS.timeout);
     
+    const merged = mergeSignals(controller.signal, options.signal);
     try {
-      callOptions.abortSignal = controller.signal;
+      callOptions.abortSignal = merged.signal;
       
       const result = await ai.generateObject(callOptions as any);
       
@@ -389,6 +405,7 @@ export class AISDKBackend implements LLMProvider {
       throw classifyError(error);
     } finally {
       clearTimeout(timeoutId);
+      merged.cleanup();
     }
   }
   
@@ -546,4 +563,53 @@ function classifyError(error: unknown): AISDKError {
  */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Merge a timeout signal with an optional caller signal so aborting EITHER
+ * aborts the request. Previously the timeout signal was assigned
+ * unconditionally, silently discarding any caller-supplied signal — meaning a
+ * Stop button could never reach the provider. Uses AbortSignal.any when
+ * available (Node >= 20) with a manual fallback for older runtimes.
+ */
+function mergeSignals(
+  timeoutSignal: AbortSignal,
+  callerSignal?: AbortSignal
+): { signal: AbortSignal; cleanup: () => void } {
+  if (!callerSignal) {
+    return { signal: timeoutSignal, cleanup: () => {} };
+  }
+  const anyFn = (AbortSignal as any).any;
+  if (typeof anyFn === 'function') {
+    // AbortSignal.any manages its own listeners and releases them once the
+    // returned signal is unreferenced — no manual cleanup required.
+    return { signal: anyFn([timeoutSignal, callerSignal]), cleanup: () => {} };
+  }
+  // Manual fallback: forward whichever signal aborts first. Track listeners so
+  // the caller can detach them after the request settles — otherwise a shared
+  // (e.g. agent-level) signal accumulates listeners across requests and
+  // eventually trips MaxListenersExceededWarning.
+  const controller = new AbortController();
+  const onAbort = (source: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort((source as any).reason);
+    }
+  };
+  const callerListener = () => onAbort(callerSignal);
+  const timeoutListener = () => onAbort(timeoutSignal);
+  const cleanup = () => {
+    callerSignal.removeEventListener('abort', callerListener);
+    timeoutSignal.removeEventListener('abort', timeoutListener);
+  };
+  if (callerSignal.aborted) {
+    onAbort(callerSignal);
+  } else {
+    callerSignal.addEventListener('abort', callerListener, { once: true });
+  }
+  if (timeoutSignal.aborted) {
+    onAbort(timeoutSignal);
+  } else {
+    timeoutSignal.addEventListener('abort', timeoutListener, { once: true });
+  }
+  return { signal: controller.signal, cleanup };
 }

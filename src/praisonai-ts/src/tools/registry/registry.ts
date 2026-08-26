@@ -106,6 +106,16 @@ export class ToolsRegistry {
         // Build middleware chain
         let result: unknown;
         const executeWithMiddleware = async (): Promise<unknown> => {
+          // Honour cancellation: if the caller's signal has already aborted,
+          // don't start the tool. throwIfAborted exists on Node >= 17.3;
+          // fall back to a manual check on older runtimes.
+          if (ctx.signal?.aborted) {
+            if (typeof (ctx.signal as any).throwIfAborted === 'function') {
+              (ctx.signal as any).throwIfAborted();
+            } else {
+              throw (ctx.signal as any).reason ?? new Error('The operation was aborted');
+            }
+          }
           return originalExecute(input, ctx);
         };
 

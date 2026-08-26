@@ -56,6 +56,7 @@ export class GoogleProvider extends BaseProvider {
             },
             tools: options.tools ? this.formatTools(options.tools) : undefined,
           }),
+          signal: options.signal,
         }
       );
 
@@ -121,6 +122,7 @@ export class GoogleProvider extends BaseProvider {
               },
               tools: options.tools ? self.formatTools(options.tools) : undefined,
             }),
+            signal: options.signal,
           }
         );
 
@@ -209,6 +211,7 @@ export class GoogleProvider extends BaseProvider {
               responseMimeType: 'application/json',
             },
           }),
+          signal: options.signal,
         }
       );
 

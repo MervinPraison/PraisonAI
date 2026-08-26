@@ -140,6 +140,14 @@ export interface SimpleAgentConfig {
   /** Enable telemetry tracking (default: false, opt-in) */
   telemetry?: boolean;
   
+  /**
+   * Default abort signal for cancellation. Aborting it stops the underlying
+   * provider request (a working Stop button). An explicit signal passed to
+   * chat()/start() takes precedence over this. Mirrors Python's
+   * interrupt_controller / cancel_token.
+   */
+  signal?: AbortSignal;
+
   // Advanced mode (role/goal/backstory) - for compatibility
   /** Agent role (advanced mode) */
   role?: string;
@@ -201,6 +209,7 @@ export class Agent {
   private cacheTTL: number;
   private responseCache: Map<string, { response: string; timestamp: number }> = new Map();
   private telemetryEnabled: boolean;
+  private signal?: AbortSignal;
   
   // AI SDK backend support
   private _backend: LLMProvider | null = null;
@@ -259,6 +268,7 @@ export class Agent {
     this.cache = config.cache ?? false;
     this.cacheTTL = config.cacheTTL ?? 3600;
     this.telemetryEnabled = config.telemetry ?? false;
+    this.signal = config.signal;
     
     // Parse model string to extract provider and model ID
     // Format: "provider/model" or just "model"
@@ -586,9 +596,10 @@ export class Agent {
   /**
    * Process tool calls from the model
    * @param toolCalls Tool calls from the model
+   * @param signal Optional AbortSignal; if already aborted, no tool is invoked
    * @returns Array of tool results
    */
-  private async processToolCalls(toolCalls: Array<any>): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
+  private async processToolCalls(toolCalls: Array<any>, signal?: AbortSignal): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
     const results = [];
     
     for (const toolCall of toolCalls) {
@@ -596,6 +607,15 @@ export class Agent {
       await Logger.debug(`Processing tool call: ${name}`, { arguments: argsString });
       
       try {
+        // Cancellation reaches the side-effecting boundary: if the caller
+        // aborts after the model returned tool calls, stop before invoking the
+        // tool rather than letting its network/process side effects run. The
+        // abort-aware catch re-throws so the run stops (not swallowed into a
+        // tool-error result).
+        if (signal?.aborted) {
+          throw (signal as any).reason ?? new Error('The operation was aborted');
+        }
+
         // Parse arguments
         const args = JSON.parse(argsString);
         
@@ -650,6 +670,11 @@ export class Agent {
         
         await Logger.debug(`Tool call result for ${name}:`, { result });
       } catch (error: any) {
+        // Cancellation is terminal: surface it to the caller instead of
+        // burying it in a tool result (which would let the loop continue).
+        if (signal?.aborted) {
+          throw (signal as any).reason ?? error;
+        }
         await Logger.error(`Error executing tool ${name}:`, error);
         results.push({
           role: 'tool',
@@ -663,13 +688,17 @@ export class Agent {
     return results;
   }
 
-  async start(prompt: string, previousResult?: string, onToken?: (token: string) => void): Promise<string> {
+  async start(prompt: string, previousResult?: string, onToken?: (token: string) => void, signal?: AbortSignal): Promise<string> {
     await Logger.debug(`Agent ${this.name} starting with prompt: ${prompt}`);
 
     // Token sink: when a caller (e.g. stream()) supplies onToken, tokens go
     // there instead of the terminal. Defaulting to stdout preserves CLI
     // behaviour without leaking process.stdout into non-terminal hosts.
     const emitToken = onToken ?? ((token: string) => { process.stdout.write(token); });
+
+    // Explicit per-call signal wins over the agent-level default (mirrors
+    // Python's resolution: cancel_token overrides interrupt_controller).
+    const abortSignal = signal ?? this.signal;
 
     try {
       // Replace placeholder with previous result if available
@@ -713,11 +742,18 @@ export class Agent {
           while (continueConversation && iterations < maxIterations) {
             iterations++;
 
+            // Stop between round-trips if cancelled (before another model call
+            // or another batch of tool executions).
+            if (abortSignal?.aborted) {
+              throw (abortSignal as any).reason ?? new Error('The operation was aborted');
+            }
+
             const result = await backend.generateText({
               messages,
               temperature: 0.7,
               tools: toolDefinitions,
               toolChoice: 'auto',
+              signal: abortSignal,
             });
 
             messages.push({
@@ -727,7 +763,7 @@ export class Agent {
             });
 
             if (result.toolCalls && result.toolCalls.length > 0) {
-              const toolResults = await this.processToolCalls(result.toolCalls);
+              const toolResults = await this.processToolCalls(result.toolCalls, abortSignal);
               messages.push(...toolResults);
               continueConversation = true;
             } else {
@@ -741,6 +777,7 @@ export class Agent {
                   messages,
                   schema: this.outputSchema,
                   temperature: 0.7,
+                  signal: abortSignal,
                 });
                 finalResponse = typeof structured.object === 'string'
                   ? structured.object
@@ -765,6 +802,7 @@ export class Agent {
             messages,
             schema: this.outputSchema,
             temperature: 0.7,
+            signal: abortSignal,
           });
           finalResponse = typeof result.object === 'string'
             ? result.object
@@ -773,7 +811,8 @@ export class Agent {
           // Streaming with AI SDK backend
           const stream = await backend.streamText({
             messages,
-            temperature: 0.7
+            temperature: 0.7,
+            signal: abortSignal
           });
           
           let accumulated = '';
@@ -788,7 +827,8 @@ export class Agent {
           // Non-streaming with AI SDK backend
           const result = await backend.generateText({
             messages,
-            temperature: 0.7
+            temperature: 0.7,
+            signal: abortSignal
           });
           finalResponse = result.text;
         }
@@ -804,6 +844,12 @@ export class Agent {
         while (continueConversation && iterations < maxIterations) {
           iterations++;
 
+          // Stop between round-trips if cancelled (before another model call
+          // or another batch of tool executions).
+          if (abortSignal?.aborted) {
+            throw (abortSignal as any).reason ?? new Error('The operation was aborted');
+          }
+
           // Tool rounds and the structured final response are separate concerns.
           // OpenAI treats `tools` and `response_format` (json_schema) as mutually
           // exclusive: sending both can make a tool round get rejected before it
@@ -817,10 +863,11 @@ export class Agent {
                 this.tools,
                 (token: string) => emitToken(token),
                 undefined,
-                undefined
+                undefined,
+                abortSignal
               )
             : await this.llmService.generateChat(
-                messages, 0.7, this.tools, undefined, undefined
+                messages, 0.7, this.tools, undefined, undefined, abortSignal
               );
 
           // Cap tool calls executed per turn (Python parity:
@@ -849,7 +896,7 @@ export class Agent {
             }
 
             // Process tool calls and add results to messages
-            const toolResults = await this.processToolCalls(perTurn);
+            const toolResults = await this.processToolCalls(perTurn, abortSignal);
             messages.push(...toolResults);
 
             // Continue conversation to get final response
@@ -889,7 +936,8 @@ export class Agent {
           0.7,
           (token: string) => {
             emitToken(token);
-          }
+          },
+          abortSignal
         );
       } else if (this.outputSchema) {
         // Structured output (no tools): go through generateChat so the full
@@ -902,7 +950,8 @@ export class Agent {
           0.7,
           undefined,
           undefined,
-          this.getResponseFormat()
+          this.getResponseFormat(),
+          abortSignal
         );
         finalResponse = response.content || '';
       } else {
@@ -913,7 +962,8 @@ export class Agent {
           0.7,
           undefined,
           undefined,
-          this.getResponseFormat()
+          this.getResponseFormat(),
+          abortSignal
         );
         finalResponse = response;
       }
@@ -1035,7 +1085,7 @@ export class Agent {
     }
   }
 
-  async chat(prompt: string, previousResult?: string): Promise<string> {
+  async chat(prompt: string, previousResult?: string, signal?: AbortSignal): Promise<string> {
     // Lazy init: restore history on first chat (like Python SDK)
     await this.initDbSession();
     
@@ -1053,7 +1103,7 @@ export class Agent {
     // start() replays this.messages AND appends the prompt itself, so the
     // user message goes into history only AFTER the call — pushing it first
     // sent every prompt to the model twice.
-    const response = await this.start(prompt, previousResult);
+    const response = await this.start(prompt, previousResult, undefined, signal);
 
     // Add user message and assistant response to history
     this.messages.push({ role: 'user', content: prompt });
