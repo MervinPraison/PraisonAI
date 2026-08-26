@@ -55,6 +55,22 @@ Simpler than competitors • More extensible • Faster • Agent-centric
 /Users/praison/PraisonAIDocs/      # Documentation (Mintlify)
 ```
 
+### 2.1.1 Issue routing and npm mirror
+
+| Step | Location |
+|------|----------|
+| **Report issues** | [MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI) — use the bug/feature templates |
+| **Implement fixes** | **`src/praisonai-ts/`** in this monorepo (this directory) |
+| **npm mirror** | [MervinPraison/praisonai-js](https://github.com/MervinPraison/praisonai-js) — updated from the monorepo, not the fix target |
+
+After a TypeScript PR merges on PraisonAI, maintainers sync the npm mirror:
+
+```bash
+gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI
+```
+
+Direction is **monorepo → praisonai-js** only. Do not implement TS fixes in praisonai-js for PraisonAI issues.
+
 ### 2.2 TypeScript SDK Source Structure
 
 ```
