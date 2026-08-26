@@ -284,3 +284,21 @@ test("an engine declaring approvals:false never emits an approval_request", asyn
   const events = await collect(engine);
   assert.equal(events.some((e) => e.type === "approval_request"), false);
 });
+
+test("a run started after dispose fails fast instead of hanging", async () => {
+  // A disposed engine that still accepts runs starts a provider request that
+  // cancel() can no longer reach -- dispose has already cleared the live map
+  // it looks in, so the Stop button would report false forever.
+  const engine = build(fakeAgent([{ type: "finish", text: "x" }]));
+  await engine.dispose();
+
+  const events = await collect(engine);
+  assert.deepEqual(events.map((e) => e.type), ["start", "error"]);
+  assert.equal(events[1]!.type === "error" && events[1].kind, "internal");
+});
+
+test("a run before dispose is unaffected", async () => {
+  // The pair: "always refuse" would pass the test above.
+  const engine = build(fakeAgent([{ type: "finish", text: "x" }]));
+  assert.equal((await collect(engine)).at(-1)!.type, "end");
+});

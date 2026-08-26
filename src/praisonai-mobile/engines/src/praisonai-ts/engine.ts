@@ -73,6 +73,16 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
 
   async function* run(request: RunRequest, signal: AbortSignal): AsyncIterable<RunEvent> {
     const msgId = options.newMsgId();
+
+    if (disposed) {
+      // Fail fast and terminally. A disposed engine still accepting runs would
+      // start a provider request that `cancel` can no longer reach, because
+      // dispose() has already cleared the live map it looks in.
+      yield { type: "start", msgId, runId: request.runId };
+      yield { type: "error", msgId, kind: "internal", message: "engine has been disposed" };
+      return;
+    }
+
     const controller = new AbortController();
 
     // Two sources of cancellation, one abort. The caller's signal and a
@@ -85,7 +95,6 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
     yield { type: "start", msgId, runId: request.runId };
 
     let answer = "";
-    let streamed = false;
     let terminated = false;
 
     try {
@@ -97,7 +106,6 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
           // for "the model said nothing", which is a different condition with
           // its own event.
           if (event.delta === "") continue;
-          streamed = true;
           answer += event.delta;
           yield { type: "delta", msgId, text: event.delta };
         } else if (event.type === "finish") {
@@ -172,7 +180,6 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
       signal.removeEventListener("abort", forward);
       controller.abort();
       live.delete(request.runId);
-      void streamed;
     }
   }
 
@@ -202,7 +209,6 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
       for (const controller of live.values()) controller.abort();
       live.clear();
       disposed = true;
-      void disposed;
     },
   };
 }
