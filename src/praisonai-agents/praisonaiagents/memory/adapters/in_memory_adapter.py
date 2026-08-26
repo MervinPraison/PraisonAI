@@ -5,6 +5,7 @@ Lightweight in-memory adapter for testing and development.
 No dependencies required - stores data as plain Python lists.
 """
 
+import threading
 from typing import Any, Dict, List, Optional
 
 
@@ -25,6 +26,13 @@ class InMemoryAdapter:
         self._data: List[Dict[str, Any]] = []
         self._max_size: int = kwargs.get("max_size", 10_000)  # Default limit
         self._next_id: int = 0  # Monotonic counter to prevent ID collisions after eviction
+        # Guards the non-atomic id-increment + append + eviction sequence. Async
+        # task/knowledge paths offload writes via ``asyncio.to_thread``, so
+        # parallel callbacks can hit this shared adapter on different worker
+        # threads concurrently. A re-entrant lock keeps every mutation atomic
+        # (no duplicate ids / lost entries) at negligible cost for the common
+        # single-threaded case.
+        self._lock = threading.RLock()
     
     def _evict_if_needed(self):
         """Evict old entries if we exceed max size (FIFO eviction)."""
@@ -35,50 +43,54 @@ class InMemoryAdapter:
     def store_short_term(
         self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs
     ) -> str:
-        entry: Dict[str, Any] = {
-            "id": str(self._next_id),
-            "text": text,
-            "type": "short",
-            "metadata": metadata,
-        }
-        self._next_id += 1
-        self._data.append(entry)
-        self._evict_if_needed()
-        return entry["id"]
+        with self._lock:
+            entry: Dict[str, Any] = {
+                "id": str(self._next_id),
+                "text": text,
+                "type": "short",
+                "metadata": metadata,
+            }
+            self._next_id += 1
+            self._data.append(entry)
+            self._evict_if_needed()
+            return entry["id"]
 
     def search_short_term(
         self, query: str, limit: int = 5, **kwargs
     ) -> List[Dict[str, Any]]:
-        results = [
-            e
-            for e in self._data
-            if e["type"] == "short" and query.lower() in e["text"].lower()
-        ]
-        return results[:limit]
+        with self._lock:
+            results = [
+                e
+                for e in self._data
+                if e["type"] == "short" and query.lower() in e["text"].lower()
+            ]
+            return results[:limit]
 
     def store_long_term(
         self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs
     ) -> str:
-        entry: Dict[str, Any] = {
-            "id": str(self._next_id),
-            "text": text,
-            "type": "long",
-            "metadata": metadata,
-        }
-        self._next_id += 1
-        self._data.append(entry)
-        self._evict_if_needed()
-        return entry["id"]
+        with self._lock:
+            entry: Dict[str, Any] = {
+                "id": str(self._next_id),
+                "text": text,
+                "type": "long",
+                "metadata": metadata,
+            }
+            self._next_id += 1
+            self._data.append(entry)
+            self._evict_if_needed()
+            return entry["id"]
 
     def search_long_term(
         self, query: str, limit: int = 5, **kwargs
     ) -> List[Dict[str, Any]]:
-        results = [
-            e
-            for e in self._data
-            if e["type"] == "long" and query.lower() in e["text"].lower()
-        ]
-        return results[:limit]
+        with self._lock:
+            results = [
+                e
+                for e in self._data
+                if e["type"] == "long" and query.lower() in e["text"].lower()
+            ]
+            return results[:limit]
 
     def delete_memory(self, memory_id: str, tier: Optional[str] = None, **kwargs) -> bool:
         """Delete a memory by ID. Returns True if an entry was removed.
@@ -87,25 +99,29 @@ class InMemoryAdapter:
         tier. IDs here are globally unique (shared monotonic counter), so tier
         is only used to preserve the caller's scope, never for disambiguation.
         """
-        before = len(self._data)
-        self._data = [
-            e
-            for e in self._data
-            if not (
-                e.get("id") == str(memory_id)
-                and (tier is None or e.get("type") == tier)
-            )
-        ]
-        return len(self._data) < before
+        with self._lock:
+            before = len(self._data)
+            self._data = [
+                e
+                for e in self._data
+                if not (
+                    e.get("id") == str(memory_id)
+                    and (tier is None or e.get("type") == tier)
+                )
+            ]
+            return len(self._data) < before
 
     def reset_short_term(self) -> None:
         """Clear all short-term memories."""
-        self._data = [e for e in self._data if e.get("type") != "short"]
+        with self._lock:
+            self._data = [e for e in self._data if e.get("type") != "short"]
 
     def reset_long_term(self) -> None:
         """Clear all long-term memories."""
-        self._data = [e for e in self._data if e.get("type") != "long"]
+        with self._lock:
+            self._data = [e for e in self._data if e.get("type") != "long"]
 
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
-        # Return defensive copy to prevent external mutation of internal state
-        return [dict(entry) for entry in self._data]
+        with self._lock:
+            # Return defensive copy to prevent external mutation of internal state
+            return [dict(entry) for entry in self._data]
