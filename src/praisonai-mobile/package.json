@@ -12,10 +12,11 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test --test-reporter=spec \"protocol/**/*.test.ts\" \"core/**/*.test.ts\" \"engines/**/*.test.ts\" \"adapters/**/*.test.ts\" \"testing/**/*.test.ts\" \"ui/**/*.test.ts\" \"app/**/*.test.ts\" \"tools/*.test.mjs\"",
     "boundaries": "node tools/check-boundaries.mjs",
-    "build": "node tools/bundle.mjs",
+    "build": "node tools/build-webview.mjs",
     "test:bundle": "node --test --test-reporter=spec tools/bundle.test.mjs",
     "check": "npm run typecheck && npm run boundaries && npm run test",
-    "check:upstream": "node tools/check-upstream-parity.mjs"
+    "check:upstream": "node tools/check-upstream-parity.mjs",
+    "build:webview": "node tools/build-webview.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
