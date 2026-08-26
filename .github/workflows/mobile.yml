@@ -72,25 +72,26 @@ jobs:
 
   upstream-parity:
     name: upstream parity
-    # Separate job: it needs the sibling praisonai-ts checkout, and it should be
-    # obvious in the checks list when the mobile engine has drifted from the
-    # real Agent rather than being buried in another job's log.
+    # Its own job so drift from the real Agent is visible in the checks list
+    # rather than buried in another job's log.
+    #
+    # It needs only THIS package's install. praisonai-ts's own dependencies are
+    # neither needed nor installable -- `npm install` there fails with an
+    # ERESOLVE peer conflict (bedrock-agentcore -> @strands-agents/sdk) -- and
+    # every member the check looks at is declared locally in simple.ts. That is
+    # verified rather than assumed: with praisonai-ts's node_modules moved
+    # aside, injected drift is still caught as TS2741.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22.18'
-      - name: Install praisonai-ts deps
-        working-directory: src/praisonai-ts
-        # `npm install`, not `npm ci`: praisonai-ts deliberately gitignores its
-        # lockfile (src/praisonai-ts/.gitignore:6), so `npm ci` fails outright.
-        # This matches the convention already used elsewhere in the repo
-        # (claude.yml:345).
-        run: npm install --no-audit --no-fund
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - run: npm ci
       - name: Does the real Agent still satisfy PraisonAgent?
-        # The engine declares its coupling structurally rather than importing
-        # 'praisonai', which is what keeps its tests free of a provider, a
-        # network and a key. This is the check that pays for that choice: it
-        # SKIPS loudly if the sibling is missing rather than passing quietly.
+        # Skips loudly if the praisonai-ts checkout is missing, rather than
+        # passing quietly -- a check that silently stops covering anything is
+        # worse than no check.
         run: npm run check:upstream

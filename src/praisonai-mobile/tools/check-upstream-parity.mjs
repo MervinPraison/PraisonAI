@@ -14,6 +14,19 @@
  * Run it via `npm run check:upstream`. If the sibling is missing it SKIPS
  * loudly rather than passing quietly -- a check that silently stops covering
  * anything is worse than no check.
+ *
+ * It does NOT need praisonai-ts's dependencies installed, which matters
+ * because they do not install cleanly (`npm install` there fails with an
+ * ERESOLVE peer conflict on bedrock-agentcore -> @strands-agents/sdk). Every
+ * member this checks -- `streamEvents`, `lastStopReason` and their types -- is
+ * declared locally in simple.ts, so unresolved third-party imports degrade
+ * only unrelated members. That is asserted, not assumed: with praisonai-ts's
+ * node_modules moved aside, injecting a member the real Agent lacks still
+ * produces `TS2741 Property 'renamedUpstream' is missing in type 'Agent'`.
+ *
+ * Consequently tsc runs from THIS package (which has typescript) and errors
+ * outside the generated parity file are ignored -- they are unresolved-module
+ * and implicit-any noise from praisonai-ts's own sources, not drift.
  */
 import { execFile } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -43,16 +56,6 @@ if (!(await exists(AGENT_SRC))) {
   process.exit(0);
 }
 
-if (!(await exists(join(UPSTREAM, "node_modules")))) {
-  // tsc has to resolve praisonai-ts's OWN imports to typecheck its Agent, so
-  // without its dependencies this cannot run. Skipped loudly rather than
-  // failed: a missing install is an environment problem, and reporting it as
-  // upstream drift would send someone looking in the wrong file entirely.
-  console.log("upstream-parity: SKIPPED -- praisonai-ts has no node_modules");
-  console.log(`  run: (cd ${UPSTREAM} && npm install)`);
-  process.exit(0);
-}
-
 const dir = await mkdtemp(join(tmpdir(), "praison-parity-"));
 const file = join(dir, "parity.ts");
 
@@ -71,21 +74,39 @@ await writeFile(
   ].join("\n"),
 );
 
+const HERE = resolve(import.meta.dirname, "..");
+
+let output = "";
 try {
+  // Run from THIS package: it has typescript, and praisonai-ts's own
+  // dependencies are neither needed nor installable (see the header).
   await run("npx", [
     "tsc", "--noEmit", "--strict", "--skipLibCheck",
     "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler",
     file,
-  ], { cwd: UPSTREAM });
-  console.log("upstream-parity: the real Agent still satisfies PraisonAgent");
+  ], { cwd: HERE });
 } catch (error) {
+  output = error.stdout || error.message || "";
+}
+
+// Only errors AT the generated file are drift. An assignability failure always
+// reports at the assignment site, so nothing real is lost by this filter --
+// while TS2307 (unresolved module) and TS7006 (implicit any) from
+// praisonai-ts's own sources would otherwise fail every run.
+const drift = output
+  .split("\n")
+  .filter((line) => line.includes("parity.ts") && line.includes("error TS"));
+
+await rm(dir, { recursive: true, force: true });
+
+if (drift.length > 0) {
   console.error("upstream-parity: FAILED -- praisonai-ts has drifted from agent-api.ts\n");
-  console.error(error.stdout || error.message);
+  for (const line of drift) console.error("  " + line.replace(/^.*parity\.ts/, "parity.ts"));
   console.error(
     "\n  Fix agent-api.ts to match upstream, then re-check the mappings in\n" +
     "  engines/src/praisonai-ts/engine.ts that depend on the changed member.",
   );
   process.exitCode = 1;
-} finally {
-  await rm(dir, { recursive: true, force: true });
+} else {
+  console.log("upstream-parity: the real Agent still satisfies PraisonAgent");
 }
