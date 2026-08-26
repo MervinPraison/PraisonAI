@@ -551,6 +551,11 @@ class StreamProtocolVocabulary(unittest.TestCase):
 
     SOURCE = pathlib.Path(server.__file__).resolve()
 
+    EXPECTED = {
+        "start", "reasoning", "delta", "tool_drafting", "tool_call",
+        "tool_result", "approval_request", "usage", "cancelled", "error", "end",
+    }
+
     @classmethod
     def setUpClass(cls):
         cls.text = cls.SOURCE.read_text(encoding="utf-8")
@@ -611,6 +616,13 @@ class StreamProtocolVocabulary(unittest.TestCase):
         for event in ("approval_request", "tool_drafting"):
             self.assertIn(event, documented,
                           f"{event} is emitted but missing from the spec again")
+
+    def test_the_vocabulary_is_the_eleven_events_expected(self):
+        # A belt-and-braces check so a matched pair of *both* sides drifting
+        # (an event added to the comment and an emitter in the same PR, but
+        # neither reviewed) is still measured against a fixed expectation.
+        self.assertEqual(self._documented_events(), self.EXPECTED)
+        self.assertEqual(self._emitted_events(), self.EXPECTED)
 
 
 if __name__ == "__main__":
