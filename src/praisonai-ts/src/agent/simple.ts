@@ -41,6 +41,13 @@ import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
  * await agent.chat("Hello!");
  * ```
  */
+/**
+ * Terminal reason for the most recent agent run, mirroring Python's
+ * `Agent.last_stop_reason`. Lets callers distinguish a completed run from a
+ * truncated one instead of both looking identical.
+ */
+export type StopReason = 'completed' | 'max_steps' | 'cancelled' | 'error';
+
 export interface SimpleAgentConfig {
   /** Agent instructions/system prompt (required) */
   instructions: string;
@@ -103,10 +110,17 @@ export interface SimpleAgentConfig {
   approval?: boolean | ApprovalManager;
   /**
    * Maximum number of tool-call round-trips before the loop is aborted
-   * (default: 5). When the cap is reached the run throws instead of
-   * silently returning an empty string, so exhaustion is observable.
+   * (default: 20, matching Python's `ExecutionConfig.max_iter`). When the cap
+   * is reached the run sets `lastStopReason = 'max_steps'` and throws instead
+   * of silently returning an empty string, so exhaustion is observable.
    */
   maxIterations?: number;
+  /**
+   * Maximum number of tool calls executed within a single round-trip
+   * (default: 10, matching Python's `ExecutionConfig.max_tool_calls_per_turn`).
+   * Extra tool calls beyond this cap in one turn are ignored.
+   */
+  maxToolCallsPerTurn?: number;
   /** Database adapter for persistence */
   db?: DbAdapter;
   /** Session ID for conversation persistence (auto-generated if not provided) */
@@ -169,6 +183,12 @@ export class Agent {
   private toolFunctions: Record<string, Function> = {};
   private approvalManager?: ApprovalManager;
   private maxIterations: number;
+  private maxToolCallsPerTurn: number;
+  /**
+   * Terminal reason for the most recent run (mirrors Python's
+   * `Agent.last_stop_reason`). `null` until the agent has run at least once.
+   */
+  public lastStopReason: StopReason | null = null;
   private dbAdapter?: DbAdapter;
   private sessionId: string;
   private runId: string;
@@ -228,7 +248,8 @@ export class Agent {
       manager.onApprovalRequest(createCLIApprovalPrompt());
       this.approvalManager = manager;
     }
-    this.maxIterations = config.maxIterations ?? 5;
+    this.maxIterations = config.maxIterations ?? 20;
+    this.maxToolCallsPerTurn = config.maxToolCallsPerTurn ?? 10;
     this.dbAdapter = config.db;
     this.sessionId = config.sessionId || this.generateSessionId();
     this.runId = config.runId || randomUUID();
@@ -672,6 +693,9 @@ export class Agent {
       messages.push({ role: 'user', content: prompt });
       
       let finalResponse = '';
+      // Reset per run; set to a terminal value before returning/throwing so
+      // callers can tell a completed run from a truncated one.
+      this.lastStopReason = null;
       
       // Use AI SDK backend for non-OpenAI providers
       if (this._useAISDKBackend) {
@@ -768,8 +792,98 @@ export class Agent {
           });
           finalResponse = result.text;
         }
-      } else if (this.streamEnabled && !this.tools && !this.outputSchema) {
-        // Use streaming with full conversation history (OpenAI)
+      } else if (this.tools) {
+        // Unified streaming/tools loop (OpenAI). Streaming and tools are no
+        // longer mutually exclusive: when `stream` is set, text deltas, tool
+        // calls and tool results interleave on one request per round-trip via
+        // streamChatWithTools; otherwise a single blocking generateChat is used.
+        let continueConversation = true;
+        let iterations = 0;
+        const maxIterations = this.maxIterations; // Prevent infinite loops (configurable)
+
+        while (continueConversation && iterations < maxIterations) {
+          iterations++;
+
+          // Tool rounds and the structured final response are separate concerns.
+          // OpenAI treats `tools` and `response_format` (json_schema) as mutually
+          // exclusive: sending both can make a tool round get rejected before it
+          // returns tool_calls. So during tool rounds we omit the schema and let
+          // the model decide; once the model stops calling tools we re-issue a
+          // final request with the schema applied to shape the answer.
+          const response = this.streamEnabled
+            ? await this.llmService.streamChatWithTools(
+                messages,
+                0.7,
+                this.tools,
+                (token: string) => emitToken(token),
+                undefined,
+                undefined
+              )
+            : await this.llmService.generateChat(
+                messages, 0.7, this.tools, undefined, undefined
+              );
+
+          // Cap tool calls executed per turn (Python parity:
+          // ExecutionConfig.max_tool_calls_per_turn). Extra calls beyond the cap
+          // in a single round are dropped. The assistant message must list ONLY
+          // the executed calls, because every tool_call_id in an assistant
+          // message needs a matching tool result message or the next request 400s.
+          const perTurn = response.tool_calls
+            ? response.tool_calls.slice(0, this.maxToolCallsPerTurn)
+            : undefined;
+
+          // Add assistant response to messages (only the executed tool calls)
+          messages.push({
+            role: 'assistant',
+            content: response.content || '',
+            tool_calls: perTurn
+          });
+
+          // Check if there are tool calls to process
+          if (perTurn && perTurn.length > 0) {
+            if (response.tool_calls!.length > this.maxToolCallsPerTurn) {
+              await Logger.warn(
+                `Agent ${this.name}: ${response.tool_calls!.length} tool calls in one turn exceeds ` +
+                `maxToolCallsPerTurn (${this.maxToolCallsPerTurn}); executing the first ${this.maxToolCallsPerTurn}.`
+              );
+            }
+
+            // Process tool calls and add results to messages
+            const toolResults = await this.processToolCalls(perTurn);
+            messages.push(...toolResults);
+
+            // Continue conversation to get final response
+            continueConversation = true;
+          } else if (this.outputSchema) {
+            // Model produced no tool calls: issue one final request that pins the
+            // structured output schema. Tools are omitted here so `tools` and
+            // `response_format` never coexist (OpenAI treats them as mutually
+            // exclusive). generateChat sends the full history.
+            const finalResp = await this.llmService.generateChat(
+              messages, 0.7, undefined, undefined, this.getResponseFormat()
+            );
+            finalResponse = finalResp.content || response.content || '';
+            continueConversation = false;
+          } else {
+            // No tool calls, we have our final response
+            finalResponse = response.content || '';
+            continueConversation = false;
+          }
+        }
+
+        if (continueConversation && iterations >= maxIterations) {
+          // Exhaustion is observable: returning finalResponse here would be
+          // '' (unresolved tool calls left no text answer), indistinguishable
+          // from the model saying nothing. Mark the stop reason and throw.
+          this.lastStopReason = 'max_steps';
+          await Logger.warn(`Reached maximum iterations (${maxIterations}) for tool calls`);
+          throw new Error(
+            `Agent ${this.name}: reached maximum tool-call iterations (${maxIterations}) without a final answer. ` +
+            `Increase maxIterations in the agent config if the task legitimately needs more tool round-trips.`
+          );
+        }
+      } else if (this.streamEnabled && !this.outputSchema) {
+        // Use streaming with full conversation history (OpenAI, no tools)
         finalResponse = await this.llmService.streamChat(
           messages,
           0.7,
@@ -777,55 +891,6 @@ export class Agent {
             emitToken(token);
           }
         );
-      } else if (this.tools) {
-        // Use tools (non-streaming for now to simplify implementation)
-        let continueConversation = true;
-        let iterations = 0;
-        const maxIterations = this.maxIterations; // Prevent infinite loops (configurable)
-        
-        while (continueConversation && iterations < maxIterations) {
-          iterations++;
-          
-          // Get response from LLM (responseFormat constrains the final
-          // answer when outputSchema is configured)
-          const response = await this.llmService.generateChat(
-            messages, 0.7, this.tools, undefined, this.getResponseFormat()
-          );
-          
-          // Add assistant response to messages
-          messages.push({
-            role: 'assistant',
-            content: response.content || '',
-            tool_calls: response.tool_calls
-          });
-          
-          // Check if there are tool calls to process
-          if (response.tool_calls && response.tool_calls.length > 0) {
-            // Process tool calls
-            const toolResults = await this.processToolCalls(response.tool_calls);
-            
-            // Add tool results to messages
-            messages.push(...toolResults);
-            
-            // Continue conversation to get final response
-            continueConversation = true;
-          } else {
-            // No tool calls, we have our final response
-            finalResponse = response.content || '';
-            continueConversation = false;
-          }
-        }
-        
-        if (continueConversation && iterations >= maxIterations) {
-          // Exhaustion is observable: returning finalResponse here would be
-          // '' (unresolved tool calls left no text answer), indistinguishable
-          // from the model saying nothing. Throw instead so the caller knows.
-          await Logger.warn(`Reached maximum iterations (${maxIterations}) for tool calls`);
-          throw new Error(
-            `Agent ${this.name}: reached maximum tool-call iterations (${maxIterations}) without a final answer. ` +
-            `Increase maxIterations in the agent config if the task legitimately needs more tool round-trips.`
-          );
-        }
       } else if (this.outputSchema) {
         // Structured output (no tools): go through generateChat so the full
         // `messages` history (system + prior turns + current prompt) is sent.
@@ -853,8 +918,16 @@ export class Agent {
         finalResponse = response;
       }
 
+      // A run that reaches here finished normally (max_steps throws earlier).
+      if (this.lastStopReason === null) {
+        this.lastStopReason = 'completed';
+      }
       return finalResponse;
     } catch (error) {
+      // Preserve a more specific reason (e.g. 'max_steps') if already set.
+      if (this.lastStopReason === null) {
+        this.lastStopReason = 'error';
+      }
       await Logger.error('Error in agent execution', error);
       throw error;
     }

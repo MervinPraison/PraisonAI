@@ -414,6 +414,105 @@ export class OpenAIService {
         }
     }
 
+    /**
+     * Streaming chat that also surfaces tool calls. Text deltas are emitted
+     * through `onToken` as they arrive; tool-call fragments are accumulated
+     * across chunks and returned once the stream ends. This is the building
+     * block that lets a streaming agent interleave reasoning text with tool
+     * use in a single request (instead of streaming XOR tools).
+     *
+     * @returns The full streamed text plus any accumulated tool calls.
+     */
+    async streamChatWithTools(
+        messages: ChatMessage[],
+        temperature: number = 0.7,
+        tools?: ChatCompletionTool[],
+        onToken?: (token: string) => void,
+        tool_choice?: ChatCompletionToolChoiceOption,
+        responseFormat?: ResponseFormat
+    ): Promise<LLMResponse> {
+        await Logger.debug('Starting chat stream with tools...', {
+            model: this.model,
+            messageCount: messages.length
+        });
+
+        try {
+            const openAIMessages = messages.map(convertToOpenAIMessage);
+            const openAITools = tools ? tools.map(convertToOpenAITool) : undefined;
+
+            const stream = await this.getClient().then(client =>
+                client.chat.completions.create({
+                    model: this.model,
+                    ...this.temperatureParam(temperature),
+                    messages: openAIMessages,
+                    stream: true,
+                    tools: openAITools,
+                    tool_choice,
+                    ...(responseFormat ? { response_format: responseFormat } : {})
+                })
+            );
+
+            let fullResponse = '';
+            const toolCalls: Record<number, any> = {};
+
+            for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+                if (!delta) continue;
+
+                // Stream text deltas as they arrive.
+                if (delta.content) {
+                    const token = delta.content;
+                    fullResponse += token;
+                    if (onToken) onToken(token);
+                }
+
+                // Accumulate tool-call fragments across chunks. The id/name
+                // arrive on the first fragment; arguments stream in pieces.
+                if (delta.tool_calls && delta.tool_calls.length > 0) {
+                    for (const toolCall of delta.tool_calls) {
+                        const index = toolCall.index ?? 0;
+                        if (!toolCalls[index]) {
+                            toolCalls[index] = {
+                                id: toolCall.id || '',
+                                type: toolCall.type || 'function',
+                                function: {
+                                    name: toolCall.function?.name || '',
+                                    arguments: ''
+                                }
+                            };
+                        }
+                        if (toolCall.id) toolCalls[index].id = toolCall.id;
+                        if (toolCall.function?.name) {
+                            toolCalls[index].function.name = toolCall.function.name;
+                        }
+                        if (toolCall.function?.arguments) {
+                            toolCalls[index].function.arguments += toolCall.function.arguments;
+                        }
+                    }
+                }
+            }
+
+            const result: LLMResponse = {
+                content: fullResponse,
+                role: 'assistant'
+            };
+            const collected = Object.keys(toolCalls)
+                .map(k => Number(k))
+                .sort((a, b) => a - b)
+                .map(i => toolCalls[i]);
+            if (collected.length > 0) {
+                result.tool_calls = collected;
+                await Logger.debug('Tool calls detected in stream', { tool_calls: collected });
+            }
+
+            await Logger.debug('Chat stream with tools completed');
+            return result;
+        } catch (error) {
+            await Logger.error('Error in chat stream with tools', error);
+            throw error;
+        }
+    }
+
     async chatCompletion(
         messages: ChatMessage[],
         temperature: number = 0.7,
