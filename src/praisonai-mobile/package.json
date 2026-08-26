@@ -14,7 +14,8 @@
     "boundaries": "node tools/check-boundaries.mjs",
     "build": "node build/bundle.mjs",
     "test:bundle": "node --test --test-reporter=spec build/bundle.test.mjs",
-    "check": "npm run typecheck && npm run boundaries && npm run test"
+    "check": "npm run typecheck && npm run boundaries && npm run test",
+    "check:upstream": "node tools/check-upstream-parity.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
