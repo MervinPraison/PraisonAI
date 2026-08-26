@@ -3,6 +3,7 @@
  */
 
 import { BaseProvider } from './base';
+import { getEnv } from '../openaiClientOptions';
 import type {
   ProviderConfig,
   GenerateTextOptions,
@@ -28,7 +29,7 @@ export class GoogleProvider extends BaseProvider {
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
-    this.apiKey = config.apiKey || process.env.GOOGLE_API_KEY || '';
+    this.apiKey = config.apiKey || getEnv('GOOGLE_API_KEY') || '';
     this.baseUrl = config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
     
     if (!this.apiKey) {
@@ -40,7 +41,7 @@ export class GoogleProvider extends BaseProvider {
     return this.withRetry(async () => {
       const { systemInstruction, contents } = this.formatRequest(options.messages);
       
-      const response = await fetch(
+      const response = await this.getFetch()(
         `${this.baseUrl}/models/${this.modelId}:generateContent?key=${this.apiKey}`,
         {
           method: 'POST',
@@ -108,7 +109,7 @@ export class GoogleProvider extends BaseProvider {
     
     return {
       async *[Symbol.asyncIterator]() {
-        const response = await fetch(
+        const response = await self.getFetch()(
           `${self.baseUrl}/models/${self.modelId}:streamGenerateContent?key=${self.apiKey}&alt=sse`,
           {
             method: 'POST',
@@ -195,7 +196,7 @@ export class GoogleProvider extends BaseProvider {
     const { systemInstruction, contents } = this.formatRequest(options.messages);
     
     return this.withRetry(async () => {
-      const response = await fetch(
+      const response = await this.getFetch()(
         `${this.baseUrl}/models/${this.modelId}:generateContent?key=${this.apiKey}`,
         {
           method: 'POST',

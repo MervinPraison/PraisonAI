@@ -11,6 +11,7 @@ import {
   AISDK_PROVIDERS, 
   PROVIDER_ALIASES 
 } from './types';
+import { getEnv } from '../../openaiClientOptions';
 
 /**
  * Parsed model string result
@@ -265,7 +266,7 @@ export function validateProviderApiKey(providerId: string): boolean {
   if (!envKey) {
     return true; // Custom providers may not need env keys
   }
-  return !!process.env[envKey];
+  return !!getEnv(envKey);
 }
 
 /**

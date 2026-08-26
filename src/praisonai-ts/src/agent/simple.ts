@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import type { LLMProvider } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
 import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
+import { getEnv } from '../llm/openaiClientOptions';
 
 /**
  * Agent Configuration
@@ -233,9 +234,9 @@ export class Agent {
     }
     
     this.name = config.name || `Agent_${Math.random().toString(36).substr(2, 9)}`;
-    this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
-    this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
-    this.llm = config.llm || process.env.OPENAI_MODEL_NAME || process.env.PRAISONAI_MODEL || 'gpt-4o-mini';
+    this.verbose = config.verbose ?? getEnv('PRAISON_VERBOSE') !== 'false';
+    this.pretty = config.pretty ?? getEnv('PRAISON_PRETTY') === 'true';
+    this.llm = config.llm || getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini';
     this.markdown = config.markdown ?? true;
     this.streamEnabled = config.stream ?? true;
     // NOTE: this.tools is rebuilt below from a snapshot of config.tools —
@@ -694,7 +695,11 @@ export class Agent {
     // Token sink: when a caller (e.g. stream()) supplies onToken, tokens go
     // there instead of the terminal. Defaulting to stdout preserves CLI
     // behaviour without leaking process.stdout into non-terminal hosts.
-    const emitToken = onToken ?? ((token: string) => { process.stdout.write(token); });
+    const emitToken = onToken ?? ((token: string) => {
+      if (typeof process !== 'undefined' && process.stdout) {
+        process.stdout.write(token);
+      }
+    });
 
     // Explicit per-call signal wins over the agent-level default (mirrors
     // Python's resolution: cancel_token overrides interrupt_controller).
@@ -1338,8 +1343,8 @@ export class AgentTeam {
       : configOrAgents;
     
     this.agents = config.agents;
-    this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
-    this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
+    this.verbose = config.verbose ?? getEnv('PRAISON_VERBOSE') !== 'false';
+    this.pretty = config.pretty ?? getEnv('PRAISON_PRETTY') === 'true';
     this.process = config.process || 'sequential';
 
     // Auto-generate tasks if not provided

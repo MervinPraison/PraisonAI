@@ -3,6 +3,7 @@
  */
 
 import { BaseProvider } from './base';
+import { getEnv } from '../openaiClientOptions';
 import type {
   ProviderConfig,
   GenerateTextOptions,
@@ -34,7 +35,7 @@ export class AnthropicProvider extends BaseProvider {
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
-    this.apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || '';
+    this.apiKey = config.apiKey || getEnv('ANTHROPIC_API_KEY') || '';
     this.baseUrl = config.baseUrl || 'https://api.anthropic.com';
     
     if (!this.apiKey) {
@@ -46,7 +47,7 @@ export class AnthropicProvider extends BaseProvider {
     return this.withRetry(async () => {
       const { systemPrompt, messages } = this.extractSystemPrompt(options.messages);
       
-      const response = await fetch(`${this.baseUrl}/v1/messages`, {
+      const response = await this.getFetch()(`${this.baseUrl}/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -113,7 +114,7 @@ export class AnthropicProvider extends BaseProvider {
     
     return {
       async *[Symbol.asyncIterator]() {
-        const response = await fetch(`${self.baseUrl}/v1/messages`, {
+        const response = await self.getFetch()(`${self.baseUrl}/v1/messages`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -214,7 +215,7 @@ export class AnthropicProvider extends BaseProvider {
     const jsonSystemPrompt = `${systemPrompt}\n\nYou must respond with valid JSON matching this schema:\n${JSON.stringify(options.schema, null, 2)}`;
     
     return this.withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/messages`, {
+      const response = await this.getFetch()(`${this.baseUrl}/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

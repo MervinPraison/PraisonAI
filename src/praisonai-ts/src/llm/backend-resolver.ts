@@ -11,6 +11,7 @@
  */
 
 import type { LLMProvider, ProviderConfig } from './providers/types';
+import { getEnv } from './openaiClientOptions';
 
 export type BackendSource = 'ai-sdk' | 'native' | 'custom' | 'legacy';
 
@@ -80,7 +81,7 @@ export function resetAISDKAvailabilityCache(): void {
  * Get the preferred backend from environment
  */
 export function getPreferredBackend(): 'ai-sdk' | 'native' | 'auto' {
-  const env = process.env.PRAISONAI_BACKEND?.toLowerCase();
+  const env = getEnv('PRAISONAI_BACKEND')?.toLowerCase();
   if (env === 'ai-sdk' || env === 'aisdk') return 'ai-sdk';
   if (env === 'native' || env === 'legacy') return 'native';
   return 'auto';
@@ -247,8 +248,8 @@ export function resolveBackendSync(
  * Get default model string
  */
 export function getDefaultModel(): string {
-  return process.env.OPENAI_MODEL_NAME || 
-         process.env.PRAISONAI_MODEL || 
+  return getEnv('OPENAI_MODEL_NAME') || 
+         getEnv('PRAISONAI_MODEL') || 
          'openai/gpt-4o-mini';
 }
 

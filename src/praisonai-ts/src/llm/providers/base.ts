@@ -44,6 +44,17 @@ export abstract class BaseProvider implements LLMProvider {
   protected abstract formatMessages(messages: Message[]): any[];
 
   /**
+   * Resolve the fetch implementation for this provider.
+   *
+   * Prefers the caller-injected `config.fetch` (which lets a host route egress
+   * through native code, keeping the API key out of the JS heap and avoiding
+   * webview CORS) and falls back to the global `fetch` otherwise.
+   */
+  protected getFetch(): typeof fetch {
+    return this.config.fetch ?? fetch;
+  }
+
+  /**
    * Retry logic with exponential backoff
    */
   protected async withRetry<T>(
