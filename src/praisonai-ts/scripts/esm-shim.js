@@ -117,8 +117,14 @@ function stripStringsAndComments(code) {
   // below only ever see real code. `/\brequire\b/` on raw text matched the word
   // inside error messages like "Zod schemas require zod-to-json-schema", giving
   // 24/288 ESM files a createRequire banner (and hard imports of module/url/path)
-  // they never needed. Replace each token with same-length whitespace so any
-  // surviving offsets stay meaningful; newlines are preserved.
+  // they never needed. Every blanked token is replaced with same-length
+  // whitespace so surviving offsets stay meaningful and newlines are preserved.
+  //
+  // Template literals are special: the raw text between backticks is blanked,
+  // but each `${...}` interpolation is real, executable code and is recursively
+  // stripped and kept — otherwise a genuine `require(...)` (or __dirname) inside
+  // an interpolation would be hidden and the file would emit without its banner,
+  // failing at runtime with a ReferenceError.
   let out = '';
   let i = 0;
   const n = code.length;
@@ -143,16 +149,112 @@ function stripStringsAndComments(code) {
       i = j;
       continue;
     }
-    // String / template literal
-    if (ch === "'" || ch === '"' || ch === '`') {
+    // Template literal: blank the literal text but preserve and recursively
+    // strip each ${...} interpolation (which is executable code).
+    if (ch === '`') {
+      out += '`';
+      let j = i + 1;
+      while (j < n && code[j] !== '`') {
+        if (code[j] === '\\') {
+          out += '  ';
+          j += 2;
+          continue;
+        }
+        if (code[j] === '$' && code[j + 1] === '{') {
+          // Consume a balanced ${ ... } interpolation, honouring nested braces,
+          // strings and templates so we stop at the matching close brace.
+          out += '${';
+          let k = j + 2;
+          let depth = 1;
+          // Tracks the last significant (non-space) character consumed so we can
+          // tell a regex literal (/.../ in expression position) from a division
+          // operator (a / b). A regex may follow (, {, [, comma, operators or the
+          // interpolation start; it never follows an identifier/number/), ], }.
+          let prevSig = '';
+          while (k < n && depth > 0) {
+            const c = code[k];
+            if (c === '\\') { k += 2; prevSig = ''; continue; }
+            // Skip line/block comments so a `}` inside them can't close the
+            // interpolation early and hide executable CJS that follows.
+            if (c === '/' && code[k + 1] === '/') {
+              k += 2;
+              while (k < n && code[k] !== '\n') k++;
+              continue;
+            }
+            if (c === '/' && code[k + 1] === '*') {
+              k += 2;
+              while (k < n && !(code[k] === '*' && code[k + 1] === '/')) k++;
+              k = Math.min(k + 2, n);
+              continue;
+            }
+            // Regex literal in expression position: its interior (including a `}`
+            // in a character class) must not affect brace depth.
+            if (c === '/' && (prevSig === '' || '([{,;:=!&|?+-*%^~<>'.includes(prevSig))) {
+              k++;
+              let inClass = false;
+              while (k < n) {
+                const rc = code[k];
+                if (rc === '\\') { k += 2; continue; }
+                if (rc === '[') { inClass = true; k++; continue; }
+                if (rc === ']') { inClass = false; k++; continue; }
+                if (rc === '/' && !inClass) { k++; break; }
+                if (rc === '\n') break;
+                k++;
+              }
+              prevSig = '/';
+              continue;
+            }
+            if (c === '{') { depth++; k++; prevSig = '{'; continue; }
+            if (c === '}') { depth--; k++; prevSig = '}'; continue; }
+            if (c === '`' || c === '"' || c === "'") {
+              // Skip nested string/template as-is; the recursive strip below
+              // handles its interior.
+              const q = c;
+              k++;
+              while (k < n) {
+                if (code[k] === '\\') { k += 2; continue; }
+                if (code[k] === q) { k++; break; }
+                k++;
+              }
+              prevSig = q;
+              continue;
+            }
+            if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') prevSig = c;
+            k++;
+          }
+          // The interpolation body excludes the trailing '}'.
+          const innerStart = j + 2;
+          const innerEnd = k - 1;
+          out += stripStringsAndComments(code.slice(innerStart, innerEnd)) + '}';
+          j = k;
+          continue;
+        }
+        out += code[j] === '\n' ? '\n' : ' ';
+        j++;
+      }
+      if (j < n && code[j] === '`') {
+        out += '`';
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    // Ordinary quoted string literal.
+    if (ch === '"' || ch === "'") {
       const quote = ch;
       let j = i + 1;
       while (j < n) {
-        if (code[j] === '\\') { j += 2; continue; }
-        if (code[j] === quote) { j++; break; }
+        if (code[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        if (code[j] === quote) {
+          j++;
+          break;
+        }
         j++;
       }
-      out += blank(code.slice(i, j));
+      out += quote + blank(code.slice(i + 1, j - 1)) + (code[j - 1] === quote ? quote : '');
       i = j;
       continue;
     }
@@ -167,14 +269,16 @@ function needsCjsBanner(code) {
   // "require" inside an error message never triggers the banner. Match real CJS
   // usage: require(...) call expressions and __dirname/__filename/module in
   // identifier positions (not property accesses like obj.require).
-  const src = stripStringsAndComments(code);
+  const stripped = stripStringsAndComments(code);
   return (
-    /(^|[^.\w$])require\s*\(/.test(src) ||
-    /(^|[^.\w$])__dirname\b/.test(src) ||
-    /(^|[^.\w$])__filename\b/.test(src) ||
-    /\bmodule\.exports\b/.test(src) ||
-    /===\s*module\b/.test(src) ||
-    /\bmodule\s*===/.test(src)
+    // Real require(...) call expression, not obj.require or a bare word.
+    /(?:^|[^.\w$])require\s*\(/.test(stripped) ||
+    // __dirname / __filename in identifier position (not a property access).
+    /(?:^|[^.\w$])__dirname\b/.test(stripped) ||
+    /(?:^|[^.\w$])__filename\b/.test(stripped) ||
+    /\bmodule\.exports\b/.test(stripped) ||
+    /===\s*module\b/.test(stripped) ||
+    /\bmodule\s*===/.test(stripped)
   );
 }
 
@@ -220,4 +324,9 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { needsCjsBanner, applyBanner, stripStringsAndComments };
+module.exports = {
+  needsCjsBanner,
+  applyBanner,
+  stripStringsAndComments,
+  CJS_BANNER,
+};
