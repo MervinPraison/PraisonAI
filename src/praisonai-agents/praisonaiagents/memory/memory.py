@@ -18,6 +18,7 @@ from .core import MemoryCoreMixin
 from .protocols import MemoryProtocol
 from .adapters import get_memory_adapter, get_first_available_memory_adapter
 from .adapters.sqlite_adapter import SqliteMemoryAdapter
+from .adapters.factories import sanitize_chroma_metadata
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -979,19 +980,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
     # -------------------------------------------------------------------------
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
         """Sanitize metadata for ChromaDB - convert to acceptable types"""
-        sanitized = {}
-        for k, v in metadata.items():
-            if v is None:
-                continue
-            if isinstance(v, (str, int, float, bool)):
-                sanitized[k] = v
-            elif isinstance(v, dict):
-                # Convert dict to string representation
-                sanitized[k] = str(v)
-            else:
-                # Convert other types to string
-                sanitized[k] = str(v)
-        return sanitized
+        return sanitize_chroma_metadata(metadata)
 
     def store_long_term(
         self,

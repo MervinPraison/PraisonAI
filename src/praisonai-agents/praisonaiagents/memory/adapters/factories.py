@@ -23,6 +23,19 @@ from ..protocols import MemoryProtocol
 logger = logging.getLogger(__name__)
 
 
+def sanitize_chroma_metadata(metadata: Dict) -> Dict:
+    """Sanitize metadata for ChromaDB - convert to acceptable types."""
+    sanitized = {}
+    for k, v in metadata.items():
+        if v is None:
+            continue
+        if isinstance(v, (str, int, float, bool)):
+            sanitized[k] = v
+        else:
+            sanitized[k] = str(v)
+    return sanitized
+
+
 def safe_mem0_search(mem0_client, **kwargs) -> List[Dict[str, Any]]:
     """
     Defensive wrapper for mem0.search() to handle MongoDB vector store compatibility.
@@ -359,17 +372,7 @@ class ChromaMemoryAdapter:
     
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
         """Sanitize metadata for ChromaDB - convert to acceptable types."""
-        sanitized = {}
-        for k, v in metadata.items():
-            if v is None:
-                continue
-            if isinstance(v, (str, int, float, bool)):
-                sanitized[k] = v
-            elif isinstance(v, dict):
-                sanitized[k] = str(v)
-            else:
-                sanitized[k] = str(v)
-        return sanitized
+        return sanitize_chroma_metadata(metadata)
     
     def _reset_collection(self) -> None:
         """Delete and recreate this adapter's collection, wiping stored memory.
