@@ -10,6 +10,7 @@ import { describe, it, expect } from '@jest/globals';
 import { OpenAIProvider } from '../../../src/llm/providers/openai';
 import { ToolsRegistry } from '../../../src/tools/registry/registry';
 import type { ToolMetadata } from '../../../src/tools/registry/types';
+import { Agent } from '../../../src/agent/simple';
 
 describe('AbortSignal cancellation', () => {
   describe('OpenAIProvider forwards signal to the client', () => {
@@ -137,6 +138,58 @@ describe('AbortSignal cancellation', () => {
       const result = await tool.execute({ value: 42 }, { signal: controller.signal });
       expect(executed).toBe(true);
       expect(result).toEqual({ value: 42 });
+    });
+  });
+
+  describe('Agent tool loop honours cancellation', () => {
+    it('does not invoke a tool when the resolved signal is already aborted', async () => {
+      let toolRan = false;
+      const agent = new Agent({
+        instructions: 'test',
+        toolFunctions: {
+          sideEffect: () => {
+            toolRan = true;
+            return 'done';
+          },
+        },
+      });
+
+      const controller = new AbortController();
+      controller.abort();
+
+      // Drive processToolCalls directly with an already-aborted signal: the
+      // model returned a tool call but Stop was pressed before execution.
+      const toolCalls = [
+        { id: '1', function: { name: 'sideEffect', arguments: '{}' } },
+      ];
+
+      await expect(
+        (agent as any).processToolCalls(toolCalls, controller.signal)
+      ).rejects.toBeDefined();
+      // Before the fix the signal was dropped and the side-effecting tool ran.
+      expect(toolRan).toBe(false);
+    });
+
+    it('runs the tool when the signal is not aborted', async () => {
+      let toolRan = false;
+      const agent = new Agent({
+        instructions: 'test',
+        toolFunctions: {
+          sideEffect: () => {
+            toolRan = true;
+            return 'done';
+          },
+        },
+      });
+
+      const controller = new AbortController();
+      const toolCalls = [
+        { id: '1', function: { name: 'sideEffect', arguments: '{}' } },
+      ];
+
+      const results = await (agent as any).processToolCalls(toolCalls, controller.signal);
+      expect(toolRan).toBe(true);
+      expect(results[0].content).toBe('done');
     });
   });
 });

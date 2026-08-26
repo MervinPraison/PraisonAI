@@ -295,7 +295,8 @@ export class OpenAIService {
         onToken: (token: string) => void,
         tools?: ChatCompletionTool[],
         tool_choice?: ChatCompletionToolChoiceOption,
-        onToolCall?: (toolCall: any) => void
+        onToolCall?: (toolCall: any) => void,
+        signal?: AbortSignal
     ): Promise<void> {
         await Logger.debug('Starting text stream...', {
             model: this.model,
@@ -323,7 +324,7 @@ export class OpenAIService {
                     stream: true,
                     tools: openAITools,
                     tool_choice
-                })
+                }, { signal })
             );
 
             let fullResponse = '';

@@ -596,24 +596,26 @@ export class Agent {
   /**
    * Process tool calls from the model
    * @param toolCalls Tool calls from the model
+   * @param signal Optional AbortSignal; if already aborted, no tool is invoked
    * @returns Array of tool results
    */
   private async processToolCalls(toolCalls: Array<any>, signal?: AbortSignal): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
     const results = [];
     
     for (const toolCall of toolCalls) {
-      // Cancellation reaches the side-effecting boundary: if the caller aborts
-      // after the model returned tool calls, stop before invoking the tool
-      // rather than letting its network/process side effects run. The abort
-      // propagates out so the run stops (not swallowed into a tool-error result).
-      if (signal?.aborted) {
-        throw new DOMException('The operation was aborted', 'AbortError');
-      }
-
       const { id, function: { name, arguments: argsString } } = toolCall;
       await Logger.debug(`Processing tool call: ${name}`, { arguments: argsString });
       
       try {
+        // Cancellation reaches the side-effecting boundary: if the caller
+        // aborts after the model returned tool calls, stop before invoking the
+        // tool rather than letting its network/process side effects run. The
+        // abort-aware catch re-throws so the run stops (not swallowed into a
+        // tool-error result).
+        if (signal?.aborted) {
+          throw (signal as any).reason ?? new Error('The operation was aborted');
+        }
+
         // Parse arguments
         const args = JSON.parse(argsString);
         
@@ -668,6 +670,11 @@ export class Agent {
         
         await Logger.debug(`Tool call result for ${name}:`, { result });
       } catch (error: any) {
+        // Cancellation is terminal: surface it to the caller instead of
+        // burying it in a tool result (which would let the loop continue).
+        if (signal?.aborted) {
+          throw (signal as any).reason ?? error;
+        }
         await Logger.error(`Error executing tool ${name}:`, error);
         results.push({
           role: 'tool',
@@ -735,10 +742,10 @@ export class Agent {
           while (continueConversation && iterations < maxIterations) {
             iterations++;
 
-            // Stop between round-trips if the caller aborted, so a Stop button
-            // ends the loop instead of issuing another model request.
+            // Stop between round-trips if cancelled (before another model call
+            // or another batch of tool executions).
             if (abortSignal?.aborted) {
-              throw new DOMException('The operation was aborted', 'AbortError');
+              throw (abortSignal as any).reason ?? new Error('The operation was aborted');
             }
 
             const result = await backend.generateText({
@@ -795,6 +802,7 @@ export class Agent {
             messages,
             schema: this.outputSchema,
             temperature: 0.7,
+            signal: abortSignal,
           });
           finalResponse = typeof result.object === 'string'
             ? result.object
@@ -836,10 +844,10 @@ export class Agent {
         while (continueConversation && iterations < maxIterations) {
           iterations++;
 
-          // Stop between round-trips if the caller aborted, so a Stop button
-          // ends the loop instead of issuing another model request.
+          // Stop between round-trips if cancelled (before another model call
+          // or another batch of tool executions).
           if (abortSignal?.aborted) {
-            throw new DOMException('The operation was aborted', 'AbortError');
+            throw (abortSignal as any).reason ?? new Error('The operation was aborted');
           }
 
           // Tool rounds and the structured final response are separate concerns.
