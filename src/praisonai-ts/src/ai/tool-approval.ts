@@ -5,7 +5,106 @@
  * Compatible with AI SDK v6's needsApproval pattern.
  */
 
-import { EventEmitter } from 'events';
+// ============================================================================
+// Internal Event Emitter
+// ============================================================================
+
+/**
+ * Listener callback for {@link SimpleEventEmitter}.
+ */
+type EventListener = (...args: any[]) => void;
+
+/**
+ * Minimal, browser-safe event emitter.
+ *
+ * Implements the small slice of the Node `EventEmitter` API that
+ * {@link ApprovalManager} relies on, so the Agent import graph stays free of
+ * the Node `events` builtin and remains bundleable for browser/webview targets.
+ */
+class SimpleEventEmitter {
+  private listeners = new Map<string, EventListener[]>();
+
+  on(event: string, listener: EventListener): this {
+    const existing = this.listeners.get(event);
+    if (existing) {
+      existing.push(listener);
+    } else {
+      this.listeners.set(event, [listener]);
+    }
+    return this;
+  }
+
+  once(event: string, listener: EventListener): this {
+    const wrapper: EventListener & { listener?: EventListener } = (...args: any[]) => {
+      this.off(event, wrapper);
+      listener(...args);
+    };
+    wrapper.listener = listener;
+    return this.on(event, wrapper);
+  }
+
+  off(event: string, listener: EventListener): this {
+    const existing = this.listeners.get(event);
+    if (existing) {
+      const idx = existing.findIndex((candidate) =>
+        candidate === listener ||
+        (candidate as EventListener & { listener?: EventListener }).listener === listener
+      );
+      if (idx !== -1) existing.splice(idx, 1);
+      if (existing.length === 0) this.listeners.delete(event);
+    }
+    return this;
+  }
+
+  removeAllListeners(event?: string): this {
+    if (event === undefined) {
+      this.listeners.clear();
+    } else {
+      this.listeners.delete(event);
+    }
+    return this;
+  }
+
+  emit(event: string, ...args: any[]): boolean {
+    const existing = this.listeners.get(event);
+    if (!existing || existing.length === 0) return false;
+    for (const listener of existing.slice()) {
+      listener(...args);
+    }
+    return true;
+  }
+}
+
+/**
+ * Generate a RFC-4122 v4 UUID using WebCrypto.
+ *
+ * Uses `globalThis.crypto.randomUUID` (available in all supported webviews and
+ * Node >= 19), falling back to a `getRandomValues`-based implementation so this
+ * module never depends on the Node `crypto` builtin and stays bundleable for
+ * browser/webview targets.
+ */
+function randomUUID(): string {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) {
+    return c.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (c?.getRandomValues) {
+    c.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
+  return (
+    hex[0] + hex[1] + hex[2] + hex[3] + '-' +
+    hex[4] + hex[5] + '-' +
+    hex[6] + hex[7] + '-' +
+    hex[8] + hex[9] + '-' +
+    hex[10] + hex[11] + hex[12] + hex[13] + hex[14] + hex[15]
+  );
+}
 
 // ============================================================================
 // Types
@@ -97,7 +196,7 @@ export type ApprovalHandler = (request: ToolApprovalRequest) => Promise<boolean>
  * });
  * ```
  */
-export class ApprovalManager extends EventEmitter {
+export class ApprovalManager extends SimpleEventEmitter {
   private pendingRequests = new Map<string, {
     request: ToolApprovalRequest;
     resolve: (approved: boolean) => void;
@@ -192,8 +291,8 @@ export class ApprovalManager extends EventEmitter {
     reason?: string;
     timeout?: number;
   }): Promise<boolean> {
-    const requestId = crypto.randomUUID();
-    const toolInvocationId = options.toolInvocationId || crypto.randomUUID();
+    const requestId = randomUUID();
+    const toolInvocationId = options.toolInvocationId || randomUUID();
     
     // Check auto-deny first (safety)
     if (this.checkAutoDeny(options.toolName, options.input)) {
