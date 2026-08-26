@@ -55,8 +55,14 @@ class TypeScriptFeatureExtractor:
     - export { Name } from './path' statements
     - export type { Name } from './path' statements
     - export * from './path' statements
-    
+
     It categorizes exports into modules based on their source paths.
+
+    IMPORTANT — this measures symbol *names*, not behaviour. Presence of an
+    exported name here does NOT mean the capability is reachable, wired up, or
+    behaviourally equivalent to its Python counterpart. A name that is exported
+    but never called (e.g. an approval manager that no code path invokes) still
+    shows up. Downstream reports must label these as "exported", not "done".
     """
     
     # Module category mapping based on source paths

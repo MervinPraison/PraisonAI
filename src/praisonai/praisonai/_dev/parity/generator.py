@@ -453,6 +453,16 @@ class ParityTrackerGenerator:
         lines.append(f"> **Version:** {tracker['version']} | **Last Updated:** {tracker['lastUpdated']}")
         lines.append(f"> **Source of Truth:** {tracker['sourceOfTruth']}")
         lines.append("")
+        lines.append("> [!IMPORTANT]")
+        lines.append("> **What this measures:** whether a matching *exported symbol name* exists in")
+        lines.append("> the TypeScript SDK's public surface (parsed from `src/index.ts`). It does **not**")
+        lines.append("> verify that the capability is reachable, wired up, or behaves like its Python")
+        lines.append("> counterpart. A `✅ exported` cell means the name is exported — not that it works.")
+        lines.append("> Counts include barrel re-exports, so `TypeScript Features` reflects module")
+        lines.append("> structure, not distinct capabilities, and is not directly comparable to the")
+        lines.append("> Python count. For a capability with a testable contract, rely on its conformance")
+        lines.append("> suite rather than this table.")
+        lines.append("")
         
         # Summary
         summary = tracker['summary']
@@ -482,7 +492,7 @@ class ParityTrackerGenerator:
             done_count = sum(1 for g in gaps if g['status'] == 'DONE')
             todo_count = len(gaps) - done_count
             
-            lines.append(f"### {priority_key} ({done_count} done, {todo_count} todo)")
+            lines.append(f"### {priority_key} ({done_count} exported, {todo_count} missing)")
             lines.append("")
             lines.append("| Feature | Python | TypeScript | Effort | Status |")
             lines.append("|---------|--------|------------|--------|--------|")
@@ -490,7 +500,7 @@ class ParityTrackerGenerator:
             for gap in sorted(gaps, key=lambda x: (x['status'] != 'TODO', x['feature'])):
                 py = "✅" if gap['python'] else "❌"
                 ts = "✅" if gap['typescript'] else "❌"
-                status = "✅ DONE" if gap['status'] == 'DONE' else "⏳ TODO"
+                status = "✅ exported" if gap['status'] == 'DONE' else "⏳ missing"
                 feature = _escape_md(gap['feature'])
                 lines.append(f"| `{feature}` | {py} | {ts} | {gap['effort']} | {status} |")
             
@@ -616,6 +626,14 @@ class ParityTrackerGenerator:
         lines.append("# Rust Feature Parity Tracker")
         lines.append("")
         lines.append(f"> **Python Features:** {python_count} | **Rust Features:** {rust_count} | **Parity:** {parity_pct}%")
+        lines.append("")
+        lines.append("> [!IMPORTANT]")
+        lines.append("> **What this measures:** whether a matching *exported symbol name* exists in the")
+        lines.append("> Rust crate's public surface. It does **not** verify that the capability is")
+        lines.append("> reachable or behaves like its Python counterpart — an exported item whose body")
+        lines.append("> returns `Err(\"not yet implemented\")` still counts here. Treat `✅` as \"a symbol")
+        lines.append("> of this name is exported\", not \"this works\". For a capability with a testable")
+        lines.append("> contract, rely on its conformance suite rather than this table.")
         lines.append("")
         lines.append("## Summary")
         lines.append("")

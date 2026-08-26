@@ -2,6 +2,14 @@
 
 > **Python Features:** 411 | **Rust Features:** 667 | **Parity:** 69.8%
 
+> [!IMPORTANT]
+> **What this measures:** whether a matching *exported symbol name* exists in the
+> Rust crate's public surface. It does **not** verify that the capability is
+> reachable or behaves like its Python counterpart — an exported item whose body
+> returns `Err("not yet implemented")` still counts here. Treat `✅` as "a symbol
+> of this name is exported", not "this works". For a capability with a testable
+> contract, rely on its conformance suite rather than this table.
+
 ## Summary
 
 | Metric | Count |
