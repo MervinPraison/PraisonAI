@@ -1132,6 +1132,8 @@ def run_main(
     worktree: bool = typer.Option(False, "--worktree", help="Run on an isolated git worktree/branch (branch-per-task); no-op when not a git repo"),
     keep: bool = typer.Option(False, "--keep", help="With --worktree, keep the worktree/branch after the run for review instead of tearing it down"),
     append_system_prompt: Optional[str] = typer.Option(None, "--append-system-prompt", help="Append text (or @file) to the system prompt for this invocation only. Env fallback: PRAISONAI_APPEND_SYSTEM_PROMPT"),
+    # Multimodal attachment for one-shot runs
+    image: Optional[List[str]] = typer.Option(None, "--image", help="Attach an image (local path or http(s):// URL) to a one-shot run so the agent can see it. Repeatable."),
 ):
     """
     Run agents from a file or prompt.
@@ -1143,6 +1145,8 @@ def run_main(
         praisonai run "Add tests" --session abc123
         praisonai run agents.yaml --interactive
         praisonai run "What is 2+2?" --profile
+        praisonai run "Describe this screenshot" --image bug.png
+        praisonai run "Compare these" --image a.png --image b.png
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
@@ -1397,6 +1401,7 @@ def run_main(
             allow_local_tools=allow_local_tools,
             instructions=merged_instructions,
             append_system_prompt=resolved_append_prompt,
+            image=image,
         )
         return
     
@@ -1582,6 +1587,7 @@ def run_main(
                 isolated=worktree,
                 instructions=merged_instructions,
                 append_system_prompt=resolved_append_prompt,
+                image=image,
             )
 
 
@@ -1756,6 +1762,7 @@ def _run_prompt(
     isolated: bool = False,
     instructions: Optional[List[str]] = None,
     append_system_prompt: Optional[str] = None,
+    image: Optional[List[str]] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -1851,6 +1858,7 @@ def _run_prompt(
             and thinking_budget is None
             and not isolated
             and not append_system_prompt
+            and not image
             and not any([
                 mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
                 memory, permissions_config, fork, instructions,
@@ -1875,7 +1883,10 @@ def _run_prompt(
         ):
             return
 
-        if output_mode == "actions":
+        # An --image attachment is handled by the vision path in
+        # handle_direct_prompt (ImageHandler); the "actions" fast path builds a
+        # bare Agent and would silently drop it, so fall through when set.
+        if output_mode == "actions" and not image:
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
 
@@ -2010,7 +2021,7 @@ def _run_prompt(
         args.claude_memory = False
         args.guardrail = None
         args.metrics = False
-        args.image = None
+        args.image = ",".join(image) if image else None
         args.image_generate = False
         args.telemetry = False
         args.mcp = mcp
