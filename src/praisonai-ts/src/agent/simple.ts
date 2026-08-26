@@ -804,9 +804,12 @@ export class Agent {
         while (continueConversation && iterations < maxIterations) {
           iterations++;
 
-          // One round-trip. Streaming emits reasoning text as it arrives AND
-          // returns any accumulated tool calls; non-streaming blocks for the
-          // full response. Both honour outputSchema on the final answer.
+          // Tool rounds and the structured final response are separate concerns.
+          // OpenAI treats `tools` and `response_format` (json_schema) as mutually
+          // exclusive: sending both can make a tool round get rejected before it
+          // returns tool_calls. So during tool rounds we omit the schema and let
+          // the model decide; once the model stops calling tools we re-issue a
+          // final request with the schema applied to shape the answer.
           const response = this.streamEnabled
             ? await this.llmService.streamChatWithTools(
                 messages,
@@ -814,28 +817,33 @@ export class Agent {
                 this.tools,
                 (token: string) => emitToken(token),
                 undefined,
-                this.getResponseFormat()
+                undefined
               )
             : await this.llmService.generateChat(
-                messages, 0.7, this.tools, undefined, this.getResponseFormat()
+                messages, 0.7, this.tools, undefined, undefined
               );
 
-          // Add assistant response to messages
+          // Cap tool calls executed per turn (Python parity:
+          // ExecutionConfig.max_tool_calls_per_turn). Extra calls beyond the cap
+          // in a single round are dropped. The assistant message must list ONLY
+          // the executed calls, because every tool_call_id in an assistant
+          // message needs a matching tool result message or the next request 400s.
+          const perTurn = response.tool_calls
+            ? response.tool_calls.slice(0, this.maxToolCallsPerTurn)
+            : undefined;
+
+          // Add assistant response to messages (only the executed tool calls)
           messages.push({
             role: 'assistant',
             content: response.content || '',
-            tool_calls: response.tool_calls
+            tool_calls: perTurn
           });
 
           // Check if there are tool calls to process
-          if (response.tool_calls && response.tool_calls.length > 0) {
-            // Cap tool calls executed per turn (Python parity:
-            // ExecutionConfig.max_tool_calls_per_turn). Extra calls beyond the
-            // cap in a single round are dropped.
-            const perTurn = response.tool_calls.slice(0, this.maxToolCallsPerTurn);
-            if (response.tool_calls.length > this.maxToolCallsPerTurn) {
+          if (perTurn && perTurn.length > 0) {
+            if (response.tool_calls!.length > this.maxToolCallsPerTurn) {
               await Logger.warn(
-                `Agent ${this.name}: ${response.tool_calls.length} tool calls in one turn exceeds ` +
+                `Agent ${this.name}: ${response.tool_calls!.length} tool calls in one turn exceeds ` +
                 `maxToolCallsPerTurn (${this.maxToolCallsPerTurn}); executing the first ${this.maxToolCallsPerTurn}.`
               );
             }
@@ -846,6 +854,16 @@ export class Agent {
 
             // Continue conversation to get final response
             continueConversation = true;
+          } else if (this.outputSchema) {
+            // Model produced no tool calls: issue one final request that pins the
+            // structured output schema. Tools are omitted here so `tools` and
+            // `response_format` never coexist (OpenAI treats them as mutually
+            // exclusive). generateChat sends the full history.
+            const finalResp = await this.llmService.generateChat(
+              messages, 0.7, undefined, undefined, this.getResponseFormat()
+            );
+            finalResponse = finalResp.content || response.content || '';
+            continueConversation = false;
           } else {
             // No tool calls, we have our final response
             finalResponse = response.content || '';

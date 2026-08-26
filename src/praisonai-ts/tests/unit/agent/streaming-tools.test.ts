@@ -127,6 +127,52 @@ describe('maxIterations / lastStopReason parity', () => {
     expect(agent.lastStopReason).toBe('max_steps');
   });
 
+  it('caps tool calls per turn and keeps assistant tool_calls paired with tool results', async () => {
+    // Round 1: model returns THREE tool calls, but the cap is 2.
+    // Round 2: model gives a final answer.
+    const threeCalls = {
+      content: '',
+      role: 'assistant',
+      tool_calls: [
+        { id: 'c1', type: 'function', function: { name: 'noop', arguments: '{}' } },
+        { id: 'c2', type: 'function', function: { name: 'noop', arguments: '{}' } },
+        { id: 'c3', type: 'function', function: { name: 'noop', arguments: '{}' } },
+      ],
+    };
+    const finalAnswer = { content: 'done', role: 'assistant' };
+    const generateChat = jest
+      .spyOn(OpenAIService.prototype, 'generateChat')
+      .mockResolvedValueOnce(threeCalls as any)
+      .mockResolvedValueOnce(finalAnswer as any);
+
+    const noop = function noop() { return 'ok'; };
+    const agent = new Agent({
+      instructions: 't',
+      llm: 'gpt-4o-mini',
+      stream: false,
+      verbose: false,
+      tools: [noop],
+      maxToolCallsPerTurn: 2,
+    });
+
+    const result = await agent.start('go');
+    expect(result).toBe('done');
+
+    // The second request's history: the assistant message must list only the 2
+    // executed tool calls, matched 1:1 by exactly 2 tool result messages.
+    const secondMessages = generateChat.mock.calls[1][0];
+    const assistantMsg: any = secondMessages.find(
+      (m: any) => m.role === 'assistant' && m.tool_calls
+    );
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg.tool_calls).toHaveLength(2);
+    const toolMsgs = secondMessages.filter((m: any) => m.role === 'tool');
+    expect(toolMsgs).toHaveLength(2);
+    const assistantIds = assistantMsg.tool_calls.map((t: any) => t.id).sort();
+    const toolIds = toolMsgs.map((m: any) => m.tool_call_id).sort();
+    expect(assistantIds).toEqual(toolIds);
+  });
+
   it('sets lastStopReason to completed on a normal (non-tool) run', async () => {
     jest.spyOn(OpenAIService.prototype, 'generateText').mockResolvedValue('hi');
     const agent = new Agent({ instructions: 't', llm: 'gpt-4o-mini', stream: false, verbose: false });
