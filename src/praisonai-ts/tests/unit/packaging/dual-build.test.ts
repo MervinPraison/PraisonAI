@@ -1,0 +1,128 @@
+/**
+ * Dual ESM+CJS build — behavioural packaging tests.
+ *
+ * These tests exercise the *emitted* build output, not just declarations, to
+ * guard the concrete regression in the issue: a CJS-only build downlevels every
+ * `await import()` into a `require()`, which browser/React-Native bundlers cannot
+ * resolve. The dual ESM build must instead preserve dynamic `import()` so it
+ * survives as a lazy chunk.
+ *
+ * The tests build the ESM output on demand (idempotent) and then:
+ *   1. Assert emitted ESM modules keep `import(` (not `require(`) for the lazy
+ *      boundaries their source used — this FAILS on the old CJS-only build.
+ *   2. Actually load the ESM entry point via native dynamic import() and
+ *      construct an Agent — proving the entry works, not merely that it exists.
+ */
+
+import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { pathToFileURL } from 'url';
+
+const PKG_ROOT = path.resolve(__dirname, '..', '..', '..');
+const ESM_DIR = path.join(PKG_ROOT, 'dist', 'esm');
+const ESM_ENTRY = path.join(ESM_DIR, 'index.js');
+
+function buildEsmOnce(): void {
+  if (fs.existsSync(ESM_ENTRY)) return;
+  execFileSync('npm', ['run', 'build:esm'], {
+    cwd: PKG_ROOT,
+    stdio: 'inherit',
+  });
+}
+
+function walk(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walk(full));
+    else if (entry.isFile() && full.endsWith('.js')) out.push(full);
+  }
+  return out;
+}
+
+describe('praisonai dual ESM+CJS packaging', () => {
+  beforeAll(() => {
+    buildEsmOnce();
+  }, 300000);
+
+  it('emits an ESM entry point and marks dist/esm as a module', () => {
+    expect(fs.existsSync(ESM_ENTRY)).toBe(true);
+    const esmPkg = JSON.parse(
+      fs.readFileSync(path.join(ESM_DIR, 'package.json'), 'utf8')
+    );
+    expect(esmPkg.type).toBe('module');
+  });
+
+  it('preserves dynamic import() in emitted ESM instead of downleveling to require()', () => {
+    // Pick a representative module whose source uses `await import(`.
+    // simple.ts (the Agent) uses lazy dynamic imports; its ESM output must keep them.
+    const simpleEsm = path.join(ESM_DIR, 'agent', 'simple.js');
+    expect(fs.existsSync(simpleEsm)).toBe(true);
+
+    const code = fs.readFileSync(simpleEsm, 'utf8');
+
+    // The behavioural guarantee: dynamic import() survives (lazy chunk for bundlers).
+    expect(code).toMatch(/\bimport\s*\(/);
+
+    // And it was NOT downleveled into a synchronous require() at those sites,
+    // which is exactly what the CJS-only build produced and what browser/RN
+    // bundlers choke on. Any require() present must come only from the shim
+    // banner (createRequire), never as `Promise.resolve().then(() => require(`.
+    expect(code).not.toMatch(/Promise\.resolve\(\)\.then\([^)]*require\(/);
+    expect(code).not.toMatch(/=\s*require\(/);
+  });
+
+  it('rewrites relative specifiers to explicit .js paths for native ESM resolution', () => {
+    const files = walk(ESM_DIR).filter((f) => !f.endsWith('package.json'));
+    // Scan a bounded sample for speed; assert no bare extensionless relative
+    // import survives (Node's ESM resolver requires explicit extensions).
+    const offenders: string[] = [];
+    for (const file of files) {
+      const code = fs.readFileSync(file, 'utf8');
+      const badFrom = /(?:import|export)[\s\S]*?from\s*['"](\.[^'"]*?)(?<!\.js)(?<!\.json)(?<!\/index)['"]/.test(
+        code
+      );
+      // Only flag if it's a relative path with no extension at all.
+      const m = code.match(/from\s*['"](\.[^'"]+)['"]/g) || [];
+      for (const spec of m) {
+        const inner = spec.replace(/from\s*['"]/, '').replace(/['"]$/, '');
+        if (
+          (inner.startsWith('./') || inner.startsWith('../')) &&
+          !/\.[a-zA-Z0-9]+$/.test(inner)
+        ) {
+          offenders.push(`${path.relative(ESM_DIR, file)}: ${inner}`);
+        }
+      }
+      void badFrom;
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('loads the ESM entry in native Node ESM and constructs an Agent', () => {
+    // Run in a real child Node process so ts-jest cannot rewrite the dynamic
+    // import() into a require(). This proves the *published ESM* actually works
+    // under native ESM resolution, not merely that a symbol is declared.
+    const entryUrl = pathToFileURL(ESM_ENTRY).href;
+    const script = [
+      `const { Agent } = await import(${JSON.stringify(entryUrl)});`,
+      `if (typeof Agent !== 'function') { console.error('NO_AGENT'); process.exit(2); }`,
+      `const a = new Agent({ instructions: 'hi', sessionId: 'packaging-esm-test' });`,
+      `if (a.getSessionId() !== 'packaging-esm-test') { console.error('BAD_SESSION'); process.exit(3); }`,
+      `console.log('ESM_OK');`,
+    ].join('\n');
+
+    const scriptFile = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'praison-esm-')),
+      'load.mjs'
+    );
+    fs.writeFileSync(scriptFile, script);
+
+    const out = execFileSync(process.execPath, [scriptFile], {
+      cwd: PKG_ROOT,
+      encoding: 'utf8',
+    });
+    expect(out).toContain('ESM_OK');
+  }, 120000);
+});
