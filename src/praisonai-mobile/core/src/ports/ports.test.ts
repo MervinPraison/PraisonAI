@@ -57,6 +57,7 @@ test("the shell port is implementable", () => {
   const shell: ShellPort = {
     kind: "fake",
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    keyboardHeightPx: 0,
     onInsetsChanged: noop,
     onKeyboardHeightChanged: noop,
     onLifecycleChanged: noop,

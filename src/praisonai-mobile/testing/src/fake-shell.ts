@@ -8,6 +8,7 @@
  * and layout code that only ever sees them in one order works on a phone and
  * breaks on a tablet.
  */
+import { isOpenableExternally } from "../../core/src/ports/shell.ts";
 import type {
   HapticKind,
   LifecyclePhase,
@@ -42,6 +43,7 @@ export interface FakeShell extends ShellPort {
 
 export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell {
   let insets = initial;
+  let keyboardHeightPx = 0;
   const insetSubs = new Set<(i: SafeAreaInsets) => void>();
   const keyboardSubs = new Set<(px: number) => void>();
   const lifecycleSubs = new Set<(p: LifecyclePhase) => void>();
@@ -68,6 +70,10 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
     },
 
     onInsetsChanged: (cb) => subscribe(insetSubs, cb),
+    get keyboardHeightPx() {
+      return keyboardHeightPx;
+    },
+
     onKeyboardHeightChanged: (cb) => subscribe(keyboardSubs, cb),
     onLifecycleChanged: (cb) => subscribe(lifecycleSubs, cb),
 
@@ -91,6 +97,12 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
     },
 
     async openExternal(url) {
+      // The fake enforces the port's scheme rule too. A permissive fake is how
+      // a real adapter's guard goes untested: every test would pass against the
+      // fake and the rule would exist in exactly one implementation.
+      if (!isOpenableExternally(url)) {
+        throw new TypeError(`refusing to open ${url.split(":")[0] ?? ""}: externally`);
+      }
       opened.push(url);
     },
 
@@ -100,6 +112,10 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
       for (const cb of insetSubs) cb(next);
     },
     setKeyboardHeight(px) {
+      // Snapshot FIRST, then notify -- the port's ordering rule. A subscriber
+      // re-reading the snapshot during its own callback must not see the old
+      // value, or the layout lands one transition behind.
+      keyboardHeightPx = px;
       for (const cb of keyboardSubs) cb(px);
     },
     setLifecycle(phase) {
