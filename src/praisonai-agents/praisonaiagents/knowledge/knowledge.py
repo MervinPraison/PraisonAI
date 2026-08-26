@@ -532,6 +532,19 @@ class Knowledge:
                                 all_results.extend(result.get('results', []))
                             except Exception as e:
                                 logger.warning(f"Failed to process file {file_path}: {e}")
+                            except BaseException as e:
+                                # A native backend (e.g. Chroma's rust bindings)
+                                # can raise a pyo3 PanicException, which is a
+                                # BaseException and would otherwise unwind and
+                                # kill the process. Re-raise as a Python
+                                # RuntimeError so callers stay alive (issue #4376).
+                                logger.error(
+                                    "Knowledge backend crashed while indexing %s: %s",
+                                    file_path, e,
+                                )
+                                raise RuntimeError(
+                                    f"Knowledge indexing backend crashed on {file_path}"
+                                ) from e
                 
                 if not all_results:
                     logger.warning(f"No supported files found in directory: {input_path}")

@@ -330,3 +330,37 @@ class TestChromaKnowledgeAdapterWhereFilters:
 
         where = adapter.collection.query.call_args.kwargs["where"]
         assert where == {"user_id": "u1"}
+
+
+class TestChromaDefaultPersistPath:
+    """Regression tests for issue #4376 (Windows crash/hang on default persist)."""
+
+    def test_default_chroma_path_is_absolute(self):
+        """Default persist path must be absolute, not the cwd-relative 'knowledge_db'."""
+        import os
+        from praisonaiagents.knowledge.adapters.factories import _default_chroma_path
+
+        path = _default_chroma_path()
+        assert os.path.isabs(path), f"Default chroma path should be absolute: {path}"
+        assert path != "knowledge_db"
+        assert path.rstrip("/\\").endswith("chroma")
+
+    def test_persistent_client_baseexception_becomes_runtimeerror(self):
+        """A rust PanicException (BaseException) must surface as a Python RuntimeError."""
+        import tempfile
+        from unittest.mock import MagicMock
+        from praisonaiagents.knowledge.adapters.factories import ChromaKnowledgeAdapter
+
+        class FakePanic(BaseException):
+            pass
+
+        fake_chromadb = MagicMock()
+        fake_chromadb.PersistentClient.side_effect = FakePanic("range start index 10")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with pytest.raises(RuntimeError, match="Chroma persist failed"):
+                ChromaKnowledgeAdapter(
+                    chromadb=fake_chromadb,
+                    markitdown=MagicMock(),
+                    config={"vector_store": {"config": {"path": tmp}}},
+                )
