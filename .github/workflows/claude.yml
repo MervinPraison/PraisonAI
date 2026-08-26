@@ -70,20 +70,8 @@ jobs:
             if (content.includes('documentation') || content.includes('docs')) {
               labels.push('documentation');
             }
-            const isPraisonaiJsFocus =
-              content.includes('praisonai-js') ||
-              content.includes('praisonai-ts') ||
-              content.includes('src/praisonai-ts') ||
-              content.includes('typescript sdk') ||
-              content.includes('javascript sdk') ||
-              (content.includes('typescript') && content.includes('praisonai')) ||
-              (content.includes('javascript') && content.includes('praisonai')) ||
-              (content.includes('npm') && content.includes('praisonai') && !content.includes('pypi'));
-            if (isPraisonaiJsFocus || content.includes('typescript') || content.includes('javascript') || content.includes('npm')) {
+            if (content.includes('typescript') || content.includes('javascript') || content.includes('npm')) {
               labels.push('javascript');
-            }
-            if (isPraisonaiJsFocus) {
-              labels.push('praisonai-js');
             }
 
             // Apply labels
@@ -112,7 +100,7 @@ jobs:
                   '',
                   '_Bug and enhancement reports are auto-triaged with Claude. Questions and other issues: a maintainer can comment `@claude` to trigger analysis._',
                   '',
-                  '**Routing:** TypeScript/JavaScript SDK → [praisonai-js](https://github.com/MervinPraison/praisonai-js) (canonical; monorepo `src/praisonai-ts/` is synced from there). Agent-callable tools → [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools); lifecycle plugins (tracing/hooks/guardrails) → [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins).'
+                  '**Routing:** Agent-callable tools → [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools); lifecycle plugins (tracing/hooks/guardrails) → [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins). TypeScript/JavaScript SDK fixes land in `src/praisonai-ts/` in this repo.'
                 ].join('\n')
               });
             }
@@ -305,7 +293,7 @@ jobs:
 
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.
-            SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify praisonai-rust or src/praisonai-ts in this repo — TypeScript/JavaScript SDK work belongs in MervinPraison/praisonai-js (STEP 3-ALT).
+            SCOPE: Python SDK (praisonaiagents, praisonai) and TypeScript SDK (src/praisonai-ts/) live in this monorepo. Do NOT modify src/praisonai-rust. For TS issues read src/praisonai-ts/AGENTS.md.
             AIM: This package must stay LIGHTWEIGHT AND POWERFUL. Do a CRITICAL REVIEW at each stage (issue triage, fix planning, PR review/implementation) and reject scope creep for the sake of adding features. Prefer existing Agent capabilities (instructions/backstory/tools/hooks/memory) over new params/modules/exports. Even when fixing a raised issue, keep the fix minimal and lightweight — do NOT expand the surface area or add knobs with no live consumer.
 
             STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
@@ -317,8 +305,8 @@ jobs:
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
               5. Plugins → MervinPraison/PraisonAI-Plugins: framework lifecycle extensions (tracing, logging, metrics, hooks, guardrails). Not agent tools — use STEP 3-ALT.
               6. Sandbox backends (optional/niche, e.g. Capsule) → PraisonAI-Plugins via `praisonai.sandbox` entry point; core keeps protocol/config/manager only.
-              7. TypeScript/JavaScript SDK → MervinPraison/praisonai-js: canonical npm SDK repo. Do NOT implement in src/praisonai-ts/ here — clone praisonai-js and use STEP 3-ALT. After merge there, run **Sync to PraisonAI Monorepo** workflow to update src/praisonai-ts/.
-              For items routed to an EXTERNAL repository (Tools, Docs, Plugins, praisonai-js), follow STEP 3-ALT below.
+              7. TypeScript/JavaScript SDK → src/praisonai-ts/ in this monorepo (not praisonaiagents/).
+              For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory). If it does, reject the change as scope creep and prefer the existing capability — the aim is lightweight and powerful, not more knobs.
             - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
             - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
@@ -331,7 +319,7 @@ jobs:
             ${{ steps.check_fork.outputs.is_pr == 'true' && (steps.check_fork.outputs.is_fork != 'true' || steps.check_fork.outputs.can_push_fork == 'true') && steps.check_fork.outputs.merge_state != 'DIRTY' && format('STEP 3 — IMPLEMENT ON EXISTING PR (branch: {0}, PR #{1}{2}):\n- DO NOT create a new branch or PR\n- git checkout {0}\n- Implement minimal, focused fixes from reviewer feedback\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description>"\n- Push: git push origin {0}\n- Comment a summary of exact files modified and what you skipped\n', steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.pr_number, steps.check_fork.outputs.can_push_fork == 'true' && format(', fork: {0}', steps.check_fork.outputs.fork_repo) || '') || '' }}
             ${{ steps.check_fork.outputs.is_pr != 'true' && 'STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):\n- Create a fix branch: git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\n- Implement a minimal, focused fix\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description> (fixes #$ISSUE_NUMBER)"\n- Push: git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\nCRITICAL: After pushing, you MUST immediately run: gh pr create --title "fix: <title>" --body "Fixes #$ISSUE_NUMBER" --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\nDo NOT stop after pushing. Do NOT say "manually create a PR". Always create the PR automatically.\n' || '' }}
 
-            STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins, praisonai-js):
+            STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
             When work must happen in a different repository, follow these steps EXACTLY. Do NOT attempt to use `cd`, as directory state is not preserved. Use `git -C` for all commands.
             a) Clone the repository:
                gh repo clone MervinPraison/<REPO_NAME> /tmp/<REPO_NAME>
@@ -349,11 +337,11 @@ jobs:
                gh pr create -R MervinPraison/<REPO_NAME> --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d) --title "feat: <title>" --body "Fixes MervinPraison/PraisonAI#$ISSUE_NUMBER
 
                <body>"
-            h) Comment on THIS PraisonAI issue with the external PR URL. For praisonai-js: note that after merge, a maintainer runs **Sync to PraisonAI Monorepo** on praisonai-js (Actions → sync workflow) to update src/praisonai-ts/.
+            h) Comment on THIS PraisonAI issue with the external PR URL.
 
             STEP 4 — TEST:
-            - For SDK changes: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
-            - For praisonai-js: cd /tmp/praisonai-js && npm install && npm run build && npm test
+            - For Python SDK changes: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
+            - For TypeScript SDK changes: cd src/praisonai-ts && npm install && npm run build && npm test
             - For docs changes: verify files exist and are valid markdown/MDX
             - Ensure no regressions
 

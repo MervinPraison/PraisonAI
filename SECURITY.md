@@ -8,9 +8,7 @@ PraisonAI takes security seriously. We appreciate responsible disclosure from re
 |---------|----------|-------------|
 | `praisonaiagents` | [PyPI](https://pypi.org/project/praisonaiagents/) | `src/praisonai-agents/` |
 | `praisonai` | [PyPI](https://pypi.org/project/praisonai/) | `src/praisonai/` |
-| `praisonai` | [npm](https://www.npmjs.com/package/praisonai) | [praisonai-js](https://github.com/MervinPraison/praisonai-js) (canonical); mirrored at `src/praisonai-ts/` |
-
-Report npm/TypeScript vulnerabilities on **PraisonAI** (hub intake) or [praisonai-js](https://github.com/MervinPraison/praisonai-js). Fixes land in praisonai-js first.
+| `praisonai` | [npm](https://www.npmjs.com/package/praisonai) | `src/praisonai-ts/` |
 
 Report issues against the **specific package** where the vulnerability exists. A platform-only issue does not necessarily affect the core SDK, and vice versa.
 

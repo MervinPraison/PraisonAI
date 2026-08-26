@@ -1,86 +1,41 @@
 ---
 name: praisonai-js-hub-intake
 description: >-
-  Explains Option B hub intake for PraisonAI TypeScript/JavaScript (npm praisonai):
-  accept TS issues on MervinPraison/PraisonAI, implement fixes in MervinPraison/praisonai-js,
-  sync to src/praisonai-ts/. Use when routing issues, implementing TS fixes, sync workflows,
-  merge-gate TS paths, or when the user mentions praisonai-js, praisonai-ts, npm SDK, or TS hub intake.
+  Explains TypeScript/JavaScript issue and fix routing in the PraisonAI monorepo:
+  TS issues filed on MervinPraison/PraisonAI, fixes implemented in src/praisonai-ts/.
+  Use when routing npm/TS issues, merge-gate TS paths, or when the user mentions
+  praisonai-ts, javascript label, or TypeScript SDK in the monorepo.
 ---
 
-# praisonai-js hub intake (Option B)
+# TypeScript SDK in the PraisonAI monorepo
 
-## Model in one sentence
+## Model
 
-**Users file TypeScript issues on [PraisonAI](https://github.com/MervinPraison/PraisonAI); fixes land in [praisonai-js](https://github.com/MervinPraison/praisonai-js); the monorepo `src/praisonai-ts/` is a sync mirror only.**
+**Issues and fixes both live in `MervinPraison/PraisonAI`.** TypeScript code path: `src/praisonai-ts/`.
 
-Do **not** ask users to re-file on praisonai-js unless they opened a duplicate on the wrong repo.
+Do **not** route TS fixes to external repos in automation prompts. The separate [praisonai-js](https://github.com/MervinPraison/praisonai-js) repo is optional for npm publishing/mirror — not the fix target for hub issues.
 
 ## Routing table
 
-| Topic | Report | Fix repo | Monorepo mirror |
-|-------|--------|----------|-----------------|
-| Python SDK / CLI | PraisonAI | `src/praisonai-agents/`, `src/praisonai/` | — |
-| TypeScript / npm `praisonai` | PraisonAI (preferred) or praisonai-js | **praisonai-js** | `src/praisonai-ts/` |
-| Cross-language parity | PraisonAI | Often both Python + praisonai-js | sync after TS merge |
-| Agent-callable tools | PraisonAI | PraisonAI-Tools | — |
-| Lifecycle plugins | PraisonAI | PraisonAI-Plugins | — |
-
-## End-to-end flow
-
-```
-Issue on PraisonAI
-  → issue-triage: labels javascript, praisonai-js (if TS focus)
-  → claude label → Claude STEP 3-ALT clones praisonai-js
-  → PR on praisonai-js with body: Fixes MervinPraison/PraisonAI#N
-  → merge on praisonai-js (CI + merge gate there)
-  → Sync to PraisonAI Monorepo workflow on praisonai-js
-  → PR on PraisonAI: sync: update src/praisonai-ts/...
-```
+| Topic | Report | Fix path |
+|-------|--------|----------|
+| Python SDK / CLI | PraisonAI | `src/praisonai-agents/`, `src/praisonai/` |
+| TypeScript / npm | PraisonAI | **`src/praisonai-ts/`** |
+| Agent-callable tools | PraisonAI | PraisonAI-Tools (external) |
+| Lifecycle plugins | PraisonAI | PraisonAI-Plugins (external) |
 
 ## Agent rules
 
-1. **Never implement TS features in `src/praisonai-ts/` on PraisonAI** — edit praisonai-js instead.
-2. **External PR body** must include `Fixes MervinPraison/PraisonAI#<n>` when fixing a hub issue.
-3. **After praisonai-js merge**, run sync workflow (or tell maintainer to):
-   ```bash
-   gh workflow run "Sync to PraisonAI Monorepo" \
-     --repo MervinPraison/praisonai-js \
-     -f upstream_issue=<issue_number>
-   ```
-4. **Merge gate on PraisonAI** blocks direct `src/praisonai-ts/` changes unless sync PR (title `sync:` or body mentions praisonai-js).
-5. **Tests for TS fixes**: `npm install && npm run build && npm test` in praisonai-js clone.
+1. TS fixes → edit **`src/praisonai-ts/`** in the monorepo.
+2. Read **`src/praisonai-ts/AGENTS.md`** for TS architecture rules.
+3. Tests: `cd src/praisonai-ts && npm install && npm run build && npm test`.
+4. Merge gate FINAL reviewer: Python + `src/praisonai-ts/` in scope; **no praisonai-js routing line**.
+5. External STEP 3-ALT only for Tools, Docs, Plugins — not TS.
 
-## TS issue detection (PraisonAI triage)
+## Issue triage
 
-Labels `javascript` + `praisonai-js` when issue mentions: `praisonai-js`, `praisonai-ts`, `src/praisonai-ts`, `typescript`+`praisonai`, `npm`+`praisonai` (not pypi).
+`javascript` label when issue mentions typescript, javascript, or npm.
 
-## Key files
+## Key automation files
 
-See [reference.md](reference.md) for paths in both repos.
-
-## Quick commands
-
-```bash
-# Sync Claude secrets to praisonai-js (from PraisonAI hub)
-gh workflow run "Sync Claude Secrets" \
-  --repo MervinPraison/PraisonAI \
-  -f target_repo=MervinPraison/praisonai-js
-
-# Sync code praisonai-js → monorepo mirror
-gh workflow run "Sync to PraisonAI Monorepo" \
-  --repo MervinPraison/praisonai-js \
-  -f upstream_issue=1234
-```
-
-## Related docs
-
-- Monorepo: `CONTRIBUTING.md` (hub intake table)
-- praisonai-js: `AGENTS.md` §2.1.1 Hub intake
-- Security: `SECURITY.md` (npm canonical = praisonai-js)
-
-## Cursor skill locations
-
-| Repo | Path |
-|------|------|
-| PraisonAI monorepo | `.cursor/skills/praisonai-js-hub-intake/` |
-| praisonai-js | `.cursor/skills/praisonai-js-hub-intake/` |
+See [reference.md](reference.md).

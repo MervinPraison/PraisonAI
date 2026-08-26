@@ -35,7 +35,7 @@ steps:
       Third, read architecture guidelines: execute_command 'cat src/praisonai-agents/AGENTS.md'.
 
       Fourth, decide routing before planning:
-      - TypeScript/JavaScript SDK → MervinPraison/praisonai-js: canonical npm repo. Do NOT edit src/praisonai-ts/ in this monorepo. Cross-link upstream issue in external PR body: Fixes MervinPraison/PraisonAI#N.
+      - TypeScript/JavaScript SDK → src/praisonai-ts/ in this monorepo (read src/praisonai-ts/AGENTS.md).
       - Tools → PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs).
       - Plugins → PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails).
       - Sandbox backends → PraisonAI-Plugins via `praisonai.sandbox` entry point.
@@ -45,7 +45,7 @@ steps:
       - If YES: identify the exact files and lines that must change. Output a concrete file-level plan.
       - If NO (question, discussion, duplicate, invalid): say so clearly. No code changes needed.
 
-      Output: routing decision (Core / Wrapper / TS-external / Tools-external / Plugins-external / No-change), validation result, and exact files/lines to change.
+      Output: routing decision (Core / Wrapper / TS-monorepo / Tools-external / Plugins-external / No-change), validation result, and exact files/lines to change.
     expected_output: A decision on whether code changes are needed, and if so a concrete file-level plan.
 
   - name: Implement Fix

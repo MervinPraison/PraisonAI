@@ -8,7 +8,7 @@ assignees: ''
 
 ## SDK / package
 - [ ] Python (`pip install praisonai` / `praisonaiagents`)
-- [ ] TypeScript / JavaScript (`npm install praisonai`) — fixes land in [praisonai-js](https://github.com/MervinPraison/praisonai-js); you can report here or there
+- [ ] TypeScript / JavaScript (`npm install praisonai`) — fixes in `src/praisonai-ts/`
 - [ ] Cross-language / parity (file here on PraisonAI)
 
 ## Environment
