@@ -77,3 +77,63 @@ export type {
   ChatRow,
   UnreadableRow,
 } from "./chats/list-view-model.ts";
+
+export {
+  CONFIGURED,
+  GENERAL_SECTION,
+  NOT_SET,
+  SOFTWARE_SECRETS_WARNING,
+  buildSettings,
+  controlFor,
+  labelOf,
+  rowsOf,
+  secretRowsOf,
+  validateInput,
+} from "./settings/view-model.ts";
+export type {
+  ControlKind,
+  PresenceState,
+  SecretPresence,
+  SecretRow,
+  SecretStatus,
+  SettingsRow,
+  SettingsSection,
+  SettingsView,
+  ValueRow,
+  WarningRow,
+} from "./settings/view-model.ts";
+
+export {
+  COMPOSER_LINE_PX,
+  COMPOSER_MAX_PX,
+  COMPOSER_MIN_PX,
+  COMPOSER_PADDING_PX,
+  DEFAULT_SUBMIT_POLICY,
+  DRAFT_NEW_CHAT,
+  canSend,
+  clearDraft,
+  draftOf,
+  emptyComposer,
+  focusDraft,
+  heightFor,
+  keyAction,
+  lineCountOf,
+  restoreComposer,
+  setDraft,
+  snapshotOf,
+  submit,
+} from "./composer/composer.ts";
+export type {
+  ComposerSnapshot,
+  ComposerState,
+  KeyAction,
+  KeyPress,
+  SubmitPolicy,
+  SubmitResult,
+} from "./composer/composer.ts";
+
+/** The renderer's half of the transcript: what to change, computed without a
+ *  DOM. Exported here because a renderer that cannot reach it rebuilds the
+ *  whole list on every publish, which is the jank this package exists to avoid. */
+export { emptyRender, reconcile, signatureOf } from "./render/reconcile.ts";
+export type { Diff, Op, RenderState } from "./render/reconcile.ts";

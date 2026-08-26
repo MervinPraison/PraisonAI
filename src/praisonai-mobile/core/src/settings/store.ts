@@ -30,6 +30,19 @@ export interface SettingDef {
   readonly choices?: readonly SettingValue[];
   /** Secret values are routed to SecretsPort and never to StoragePort. */
   readonly secret?: boolean;
+  /**
+   * WHERE a secret def's value lives in the keychain.
+   *
+   * Without this a def could say "this is a secret" and not say which slot it
+   * maps to, so a settings screen could render presence and still had no
+   * sanctioned way to know where `setSecret` should write -- the mapping had
+   * to be carried in by whoever built the view, which puts the one identifier
+   * that addresses a stored credential outside the registry that declares it.
+   *
+   * Required in practice for `secret: true`; `secretRefOf` refuses the pair
+   * that does not make sense rather than letting it reach a keychain call.
+   */
+  readonly secretRef?: SecretRef;
   /** Clamp or reject. Returns the value to store, or null to refuse it. */
   readonly validate?: (value: SettingValue) => SettingValue | null;
 }
@@ -70,6 +83,18 @@ export interface SettingsFacade {
   /** False on the web adapter. The settings view warns rather than implying a
    *  safety the platform is not providing. */
   readonly secretsAreHardwareBacked: boolean;
+}
+
+/**
+ * The keychain address for a def, or null when there isn't one.
+ *
+ * Both mismatches are refused rather than guessed: a secret def with no ref
+ * has nowhere to write, and a non-secret def with a ref would route an
+ * ordinary setting into the keychain, where nothing would ever read it back.
+ */
+export function secretRefOf(def: SettingDef): SecretRef | null {
+  if (def.secret !== true) return null;
+  return def.secretRef ?? null;
 }
 
 const STORAGE_KEY = { namespace: "settings" as const, id: "app" };

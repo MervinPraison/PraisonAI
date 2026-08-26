@@ -27,6 +27,10 @@ export const ENGINE_PRAISONAI_TS = "praisonai-ts";
  * `label` rather than the key, because a settings screen showing `maxSteps` to
  * a user is a screen written by someone who never opened it.
  */
+/** The one secret this app stores. It is the keychain lookup, so changing it
+ *  silently orphans every key already on a device. */
+export const OPENAI_KEY = { slot: "openai" as const, account: "default" };
+
 export const SETTING_DEFS: readonly SettingDef[] = [
   {
     key: "engineId",
@@ -80,11 +84,9 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     help: "Stored in the device keychain where one is available.",
     section: "Credentials",
     secret: true,
+    secretRef: OPENAI_KEY,
   },
 ];
-
-/** The one secret this app stores. */
-export const OPENAI_KEY = { slot: "openai" as const, account: "default" };
 
 export interface RegistryDeps {
   readonly settings: SettingsFacade;

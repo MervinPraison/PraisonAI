@@ -8,7 +8,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clampNum, createSettingsStore, facadeFor, type SettingDef } from "./store.ts";
+import {
+  clampNum,
+  createSettingsStore,
+  facadeFor,
+  secretRefOf,
+  type SettingDef,
+} from "./store.ts";
 import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../../testing/src/fake-secrets.ts";
 
@@ -236,4 +242,35 @@ test("clearing a key through the facade removes it", async () => {
   await facade.setSecret(ref, "sk-x");
   await facade.clearSecret(ref);
   assert.equal(await facade.hasSecret(ref), false);
+});
+
+// ---- a secret def knows where its own value lives --------------------------
+
+test("a secret def carries the keychain address its value belongs at", () => {
+  // Without this a def could declare "this is a secret" and not say WHICH
+  // slot, so a settings screen could render presence and still not know where
+  // setSecret should write -- the one identifier that addresses a stored
+  // credential lived outside the registry that declares it.
+  const def: SettingDef = {
+    key: "apiKey",
+    default: "",
+    secret: true,
+    secretRef: { slot: "openai", account: "default" },
+  };
+  assert.deepEqual(secretRefOf(def), { slot: "openai", account: "default" });
+});
+
+test("a secret def with no address resolves to null rather than a guess", () => {
+  // Guessing a slot from the key name would write a real credential to an
+  // address nothing reads back, and report success.
+  assert.equal(secretRefOf({ key: "apiKey", default: "", secret: true }), null);
+});
+
+test("an ordinary def has no keychain address even if one is written on it", () => {
+  // The other mismatch: routing a non-secret setting into the keychain puts it
+  // somewhere `get` never looks, so the value silently stops existing.
+  assert.equal(
+    secretRefOf({ key: "model", default: "x", secretRef: { slot: "openai", account: "default" } }),
+    null,
+  );
 });
