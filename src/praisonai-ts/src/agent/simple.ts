@@ -5,6 +5,7 @@ import type { DbAdapter, DbMessage, DbRun } from '../db/types';
 import { randomUUID } from 'crypto';
 import type { LLMProvider } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
+import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 
 /**
  * Agent Configuration
@@ -76,6 +77,15 @@ export interface SimpleAgentConfig {
   /** Map of tool function implementations */
   toolFunctions?: Record<string, Function>;
   /**
+   * Human-in-the-loop approval gate for tool calls (mirrors Python's
+   * `approval`). When `true`, every tool is gated behind an interactive CLI
+   * prompt (approve/deny per call); pass an `ApprovalManager` instance to use
+   * custom handlers / auto-approve-deny rules (e.g. a UI responder). Denied
+   * calls are reported back to the model as the tool result rather than
+   * throwing, so it can course-correct.
+   */
+  approval?: boolean | ApprovalManager;
+  /**
    * Maximum number of tool-call round-trips before the loop is aborted
    * (default: 5). When the cap is reached the run throws instead of
    * silently returning an empty string, so exhaustion is observable.
@@ -122,6 +132,7 @@ export class Agent {
   private outputSchema?: Record<string, any>;
   private outputSchemaName: string = 'response';
   private toolFunctions: Record<string, Function> = {};
+  private approvalManager?: ApprovalManager;
   private maxIterations: number;
   private dbAdapter?: DbAdapter;
   private sessionId: string;
@@ -170,6 +181,18 @@ export class Agent {
     this.tools = undefined;
     this.outputSchema = config.outputSchema;
     this.outputSchemaName = config.outputSchemaName || 'response';
+    if (config.approval instanceof ApprovalManager) {
+      this.approvalManager = config.approval;
+    } else if (config.approval === true) {
+      // `true` shorthand: gate every tool via an interactive CLI prompt.
+      // Without a handler, requestApproval() would fall through to a Promise
+      // awaiting respond() that nobody calls — stalling every tool for the
+      // full 5-min timeout before denying. Wire the built-in prompt so the
+      // default is usable and safe (blocks until the operator answers).
+      const manager = new ApprovalManager();
+      manager.onApprovalRequest(createCLIApprovalPrompt());
+      this.approvalManager = manager;
+    }
     this.maxIterations = config.maxIterations ?? 5;
     this.dbAdapter = config.db;
     this.sessionId = config.sessionId || this.generateSessionId();
@@ -520,7 +543,27 @@ export class Agent {
         if (!this.toolFunctions[name]) {
           throw new Error(`Function ${name} not registered`);
         }
-        
+
+        // Human-in-the-loop gate: block the tool until approved. A denial is
+        // fed back to the model as the tool result so it can course-correct,
+        // rather than aborting the run.
+        if (this.approvalManager) {
+          const approved = await this.approvalManager.requestApproval({
+            toolInvocationId: id,
+            toolName: name,
+            input: args,
+          });
+          if (!approved) {
+            await Logger.debug(`Tool call denied by approval gate: ${name}`);
+            results.push({
+              role: 'tool',
+              tool_call_id: id,
+              content: `Error: Tool call "${name}" was denied by the approval gate.`
+            });
+            continue;
+          }
+        }
+
         // Call the function - registered wrappers handle positional mapping
         const result = await this.toolFunctions[name](args);
 

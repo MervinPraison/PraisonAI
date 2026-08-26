@@ -4,6 +4,7 @@
  */
 import { Agent } from '../../../src/agent/simple';
 import { OpenAIService } from '../../../src/llm/openai';
+import { ApprovalManager } from '../../../src/ai/tool-approval';
 
 jest.mock('openai');
 
@@ -172,6 +173,86 @@ describe('Agent constructor tool processing', () => {
     const registered = (agent as any).toolFunctions['getWeatherArrow'];
     const out = await registered({ city: 'Paris' });
     expect(out).toBe('Weather in Paris: 20C');
+  });
+});
+
+describe('Agent tool approval gate', () => {
+  const objTool = function lookup(id: string) {
+    return { id, ok: true };
+  };
+
+  it('runs the tool when no approval gate is configured', async () => {
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false });
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+    expect(results[0].content).toBe('{"id":"x","ok":true}');
+  });
+
+  it('blocks the tool and reports the denial back when approval is denied', async () => {
+    const manager = new ApprovalManager();
+    manager.onApprovalRequest(async () => false);
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: manager });
+    const spy = jest.fn(objTool);
+    (agent as any).toolFunctions.lookup = spy;
+
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(results[0].tool_call_id).toBe('call_1');
+    expect(results[0].content).toContain('denied by the approval gate');
+  });
+
+  it('runs the tool when approval is granted', async () => {
+    const manager = new ApprovalManager();
+    manager.onApprovalRequest(async () => true);
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: manager });
+
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+    expect(results[0].content).toBe('{"id":"x","ok":true}');
+  });
+
+  it('approval: true creates a default ApprovalManager with an interactive handler (no 5-min stall)', () => {
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: true });
+    const manager = (agent as any).approvalManager as ApprovalManager;
+    expect(manager).toBeInstanceOf(ApprovalManager);
+    // A handler must be wired so requestApproval resolves via the handler
+    // path instead of falling through to the respond()-awaiting Promise,
+    // which would block for the full default timeout before denying.
+    expect((manager as any).handlers.length).toBeGreaterThan(0);
+  });
+
+  it('approval: true resolves via its handler without waiting for the timeout', async () => {
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: true });
+    const manager = (agent as any).approvalManager as ApprovalManager;
+    // Deny synchronously via the wired handler; must resolve immediately.
+    (manager as any).handlers = [async () => false];
+    const results = await Promise.race([
+      (agent as any).processToolCalls([
+        { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+      ]),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('stalled')), 1000)),
+    ]) as Array<{ tool_call_id: string; content: string }>;
+    expect(results[0].content).toContain('denied by the approval gate');
+  });
+
+  it('passes the tool call id as toolInvocationId (correlation, never positional)', async () => {
+    const manager = new ApprovalManager();
+    const spy = jest.spyOn(manager, 'requestApproval').mockResolvedValue(true);
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: manager });
+
+    await (agent as any).processToolCalls([
+      { id: 'call_42', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ toolInvocationId: 'call_42', toolName: 'lookup', input: { id: 'x' } }),
+    );
+    spy.mockRestore();
   });
 });
 
