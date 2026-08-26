@@ -28,7 +28,7 @@ class DataDirectory(unittest.TestCase):
 
     def test_macos_uses_application_support(self):
         got = server.default_data_dir("darwin", home=pathlib.PurePosixPath("/Users/x"), env={})
-        self.assertEqual(str(got), "/Users/x/Library/Application Support/PraisonAI")
+        self.assertEqual(got, pathlib.Path("/Users/x/Library/Application Support/PraisonAI"))
 
     def test_windows_uses_appdata_not_a_library_folder(self):
         got = server.default_data_dir(
@@ -51,18 +51,18 @@ class DataDirectory(unittest.TestCase):
         got = server.default_data_dir(
             "linux", home=pathlib.PurePosixPath("/home/x"),
             env={"XDG_DATA_HOME": "/mnt/data/xdg"})
-        self.assertEqual(str(got), "/mnt/data/xdg/PraisonAI")
+        self.assertEqual(got, pathlib.Path("/mnt/data/xdg/PraisonAI"))
 
     def test_linux_without_xdg_falls_back_to_the_spec_default(self):
         got = server.default_data_dir("linux", home=pathlib.PurePosixPath("/home/x"), env={})
-        self.assertEqual(str(got), "/home/x/.local/share/PraisonAI")
+        self.assertEqual(got, pathlib.Path("/home/x/.local/share/PraisonAI"))
 
     def test_the_explicit_override_wins_everywhere(self):
         for platform in ("darwin", "win32", "linux"):
             got = server.default_data_dir(
                 platform, home=pathlib.PurePosixPath("/home/x"),
                 env={"PRAISONAI_DESKTOP_HOME": "/tmp/chosen"})
-            self.assertEqual(str(got), "/tmp/chosen", platform)
+            self.assertEqual(got, pathlib.Path("/tmp/chosen"), platform)
 
 
 class SignalRegistration(unittest.TestCase):
@@ -314,7 +314,12 @@ class SecretDeletion(unittest.TestCase):
 
     def test_a_delete_that_no_store_can_satisfy_reports_failure(self):
         self.primary.up = False
-        broken = server.FileSecretStore(pathlib.Path("/nonexistent/nope"))
+        # A *file* stands where the store wants a directory, so mkdir fails
+        # with NotADirectoryError on every platform -- unlike a made-up
+        # absolute path, which a Windows runner may happily create.
+        blocker = pathlib.Path(self.home) / "not-a-directory"
+        blocker.write_text("", encoding="utf-8")
+        broken = server.FileSecretStore(blocker / "store")
         store = server.FallbackSecretStore(self.primary, broken)
         self.assertFalse(store.set("api_key", ""),
                          "a delete nothing could perform reported success")
@@ -354,18 +359,33 @@ class Encoding(unittest.TestCase):
                          "interpreter=C:\\Users\\\u7530\u4e2d\\python.exe\n")
 
     def _in_c_locale(self, statement):
-        """Run one statement against the engine with a non-UTF-8 locale."""
+        """Run one statement against the engine with a non-UTF-8 locale.
+
+        The statement goes through a file rather than `-c`. Python decodes the
+        `-c` argument with the filesystem encoding, which under LC_ALL=C on
+        Linux is ASCII with surrogateescape -- so a non-ASCII character in the
+        statement itself arrived as unpaired surrogates and died before
+        reaching the code under test. Source *files* are read as UTF-8
+        regardless of locale (PEP 3120), so this tests what it means to.
+        """
         import subprocess
         engine = os.path.dirname(os.path.abspath(server.__file__))
         code = ("import pathlib, sys\n"
                 f"sys.path.insert(0, {engine!r})\n"
                 "import server\n"
                 f"{statement}\n")
+        script = pathlib.Path(self.home) / "_c_locale_case.py"
+        script.write_text(code, encoding="utf-8")
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, str(script)],
             env=dict(os.environ, LC_ALL="C", LANG="C",
                      PYTHONCOERCECLOCALE="0", PYTHONUTF8="0"),
-            capture_output=True, text=True, timeout=60)
+            # encoding, not bare text=True: text=True decodes the child's
+            # output with the *parent's* default encoding -- cp1252 on a
+            # Windows runner -- so a test about UTF-8 handling was reading its
+            # own result through a locale codec and failing on the round trip
+            # rather than on anything the engine did.
+            capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(result.returncode, 0,
                          f"failed under a C locale:\n{result.stderr[-800:]}")
         return result.stdout

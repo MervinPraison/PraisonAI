@@ -167,7 +167,16 @@ mod platform_layout {
         // colon of its own, so "does it contain ':'" cannot tell a separator
         // from a path and would pass either way.
         let env = spawn_env(&windows_layout(), &inherited, Platform::Windows);
-        assert_eq!(env["PATH"], "C:/data/venv/Scripts;C:/Windows/System32");
+        // Split on the separator rather than comparing the whole string: the
+        // separator *between entries* is what this is about, and asserting the
+        // whole value also pins the separator *inside* a path, which is the
+        // host's business -- PathBuf::join writes a backslash when the tests
+        // themselves run on Windows, and this failed there for that reason
+        // while the product was correct.
+        let entries: Vec<&str> = env["PATH"].split(';').collect();
+        assert_eq!(entries.len(), 2, "PATH did not split into two entries: {}", env["PATH"]);
+        assert!(entries[0].ends_with("Scripts"), "{}", entries[0]);
+        assert_eq!(entries[1], "C:/Windows/System32");
     }
 
     #[test]
@@ -187,7 +196,10 @@ mod platform_layout {
             version: "3.12.4".to_string(),
         };
         let env = spawn_env(&layout, &inherited, Platform::Mac);
-        assert_eq!(env["PATH"], "/data/venv/bin:/usr/bin");
+        let entries: Vec<&str> = env["PATH"].split(':').collect();
+        assert_eq!(entries.len(), 2, "PATH did not split into two entries: {}", env["PATH"]);
+        assert!(entries[0].ends_with("bin"), "{}", entries[0]);
+        assert_eq!(entries[1], "/usr/bin");
     }
 
     #[test]
