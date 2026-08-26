@@ -311,15 +311,63 @@ def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
     return agent
 
 
+# Fields whose swap requires side-effects the core SDK owns and the wrapper
+# must not open-code: a bare ``setattr(agent, 'llm', value)`` leaves the cached
+# ``_llm_instance`` / ``_unified_dispatcher`` / ``_llm_init_params`` bound to the
+# previous model, so the request keeps running on the OLD LLM while ``agent.llm``
+# (and the response metadata) reports the new one. Route through the SDK's own
+# invalidator instead (praisonaiagents.Agent._apply_default_llm).
+_SIDE_EFFECT_OVERRIDES = frozenset({"llm"})
+
 _APPLYABLE_OVERRIDES = frozenset({
     "instructions", "goal", "role", "backstory",
-    "llm", "max_iter",
+    "max_iter",
     "verbose", "markdown",
 })
 
 
 class AgentConfigError(ValueError):
     """Raised when an agent_config override is unsupported or cannot be applied."""
+
+
+def _swap_llm(agent: Any, model: Any) -> None:
+    """Swap the agent's model, invalidating the SDK's cached LLM state.
+
+    Prefers the SDK's own ``_apply_default_llm`` (which drops ``_llm_instance``,
+    ``_unified_dispatcher`` and re-seeds ``_llm_init_params`` atomically). That
+    method self-guards when the agent explicitly chose a model *or* was built
+    with a panel descriptor, so both guards are temporarily cleared — an API
+    override IS an explicit choice that supersedes a panel selection. Without
+    clearing ``_panel_descriptor`` the SDK returns early and the request would
+    silently continue on the panel model. Falls back to mirroring the SDK's
+    invalidation contract when the method is absent.
+    """
+    apply = getattr(agent, "_apply_default_llm", None)
+    if callable(apply):
+        had_explicit = getattr(agent, "_llm_explicit", None)
+        had_panel = getattr(agent, "_panel_descriptor", None)
+        agent._llm_explicit = False
+        if had_panel is not None:
+            agent._panel_descriptor = None
+        try:
+            apply(model)
+        finally:
+            if had_explicit is not None:
+                agent._llm_explicit = had_explicit
+            # ``_panel_descriptor`` is intentionally NOT restored: the override
+            # replaces the panel selection for the lifetime of this isolated
+            # clone. Restoring it would let ``_ensure_llm_instance`` rebuild the
+            # panel LLM and drift back to the old model.
+        return
+    # Fallback: mirror the SDK invalidation contract manually.
+    agent.llm = model
+    if getattr(agent, "_panel_descriptor", None) is not None:
+        agent._panel_descriptor = None
+    for attr in ("_llm_instance", "_unified_dispatcher"):
+        if hasattr(agent, attr):
+            setattr(agent, attr, None)
+    if getattr(agent, "_llm_init_params", None):
+        agent._llm_init_params = {**agent._llm_init_params, "model": model}
 
 
 def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> None:
@@ -333,6 +381,10 @@ def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> N
     the shared-instance fallback): writing overrides onto a registry-shared
     object would leak this request's config into subsequent/concurrent requests.
     In that case the override is rejected rather than silently applied globally.
+
+    ``llm`` is a side-effecting swap routed through :func:`_swap_llm` so the
+    cached LLM is invalidated — a plain ``setattr`` would leave the request
+    running on the previously cached model.
     """
     if not agent_config:
         return
@@ -342,13 +394,18 @@ def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> N
             "agent is shared across requests and cannot be safely overridden "
             "per request."
         )
-    unknown = set(agent_config) - _APPLYABLE_OVERRIDES
+    allowed = _APPLYABLE_OVERRIDES | _SIDE_EFFECT_OVERRIDES
+    unknown = set(agent_config) - allowed
     if unknown:
         raise AgentConfigError(
             f"Unsupported agent_config override(s): {sorted(unknown)}. "
-            f"Allowed: {sorted(_APPLYABLE_OVERRIDES)}"
+            f"Allowed: {sorted(allowed)}"
         )
+    if "llm" in agent_config:
+        _swap_llm(agent, agent_config["llm"])
     for key, value in agent_config.items():
+        if key in _SIDE_EFFECT_OVERRIDES:
+            continue
         if not hasattr(agent, key):
             raise AgentConfigError(
                 f"Agent has no attribute {key!r}; cannot override."

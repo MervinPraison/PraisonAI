@@ -7,6 +7,7 @@ import asyncio
 import argparse
 import logging
 import importlib.util
+import threading
 import time
 from typing import Optional
 from collections import defaultdict
@@ -103,35 +104,96 @@ _ips_lock = asyncio.Lock()
 
 # One-shot, short-lived session tokens handed to the Twilio media-stream client
 # so the shared server secret is never embedded in a URL (which leaks into
-# access logs / referrers / history). Maps token -> expiry timestamp.
+# access logs / referrers / history).
 _STREAM_SESSION_TTL = 60  # seconds
-_pending_stream_sessions: "dict[str, float]" = {}
 
 
-def _mint_stream_session_token() -> str:
-    """Create a single-use, TTL-bound token for the media-stream handshake."""
-    now = time.time()
-    # Opportunistically drop expired tokens so the map can't grow unbounded.
-    for tok in [t for t, exp in _pending_stream_sessions.items() if exp < now]:
-        _pending_stream_sessions.pop(tok, None)
-    token = secrets.token_urlsafe(32)
-    _pending_stream_sessions[token] = now + _STREAM_SESSION_TTL
-    return token
+class CallAppState:
+    """Per-app tools registry + one-shot session-token store.
 
+    Replaces the previous module-level ``tools`` / ``_pending_stream_sessions``
+    globals so co-hosted / multi-tenant ``build_call_app()`` instances in one
+    process never share a tool schema or cross-consume each other's stream
+    tokens. FastAPI hands this to handlers via ``request.app.state`` /
+    ``websocket.app.state``.
+    """
 
-def _consume_stream_session_token(token: str) -> bool:
-    """Validate and consume a one-shot stream-session token (constant-time)."""
-    if not token:
+    __slots__ = ("tools", "pending_sessions", "_lock")
+
+    def __init__(self):
+        self.tools: list = []
+        self.pending_sessions: "dict[str, float]" = {}
+        self._lock = threading.Lock()
+
+    def mint_stream_token(self) -> str:
+        """Create a single-use, TTL-bound token for the media-stream handshake."""
+        now = time.time()
+        token = secrets.token_urlsafe(32)
+        with self._lock:
+            # Opportunistically drop expired tokens so the map can't grow unbounded.
+            self.pending_sessions = {
+                t: exp for t, exp in self.pending_sessions.items() if exp >= now
+            }
+            self.pending_sessions[token] = now + _STREAM_SESSION_TTL
+        return token
+
+    def consume_stream_token(self, token: str) -> bool:
+        """Validate and consume a one-shot stream-session token (constant-time)."""
+        if not token:
+            return False
+        now = time.time()
+        with self._lock:
+            for candidate, expiry in list(self.pending_sessions.items()):
+                if expiry < now:
+                    self.pending_sessions.pop(candidate, None)
+                    continue
+                if hmac.compare_digest(candidate, token):
+                    self.pending_sessions.pop(candidate, None)
+                    return True
         return False
-    now = time.time()
-    for candidate, expiry in list(_pending_stream_sessions.items()):
-        if expiry < now:
-            _pending_stream_sessions.pop(candidate, None)
-            continue
-        if hmac.compare_digest(candidate, token):
-            _pending_stream_sessions.pop(candidate, None)
-            return True
-    return False
+
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def _configured_public_base() -> Optional[str]:
+    """``ws(s)://`` base for outbound Twilio media-stream URLs.
+
+    Set via ``PRAISONAI_CALL_PUBLIC_BASE`` (e.g. ``wss://praison.example``).
+    Never fall back to ``request.url.hostname`` — that is derived from the
+    client-supplied ``Host`` header and would let an authenticated caller
+    redirect Twilio's live media leg to an arbitrary host (SSRF / call-audio
+    exfiltration). Mirrors ``_configured_bind_host`` in ``agent_invoke.py``:
+    externally-visible URLs come from config, never a request header.
+    """
+    return os.getenv("PRAISONAI_CALL_PUBLIC_BASE")
+
+
+def _validate_public_base(base: Optional[str]) -> Optional[str]:
+    """Return an error string if ``base`` is not a safe media-stream base URL.
+
+    A prefix check alone is insufficient: a value like ``ws://`` has no host
+    (Twilio cannot connect) and a cleartext ``ws://`` to a non-local host sends
+    the live audio *and* the one-shot session token over an unencrypted
+    transport. Require a structurally valid ``wss://`` URL with a host; permit
+    cleartext ``ws://`` only for localhost (dev / tunnelled setups).
+
+    Returns ``None`` when the base is acceptable.
+    """
+    if not base:
+        return "unset"
+    from urllib.parse import urlparse
+    parsed = urlparse(base)
+    if parsed.scheme not in ("ws", "wss"):
+        return "PRAISONAI_CALL_PUBLIC_BASE must be a ws:// or wss:// URL"
+    if not parsed.hostname:
+        return "PRAISONAI_CALL_PUBLIC_BASE must include a host"
+    if parsed.scheme == "ws" and parsed.hostname not in _LOCAL_HOSTS:
+        return (
+            "PRAISONAI_CALL_PUBLIC_BASE must use wss:// for non-local hosts; "
+            "cleartext ws:// would expose live audio and the session token"
+        )
+    return None
 
 
 def _tokens_match(provided: Optional[str], expected: Optional[str]) -> bool:
@@ -173,12 +235,6 @@ logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
 logger.handlers.clear()
 
-# Tool registry populated only when a server verb explicitly loads local tools
-# (see ``_load_local_tools`` / ``build_call_app``). It is NEVER populated as an
-# import-time side effect.
-tools = []
-
-
 def import_tools_from_file(file_path):
     """Import tools from file with PRAISONAI_ALLOW_LOCAL_TOOLS opt-in.
     
@@ -201,20 +257,19 @@ def import_tools_from_file(file_path):
         raise ValueError(f"Failed to import tools from {file_path}") from e
 
 
-def _load_local_tools():
-    """Load ``./tools.py`` into the module ``tools`` registry, if opted in.
+def _load_local_tools_into(state):
+    """Load ``./tools.py`` into ``state.tools``, if opted in.
 
     Runs user code, so it is gated behind ``PRAISONAI_ALLOW_LOCAL_TOOLS=true``
     and only invoked by a server entry point (``build_call_app``/``main``) — never
     at import time. Importing ``praisonai.api.call`` therefore has no filesystem
     scan and never executes a neighbouring ``tools.py``.
 
-    Idempotent: the shared ``tools`` registry is rebuilt from scratch on each
-    call. Building the app more than once in a process (e.g. two
-    ``build_call_app(load_local_tools=True)`` calls) therefore does not
-    accumulate duplicate tool definitions — which would otherwise send the same
-    tool multiple times in every realtime ``session.update`` and grow the
-    registry unbounded across builds.
+    Idempotent: ``state.tools`` is rebuilt from scratch on each call. Building
+    the app more than once in a process (e.g. two
+    ``build_call_app(load_local_tools=True)`` calls) does not accumulate
+    duplicate tool definitions, and — because each app owns its own ``state`` —
+    a second build no longer wipes an already-running app's tool schema.
     """
     tools_path = os.path.join(os.getcwd(), 'tools.py')
     logger.debug(f"Tools path: {tools_path}")
@@ -230,17 +285,17 @@ def _load_local_tools():
             custom_tools_module = None
 
         if custom_tools_module:
-            # Reset in place (keep the same list object other modules may hold a
-            # reference to) so a re-load replaces rather than appends.
-            tools.clear()
+            # Rebuild this app's registry from scratch so a re-load replaces
+            # rather than appends.
+            state.tools.clear()
             if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
-                tools.extend(custom_tools_module.tools)
+                state.tools.extend(custom_tools_module.tools)
             else:
                 for name, obj in custom_tools_module.__dict__.items():
                     if callable(obj) and not name.startswith("__"):
                         tool_definition = getattr(obj, 'definition', None)
                         if tool_definition:
-                            tools.append(tool_definition)
+                            state.tools.append(tool_definition)
     except Exception as e:
         logger.warning(f"Error importing custom tools: {str(e)}. Continuing without custom tools.")
 
@@ -249,12 +304,17 @@ def build_call_app(*, load_local_tools: bool = False):
     """Build a fresh FastAPI app with the call routes registered.
 
     Heavy deps (FastAPI, the agent-invoke router) are imported here, not at
-    module import time. When ``load_local_tools`` is true and the env opt-in is
-    set, ``./tools.py`` is loaded into the shared ``tools`` registry.
+    module import time. Each app owns its own :class:`CallAppState` (tools +
+    pending stream tokens) hung off ``app.state.call_state`` so co-hosted apps
+    never share tool schemas or cross-consume each other's session tokens. When
+    ``load_local_tools`` is true and the env opt-in is set, ``./tools.py`` is
+    loaded into this app's registry.
     """
     from fastapi import FastAPI
 
     app = FastAPI()
+    state = CallAppState()
+    app.state.call_state = state
 
     try:
         from .agent_invoke import router as agent_invoke_router
@@ -266,7 +326,7 @@ def build_call_app(*, load_local_tools: bool = False):
     _register_routes(app)
 
     if load_local_tools:
-        _load_local_tools()
+        _load_local_tools_into(state)
 
     return app
 
@@ -358,20 +418,38 @@ async def handle_incoming_call(request):
     if not _tokens_match(token, CALL_SERVER_TOKEN):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
+    # Build the outbound stream URL from server config, NEVER from
+    # ``request.url.hostname`` (the client-controlled Host header). Otherwise an
+    # authenticated caller could point Twilio's live media leg at an arbitrary
+    # host and exfiltrate/inject call audio.
+    base = _configured_public_base()
+    if not base:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "PRAISONAI_CALL_PUBLIC_BASE is not configured; refusing to "
+                "derive the media-stream URL from the client Host header."
+            ),
+        )
+    validation_error = _validate_public_base(base)
+    if validation_error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=validation_error,
+        )
+
     response = VoiceResponse()
     response.say("")
     response.pause(length=1)
     # response.say("")
-    host = request.url.hostname
     connect = Connect()
 
     # Never embed the shared server secret in the stream URL — a query-string
     # token leaks into intermediary access logs, referrers and history. Mint a
     # one-shot, TTL-bound session token the media-stream handshake validates and
-    # consumes exactly once.
-    stream_url = f'wss://{host}/media-stream'
-    session_token = _mint_stream_session_token()
-    stream_url += f'?session={session_token}'
+    # consumes exactly once, scoped to this app's state.
+    session_token = request.app.state.call_state.mint_stream_token()
+    stream_url = f"{base.rstrip('/')}/media-stream?session={session_token}"
 
     connect.stream(url=stream_url)
     response.append(connect)
@@ -393,9 +471,10 @@ async def handle_media_stream(websocket):
     if not CALL_SERVER_TOKEN:
         await websocket.close(code=4003, reason="CALL_SERVER_TOKEN not configured")
         return
+    state = websocket.app.state.call_state
     session_token = websocket.query_params.get("session")
     header_token = websocket.headers.get("x-call-token")
-    authorized = _consume_stream_session_token(session_token or "") or _tokens_match(
+    authorized = state.consume_stream_token(session_token or "") or _tokens_match(
         header_token, CALL_SERVER_TOKEN
     )
     if not authorized:
@@ -438,7 +517,7 @@ async def handle_media_stream(websocket):
             close_timeout=5,
             max_size=2 ** 20,  # 1 MiB frame cap
         ) as openai_ws:
-            await send_session_update(openai_ws)
+            await send_session_update(state, openai_ws)
             stream_sid = None
 
             async def receive_from_twilio():
@@ -477,7 +556,7 @@ async def handle_media_stream(websocket):
                             print("Session updated successfully:", response)
 
                         if response['type'] == 'response.done':
-                            await handle_response_done(response, openai_ws)
+                            await handle_response_done(state, response, openai_ws)
 
                         if response['type'] == 'response.audio.delta' and response.get('delta'):
                             # Audio from OpenAI
@@ -498,15 +577,15 @@ async def handle_media_stream(websocket):
         async with _conn_lock:
             active_connections -= 1
 
-async def handle_response_done(response, openai_ws):
+async def handle_response_done(state, response, openai_ws):
     """Handle the response.done event and process any function calls."""
     print("Handling response.done:", response)
     output_items = response.get('response', {}).get('output', [])
     for item in output_items:
         if item.get('type') == 'function_call':
-            await process_function_call(item, openai_ws)
+            await process_function_call(state, item, openai_ws)
 
-async def process_function_call(item, openai_ws):
+async def process_function_call(state, item, openai_ws):
     """Process a function call item and send the result back to OpenAI."""
     function_name = item.get('name')
     arguments = json.loads(item.get('arguments', '{}'))
@@ -515,7 +594,7 @@ async def process_function_call(item, openai_ws):
     print(f"Processing function call: {function_name}")
     print(f"Arguments: {arguments}")
 
-    result = await call_tool(function_name, arguments)
+    result = await call_tool(state, function_name, arguments)
 
     # Send the function call result back to OpenAI
     await openai_ws.send(json.dumps({
@@ -532,9 +611,9 @@ async def process_function_call(item, openai_ws):
         "type": "response.create"
     }))
 
-async def call_tool(function_name, arguments):
+async def call_tool(state, function_name, arguments):
     """Call the appropriate tool function and return the result."""
-    tool = next((t for t in tools if t[0]['name'] == function_name), None)
+    tool = next((t for t in state.tools if t[0]['name'] == function_name), None)
     if not tool:
         return {"error": f"Function {function_name} not found"}
     
@@ -545,14 +624,13 @@ async def call_tool(function_name, arguments):
     except Exception as e:
         return {"error": str(e)}
 
-async def send_session_update(openai_ws):
+async def send_session_update(state, openai_ws):
     """Send session update to OpenAI WebSocket."""
-    global tools
-    print(f"Formatted tools: {tools}")
+    print(f"Formatted tools: {state.tools}")
     
     use_tools = [
         {**tool[0], "type": "function"}
-        for tool in tools
+        for tool in state.tools
         if isinstance(tool, tuple) and len(tool) > 0 and isinstance(tool[0], dict)
     ]
     
