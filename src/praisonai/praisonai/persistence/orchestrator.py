@@ -1,8 +1,15 @@
 """
-PersistenceOrchestrator - Central coordinator for all persistence operations.
+PersistenceOrchestrator - higher-level façade over the persistence layer.
 
 Hooks into agent lifecycle to provide automatic conversation persistence,
 knowledge retrieval, and state management.
+
+This class is a thin façade: the store-write side of the lifecycle hooks
+(persisting messages, updating session metadata at agent end) is delegated to
+:class:`praisonai.db.adapter.PraisonAIDB` — the single owner of that logic and
+the live path core routes to via ``MemoryConfig(db=...)``. The orchestrator adds
+its own resume-aware ``on_agent_start`` return contract, an LRU session cache,
+and the knowledge/state/context helpers on top.
 """
 
 import asyncio
@@ -83,6 +90,10 @@ class PersistenceOrchestrator:
             self._config = None
         
         self._current_session: Optional[ConversationSession] = None
+        # Delegate target: the live adapter owns the store-write lifecycle hooks.
+        # Built lazily from the resolved stores so import stays cheap and a
+        # store-less orchestrator never constructs one.
+        self._db = None
         # Bounded LRU cache: prevents unbounded memory growth in long-running
         # servers/bots where each request may carry a fresh session_id.
         self._session_cache: "OrderedDict[str, ConversationSession]" = OrderedDict()
@@ -124,6 +135,22 @@ class PersistenceOrchestrator:
         config = PersistenceConfig.from_env()
         return cls(config=config)
     
+    def _adapter(self):
+        """Lazily build the delegate adapter over this orchestrator's stores.
+
+        The adapter (:class:`praisonai.db.adapter.PraisonAIDB`) is the single
+        owner of the message-write / session-end store logic; the orchestrator
+        reuses it instead of keeping a second copy.
+        """
+        if self._db is None:
+            from ..db.adapter import PraisonAIDB
+            self._db = PraisonAIDB._from_stores(
+                conversation_store=self.conversation,
+                state_store=self.state,
+                knowledge_store=self.knowledge,
+            )
+        return self._db
+
     # =========================================================================
     # Thread-Safe Cache Operations
     # =========================================================================
@@ -269,7 +296,11 @@ class PersistenceOrchestrator:
             metadata=metadata,
         )
         
-        self._sync(self.conversation.add_message(session_id, message))
+        # Delegate the store write to the single-owner adapter dispatch so the
+        # sync/async-store handling is not duplicated here.
+        self._adapter()._call_store(
+            self.conversation, "add_message", "async_add_message", session_id, message
+        )
         logger.debug(f"Persisted {role} message to session {session_id}")
         return message
     
@@ -290,12 +321,17 @@ class PersistenceOrchestrator:
         if not self.conversation:
             return
         
-        session = self._cache_get(session_id) or self._sync(self.conversation.get_session(session_id))
+        adapter = self._adapter()
+        session = self._cache_get(session_id) or adapter._call_store(
+            self.conversation, "get_session", "async_get_session", session_id
+        )
         if session:
             session.updated_at = time.time()
             if metadata:
                 session.metadata = {**(session.metadata or {}), **metadata}
-            self._sync(self.conversation.update_session(session))
+            adapter._call_store(
+                self.conversation, "update_session", "async_update_session", session
+            )
             # Update cache with the modified session
             self._cache_put(session)
             logger.debug(f"Updated session metadata: {session_id}")
@@ -433,11 +469,11 @@ class PersistenceOrchestrator:
             metadata=metadata,
         )
         
-        if isinstance(self.conversation, AsyncConversationStore):
-            await self.conversation.add_message(session_id, message)
-        else:
-            await asyncio.to_thread(self.conversation.add_message, session_id, message)
-            
+        # Delegate the async store write to the single-owner adapter dispatch so
+        # the async/sync-store branching is not duplicated here.
+        await self._adapter()._dispatch_async(
+            self.conversation, "add_message", "async_add_message", session_id, message
+        )
         logger.debug(f"Persisted {role} message to session {session_id}")
         return message
     
@@ -458,23 +494,21 @@ class PersistenceOrchestrator:
         if not self.conversation:
             return
         
+        adapter = self._adapter()
         session = self._cache_get(session_id)
         if not session:
-            if isinstance(self.conversation, AsyncConversationStore):
-                session = await self.conversation.get_session(session_id)
-            else:
-                session = await asyncio.to_thread(self.conversation.get_session, session_id)
-                
+            session = await adapter._dispatch_async(
+                self.conversation, "get_session", "async_get_session", session_id
+            )
+
         if session:
             session.updated_at = time.time()
             if metadata:
                 session.metadata = {**(session.metadata or {}), **metadata}
-                
-            if isinstance(self.conversation, AsyncConversationStore):
-                await self.conversation.update_session(session)
-            else:
-                await asyncio.to_thread(self.conversation.update_session, session)
-                
+
+            await adapter._dispatch_async(
+                self.conversation, "update_session", "async_update_session", session
+            )
             # Update cache with the modified session
             self._cache_put(session)
             logger.debug(f"Updated session metadata: {session_id}")
