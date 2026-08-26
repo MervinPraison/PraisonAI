@@ -34,6 +34,9 @@ class _FakeRunner:
     def shutdown(self):
         pass
 
+    def stop(self):
+        pass
+
 
 def _make_runner_factory(**runner_kwargs):
     def factory(server_params, timeout=60):
@@ -81,6 +84,36 @@ def test_mcp_nonempty_tools_ok():
         names = [getattr(t, "__name__", None) for t in mcp]
         assert "get_current_time" in names
         assert len(list(mcp)) == len(mcp.get_tools())
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_mcp_empty_server_with_filter_still_raises():
+    """A filter must not mask a server that advertised zero tools.
+
+    When the server itself lists no tools, the filter removed nothing, so the
+    fail-closed error must still fire even though allowed_tools was supplied
+    (issue #4375).
+    """
+    factory = _make_runner_factory(tools=[])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        with pytest.raises(RuntimeError, match="produced 0 tools"):
+            MCP("/usr/bin/python fake_server.py", timeout=5,
+                allowed_tools=["get_current_time"])
+
+
+@pytest.mark.skipif(not mcp_module.MCP_AVAILABLE, reason="mcp package not installed")
+def test_mcp_filter_removes_all_tools_does_not_raise():
+    """A filter that deliberately removes every tool is a valid empty config."""
+    class _FakeTool:
+        name = "get_current_time"
+        description = "Return the current time"
+        inputSchema = {"type": "object", "properties": {}, "required": []}
+
+    factory = _make_runner_factory(tools=[_FakeTool()])
+    with patch.object(mcp_module, "MCPToolRunner", factory):
+        mcp = MCP("/usr/bin/python fake_server.py", timeout=5,
+                  disabled_tools=["get_current_time"])
+        assert list(mcp) == []
 
 
 if __name__ == "__main__":
