@@ -1,0 +1,92 @@
+# The mobile package's tests.
+#
+# Written at the same time as the package, deliberately. praisonai-desktop's
+# suite existed and ran nowhere for months because no workflow referenced it,
+# and a package whose tests never run in CI is a package whose tests are
+# decoration -- the 523 here would go stale silently.
+#
+# Four gates, and they catch different things:
+#
+#   typecheck   -- the boundary between erasable and non-erasable TypeScript.
+#                  node:test strips types rather than compiling, so an enum or
+#                  a constructor parameter property is a runtime parse error at
+#                  import; `erasableSyntaxOnly` turns that into a typecheck
+#                  failure at the file that caused it.
+#   boundaries  -- the two seams. Only engines/src/praisonai-ts may import
+#                  'praisonai'; only adapters/src/tauri may import @tauri-apps.
+#                  These are the whole reason the package is swappable, and a
+#                  rule enforced only by review stops being enforced.
+#   test        -- the suite itself.
+#   bundle gate -- webview compatibility. This is the one a normal test run
+#                  CANNOT do: node:test runs in Node, where a `crypto` import
+#                  and a top-level `process.env` both work fine, and both kill
+#                  a webview bundle at import time.
+name: mobile
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/praisonai-mobile/**', '.github/workflows/mobile.yml']
+  pull_request:
+    paths: ['src/praisonai-mobile/**', '.github/workflows/mobile.yml']
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: src/praisonai-mobile
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.18 is the floor declared in package.json -- tested because a
+        # declared floor nobody runs is a guess. 24 is the forward check:
+        # native type-stripping is the feature this package depends on most,
+        # and it is exactly the kind of thing a major bump changes.
+        node: ['22.18', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Layer boundaries
+        run: npm run boundaries
+      - name: Tests
+        run: npm test
+      - name: Bundle gate fixtures
+        # Runs the gate's own suite, which proves each check can FAIL -- a
+        # build check that has only ever seen clean input is a check nobody
+        # knows the state of.
+        run: npm run test:bundle
+
+  upstream-parity:
+    name: upstream parity
+    # Separate job: it needs the sibling praisonai-ts checkout, and it should be
+    # obvious in the checks list when the mobile engine has drifted from the
+    # real Agent rather than being buried in another job's log.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      - name: Install praisonai-ts deps
+        working-directory: src/praisonai-ts
+        run: npm ci
+      - name: Does the real Agent still satisfy PraisonAgent?
+        # The engine declares its coupling structurally rather than importing
+        # 'praisonai', which is what keeps its tests free of a provider, a
+        # network and a key. This is the check that pays for that choice: it
+        # SKIPS loudly if the sibling is missing rather than passing quietly.
+        run: npm run check:upstream
