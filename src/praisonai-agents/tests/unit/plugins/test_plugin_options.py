@@ -174,7 +174,7 @@ class TestYamlConfigDiscovery:
             "  pii_guardrail:\n"
             "    redact: [email]\n"
         )
-        monkeypatch.setattr(loader, "_find_config_file", lambda: cfg)
+        monkeypatch.setattr(loader, "_discover_config_files", lambda: [cfg])
         data = loader._load_config()
         assert data["plugins"]["enabled"] is True
         assert data["plugins"]["pii_guardrail"] == {"redact": ["email"]}
