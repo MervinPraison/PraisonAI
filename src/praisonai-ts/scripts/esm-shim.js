@@ -11,7 +11,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const ESM_DIR = path.join(__dirname, '..', 'dist', 'esm');
+const DIST_DIR = path.join(__dirname, '..', 'dist');
+const ESM_DIR = path.join(DIST_DIR, 'esm');
 
 function walk(dir) {
   const out = [];
@@ -62,6 +63,42 @@ function rewriteSpecifiers(code, fileDir) {
   return out;
 }
 
+function resolveCjsTarget(fileDir, spec) {
+  // Every ESM file in dist/esm has a CommonJS twin at the mirrored path in dist/.
+  // Resolve the specifier from the TWIN's directory so it lands wherever the CJS
+  // build's require would (internal module, package.json at the root, etc.), and
+  // return that concrete file so createRequire loads real CommonJS/JSON.
+  const relDir = path.relative(ESM_DIR, fileDir);
+  // Files outside dist/esm are not part of the ESM build; leave them alone.
+  if (relDir.startsWith('..') || path.isAbsolute(relDir)) return null;
+  const cjsDir = path.join(DIST_DIR, relDir);
+  const target = path.resolve(cjsDir, spec);
+  if (/\.[a-zA-Z0-9]+$/.test(spec)) {
+    return fs.existsSync(target) ? target : null;
+  }
+  if (fs.existsSync(target + '.js')) return target + '.js';
+  const asIndex = path.join(target, 'index.js');
+  if (fs.existsSync(asIndex)) return asIndex;
+  return null;
+}
+
+function rewriteRelativeRequires(code, fileDir) {
+  // `tsc --module esnext` leaves explicit require('./x') calls untouched. Under
+  // native ESM (dist/esm is type:module) those would resolve to ESM siblings and
+  // throw ERR_REQUIRE_ESM on Node <22. Repoint each internal relative require to
+  // the mirrored CommonJS file in dist/ so createRequire loads real CJS.
+  return code.replace(
+    /(\brequire\s*\(\s*)(['"])(\.[^'"]+)\2(\s*\))/g,
+    (match, pre, quote, spec, post) => {
+      const cjsAbs = resolveCjsTarget(fileDir, spec);
+      if (!cjsAbs) return match;
+      let relToCjs = path.relative(fileDir, cjsAbs).split(path.sep).join('/');
+      if (!relToCjs.startsWith('.')) relToCjs = './' + relToCjs;
+      return `${pre}${quote}${relToCjs}${quote}${post}`;
+    }
+  );
+}
+
 const CJS_BANNER = [
   "import { createRequire as __praisonCreateRequire } from 'module';",
   "import { fileURLToPath as __praisonFileURLToPath } from 'url';",
@@ -104,7 +141,9 @@ function main() {
   const files = walk(ESM_DIR);
   for (const file of files) {
     const original = fs.readFileSync(file, 'utf8');
-    let code = rewriteSpecifiers(original, path.dirname(file));
+    const fileDir = path.dirname(file);
+    let code = rewriteSpecifiers(original, fileDir);
+    code = rewriteRelativeRequires(code, fileDir);
     code = applyBanner(code);
     if (code !== original) {
       fs.writeFileSync(file, code);

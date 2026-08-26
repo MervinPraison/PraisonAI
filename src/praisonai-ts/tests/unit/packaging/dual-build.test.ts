@@ -24,9 +24,12 @@ const PKG_ROOT = path.resolve(__dirname, '..', '..', '..');
 const ESM_DIR = path.join(PKG_ROOT, 'dist', 'esm');
 const ESM_ENTRY = path.join(ESM_DIR, 'index.js');
 
-function buildEsmOnce(): void {
-  if (fs.existsSync(ESM_ENTRY)) return;
-  execFileSync('npm', ['run', 'build:esm'], {
+function buildDist(): void {
+  // Always rebuild both CJS and ESM so the suite validates the CURRENT sources
+  // and shim — never stale artifacts from an earlier revision. The ESM shim also
+  // repoints internal relative require() calls at the mirrored CJS dist/, so the
+  // CJS build must exist first (npm run build runs build:cjs then build:esm).
+  execFileSync('npm', ['run', 'build'], {
     cwd: PKG_ROOT,
     stdio: 'inherit',
   });
@@ -44,7 +47,7 @@ function walk(dir: string): string[] {
 
 describe('praisonai dual ESM+CJS packaging', () => {
   beforeAll(() => {
-    buildEsmOnce();
+    buildDist();
   }, 300000);
 
   it('emits an ESM entry point and marks dist/esm as a module', () => {
@@ -124,5 +127,54 @@ describe('praisonai dual ESM+CJS packaging', () => {
       encoding: 'utf8',
     });
     expect(out).toContain('ESM_OK');
+  }, 120000);
+
+  it('repoints internal relative require() at the CommonJS dist copy (not ESM)', () => {
+    // tsc leaves explicit require('./x') in ESM output. Under native ESM those
+    // would resolve to type:module siblings and throw ERR_REQUIRE_ESM on Node <22.
+    // The shim must repoint every internal relative require at the mirrored CJS
+    // file under dist/, i.e. the resolved target must live OUTSIDE dist/esm.
+    const files = walk(ESM_DIR);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const code = fs.readFileSync(file, 'utf8');
+      const requires = code.match(/require\(\s*['"](\.[^'"]+)['"]\s*\)/g) || [];
+      for (const req of requires) {
+        const spec = req.replace(/^require\(\s*['"]/, '').replace(/['"]\s*\)$/, '');
+        const target = path.resolve(path.dirname(file), spec);
+        const rel = path.relative(ESM_DIR, target);
+        if (!rel.startsWith('..') && !path.isAbsolute(rel)) {
+          offenders.push(`${path.relative(ESM_DIR, file)}: ${spec}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('resolves documented deep-import subpaths under native ESM', () => {
+    // The exports map must not hide public subpaths documented in JSDoc
+    // (praisonai/ai, praisonai/tools, praisonai/integrations/*). Resolve them via
+    // the built ESM files directly (the published paths those subpaths map to).
+    const subpaths = [
+      path.join(ESM_DIR, 'ai', 'index.js'),
+      path.join(ESM_DIR, 'tools', 'index.js'),
+      path.join(ESM_DIR, 'integrations', 'slack.js'),
+    ];
+    const script = subpaths
+      .map((p) => `await import(${JSON.stringify(pathToFileURL(p).href)});`)
+      .concat([`console.log('SUBPATHS_OK');`])
+      .join('\n');
+
+    const scriptFile = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'praison-subpath-')),
+      'load.mjs'
+    );
+    fs.writeFileSync(scriptFile, script);
+
+    const out = execFileSync(process.execPath, [scriptFile], {
+      cwd: PKG_ROOT,
+      encoding: 'utf8',
+    });
+    expect(out).toContain('SUBPATHS_OK');
   }, 120000);
 });

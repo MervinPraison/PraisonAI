@@ -12,6 +12,30 @@
       "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/esm/*.js",
+      "require": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./*/index": {
+      "types": "./dist/*/index.d.ts",
+      "import": "./dist/esm/*/index.js",
+      "require": "./dist/*/index.js",
+      "default": "./dist/*/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/esm/ai/index.js",
+      "require": "./dist/ai/index.js",
+      "default": "./dist/ai/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/esm/tools/index.js",
+      "require": "./dist/tools/index.js",
+      "default": "./dist/tools/index.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
