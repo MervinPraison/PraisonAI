@@ -83,7 +83,11 @@ jobs:
           node-version: '22.18'
       - name: Install praisonai-ts deps
         working-directory: src/praisonai-ts
-        run: npm ci
+        # `npm install`, not `npm ci`: praisonai-ts deliberately gitignores its
+        # lockfile (src/praisonai-ts/.gitignore:6), so `npm ci` fails outright.
+        # This matches the convention already used elsewhere in the repo
+        # (claude.yml:345).
+        run: npm install --no-audit --no-fund
       - name: Does the real Agent still satisfy PraisonAgent?
         # The engine declares its coupling structurally rather than importing
         # 'praisonai', which is what keeps its tests free of a provider, a

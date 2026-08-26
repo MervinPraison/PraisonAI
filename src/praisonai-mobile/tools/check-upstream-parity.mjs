@@ -43,6 +43,16 @@ if (!(await exists(AGENT_SRC))) {
   process.exit(0);
 }
 
+if (!(await exists(join(UPSTREAM, "node_modules")))) {
+  // tsc has to resolve praisonai-ts's OWN imports to typecheck its Agent, so
+  // without its dependencies this cannot run. Skipped loudly rather than
+  // failed: a missing install is an environment problem, and reporting it as
+  // upstream drift would send someone looking in the wrong file entirely.
+  console.log("upstream-parity: SKIPPED -- praisonai-ts has no node_modules");
+  console.log(`  run: (cd ${UPSTREAM} && npm install)`);
+  process.exit(0);
+}
+
 const dir = await mkdtemp(join(tmpdir(), "praison-parity-"));
 const file = join(dir, "parity.ts");
 
