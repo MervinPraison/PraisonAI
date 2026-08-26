@@ -96,9 +96,9 @@ class PraisonAIDB:
     @classmethod
     def _from_stores(
         cls,
-        conversation_store=None,
-        state_store=None,
-        knowledge_store=None,
+        conversation_store: Any = None,
+        state_store: Any = None,
+        knowledge_store: Any = None,
     ) -> "PraisonAIDB":
         """Build an adapter around already-constructed store instances.
 
