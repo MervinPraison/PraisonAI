@@ -35,17 +35,21 @@ class SimpleEventEmitter {
   }
 
   once(event: string, listener: EventListener): this {
-    const wrapper: EventListener = (...args: any[]) => {
+    const wrapper: EventListener & { listener?: EventListener } = (...args: any[]) => {
       this.off(event, wrapper);
       listener(...args);
     };
+    wrapper.listener = listener;
     return this.on(event, wrapper);
   }
 
   off(event: string, listener: EventListener): this {
     const existing = this.listeners.get(event);
     if (existing) {
-      const idx = existing.indexOf(listener);
+      const idx = existing.findIndex((candidate) =>
+        candidate === listener ||
+        (candidate as EventListener & { listener?: EventListener }).listener === listener
+      );
       if (idx !== -1) existing.splice(idx, 1);
       if (existing.length === 0) this.listeners.delete(event);
     }
