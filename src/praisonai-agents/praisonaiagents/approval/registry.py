@@ -422,6 +422,7 @@ class ApprovalRegistry:
         tool_name: str,
         arguments: Dict,
         force: bool = False,
+        auto_approve_scope: Optional[str] = None,
     ) -> ApprovalDecision:
         """Synchronous approval — used by ``Agent._execute_tool_impl``.
 
@@ -429,7 +430,14 @@ class ApprovalRegistry:
         registered as requiring approval (e.g. a per-agent ``PermissionManager``
         ``ask`` rule). It applies only to this call and never mutates shared
         registry state, so it cannot leak an approval gate onto other agents.
+
+        ``auto_approve_scope`` is the unique per-instance key used *only* for
+        the skill auto-approval check. It defaults to ``agent_name`` so callers
+        that don't pass it keep the old behaviour; passing a per-instance id
+        (e.g. ``Agent._approval_scope_id``) prevents skill grants from leaking
+        across unrelated agents that share the same display name.
         """
+        auto_scope = auto_approve_scope or agent_name
         # Fast-path: not required (checks both global and this agent's scope)
         if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
@@ -444,7 +452,7 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
-        if self.is_auto_approved(tool_name, agent_name):
+        if self.is_auto_approved(tool_name, auto_scope):
             self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
@@ -489,12 +497,14 @@ class ApprovalRegistry:
         tool_name: str,
         arguments: Dict,
         force: bool = False,
+        auto_approve_scope: Optional[str] = None,
     ) -> ApprovalDecision:
         """Asynchronous approval — used by async tool execution path.
 
-        See :meth:`approve_sync` for the ``force`` semantics (per-call gate,
-        no shared-state mutation).
+        See :meth:`approve_sync` for the ``force`` and ``auto_approve_scope``
+        semantics (per-call gate, no shared-state mutation).
         """
+        auto_scope = auto_approve_scope or agent_name
         # Fast-path: not required (checks both global and this agent's scope)
         if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
@@ -508,7 +518,7 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
-        if self.is_auto_approved(tool_name, agent_name):
+        if self.is_auto_approved(tool_name, auto_scope):
             self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 

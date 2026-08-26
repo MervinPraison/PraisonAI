@@ -25,9 +25,13 @@ def test_skill_allowed_tools_do_not_leak_across_agents():
     registry._agent_tool_auto_approve.clear()
 
     # Mock the skill_manager to avoid constructing a real Agent.
+    # ``_approval_scope_id`` is the unique per-instance key the grant is keyed
+    # by (a real Agent sets it in __init__); set it explicitly here so the Mock
+    # doesn't auto-generate an opaque attribute.
     agent_x = Mock()
     agent_x.name = "agent_x"
     agent_x.display_name = "agent_x"
+    agent_x._approval_scope_id = "agent_x_scope"
     agent_x.skill_manager = Mock()
     agent_x.skill_manager.get_allowed_tools.return_value = ["read_file"]
     agent_x.skill_manager.invoke.return_value = "Skill activated"
@@ -38,10 +42,13 @@ def test_skill_allowed_tools_do_not_leak_across_agents():
     result = agent_x._resolve_skill_invocation("/demo")
     assert result == "Skill activated"
 
-    # Correct per-agent, per-tool scoping:
-    assert registry.is_auto_approved("read_file", agent_name="agent_x")
+    # Correct per-agent-instance, per-tool scoping (keyed by the unique scope id):
+    assert registry.is_auto_approved("read_file", agent_name="agent_x_scope")
+    # The grant must NOT be queryable by the display name alone, so another
+    # unnamed agent defaulting to the same display name cannot inherit it.
+    assert not registry.is_auto_approved("read_file", agent_name="agent_x")
     assert not registry.is_auto_approved("read_file", agent_name="agent_y")
-    assert not registry.is_auto_approved("write_file", agent_name="agent_x")
+    assert not registry.is_auto_approved("write_file", agent_name="agent_x_scope")
 
     # Pre-fix bug signature: agent-wide backend swap must NOT happen anymore.
     assert registry._global_backend is None

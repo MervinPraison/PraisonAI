@@ -694,10 +694,15 @@ class Task:
             # Store task output in memory
             try:
                 logger.info(f"Task {self.id}: Storing task output in memory...")
-                self.store_in_memory(
-                    content=task_output.raw,
-                    agent_name=self.agent.name if self.agent else "Agent",
-                    task_id=self.id
+                # store_in_memory -> Memory.store_long_term is synchronous
+                # (embedding-API call + DB write). Offload to a thread so it
+                # never blocks the event loop for tasks batched into the same
+                # asyncio.gather(...) parallel fan-out.
+                await asyncio.to_thread(
+                    self.store_in_memory,
+                    task_output.raw,
+                    self.agent.name if self.agent else "Agent",
+                    self.id
                 )
                 logger.info(f"Task {self.id}: Task output stored in memory")
             except Exception as e:

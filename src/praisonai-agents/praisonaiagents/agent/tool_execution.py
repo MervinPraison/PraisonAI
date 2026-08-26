@@ -1706,15 +1706,22 @@ class ToolExecutionMixin:
             # registry state (which leaked onto other agents when this agent had
             # no stable name), pass the intent per-call via ``force`` so the
             # registry prompts for *this* call only without side effects.
+            # Skill auto-approval grants are keyed by this agent's unique
+            # per-instance scope id (not the display name, which defaults to
+            # "Agent" for every unnamed agent), so a skill grant on one agent
+            # can never unlock the tool for an unrelated agent in the process.
+            auto_approve_scope = getattr(self, '_approval_scope_id', None)
             if is_async:
                 return get_approval_registry().approve_async(
                     getattr(self, 'name', None), tool_name, tool_args,
                     force=manager_forces_approval,
+                    auto_approve_scope=auto_approve_scope,
                 )
             else:
                 return get_approval_registry().approve_sync(
                     getattr(self, 'name', None), tool_name, tool_args,
                     force=manager_forces_approval,
+                    auto_approve_scope=auto_approve_scope,
                 )
 
     def _doom_loop_approved(self, function_name, arguments, verdict) -> bool:
