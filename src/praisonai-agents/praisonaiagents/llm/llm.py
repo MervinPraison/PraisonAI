@@ -646,6 +646,16 @@ Respond with ONLY a valid JSON tool call in this format:
         if any(url and ("ollama" in url.lower() or ":11434" in url) for url in base_urls):
             return "ollama"
         
+        # Substring fallback for routed models whose provider is not the first
+        # path segment (e.g. bedrock/anthropic.claude-*, vertex_ai/claude-*,
+        # openrouter/anthropic/*, vertex_ai/gemini-*). Mirrors the substring
+        # fallback in get_provider_adapter so these get the correct adapter
+        # (and its streaming guard) instead of falling through to "openai".
+        if "claude" in model_lower or "anthropic" in model_lower:
+            return "anthropic"
+        if "gemini" in model_lower:
+            return "gemini"
+        
         # Default fallback
         return "openai"
     

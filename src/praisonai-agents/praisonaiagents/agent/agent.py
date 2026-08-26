@@ -1928,7 +1928,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             self.self_reflect = True if self_reflect is None else self_reflect
         
         self.instructions = instructions
-        
+
+        # Unique, per-instance scope id for skill auto-approval grants. The
+        # display ``name`` defaults to the literal "Agent" for every unnamed
+        # agent, so keying auto-approval by name alone would let one agent's
+        # skill grant leak onto every other unnamed agent in the same process
+        # (a cross-tenant privilege escalation). This id can never collide
+        # across unrelated instances.
+        import uuid as _uuid
+        self._approval_scope_id = f"{self.name}:{_uuid.uuid4().hex}"
+
         # Resolve tool_config for tool execution settings
         _tool_config = Agent._resolve_tool_config(
             tool_config=tool_config
