@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import threading
 import time
 import unittest
@@ -256,6 +257,8 @@ class FakeProc:
         self.signals = []
         self.terminated = False
 
+        self.killed = False
+
     def poll(self):
         return None if self._alive else 0
 
@@ -264,6 +267,9 @@ class FakeProc:
 
     def terminate(self):
         self.terminated = True
+
+    def kill(self):
+        self.killed = True
 
 
 class WindowsTermination(unittest.TestCase):
@@ -279,28 +285,71 @@ class WindowsTermination(unittest.TestCase):
     def setUp(self):
         self.was = training.IS_WINDOWS
         self.pgid_calls = []
+        self.tree_kills = []
         self.real_getpgid = os.getpgid
+        self.real_taskkill = training._taskkill_tree
         os.getpgid = lambda pid: self.pgid_calls.append(pid) or 1
+        training._taskkill_tree = lambda pid: self.tree_kills.append(pid) or True
 
     def tearDown(self):
         training.IS_WINDOWS = self.was
         os.getpgid = self.real_getpgid
+        training._taskkill_tree = self.real_taskkill
 
     def test_the_windows_path_never_touches_process_groups(self):
         training.IS_WINDOWS = True
-        proc = FakeProc()
-        training._terminate_group(proc)
+        training._terminate_group(FakeProc())
         self.assertEqual(self.pgid_calls, [],
                          "os.getpgid was called; on Windows it does not exist")
-        self.assertTrue(proc.signals or proc.terminated,
-                        "the Windows path signalled nothing at all")
 
-    def test_the_windows_path_falls_back_to_terminate_if_signalling_fails(self):
+    def test_the_windows_path_kills_the_whole_tree(self):
+        # Not "signalled something" -- that is what the previous version of
+        # this test asserted, and CTRL_BREAK_EVENT satisfied it while the
+        # trainer ran happily to completion. The subject is whether the tree
+        # is actually killed, and with which pid.
         training.IS_WINDOWS = True
         proc = FakeProc()
-        proc.send_signal = lambda sig: (_ for _ in ()).throw(OSError("no console"))
         training._terminate_group(proc)
-        self.assertTrue(proc.terminated, "a failed signal left the process running")
+        self.assertEqual(self.tree_kills, [proc.pid],
+                         "the child tree was never killed")
+
+    def test_a_failed_tree_kill_still_kills_the_trainer(self):
+        training.IS_WINDOWS = True
+        training._taskkill_tree = lambda pid: False
+        proc = FakeProc()
+        training._terminate_group(proc)
+        self.assertTrue(proc.killed,
+                        "taskkill failed and nothing else stopped the process")
+
+    def test_a_process_that_already_exited_is_not_killed_again(self):
+        training.IS_WINDOWS = True
+        training._taskkill_tree = lambda pid: False
+        proc = FakeProc(alive=False)
+        training._terminate_group(proc)
+        self.assertFalse(proc.killed, "killed a process that had already exited")
+
+    def test_the_tree_kill_command_targets_the_tree_and_forces_it(self):
+        # /T is what makes this the equivalent of killpg: without it only the
+        # trainer dies and whatever it spawned keeps the GPU.
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return types.SimpleNamespace(returncode=0)
+
+        real_run = training.subprocess.run
+        training.subprocess.run = fake_run
+        try:
+            # self.real_taskkill, not training._taskkill_tree: setUp replaces
+            # that with a recorder for the other tests in this class, and
+            # calling it here would exercise the stub rather than the code.
+            self.assertTrue(self.real_taskkill(4321))
+        finally:
+            training.subprocess.run = real_run
+        self.assertEqual(seen["argv"][:1], ["taskkill"])
+        self.assertIn("/T", seen["argv"])
+        self.assertIn("/F", seen["argv"])
+        self.assertIn("4321", seen["argv"])
 
     def test_the_posix_path_does_use_process_groups(self):
         training.IS_WINDOWS = False

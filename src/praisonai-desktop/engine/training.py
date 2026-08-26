@@ -462,6 +462,23 @@ def _new_process_group():
     return {"start_new_session": True}
 
 
+def _taskkill_tree(pid):
+    """Kill a process and everything it spawned, on Windows. True if it ran.
+
+    Split out so the Windows path can be exercised from any platform: the
+    branch that only ever runs on the one machine nobody tests on is exactly
+    the branch that was wrong.
+    """
+    try:
+        result = subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(pid)],
+            capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _terminate_group(proc):
     """SIGTERM the child and everything it spawned -- and nothing else.
 
@@ -475,13 +492,21 @@ def _terminate_group(proc):
         # Windows has no process groups in the POSIX sense; os.getpgid and
         # os.killpg do not exist at all, and an AttributeError here would
         # escape stop() and wedge the run in "stopping" forever while the
-        # trainer kept the GPU. CTRL_BREAK_EVENT reaches the whole group
-        # created by CREATE_NEW_PROCESS_GROUP, which is the stdlib-only
-        # equivalent.
-        try:
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        except (OSError, ValueError, AttributeError):
-            proc.terminate()
+        # trainer kept the GPU.
+        #
+        # This used to send CTRL_BREAK_EVENT, which was worse than useless.
+        # That event is delivered through a console, and the trainer is spawned
+        # with CREATE_NO_WINDOW precisely so it has none -- so send_signal
+        # returned successfully, nothing died, and the fallback never ran. The
+        # run reported "cancelled" while the fine-tune continued to completion
+        # holding the GPU: the exact failure that stopping exists to prevent,
+        # reported as a success. Every stop test failed on Windows and passed
+        # on the two platforms anyone had run them on.
+        #
+        # taskkill /T walks the child tree, which is what killpg achieves on
+        # POSIX; /F because a console-less child cannot be asked politely.
+        if not _taskkill_tree(proc.pid) and proc.poll() is None:
+            proc.kill()          # at least the trainer itself
         return
     try:
         group = os.getpgid(proc.pid)
