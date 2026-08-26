@@ -330,6 +330,13 @@ class SecretDeletion(unittest.TestCase):
         # The key is in both stores and the file store cannot be written to.
         # Reporting success here told the user the key was gone while `get`
         # went on serving the plaintext copy.
+        if os.name == "nt":
+            # The precondition is an unwritable store, established with
+            # chmod(0o500). Windows does not honour POSIX mode bits for
+            # directory writability, so the delete would succeed and the
+            # scenario this guards -- a store that *cannot* perform the delete
+            # -- is unreachable here.
+            self.skipTest("chmod(0o500) does not make a directory unwritable on Windows")
         self.store.set("api_key", "sk-live")
         # A copy in the fallback that a successful primary write did not clear
         # -- written by an older build, or left by a crash between the two
@@ -561,9 +568,25 @@ class StreamProtocolVocabulary(unittest.TestCase):
         return events
 
     def _emitted_events(self):
-        """Every literal event name passed to emit(...) or _emit_now(...)."""
-        return set(re.findall(
-            r'(?:_emit_now|emit)\(\s*"([a-z_]+)"', self.text))
+        """Every literal event name the engine can put on the wire.
+
+        Two dispatch forms reach the socket. Most call sites name the event
+        inline -- emit("delta", ...) -- and the first pattern catches those.
+        The stream loop also forwards a *variable*: emit(event, frame), where
+        event comes from _classify_stream_item. A name added to that classifier
+        would drift onto the wire invisibly to a guard that only reads literal
+        emit() arguments, so the second pattern reads the classifier's returned
+        events as well -- the only place the variable is assigned.
+        """
+        literal = re.findall(r'(?:_emit_now|emit)\(\s*"([a-z_]+)"', self.text)
+        classified = re.findall(
+            r'return\s+"([a-z_]+)"\s*,', self._classifier_block())
+        return set(literal) | set(classified)
+
+    def _classifier_block(self):
+        """The body of _classify_stream_item, source of the forwarded event."""
+        start = self.text.index("def _classify_stream_item")
+        return self.text[start:self.text.index("\ndef ", start + 1)]
 
     def test_every_emitted_event_is_documented(self):
         documented = self._documented_events()
