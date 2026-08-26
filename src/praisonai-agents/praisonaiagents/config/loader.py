@@ -245,6 +245,83 @@ def _find_config_file() -> Optional[Path]:
     return None
 
 
+def _discover_config_files() -> List[Path]:
+    """Discover all config files ordered lowest→highest precedence.
+
+    Returns an ordered list ``[global, …ancestors…, project]`` so callers can
+    deep-merge left-to-right: the user-global ``~/.praisonai/config.*`` provides
+    defaults, project configs discovered by walking up from the current
+    directory override them, and the nearest (deepest) project config wins.
+
+    A project config that sets one key therefore keeps every global default for
+    the rest, fixing the previous first-file-wins behaviour where any project
+    config silently shadowed the global one.
+
+    For each directory only the first matching filename (in ``config.toml``,
+    ``config.yaml``, ``config.yml``, ``praisonai.{toml,yaml,yml}`` order) is
+    used, preserving today's per-location precedence.
+
+    Returns:
+        Ordered list of existing config paths (lowest precedence first). Empty
+        when no config files exist anywhere.
+    """
+    files: List[Path] = []
+
+    # User global location (lowest precedence).
+    from ..paths import get_data_dir
+    data_dir = get_data_dir()
+    for global_path in (
+        data_dir / "config.toml",
+        data_dir / "config.yaml",
+        data_dir / "config.yml",
+    ):
+        if global_path.exists():
+            files.append(global_path)
+            break
+
+    # Project configs discovered by walking up from cwd to the filesystem root.
+    # Collected root→cwd so the nearest (deepest) config is folded last and wins.
+    ancestor_files: List[Path] = []
+    cwd = Path.cwd()
+    for directory in [cwd, *cwd.parents]:
+        project_data = directory / ".praisonai"
+        candidates = [
+            project_data / "config.toml",
+            project_data / "config.yaml",
+            project_data / "config.yml",
+            directory / "praisonai.toml",
+            directory / "praisonai.yaml",
+            directory / "praisonai.yml",
+        ]
+        for path in candidates:
+            if path.exists():
+                ancestor_files.append(path)
+                break
+    ancestor_files.reverse()
+    files.extend(ancestor_files)
+
+    return files
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge ``override`` onto ``base`` (dicts recurse, else replace).
+
+    Nested mappings are merged key-by-key so a higher-precedence layer can set a
+    single nested key without discarding sibling keys from lower layers. Any
+    non-dict value (including lists) at a given key replaces the base value.
+
+    Returns a new dict; inputs are not mutated.
+    """
+    result = dict(base)
+    for key, value in override.items():
+        existing = result.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(existing, value)
+        else:
+            result[key] = value
+    return result
+
+
 def _parse_toml(path: Path) -> Dict[str, Any]:
     """Parse TOML file with fallback for Python < 3.11.
     
@@ -295,16 +372,8 @@ def _parse_yaml(path: Path) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _load_config() -> Dict[str, Any]:
-    """Load configuration from file (TOML or the unified YAML surface).
-    
-    Returns:
-        Config dict (empty if no config file found)
-    """
-    config_path = _find_config_file()
-    if config_path is None:
-        return {}
-    
+def _parse_config_file(config_path: Path) -> Dict[str, Any]:
+    """Parse a single config file (TOML or YAML), returning {} on failure."""
     try:
         if config_path.suffix.lower() in (".yaml", ".yml"):
             return _parse_yaml(config_path)
@@ -313,6 +382,31 @@ def _load_config() -> Dict[str, Any]:
         import logging
         logging.warning(f"Failed to load config from {config_path}: {e}")
         return {}
+
+
+def _load_config() -> Dict[str, Any]:
+    """Load configuration by deep-merging all discovered config files.
+
+    Files are folded lowest→highest precedence (global first, nearest project
+    last) so a project config selectively overrides global defaults instead of
+    shadowing them entirely. When exactly one file exists the merged result
+    equals parsing that file alone, preserving backward compatibility.
+
+    Returns:
+        Merged config dict (empty if no config file found)
+    """
+    config_paths = _discover_config_files()
+    if not config_paths:
+        return {}
+
+    # Fast path: a single file needs no merge and matches prior behaviour.
+    if len(config_paths) == 1:
+        return _parse_config_file(config_paths[0])
+
+    merged: Dict[str, Any] = {}
+    for config_path in config_paths:
+        merged = _deep_merge(merged, _parse_config_file(config_path))
+    return merged
 
 
 def _dict_to_plugins_config(data: Dict[str, Any]) -> PluginsConfig:
