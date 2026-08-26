@@ -4,6 +4,7 @@
  */
 import { Agent } from '../../../src/agent/simple';
 import { OpenAIService } from '../../../src/llm/openai';
+import { ApprovalManager } from '../../../src/ai/tool-approval';
 
 jest.mock('openai');
 
@@ -172,6 +173,67 @@ describe('Agent constructor tool processing', () => {
     const registered = (agent as any).toolFunctions['getWeatherArrow'];
     const out = await registered({ city: 'Paris' });
     expect(out).toBe('Weather in Paris: 20C');
+  });
+});
+
+describe('Agent tool approval gate', () => {
+  const objTool = function lookup(id: string) {
+    return { id, ok: true };
+  };
+
+  it('runs the tool when no approval gate is configured', async () => {
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false });
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+    expect(results[0].content).toBe('{"id":"x","ok":true}');
+  });
+
+  it('blocks the tool and reports the denial back when approval is denied', async () => {
+    const manager = new ApprovalManager();
+    manager.onApprovalRequest(async () => false);
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: manager });
+    const spy = jest.fn(objTool);
+    (agent as any).toolFunctions.lookup = spy;
+
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(results[0].tool_call_id).toBe('call_1');
+    expect(results[0].content).toContain('denied by the approval gate');
+  });
+
+  it('runs the tool when approval is granted', async () => {
+    const manager = new ApprovalManager();
+    manager.onApprovalRequest(async () => true);
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: manager });
+
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+    expect(results[0].content).toBe('{"id":"x","ok":true}');
+  });
+
+  it('approval: true creates a default ApprovalManager that gates tools', () => {
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: true });
+    expect((agent as any).approvalManager).toBeInstanceOf(ApprovalManager);
+  });
+
+  it('passes the tool call id as toolInvocationId (correlation, never positional)', async () => {
+    const manager = new ApprovalManager();
+    const spy = jest.spyOn(manager, 'requestApproval').mockResolvedValue(true);
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: manager });
+
+    await (agent as any).processToolCalls([
+      { id: 'call_42', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ toolInvocationId: 'call_42', toolName: 'lookup', input: { id: 'x' } }),
+    );
+    spy.mockRestore();
   });
 });
 
