@@ -155,6 +155,52 @@ class TestDiffPreview:
         assert "-foo" in diff
         assert "+bar" in diff
 
+    def test_edit_file_replace_first_only_by_default(self, tmp_path):
+        from praisonaiagents.approval.utils import build_diff_preview
+        target = tmp_path / "dup.py"
+        target.write_text("foo\nfoo\n", encoding="utf-8")
+        diff = build_diff_preview(
+            "edit_file",
+            {"filepath": str(target), "old_string": "foo", "new_string": "bar"},
+        )
+        assert diff is not None
+        # Only the first occurrence changes when replace_all is falsey.
+        assert diff.count("+bar") == 1
+        assert diff.count("-foo") == 1
+
+    def test_edit_file_replace_all_when_requested(self, tmp_path):
+        from praisonaiagents.approval.utils import build_diff_preview
+        target = tmp_path / "dup.py"
+        target.write_text("foo\nfoo\n", encoding="utf-8")
+        diff = build_diff_preview(
+            "edit_file",
+            {
+                "filepath": str(target),
+                "old_string": "foo",
+                "new_string": "bar",
+                "replace_all": True,
+            },
+        )
+        assert diff is not None
+        assert diff.count("+bar") == 2
+        assert diff.count("-foo") == 2
+
+    def test_acp_edit_file_builds_whole_file_diff(self, tmp_path):
+        from praisonaiagents.approval.utils import build_diff_preview
+        target = tmp_path / "acp.py"
+        target.write_text("old line\n", encoding="utf-8")
+        diff = build_diff_preview(
+            "acp_edit_file",
+            {"filepath": str(target), "new_content": "new line\n"},
+        )
+        assert diff is not None
+        assert "-old line" in diff
+        assert "+new line" in diff
+
+    def test_acp_edit_file_missing_new_content_returns_none(self):
+        from praisonaiagents.approval.utils import build_diff_preview
+        assert build_diff_preview("acp_edit_file", {"filepath": "a.py"}) is None
+
     def test_write_file_builds_diff_for_new_file(self):
         from praisonaiagents.approval.utils import build_diff_preview
         diff = build_diff_preview(
