@@ -112,14 +112,71 @@ const CJS_BANNER = [
   'const module = { exports: {} };',
 ].join('\n');
 
+function stripStringsAndComments(code) {
+  // Blank out string literals, template literals and comments so that CJS
+  // detection only looks at real code. The word `require` inside an error
+  // message must NOT trigger the banner. Newlines are preserved so any
+  // downstream line-based reasoning stays accurate.
+  let out = '';
+  let i = 0;
+  const n = code.length;
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  while (i < n) {
+    const ch = code[i];
+    const next = code[i + 1];
+    // Line comment
+    if (ch === '/' && next === '/') {
+      let j = i + 2;
+      while (j < n && code[j] !== '\n') j++;
+      out += blank(code.slice(i, j));
+      i = j;
+      continue;
+    }
+    // Block comment
+    if (ch === '/' && next === '*') {
+      let j = i + 2;
+      while (j < n && !(code[j] === '*' && code[j + 1] === '/')) j++;
+      j = Math.min(j + 2, n);
+      out += blank(code.slice(i, j));
+      i = j;
+      continue;
+    }
+    // String / template literal
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      let j = i + 1;
+      while (j < n) {
+        if (code[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        if (code[j] === quote) {
+          j++;
+          break;
+        }
+        j++;
+      }
+      out += quote + blank(code.slice(i + 1, j - 1)) + (code[j - 1] === quote ? quote : '');
+      i = j;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 function needsCjsBanner(code) {
+  const stripped = stripStringsAndComments(code);
   return (
-    /\brequire\b/.test(code) ||
-    /\b__dirname\b/.test(code) ||
-    /\b__filename\b/.test(code) ||
-    /\bmodule\.exports\b/.test(code) ||
-    /===\s*module\b/.test(code) ||
-    /\bmodule\s*===/.test(code)
+    // Real require(...) call expression, not obj.require or a bare word.
+    /(?:^|[^.\w$])require\s*\(/.test(stripped) ||
+    // __dirname / __filename in identifier position (not a property access).
+    /(?:^|[^.\w$])__dirname\b/.test(stripped) ||
+    /(?:^|[^.\w$])__filename\b/.test(stripped) ||
+    /\bmodule\.exports\b/.test(stripped) ||
+    /===\s*module\b/.test(stripped) ||
+    /\bmodule\s*===/.test(stripped)
   );
 }
 
@@ -158,4 +215,13 @@ function main() {
   console.log(`esm-shim: processed ${files.length} files in dist/esm`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  needsCjsBanner,
+  applyBanner,
+  stripStringsAndComments,
+  CJS_BANNER,
+};
