@@ -20,6 +20,8 @@ import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 import { createFakeShell, PHONE_INSETS } from "../../../testing/src/fake-shell.ts";
 import { createWebStorage } from "../web/storage.ts";
 import { createWebSecrets } from "../web/secrets.ts";
+import { createWebShell } from "../web/shell.ts";
+import { createFakeWindow } from "../web/fake-window.ts";
 import { createWebTime } from "../web/time.ts";
 import { createTauriBridge, type TauriBridge } from "../tauri/bridge.ts";
 import {
@@ -291,8 +293,27 @@ function tauriHarness(): ShellHarness {
 
 // ---- both shells must agree ------------------------------------------------
 
+function webHarness(): ShellHarness {
+  const fake = createFakeWindow();
+  const shell = createWebShell(fake.window);
+  return {
+    shell,
+    pressBack: () => shell.pressBack(),
+    emitInsets: (insets) => fake.setInsets(insets),
+    emitKeyboardHeight: (px) => fake.setKeyboardHeight(px),
+    emitLifecycle: (phase) => {
+      // Each phase comes from the browser signal that actually produces it.
+      if (phase === "background") fake.setHidden(true);
+      else if (phase === "inactive") fake.setFocused(false);
+      else fake.setHidden(false);
+    },
+    listenerCount: () => shell.listenerCount(),
+  };
+}
+
 describeShellContract("fake shell", fakeHarness);
 describeShellContract("tauri shell", tauriHarness);
+describeShellContract("web shell", webHarness);
 
 // ---- the shell contract can fail -------------------------------------------
 
