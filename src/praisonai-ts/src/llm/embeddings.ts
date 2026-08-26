@@ -247,7 +247,8 @@ async function embedWithNative(
   const { model: modelId } = parseEmbeddingModel(model);
   
   const OpenAI = (await import('openai')).default;
-  const client = new OpenAI();
+  const { buildOpenAIClientOptions } = await import('./openaiClientOptions');
+  const client = new OpenAI(buildOpenAIClientOptions());
   
   const response = await client.embeddings.create({
     model: modelId,
@@ -271,7 +272,8 @@ async function embedManyWithNative(
   const { model: modelId } = parseEmbeddingModel(model);
   
   const OpenAI = (await import('openai')).default;
-  const client = new OpenAI();
+  const { buildOpenAIClientOptions } = await import('./openaiClientOptions');
+  const client = new OpenAI(buildOpenAIClientOptions());
   
   const response = await client.embeddings.create({
     model: modelId,

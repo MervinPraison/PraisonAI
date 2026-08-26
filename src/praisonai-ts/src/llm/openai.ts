@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import { buildOpenAIClientOptions } from './openaiClientOptions';
 import { Logger } from '../utils/logger';
 import type { ChatCompletionTool, ChatCompletionToolChoiceOption, ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
@@ -104,9 +105,9 @@ async function getOpenAIClient(): Promise<OpenAI> {
         if (!process.env.OPENAI_API_KEY) {
             throw new Error('OPENAI_API_KEY not found in environment variables');
         }
-        openAIInstance = new OpenAI({
+        openAIInstance = new OpenAI(buildOpenAIClientOptions({
             apiKey: process.env.OPENAI_API_KEY
-        });
+        }));
         await Logger.debug('OpenAI client initialized');
     }
     return openAIInstance;
@@ -117,19 +118,49 @@ export type ResponseFormat =
     | { type: 'json_object' }
     | { type: 'json_schema'; json_schema: { name: string; schema: Record<string, any>; strict?: boolean } };
 
+/**
+ * Per-service credential/transport options. Mirrors Python's per-agent
+ * `api_key` / `base_url` so callers can pass credentials without relying on
+ * process env, and can inject a custom `fetch` for browser-like runtimes.
+ */
+export interface OpenAIServiceOptions {
+    apiKey?: string;
+    baseURL?: string;
+    fetch?: typeof fetch;
+    dangerouslyAllowBrowser?: boolean;
+}
+
 export class OpenAIService {
     private model: string;
     private client: OpenAI | null = null;
+    private options: OpenAIServiceOptions;
 
-    constructor(model: string = 'gpt-5-nano') {
+    constructor(model: string = 'gpt-5-nano', options: OpenAIServiceOptions = {}) {
         this.model = model;
+        this.options = options;
         Logger.debug(`OpenAIService initialized with model: ${model}`);
     }
 
     // Lazy initialization of client
     private async getClient(): Promise<OpenAI> {
         if (!this.client) {
-            this.client = await getOpenAIClient();
+            // When explicit credentials/transport are supplied, build a
+            // dedicated client so they are honoured instead of the shared
+            // env-only singleton.
+            if (this.options.apiKey || this.options.baseURL || this.options.fetch) {
+                this.client = new OpenAI(buildOpenAIClientOptions(
+                    {
+                        apiKey: this.options.apiKey || process.env.OPENAI_API_KEY,
+                        ...(this.options.baseURL ? { baseURL: this.options.baseURL } : {}),
+                    },
+                    {
+                        fetch: this.options.fetch,
+                        dangerouslyAllowBrowser: this.options.dangerouslyAllowBrowser,
+                    }
+                ));
+            } else {
+                this.client = await getOpenAIClient();
+            }
         }
         return this.client;
     }

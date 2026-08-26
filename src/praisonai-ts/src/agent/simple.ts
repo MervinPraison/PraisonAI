@@ -56,6 +56,22 @@ export interface SimpleAgentConfig {
    * Default: "gpt-4o-mini"
    */
   llm?: string;
+  /**
+   * API key for the LLM provider. Mirrors Python's per-agent `api_key`
+   * (agent/agent.py). Falls back to OPENAI_API_KEY when omitted.
+   */
+  apiKey?: string;
+  /**
+   * Base URL for the LLM provider. Mirrors Python's per-agent `base_url`
+   * (agent/agent.py). Useful for OpenAI-compatible endpoints.
+   */
+  baseURL?: string;
+  /**
+   * Custom fetch implementation. Lets a host route provider egress through
+   * native code (e.g. a Tauri command), keeping the API key out of the JS
+   * heap and avoiding CORS for embedded webviews. Implies browser support.
+   */
+  fetch?: typeof fetch;
   /** Enable markdown formatting in responses */
   markdown?: boolean;
   /** Enable streaming responses (default: true) */
@@ -189,7 +205,11 @@ export class Agent {
     // For OpenAI, use OpenAIService directly for backward compatibility
     // For other providers, we'll use the AI SDK backend via getBackend()
     this._useAISDKBackend = providerId !== 'openai';
-    this.llmService = new OpenAIService(modelId);
+    this.llmService = new OpenAIService(modelId, {
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      fetch: config.fetch,
+    });
 
     // Configure logging
     Logger.setVerbose(this.verbose);
