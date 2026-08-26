@@ -4,6 +4,7 @@
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
+import { buildOpenAIClientOptions, getEnv } from '../openaiClientOptions';
 import { BaseProvider } from './base';
 import type {
   ProviderConfig,
@@ -24,12 +25,15 @@ export class OpenAIProvider extends BaseProvider {
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
-    this.client = new OpenAI({
-      apiKey: config.apiKey || process.env.OPENAI_API_KEY,
-      baseURL: config.baseUrl,
-      timeout: config.timeout || 60000,
-      maxRetries: 0, // We handle retries ourselves
-    });
+    this.client = new OpenAI(buildOpenAIClientOptions(
+      {
+        apiKey: config.apiKey || getEnv('OPENAI_API_KEY'),
+        baseURL: config.baseUrl,
+        timeout: config.timeout || 60000,
+        maxRetries: 0, // We handle retries ourselves
+      },
+      { fetch: config.fetch, dangerouslyAllowBrowser: config.dangerouslyAllowBrowser }
+    ));
   }
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {

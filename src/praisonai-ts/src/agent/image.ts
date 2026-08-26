@@ -108,7 +108,8 @@ export class ImageAgent {
     // Try to use OpenAI SDK directly for image generation
     try {
       const OpenAI = (await import('openai')).default;
-      const client = new OpenAI();
+      const { buildOpenAIClientOptions } = await import('../llm/openaiClientOptions');
+      const client = new OpenAI(buildOpenAIClientOptions());
 
       const response = await client.images.generate({
         model: this.imageModel,

@@ -76,7 +76,8 @@ async function speakText(args: string[], options: VoiceOptions, outputFormat: st
 
   try {
     const OpenAI = (await import('openai')).default;
-    const client = new OpenAI();
+    const { buildOpenAIClientOptions } = await import('../../llm/openaiClientOptions');
+    const client = new OpenAI(buildOpenAIClientOptions());
 
     const response = await client.audio.speech.create({
       model: 'tts-1',
@@ -133,7 +134,8 @@ async function transcribeAudio(args: string[], options: VoiceOptions, outputForm
 
   try {
     const OpenAI = (await import('openai')).default;
-    const client = new OpenAI();
+    const { buildOpenAIClientOptions } = await import('../../llm/openaiClientOptions');
+    const client = new OpenAI(buildOpenAIClientOptions());
 
     const file = fs.createReadStream(audioFile);
     const response = await client.audio.transcriptions.create({
