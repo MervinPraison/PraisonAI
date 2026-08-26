@@ -171,7 +171,7 @@ pub fn start(python: &str, script: &str, timeout: Duration) -> Result<Engine, St
                     // A port parsed from a log line is a claim. Confirm it before
                     // handing it to the UI, or the first message goes to whatever
                     // else happens to be listening.
-                    if let Some(port) = announced.confirm(|p| probe_health(p)) {
+                    if let Some(port) = announced.confirm(probe_health) {
                         return Ok(Engine { port, child });
                     }
                 }

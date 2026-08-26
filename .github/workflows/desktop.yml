@@ -1,0 +1,113 @@
+# The desktop app's tests.
+#
+# These existed and ran nowhere: no workflow referenced praisonai-desktop, and
+# the frontend suite could not even be installed -- jsdom was undeclared, so it
+# ran only on machines that happened to have one further up the tree, at
+# whatever version that happened to be.
+name: desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/praisonai-desktop/**', '.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['src/praisonai-desktop/**', '.github/workflows/desktop.yml']
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: src/praisonai-desktop
+
+jobs:
+  engine:
+    name: engine (${{ matrix.os }})
+    # The engine is the part that has to behave the same on all three, which is
+    # the entire point of the portability suite -- so it is run on all three.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run the engine tests
+        shell: bash
+        env:
+          # Never touch a real keychain on a shared runner.
+          PRAISONAI_KEYCHAIN_SERVICE: ai.praison.desktop.ci
+        run: |
+          set -euo pipefail
+          failed=0
+          for suite in engine/test_*.py; do
+            echo "::group::$suite"
+            python "$suite" -v || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      # `test:ci` is every suite except lifecycle, which drives real
+      # conversations against a live engine and a real model -- neither of
+      # which exists on a runner. It is excluded by name rather than left to
+      # skip quietly, so that a skipped test here is a genuine problem.
+      - name: Run the UI tests
+        # A suite that skips everything still exits 0 -- that is how thirteen
+        # tests came to look like a pass while proving nothing. So the skip
+        # count is asserted, not just the exit status.
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          npm run test:ci 2>&1 | tee "$RUNNER_TEMP/ui.log"
+          skipped=$(grep -E '^. skipped ' "$RUNNER_TEMP/ui.log" | grep -oE '[0-9]+$' | head -1)
+          echo "skipped: ${skipped:-unknown}"
+          test "${skipped:-1}" -eq 0
+
+  shell:
+    name: shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-latest]
+    defaults:
+      run:
+        working-directory: src/praisonai-desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/praisonai-desktop/src-tauri
+          # The Windows cache is large and slow enough to cost more than it saves.
+          save-if: ${{ runner.os != 'Windows' }}
+      - name: Install the Linux build dependencies
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev patchelf
+      - name: Test
+        # Debug info is the bulk of a Tauri target directory and nothing here
+        # reads a backtrace, so building without it keeps the runner's disk
+        # from filling on the Windows leg.
+        run: cargo test --config 'profile.test.debug=false' --config 'profile.dev.debug=false'
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
