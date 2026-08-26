@@ -6,12 +6,12 @@
   "summary": {
     "pythonCoreFeatures": 411,
     "pythonWrapperFeatures": 21,
-    "typescriptFeatures": 1190,
-    "gapCount": 117,
+    "typescriptFeatures": 1193,
+    "gapCount": 116,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 104
+    "priorityP3": 103
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -1696,6 +1696,8 @@
     "modules": {
       "agent": [
         "Agent",
+        "AgentEvent",
+        "AgentStreamOptions",
         "AgentTeam",
         "AgentTeamConfig",
         "Agents",
@@ -1748,6 +1750,7 @@
         "SimpleAgentConfig",
         "SimpleRouteConfig",
         "SimpleRouterConfig",
+        "StopReason",
         "createAudioAgent",
         "createContextAgent",
         "createDeepResearchAgent",
@@ -5685,10 +5688,10 @@
       {
         "feature": "StopReason",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {

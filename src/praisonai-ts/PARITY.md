@@ -19,12 +19,12 @@
 |--------|-------|
 | Python Core Features | 411 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 1190 |
-| **Gap Count** | **117** |
+| TypeScript Features | 1193 |
+| **Gap Count** | **116** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 104 |
+| P3 (Low) | 103 |
 
 ## Gap Matrix
 
@@ -169,7 +169,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ exported |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (181 exported, 104 missing)
+### P3_Advanced (182 exported, 103 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -241,7 +241,6 @@
 | `SendResult` | ✅ | ❌ | low | ⏳ missing |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ missing |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ missing |
-| `StopReason` | ✅ | ❌ | high | ⏳ missing |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ missing |
 | `SuccessCriterion` | ✅ | ❌ | high | ⏳ missing |
 | `TerminationReason` | ✅ | ❌ | high | ⏳ missing |
@@ -387,6 +386,7 @@
 | `SecurityPolicy` | ✅ | ✅ | high | ✅ exported |
 | `SessionConfig` | ✅ | ✅ | low | ✅ exported |
 | `SkillsConfig` | ✅ | ✅ | low | ✅ exported |
+| `StopReason` | ✅ | ✅ | high | ✅ exported |
 | `Task` | ✅ | ✅ | high | ✅ exported |
 | `TaskOutput` | ✅ | ✅ | high | ✅ exported |
 | `TemplateConfig` | ✅ | ✅ | low | ✅ exported |
@@ -729,10 +729,10 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (64 exports)</summary>
+<summary><strong>agent</strong> (67 exports)</summary>
 
 ```typescript
-import { Agent, AgentTeam, AgentTeamConfig, Agents, AudioAgent, AudioAgentConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions... } from 'praisonai';
+import { Agent, AgentEvent, AgentStreamOptions, AgentTeam, AgentTeamConfig, Agents, AudioAgent, AudioAgentConfig, AudioProvider, AudioSpeakOptions... } from 'praisonai';
 ```
 
 </details>
