@@ -11,6 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createRunController, type RunView } from "./controller.ts";
+import { createFakeTime } from "../../../testing/src/fake-time.ts";
 import { createScriptedEngine } from "../../../testing/src/scripted-engine.ts";
 import { SCRIPTS } from "../../../testing/src/scripts.ts";
 import { createFakeScheduler } from "../../../testing/src/fake-scheduler.ts";
@@ -18,28 +19,10 @@ import { createFakeClock } from "../../../testing/src/fake-clock.ts";
 import type { TimePort } from "../ports/time.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
 
-/** A TimePort whose frames the test releases by hand. */
-function fakeTime(): TimePort & { releaseFrames: () => void } {
-  const clock = createFakeClock();
-  const schedulers: ReturnType<typeof createFakeScheduler>[] = [];
-  return {
-    nowMs: clock.nowMs,
-    epochMs: clock.nowMs,
-    createScheduler() {
-      const s = createFakeScheduler();
-      schedulers.push(s);
-      return s;
-    },
-    every: () => () => {},
-    releaseFrames() {
-      for (const s of schedulers) s.frame();
-    },
-  };
-}
 
 function harness(script: readonly RunEvent[]) {
   const views: RunView[] = [];
-  const time = fakeTime();
+  const time = createFakeTime();
   const engine = createScriptedEngine({ id: "scripted", script });
   const controller = createRunController({
     engine,
@@ -164,7 +147,7 @@ test("a stream that throws becomes a transport error and keeps the text already 
   const views: RunView[] = [];
   const controller = createRunController({
     engine: boom,
-    time: fakeTime(),
+    time: createFakeTime(),
     onPublish: (v) => views.push(v),
   });
   await controller.send("hi");
