@@ -1316,6 +1316,41 @@ def run_main(
         output.print_error("--attach is only supported for direct prompt runs")
         raise typer.Exit(1)
 
+    # --image is a per-invocation multimodal attachment for direct prompt runs.
+    # Only the direct-prompt (and interpolated --command) path threads it to the
+    # vision-capable handle_direct_prompt/ImageHandler; the custom-agent, YAML
+    # file, and profiling flows have separate execution paths that do not carry
+    # it. Reject those combinations up front so an --image is never silently
+    # dropped and the user gets a result without the attachment they asked for.
+    if image and (agent or profile or profile_deep or _is_yaml_file(target or "")):
+        output.print_error(
+            "--image is only supported for direct prompt runs "
+            "(not with --agent, --profile, or a YAML file)"
+        )
+        raise typer.Exit(1)
+
+    # --output actions builds a bare Agent (which can't carry the attachment) and
+    # the vision path can't honour the structured actions output contract, so the
+    # two are mutually exclusive. Reject up front rather than returning a plain
+    # vision response when the user asked for actions-form output.
+    if image and output_mode == "actions":
+        output.print_error("--image cannot be combined with --output actions")
+        raise typer.Exit(1)
+
+    # ImageHandler treats a comma as the multi-image separator, so a single
+    # path/URL that itself contains a comma would be split into fragments and
+    # fail validation (or attach the wrong files). Reject it with a clear error
+    # instead of silently corrupting the attachment; users pass multiple images
+    # with repeated --image flags.
+    if image:
+        for _img in image:
+            if "," in _img:
+                output.print_error(
+                    f"Invalid --image value {_img!r}: paths/URLs must not contain a "
+                    "comma. Pass multiple images with repeated --image flags."
+                )
+                raise typer.Exit(1)
+
     # Handle custom agent or command
     if agent:
         from praisonai_code.cli.features.custom_definitions import load_agent_from_name
