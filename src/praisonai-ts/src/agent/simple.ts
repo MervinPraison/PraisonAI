@@ -320,6 +320,31 @@ export class Agent {
   }
 
   /**
+   * Flatten OpenAI-shape tool definitions ({ type: 'function', function: {...} })
+   * into the provider-agnostic ToolDefinition shape the AI SDK backend expects.
+   * Tools already in the flat shape pass through unchanged. This mirrors what
+   * litellm does for the Python SDK: format once, translate at the transport —
+   * so tools are never dropped by provider.
+   */
+  private getFlatToolDefinitions(): Array<{ name: string; description?: string; parameters?: Record<string, any> }> {
+    if (!this.tools || this.tools.length === 0) return [];
+    return this.tools.map((tool: any) => {
+      if (tool && tool.type === 'function' && tool.function) {
+        return {
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters,
+        };
+      }
+      return {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      };
+    });
+  }
+
+  /**
    * Generate a unique session ID based on current hour, agent name, and random suffix
    */
   private generateSessionId(): string {
@@ -560,21 +585,59 @@ export class Agent {
       if (this._useAISDKBackend) {
         const backend = await this.getBackend();
 
-        // Honesty over silence: the AI SDK backend path does not yet wire
-        // tools or structured output through — say so instead of quietly
-        // answering without them.
         if (this.tools && this.tools.length > 0) {
-          await Logger.warn(
-            `Agent ${this.name}: tools are not yet supported with non-OpenAI providers (${this.llm}) — proceeding WITHOUT tools.`
-          );
-        }
-        if (this.outputSchema) {
-          await Logger.warn(
-            `Agent ${this.name}: outputSchema is not yet supported with non-OpenAI providers (${this.llm}) — proceeding without structured output.`
-          );
-        }
+          // Tools survive on every provider: format once (provider-agnostic
+          // ToolDefinition) and let the AI SDK backend translate at the
+          // transport — the same contract litellm gives the Python SDK.
+          const toolDefinitions = this.getFlatToolDefinitions();
+          let continueConversation = true;
+          let iterations = 0;
+          const maxIterations = this.maxIterations;
 
-        if (this.stream && !this.tools) {
+          while (continueConversation && iterations < maxIterations) {
+            iterations++;
+
+            const result = await backend.generateText({
+              messages,
+              temperature: 0.7,
+              tools: toolDefinitions,
+              toolChoice: 'auto',
+            });
+
+            messages.push({
+              role: 'assistant',
+              content: result.text || '',
+              tool_calls: result.toolCalls,
+            });
+
+            if (result.toolCalls && result.toolCalls.length > 0) {
+              const toolResults = await this.processToolCalls(result.toolCalls);
+              messages.push(...toolResults);
+              continueConversation = true;
+            } else {
+              finalResponse = result.text || '';
+              continueConversation = false;
+            }
+          }
+
+          if (continueConversation && iterations >= maxIterations) {
+            await Logger.warn(`Reached maximum iterations (${maxIterations}) for tool calls`);
+            throw new Error(
+              `Agent ${this.name}: reached maximum tool-call iterations (${maxIterations}) without a final answer. ` +
+              `Increase maxIterations in the agent config if the task legitimately needs more tool round-trips.`
+            );
+          }
+        } else if (this.outputSchema) {
+          // Structured output via the AI SDK backend's generateObject.
+          const result = await backend.generateObject({
+            messages,
+            schema: this.outputSchema,
+            temperature: 0.7,
+          });
+          finalResponse = typeof result.object === 'string'
+            ? result.object
+            : JSON.stringify(result.object);
+        } else if (this.stream) {
           // Streaming with AI SDK backend
           const stream = await backend.streamText({
             messages,
