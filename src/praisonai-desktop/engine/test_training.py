@@ -378,6 +378,55 @@ class RunDirectoryCollisions(unittest.TestCase):
                             "the new run reused a directory from a previous process")
 
 
+class HistoryRetention(unittest.TestCase):
+    """The history is capped, and reaching the cap must not break anything.
+
+    It is a bounded deque so a process that stays open for days does not hold
+    every run's event ring and metric series forever. The cap has to be reached
+    by a test, because the two things that go wrong there only go wrong when it
+    is full: insert(0, ...) raises IndexError on a full bounded deque, so the
+    run after the cap failed to start at all; and evicting from the wrong end
+    would drop the run that just finished instead of the oldest one.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-history-")
+        self.trainer = training.Trainer(self.home, sys.executable)
+        self.trainer.command_builder = _script("print('done')")
+        self.config = {"model_name": "unsloth/tiny", "dataset": "d.json"}
+
+    def tearDown(self):
+        self.trainer.stop()
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _run_once(self, run_id=None):
+        run = self.trainer.start(self.config, run_id)
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 20), run.state)
+        return run
+
+    def test_starting_more_runs_than_the_cap_still_works(self):
+        cap = training.MAX_HISTORY
+        for i in range(cap + 3):
+            self._run_once(f"run-{i:04d}")
+        self.assertEqual(len(self.trainer.history), cap)
+
+    def test_the_newest_run_is_kept_and_the_oldest_is_dropped(self):
+        cap = training.MAX_HISTORY
+        for i in range(cap + 1):
+            self._run_once(f"run-{i:04d}")
+        ids = [r.id for r in self.trainer.history]
+        self.assertEqual(ids[0], f"run-{cap:04d}", "the newest run is not first")
+        self.assertNotIn("run-0000", ids, "the oldest run was not the one evicted")
+
+    def test_the_metric_series_is_capped(self):
+        run = training.Run("r", "c", os.path.join(self.home, "t.log"))
+        for step in range(training.MAX_METRICS + 25):
+            run.metrics.append({"step": step, "loss": 0.1})
+        self.assertEqual(len(run.metrics), training.MAX_METRICS)
+        self.assertEqual(run.metrics[-1]["step"], training.MAX_METRICS + 24,
+                         "the newest metric was dropped instead of the oldest")
+
+
 class StopBeforeSpawn(unittest.TestCase):
     """Cancelling in the window before the trainer process exists.
 

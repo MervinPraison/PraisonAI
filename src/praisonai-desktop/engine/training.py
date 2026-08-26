@@ -260,7 +260,11 @@ class Trainer:
             _write_config(config_path, config)
             run = Run(run_id, config_path, os.path.join(run_dir, "train.log"))
             self.current = run
-            self.history.insert(0, run)
+            # appendleft, not insert(0): insert on a *full* bounded deque
+            # raises IndexError("deque already at its maximum size"), so the
+            # 51st run would have failed to start. appendleft evicts from the
+            # far end, which is the oldest run -- what the cap is for.
+            self.history.appendleft(run)
 
         run.emit("start", {"id": run.id, "config": config_path})
         threading.Thread(target=self._supervise, args=(run,), daemon=True).start()
