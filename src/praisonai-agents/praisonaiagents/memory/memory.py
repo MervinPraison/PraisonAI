@@ -980,6 +980,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
     # -------------------------------------------------------------------------
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
         """Sanitize metadata for ChromaDB - convert to acceptable types"""
+        from .adapters.factories import sanitize_chroma_metadata
         return sanitize_chroma_metadata(metadata)
 
     def store_long_term(
