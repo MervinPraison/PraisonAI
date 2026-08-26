@@ -29,7 +29,7 @@
     "@tauri-apps/api": ["adapters/src/tauri/bridge.ts"],
     "@tauri-apps/plugin-*": ["adapters/src/tauri"],
     "jsdom": ["**/*.test.ts"],
-    "esbuild": ["build", "tools"]
+    "esbuild": ["tools"]
   },
   "testImports": ["testing"],
   "governedRoots": ["protocol", "core", "engines", "adapters", "testing", "ui", "app"]
