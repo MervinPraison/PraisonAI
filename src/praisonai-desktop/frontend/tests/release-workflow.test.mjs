@@ -239,10 +239,27 @@ test('the signature gate reads the DMG, not the app beside it', () => {
   assert.ok(gate, 'the signature gate is gone');
   assert.match(gate, /hdiutil attach/, 'the gate does not open the DMG');
   assert.match(gate, /-name '\*\.dmg'/, 'the gate does not look for a .dmg');
-  assert.ok(!/-name '\*\.app' -print -quit"?\s*\)?\s*$/m.test(
-              gate.split('hdiutil attach')[0]),
+  assert.ok(!/-name '\*\.app'/.test(gate.split('hdiutil attach')[0]),
             'the gate looks for a .app before mounting; Tauri has deleted it by then');
   assert.match(gate, /hdiutil detach/, 'the gate never unmounts the DMG');
+
+  // The point of mounting is to verify what is *inside* the DMG. A gate that
+  // mounted the image and then ran codesign against something else -- the
+  // deleted build-time .app, or a bare path -- would mount for nothing and
+  // reproduce the bug this fixes. Tie the two together explicitly:
+  //   1. the .app the gate verifies is discovered under the mount point, and
+  //   2. that same variable is what codesign is handed.
+  // Pinned to the shell variable rather than a literal spelling of the find,
+  // so an equivalent lookup (double quotes, different flags) still passes as
+  // long as it resolves the app from the mount and verifies that resolution.
+  const mount = /hdiutil attach\b[^\n]*?-mountpoint\s+"?(\$\{?\w+\}?|"[^"]+")/
+    .exec(gate);
+  assert.ok(mount, 'the gate mounts the DMG without a named mount point to read from');
+  const app = /(\w+)="?\$\(\s*find\s+"?\$\{?\w+\}?"?[^\n]*-name '\*\.app'/.exec(gate);
+  assert.ok(app, 'the verified .app is not discovered from inside the mounted DMG');
+  const appVar = app[1];
+  assert.match(gate, new RegExp(`codesign\\s+--verify[^\\n]*"\\$\\{?${appVar}\\}?"`),
+               `codesign does not verify the .app (\$${appVar}) found inside the mounted DMG`);
 });
 
 test('the macOS overlay does not drop the bundle configuration', () => {
