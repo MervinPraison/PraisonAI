@@ -81,4 +81,23 @@ describe('esm-shim createRequire banner detection', () => {
     expect(needsCjsBanner(code)).toBe(false);
     expect(hasBanner(applyBanner(code))).toBe(false);
   });
+
+  it('DOES banner CommonJS usage inside a ${...} template interpolation', () => {
+    // The executable expression inside ${...} is real code, not inert template
+    // text, so a genuine require()/__dirname there must still trigger the banner.
+    const req = 'const p = `path: ${require("path").resolve(".")}`;\n';
+    const dir = 'const msg = `dir is ${__dirname}`;\n';
+    expect(needsCjsBanner(req)).toBe(true);
+    expect(needsCjsBanner(dir)).toBe(true);
+    expect(hasBanner(applyBanner(req))).toBe(true);
+    expect(hasBanner(applyBanner(dir))).toBe(true);
+  });
+
+  it('does NOT banner an inert "require" string nested inside a ${...} interpolation', () => {
+    // A string literal inside the interpolation is still inert text and must not
+    // trigger the banner (proves the recursive stripping handles nesting).
+    const code = 'const x = `value: ${"require me not"}`;\n';
+    expect(needsCjsBanner(code)).toBe(false);
+    expect(hasBanner(applyBanner(code))).toBe(false);
+  });
 });

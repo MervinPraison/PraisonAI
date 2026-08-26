@@ -143,8 +143,8 @@ function stripStringsAndComments(code) {
       i = j;
       continue;
     }
-    // String / template literal
-    if (ch === "'" || ch === '"' || ch === '`') {
+    // Plain string literal
+    if (ch === "'" || ch === '"') {
       const quote = ch;
       let j = i + 1;
       while (j < n) {
@@ -153,6 +153,41 @@ function stripStringsAndComments(code) {
         j++;
       }
       out += blank(code.slice(i, j));
+      i = j;
+      continue;
+    }
+    // Template literal: blank the inert text but KEEP the executable code inside
+    // ${...} interpolations (recursively), since `${require("x")}` or `${__dirname}`
+    // are real CJS usages that must still trigger the banner. The backtick,
+    // literal chunks, `${`/`}` delimiters are replaced with same-length whitespace
+    // so offsets and newlines are preserved.
+    if (ch === '`') {
+      out += ' '; // opening backtick
+      let j = i + 1;
+      while (j < n) {
+        if (code[j] === '\\') { out += blank(code.slice(j, j + 2)); j += 2; continue; }
+        if (code[j] === '`') { out += ' '; j++; break; } // closing backtick
+        if (code[j] === '$' && code[j + 1] === '{') {
+          // Find the matching closing brace, tracking nested braces.
+          let depth = 1;
+          let k = j + 2;
+          while (k < n && depth > 0) {
+            if (code[k] === '{') depth++;
+            else if (code[k] === '}') depth--;
+            if (depth === 0) break;
+            k++;
+          }
+          out += '  '; // blank the `${`
+          // Recurse so nested strings/templates/comments inside the expression
+          // are handled correctly too.
+          out += stripStringsAndComments(code.slice(j + 2, k));
+          if (k < n && code[k] === '}') { out += ' '; k++; } // blank the `}`
+          j = k;
+          continue;
+        }
+        out += code[j] === '\n' ? '\n' : ' ';
+        j++;
+      }
       i = j;
       continue;
     }
