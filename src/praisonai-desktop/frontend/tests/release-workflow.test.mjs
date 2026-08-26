@@ -185,8 +185,12 @@ test('the macOS bundle is configured to be signed', () => {
   // between "damaged" and a warning the user can click past.
   const mac = config.bundle.macOS;
   assert.ok(mac, 'no macOS bundle config at all');
-  assert.ok(mac.signingIdentity,
-            'no signingIdentity: the bundle will ship with an invalid signature');
+  // Pinned to "-", not merely truthy: any other value is either a Developer ID
+  // we do not have (the build has no keychain to satisfy it, so codesign
+  // fails) or a typo Tauri passes straight to codesign. Only "-" is the ad-hoc
+  // identity that turns the shipped "damaged" bundle into a valid signature.
+  assert.equal(mac.signingIdentity, '-',
+               'the macOS bundle must use the ad-hoc signing identity "-"');
 });
 
 test('the release build verifies the signature before uploading', () => {
@@ -204,6 +208,18 @@ test('the release build verifies the signature before uploading', () => {
                'nothing checks the signature before the bundle is attached');
   assert.ok(runnable.indexOf('codesign --verify') < runnable.indexOf('gh release upload'),
             'the signature is verified after upload, which is too late');
+
+  // The gate is worthless if it never runs. Its step is the only place the
+  // codesign command lives, so pin that step to macOS: flipping the `if` to
+  // skip macOS -- or dropping the condition so it runs on Linux where codesign
+  // does not exist and the step is silently skipped -- would otherwise still
+  // pass every assertion above.
+  const stepStart = runnable.lastIndexOf('- name:',
+                                         runnable.indexOf('codesign --verify'));
+  const nextStep = runnable.indexOf('\n      - name:', stepStart + 1);
+  const gate = runnable.slice(stepStart, nextStep === -1 ? undefined : nextStep);
+  assert.match(gate, /if:\s*runner\.os\s*==\s*'macOS'/,
+               'the signature-verification step is not scoped to macOS runners');
 });
 
 test('the macOS overlay does not drop the bundle configuration', () => {
