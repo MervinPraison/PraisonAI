@@ -32,7 +32,17 @@ def _wait(predicate, timeout=20.0):
 
 
 def _alive(pid):
-    """True while the pid exists, including as a zombie we have not reaped."""
+    """True while the pid exists, including as a zombie we have not reaped.
+
+    os.kill(pid, 0) is the POSIX liveness idiom, but on Windows Python maps
+    every signal other than CTRL_C/CTRL_BREAK to TerminateProcess: signal 0
+    would try to *kill* a live pid, and a dead one raises OSError(WinError 87)
+    rather than ProcessLookupError -- so the probe both lies and, worse, is
+    destructive. Windows therefore gets an OpenProcess-based check that only
+    observes, mirroring how training.py already forks its termination path.
+    """
+    if os.name == "nt":
+        return _alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -40,6 +50,35 @@ def _alive(pid):
     except PermissionError:
         return True
     return True
+
+
+def _alive_windows(pid):
+    """Observe, never signal: open the process and read its exit code.
+
+    STILL_ACTIVE (259) means running. A pid that cannot be opened -- invalid
+    (WinError 87) or already gone -- reads as dead. This is the non-destructive
+    counterpart to os.kill(pid, 0), which on Windows would terminate the pid.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # A HANDLE is pointer-sized; without restype ctypes truncates it to a C int
+    # and the CloseHandle below would free the wrong value on 64-bit.
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _script(body):
@@ -604,8 +643,10 @@ class RunLifecycle(unittest.TestCase):
         self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 15))
         self.assertEqual(run.state, training.CANCELLED)
         self.assertIsNotNone(run._proc.poll(), "the child was never reaped")
-        with self.assertRaises(OSError):
-            os.kill(pid, 0)          # gone, not a zombie left behind
+        # Gone, not a zombie left behind. os.kill(pid, 0) is the POSIX way to
+        # ask, but on Windows signal 0 is not a query -- it terminates -- so the
+        # liveness probe is factored into _alive, which observes on either OS.
+        self.assertFalse(_alive(pid), "the child was left behind after reaping")
 
     def test_stopping_also_kills_what_the_trainer_spawned(self):
         """The orphan case, which is the one that actually bites.

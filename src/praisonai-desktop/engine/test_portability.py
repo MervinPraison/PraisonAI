@@ -13,6 +13,7 @@ exercised rather than merely written.
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -329,6 +330,13 @@ class SecretDeletion(unittest.TestCase):
         # The key is in both stores and the file store cannot be written to.
         # Reporting success here told the user the key was gone while `get`
         # went on serving the plaintext copy.
+        if os.name == "nt":
+            # The precondition is an unwritable store, established with
+            # chmod(0o500). Windows does not honour POSIX mode bits for
+            # directory writability, so the delete would succeed and the
+            # scenario this guards -- a store that *cannot* perform the delete
+            # -- is unreachable here.
+            self.skipTest("chmod(0o500) does not make a directory unwritable on Windows")
         self.store.set("api_key", "sk-live")
         # A copy in the fallback that a successful primary write did not clear
         # -- written by an older build, or left by a crash between the two
@@ -527,6 +535,82 @@ class ProcessStartTime(unittest.TestCase):
 
     def test_a_pid_that_does_not_exist_reports_zero(self):
         self.assertEqual(server._start_time(2 ** 22), 0)
+
+
+class StreamProtocolVocabulary(unittest.TestCase):
+    """The documented stream-protocol events must match the ones emitted.
+
+    A comment cannot fail CI, so the "stream protocol v2" block in server.py
+    drifted: it listed nine events while the engine emitted eleven, and the two
+    missing ones included approval_request -- the human-in-the-loop tool gate a
+    client cannot render if it never hears the event. This test makes the
+    comment a checked artifact: every emit(...) call site's name must appear in
+    the documented list, and every documented name must be emitted, so either
+    direction of drift fails here rather than silently on the wire.
+    """
+
+    SOURCE = pathlib.Path(server.__file__).resolve()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = cls.SOURCE.read_text(encoding="utf-8")
+
+    def _documented_events(self):
+        """The event names listed under the 'stream protocol v2' comment."""
+        marker = "--- stream protocol v2"
+        start = self.text.index(marker)
+        block = self.text[start:self.text.index("\ndef ", start)]
+        events = set()
+        for line in block.splitlines():
+            m = re.match(r"#\s+([a-z_]+)\s+\{", line)
+            if m:
+                events.add(m.group(1))
+        return events
+
+    def _emitted_events(self):
+        """Every literal event name the engine can put on the wire.
+
+        Two dispatch forms reach the socket. Most call sites name the event
+        inline -- emit("delta", ...) -- and the first pattern catches those.
+        The stream loop also forwards a *variable*: emit(event, frame), where
+        event comes from _classify_stream_item. A name added to that classifier
+        would drift onto the wire invisibly to a guard that only reads literal
+        emit() arguments, so the second pattern reads the classifier's returned
+        events as well -- the only place the variable is assigned.
+        """
+        literal = re.findall(r'(?:_emit_now|emit)\(\s*"([a-z_]+)"', self.text)
+        classified = re.findall(
+            r'return\s+"([a-z_]+)"\s*,', self._classifier_block())
+        return set(literal) | set(classified)
+
+    def _classifier_block(self):
+        """The body of _classify_stream_item, source of the forwarded event."""
+        start = self.text.index("def _classify_stream_item")
+        return self.text[start:self.text.index("\ndef ", start + 1)]
+
+    def test_every_emitted_event_is_documented(self):
+        documented = self._documented_events()
+        undocumented = self._emitted_events() - documented
+        self.assertEqual(
+            undocumented, set(),
+            f"these events are emitted but not documented in the "
+            f"stream-protocol comment: {sorted(undocumented)}")
+
+    def test_every_documented_event_is_emitted(self):
+        emitted = self._emitted_events()
+        unemitted = self._documented_events() - emitted
+        self.assertEqual(
+            unemitted, set(),
+            f"these events are documented but never emitted -- the comment is "
+            f"stale: {sorted(unemitted)}")
+
+    def test_the_two_events_the_drift_hid_are_present(self):
+        # The specific regression: approval_request and tool_drafting were live
+        # on the wire and absent from the spec.
+        documented = self._documented_events()
+        for event in ("approval_request", "tool_drafting"):
+            self.assertIn(event, documented,
+                          f"{event} is emitted but missing from the spec again")
 
 
 if __name__ == "__main__":
