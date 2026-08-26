@@ -216,9 +216,28 @@ describe('Agent tool approval gate', () => {
     expect(results[0].content).toBe('{"id":"x","ok":true}');
   });
 
-  it('approval: true creates a default ApprovalManager that gates tools', () => {
+  it('approval: true creates a default ApprovalManager with an interactive handler (no 5-min stall)', () => {
     const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: true });
-    expect((agent as any).approvalManager).toBeInstanceOf(ApprovalManager);
+    const manager = (agent as any).approvalManager as ApprovalManager;
+    expect(manager).toBeInstanceOf(ApprovalManager);
+    // A handler must be wired so requestApproval resolves via the handler
+    // path instead of falling through to the respond()-awaiting Promise,
+    // which would block for the full default timeout before denying.
+    expect((manager as any).handlers.length).toBeGreaterThan(0);
+  });
+
+  it('approval: true resolves via its handler without waiting for the timeout', async () => {
+    const agent = new Agent({ instructions: 't', tools: [objTool], verbose: false, approval: true });
+    const manager = (agent as any).approvalManager as ApprovalManager;
+    // Deny synchronously via the wired handler; must resolve immediately.
+    (manager as any).handlers = [async () => false];
+    const results = await Promise.race([
+      (agent as any).processToolCalls([
+        { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+      ]),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('stalled')), 1000)),
+    ]) as Array<{ tool_call_id: string; content: string }>;
+    expect(results[0].content).toContain('denied by the approval gate');
   });
 
   it('passes the tool call id as toolInvocationId (correlation, never positional)', async () => {

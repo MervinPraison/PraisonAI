@@ -5,7 +5,7 @@ import type { DbAdapter, DbMessage, DbRun } from '../db/types';
 import { randomUUID } from 'crypto';
 import type { LLMProvider } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
-import { ApprovalManager } from '../ai/tool-approval';
+import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 
 /**
  * Agent Configuration
@@ -78,10 +78,11 @@ export interface SimpleAgentConfig {
   toolFunctions?: Record<string, Function>;
   /**
    * Human-in-the-loop approval gate for tool calls (mirrors Python's
-   * `approval`). When `true`, a shared `ApprovalManager` gates every tool
-   * before it runs; pass an `ApprovalManager` instance to use custom
-   * handlers / auto-approve-deny rules. Denied calls are reported back to the
-   * model as the tool result rather than throwing, so it can course-correct.
+   * `approval`). When `true`, every tool is gated behind an interactive CLI
+   * prompt (approve/deny per call); pass an `ApprovalManager` instance to use
+   * custom handlers / auto-approve-deny rules (e.g. a UI responder). Denied
+   * calls are reported back to the model as the tool result rather than
+   * throwing, so it can course-correct.
    */
   approval?: boolean | ApprovalManager;
   /**
@@ -183,7 +184,14 @@ export class Agent {
     if (config.approval instanceof ApprovalManager) {
       this.approvalManager = config.approval;
     } else if (config.approval === true) {
-      this.approvalManager = new ApprovalManager();
+      // `true` shorthand: gate every tool via an interactive CLI prompt.
+      // Without a handler, requestApproval() would fall through to a Promise
+      // awaiting respond() that nobody calls — stalling every tool for the
+      // full 5-min timeout before denying. Wire the built-in prompt so the
+      // default is usable and safe (blocks until the operator answers).
+      const manager = new ApprovalManager();
+      manager.onApprovalRequest(createCLIApprovalPrompt());
+      this.approvalManager = manager;
     }
     this.maxIterations = config.maxIterations ?? 5;
     this.dbAdapter = config.db;
