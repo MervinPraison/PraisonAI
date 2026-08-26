@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+
+    // `node --test` runs these files by stripping types. Stripping does no code
+    // generation and no path rewriting, so two things that typecheck fine will
+    // still die at runtime unless they are banned here:
+    //
+    //   allowImportingTsExtensions -- relative imports must carry ".ts", because
+    //     nothing rewrites "./x.js" back to "./x.ts" at run time.
+    //   erasableSyntaxOnly -- an `enum` or a parameter property compiles to real
+    //     JavaScript, which stripping cannot emit. Without this line the failure
+    //     is a parse error in CI pointing at the importer, not the author.
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    // args["path"] is `unknown | undefined`, which is the truth for a bag of
+    // arguments that arrived over a wire.
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["protocol", "core", "engines", "adapters", "testing", "ui", "app"],
+  "exclude": ["node_modules", "dist", "shell-tauri"]
+}

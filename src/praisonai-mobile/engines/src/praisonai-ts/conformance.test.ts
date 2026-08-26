@@ -1,0 +1,88 @@
+/**
+ * praisonai-ts against the engine contract.
+ *
+ * Passing this IS the definition of implementing the agent-framework seam --
+ * the same suite the remote-http engine and the scripted fake already run.
+ *
+ * Five scenarios are declared unsupported, with reasons. That is not the suite
+ * being lenient: `unsupported` prints every omission, so a shrinking contract
+ * is visible in the output rather than silently green. The five are all one
+ * fact -- upstream `streamEvents` emits three variants (text/finish/error)
+ * against protocol v2's eleven, so tool and approval events cannot be produced
+ * by this engine at all. It is recorded in gaps.md and reflected in
+ * `capabilities`, which the suite checks in the negative direction: an engine
+ * declaring approvals:false must never emit an approval_request.
+ */
+import { describeEngineContract, type ScenarioName } from "../conformance.ts";
+import { createPraisonTsEngine } from "./engine.ts";
+import type { PraisonAgent, PraisonAgentEvent, PraisonStopReason } from "./agent-api.ts";
+
+/** The upstream event script for each scenario this engine CAN produce. */
+const SCRIPTS: Partial<Record<ScenarioName, {
+  events: readonly PraisonAgentEvent[];
+  stop: PraisonStopReason | null;
+}>> = {
+  happy: {
+    events: [
+      { type: "text", delta: "Hel" },
+      { type: "text", delta: "lo" },
+      { type: "finish", text: "Hello" },
+    ],
+    stop: "completed",
+  },
+  empty: {
+    events: [{ type: "finish", text: "" }],
+    stop: "completed",
+  },
+  auth_error: {
+    events: [{ type: "error", error: new Error("401 Incorrect API key provided") }],
+    stop: "error",
+  },
+  rate_limit_error: {
+    events: [{ type: "error", error: new Error("429 Rate limit reached") }],
+    stop: "error",
+  },
+  cancelled: {
+    events: [{ type: "text", delta: "par" }],
+    stop: "cancelled",
+  },
+};
+
+function agentFor(scenario: ScenarioName): PraisonAgent {
+  const script = SCRIPTS[scenario];
+  if (script === undefined) {
+    throw new Error(`no script for scenario "${scenario}" -- it should be listed as unsupported`);
+  }
+  return {
+    lastStopReason: script.stop,
+    async *streamEvents(_prompt, opts) {
+      for (const event of script.events) {
+        if (opts?.signal?.aborted) return;
+        yield event;
+      }
+    },
+  };
+}
+
+let counter = 0;
+
+describeEngineContract({
+  name: "praisonai-ts",
+  create: async (scenario) =>
+    createPraisonTsEngine({
+      createAgent: () => agentFor(scenario),
+      persistence: {
+        async record() {
+          return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+        },
+      },
+      newMsgId: () => `m${++counter}`,
+    }),
+  unsupported: {
+    tool_ok: "upstream streamEvents has no tool_call/tool_result variant -- tools run but are never announced",
+    tool_failed: "same: no tool_result, so `ok: false` cannot be reported",
+    tool_unresolved: "same: no tool_call, so there is no row to leave unresolved",
+    approval: "ApprovalManager exists upstream but cannot reach the event channel",
+    two_approvals: "same as approval",
+  },
+});
