@@ -14,15 +14,9 @@ importers:
       axios:
         specifier: 1.8.4
         version: 1.8.4
-      dotenv:
-        specifier: ^16.4.7
-        version: 16.5.0
       fast-xml-parser:
         specifier: ^4.5.1
         version: 4.5.3
-      node-fetch:
-        specifier: ^2.6.9
-        version: 2.7.0
       openai:
         specifier: ^4.81.0
         version: 4.104.0(zod@3.25.51)
@@ -1378,10 +1372,6 @@ packages:
   diff@4.0.2:
     resolution: {integrity: sha512-58lmxKSA4BNyLz+HHMUzlOEpg09FV+ev6ZMe3vJihgdxzgcwZ8VoEEPmALCZG9LmqfVoNMMKpttIYTVG6uDY7A==}
     engines: {node: '>=0.3.1'}
-
-  dotenv@16.5.0:
-    resolution: {integrity: sha512-m/C+AwOAr9/W1UOIZUo232ejMNnJAJtYQjUbHoNTBNTJSvqzzDh7vnrei3o3r3m9blf6ZoDkvcw0VmozNRFJxg==}
-    engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -4890,8 +4880,6 @@ snapshots:
   diff-sequences@29.6.3: {}
 
   diff@4.0.2: {}
-
-  dotenv@16.5.0: {}
 
   dunder-proto@1.0.1:
     dependencies:
