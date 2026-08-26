@@ -49,7 +49,7 @@ export class OpenAIProvider extends BaseProvider {
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
-      });
+      }, { signal: options.signal });
 
       const choice = response.choices[0];
       const message = choice.message;
@@ -89,7 +89,7 @@ export class OpenAIProvider extends BaseProvider {
           tool_choice: options.toolChoice as any,
           stop: options.stop,
           stream: true,
-        });
+        }, { signal: options.signal });
 
         let toolCalls: ToolCall[] = [];
         
@@ -151,7 +151,7 @@ export class OpenAIProvider extends BaseProvider {
             strict: true,
           },
         },
-      });
+      }, { signal: options.signal });
 
       const choice = response.choices[0];
       const content = choice.message.content || '{}';

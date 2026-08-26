@@ -41,6 +41,8 @@ export interface GenerateTextOptions {
   topP?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
+  /** Abort signal for cancellation — aborts the underlying HTTP request */
+  signal?: AbortSignal;
 }
 
 export interface GenerateTextResult {
@@ -69,6 +71,8 @@ export interface GenerateObjectOptions<T = any> {
   temperature?: number;
   maxTokens?: number;
   maxRetries?: number;
+  /** Abort signal for cancellation — aborts the underlying HTTP request */
+  signal?: AbortSignal;
 }
 
 export interface GenerateObjectResult<T = any> {

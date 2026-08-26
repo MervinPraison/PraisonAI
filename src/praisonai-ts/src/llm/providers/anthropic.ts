@@ -63,6 +63,7 @@ export class AnthropicProvider extends BaseProvider {
           stop_sequences: options.stop,
           top_p: options.topP,
         }),
+        signal: options.signal,
       });
 
       if (!response.ok) {
@@ -128,6 +129,7 @@ export class AnthropicProvider extends BaseProvider {
             tools: options.tools ? self.formatTools(options.tools) : undefined,
             stream: true,
           }),
+          signal: options.signal,
         });
 
         if (!response.ok) {
@@ -226,6 +228,7 @@ export class AnthropicProvider extends BaseProvider {
           messages: this.formatMessages(messages),
           temperature: options.temperature ?? 0.7,
         }),
+        signal: options.signal,
       });
 
       if (!response.ok) {

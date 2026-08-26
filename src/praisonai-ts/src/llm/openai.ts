@@ -179,7 +179,8 @@ export class OpenAIService {
         temperature: number = 0.7,
         tools?: ChatCompletionTool[],
         tool_choice?: ChatCompletionToolChoiceOption,
-        responseFormat?: ResponseFormat
+        responseFormat?: ResponseFormat,
+        signal?: AbortSignal
     ): Promise<string> {
         await Logger.startSpinner('Generating text with OpenAI...');
         
@@ -204,7 +205,7 @@ export class OpenAIService {
                     tools: openAITools,
                     tool_choice,
                     ...(responseFormat ? { response_format: responseFormat } : {})
-                })
+                }, { signal })
             );
 
             const message = completion.choices[0]?.message;
@@ -239,7 +240,8 @@ export class OpenAIService {
         temperature: number = 0.7,
         tools?: ChatCompletionTool[],
         tool_choice?: ChatCompletionToolChoiceOption,
-        responseFormat?: ResponseFormat
+        responseFormat?: ResponseFormat,
+        signal?: AbortSignal
     ): Promise<LLMResponse> {
         await Logger.startSpinner('Generating chat response...');
 
@@ -258,7 +260,7 @@ export class OpenAIService {
                     tools: openAITools,
                     tool_choice,
                     ...(responseFormat ? { response_format: responseFormat } : {})
-                })
+                }, { signal })
             );
 
             const response = completion.choices[0]?.message;
@@ -376,7 +378,8 @@ export class OpenAIService {
     async streamChat(
         messages: ChatMessage[],
         temperature: number = 0.7,
-        onToken: (token: string) => void
+        onToken: (token: string) => void,
+        signal?: AbortSignal
     ): Promise<string> {
         await Logger.debug('Starting chat stream with messages...', {
             model: this.model,
@@ -392,7 +395,7 @@ export class OpenAIService {
                     ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     stream: true
-                })
+                }, { signal })
             );
 
             let fullResponse = '';
@@ -429,7 +432,8 @@ export class OpenAIService {
         tools?: ChatCompletionTool[],
         onToken?: (token: string) => void,
         tool_choice?: ChatCompletionToolChoiceOption,
-        responseFormat?: ResponseFormat
+        responseFormat?: ResponseFormat,
+        signal?: AbortSignal
     ): Promise<LLMResponse> {
         await Logger.debug('Starting chat stream with tools...', {
             model: this.model,
@@ -449,7 +453,7 @@ export class OpenAIService {
                     tools: openAITools,
                     tool_choice,
                     ...(responseFormat ? { response_format: responseFormat } : {})
-                })
+                }, { signal })
             );
 
             let fullResponse = '';

@@ -181,7 +181,7 @@ export class AISDKBackend implements LLMProvider {
         }, this.config.timeout || SAFE_DEFAULTS.timeout);
         
         try {
-          callOptions.abortSignal = controller.signal;
+          callOptions.abortSignal = mergeSignals(controller.signal, options.signal);
           
           const result = await ai.generateText(callOptions as any);
           
@@ -261,7 +261,7 @@ export class AISDKBackend implements LLMProvider {
       controller.abort();
     }, this.config.timeout || SAFE_DEFAULTS.timeout);
     
-    callOptions.abortSignal = controller.signal;
+    callOptions.abortSignal = mergeSignals(controller.signal, options.signal);
     
     const self = this;
     const onToken = options.onToken;
@@ -368,7 +368,7 @@ export class AISDKBackend implements LLMProvider {
     }, this.config.timeout || SAFE_DEFAULTS.timeout);
     
     try {
-      callOptions.abortSignal = controller.signal;
+      callOptions.abortSignal = mergeSignals(controller.signal, options.signal);
       
       const result = await ai.generateObject(callOptions as any);
       
@@ -546,4 +546,42 @@ function classifyError(error: unknown): AISDKError {
  */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Merge a timeout signal with an optional caller signal so aborting EITHER
+ * aborts the request. Previously the timeout signal was assigned
+ * unconditionally, silently discarding any caller-supplied signal — meaning a
+ * Stop button could never reach the provider. Uses AbortSignal.any when
+ * available (Node >= 20) with a manual fallback for older runtimes.
+ */
+function mergeSignals(
+  timeoutSignal: AbortSignal,
+  callerSignal?: AbortSignal
+): AbortSignal {
+  if (!callerSignal) {
+    return timeoutSignal;
+  }
+  const anyFn = (AbortSignal as any).any;
+  if (typeof anyFn === 'function') {
+    return anyFn([timeoutSignal, callerSignal]);
+  }
+  // Manual fallback: forward whichever signal aborts first.
+  const controller = new AbortController();
+  const onAbort = (source: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort((source as any).reason);
+    }
+  };
+  if (callerSignal.aborted) {
+    onAbort(callerSignal);
+  } else {
+    callerSignal.addEventListener('abort', () => onAbort(callerSignal), { once: true });
+  }
+  if (timeoutSignal.aborted) {
+    onAbort(timeoutSignal);
+  } else {
+    timeoutSignal.addEventListener('abort', () => onAbort(timeoutSignal), { once: true });
+  }
+  return controller.signal;
 }
