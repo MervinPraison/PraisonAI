@@ -6,10 +6,10 @@
  * obvious implementation -- split on ". " -- fails in three ways that are all
  * silent:
  *
- *  - "Run npm i. Then..." is fine, but "Installed v1.2.3 successfully" is cut
- *    into three pieces, and a screen reader reads three fragments with three
- *    falling intonations. `Intl.Segmenter` knows a decimal point is not a
- *    sentence end. So is "Dr. Smith", "e.g.", "U.S.".
+ *  - "Run npm i. Then..." is fine, but "Installed version 1.2.3 successfully"
+ *    is cut into three pieces, and a screen reader reads three fragments with
+ *    three falling intonations. `Intl.Segmenter` knows a decimal point is not a
+ *    sentence end; a split on ". " cannot.
  *
  *  - Japanese has no spaces and terminates with U+3002 IDEOGRAPHIC FULL STOP.
  *    Splitting on ". " finds nothing, so a Japanese answer is announced as one
@@ -23,6 +23,13 @@
  * cont" and then, a moment later, says the whole sentence again from the top.
  * `completedLength` returns only the prefix that is finished, so the caller can
  * hold the tail back until it is.
+ *
+ * ONE LIMITATION, STATED RATHER THAN HIDDEN. `Intl.Segmenter` does not expose
+ * ICU's abbreviation suppression lists, so "Ask Dr. Smith" is segmented after
+ * "Dr.". The consequence is bounded and cosmetic -- a screen reader announces
+ * two words a beat early -- and it is not worth a hand-written abbreviation
+ * list, which would be English-only and would therefore reintroduce exactly the
+ * class of bug this file exists to remove.
  */
 
 /** Sentence terminators across scripts, plus the ellipsis a model actually

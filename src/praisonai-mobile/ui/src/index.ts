@@ -137,3 +137,75 @@ export type {
  *  whole list on every publish, which is the jank this package exists to avoid. */
 export { emptyRender, reconcile, signatureOf } from "./render/reconcile.ts";
 export type { Diff, Op, RenderState } from "./render/reconcile.ts";
+
+/**
+ * Internationalisation. A string table, locale plumbing, and the locale-aware
+ * formatters that sit ALONGSIDE format.ts rather than replacing it -- format.ts
+ * stays deterministic so its tests can assert literals; see format-intl.ts.
+ */
+export { canonicalise, direction, isRtl, logicalInsets, resolveLocale } from "./i18n/locale.ts";
+export type { Direction, LogicalInsets } from "./i18n/locale.ts";
+
+export { countedPhrase, pluralCategory, selectPlural } from "./i18n/plural.ts";
+export type { PluralCategory, PluralForms } from "./i18n/plural.ts";
+
+export { completedLength, endsSentence, sentences } from "./i18n/segment.ts";
+
+export { en, stringKeys } from "./i18n/strings.ts";
+export type { DecisionStatus, StringKey, Strings } from "./i18n/strings.ts";
+
+export {
+  MISSING_CLOSE,
+  MISSING_OPEN,
+  createBundle,
+  describeBundle,
+  enBundle,
+  isComplete,
+  isMarked,
+  markMissing,
+} from "./i18n/bundle.ts";
+export type { Bundle, MissingKeyMode } from "./i18n/bundle.ts";
+
+export {
+  formatCountLocalised,
+  formatDate,
+  formatElapsedLocalised,
+  formatNumber,
+  formatRelativeFromStrings,
+  formatRelativeLocalised,
+  relativeParts,
+} from "./i18n/format-intl.ts";
+export type { RelativeParts } from "./i18n/format-intl.ts";
+
+/**
+ * Accessibility POLICY: what to announce, how urgently, and where focus goes.
+ * Pure logic with no DOM in it, for the same reason as everything else in this
+ * layer -- a rule expressed as a function is a rule a test can hold.
+ */
+export { politenessFor, priorityOf, roleFor } from "./a11y/politeness.ts";
+export type { AnnounceReason, LiveRole, Politeness } from "./a11y/politeness.ts";
+
+export {
+  accessibleName,
+  approvalRowName,
+  chatRowName,
+  droppedRowName,
+  errorRowName,
+  noticeRowName,
+  routeTitle,
+  toolRowName,
+} from "./a11y/names.ts";
+
+export { ANNOUNCE_INTERVAL_MS, announce, initialAnnouncer, resetAnnouncer } from "./a11y/announce.ts";
+export type { AnnounceInput, AnnounceResult, Announcement, AnnouncerState } from "./a11y/announce.ts";
+
+export {
+  approvalButtonId,
+  approvalGroupId,
+  focusAfterDisable,
+  focusForRoute,
+  headingId,
+  isLostFocus,
+  screenAnnouncement,
+} from "./a11y/focus.ts";
+export type { DisableInput, FocusTarget, Navigation } from "./a11y/focus.ts";

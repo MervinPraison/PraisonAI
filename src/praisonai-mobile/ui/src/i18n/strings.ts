@@ -54,6 +54,18 @@ export type DecisionStatus = DecisionState["status"];
  * key a translation forgot, and it does that by comparing shapes against `en`.
  */
 export interface Strings {
+  // ---- shell -------------------------------------------------------------
+  /** The product name. A string and not a constant: it is read aloud as the
+   *  transcript region's label, and some locales transliterate it. */
+  readonly appName: string;
+  readonly newChat: string;
+  /** The app could not start at all. The detail is machine text appended, not
+   *  interpolated into the middle of a sentence. */
+  readonly bootFailed: (detail: string) => string;
+  /** The crash screen. It has to say the conversations survived, because the
+   *  user's next thought is that they did not. */
+  readonly crashed: string;
+
   // ---- screens -----------------------------------------------------------
   readonly routeChats: string;
   readonly routeChat: string;
@@ -72,6 +84,8 @@ export interface Strings {
   /** "None of your chats could be read" -- data loss, and it must not render
    *  as the same empty state as a new install. */
   readonly chatsAllUnreadable: (count: number) => string;
+  /** An open chat with no messages in it yet. */
+  readonly emptyTranscript: string;
 
   // ---- relative time (fallback path; see format-intl.ts) -----------------
   readonly justNow: string;
@@ -127,6 +141,15 @@ export interface Strings {
   readonly actionCopy: string;
   readonly actionStop: string;
   readonly actionSend: string;
+  /**
+   * The accessible name of the message field itself.
+   *
+   * Distinct from `actionSend`, which names the BUTTON beside it. Labelling
+   * the textarea with the button's name announces the composer as
+   * "Send, edit text" -- so a blind user is told what the control next to the
+   * one they are in does, and nothing about the one they are in.
+   */
+  readonly composerLabel: string;
 
   // ---- usage -------------------------------------------------------------
   readonly usageChars: (chars: string) => string;
@@ -192,6 +215,11 @@ const RECOVERY: Readonly<Record<Recovery, string>> = {
  *  against this object, so a key added here is a key every translation is
  *  measured against. */
 export const en: Strings = {
+  appName: "PraisonAI",
+  newChat: "New chat",
+  bootFailed: (detail) => `PraisonAI could not start: ${detail}`,
+  crashed: "Something went wrong. Your conversations are saved.",
+
   routeChats: "Chats",
   routeChat: "Chat",
   routeSettings: "Settings",
@@ -199,7 +227,8 @@ export const en: Strings = {
 
   untitled: "Untitled",
   chatUnreadable: (id) => `Could not be read: ${id}`,
-  chatsEmpty: "No chats yet",
+  chatsEmpty: "No conversations yet.",
+  emptyTranscript: "Ask something to begin.",
   chatsAllUnreadable: (count) =>
     countedPhrase(EN, count, String(count), {
       one: "{n} chat could not be read",
@@ -257,6 +286,7 @@ export const en: Strings = {
   actionCopy: "Copy",
   actionStop: "Stop",
   actionSend: "Send",
+  composerLabel: "Message",
 
   usageChars: (chars) => `${chars} characters`,
   usageElapsed: (elapsed) => `${elapsed} elapsed`,

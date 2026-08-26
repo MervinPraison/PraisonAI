@@ -23,43 +23,13 @@ import { emptyRender, reconcile, type RenderState } from "../../ui/src/render/re
 import { buildTranscript } from "../../ui/src/transcript/view-model.ts";
 import type { RunView } from "../../core/src/run/controller.ts";
 import type { Route } from "../../ui/src/router.ts";
-
-/**
- * Every user-visible string, injected.
- *
- * Not hardcoded at the render site, which is where they all were: an audit
- * found every one of them inline and no locale plumbing anywhere. Passing them
- * in means the English table is one object and a translated one is another,
- * and this file never has to change to gain a language.
- */
-export interface AppStrings {
-  readonly appName: string;
-  readonly newChat: string;
-  readonly send: string;
-  readonly stop: string;
-  readonly settings: string;
-  readonly emptyChats: string;
-  readonly emptyTranscript: string;
-  readonly bootFailed: (detail: string) => string;
-  readonly crashed: string;
-}
-
-export const EN: AppStrings = {
-  appName: "PraisonAI",
-  newChat: "New chat",
-  send: "Send",
-  stop: "Stop",
-  settings: "Settings",
-  emptyChats: "No conversations yet.",
-  emptyTranscript: "Ask something to begin.",
-  bootFailed: (detail) => `PraisonAI could not start: ${detail}`,
-  crashed: "Something went wrong. Your conversations are saved.",
-};
+import { en, type Strings } from "../../ui/src/i18n/strings.ts";
+import { announce, initialAnnouncer, type AnnouncerState } from "../../ui/src/a11y/announce.ts";
 
 export interface MountDeps {
   readonly root: HTMLElement;
   readonly platform?: Platform;
-  readonly strings?: AppStrings;
+  readonly strings?: Strings;
   readonly now?: () => number;
   readonly newChatId?: () => string;
 }
@@ -76,7 +46,7 @@ function renderFatal(root: HTMLElement, message: string): void {
 }
 
 export async function mount(deps: MountDeps): Promise<App | null> {
-  const strings = deps.strings ?? EN;
+  const strings = deps.strings ?? en;
   const root = deps.root;
   const doc = root.ownerDocument;
   const platform = deps.platform ?? detectPlatform();
@@ -106,43 +76,74 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   toSettings.type = "button";
   toSettings.dataset["action"] = "navigate";
   toSettings.dataset["route"] = "settings";
-  toSettings.textContent = strings.settings;
+  toSettings.textContent = strings.routeSettings;
   bar.append(title, newChat, toSettings);
 
   const transcript = doc.createElement("main");
   transcript.className = "transcript";
-  // The stream lands here, so a screen reader is told politely rather than
-  // interrupted on every token.
+  // NOT a live region, deliberately. `reconcile`/`applyOps` mutate this
+  // element on every publish, so `aria-live` here makes the reader restart on
+  // each token batch and no sentence is ever finished -- and clearing it for a
+  // new chat would announce the wipe. Announcements go through the policy in
+  // ui/src/a11y/announce.ts and land in the small region below, which changes
+  // only when there is something worth saying.
   transcript.setAttribute("role", "log");
-  transcript.setAttribute("aria-live", "polite");
   transcript.setAttribute("aria-label", strings.appName);
+
+  const polite = doc.createElement("div");
+  polite.className = "sr-only";
+  polite.setAttribute("aria-live", "polite");
+  const assertive = doc.createElement("div");
+  assertive.className = "sr-only";
+  // Assertive interrupts: an approval prompt blocks the run, so waiting
+  // politely for the queue to drain is waiting for something that will not
+  // happen until the user answers.
+  assertive.setAttribute("aria-live", "assertive");
 
   const composer = doc.createElement("form");
   composer.className = "composer";
   const input = doc.createElement("textarea");
   input.rows = 1;
-  input.setAttribute("aria-label", strings.send);
+  // The message FIELD, not the button beside it. Labelling it with the
+  // button's name announced the composer as "Send, edit text".
+  input.setAttribute("aria-label", strings.composerLabel);
   const sendButton = doc.createElement("button");
   sendButton.type = "submit";
   sendButton.dataset["action"] = "send";
   sendButton.dataset["variant"] = "primary";
-  sendButton.textContent = strings.send;
+  sendButton.textContent = strings.actionSend;
   composer.append(input, sendButton);
 
-  screen.append(bar, transcript, composer);
+  screen.append(bar, transcript, composer, polite, assertive);
   root.textContent = "";
   root.append(screen);
 
   // ---- boot ---------------------------------------------------------------
   let render: RenderState = emptyRender;
   const nodes: RowNodes = emptyNodes();
+  let announcer: AnnouncerState = initialAnnouncer;
 
   const publish = (view: RunView): void => {
     const built = buildTranscript(view.turn, view.approvals);
     const diff = reconcile(render, built.rows);
-    applyOps(transcript, nodes, diff.ops);
+    applyOps(transcript, nodes, diff.ops, strings);
     render = diff.next;
-    sendButton.textContent = view.turn.phase === "streaming" ? strings.stop : strings.send;
+
+    // Coalesced to finished sentences and rate-limited: announcing every token
+    // is unusable, announcing nothing makes the app opaque.
+    const spoken = announce(announcer, {
+      turn: view.turn,
+      strings,
+      locale: "en",
+      nowMs: Date.now(),
+    });
+    announcer = spoken.state;
+    for (const item of spoken.announcements) {
+      const region = item.politeness === "assertive" ? assertive : polite;
+      region.textContent = item.text;
+    }
+
+    sendButton.textContent = view.turn.phase === "streaming" ? strings.actionStop : strings.actionSend;
     sendButton.dataset["action"] = view.turn.phase === "streaming" ? "stop" : "send";
   };
 
@@ -209,7 +210,8 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         app.session.reset();
         render = emptyRender;
         nodes.nodes.clear();
-        transcript.textContent = "";
+        announcer = initialAnnouncer;
+        transcript.textContent = ""; // safe now: this is no longer a live region
         return;
       case "navigate":
         app.router.push({ name: intent.route } as Route);

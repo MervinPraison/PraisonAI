@@ -182,3 +182,23 @@ button:disabled { opacity: .45; cursor: default; }
   color: var(--soft); margin: 1.2rem 0 .3rem; }
 .warning { border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius);
   padding: .55rem .75rem; margin: .5rem 0; font-size: .86rem; }
+
+/*
+ * Visually hidden, still announced.
+ *
+ * `display: none` and `visibility: hidden` remove an element from the
+ * accessibility tree entirely, so a live region styled either way is a live
+ * region a screen reader never reads. This is the clip-rect idiom, which keeps
+ * the node rendered and reachable while occupying no visible space.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

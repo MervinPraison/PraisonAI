@@ -15,6 +15,8 @@
  */
 import type { Op } from "../../ui/src/render/reconcile.ts";
 import type { Row } from "../../ui/src/transcript/view-model.ts";
+import { en, type Strings } from "../../ui/src/i18n/strings.ts";
+import { UNKNOWN } from "../../ui/src/format.ts";
 
 export interface RowNodes {
   /** id -> the element currently representing that row. */
@@ -23,16 +25,16 @@ export interface RowNodes {
 
 export const emptyNodes = (): RowNodes => ({ nodes: new Map() });
 
-function build(doc: Document, row: Row): HTMLElement {
+function build(doc: Document, row: Row, strings: Strings): HTMLElement {
   const el = doc.createElement("div");
   el.className = `row row-${row.kind}`;
   el.dataset["rowId"] = row.id;
-  paint(el, row);
+  paint(el, row, strings);
   return el;
 }
 
 /** Write a row's content into its element. Called on insert and on update. */
-function paint(el: HTMLElement, row: Row): void {
+function paint(el: HTMLElement, row: Row, strings: Strings): void {
   switch (row.kind) {
     case "text":
       el.textContent = row.text;
@@ -51,7 +53,10 @@ function paint(el: HTMLElement, row: Row): void {
       el.dataset["recovery"] = row.recovery;
       return;
     case "dropped":
-      el.textContent = `${row.count} event${row.count === 1 ? "" : "s"} could not be read (${row.reasons.join(", ")})`;
+      // Was a hand-rolled `event`/`events`, which is wrong in most languages --
+      // Polish has three plural categories, Welsh six, Arabic a `zero`. The
+      // table routes it through Intl.PluralRules.
+      el.textContent = strings.droppedEvents(row.count, row.reasons);
       return;
     case "tool": {
       el.dataset["status"] = row.status;
@@ -63,7 +68,7 @@ function paint(el: HTMLElement, row: Row): void {
       meta.className = "tool-meta";
       // durationKnown is separate from the label: `seconds: null` means the
       // engine never observed the call begin, which is not zero.
-      meta.textContent = row.durationKnown ? row.durationLabel : "—";
+      meta.textContent = row.durationKnown ? row.durationLabel : UNKNOWN;
       el.append(name, meta);
       if (row.preview !== "") {
         const out = el.ownerDocument.createElement("pre");
@@ -77,12 +82,12 @@ function paint(el: HTMLElement, row: Row): void {
       el.dataset["state"] = row.state.status;
       el.textContent = "";
       const q = el.ownerDocument.createElement("p");
-      q.textContent = `Allow ${row.name}?`;
+      q.textContent = strings.approvalQuestion(row.name);
       el.append(q);
       for (const choice of ["allow", "always", "deny"] as const) {
         const b = el.ownerDocument.createElement("button");
         b.type = "button";
-        b.textContent = choice === "always" ? "Always allow" : choice === "allow" ? "Allow" : "Deny";
+        b.textContent = strings.approvalChoice(choice);
         // The id that goes back on the wire is the approvalId, never the
         // callId -- binding by row position silently authorises the wrong
         // command as soon as two approvals are outstanding.
@@ -103,6 +108,7 @@ export function applyOps(
   host: HTMLElement,
   state: RowNodes,
   ops: readonly Op[],
+  strings: Strings = en,
 ): void {
   const doc = host.ownerDocument;
   for (const op of ops) {
@@ -113,7 +119,7 @@ export function applyOps(
         break;
       }
       case "insert": {
-        const el = build(doc, op.row);
+        const el = build(doc, op.row, strings);
         state.nodes.set(op.id, el);
         // `children[index]` is the node currently at that position; inserting
         // before it puts the new row exactly there. Undefined means append.
@@ -122,7 +128,7 @@ export function applyOps(
       }
       case "update": {
         const el = state.nodes.get(op.id);
-        if (el !== undefined) paint(el, op.row);
+        if (el !== undefined) paint(el, op.row, strings);
         break;
       }
       case "move": {
