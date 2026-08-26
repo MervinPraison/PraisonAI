@@ -3,6 +3,7 @@
  */
 
 import { BaseProvider } from './base';
+import { getEnv } from '../openaiClientOptions';
 import type {
   ProviderConfig,
   GenerateTextOptions,
@@ -34,7 +35,7 @@ export class AnthropicProvider extends BaseProvider {
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
-    this.apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || '';
+    this.apiKey = config.apiKey || getEnv('ANTHROPIC_API_KEY') || '';
     this.baseUrl = config.baseUrl || 'https://api.anthropic.com';
     
     if (!this.apiKey) {

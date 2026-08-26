@@ -433,11 +433,16 @@ export function createCLIApprovalPrompt(options?: {
   output?: NodeJS.WritableStream;
 }): ApprovalHandler {
   return async (request: ToolApprovalRequest): Promise<boolean> => {
+    const proc = typeof process !== 'undefined' ? process : undefined;
+    const input = options?.input || proc?.stdin;
+    const output = options?.output || proc?.stdout;
+    if (!input || !output) {
+      throw new Error(
+        'createCLIApprovalPrompt requires a Node process (stdin/stdout) or explicit input/output streams.'
+      );
+    }
     const readline = await import('readline');
-    const rl = readline.createInterface({
-      input: options?.input || process.stdin,
-      output: options?.output || process.stdout,
-    });
+    const rl = readline.createInterface({ input, output });
 
     const message = options?.promptMessage
       ? options.promptMessage(request)

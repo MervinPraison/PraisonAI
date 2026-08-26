@@ -39,6 +39,7 @@ export {
 
 import type { LLMProvider, ProviderConfig } from './types';
 import { getDefaultRegistry } from './registry';
+import { getEnv } from '../openaiClientOptions';
 import type { ProviderConstructor, ProviderRegistry } from './registry';
 
 /**
@@ -186,13 +187,13 @@ export function isProviderAvailable(providerId: string): boolean {
   switch (normalizedId) {
     case 'openai':
     case 'oai':
-      return !!process.env.OPENAI_API_KEY;
+      return !!getEnv('OPENAI_API_KEY');
     case 'anthropic':
     case 'claude':
-      return !!process.env.ANTHROPIC_API_KEY;
+      return !!getEnv('ANTHROPIC_API_KEY');
     case 'google':
     case 'gemini':
-      return !!process.env.GOOGLE_API_KEY;
+      return !!getEnv('GOOGLE_API_KEY');
     default:
       // For custom providers, assume available if registered
       // Users can override this behavior
