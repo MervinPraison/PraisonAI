@@ -271,12 +271,13 @@ class SecretDeletion(unittest.TestCase):
 
         def __init__(self):
             self.values, self.up = {}, True
+            self.frozen = False        # readable, but accepts no writes
 
         def get(self, name):
             return self.values.get(name, "") if self.up else ""
 
         def set(self, name, value):
-            if not self.up:
+            if not self.up or self.frozen:
                 return False
             if value:
                 self.values[name] = value
@@ -323,6 +324,52 @@ class SecretDeletion(unittest.TestCase):
         store = server.FallbackSecretStore(self.primary, broken)
         self.assertFalse(store.set("api_key", ""),
                          "a delete nothing could perform reported success")
+
+    def test_a_delete_the_fallback_could_not_perform_is_not_reported_as_success(self):
+        # The key is in both stores and the file store cannot be written to.
+        # Reporting success here told the user the key was gone while `get`
+        # went on serving the plaintext copy.
+        self.store.set("api_key", "sk-live")
+        # A copy in the fallback that a successful primary write did not clear
+        # -- written by an older build, or left by a crash between the two
+        # writes. However it got there, `get` can still read it.
+        self.file.set("api_key", "sk-live")
+        self.file.path.parent.chmod(0o500)          # nothing may be written
+        try:
+            reported = self.store.set("api_key", "")
+            still_readable = self.store.get("api_key")
+        finally:
+            self.file.path.parent.chmod(0o700)
+        self.assertEqual(still_readable, "sk-live",
+                         "the fallback copy was cleared after all; rework this test")
+        self.assertFalse(reported,
+                         "a delete that left a readable secret reported success")
+
+    def test_a_new_key_the_primary_cannot_take_is_the_one_that_gets_used(self):
+        # The primary holds an old key and has become unwritable. Saving a new
+        # one must not leave the old one shadowing it: the user saves, is told
+        # it worked, and the app keeps using the previous key.
+        self.store.set("api_key", "sk-old")
+        self.primary.frozen = True                  # accepts nothing further
+        reported = self.store.set("api_key", "sk-new")
+        if reported:
+            self.assertEqual(self.store.get("api_key"), "sk-new",
+                             "the save reported success but the old key is still in use")
+
+    def test_a_file_that_will_not_parse_does_not_destroy_the_other_secrets(self):
+        # One unreadable read used to mean "empty", and the next write laid a
+        # fresh file over the top.
+        self.file.set("api_key", "sk-keep")
+        self.file.set("other_key", "other-keep")
+        self.file.path.write_text("{ this is not json", encoding="utf-8")
+        self.assertFalse(self.file.set("api_key", "sk-new"),
+                         "wrote over a file it could not read")
+        self.assertEqual(self.file.get("api_key"), "",
+                         "an unreadable store should read as empty, not raise")
+        self.file.path.write_text('{"api_key": "sk-keep", "other_key": "other-keep"}',
+                                  encoding="utf-8")
+        self.assertEqual(self.file.get("other_key"), "other-keep",
+                         "the other secret did not survive")
 
     def test_writing_a_new_secret_does_not_leave_the_old_one_in_the_fallback(self):
         self.primary.up = False

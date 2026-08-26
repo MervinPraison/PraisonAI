@@ -818,11 +818,20 @@ class FileSecretStore:
         self.path = pathlib.Path(data_dir) / "secrets.json"
 
     def _read(self) -> dict:
+        """The stored secrets, or {} if there are none.
+
+        Only absence is silent. Swallowing every error here meant one transient
+        read failure -- or a partly written file -- read as "empty", and the
+        next `set` wrote a fresh file over the top, destroying every other
+        secret in it. The DPAPI store's docstring names this exact hazard; this
+        one was left with it.
+        """
         try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
-            return value if isinstance(value, dict) else {}
-        except (OSError, ValueError):
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             return {}
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
 
     def set(self, name: str, value: str) -> bool:
         try:
@@ -856,7 +865,10 @@ class FileSecretStore:
             return False
 
     def get(self, name: str) -> str:
-        return str(self._read().get(name, ""))
+        try:
+            return str(self._read().get(name, ""))
+        except Exception:  # noqa: BLE001 - unreadable is not the caller's problem
+            return ""
 
 
 class FallbackSecretStore:
@@ -885,12 +897,23 @@ class FallbackSecretStore:
         fallback, so the secondary is cleared after a successful primary write.
         """
         if not value:
+            # `and`, not `or`: a delete has only succeeded if the secret is
+            # gone from everywhere it could be read from. With `or`, an
+            # unwritable file store meant the plaintext copy survived, `get`
+            # served it, and the user was told the key had been removed.
             cleared_primary = self.primary.set(name, "")
             cleared_secondary = self.secondary.set(name, "")
-            return cleared_primary or cleared_secondary
+            return cleared_primary and cleared_secondary
         if self.primary.set(name, value):
             self.secondary.set(name, "")   # never leave a stale plaintext copy
             return True
+        # The primary could not take the new value. If it still holds the old
+        # one, `get` would keep serving that -- the user saves a new key, is
+        # told it worked, and the app goes on using the previous one. Clearing
+        # the primary first is what makes the fallback reachable; if even that
+        # fails there is nowhere safe to put this.
+        if self.primary.get(name) and not self.primary.set(name, ""):
+            return False
         return self.secondary.set(name, value)
 
     def get(self, name: str) -> str:
@@ -1323,6 +1346,13 @@ class Handler(BaseHTTPRequestHandler):
                 # delivers the events instead of discarding them.
                 self.wfile.write(b"event: resync\ndata: {}\n\n")
                 self.wfile.flush()
+                # Resume at the oldest event still held. A gap always comes
+                # with events -- since() returns early on an empty buffer, and
+                # a gap means every held event is newer than the cursor -- so
+                # this is really `events[0][0] - 1`; the fallback is there so a
+                # future change to since() cannot turn this into an
+                # IndexError. The fix was removing the `continue` that used to
+                # follow: without it the loop falls through and delivers them.
                 cursor = events[0][0] - 1 if events else cursor
             for c, kind, payload in events:
                 cursor = c

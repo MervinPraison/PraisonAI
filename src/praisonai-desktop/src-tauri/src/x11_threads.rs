@@ -26,7 +26,10 @@ pub fn init() {
 
         const RTLD_DEFAULT: *mut c_void = std::ptr::null_mut();
         extern "C" {
-            fn dlsym(handle: *mut c_void, symbol: *const i8) -> *mut c_void;
+            // c_char, not i8: c_char is *unsigned* on aarch64 and arm Linux,
+            // so i8 does not compile there. The CI runner is x86_64, where the
+            // two happen to agree, so nothing would have caught it.
+            fn dlsym(handle: *mut c_void, symbol: *const std::ffi::c_char) -> *mut c_void;
         }
         let name = c"XInitThreads";
         let symbol = dlsym(RTLD_DEFAULT, name.as_ptr());

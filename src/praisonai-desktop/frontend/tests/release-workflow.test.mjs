@@ -18,6 +18,7 @@ import test from 'node:test';
 
 const root = new URL('../../../../', import.meta.url);
 const workflow = readFileSync(new URL('.github/workflows/desktop-release.yml', root), 'utf8');
+const ci = readFileSync(new URL('.github/workflows/desktop.yml', root), 'utf8');
 const config = JSON.parse(
   readFileSync(new URL('src/praisonai-desktop/src-tauri/tauri.conf.json', root), 'utf8'));
 const install = readFileSync(new URL('src/praisonai-desktop/INSTALL.md', root), 'utf8');
@@ -111,10 +112,62 @@ test('the Linux leg installs the webkit and tray libraries the app links against
             'mixing ayatana and libappindicator changes the .deb\'s generated Depends');
 });
 
+test('no build runs on a retired or deprecating runner image', () => {
+  // This has bitten twice. macos-13 was retired on 2026-12-04, so the Intel
+  // leg would never have scheduled and the completeness check below would have
+  // failed every release, forever, correctly. macos-14 then entered its own
+  // deprecation, with brownouts that fail jobs before the final date -- and it
+  // was the only Apple-silicon leg, so losing it means no arm64 DMG at all.
+  //
+  // A list of names, not a date check: the point is to fail here, next to the
+  // reason, rather than at midnight on release day.
+  const RETIRED = ['macos-11', 'macos-12', 'macos-13', 'macos-14',
+                   'ubuntu-18.04', 'ubuntu-20.04', 'windows-2019'];
+  for (const file of [workflow, ci]) {
+    for (const image of RETIRED) {
+      // Word boundary: macos-15-intel must not match macos-15, and macos-13
+      // must not match macos-13-large.
+      const used = new RegExp(`(?:runner|os):\\s*\\[?[^\\n]*\\b${image}\\b`);
+      assert.ok(!used.test(file),
+                `${image} is retired or deprecating; jobs on it fail or never schedule`);
+    }
+  }
+});
+
+test('every platform the app ships on is still built', () => {
+  // Bumping a runner must not quietly drop a leg.
+  assert.match(workflow, /runner:\s*macos-15\b/, 'no Apple-silicon build');
+  assert.match(workflow, /runner:\s*macos-15-intel\b/, 'no Intel Mac build');
+  assert.match(workflow, /runner:\s*windows-latest\b/, 'no Windows build');
+  assert.match(workflow, /runner:\s*ubuntu-22\.04\b/, 'no Linux build');
+});
+
 test('the Linux build host is old enough for the glibc floor it promises', () => {
   // glibc is forward-compatible only: the build host decides the oldest
   // distribution the .deb can start on, and no runtime flag can widen it.
   assert.match(workflow, /runner:\s*ubuntu-22\.04/,
                'building Linux on a newer image silently drops older distributions');
   assert.ok(install.includes('22.04'), 'INSTALL.md does not say which distributions are supported');
+});
+
+test('the macOS window overlay repeats the base window faithfully', () => {
+  // tauri.macos.conf.json has to restate the whole window object, because
+  // Tauri merges with RFC 7386 and that replaces arrays wholesale rather than
+  // merging their elements. An overlay carrying only the two macOS keys
+  // deleted title, width, height and both minimums, and the app became an
+  // 800x600 "Tauri App" that could be dragged down to nothing.
+  //
+  // Restating it means it can now drift instead. Nothing else would notice,
+  // because the result is a window that is merely the wrong size.
+  const overlay = JSON.parse(
+    readFileSync(new URL('src/praisonai-desktop/src-tauri/tauri.macos.conf.json', root), 'utf8'));
+  const base = config.app.windows[0];
+  const mac = overlay.app.windows[0];
+  for (const key of Object.keys(base)) {
+    assert.deepEqual(mac[key], base[key],
+                     `tauri.macos.conf.json disagrees about "${key}"`);
+  }
+  // And the two keys that are the whole reason the overlay exists.
+  assert.equal(mac.titleBarStyle, 'Overlay');
+  assert.equal(mac.hiddenTitle, true);
 });

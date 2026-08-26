@@ -2257,7 +2257,12 @@ trainForm.addEventListener('submit',async e=>{
 tStop.addEventListener('click',async()=>{
   tStop.disabled=true;
   try{
-    const res=await fetch(`http://127.0.0.1:${PORT}/train/stop`,{
+    // Send the run this tab is watching, so the engine can refuse if it is
+    // not the live one. Without the id the server's stale-tab guard cannot
+    // fire at all: a tab left open from a finished run would cancel whatever
+    // someone started after it, and be told it succeeded.
+    const target=trainRunId?`/train/stop/${encodeURIComponent(trainRunId)}`:'/train/stop';
+    const res=await fetch(`http://127.0.0.1:${PORT}${target}`,{
       method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     if(!res.ok){ const b=await res.json(); tError.textContent=b.error||'Nothing was running.'; }
   }catch(err){ tError.textContent=`Could not reach the engine: ${err.message}`; }

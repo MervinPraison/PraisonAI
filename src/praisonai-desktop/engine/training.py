@@ -551,12 +551,17 @@ def _last_meaningful_line(log_path, limit=4000, window=65536):
     try:
         with open(log_path, "rb") as raw:
             raw.seek(0, os.SEEK_END)
-            raw.seek(max(0, raw.tell() - window))
-            # The first line is very likely cut mid-way by the seek; drop it
-            # unless we happened to land at the start of the file.
+            start = max(0, raw.tell() - window)
+            raw.seek(start)
             chunk = raw.read()
         text = chunk.decode("utf-8", errors="replace")
-        tail = text.splitlines()[-40:]
+        lines = text.splitlines()
+        # A seek into the middle of the file almost certainly lands inside a
+        # line, so the first one is a fragment. Drop it -- unless we started at
+        # the beginning, where it is a whole line.
+        if start and len(lines) > 1:
+            lines = lines[1:]
+        tail = lines[-40:]
     except OSError:
         return None
     for line in reversed(tail):

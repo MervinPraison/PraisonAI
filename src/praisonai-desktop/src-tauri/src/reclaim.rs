@@ -96,7 +96,7 @@ pub fn fnv1a64(text: &str) -> u64 {
 pub fn observe(pid: u32) -> Observed {
     #[cfg(windows)]
     {
-        return observe_windows(pid);
+        observe_windows(pid)
     }
     #[cfg(not(windows))]
     {

@@ -256,7 +256,39 @@ test('Stop asks the engine to stop', async () => {
   await settle();
   click(doc.getElementById('tStop'));
   await settle();
-  assert.equal(posted(calls, '/train/stop').length, 1, 'Stop sent nothing');
+  const [stop] = posted(calls, '/train/stop');
+  assert.ok(stop, 'Stop sent nothing');
+  // The run id, not a bare /train/stop.
+  //
+  // The engine refuses to stop a run other than the one asked for, so that a
+  // tab left open on a finished run cannot cancel whatever someone started
+  // after it. That guard reads the id from the path -- and the button never
+  // sent one, so it could never fire, and the stale tab won. Three server
+  // tests covered a request the product did not make.
+  assert.notEqual(stop.path, '/train/stop',
+                  'Stop did not name its run, so the stale-tab guard cannot fire');
+  assert.match(stop.path, /^\/train\/stop\/[^/]+$/,
+               `unexpected stop path: ${stop.path}`);
+});
+
+test('Stop names the run the view is actually watching', async () => {
+  // Not just "some id": the id has to be the one this tab is following, or
+  // the guard passes for the wrong reason.
+  const { doc, calls, streams } = await boot({
+    start: { ok: true, run: { id: 'run-being-watched', state: 'pending' } },
+  });
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  doc.getElementById('trainForm').dispatchEvent(
+    new doc.defaultView.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  streams[streams.length - 1].emit('state', { cursor: 1, state: 'running' });
+  await settle();
+  click(doc.getElementById('tStop'));
+  await settle();
+  const [stop] = posted(calls, '/train/stop');
+  assert.ok(stop, 'Stop sent nothing');
+  assert.equal(stop.path, '/train/stop/run-being-watched');
 });
 
 test('a run already in flight is picked up when the view opens', async () => {

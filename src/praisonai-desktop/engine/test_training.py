@@ -286,14 +286,20 @@ class WindowsTermination(unittest.TestCase):
         self.was = training.IS_WINDOWS
         self.pgid_calls = []
         self.tree_kills = []
-        self.real_getpgid = os.getpgid
+        # getattr: os.getpgid does not exist on Windows at all, so taking it
+        # unconditionally made this class -- the one that exists to prove the
+        # Windows path works -- error in setUp on Windows.
+        self.real_getpgid = getattr(os, "getpgid", None)
         self.real_taskkill = training._taskkill_tree
         os.getpgid = lambda pid: self.pgid_calls.append(pid) or 1
         training._taskkill_tree = lambda pid: self.tree_kills.append(pid) or True
 
     def tearDown(self):
         training.IS_WINDOWS = self.was
-        os.getpgid = self.real_getpgid
+        if self.real_getpgid is None:
+            del os.getpgid
+        else:
+            os.getpgid = self.real_getpgid
         training._taskkill_tree = self.real_taskkill
 
     def test_the_windows_path_never_touches_process_groups(self):

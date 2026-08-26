@@ -9,9 +9,11 @@ name: desktop
 on:
   push:
     branches: [main]
-    paths: ['src/praisonai-desktop/**', '.github/workflows/desktop.yml']
+    paths: ['src/praisonai-desktop/**', '.github/workflows/desktop.yml',
+            '.github/workflows/desktop-release.yml']
   pull_request:
-    paths: ['src/praisonai-desktop/**', '.github/workflows/desktop.yml']
+    paths: ['src/praisonai-desktop/**', '.github/workflows/desktop.yml',
+            '.github/workflows/desktop-release.yml']
 
 concurrency:
   group: desktop-${{ github.ref }}
@@ -30,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, windows-latest]
+        os: [ubuntu-22.04, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, windows-latest]
+        os: [ubuntu-22.04, macos-15, windows-latest]
     defaults:
       run:
         working-directory: src/praisonai-desktop/src-tauri
