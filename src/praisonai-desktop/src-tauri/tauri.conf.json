@@ -43,7 +43,8 @@
     "shortDescription": "Local AI agents on your desktop",
     "longDescription": "PraisonAI runs AI agents locally. Chat with a model, give it tools and files, and fine-tune your own.",
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
     },
     "windows": {
       "webviewInstallMode": {
