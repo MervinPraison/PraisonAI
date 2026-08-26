@@ -7,10 +7,13 @@ mock without testing the mock.
 """
 
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
+import threading
 import time
 import unittest
 
@@ -254,6 +257,8 @@ class FakeProc:
         self.signals = []
         self.terminated = False
 
+        self.killed = False
+
     def poll(self):
         return None if self._alive else 0
 
@@ -262,6 +267,9 @@ class FakeProc:
 
     def terminate(self):
         self.terminated = True
+
+    def kill(self):
+        self.killed = True
 
 
 class WindowsTermination(unittest.TestCase):
@@ -277,33 +285,270 @@ class WindowsTermination(unittest.TestCase):
     def setUp(self):
         self.was = training.IS_WINDOWS
         self.pgid_calls = []
-        self.real_getpgid = os.getpgid
+        self.tree_kills = []
+        # getattr: os.getpgid does not exist on Windows at all, so taking it
+        # unconditionally made this class -- the one that exists to prove the
+        # Windows path works -- error in setUp on Windows.
+        self.real_getpgid = getattr(os, "getpgid", None)
+        self.real_taskkill = training._taskkill_tree
         os.getpgid = lambda pid: self.pgid_calls.append(pid) or 1
+        training._taskkill_tree = lambda pid: self.tree_kills.append(pid) or True
 
     def tearDown(self):
         training.IS_WINDOWS = self.was
-        os.getpgid = self.real_getpgid
+        if self.real_getpgid is None:
+            del os.getpgid
+        else:
+            os.getpgid = self.real_getpgid
+        training._taskkill_tree = self.real_taskkill
 
     def test_the_windows_path_never_touches_process_groups(self):
         training.IS_WINDOWS = True
-        proc = FakeProc()
-        training._terminate_group(proc)
+        training._terminate_group(FakeProc())
         self.assertEqual(self.pgid_calls, [],
                          "os.getpgid was called; on Windows it does not exist")
-        self.assertTrue(proc.signals or proc.terminated,
-                        "the Windows path signalled nothing at all")
 
-    def test_the_windows_path_falls_back_to_terminate_if_signalling_fails(self):
+    def test_the_windows_path_kills_the_whole_tree(self):
+        # Not "signalled something" -- that is what the previous version of
+        # this test asserted, and CTRL_BREAK_EVENT satisfied it while the
+        # trainer ran happily to completion. The subject is whether the tree
+        # is actually killed, and with which pid.
         training.IS_WINDOWS = True
         proc = FakeProc()
-        proc.send_signal = lambda sig: (_ for _ in ()).throw(OSError("no console"))
         training._terminate_group(proc)
-        self.assertTrue(proc.terminated, "a failed signal left the process running")
+        self.assertEqual(self.tree_kills, [proc.pid],
+                         "the child tree was never killed")
+
+    def test_a_failed_tree_kill_still_kills_the_trainer(self):
+        training.IS_WINDOWS = True
+        training._taskkill_tree = lambda pid: False
+        proc = FakeProc()
+        training._terminate_group(proc)
+        self.assertTrue(proc.killed,
+                        "taskkill failed and nothing else stopped the process")
+
+    def test_a_process_that_already_exited_is_not_killed_again(self):
+        training.IS_WINDOWS = True
+        training._taskkill_tree = lambda pid: False
+        proc = FakeProc(alive=False)
+        training._terminate_group(proc)
+        self.assertFalse(proc.killed, "killed a process that had already exited")
+
+    def test_the_tree_kill_command_targets_the_tree_and_forces_it(self):
+        # /T is what makes this the equivalent of killpg: without it only the
+        # trainer dies and whatever it spawned keeps the GPU.
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return types.SimpleNamespace(returncode=0)
+
+        real_run = training.subprocess.run
+        training.subprocess.run = fake_run
+        try:
+            # self.real_taskkill, not training._taskkill_tree: setUp replaces
+            # that with a recorder for the other tests in this class, and
+            # calling it here would exercise the stub rather than the code.
+            self.assertTrue(self.real_taskkill(4321))
+        finally:
+            training.subprocess.run = real_run
+        self.assertEqual(seen["argv"][:1], ["taskkill"])
+        self.assertIn("/T", seen["argv"])
+        self.assertIn("/F", seen["argv"])
+        self.assertIn("4321", seen["argv"])
 
     def test_the_posix_path_does_use_process_groups(self):
         training.IS_WINDOWS = False
         training._terminate_group(FakeProc())
         self.assertTrue(self.pgid_calls, "the posix path stopped using the process group")
+
+
+class RunDirectoryCollisions(unittest.TestCase):
+    """Two runs must never share a directory.
+
+    They overwrite each other's config.yaml and interleave into one train.log,
+    so the second run trains on the first one's settings and neither log can be
+    read. Two ways in: ids differing only in case (macOS and Windows compare
+    filenames case-insensitively), and the auto-generated id, which had
+    one-second resolution.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-collide-")
+        self.trainer = training.Trainer(self.home, sys.executable)
+        self.trainer.command_builder = _script("print('done')")
+        self.config = {"model_name": "unsloth/tiny", "dataset": "d.json"}
+
+    def tearDown(self):
+        self.trainer.stop()
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _finished(self, run):
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 20), run.state)
+
+    def test_an_id_differing_only_in_case_is_refused(self):
+        first = self.trainer.start(self.config, "run-alpha")
+        self._finished(first)
+        with self.assertRaises(ValueError):
+            self.trainer.start(self.config, "RUN-ALPHA")
+
+    def test_the_same_id_twice_is_refused(self):
+        first = self.trainer.start(self.config, "run-beta")
+        self._finished(first)
+        with self.assertRaises(ValueError):
+            self.trainer.start(self.config, "run-beta")
+
+    def test_a_refused_id_does_not_disturb_the_existing_run(self):
+        # The check used to run after makedirs and _write_config, so by the
+        # time it raised it had already overwritten the first run's config.
+        first = self.trainer.start(dict(self.config, learning_rate=0.0002), "run-gamma")
+        self._finished(first)
+        before = pathlib.Path(first.config_path).read_text()
+        with self.assertRaises(ValueError):
+            self.trainer.start(dict(self.config, learning_rate=0.9), "RUN-GAMMA")
+        self.assertEqual(pathlib.Path(first.config_path).read_text(), before,
+                         "the refused run overwrote the existing run's config")
+
+    def test_two_generated_ids_in_the_same_second_do_not_collide(self):
+        runs = []
+        for _ in range(4):
+            run = self.trainer.start(self.config)
+            self._finished(run)
+            runs.append(run)
+        ids = [run.id for run in runs]
+        self.assertEqual(len(set(i.casefold() for i in ids)), len(ids),
+                         f"generated ids collided: {ids}")
+        directories = sorted(os.listdir(os.path.join(self.home, "runs")))
+        self.assertEqual(len(directories), len(runs),
+                         f"{len(runs)} runs produced {len(directories)} directories")
+
+    def test_a_generated_id_avoids_a_directory_left_by_an_earlier_process(self):
+        # The history is empty after a restart, so the filesystem is the only
+        # record that the id is taken.
+        stamp = int(time.time())
+        os.makedirs(os.path.join(self.home, "runs", f"run-{stamp}"), exist_ok=True)
+        run = self.trainer.start(self.config)
+        self._finished(run)
+        self.assertNotEqual(run.id, f"run-{stamp}",
+                            "the new run reused a directory from a previous process")
+
+
+class HistoryRetention(unittest.TestCase):
+    """The history is capped, and reaching the cap must not break anything.
+
+    It is a bounded deque so a process that stays open for days does not hold
+    every run's event ring and metric series forever. The cap has to be reached
+    by a test, because the two things that go wrong there only go wrong when it
+    is full: insert(0, ...) raises IndexError on a full bounded deque, so the
+    run after the cap failed to start at all; and evicting from the wrong end
+    would drop the run that just finished instead of the oldest one.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-history-")
+        self.trainer = training.Trainer(self.home, sys.executable)
+        self.trainer.command_builder = _script("print('done')")
+        self.config = {"model_name": "unsloth/tiny", "dataset": "d.json"}
+
+    def tearDown(self):
+        self.trainer.stop()
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _run_once(self, run_id=None):
+        run = self.trainer.start(self.config, run_id)
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 20), run.state)
+        return run
+
+    def test_starting_more_runs_than_the_cap_still_works(self):
+        cap = training.MAX_HISTORY
+        for i in range(cap + 3):
+            self._run_once(f"run-{i:04d}")
+        self.assertEqual(len(self.trainer.history), cap)
+
+    def test_the_newest_run_is_kept_and_the_oldest_is_dropped(self):
+        cap = training.MAX_HISTORY
+        for i in range(cap + 1):
+            self._run_once(f"run-{i:04d}")
+        ids = [r.id for r in self.trainer.history]
+        self.assertEqual(ids[0], f"run-{cap:04d}", "the newest run is not first")
+        self.assertNotIn("run-0000", ids, "the oldest run was not the one evicted")
+
+    def test_the_metric_series_is_capped(self):
+        run = training.Run("r", "c", os.path.join(self.home, "t.log"))
+        for step in range(training.MAX_METRICS + 25):
+            run.metrics.append({"step": step, "loss": 0.1})
+        self.assertEqual(len(run.metrics), training.MAX_METRICS)
+        self.assertEqual(run.metrics[-1]["step"], training.MAX_METRICS + 24,
+                         "the newest metric was dropped instead of the oldest")
+
+
+class StopBeforeSpawn(unittest.TestCase):
+    """Cancelling in the window before the trainer process exists.
+
+    start() returns as soon as the supervisor thread is created, so between
+    the HTTP reply and Popen returning there is a period where run._proc is
+    None. stop() had nothing to signal there, and _supervise then overwrote
+    STOPPING with RUNNING: the user saw {"ok": true} and a "stopping" pill,
+    and the fine-tune ran to completion and reported "done", holding the GPU.
+
+    The window is real but short, so a route-level test cannot reach it
+    reliably -- two HTTP round trips are slower than a spawn. Delaying the
+    spawn makes it deterministic instead of hoping for a race.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-stopspawn-")
+        self.trainer = training.Trainer(self.home, sys.executable)
+        self.spawned = threading.Event()
+        real_spawn = self.trainer._spawn
+
+        def slow_spawn(run):
+            # Hold the run in `pending` long enough to stop it deliberately.
+            self.spawned.wait(2.0)
+            return real_spawn(run)
+
+        self.trainer._spawn = slow_spawn
+
+    def tearDown(self):
+        self.spawned.set()
+        self.trainer.stop()
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def test_a_stop_while_pending_cancels_the_run(self):
+        # The script announces when it has run to the end. Checking only the
+        # final state is not enough: a version that records CANCELLED without
+        # actually signalling the process passes that check while the training
+        # job keeps running and holding the GPU, which is the whole harm.
+        self.trainer.command_builder = _script(
+            "import time\n"
+            "for _ in range(40):\n"
+            "    print('working', flush=True); time.sleep(0.05)\n"
+            "print('RAN-TO-COMPLETION', flush=True)")
+        run = self.trainer.start({"model_name": "unsloth/tiny", "dataset": "d.json"})
+        self.assertEqual(run.state, training.PENDING)
+        self.assertIsNone(run._proc, "the process already exists; the window was missed")
+
+        self.assertTrue(self.trainer.stop(), "stop() refused a pending run")
+        self.assertEqual(run.state, training.STOPPING)
+
+        self.spawned.set()          # let the spawn proceed
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 20), run.state)
+        self.assertEqual(run.state, training.CANCELLED,
+                         "the run continued after the user cancelled it")
+
+        log = pathlib.Path(run.log_path).read_text(encoding="utf-8", errors="replace")
+        self.assertNotIn("RAN-TO-COMPLETION", log,
+                         "the run was reported cancelled but ran to the end anyway")
+        self.assertIsNotNone(run._proc, "no process was ever spawned to stop")
+        self.assertIsNotNone(run._proc.poll(), "the trainer process is still alive")
+
+    def test_a_run_not_stopped_in_that_window_still_runs_normally(self):
+        # The guard must not cancel runs nobody asked to cancel.
+        self.trainer.command_builder = _script("print('done')")
+        run = self.trainer.start({"model_name": "unsloth/tiny", "dataset": "d.json"})
+        self.spawned.set()
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 20), run.state)
+        self.assertEqual(run.state, training.DONE)
 
 
 class RunLifecycle(unittest.TestCase):

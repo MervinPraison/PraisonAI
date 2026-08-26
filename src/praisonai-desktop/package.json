@@ -1,0 +1,14 @@
+{
+  "name": "praisonai-desktop-frontend-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Test harness for the desktop UI. The app itself has no build step -- ui/index.html is shipped as written -- so this exists only to pin what the tests need. jsdom is pinned because the suite silently used whatever version happened to be installed further up the tree, and 16 tests fail on an older one.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test frontend/tests/*.test.mjs frontend/tests/*.test.ts",
+    "test:ci": "node --test $(ls frontend/tests/*.test.mjs frontend/tests/*.test.ts | grep -v lifecycle)"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

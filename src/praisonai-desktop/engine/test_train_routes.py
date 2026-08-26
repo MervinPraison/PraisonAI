@@ -7,8 +7,11 @@ skipped all eleven of its tests for months because it probed for the engine in
 a way that could not work, so these fail loudly rather than skip.
 """
 
+import atexit
+import hashlib
 import json
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
@@ -58,7 +61,14 @@ class EngineProcess:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status, json.loads(response.read() or b"{}")
         except urllib.error.HTTPError as err:
-            return err.code, json.loads(err.read() or b"{}")
+            # An unrouted path gets BaseHTTPRequestHandler's own HTML error
+            # page, which is a perfectly good 404 but is not JSON. The status
+            # is the thing under test there.
+            raw = err.read()
+            try:
+                return err.code, json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return err.code, {}
 
     def stream(self, path, timeout=30):
         """Read an SSE stream into (event, data) pairs until it closes."""
@@ -81,15 +91,30 @@ class EngineProcess:
         shutil.rmtree(self.home, ignore_errors=True)
 
 
+_SCRIPTS = tempfile.mkdtemp(prefix="praison-train-scripts-")
+atexit.register(shutil.rmtree, _SCRIPTS, True)
+
+
 def _python(body):
     """A PRAISONAI_TRAIN_CMD that runs `body` instead of a real fine-tune.
 
-    shlex.quote, not json.dumps: the engine splits this with shlex, and JSON
-    escaping turns a newline into a literal backslash-n, which reached the
-    interpreter as a syntax error partway through a script that had already
-    printed its first line -- a half-run that looked like a trainer crash.
+    The body goes into a file rather than `-c`. The engine splits this command
+    with POSIX rules on Unix and Windows rules on Windows, and the two disagree
+    about a string containing a quote: shlex.quote escapes an inner `'` as the
+    concatenation `'"'"'`, which POSIX reassembles into one token and Windows
+    splits into seven. Every script here prints something, so every one of them
+    contains a quote, and the whole training suite failed on Windows for that
+    reason alone.
+
+    A path has no newlines and no quotes, so both rule sets agree about it.
     """
-    return f"{shlex.quote(sys.executable)} -u -c {shlex.quote(body)}"
+    # A content hash, not hash(): the built-in is salted per process, and two
+    # different bodies landing on one filename would have the second silently
+    # overwrite the first.
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    script = pathlib.Path(_SCRIPTS) / f"case-{digest}.py"
+    script.write_text(body, encoding="utf-8")
+    return f"{shlex.quote(sys.executable)} -u {shlex.quote(str(script))}"
 
 
 def _wait(predicate, timeout=30):
@@ -182,6 +207,163 @@ class TrainRoutes(unittest.TestCase):
     def test_stopping_when_idle_is_404_not_a_crash(self):
         status, body = self.engine.request("/train/stop", {}, method="POST")
         self.assertEqual(status, 404)
+
+
+class LongRunReplay(unittest.TestCase):
+    """Opening the view on a run that has outlived its event buffer.
+
+    A tqdm refresh emits both a log and a progress event, so a real fine-tune
+    passes 4000 events in about twenty minutes. Every fresh tab opens the
+    stream at cursor=-1, which is exactly the case that has to work.
+    """
+
+    def setUp(self):
+        # A run that emits far more than the ring can hold, then ends.
+        self.engine = EngineProcess(_python(
+            "import sys\n"
+            "for i in range(4500):\n"
+            "    print(f'{i}/4500 [00:01<00:02]')\n"
+            "sys.stdout.flush()\n"))
+
+    def tearDown(self):
+        self.engine.close()
+
+    def test_a_client_that_missed_the_start_still_receives_the_log(self):
+        status, body = self.engine.request("/train/start", {"config": CONFIG})
+        self.assertEqual(status, 200, body)
+        run_id = body["run"]["id"]
+        self.assertTrue(_wait(
+            lambda: (self.engine.request("/train/status")[1].get("run") or {})
+            .get("state") in ("done", "failed", "cancelled"), 60))
+
+        events = self.engine.stream(f"/train/progress?run={run_id}&cursor=-1", timeout=30)
+        kinds = [kind for kind, _ in events]
+        resyncs = kinds.count("resync")
+        self.assertLessEqual(resyncs, 2,
+                             f"the stream resynced {resyncs} times instead of catching up")
+        self.assertTrue(any(k == "log" for k in kinds),
+                        "a client that missed the beginning received no output at all")
+        self.assertIn("end", kinds, "the stream never delivered the ending")
+
+    def test_the_stream_closes_when_the_run_is_over(self):
+        # The whole test would hang rather than fail if this regressed, so it
+        # is bounded by the stream timeout.
+        status, body = self.engine.request("/train/start", {"config": CONFIG})
+        run_id = body["run"]["id"]
+        self.assertTrue(_wait(
+            lambda: (self.engine.request("/train/status")[1].get("run") or {})
+            .get("state") in ("done", "failed", "cancelled"), 60))
+        events = self.engine.stream(f"/train/progress?run={run_id}&cursor=-1", timeout=30)
+        self.assertIn("end", [k for k, _ in events])
+
+
+class StopRouting(unittest.TestCase):
+    """Which run a stop request actually stops."""
+
+    def setUp(self):
+        self.engine = EngineProcess(_python(LONG_RUN))
+
+    def tearDown(self):
+        self.engine.close()
+
+    def _start(self):
+        status, body = self.engine.request("/train/start", {"config": CONFIG})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(_wait(
+            lambda: (self.engine.request("/train/status")[1].get("run") or {})
+            .get("state") == "running"))
+        return body["run"]["id"]
+
+    def _state(self):
+        return (self.engine.request("/train/status")[1].get("run") or {}).get("state")
+
+    def test_stopping_by_the_live_id_works(self):
+        run_id = self._start()
+        status, _ = self.engine.request(f"/train/stop/{run_id}", {}, method="POST")
+        self.assertEqual(status, 200)
+        self.assertTrue(_wait(lambda: self._state() == "cancelled"))
+
+    def test_a_stale_id_is_refused(self):
+        self._start()
+        status, _ = self.engine.request("/train/stop/run-from-a-stale-tab", {}, method="POST")
+        self.assertEqual(status, 409)
+        self.assertEqual(self._state(), "running")
+
+    def test_a_stale_id_with_a_trailing_slash_is_still_refused(self):
+        # rsplit("/") on ".../stale/" yields "", which is falsy -- so the guard
+        # was skipped entirely and the live run was killed by a stale tab.
+        self._start()
+        status, _ = self.engine.request("/train/stop/run-from-a-stale-tab/", {}, method="POST")
+        self.assertEqual(status, 409, "a trailing slash bypassed the stale-tab guard")
+        self.assertEqual(self._state(), "running")
+
+    def test_a_path_that_merely_starts_with_the_route_is_not_the_route(self):
+        self._start()
+        status, _ = self.engine.request("/train/stopXXXX", {}, method="POST")
+        self.assertEqual(status, 404, "/train/stopXXXX was treated as /train/stop")
+        self.assertEqual(self._state(), "running")
+
+    def test_a_query_string_does_not_hide_the_run_id(self):
+        run_id = self._start()
+        status, _ = self.engine.request(f"/train/stop/{run_id}?force=1", {}, method="POST")
+        self.assertEqual(status, 200, "a legitimate stop was refused because of a query string")
+        self.assertTrue(_wait(lambda: self._state() == "cancelled"))
+
+    def test_stopping_a_run_that_has_not_spawned_yet_still_stops_it(self):
+        # start() returns as soon as the supervisor thread is created, so there
+        # is a window where the process does not exist. A stop in that window
+        # was recorded and then overwritten by "running", and the fine-tune ran
+        # to completion after the user cancelled it.
+        status, body = self.engine.request("/train/start", {"config": CONFIG})
+        self.assertEqual(status, 200, body)
+        status, _ = self.engine.request("/train/stop", {}, method="POST")
+        self.assertEqual(status, 200)
+        self.assertTrue(_wait(lambda: self._state() in ("cancelled", "done", "failed"), 30))
+        self.assertEqual(self._state(), "cancelled",
+                         "the run continued after the user stopped it")
+
+    def test_a_malformed_cursor_is_refused_rather_than_crashing(self):
+        run_id = self._start()
+        status, _ = self.engine.request(f"/train/progress?run={run_id}&cursor=abc")
+        self.assertEqual(status, 400)
+
+
+class MethodPreflight(unittest.TestCase):
+    """A config that cannot work must fail now, not after the download.
+
+    The trainer validates method requirements inside train_model(), which runs
+    after several gigabytes have been fetched and the model loaded in 4-bit.
+    Anything decidable from the config alone belongs before that.
+    """
+
+    def setUp(self):
+        self.engine = EngineProcess(_python("print('ok')"))
+
+    def tearDown(self):
+        self.engine.close()
+
+    def test_grpo_without_reward_functions_is_refused_immediately(self):
+        status, body = self.engine.request(
+            "/train/start", {"config": dict(CONFIG, method="grpo")})
+        self.assertEqual(status, 400, body)
+        self.assertIn("reward_funcs", body.get("error", ""))
+
+    def test_grpo_with_reward_functions_is_accepted(self):
+        status, body = self.engine.request(
+            "/train/start", {"config": dict(CONFIG, method="grpo",
+                                            reward_funcs=["mod:fn"])})
+        self.assertEqual(status, 200, body)
+
+    def test_the_default_method_still_starts(self):
+        status, body = self.engine.request("/train/start", {"config": CONFIG})
+        self.assertEqual(status, 200, body)
+
+    def test_a_preference_method_is_not_blocked_by_the_preflight(self):
+        # Its columns depend on the dataset, which we cannot inspect without
+        # fetching it -- so the preflight must not guess and refuse.
+        status, body = self.engine.request(
+            "/train/start", {"config": dict(CONFIG, method="dpo")})
+        self.assertEqual(status, 200, body)
 
 
 class TrainConcurrency(unittest.TestCase):

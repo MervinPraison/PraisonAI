@@ -38,12 +38,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14        # Apple silicon
+          # macos-15, not macos-14: that image entered deprecation on
+          # 2026-07-06 and is fully unsupported from 2026-11-02, with brownout
+          # periods failing jobs before then. This is the only Apple-silicon
+          # leg, so losing it means no arm64 DMG at all.
+          - runner: macos-15        # Apple silicon
             target: aarch64-apple-darwin
             bundles: dmg
             ext: dmg
             asset: macos-apple-silicon
-          - runner: macos-13        # Intel
+          # macos-15-intel, not macos-13: that image was retired on
+          # 2025-12-04, so the leg would never schedule and the verify job
+          # below would correctly report a missing asset on every release,
+          # forever. macos-15-intel is GitHub's named x86_64 replacement.
+          - runner: macos-15-intel  # Intel
             target: x86_64-apple-darwin
             bundles: dmg
             ext: dmg
@@ -106,7 +114,13 @@ jobs:
           save-if: ${{ runner.os != 'Windows' }}
 
       - name: Install the Tauri CLI
-        run: cargo install tauri-cli --version '^2' --locked || true
+        shell: bash
+        # `|| true` swallowed a genuine install failure and the next step then
+        # died with an unrelated "no such command: tauri". It also behaved
+        # differently per leg, since Windows defaults to pwsh where `true` is
+        # not a command. Skip the install if it is already there; otherwise
+        # let a failure be a failure.
+        run: command -v cargo-tauri >/dev/null || cargo install tauri-cli --version '^2' --locked
 
       - name: Build the bundle
         working-directory: src/praisonai-desktop/src-tauri

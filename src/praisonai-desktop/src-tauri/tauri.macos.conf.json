@@ -3,6 +3,12 @@
   "app": {
     "windows": [
       {
+        "title": "PraisonAI",
+        "width": 980,
+        "height": 720,
+        "minWidth": 560,
+        "minHeight": 420,
+        "visible": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
       }

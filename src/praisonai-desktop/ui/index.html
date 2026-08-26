@@ -73,7 +73,10 @@ body{margin:0;background:var(--ground);color:var(--ink);font:.906rem/1.6 ui-sans
 .chat .x:hover{opacity:1;color:var(--bad)}
 .chat.corrupt .t{color:var(--bad);font-style:italic}
 #main{flex:1;display:flex;flex-direction:column;min-width:0}
-.titlebar{height:2.75rem;-webkit-app-region:drag;flex:none;display:flex;align-items:center;
+/* Dragging comes from data-tauri-drag-region on the markup, not from
+   -webkit-app-region: that property is Chromium's and is a no-op in both
+   WKWebView and WebKitGTK, so it was documentation pretending to be code. */
+.titlebar{height:2.75rem;flex:none;display:flex;align-items:center;
           gap:.6rem;padding:0 .9rem;border-bottom:1px solid var(--rule)}
 /* Room for the traffic lights, which only macOS puts inside the window and
    only on the left. Reserving it everywhere left dead space on Windows and
@@ -400,6 +403,19 @@ body.training #thread,body.training #f{display:none}
 .trun .grow{flex:1}
 .tnote{font-size:.76rem;color:var(--bad);margin-top:.6rem}
 .tnote:empty{display:none}
+
+/* Utility classes standing in for inline style attributes.
+   A style="" attribute is governed by style-src, and Tauri stamps a nonce on
+   the page's <style> tag whenever a CSP is configured -- which voids
+   'unsafe-inline' for the whole directive. Every inline style attribute then
+   stops applying: the file input and the Stop button render permanently
+   visible, every tool-output block sits expanded, and the training history
+   heading loses its spacing. Setting .style from JavaScript is CSSOM and
+   unaffected; only the attributes are. */
+.is-hidden{display:none}
+.errhint{color:var(--bad)}
+.logpre{max-height:52vh;overflow:auto;font-size:.74rem}
+.runshd{padding:0 0 .3rem}
 </style></head><body>
 <div class="titlebar" data-tauri-drag-region>
   <button class="modelpill" id="modelpill" type="button">
@@ -441,7 +457,7 @@ body.training #thread,body.training #f{display:none}
   <div class="queued" id="queued"></div>
   <div class="chips" id="chips"></div>
   <textarea id="p" rows="1" placeholder="Ask anything…" disabled></textarea>
-  <input type="file" id="filein" multiple style="display:none"/>
+  <input type="file" id="filein" multiple class="is-hidden"/>
   <div class="ctools">
     <button class="ctool" id="attach" type="button" title="Attach a file"
             aria-label="Attach a file">+</button>
@@ -449,7 +465,7 @@ body.training #thread,body.training #f{display:none}
             aria-pressed="true">⚒ Tools</button>
     <span class="grow"></span>
     <button id="send" disabled title="Send" aria-label="Send message">↑</button>
-    <button id="stop" class="stop" type="button" style="display:none">Stop</button>
+    <button id="stop" class="stop is-hidden" type="button">Stop</button>
   </div>
 </div></div></form>
     <section id="train" role="tabpanel" aria-labelledby="viewTrain" aria-label="Training">
@@ -562,7 +578,7 @@ body.training #thread,body.training #f{display:none}
         </div>
 
         <div class="tcard" id="tHistoryCard" hidden>
-          <div class="sectlbl" style="padding:0 0 .3rem">Previous runs</div>
+          <div class="sectlbl runshd">Previous runs</div>
           <div id="tHistory"></div>
         </div>
       </div>
@@ -848,12 +864,27 @@ const chord=key=>OS==='mac'?`${MOD}${key}`:`${MOD}+${key}`;
 
 /** Where the engine keeps transcripts and settings, per platform.
  *
- * Must match `default_data_dir` in engine/server.py. Offering to copy a path
- * that does not exist on the machine reading it is worse than not offering. */
+ * The default for this platform, matching `default_data_dir` in
+ * engine/server.py. Offering to copy a path that does not exist on the machine
+ * reading it is worse than not offering.
+ *
+ * The engine can be pointed elsewhere with PRAISONAI_DESKTOP_HOME, and Linux
+ * honours XDG_DATA_HOME, so this is the default rather than the truth. The
+ * caller asks the engine where it actually is and falls back to this. */
 function dataFolderPath(){
   if(OS==='mac') return '~/Library/Application Support/PraisonAI';
   if(OS==='win') return '%APPDATA%\\PraisonAI';
   return '~/.local/share/PraisonAI';
+}
+
+/** The folder the engine is really using, or the default if it cannot say. */
+async function actualDataFolder(){
+  try{
+    const r=await fetch(`http://127.0.0.1:${PORT}/health`);
+    const {data_dir}=await r.json();
+    if(data_dir) return data_dir;
+  }catch(e){ /* the engine may be down; the default is still useful */ }
+  return dataFolderPath();
 }
 window.dataFolderPath=dataFolderPath;
 
@@ -1100,7 +1131,7 @@ function toolCard(host,callId,name,args){
       <span class="tool-name"></span><span class="tool-meta">running…</span>
       <span class="tool-chev">▶</span></div>
     <div class="tool-body"><div class="tool-label">Arguments</div><pre class="args"></pre>
-      <div class="out-wrap" style="display:none">
+      <div class="out-wrap is-hidden">
         <div class="tool-label">Result</div><pre class="out"></pre></div></div>`;
   el.querySelector('.tool-name').textContent=name;
   el.querySelector('.args').textContent=
@@ -1118,7 +1149,7 @@ function toolResult(host,callId,name,ok,output,seconds){
   el.querySelector('.tool-meta').textContent=
     (ok?'':'failed · ')+(seconds!=null?`${seconds}s`:'done');
   const w=el.querySelector('.out-wrap'), pre=el.querySelector('.out');
-  w.style.display='';
+  w.classList.remove('is-hidden');
   const full=String(output??'');
   // Keep the TAIL, not the head. For command output the end is the part that
   // matters -- the error, the summary, the last line -- and head-truncating
@@ -1333,7 +1364,7 @@ if(st.state==='ready'){
   applyTheme(CFG.theme);
   applyPrefs(CFG);
   if(CFG.check_updates!==false) checkUpdates();
-}else if(st.reason==='No usable Python'){
+}else if(needsSetup(st)){
   // A clean machine has nothing to run the engine with. Offering to build it
   // is the difference between a product and an error message: "No usable
   // Python" is true and useless to someone who has never installed one.
@@ -1341,7 +1372,42 @@ if(st.state==='ready'){
   firstRun(st);
 }else{
   status.textContent='engine failed'; status.className='s-fail';
-  fail(st.reason, st.detail, st.tail);
+  // Always with a way to act. A banner with no buttons is a dead end, and
+  // this branch is reached on every launch once it starts happening.
+  failWithSetup(st);
+}
+
+/**
+ * Whether this failure is one that building the environment would fix.
+ *
+ * Not just the exact "No usable Python" string. An install interrupted during
+ * the dependency step leaves a venv that is complete and empty: pyvenv.cfg
+ * exists so the interpreter is accepted, and the engine then dies importing a
+ * package that was never installed. That is repairable by exactly the same
+ * setup flow, but it arrives under a different reason -- so keying off the one
+ * string left those users with an error screen and no button, permanently.
+ */
+function needsSetup(st){
+  if(st.reason==='No usable Python') return true;
+  const said=`${st.reason||''} ${st.detail||''} ${st.tail||''}`;
+  return /ModuleNotFoundError|No module named|ImportError/i.test(said);
+}
+
+/** The failure banner, always with something the reader can do next. */
+function failWithSetup(st){
+  const d=fail(st.reason, st.detail, st.tail);
+  const row=document.createElement('div'); row.className='errbtns';
+  const setup=document.createElement('button');
+  setup.type='button'; setup.className='ghost'; setup.textContent='Set up the environment';
+  setup.onclick=()=>{ d.remove(); syncEmpty(); firstRun(st); };
+  const copy=document.createElement('button');
+  copy.type='button'; copy.className='ghost'; copy.textContent='Copy details';
+  copy.onclick=()=>{ navigator.clipboard.writeText(
+    [st.reason,st.detail,st.tail].filter(Boolean).join('\n\n'));
+    copy.textContent='Copied'; setTimeout(()=>copy.textContent='Copy details',1200); };
+  row.append(setup,copy);
+  const err=d.querySelector('.err');
+  if(err) err.appendChild(row);
 }
 }
 
@@ -1423,7 +1489,7 @@ document.getElementById('f').addEventListener('submit',async e=>{
   setComposer('');
   if(running){ queue.push(text); renderQueue(); return; }
   running=true;
-  send.style.display='none'; stopBtn.style.display=''; box.focus();
+  send.style.display='none'; stopBtn.classList.remove('is-hidden'); box.focus();
   const runId=rid(); activeRun=runId;
   const sent=attached; attached=[]; renderChips();
   const ub=turn('u','You'); ub.classList.add('plain'); ub.textContent=text;
@@ -1491,7 +1557,7 @@ document.getElementById('f').addEventListener('submit',async e=>{
               btns.innerHTML='<span class="hint">'
                 +(choice==='deny'?'Denied':'Allowed')+'</span>';
             }catch(e){
-              btns.innerHTML='<span class="hint" style="color:var(--bad)">'
+              btns.innerHTML='<span class="hint errhint">'
                 +'Could not send your decision \u2014 '+e.message+'</span>';
               const retry=document.createElement('button');
               retry.className='ctool'; retry.textContent='Retry';
@@ -1535,7 +1601,7 @@ document.getElementById('f').addEventListener('submit',async e=>{
     addActions(out.parentElement, text, acc, userIndex, versions, vactive);
     out.parentElement.classList.remove('live');
     activeRun=null; activeReader=null;
-    stopBtn.style.display='none'; send.style.display='';
+    stopBtn.classList.add('is-hidden'); send.style.display='';
     box.focus();
     refreshChats();
     running=false;
@@ -1667,7 +1733,7 @@ document.getElementById('logsBtn').addEventListener('click',async()=>{
   try{ r=await (await fetch('http://127.0.0.1:'+PORT+'/logs')).json(); }
   catch(e){ engineDownPanel('The engine log'); return; }
   const body=r.lines.length ? r.lines.map(l=>esc(l)).join('\n') : '(nothing yet)';
-  panel.innerHTML='<h2>Engine log</h2><pre style="max-height:52vh;overflow:auto;font-size:.74rem">'
+  panel.innerHTML='<h2>Engine log</h2><pre class="logpre">'
     +body+'</pre><div class="row"><button class="ghost" id="l-close">Close</button></div>';
   panel.querySelector('#l-close').onclick=closeOverlay;
   overlay.classList.add('open');
@@ -1809,8 +1875,9 @@ async function runAction(def){
     for(const c of chats) await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id,{method:'DELETE'});
     chatId=rid(); turns.innerHTML=''; syncEmpty(); refreshChats(); closeOverlay();
   } else if(def.action==='reveal'){
-    await navigator.clipboard.writeText(dataFolderPath());
-    toast(`Path copied: ${dataFolderPath()}`);
+    const where=await actualDataFolder();
+    await navigator.clipboard.writeText(where);
+    toast(`Path copied: ${where}`);
   } else if(def.action==='update'){
     const u=await (await fetch('http://127.0.0.1:'+PORT+'/update')).json();
     toast(u.message || ('PraisonAI Desktop '+u.current));
@@ -2081,14 +2148,19 @@ const trainView=document.getElementById('train'),
       tHistoryCard=document.getElementById('tHistoryCard'),
       lossCanvas=document.getElementById('loss');
 
+/* Each hint names the columns the dataset must actually have.
+   The trainer only checks these after it has downloaded the model and loaded
+   it in 4-bit, so a mismatch costs an hour before it is reported. Saying so up
+   front is the difference between a wrong dataset and a wasted evening. */
 const METHOD_HINTS={
-  sft:'Trains on completions.', cpt:'Raw-text corpus; embeddings get their own rate.',
+  sft:'Trains on completions. Works with the default dataset.',
+  cpt:'Raw-text corpus; needs a text column. Embeddings get their own rate.',
   dpo:'Needs prompt, chosen and rejected columns.',
-  orpo:'Preference tuning without a reference model.',
-  kto:'Binary thumbs up or down per sample.',
-  grpo:'Needs reward functions; no reward model.',
-  reward:'Trains a reward model, not a chat model.',
-  cpo:'Contrastive preference; no reference model.'};
+  orpo:'Needs prompt, chosen and rejected columns; no reference model.',
+  kto:'Needs prompt, completion and label columns.',
+  grpo:'Needs reward functions, which this form cannot supply — use the CLI.',
+  reward:'Needs chosen and rejected columns. Trains a reward model, not a chat model.',
+  cpo:'Needs prompt, chosen and rejected columns; no reference model.'};
 
 let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[];
 const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
@@ -2185,7 +2257,12 @@ trainForm.addEventListener('submit',async e=>{
 tStop.addEventListener('click',async()=>{
   tStop.disabled=true;
   try{
-    const res=await fetch(`http://127.0.0.1:${PORT}/train/stop`,{
+    // Send the run this tab is watching, so the engine can refuse if it is
+    // not the live one. Without the id the server's stale-tab guard cannot
+    // fire at all: a tab left open from a finished run would cancel whatever
+    // someone started after it, and be told it succeeded.
+    const target=trainRunId?`/train/stop/${encodeURIComponent(trainRunId)}`:'/train/stop';
+    const res=await fetch(`http://127.0.0.1:${PORT}${target}`,{
       method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     if(!res.ok){ const b=await res.json(); tError.textContent=b.error||'Nothing was running.'; }
   }catch(err){ tError.textContent=`Could not reach the engine: ${err.message}`; }

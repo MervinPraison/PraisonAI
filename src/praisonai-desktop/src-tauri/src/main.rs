@@ -96,16 +96,28 @@ fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
 /// directory, no engine, and the orphan-reclaim path never ran at all.
 fn home_dir() -> Option<PathBuf> {
     let platform = Platform::current();
-    std::env::var_os(platform.home_var())
+    // Empty is unset. The engine treats it that way (`if override:`), and for
+    // XDG the spec requires it -- so without this filter the two sides pick
+    // different directories from the same environment: `XDG_DATA_HOME=""`
+    // makes Rust join onto an empty path and produce the *relative* path
+    // "PraisonAI", so the shell looks for the lockfile in the working
+    // directory while the engine writes it under the home directory. The
+    // shell then decides "no lock, spawn" on every single launch.
+    non_empty(platform.home_var()).or_else(|| non_empty("HOME"))
+}
+
+/// An environment variable as a path, treating empty exactly like unset.
+fn non_empty(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
 }
 
 /// %APPDATA% on Windows, $XDG_DATA_HOME on Linux, neither on macOS.
 fn app_data_root() -> Option<PathBuf> {
     match Platform::current() {
-        Platform::Windows => std::env::var_os("APPDATA").map(PathBuf::from),
-        Platform::Linux => std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+        Platform::Windows => non_empty("APPDATA"),
+        Platform::Linux => non_empty("XDG_DATA_HOME"),
         Platform::Mac => None,
     }
 }
@@ -183,13 +195,26 @@ async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
                     String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")));
             }
             say("uv", "Fetching the installer", "done", "");
-            data.join(platform.venv_bin_rel()).join(platform.uv_exe())
+            let installed = data.join(platform.venv_bin_rel()).join(platform.uv_exe());
+            // An exit code is not evidence. `powershell -Command "irm … | iex"`
+            // can exit 0 having installed nothing -- a non-terminating error
+            // does not set the exit status -- and the user then meets a
+            // confusing failure at "Installing Python" rather than being told
+            // the uv install is what went wrong.
+            if !installed.is_file() {
+                return Err(format!(
+                    "the uv installer reported success but left nothing at {}",
+                    installed.display()));
+            }
+            installed
         }
     };
 
     for step in plan(&uv, &data, ENGINE_PACKAGES, platform) {
         say(step.id, step.label, "running", "");
-        let out = std::process::Command::new(&step.program)
+        let mut step_command = std::process::Command::new(&step.program);
+        no_console(&mut step_command);
+        let out = step_command
             .args(&step.args)
             .output()
             .map_err(|e| format!("{}: {e}", step.label))?;
@@ -314,6 +339,9 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
 static SAVE_PENDING: AtomicBool = AtomicBool::new(false);
 
 fn main() {
+    // First, before anything can open an X connection. GTK will not do this
+    // for us and the failure without it is a silent exit(1) with no message.
+    praisonai_desktop_core::x11_threads::init();
     tauri::Builder::default()
         // Must be registered first: the guard has to run before anything else
         // touches the lockfile or the engine.
@@ -330,7 +358,18 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(AppState { engine: Mutex::new(None) });
-            praisonai_desktop_core::tray::build(app.handle())?;
+            // Deliberately not `?`. On Linux the tray goes through
+            // libappindicator, which is dlopen'd at first use and *panics* if
+            // neither the ayatana nor the classic library is present -- and
+            // with panic=abort that is not catchable. A missing tray would
+            // take the whole app down before a window ever existed: the
+            // package would install cleanly and then do nothing when clicked.
+            // The same applies to a Wayland compositor with no tray protocol.
+            // An app with no tray icon is a small loss; an app that will not
+            // open is a total one.
+            if let Err(e) = praisonai_desktop_core::tray::build(app.handle()) {
+                eprintln!("tray unavailable, continuing without it: {e}");
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

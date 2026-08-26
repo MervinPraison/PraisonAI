@@ -16,6 +16,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,7 +28,7 @@ class DataDirectory(unittest.TestCase):
 
     def test_macos_uses_application_support(self):
         got = server.default_data_dir("darwin", home=pathlib.PurePosixPath("/Users/x"), env={})
-        self.assertEqual(str(got), "/Users/x/Library/Application Support/PraisonAI")
+        self.assertEqual(got.as_posix(), "/Users/x/Library/Application Support/PraisonAI")
 
     def test_windows_uses_appdata_not_a_library_folder(self):
         got = server.default_data_dir(
@@ -50,18 +51,18 @@ class DataDirectory(unittest.TestCase):
         got = server.default_data_dir(
             "linux", home=pathlib.PurePosixPath("/home/x"),
             env={"XDG_DATA_HOME": "/mnt/data/xdg"})
-        self.assertEqual(str(got), "/mnt/data/xdg/PraisonAI")
+        self.assertEqual(got.as_posix(), "/mnt/data/xdg/PraisonAI")
 
     def test_linux_without_xdg_falls_back_to_the_spec_default(self):
         got = server.default_data_dir("linux", home=pathlib.PurePosixPath("/home/x"), env={})
-        self.assertEqual(str(got), "/home/x/.local/share/PraisonAI")
+        self.assertEqual(got.as_posix(), "/home/x/.local/share/PraisonAI")
 
     def test_the_explicit_override_wins_everywhere(self):
         for platform in ("darwin", "win32", "linux"):
             got = server.default_data_dir(
                 platform, home=pathlib.PurePosixPath("/home/x"),
                 env={"PRAISONAI_DESKTOP_HOME": "/tmp/chosen"})
-            self.assertEqual(str(got), "/tmp/chosen", platform)
+            self.assertEqual(got.as_posix(), "/tmp/chosen", platform)
 
 
 class SignalRegistration(unittest.TestCase):
@@ -208,6 +209,177 @@ class TestIsolation(unittest.TestCase):
             importlib.reload(server)
 
 
+class HealthReportsWhereItLives(unittest.TestCase):
+    """The UI offers to copy the data folder, so the engine must name it.
+
+    The path can be overridden by PRAISONAI_DESKTOP_HOME, and on Linux by
+    XDG_DATA_HOME, so a page that reproduces the default hands the user a
+    directory the app is not using.
+    """
+
+    def test_the_health_response_names_the_directory_in_use(self):
+        import json as _json
+        import subprocess as _sp
+        import sys as _sys
+        import urllib.request as _url
+
+        home = tempfile.mkdtemp(prefix="praison-health-")
+        engine = os.path.join(os.path.dirname(os.path.abspath(server.__file__)), "server.py")
+        proc = _sp.Popen([_sys.executable, "-u", engine],
+                         env=dict(os.environ, PRAISONAI_DESKTOP_HOME=home,
+                                  PRAISONAI_KEYCHAIN_SERVICE="ai.praison.desktop.test"),
+                         stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True)
+        try:
+            port = None
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                if "PRAISONAI_PORT=" in line:
+                    port = int(line.split("PRAISONAI_PORT=")[1].strip())
+                    break
+            self.assertIsNotNone(port, "the engine never announced a port")
+            with _url.urlopen(f"http://127.0.0.1:{port}/health", timeout=15) as r:
+                health = _json.loads(r.read())
+            self.assertEqual(health.get("data_dir"), home,
+                             "health does not report the directory actually in use")
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+            shutil.rmtree(home, ignore_errors=True)
+
+
+class SecretDeletion(unittest.TestCase):
+    """Clearing a secret must clear it everywhere it could have landed.
+
+    The fallback exists so a machine with no keyring can still save a key. The
+    consequence nobody planned for: once a secret has been written to *both*
+    stores -- keyring unavailable, then available again -- a delete that
+    short-circuits on the first success leaves the other copy behind, and the
+    read path happily serves it. "Remove my API key" then reports success and
+    the key keeps working, with the plaintext still on disk.
+    """
+
+    class Flaky:
+        """A store that can be switched off, like a locked keyring."""
+
+        path = None
+
+        def __init__(self):
+            self.values, self.up = {}, True
+            self.frozen = False        # readable, but accepts no writes
+
+        def get(self, name):
+            return self.values.get(name, "") if self.up else ""
+
+        def set(self, name, value):
+            if not self.up or self.frozen:
+                return False
+            if value:
+                self.values[name] = value
+            else:
+                self.values.pop(name, None)
+            return True
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-del-")
+        self.primary = self.Flaky()
+        self.file = server.FileSecretStore(pathlib.Path(self.home))
+        self.store = server.FallbackSecretStore(self.primary, self.file)
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def test_a_secret_written_to_both_stores_is_deleted_from_both(self):
+        self.primary.up = False
+        self.store.set("api_key", "sk-old")             # lands in the file
+        self.primary.up = True
+        self.store.set("api_key", "sk-new")             # lands in the keyring
+        self.assertEqual(self.store.get("api_key"), "sk-new")
+
+        self.assertTrue(self.store.set("api_key", ""))  # the user clears it
+        self.assertEqual(self.store.get("api_key"), "",
+                         "the old key was resurrected from the fallback store")
+        self.assertEqual(self.file.get("api_key"), "",
+                         "the plaintext copy is still on disk after a delete")
+
+    def test_a_delete_reaches_the_fallback_even_when_the_primary_works(self):
+        self.store.set("api_key", "sk-value")
+        self.file.set("api_key", "sk-stale-copy")       # however it got there
+        self.store.set("api_key", "")
+        self.assertEqual(self.file.get("api_key"), "")
+
+    def test_a_delete_that_no_store_can_satisfy_reports_failure(self):
+        self.primary.up = False
+        # A *file* stands where the store wants a directory, so mkdir fails
+        # with NotADirectoryError on every platform -- unlike a made-up
+        # absolute path, which a Windows runner may happily create.
+        blocker = pathlib.Path(self.home) / "not-a-directory"
+        blocker.write_text("", encoding="utf-8")
+        broken = server.FileSecretStore(blocker / "store")
+        store = server.FallbackSecretStore(self.primary, broken)
+        self.assertFalse(store.set("api_key", ""),
+                         "a delete nothing could perform reported success")
+
+    def test_a_delete_the_fallback_could_not_perform_is_not_reported_as_success(self):
+        # The key is in both stores and the file store cannot be written to.
+        # Reporting success here told the user the key was gone while `get`
+        # went on serving the plaintext copy.
+        self.store.set("api_key", "sk-live")
+        # A copy in the fallback that a successful primary write did not clear
+        # -- written by an older build, or left by a crash between the two
+        # writes. However it got there, `get` can still read it.
+        self.file.set("api_key", "sk-live")
+        self.file.path.parent.chmod(0o500)          # nothing may be written
+        try:
+            reported = self.store.set("api_key", "")
+            still_readable = self.store.get("api_key")
+        finally:
+            self.file.path.parent.chmod(0o700)
+        self.assertEqual(still_readable, "sk-live",
+                         "the fallback copy was cleared after all; rework this test")
+        self.assertFalse(reported,
+                         "a delete that left a readable secret reported success")
+
+    def test_a_new_key_the_primary_cannot_take_is_the_one_that_gets_used(self):
+        # The primary holds an old key and has become unwritable. Saving a new
+        # one must not leave the old one shadowing it: the user saves, is told
+        # it worked, and the app keeps using the previous key.
+        self.store.set("api_key", "sk-old")
+        self.primary.frozen = True                  # accepts nothing further
+        reported = self.store.set("api_key", "sk-new")
+        if reported:
+            self.assertEqual(self.store.get("api_key"), "sk-new",
+                             "the save reported success but the old key is still in use")
+
+    def test_a_file_that_will_not_parse_does_not_destroy_the_other_secrets(self):
+        # One unreadable read used to mean "empty", and the next write laid a
+        # fresh file over the top.
+        self.file.set("api_key", "sk-keep")
+        self.file.set("other_key", "other-keep")
+        self.file.path.write_text("{ this is not json", encoding="utf-8")
+        self.assertFalse(self.file.set("api_key", "sk-new"),
+                         "wrote over a file it could not read")
+        self.assertEqual(self.file.get("api_key"), "",
+                         "an unreadable store should read as empty, not raise")
+        self.file.path.write_text('{"api_key": "sk-keep", "other_key": "other-keep"}',
+                                  encoding="utf-8")
+        self.assertEqual(self.file.get("other_key"), "other-keep",
+                         "the other secret did not survive")
+
+    def test_writing_a_new_secret_does_not_leave_the_old_one_in_the_fallback(self):
+        self.primary.up = False
+        self.store.set("api_key", "sk-old")
+        self.primary.up = True
+        self.store.set("api_key", "sk-new")
+        self.assertNotEqual(self.file.get("api_key"), "sk-old",
+                            "a superseded key is still readable in plaintext")
+
+
 class Encoding(unittest.TestCase):
     """Files are UTF-8 everywhere, not whatever the machine's locale says."""
 
@@ -234,18 +406,33 @@ class Encoding(unittest.TestCase):
                          "interpreter=C:\\Users\\\u7530\u4e2d\\python.exe\n")
 
     def _in_c_locale(self, statement):
-        """Run one statement against the engine with a non-UTF-8 locale."""
+        """Run one statement against the engine with a non-UTF-8 locale.
+
+        The statement goes through a file rather than `-c`. Python decodes the
+        `-c` argument with the filesystem encoding, which under LC_ALL=C on
+        Linux is ASCII with surrogateescape -- so a non-ASCII character in the
+        statement itself arrived as unpaired surrogates and died before
+        reaching the code under test. Source *files* are read as UTF-8
+        regardless of locale (PEP 3120), so this tests what it means to.
+        """
         import subprocess
         engine = os.path.dirname(os.path.abspath(server.__file__))
         code = ("import pathlib, sys\n"
                 f"sys.path.insert(0, {engine!r})\n"
                 "import server\n"
                 f"{statement}\n")
+        script = pathlib.Path(self.home) / "_c_locale_case.py"
+        script.write_text(code, encoding="utf-8")
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, str(script)],
             env=dict(os.environ, LC_ALL="C", LANG="C",
                      PYTHONCOERCECLOCALE="0", PYTHONUTF8="0"),
-            capture_output=True, text=True, timeout=60)
+            # encoding, not bare text=True: text=True decodes the child's
+            # output with the *parent's* default encoding -- cp1252 on a
+            # Windows runner -- so a test about UTF-8 handling was reading its
+            # own result through a locale codec and failing on the round trip
+            # rather than on anything the engine did.
+            capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(result.returncode, 0,
                          f"failed under a C locale:\n{result.stderr[-800:]}")
         return result.stdout
