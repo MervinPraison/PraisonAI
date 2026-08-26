@@ -207,6 +207,7 @@ and features (capabilities, bots, framework adapters) — use
 | 2b | `praisonai-bot` | Bots, gateway, channel CLI, OS daemon |
 | 2c | `praisonai-train` | LLM fine-tuning (Unsloth), agent training, `train` CLI |
 | 3 | `praisonai` | `framework_adapters/`, capabilities, serve orchestration, dashboard |
+| 1-TS | `praisonai-ts` | TypeScript/JavaScript SDK (`npm: praisonai`); canonical path `src/praisonai-ts/` |
 
 **Cross-tier rule:** `praisonai-code` must not declare a PyPI dependency on `praisonai`. Use
 [`praisonai_code._wrapper_bridge`](../praisonai-code/praisonai_code/_wrapper_bridge.py) for lazy wrapper access.
@@ -221,6 +222,17 @@ from `praisonai_train.cli.commands.*` (`train`, C10); `_WRAPPER_RESIDENT_COMMAND
 (`serve`, …) stay local; bridge internal wrapper imports.
 
 Full boundary doc: [`src/praisonai/tests/C7.1_BOUNDARIES.md`](../praisonai/tests/C7.1_BOUNDARIES.md).
+
+### 2.5 TypeScript SDK (`praisonai-ts`)
+
+Python guidelines in this file do **not** replace the TypeScript SDK guide. For any issue, PR, or review touching `src/praisonai-ts/`:
+
+1. Read [`src/praisonai-ts/AGENTS.md`](../praisonai-ts/AGENTS.md) — architecture, parity, triage, and PR review rules.
+2. Implement fixes in **`src/praisonai-ts/`** in this monorepo (not in `praisonaiagents/`).
+3. Verify with `cd src/praisonai-ts && npm install && npm run build && npm test`.
+4. After merge, maintainers sync the npm mirror: `gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI`.
+
+[MervinPraison/praisonai-js](https://github.com/MervinPraison/praisonai-js) is the public npm checkout; direction is **monorepo → praisonai-js** only. Claude merge gate and `@claude` review TS changes under `src/praisonai-ts/` using the TS AGENTS.md criteria (lightweight, type-safe, Python parity where applicable).
 
 ---
 
@@ -876,6 +888,8 @@ from praisonaiagents import Workflow, Route, Parallel, Loop
 | CLI backends | `praisonai_code/cli_backends/` |
 | Back-compat shims | `praisonai/cli/_shim.py`, `praisonai/cli/main.py` |
 | C5 regression tests | `praisonai/tests/unit/test_c5_backward_compat.py` |
+| TypeScript SDK | `src/praisonai-ts/` — see `src/praisonai-ts/AGENTS.md` |
+| npm mirror (sync only) | [MervinPraison/praisonai-js](https://github.com/MervinPraison/praisonai-js) |
 
 ---
 

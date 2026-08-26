@@ -33,13 +33,14 @@ steps:
       Second, read the issue: execute_command 'cat .github/triage-context.md'. Do NOT pass cwd.
 
       Third, read architecture guidelines: execute_command 'cat src/praisonai-agents/AGENTS.md'.
+      If the issue is TypeScript/JavaScript SDK, also execute_command 'cat src/praisonai-ts/AGENTS.md'.
 
       Fourth, decide routing before planning:
       - TypeScript/JavaScript SDK → src/praisonai-ts/ in this monorepo (read src/praisonai-ts/AGENTS.md).
       - Tools → PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs).
       - Plugins → PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails).
       - Sandbox backends → PraisonAI-Plugins via `praisonai.sandbox` entry point.
-      Core SDK/wrapper only for protocols and CLI — external repos for TS SDK/Tools/Plugins.
+      Core SDK/wrapper for Python protocols and CLI; external repos for Tools/Plugins/Docs only.
 
       Fifth, decide if this issue requires code changes:
       - If YES: identify the exact files and lines that must change. Output a concrete file-level plan.
