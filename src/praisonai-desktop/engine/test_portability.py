@@ -13,6 +13,7 @@ exercised rather than merely written.
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -527,6 +528,66 @@ class ProcessStartTime(unittest.TestCase):
 
     def test_a_pid_that_does_not_exist_reports_zero(self):
         self.assertEqual(server._start_time(2 ** 22), 0)
+
+
+class StreamProtocolVocabulary(unittest.TestCase):
+    """The documented stream-protocol events must match the ones emitted.
+
+    A comment cannot fail CI, so the "stream protocol v2" block in server.py
+    drifted: it listed nine events while the engine emitted eleven, and the two
+    missing ones included approval_request -- the human-in-the-loop tool gate a
+    client cannot render if it never hears the event. This test makes the
+    comment a checked artifact: every emit(...) call site's name must appear in
+    the documented list, and every documented name must be emitted, so either
+    direction of drift fails here rather than silently on the wire.
+    """
+
+    SOURCE = pathlib.Path(server.__file__).resolve()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = cls.SOURCE.read_text(encoding="utf-8")
+
+    def _documented_events(self):
+        """The event names listed under the 'stream protocol v2' comment."""
+        marker = "--- stream protocol v2"
+        start = self.text.index(marker)
+        block = self.text[start:self.text.index("\ndef ", start)]
+        events = set()
+        for line in block.splitlines():
+            m = re.match(r"#\s+([a-z_]+)\s+\{", line)
+            if m:
+                events.add(m.group(1))
+        return events
+
+    def _emitted_events(self):
+        """Every literal event name passed to emit(...) or _emit_now(...)."""
+        return set(re.findall(
+            r'(?:_emit_now|emit)\(\s*"([a-z_]+)"', self.text))
+
+    def test_every_emitted_event_is_documented(self):
+        documented = self._documented_events()
+        undocumented = self._emitted_events() - documented
+        self.assertEqual(
+            undocumented, set(),
+            f"these events are emitted but not documented in the "
+            f"stream-protocol comment: {sorted(undocumented)}")
+
+    def test_every_documented_event_is_emitted(self):
+        emitted = self._emitted_events()
+        unemitted = self._documented_events() - emitted
+        self.assertEqual(
+            unemitted, set(),
+            f"these events are documented but never emitted -- the comment is "
+            f"stale: {sorted(unemitted)}")
+
+    def test_the_two_events_the_drift_hid_are_present(self):
+        # The specific regression: approval_request and tool_drafting were live
+        # on the wire and absent from the spec.
+        documented = self._documented_events()
+        for event in ("approval_request", "tool_drafting"):
+            self.assertIn(event, documented,
+                          f"{event} is emitted but missing from the spec again")
 
 
 if __name__ == "__main__":

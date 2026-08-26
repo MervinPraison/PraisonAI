@@ -1136,15 +1136,22 @@ def _get_agent(session_id: str = "default", tools: bool = True):
 # Every event carries `msg_id` so the client can address a specific message
 # rather than assuming the last one is the live one.
 #
-#   start        {msg_id}
-#   reasoning    {msg_id, text}          incremental, collapsible
-#   delta        {msg_id, text}          assistant text
-#   tool_call    {msg_id, call_id, name, args}
-#   tool_result  {msg_id, call_id, name, ok, output, seconds}
-#   usage        {msg_id, chars, seconds, ttft}
-#   cancelled    {msg_id, run_id}
-#   error        {msg_id, message, kind}
-#   end          {msg_id}
+# This list is the whole vocabulary: eleven events, no more. A client written
+# against a subset silently ignores the rest, so approval_request in particular
+# -- the human-in-the-loop tool gate -- must appear here or the run blocks
+# invisibly until its timeout. Keep this in sync with every emit(...) call site.
+#
+#   start            {msg_id, run_id}
+#   reasoning        {msg_id, text}          incremental, collapsible
+#   delta            {msg_id, text}          assistant text
+#   tool_drafting    {msg_id, name}          "preparing tool..." state
+#   tool_call        {msg_id, call_id, name, args}
+#   tool_result      {msg_id, call_id, name, ok, output, seconds}
+#   approval_request {msg_id, approval_id, call_id, name, args}  human-in-the-loop gate
+#   usage            {msg_id, chars, seconds, ttft}
+#   cancelled        {msg_id, run_id}
+#   error            {msg_id, message, kind}
+#   end              {msg_id, user_index, assistant_index, versions, active}
 
 def _classify_stream_item(item):
     """Map one yielded item onto a protocol event.
