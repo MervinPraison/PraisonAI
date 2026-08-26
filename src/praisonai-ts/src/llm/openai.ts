@@ -1,11 +1,15 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import { buildOpenAIClientOptions } from './openaiClientOptions';
+import { buildOpenAIClientOptions, getEnv } from './openaiClientOptions';
 import { Logger } from '../utils/logger';
 import type { ChatCompletionTool, ChatCompletionToolChoiceOption, ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-// Load environment variables once at the application level
-dotenv.config();
+// Load environment variables once at the application level. Guarded so that
+// importing this module never throws in browser-like runtimes where `process`
+// (and the filesystem dotenv reads) are unavailable.
+if (typeof process !== 'undefined' && process.env) {
+    dotenv.config();
+}
 
 // The API-key check lives in getOpenAIClient(), where the client is actually
 // created — importing the package must not throw for users of non-OpenAI
@@ -102,11 +106,12 @@ let openAIInstance: OpenAI | null = null;
 // Get cached OpenAI client instance
 async function getOpenAIClient(): Promise<OpenAI> {
     if (!openAIInstance) {
-        if (!process.env.OPENAI_API_KEY) {
+        const apiKey = getEnv('OPENAI_API_KEY');
+        if (!apiKey) {
             throw new Error('OPENAI_API_KEY not found in environment variables');
         }
         openAIInstance = new OpenAI(buildOpenAIClientOptions({
-            apiKey: process.env.OPENAI_API_KEY
+            apiKey
         }));
         await Logger.debug('OpenAI client initialized');
     }
@@ -150,7 +155,7 @@ export class OpenAIService {
             if (this.options.apiKey || this.options.baseURL || this.options.fetch) {
                 this.client = new OpenAI(buildOpenAIClientOptions(
                     {
-                        apiKey: this.options.apiKey || process.env.OPENAI_API_KEY,
+                        apiKey: this.options.apiKey || getEnv('OPENAI_API_KEY'),
                         ...(this.options.baseURL ? { baseURL: this.options.baseURL } : {}),
                     },
                     {

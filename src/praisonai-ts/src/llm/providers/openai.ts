@@ -4,7 +4,7 @@
 
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
-import { buildOpenAIClientOptions } from '../openaiClientOptions';
+import { buildOpenAIClientOptions, getEnv } from '../openaiClientOptions';
 import { BaseProvider } from './base';
 import type {
   ProviderConfig,
@@ -27,7 +27,7 @@ export class OpenAIProvider extends BaseProvider {
     super(modelId, config);
     this.client = new OpenAI(buildOpenAIClientOptions(
       {
-        apiKey: config.apiKey || process.env.OPENAI_API_KEY,
+        apiKey: config.apiKey || getEnv('OPENAI_API_KEY'),
         baseURL: config.baseUrl,
         timeout: config.timeout || 60000,
         maxRetries: 0, // We handle retries ourselves

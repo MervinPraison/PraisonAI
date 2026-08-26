@@ -1,6 +1,7 @@
 import {
   buildOpenAIClientOptions,
   isBrowserLikeRuntime,
+  getEnv,
 } from '../../../src/llm/openaiClientOptions';
 
 describe('buildOpenAIClientOptions', () => {
@@ -67,6 +68,15 @@ describe('buildOpenAIClientOptions', () => {
     expect(opts.dangerouslyAllowBrowser).toBeUndefined();
   });
 
+  it('explicit false override strips a pre-set flag on the base options', () => {
+    g.window = { document: {} };
+    const opts = buildOpenAIClientOptions(
+      { apiKey: 'sk-test', dangerouslyAllowBrowser: true },
+      { dangerouslyAllowBrowser: false }
+    );
+    expect(opts.dangerouslyAllowBrowser).toBeUndefined();
+  });
+
   it('actually constructs the real OpenAI SDK with browser-safe options', () => {
     // Exercise the real SDK (not the jest manual mock) to prove the options
     // the helper produces are the ones the browser guard requires. This calls
@@ -83,5 +93,25 @@ describe('buildOpenAIClientOptions', () => {
       // Constructing with the helper's browser-safe options must not throw.
       expect(() => new OpenAI(opts)).not.toThrow();
     });
+  });
+});
+
+describe('getEnv', () => {
+  it('reads an existing environment variable in Node', () => {
+    process.env.PRAISON_TEST_ENV = 'present';
+    expect(getEnv('PRAISON_TEST_ENV')).toBe('present');
+    delete process.env.PRAISON_TEST_ENV;
+  });
+
+  it('returns undefined without throwing when process is absent (browser)', () => {
+    const savedProcess = (globalThis as any).process;
+    // Simulate a browser/webview where `process` is not defined.
+    delete (globalThis as any).process;
+    try {
+      expect(() => getEnv('OPENAI_API_KEY')).not.toThrow();
+      expect(getEnv('OPENAI_API_KEY')).toBeUndefined();
+    } finally {
+      (globalThis as any).process = savedProcess;
+    }
   });
 });
