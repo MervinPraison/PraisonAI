@@ -23,6 +23,7 @@ Everything here is pure or filesystem-only; the HTTP layer is in server.py.
 from __future__ import annotations
 
 import json
+import collections
 import os
 import re
 import shlex
@@ -33,6 +34,10 @@ import time
 
 # What a run can be. `stopping` exists because SIGTERM is not instant and a UI
 # that shows "running" through a five-second teardown looks broken.
+# How much of a run is kept in memory. The log file is the full record.
+MAX_METRICS = 5000           # points in the loss series
+MAX_HISTORY = 50             # finished runs listed in the history pane
+
 PENDING, RUNNING, STOPPING, DONE, FAILED, CANCELLED = (
     "pending", "running", "stopping", "done", "failed", "cancelled")
 TERMINAL = frozenset({DONE, FAILED, CANCELLED})
@@ -145,7 +150,11 @@ class Run:
         self.error = None
         self.step = 0
         self.total = 0
-        self.metrics = []            # [{step, loss, learning_rate, epoch}]
+        # A tail, not an archive. At 20k logging steps the full series is
+        # several megabytes per run, held forever by a process that is meant
+        # to stay open for days; the chart only ever draws the recent shape
+        # and train.log keeps the complete record.
+        self.metrics = collections.deque(maxlen=MAX_METRICS)
         self.events = []             # [(cursor, kind, payload)]
         self._next_cursor = 0        # never derived from len(events): see emit
         self._proc = None
@@ -210,7 +219,9 @@ class Trainer:
         self.command_builder = command_builder
         self.dir = os.path.join(str(home), "runs")
         self.current = None
-        self.history = []
+        # Finished runs are kept so the history list can show them, but not
+        # without limit -- each retains its event ring and metric series.
+        self.history = collections.deque(maxlen=MAX_HISTORY)
         self._lock = threading.Lock()
 
     # -- starting --------------------------------------------------------
@@ -226,7 +237,23 @@ class Trainer:
                 raise RuntimeError(
                     f"run {self.current.id} is {self.current.state}. "
                     "Stop it before starting another; one GPU runs one job.")
-            run_id = validate_run_id(run_id) if run_id else f"run-{int(time.time())}"
+            # Settle the id before creating anything.
+            #
+            # Two runs must never share a directory: they overwrite each
+            # other's config.yaml and interleave into one train.log. Two ways
+            # that happened -- an auto-generated id had one-second resolution,
+            # so two runs started in the same second collided; and ids differing
+            # only in case are the same directory on macOS and Windows, whose
+            # filesystems are case-insensitive.
+            if run_id:
+                run_id = validate_run_id(run_id)
+                if self._id_taken(run_id):
+                    raise ValueError(
+                        f"a run named {run_id!r} already exists (run ids are "
+                        "compared case-insensitively, because directories are)")
+            else:
+                run_id = self._unused_id()
+
             run_dir = os.path.join(self.dir, run_id)
             os.makedirs(run_dir, exist_ok=True)
             config_path = os.path.join(run_dir, "config.yaml")
@@ -238,6 +265,27 @@ class Trainer:
         run.emit("start", {"id": run.id, "config": config_path})
         threading.Thread(target=self._supervise, args=(run,), daemon=True).start()
         return run
+
+    def _id_taken(self, run_id):
+        """Whether this id would land on an existing run or directory."""
+        folded = run_id.casefold()
+        if any(other.id.casefold() == folded for other in self.history):
+            return True
+        try:
+            existing = os.listdir(self.dir)
+        except OSError:
+            return False       # nothing has been created yet
+        return any(name.casefold() == folded for name in existing)
+
+    def _unused_id(self):
+        """A generated id that is free, even for two runs in the same second."""
+        stamp = int(time.time())
+        candidate = f"run-{stamp}"
+        suffix = 2
+        while self._id_taken(candidate):
+            candidate = f"run-{stamp}-{suffix}"
+            suffix += 1
+        return candidate
 
     def _command(self, run):
         """The argv that runs the fine-tune.
@@ -283,8 +331,22 @@ class Trainer:
             run.finish(FAILED, f"could not start the trainer: {exc}")
             return
         run._proc = proc
-        run.state = RUNNING
-        run.emit("state", {"state": RUNNING})
+        # Honour a stop that arrived before the process existed.
+        #
+        # start() returns as soon as this thread is created, so there is a
+        # window -- every millisecond between the HTTP reply and Popen
+        # returning -- where stop() finds run._proc is None and has nothing to
+        # signal. It recorded STOPPING and this line then overwrote it with
+        # RUNNING: the user got {"ok": true} and a "stopping" pill, and the
+        # fine-tune ran to completion and reported "done".
+        with run._lock:
+            stop_requested = run.state == STOPPING
+            if not stop_requested:
+                run.state = RUNNING
+        if stop_requested:
+            _terminate_group(proc)
+        else:
+            run.emit("state", {"state": RUNNING})
         try:
             with open(run.log_path, "a", encoding="utf-8") as log:
                 for line in proc.stdout:
@@ -321,11 +383,16 @@ class Trainer:
             # Refuse to stop a different run than the one asked for: a stale
             # tab must not cancel the job someone started after it.
             raise RuntimeError(f"{run_id} is not the live run ({run.id})")
-        run.state = STOPPING
+        with run._lock:
+            if run.state in TERMINAL:
+                return False        # it ended while we were deciding
+            run.state = STOPPING
         run.emit("state", {"state": STOPPING})
         proc = run._proc
         if proc and proc.poll() is None:
             _terminate_group(proc)
+        # If proc is still None the run has not spawned yet; _supervise sees
+        # STOPPING under the same lock and terminates it on arrival.
         return True
 
     def get(self, run_id):
@@ -333,6 +400,44 @@ class Trainer:
             if run.id == run_id:
                 return run
         return None
+
+
+# What each method needs beyond a model and a dataset.
+#
+# The trainer checks these too, but only inside train_model() -- which runs
+# after prepare_model() has downloaded several gigabytes and loaded the model
+# in 4-bit. Failing there means the user waits an hour to be told their config
+# was never going to work. Everything checkable from the config alone is
+# checked here, before anything is downloaded.
+#
+# Column requirements are NOT checked here: they depend on the dataset's
+# contents, which we would have to fetch to know. They are named in the UI's
+# per-method hint instead, and the trainer still enforces them.
+METHOD_REQUIREMENTS = {
+    "grpo": ("reward_funcs",),
+}
+
+# The columns each method expects, for the error message rather than a check.
+METHOD_COLUMNS = {
+    "cpt": ("text",),
+    "dpo": ("prompt", "chosen", "rejected"),
+    "orpo": ("prompt", "chosen", "rejected"),
+    "cpo": ("prompt", "chosen", "rejected"),
+    "kto": ("prompt", "completion", "label"),
+    "reward": ("chosen", "rejected"),
+}
+
+
+def check_method_requirements(config):
+    """Raise ValueError if this config cannot work, before anything is fetched."""
+    method = (config.get("method") or "sft").lower()
+    missing = [key for key in METHOD_REQUIREMENTS.get(method, ())
+               if not config.get(key)]
+    if missing:
+        raise ValueError(
+            f"{method} needs {', '.join(missing)}, which this form does not "
+            f"collect -- run it from the command line instead")
+    return method
 
 
 def _new_process_group():
@@ -406,11 +511,23 @@ def _write_config(path, config):
     return path
 
 
-def _last_meaningful_line(log_path, limit=4000):
-    """The last non-blank line, for a failure message worth reading."""
+def _last_meaningful_line(log_path, limit=4000, window=65536):
+    """The last non-blank line, for a failure message worth reading.
+
+    Reads only the final `window` bytes. readlines() materialised the entire
+    log to keep forty lines from the end -- and a tqdm bar writes a line per
+    refresh, so a long run leaves tens of megabytes. This is called exactly
+    when a run fails, which is the worst moment to allocate the whole file.
+    """
     try:
-        with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
-            tail = handle.readlines()[-40:]
+        with open(log_path, "rb") as raw:
+            raw.seek(0, os.SEEK_END)
+            raw.seek(max(0, raw.tell() - window))
+            # The first line is very likely cut mid-way by the seek; drop it
+            # unless we happened to land at the start of the file.
+            chunk = raw.read()
+        text = chunk.decode("utf-8", errors="replace")
+        tail = text.splitlines()[-40:]
     except OSError:
         return None
     for line in reversed(tail):

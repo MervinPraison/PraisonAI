@@ -409,11 +409,13 @@ body.training #thread,body.training #f{display:none}
    the page's <style> tag whenever a CSP is configured -- which voids
    'unsafe-inline' for the whole directive. Every inline style attribute then
    stops applying: the file input and the Stop button render permanently
-   visible, and every tool-output block sits expanded. Setting .style from
-   JavaScript is CSSOM and unaffected; only the attributes are. */
+   visible, every tool-output block sits expanded, and the training history
+   heading loses its spacing. Setting .style from JavaScript is CSSOM and
+   unaffected; only the attributes are. */
 .is-hidden{display:none}
 .errhint{color:var(--bad)}
 .logpre{max-height:52vh;overflow:auto;font-size:.74rem}
+.runshd{padding:0 0 .3rem}
 </style></head><body>
 <div class="titlebar" data-tauri-drag-region>
   <button class="modelpill" id="modelpill" type="button">
@@ -576,7 +578,7 @@ body.training #thread,body.training #f{display:none}
         </div>
 
         <div class="tcard" id="tHistoryCard" hidden>
-          <div class="sectlbl" style="padding:0 0 .3rem">Previous runs</div>
+          <div class="sectlbl runshd">Previous runs</div>
           <div id="tHistory"></div>
         </div>
       </div>
@@ -2146,14 +2148,19 @@ const trainView=document.getElementById('train'),
       tHistoryCard=document.getElementById('tHistoryCard'),
       lossCanvas=document.getElementById('loss');
 
+/* Each hint names the columns the dataset must actually have.
+   The trainer only checks these after it has downloaded the model and loaded
+   it in 4-bit, so a mismatch costs an hour before it is reported. Saying so up
+   front is the difference between a wrong dataset and a wasted evening. */
 const METHOD_HINTS={
-  sft:'Trains on completions.', cpt:'Raw-text corpus; embeddings get their own rate.',
+  sft:'Trains on completions. Works with the default dataset.',
+  cpt:'Raw-text corpus; needs a text column. Embeddings get their own rate.',
   dpo:'Needs prompt, chosen and rejected columns.',
-  orpo:'Preference tuning without a reference model.',
-  kto:'Binary thumbs up or down per sample.',
-  grpo:'Needs reward functions; no reward model.',
-  reward:'Trains a reward model, not a chat model.',
-  cpo:'Contrastive preference; no reference model.'};
+  orpo:'Needs prompt, chosen and rejected columns; no reference model.',
+  kto:'Needs prompt, completion and label columns.',
+  grpo:'Needs reward functions, which this form cannot supply — use the CLI.',
+  reward:'Needs chosen and rejected columns. Trains a reward model, not a chat model.',
+  cpo:'Needs prompt, chosen and rejected columns; no reference model.'};
 
 let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[];
 const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
