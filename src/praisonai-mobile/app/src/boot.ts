@@ -17,7 +17,7 @@ import type { ShellPort } from "../../core/src/ports/shell.ts";
 import type { StoragePort } from "../../core/src/ports/storage.ts";
 import type { SecretsPort } from "../../core/src/ports/secrets.ts";
 import type { TimePort } from "../../core/src/ports/time.ts";
-import { createChatRepository, type ChatRepository } from "../../core/src/chat/repository.ts";
+import { createSession, type Session } from "../../core/src/chat/session.ts";
 import {
   createSettingsStore,
   facadeFor,
@@ -39,12 +39,15 @@ export interface AppDeps {
   /** Which engine to start with, normally read from settings. */
   readonly engineId: string;
   readonly onPublish: (view: RunView) => void;
+  /** Injected so boot is deterministic under test. */
+  readonly now: () => number;
+  readonly newChatId: () => string;
 }
 
 export interface App {
   readonly engine: AgentEnginePort;
   readonly controller: RunController;
-  readonly chats: ChatRepository;
+  readonly session: Session;
   readonly settings: SettingsFacade;
   readonly router: Router;
   readonly shell: ShellPort;
@@ -71,7 +74,15 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   const engine = selection.engine;
 
   // 3. Everything above the seam. None of these can name a concrete adapter.
-  const chats = createChatRepository(deps.storage);
+  // The session owns the join between the assistant-only TurnState and the
+  // two-sided StoredChat, and it is what engines call to record a turn -- so
+  // `end.userIndex` is produced by whatever actually did the write.
+  const session = createSession({
+    storage: deps.storage,
+    engineId: deps.engineId,
+    now: deps.now,
+    newChatId: deps.newChatId,
+  });
   const controller = createRunController({
     engine,
     time: deps.time,
@@ -101,7 +112,7 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
     app: {
       engine,
       controller,
-      chats,
+      session,
       settings: facadeFor(settingsStore, deps.secrets),
       router,
       shell: deps.shell,

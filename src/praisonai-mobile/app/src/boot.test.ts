@@ -43,6 +43,8 @@ function deps(over: Partial<AppDeps> = {}): AppDeps {
     settingDefs: DEFS,
     engineId: "scripted",
     onPublish: () => {},
+    now: () => 1000,
+    newChatId: () => "c1",
     ...over,
   };
 }
@@ -54,7 +56,7 @@ test("a good boot returns an app with every collaborator wired", async () => {
 
   assert.equal(result.app.engine.id, "scripted");
   assert.ok(result.app.controller);
-  assert.ok(result.app.chats);
+  assert.ok(result.app.session);
   assert.ok(result.app.router);
   await result.app.dispose();
 });
