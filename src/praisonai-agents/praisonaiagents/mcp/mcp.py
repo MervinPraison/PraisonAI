@@ -242,8 +242,30 @@ class MCPToolRunner(threading.Thread):
                 telemetry.track_tool_usage(tool_name, success=is_success, execution_time=execution_time)
     
     def shutdown(self):
-        """Signal the thread to shut down."""
+        """Signal the thread to shut down.
+
+        Queues a sentinel that the request loop consumes to exit cleanly. This
+        only takes effect once initialization has completed and the loop is
+        running; use :meth:`stop` for a best-effort teardown when init never
+        finished (e.g. a timed-out handshake) so the daemon thread and its
+        stdio child do not leak across construction retries (issue #4375).
+        """
         self.queue.put(None)
+
+    def stop(self):
+        """Best-effort teardown for a runner that failed to initialize.
+
+        Queues the shutdown sentinel and joins the thread briefly so that if
+        the handshake eventually completes the request loop exits immediately
+        instead of leaving a background thread (and its stdio subprocess) alive.
+        The thread is a daemon, so this never blocks interpreter exit.
+        """
+        try:
+            self.queue.put(None)
+        except Exception:
+            pass
+        if self.is_alive():
+            self.join(timeout=1)
 
 class MCP:
     """
@@ -478,9 +500,23 @@ class MCP:
         )
         self.runner = MCPToolRunner(self.server_params, timeout)
         
-        # Wait for initialization
+        # Wait for initialization. Fail closed on timeout so callers never
+        # receive a usable-but-empty MCP object that silently degrades an
+        # Agent into a tool-less chat (issue #4375). Tear the runner down first
+        # so a blocked handshake does not leave a background thread and stdio
+        # child process alive across construction retries.
         if not self.runner.initialized.wait(timeout=self.timeout):
-            print(f"Warning: MCP initialization timed out after {self.timeout} seconds")
+            self.runner.stop()
+            raise TimeoutError(
+                f"MCP initialization timed out after {self.timeout} seconds "
+                f"(command={cmd!r} args={arguments!r})."
+            )
+        if getattr(self.runner, "_init_error", None):
+            self.runner.stop()
+            raise RuntimeError(
+                f"MCP initialization failed: {self.runner._init_error} "
+                f"(command={cmd!r} args={arguments!r})."
+            )
         
         # Automatically detect if this is an NPX command
         base_cmd = os.path.basename(cmd) if isinstance(cmd, str) else cmd
@@ -499,6 +535,25 @@ class MCP:
         else:
             # Generate tool functions immediately and store them
             self._tools = self._apply_tool_filters(self._generate_tool_functions())
+
+        # Fail closed if a stdio server initialized but produced no tools.
+        # Returning an empty iterable here would let Agent(tools=mcp) run as a
+        # tool-less chat and hallucinate answers (issue #4375). Distinguish the
+        # two empty cases:
+        #   * the server itself advertised zero tools  -> always fail closed,
+        #     even when a filter is configured (the filter removed nothing, so
+        #     it cannot be blamed for the empty result); versus
+        #   * a filter deliberately removed every tool  -> leave untouched, as
+        #     that is an intentional configuration by the caller.
+        server_advertised_tools = bool(getattr(self.runner, "tools", None))
+        filter_configured = bool(self.allowed_tools or self.disabled_tools)
+        if not self._tools and not (filter_configured and server_advertised_tools):
+            err = getattr(self.runner, "_init_error", None)
+            raise RuntimeError(
+                f"MCP server produced 0 tools (command={cmd!r} args={arguments!r}). "
+                f"init_error={err!r}. On Windows pass command='npx.cmd' explicitly "
+                f"or use a Python MCP server (command=sys.executable, args=[server.py])."
+            )
     
     def _generate_tool_functions(self) -> List[Callable]:
         """

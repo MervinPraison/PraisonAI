@@ -21,7 +21,9 @@ def test_mcp_config_to_mcp_instance_import_fix():
     )
     
     # This should not raise ImportError anymore
-    # Note: It might return None if MCP package is not installed, but the import should work
+    # Note: It might return None if MCP package is not installed, but the import should work.
+    # 'echo' is not a real MCP server, so with fail-closed init (issue #4375) a
+    # TimeoutError/RuntimeError here is expected and equally proves the import path is correct.
     try:
         result = config.to_mcp_instance()
         # If we get here without ImportError from wrong path, the fix worked
@@ -32,6 +34,9 @@ def test_mcp_config_to_mcp_instance_import_fix():
         else:
             # This is expected if mcp package is not installed
             assert "praisonaiagents[mcp]" in str(e)
+    except (RuntimeError, TimeoutError):
+        # 'echo' initialized but is not a valid MCP server; fail-closed is correct.
+        assert True
 
 
 def test_load_mcp_tools_import():
@@ -52,7 +57,9 @@ def test_mcp_filter_parameters():
     try:
         from praisonaiagents.mcp import MCP
         # This should not raise TypeError for unknown parameters
-        # Note: May raise ImportError if mcp package not installed
+        # Note: May raise ImportError if mcp package not installed.
+        # 'echo' is not a real MCP server; with fail-closed init (issue #4375)
+        # this raises after accepting the filter kwargs, which still proves B3.
         mcp = MCP("echo hello", allowed_tools=["test"], disabled_tools=["bad"])
         assert mcp.allowed_tools == ["test"]
         assert mcp.disabled_tools == ["bad"]
@@ -62,6 +69,10 @@ def test_mcp_filter_parameters():
             pytest.skip("MCP package not installed")
         else:
             raise
+    except (RuntimeError, TimeoutError):
+        # Filter kwargs were accepted (no TypeError); 'echo' is not a valid
+        # MCP server so fail-closed init is expected.
+        assert True
 
 
 def test_filter_tool_functions_exist():
@@ -281,23 +292,21 @@ def test_safe_env_build():
     """Test safe environment building (B5)."""
     try:
         from praisonaiagents.mcp import MCP
-        
-        # Create MCP instance to test env building
-        # This tests that _build_safe_env method exists
-        mcp = MCP("echo test")
-        assert hasattr(mcp, '_build_safe_env')
-        
-        # Test safe env function
-        safe_env = mcp._build_safe_env({"CUSTOM_VAR": "test"})
-        assert isinstance(safe_env, dict)
-        assert "CUSTOM_VAR" in safe_env
-        assert safe_env["CUSTOM_VAR"] == "test"
-        # Should have safe baseline
-        assert "PATH" in safe_env
-        assert "HOME" in safe_env
-        
     except ImportError as e:
         if "praisonaiagents[mcp]" in str(e):
-            pytest.skip("MCP package not installed") 
-        else:
-            raise
+            pytest.skip("MCP package not installed")
+        raise
+
+    # _build_safe_env does not need a live server connection. Construct the
+    # instance without __init__ so we don't depend on 'echo' being a valid MCP
+    # server (which now fails closed per issue #4375).
+    assert hasattr(MCP, '_build_safe_env')
+    mcp = MCP.__new__(MCP)
+
+    safe_env = mcp._build_safe_env({"CUSTOM_VAR": "test"})
+    assert isinstance(safe_env, dict)
+    assert "CUSTOM_VAR" in safe_env
+    assert safe_env["CUSTOM_VAR"] == "test"
+    # Should have safe baseline
+    assert "PATH" in safe_env
+    assert "HOME" in safe_env
