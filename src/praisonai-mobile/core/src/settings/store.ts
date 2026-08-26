@@ -18,14 +18,32 @@ export type SettingValue = string | number | boolean;
 export interface SettingDef {
   readonly key: string;
   readonly default: SettingValue;
+  /** What the settings screen calls it. Falls back to the key, which is at
+   *  least honest -- but a screen showing `maxTokens` to a user is a screen
+   *  written by someone who never opened it. */
+  readonly label?: string;
+  readonly help?: string;
+  /** Groups rows under a heading. Ungrouped settings land under "General". */
+  readonly section?: string;
+  /** A closed set of choices. Renders as a picker rather than a free field,
+   *  which is the difference between choosing a model and typing one. */
+  readonly choices?: readonly SettingValue[];
   /** Secret values are routed to SecretsPort and never to StoragePort. */
   readonly secret?: boolean;
   /** Clamp or reject. Returns the value to store, or null to refuse it. */
   readonly validate?: (value: SettingValue) => SettingValue | null;
 }
 
+export type SettingsUnsubscribe = () => void;
+
 export interface SettingsStore {
   get(key: string): SettingValue | undefined;
+  /** The definitions, so a screen renders from data rather than a hard-coded
+   *  list that drifts the first time a setting is added. */
+  defs(): readonly SettingDef[];
+  /** Fires after any accepted write. Without it a screen re-renders blindly
+   *  after every `set`, including the ones that were refused. */
+  subscribe(cb: () => void): SettingsUnsubscribe;
   set(key: string, value: SettingValue): Promise<boolean>;
   load(): Promise<void>;
   setSecret(ref: SecretRef, value: string): Promise<void>;
@@ -37,7 +55,18 @@ export interface SettingsStore {
 export interface SettingsFacade {
   get(key: string): SettingValue | undefined;
   set(key: string, value: SettingValue): Promise<boolean>;
+  defs(): readonly SettingDef[];
+  subscribe(cb: () => void): SettingsUnsubscribe;
   hasSecret(ref: SecretRef): Promise<boolean>;
+  /**
+   * Store a secret. WRITE-ONLY by design -- there is deliberately no getter
+   * beside it, so a view can configure a key and prove one is present without
+   * ever being able to fault the value into a render tree, a log or a
+   * screenshot. Without this the keychain port was inert: nothing in the
+   * package could write a secret at all.
+   */
+  setSecret(ref: SecretRef, value: string): Promise<void>;
+  clearSecret(ref: SecretRef): Promise<void>;
   /** False on the web adapter. The settings view warns rather than implying a
    *  safety the platform is not providing. */
   readonly secretsAreHardwareBacked: boolean;
@@ -65,9 +94,23 @@ export function createSettingsStore(
     await storage.write(STORAGE_KEY, JSON.stringify(plain));
   };
 
+  const subscribers = new Set<() => void>();
+  /** Only after an ACCEPTED write. Notifying on a refused one is what makes a
+   *  screen redraw a value the user did not manage to change. */
+  const notify = () => {
+    for (const cb of [...subscribers]) cb();
+  };
+
   return {
     get(key) {
       return values.get(key);
+    },
+
+    defs: () => defs,
+
+    subscribe(cb) {
+      subscribers.add(cb);
+      return () => void subscribers.delete(cb);
     },
 
     async set(key, value) {
@@ -82,6 +125,7 @@ export function createSettingsStore(
 
       values.set(key, validated);
       await persist();
+      notify();
       return true;
     },
 
@@ -113,6 +157,10 @@ export function createSettingsStore(
 
     async setSecret(ref, value) {
       await secrets.set(ref, value);
+      // A screen renders "configured" from hasSecret, so storing a key has to
+      // wake it -- otherwise the row still reads "not set" until something
+      // else happens to trigger a redraw.
+      notify();
     },
 
     async hasSecret(ref) {
@@ -121,6 +169,7 @@ export function createSettingsStore(
 
     async clearSecret(ref) {
       await secrets.delete(ref);
+      notify();
     },
   };
 }
@@ -130,6 +179,10 @@ export function facadeFor(store: SettingsStore, secrets: SecretsPort): SettingsF
   return {
     get: (key) => store.get(key),
     set: (key, value) => store.set(key, value),
+    defs: () => store.defs(),
+    subscribe: (cb) => store.subscribe(cb),
+    setSecret: (ref, value) => store.setSecret(ref, value),
+    clearSecret: (ref) => store.clearSecret(ref),
     hasSecret: (ref) => store.hasSecret(ref),
     secretsAreHardwareBacked: secrets.isHardwareBacked,
   };

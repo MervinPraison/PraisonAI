@@ -146,3 +146,94 @@ test("clampNum is a named function a test can call", () => {
   assert.equal(clamp("x"), null);
   assert.equal(clamp(NaN), null);
 });
+
+// ---- enumeration and change notification -----------------------------------
+
+test("a screen can enumerate the settings rather than hard-coding them", async () => {
+  // Without this a settings view must repeat the key list that already exists
+  // as data, and the two drift the first time a setting is added.
+  const { store } = build();
+  assert.deepEqual(store.defs().map((d) => d.key), ["model", "temperature", "showReasoning", "apiKey"]);
+});
+
+test("an accepted write wakes subscribers", async () => {
+  const { store } = build();
+  let calls = 0;
+  store.subscribe(() => void calls++);
+  await store.set("model", "gpt-4o");
+  assert.equal(calls, 1);
+});
+
+test("a REFUSED write wakes nobody", async () => {
+  // The pair, and the one that matters: notifying on a refused write makes a
+  // screen redraw a value the user did not manage to change, which reads as
+  // the setting having been accepted.
+  const { store } = build();
+  let calls = 0;
+  store.subscribe(() => void calls++);
+  assert.equal(await store.set("nonexistent", 1), false);
+  assert.equal(await store.set("apiKey", "sk-nope"), false);
+  assert.equal(calls, 0);
+});
+
+test("storing a secret wakes subscribers", async () => {
+  // A row reads "configured" from hasSecret; storing a key must redraw it.
+  const { store } = build();
+  let calls = 0;
+  store.subscribe(() => void calls++);
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-x");
+  assert.equal(calls, 1);
+});
+
+test("unsubscribing stops the callbacks", async () => {
+  const { store } = build();
+  let calls = 0;
+  const stop = store.subscribe(() => void calls++);
+  await store.set("model", "a");
+  stop();
+  await store.set("model", "b");
+  assert.equal(calls, 1);
+});
+
+test("the facade exposes defs and subscribe, still without a secret getter", async () => {
+  const { secrets, store } = build();
+  const facade = facadeFor(store, secrets);
+  assert.equal(facade.defs().length, 4);
+  assert.equal(typeof facade.subscribe, "function");
+  assert.equal("getSecret" in facade, false);
+});
+
+test("the facade can configure a key without ever being able to read one", async () => {
+  // The keychain port was inert: nothing in the package could write a secret,
+  // so a fresh install had no way to become usable. The write path exists now
+  // and the getter still does not -- a view can prove a key is present and
+  // never fault the value into a render tree, a log, or a screenshot.
+  const { secrets, store } = build();
+  const facade = facadeFor(store, secrets);
+  const ref = { slot: "openai" as const, account: "default" };
+
+  assert.equal(await facade.hasSecret(ref), false);
+  await facade.setSecret(ref, "sk-live");
+  assert.equal(await facade.hasSecret(ref), true);
+  assert.equal(secrets.reads, 0, "presence must not read the value");
+  assert.equal("getSecret" in facade, false);
+  assert.equal("get" in facade && typeof facade.get === "function", true);
+});
+
+test("a secret written through the facade never reaches plain storage", async () => {
+  // The guarantee, re-asserted at the new entry point rather than assumed to
+  // carry over from the store's own test.
+  const { storage, secrets, store } = build();
+  await facadeFor(store, secrets).setSecret({ slot: "openai", account: "default" }, "sk-do-not-leak");
+  const written = await storage.read({ namespace: "settings", id: "app" });
+  assert.equal(written === null || !written.includes("sk-do-not-leak"), true);
+});
+
+test("clearing a key through the facade removes it", async () => {
+  const { secrets, store } = build();
+  const facade = facadeFor(store, secrets);
+  const ref = { slot: "openai" as const, account: "default" };
+  await facade.setSecret(ref, "sk-x");
+  await facade.clearSecret(ref);
+  assert.equal(await facade.hasSecret(ref), false);
+});
