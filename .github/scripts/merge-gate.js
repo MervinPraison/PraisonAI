@@ -308,7 +308,7 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
 }
 
 const FINAL_CLAUDE_REVIEW_BODY =
-  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify praisonai-rust or praisonai-ts. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
+  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify src/praisonai-rust or src/praisonai-ts in this repo — TypeScript SDK work belongs in MervinPraison/praisonai-js. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: TypeScript/JavaScript SDK → praisonai-js (not src/praisonai-ts/ here); agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
 
 async function getMergeState(github, owner, repo, prNumber) {
   const query = `
@@ -600,6 +600,24 @@ function hasManualOnlyLabel(labels) {
   return labels.some((l) => MANUAL_ONLY_LABELS.has(l));
 }
 
+const TS_MIRROR_PREFIX = 'src/praisonai-ts/';
+
+function tsMirrorPathReasons(files, pr) {
+  const touchesTs = files.some((f) => f.filename.startsWith(TS_MIRROR_PREFIX));
+  if (!touchesTs) return [];
+  const title = (pr.title || '').toLowerCase();
+  const body = (pr.body || '').toLowerCase();
+  const isSyncPr =
+    title.startsWith('sync:') ||
+    body.includes('sync from praisonai-js') ||
+    body.includes('praisonai-js') ||
+    body.includes('mervinpraison/praisonai-js');
+  if (isSyncPr) return [];
+  return [
+    'src/praisonai-ts/ changed outside praisonai-js sync — implement in MervinPraison/praisonai-js, then run Sync to PraisonAI Monorepo workflow',
+  ];
+}
+
 function sensitivePathReasons(files, labels = []) {
   if (labels.includes(WORKFLOW_ONLY_LABEL) && isCiOnlyChange(files)) {
     return [];
@@ -823,6 +841,7 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   if (agentManual) reasons.push(agentManual);
 
   reasons.push(...sensitivePathReasons(pullFiles, ctx.labels));
+  reasons.push(...tsMirrorPathReasons(pullFiles, ctx.pr));
   reasons.push(...prSizeReasons(pullFiles));
   reasons.push(...secretScanReasons(pullFiles));
 
@@ -989,6 +1008,7 @@ module.exports = {
   touchesSdk,
   hasManualOnlyLabel,
   sensitivePathReasons,
+  tsMirrorPathReasons,
   prSizeReasons,
   missingTestsReason,
   secretScanReasons,

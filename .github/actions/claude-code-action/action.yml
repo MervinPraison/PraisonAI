@@ -225,9 +225,10 @@ runs:
         - CORE vs WRAPPER vs TOOLS vs PLUGINS ROUTING:
           1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
           2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-          3. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs). Do NOT add to praisonaiagents/.
-          4. Plugins → MervinPraison/PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails). Not agent tools.
-          5. Sandbox backends → PraisonAI-Plugins via `praisonai.sandbox` entry point (core protocol only).
+          3. TypeScript/JavaScript SDK → MervinPraison/praisonai-js: canonical npm repo. Do NOT edit src/praisonai-ts/ here.
+          4. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs). Do NOT add to praisonaiagents/.
+          5. Plugins → MervinPraison/PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails). Not agent tools.
+          6. Sandbox backends → PraisonAI-Plugins via `praisonai.sandbox` entry point (core protocol only).
         - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
         - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
         - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
