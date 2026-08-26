@@ -73,6 +73,27 @@ describe('Agent.stream()', () => {
     expect(finish).toEqual({ type: 'finish', text: 'foobar' });
   });
 
+  it('yields the finish text when the agent is non-streaming (stream: false)', async () => {
+    const generateSpy = jest
+      .spyOn(OpenAIService.prototype, 'generateText')
+      .mockResolvedValue('final answer');
+
+    const agent = new Agent({
+      instructions: 'be helpful',
+      llm: 'gpt-4o-mini',
+      stream: false,
+      verbose: false,
+    });
+
+    const received: string[] = [];
+    for await (const token of agent.stream('hi')) {
+      received.push(token);
+    }
+
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    expect(received.join('')).toBe('final answer');
+  });
+
   it('supports cancellation by breaking out of the loop', async () => {
     mockStreamChat(['1', '2', '3', '4', '5']);
 

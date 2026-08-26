@@ -869,6 +869,14 @@ export class Agent {
    * breaking out of the `for await` runs the iterator's `return()`, which
    * detaches the token sink so no further tokens are queued.
    *
+   * When the underlying execution path does not stream (e.g. `stream: false`,
+   * tools, or a structured `outputSchema`), no text deltas are produced; in
+   * that case the full response from the terminal `finish` event is yielded as
+   * a single token so callers always receive the answer.
+   *
+   * @param prompt - The user prompt to send to the agent.
+   * @param opts - Optional {@link AgentStreamOptions} (e.g. `previousResult`).
+   * @returns An async iterable of plain text tokens.
    * @example
    * ```typescript
    * for await (const token of agent.stream("Tell me a story")) {
@@ -877,9 +885,17 @@ export class Agent {
    * ```
    */
   async *stream(prompt: string, opts?: AgentStreamOptions): AsyncIterable<string> {
+    let sawDelta = false;
     for await (const event of this.streamEvents(prompt, opts)) {
       if (event.type === 'text') {
+        sawDelta = true;
         yield event.delta;
+      } else if (event.type === 'finish') {
+        // Non-streaming paths yield only a finish event; surface its text so
+        // stream() never silently drops a successful response.
+        if (!sawDelta && event.text) {
+          yield event.text;
+        }
       } else if (event.type === 'error') {
         throw event.error;
       }
@@ -890,6 +906,18 @@ export class Agent {
    * Stream structured {@link AgentEvent}s (text deltas, finish, error) — the
    * TypeScript analogue of Python's `stream_emitter` channel. Prefer
    * {@link Agent.stream} when you only need the text tokens.
+   *
+   * @param prompt - The user prompt to send to the agent.
+   * @param opts - Optional {@link AgentStreamOptions} (e.g. `previousResult`).
+   * @returns An async iterable of {@link AgentEvent}s: zero or more `text`
+   * deltas followed by a single terminal `finish` (or `error`) event.
+   * @example
+   * ```typescript
+   * for await (const event of agent.streamEvents("Hi")) {
+   *   if (event.type === 'text') process.stdout.write(event.delta);
+   *   else if (event.type === 'finish') console.log('\n', event.text);
+   * }
+   * ```
    */
   async *streamEvents(prompt: string, opts?: AgentStreamOptions): AsyncIterable<AgentEvent> {
     const queue: string[] = [];
