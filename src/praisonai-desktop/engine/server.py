@@ -1139,12 +1139,16 @@ def _get_agent(session_id: str = "default", tools: bool = True):
 # This list is the whole vocabulary: eleven events, no more. A client written
 # against a subset silently ignores the rest, so approval_request in particular
 # -- the human-in-the-loop tool gate -- must appear here or the run blocks
-# invisibly until its timeout. Keep this in sync with every emit(...) call site.
+# invisibly until its timeout. It is not a comment that can drift silently --
+# the StreamProtocolVocabulary test in test_portability.py parses these names
+# *and* every emit(...) / _emit_now(...) call site and asserts the two sets
+# match in both directions, so a new event with no line here (or a line here
+# with no emitter) fails CI.
 #
 #   start            {msg_id, run_id}
 #   reasoning        {msg_id, text}          incremental, collapsible
 #   delta            {msg_id, text}          assistant text
-#   tool_drafting    {msg_id, name}          "preparing tool..." state
+#   tool_drafting    {msg_id, name}          "preparing tool..." before the call
 #   tool_call        {msg_id, call_id, name, args}
 #   tool_result      {msg_id, call_id, name, ok, output, seconds}
 #   approval_request {msg_id, approval_id, call_id, name, args}  human-in-the-loop gate
