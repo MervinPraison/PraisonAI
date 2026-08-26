@@ -174,6 +174,14 @@ export type AgentEvent =
 export interface AgentStreamOptions {
   /** Previous result to substitute for the `{{previous}}` placeholder. */
   previousResult?: string;
+  /**
+   * Turn-scoped abort signal. Aborting it stops the underlying provider
+   * request so no further tokens are generated or billed. Independent of the
+   * agent-level `SimpleAgentConfig.signal`: cancel one turn while keeping the
+   * agent. Breaking out of the `for await` loop also aborts automatically —
+   * the iterator's `return()` is the language's own cancellation signal.
+   */
+  signal?: AbortSignal;
 }
 
 export class Agent {
@@ -907,7 +915,7 @@ export class Agent {
             // `response_format` never coexist (OpenAI treats them as mutually
             // exclusive). generateChat sends the full history.
             const finalResp = await this.llmService.generateChat(
-              messages, 0.7, undefined, undefined, this.getResponseFormat()
+              messages, 0.7, undefined, undefined, this.getResponseFormat(), abortSignal
             );
             finalResponse = finalResp.content || response.content || '';
             continueConversation = false;
@@ -976,7 +984,9 @@ export class Agent {
     } catch (error) {
       // Preserve a more specific reason (e.g. 'max_steps') if already set.
       if (this.lastStopReason === null) {
-        this.lastStopReason = 'error';
+        // A user-initiated abort is not a failure: distinguish 'cancelled'
+        // from 'error' so a Stop button and a genuine crash aren't conflated.
+        this.lastStopReason = abortSignal?.aborted ? 'cancelled' : 'error';
       }
       await Logger.error('Error in agent execution', error);
       throw error;
@@ -1049,6 +1059,25 @@ export class Agent {
     let done = false;
     let cancelled = false;
 
+    // Own controller so breaking the consumer's `for await` (which runs the
+    // iterator's `return()`, landing in the finally below) aborts the upstream
+    // provider request — otherwise tokens keep generating and billing after
+    // the consumer stopped reading. A caller-supplied `opts.signal` is chained
+    // in: aborting it aborts ours, so both paths stop the same request.
+    const controller = new AbortController();
+    const callerSignal = opts?.signal;
+    if (callerSignal) {
+      if (callerSignal.aborted) {
+        controller.abort((callerSignal as any).reason);
+      } else {
+        callerSignal.addEventListener(
+          'abort',
+          () => controller.abort((callerSignal as any).reason),
+          { once: true }
+        );
+      }
+    }
+
     const wake = () => { const n = notify; notify = null; n?.(); };
     const onToken = (token: string) => {
       if (cancelled) return;
@@ -1056,7 +1085,7 @@ export class Agent {
       wake();
     };
 
-    const run = this.start(prompt, opts?.previousResult, onToken)
+    const run = this.start(prompt, opts?.previousResult, onToken, controller.signal)
       .then((text) => ({ text } as { text: string }))
       .catch((error) => ({
         error: error instanceof Error ? error : new Error(String(error)),
@@ -1079,9 +1108,11 @@ export class Agent {
       }
       yield { type: 'finish', text: result.text };
     } finally {
-      // Breaking the consumer's loop lands here: stop feeding the sink so the
-      // in-flight start() can settle without buffering further tokens.
+      // Breaking the consumer's loop lands here: stop feeding the sink and
+      // abort the in-flight request so the provider stops generating (and
+      // billing) rather than running to completion detached.
       cancelled = true;
+      controller.abort();
     }
   }
 
