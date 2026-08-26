@@ -75,6 +75,12 @@ export interface SimpleAgentConfig {
   outputSchemaName?: string;
   /** Map of tool function implementations */
   toolFunctions?: Record<string, Function>;
+  /**
+   * Maximum number of tool-call round-trips before the loop is aborted
+   * (default: 5). When the cap is reached the run throws instead of
+   * silently returning an empty string, so exhaustion is observable.
+   */
+  maxIterations?: number;
   /** Database adapter for persistence */
   db?: DbAdapter;
   /** Session ID for conversation persistence (auto-generated if not provided) */
@@ -116,6 +122,7 @@ export class Agent {
   private outputSchema?: Record<string, any>;
   private outputSchemaName: string = 'response';
   private toolFunctions: Record<string, Function> = {};
+  private maxIterations: number;
   private dbAdapter?: DbAdapter;
   private sessionId: string;
   private runId: string;
@@ -163,6 +170,7 @@ export class Agent {
     this.tools = undefined;
     this.outputSchema = config.outputSchema;
     this.outputSchemaName = config.outputSchemaName || 'response';
+    this.maxIterations = config.maxIterations ?? 5;
     this.dbAdapter = config.db;
     this.sessionId = config.sessionId || this.generateSessionId();
     this.runId = config.runId || randomUUID();
@@ -602,7 +610,7 @@ export class Agent {
         // Use tools (non-streaming for now to simplify implementation)
         let continueConversation = true;
         let iterations = 0;
-        const maxIterations = 5; // Prevent infinite loops
+        const maxIterations = this.maxIterations; // Prevent infinite loops (configurable)
         
         while (continueConversation && iterations < maxIterations) {
           iterations++;
@@ -637,8 +645,15 @@ export class Agent {
           }
         }
         
-        if (iterations >= maxIterations) {
+        if (continueConversation && iterations >= maxIterations) {
+          // Exhaustion is observable: returning finalResponse here would be
+          // '' (unresolved tool calls left no text answer), indistinguishable
+          // from the model saying nothing. Throw instead so the caller knows.
           await Logger.warn(`Reached maximum iterations (${maxIterations}) for tool calls`);
+          throw new Error(
+            `Agent ${this.name}: reached maximum tool-call iterations (${maxIterations}) without a final answer. ` +
+            `Increase maxIterations in the agent config if the task legitimately needs more tool round-trips.`
+          );
         }
       } else if (this.outputSchema) {
         // Structured output (no tools): go through generateChat so the full
