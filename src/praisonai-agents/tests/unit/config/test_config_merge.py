@@ -115,6 +115,40 @@ def test_ancestor_directory_discovery_nearest_wins(tmp_path, monkeypatch):
     assert raw["defaults"]["base_url"] == "https://root"
 
 
+def test_write_target_prefers_highest_precedence_file(tmp_path, monkeypatch):
+    # Global config exists AND a nearer ancestor config exists. The CLI must
+    # write to the ancestor (which wins the merge), not the global — otherwise
+    # the ancestor overrides the write on reload and the CLI has no effect.
+    home = tmp_path / "home"
+    _write_yaml(home / "config.yaml", "plugins:\n  enabled: []\n")
+    root = tmp_path / "workspace"
+    ancestor_cfg = root / ".praisonai" / "config.yaml"
+    _write_yaml(ancestor_cfg, "plugins:\n  enabled: []\n")
+    nested = root / "sub" / "deep"
+    nested.mkdir(parents=True)
+    _run_with_dirs(tmp_path, monkeypatch, home, nested)
+
+    target = loader._config_write_target()
+    assert target == ancestor_cfg
+
+
+def test_set_plugin_enabled_writes_ancestor_and_takes_effect(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    _write_yaml(home / "config.yaml", "plugins:\n  enabled: []\n")
+    root = tmp_path / "workspace"
+    ancestor_cfg = root / ".praisonai" / "config.yaml"
+    _write_yaml(ancestor_cfg, "plugins:\n  enabled: []\n")
+    nested = root / "sub" / "deep"
+    nested.mkdir(parents=True)
+    _run_with_dirs(tmp_path, monkeypatch, home, nested)
+
+    written = loader.set_plugin_enabled("pii_guardrail", True)
+    assert written == ancestor_cfg
+    # The runtime (merged) view reflects the change, not overridden by global.
+    loader.clear_config_cache()
+    assert loader.get_enabled_plugins() == ["pii_guardrail"]
+
+
 def test_single_file_fast_path_matches_direct_parse(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

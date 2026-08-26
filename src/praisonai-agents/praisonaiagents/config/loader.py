@@ -690,15 +690,19 @@ def get_plugin_options() -> Dict[str, Dict[str, Any]]:
 def _config_write_target() -> Path:
     """Resolve the config file the CLI should write plugin enable/disable to.
 
-    Returns the existing config file if one is already present (so the CLI
-    mutates the *same* file the runtime reads), otherwise the project-local
-    ``.praisonai/config.yaml`` — the unified surface — as the default target.
-    This closes the config split-brain where the CLI wrote a JSON file the
-    runtime never read.
+    Returns the *highest-precedence* existing config file (the one that wins
+    after the deep merge) so the CLI mutates the same file the runtime honours.
+    Using ``_discover_config_files()[-1]`` — rather than ``_find_config_file()``
+    which only sees cwd + global — ensures that when a nearer ancestor config
+    overrides the global, the CLI writes that ancestor file instead of a
+    lower-precedence global whose change would be silently overridden on reload.
+    Falls back to the project-local ``.praisonai/config.yaml`` — the unified
+    surface — when no config exists yet. This closes the config split-brain
+    where the CLI wrote a file the runtime never read.
     """
-    existing = _find_config_file()
-    if existing is not None:
-        return existing
+    config_paths = _discover_config_files()
+    if config_paths:
+        return config_paths[-1]
     return get_project_data_dir() / "config.yaml"
 
 
@@ -743,7 +747,10 @@ def set_plugin_enabled(name: str, enabled: bool) -> Path:
         The path of the config file that was written.
     """
     target = _config_write_target()
-    raw = _load_config() if _find_config_file() is not None else {}
+    # Seed from the *target* file only (not the merged view) so we round-trip the
+    # exact file we write back to; merging in lower-precedence globals here would
+    # persist inherited keys into the target and defeat the fall-through design.
+    raw = _parse_config_file(target) if target.exists() else {}
     if not isinstance(raw, dict):
         raw = {}
 
