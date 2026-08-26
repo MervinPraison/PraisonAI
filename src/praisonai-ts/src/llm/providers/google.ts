@@ -15,6 +15,7 @@ import type {
   ToolDefinition,
   ToolCall,
 } from './types';
+import { getEnv } from '../openaiClientOptions';
 
 interface GeminiContent {
   role: 'user' | 'model';
@@ -28,7 +29,7 @@ export class GoogleProvider extends BaseProvider {
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
-    this.apiKey = config.apiKey || process.env.GOOGLE_API_KEY || '';
+    this.apiKey = config.apiKey || getEnv('GOOGLE_API_KEY') || '';
     this.baseUrl = config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
     
     if (!this.apiKey) {
