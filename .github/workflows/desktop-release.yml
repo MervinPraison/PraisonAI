@@ -131,14 +131,22 @@ jobs:
         working-directory: src/praisonai-desktop/src-tauri
         run: |
           set -euo pipefail
-          app="$(find "target/${{ matrix.target }}/release/bundle" -name '*.app' -print -quit)"
-          [ -n "$app" ] || { echo "no .app was produced"; exit 1; }
+          dmg="$(find "target/${{ matrix.target }}/release/bundle" -name '*.dmg' -print -quit)"
+          [ -n "$dmg" ] || { echo "no .dmg was produced"; exit 1; }
 
+          # Verify inside the DMG, not the .app beside it.
+          #
+          # Tauri deletes the app bundle once the DMG is built -- the build log
+          # says so plainly ("Cleaning .../bundle/macos/PraisonAI.app") -- so a
+          # gate that looked for the .app found nothing and failed every macOS
+          # leg. Reading the DMG is also the better check: it is the artifact
+          # people download, and the one that was broken.
+          #
           # v4.7.2 shipped a DMG that macOS called "damaged and can't be
           # opened" on every Mac. The cause was not the missing Developer ID:
-          # the only signature present was the one rustc's linker puts on the
-          # bare executable (adhoc, linker-signed), and its CodeDirectory
-          # declares a resource seal that an unsigned bundle does not have --
+          # the only signature was the one rustc's linker puts on the bare
+          # executable, whose CodeDirectory declares a resource seal that an
+          # unsigned bundle does not have --
           #
           #   Sealed Resources=none
           #   code has no resources but signature indicates they must be present
@@ -146,18 +154,19 @@ jobs:
           # That is an *invalid* signature, not an unsigned one, and macOS
           # reports invalid as "damaged". Right-click -> Open cannot bypass it,
           # so the instructions shipped alongside it could not work either.
-          #
-          # `codesign --verify` is therefore a release gate. An ad-hoc identity
-          # is still not a Developer ID and Gatekeeper will still refuse the
-          # app on a double-click -- but it refuses it as "unidentified
-          # developer", which right-click -> Open does bypass.
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -quiet -mountpoint "$mnt" "$dmg"
+          trap 'hdiutil detach "$mnt" -quiet || true' EXIT
+
+          app="$(find "$mnt" -maxdepth 1 -name '*.app' -print -quit)"
+          [ -n "$app" ] || { echo "the DMG contains no .app"; ls -la "$mnt"; exit 1; }
+
           echo "verifying $app"
           codesign --verify --deep --strict --verbose=2 "$app"
           # Printed, not asserted: --verify already fails on the exact bundle
-          # that shipped ("code has no resources but signature indicates they
-          # must be present"), so a second check for the same thing would only
-          # be a second way to say it. This is here to make the log readable.
-          codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Sealed Resources|flags='  || true
+          # that shipped, so a second check for the same thing would only be a
+          # second way to say it. This is here to make the log readable.
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Sealed Resources|flags=' || true
 
       - name: Name the artifact for the platform it runs on
         id: artifact

@@ -222,6 +222,29 @@ test('the release build verifies the signature before uploading', () => {
                'the signature-verification step is not scoped to macOS runners');
 });
 
+test('the signature gate reads the DMG, not the app beside it', () => {
+  // Tauri deletes the app bundle once the DMG is built -- the build log says
+  // so: "Cleaning .../bundle/macos/PraisonAI.app". A gate that looked for the
+  // .app therefore found nothing and failed every macOS leg of v4.7.3, which
+  // is why that release shipped with no Mac downloads at all.
+  //
+  // Reading the DMG is also the better check: it is the artifact people
+  // download, and the one that was broken.
+  const runnable = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const gate = runnable.slice(runnable.indexOf('must carry a valid signature'),
+                              runnable.indexOf('Name the artifact'));
+  assert.ok(gate, 'the signature gate is gone');
+  assert.match(gate, /hdiutil attach/, 'the gate does not open the DMG');
+  assert.match(gate, /-name '\*\.dmg'/, 'the gate does not look for a .dmg');
+  assert.ok(!/-name '\*\.app' -print -quit"?\s*\)?\s*$/m.test(
+              gate.split('hdiutil attach')[0]),
+            'the gate looks for a .app before mounting; Tauri has deleted it by then');
+  assert.match(gate, /hdiutil detach/, 'the gate never unmounts the DMG');
+});
+
 test('the macOS overlay does not drop the bundle configuration', () => {
   // Tauri merges the overlay with RFC 7386, which replaces rather than merges.
   // An overlay that grew a "bundle" key would silently discard the signing
