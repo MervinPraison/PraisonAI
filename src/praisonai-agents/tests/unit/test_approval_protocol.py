@@ -144,6 +144,131 @@ class TestConsoleBackend:
         assert decision.approved is True
 
 
+class TestDiffPreview:
+    def test_edit_file_builds_diff(self):
+        from praisonaiagents.approval.utils import build_diff_preview
+        diff = build_diff_preview(
+            "edit_file",
+            {"filepath": "/tmp/does-not-exist.py", "old_string": "foo", "new_string": "bar"},
+        )
+        assert diff is not None
+        assert "-foo" in diff
+        assert "+bar" in diff
+
+    def test_edit_file_replace_first_only_by_default(self, tmp_path):
+        from praisonaiagents.approval.utils import build_diff_preview
+        target = tmp_path / "dup.py"
+        target.write_text("foo\nfoo\n", encoding="utf-8")
+        diff = build_diff_preview(
+            "edit_file",
+            {"filepath": str(target), "old_string": "foo", "new_string": "bar"},
+        )
+        assert diff is not None
+        # Only the first occurrence changes when replace_all is falsey.
+        assert diff.count("+bar") == 1
+        assert diff.count("-foo") == 1
+
+    def test_edit_file_replace_all_when_requested(self, tmp_path):
+        from praisonaiagents.approval.utils import build_diff_preview
+        target = tmp_path / "dup.py"
+        target.write_text("foo\nfoo\n", encoding="utf-8")
+        diff = build_diff_preview(
+            "edit_file",
+            {
+                "filepath": str(target),
+                "old_string": "foo",
+                "new_string": "bar",
+                "replace_all": True,
+            },
+        )
+        assert diff is not None
+        assert diff.count("+bar") == 2
+        assert diff.count("-foo") == 2
+
+    def test_acp_edit_file_builds_whole_file_diff(self, tmp_path):
+        from praisonaiagents.approval.utils import build_diff_preview
+        target = tmp_path / "acp.py"
+        target.write_text("old line\n", encoding="utf-8")
+        diff = build_diff_preview(
+            "acp_edit_file",
+            {"filepath": str(target), "new_content": "new line\n"},
+        )
+        assert diff is not None
+        assert "-old line" in diff
+        assert "+new line" in diff
+
+    def test_acp_edit_file_missing_new_content_returns_none(self):
+        from praisonaiagents.approval.utils import build_diff_preview
+        assert build_diff_preview("acp_edit_file", {"filepath": "a.py"}) is None
+
+    def test_write_file_builds_diff_for_new_file(self):
+        from praisonaiagents.approval.utils import build_diff_preview
+        diff = build_diff_preview(
+            "write_file",
+            {"filepath": "/tmp/definitely-missing-xyz.txt", "content": "hello\nworld\n"},
+        )
+        assert diff is not None
+        assert "+hello" in diff
+
+    def test_apply_patch_returns_patch_verbatim(self):
+        from praisonaiagents.approval.utils import build_diff_preview
+        patch_text = "*** Update File: a.py\n-old\n+new"
+        assert build_diff_preview("apply_patch", {"patch": patch_text}) == patch_text
+
+    def test_non_edit_tool_returns_none(self):
+        from praisonaiagents.approval.utils import build_diff_preview
+        assert build_diff_preview("execute_command", {"command": "ls"}) is None
+
+    def test_console_render_markup_colours_and_escapes(self):
+        from praisonaiagents.approval.backends import ConsoleBackend
+        out = ConsoleBackend._render_diff_markup(
+            "@@ -1 +1 @@\n-old\n+new [bold]x[/bold]"
+        )
+        assert "[green]" in out and "[red]" in out and "[cyan]" in out
+        assert "\\[bold]" in out
+
+    def test_prompt_renders_diff_when_present(self):
+        from praisonaiagents.approval.backends import ConsoleBackend
+        from praisonaiagents.approval.protocols import ApprovalRequest
+        backend = ConsoleBackend()
+        req = ApprovalRequest(
+            tool_name="edit_file",
+            arguments={"filepath": "a.py", "old_string": "foo", "new_string": "bar"},
+            risk_level="high",
+            context={"diff": "@@ -1 +1 @@\n-foo\n+bar"},
+        )
+        with patch("praisonaiagents.approval.backends._get_rich_console") as mock_console_cls, \
+             patch("praisonaiagents.approval.backends._get_rich_panel") as mock_panel, \
+             patch("praisonaiagents.approval.backends._get_rich_prompt") as mock_prompt:
+            mock_console_cls.return_value = MagicMock()
+            mock_panel.return_value = MagicMock()
+            mock_prompt.return_value.ask.return_value = "n"
+            backend._prompt_user(req)
+            panel_body = mock_panel.return_value.call_args[0][0]
+            assert "+bar" in panel_body and "-foo" in panel_body
+            assert "Diff:" in panel_body
+
+    def test_prompt_falls_back_to_arguments_when_no_diff(self):
+        from praisonaiagents.approval.backends import ConsoleBackend
+        from praisonaiagents.approval.protocols import ApprovalRequest
+        backend = ConsoleBackend()
+        req = ApprovalRequest(
+            tool_name="execute_command",
+            arguments={"command": "ls -la"},
+            risk_level="critical",
+        )
+        with patch("praisonaiagents.approval.backends._get_rich_console") as mock_console_cls, \
+             patch("praisonaiagents.approval.backends._get_rich_panel") as mock_panel, \
+             patch("praisonaiagents.approval.backends._get_rich_prompt") as mock_prompt:
+            mock_console_cls.return_value = MagicMock()
+            mock_panel.return_value = MagicMock()
+            mock_prompt.return_value.ask.return_value = "n"
+            backend._prompt_user(req)
+            panel_body = mock_panel.return_value.call_args[0][0]
+            assert "ls -la" in panel_body
+            assert "Arguments:" in panel_body
+
+
 # ── Registry tests ───────────────────────────────────────────────────────────
 
 

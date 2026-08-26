@@ -1626,6 +1626,12 @@ class ToolExecutionMixin:
                 or (trust_level == "external")  # External tools need approval
             )
             if needs_approval:
+                # Attach a rendered unified diff for file-mutating tools so the
+                # reviewer approves the actual change rather than a truncated
+                # argument dump. Non-edit tools get no diff (``None``) and keep
+                # the existing argument summary.
+                from ..approval.utils import build_diff_preview
+                diff_preview = build_diff_preview(tool_name, tool_args)
                 request = ApprovalRequest(
                     tool_name=tool_name,
                     arguments=tool_args,
@@ -1634,6 +1640,7 @@ class ToolExecutionMixin:
                         or DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium")
                     ),
                     agent_name=getattr(self, 'name', None),
+                    context={"diff": diff_preview} if diff_preview else {},
                 )
                 
                 if is_async:
@@ -2852,12 +2859,15 @@ class ToolExecutionMixin:
 
         from ..approval.protocols import ApprovalRequest
         from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+        from ..approval.utils import build_diff_preview
 
+        diff_preview = build_diff_preview(function_name, arguments)
         request = ApprovalRequest(
             tool_name=function_name,
             arguments=arguments,
             risk_level=DEFAULT_DANGEROUS_TOOLS.get(function_name, "medium"),
             agent_name=getattr(self, 'name', None),
+            context={"diff": diff_preview} if diff_preview else {},
         )
 
         tracking_id = str(uuid.uuid4())[:8]

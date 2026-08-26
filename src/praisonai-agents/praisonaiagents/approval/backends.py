@@ -80,6 +80,35 @@ class AutoApproveBackend:
 class ConsoleBackend:
     """Interactive Rich terminal prompt.  Default for CLI usage."""
 
+    @staticmethod
+    def _render_diff_markup(diff: str, max_lines: int = 40) -> str:
+        """Return Rich-markup for a unified *diff* with coloured +/- hunks.
+
+        Escapes any literal ``[`` in the diff so raw file content can never be
+        interpreted as Rich markup. Added lines are green, removed lines red,
+        hunk headers cyan and context lines dimmed. Bounded to ``max_lines``.
+        """
+        from rich.markup import escape
+
+        lines = diff.splitlines()
+        rendered = []
+        for i, line in enumerate(lines):
+            if i >= max_lines:
+                rendered.append("[dim]... (diff truncated)[/dim]")
+                break
+            safe = escape(line)
+            if line.startswith("+++") or line.startswith("---"):
+                rendered.append(f"[bold]{safe}[/bold]")
+            elif line.startswith("@@"):
+                rendered.append(f"[cyan]{safe}[/cyan]")
+            elif line.startswith("+"):
+                rendered.append(f"[green]{safe}[/green]")
+            elif line.startswith("-"):
+                rendered.append(f"[red]{safe}[/red]")
+            else:
+                rendered.append(f"[dim]{safe}[/dim]")
+        return "\n".join(rendered) + "\n"
+
     def _prompt_user(self, request: ApprovalRequest):
         """Show Rich panel and ask once/session/always/no/deny-with-guidance.
 
@@ -108,12 +137,22 @@ class ConsoleBackend:
         tool_info += f"[bold]Risk Level:[/] [{risk_color}]{request.risk_level.upper()}[/{risk_color}]\n"
         if request.agent_name:
             tool_info += f"[bold]Agent:[/] {request.agent_name}\n"
-        tool_info += "[bold]Arguments:[/]\n"
-        for key, value in request.arguments.items():
-            str_value = str(value)
-            if len(str_value) > 100:
-                str_value = str_value[:97] + "..."
-            tool_info += f"  {key}: {str_value}\n"
+
+        # For file-mutating tools a rendered unified diff is attached to the
+        # request context so the reviewer sees the actual change (path plus
+        # +/- hunks) instead of a truncated argument dump. Fall back to the
+        # argument summary when no diff is present (non-edit tools).
+        diff = (request.context or {}).get("diff")
+        if diff:
+            tool_info += "[bold]Diff:[/]\n"
+            tool_info += self._render_diff_markup(diff)
+        else:
+            tool_info += "[bold]Arguments:[/]\n"
+            for key, value in request.arguments.items():
+                str_value = str(value)
+                if len(str_value) > 100:
+                    str_value = str_value[:97] + "..."
+                tool_info += f"  {key}: {str_value}\n"
 
         console.print(Panel(
             tool_info.strip(),
