@@ -1357,6 +1357,35 @@ class PraisonAI:
                 sys.exit(exit_code)
             
             elif args.command == 'run':
+                # ``run`` is overloaded: the async-jobs API (submit/status/...)
+                # and the documented YAML/agent runner (``praisonai run
+                # agents.yaml``). A YAML file first token means the user wants
+                # to run a team, not manage jobs — the jobs argparse parser only
+                # accepts {submit,status,result,cancel,list,stream} and would
+                # otherwise reject the path with an ``invalid choice`` exit 2
+                # (issue #4374). Route file targets to the modern Typer agent
+                # runner so the README example works; keep job verbs on jobs.
+                first = unknown_args[0] if unknown_args else None
+                # Reserved async-job verbs must win over a same-named path in the
+                # cwd (e.g. a stray ``submit`` file) so ``run submit ...`` still
+                # reaches the jobs API. An explicit path like ``./submit`` (which
+                # keeps its separator) is unaffected and still routes to YAML.
+                job_verbs = {"submit", "status", "result", "cancel", "list", "stream"}
+                is_yaml_target = bool(
+                    first
+                    and not first.startswith('-')
+                    and first not in job_verbs
+                    and (
+                        first.lower().endswith(('.yaml', '.yml'))
+                        or os.path.exists(first)
+                    )
+                )
+                if is_yaml_target:
+                    # Modern engine (``commands/run.py`` run_main); the first
+                    # arg is passed as the Typer ``target`` (YAML file/prompt).
+                    from ..commands.run import app as run_app
+                    run_app(unknown_args)
+                    sys.exit(0)
                 # Run command - async jobs API for long-running tasks
                 from ..features.jobs import handle_run_command
                 handle_run_command(unknown_args, verbose=getattr(args, 'verbose', False))
