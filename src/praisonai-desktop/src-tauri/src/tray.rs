@@ -35,12 +35,28 @@ pub fn focus_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// A keyboard accelerator, or none where the modifier does not exist.
+fn accel(mac: &str) -> Option<&str> {
+    if cfg!(target_os = "macos") {
+        Some(mac)
+    } else {
+        // Deliberately no Ctrl equivalent: a tray menu is not focused, so the
+        // accelerator would be a global hotkey stealing a common chord from
+        // whatever the user is actually typing into.
+        None
+    }
+}
+
 pub fn build(app: &AppHandle<tauri::Wry>) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, SHOW, "Open PraisonAI", true, None::<&str>)?;
     let engine = MenuItem::with_id(app, ENGINE, "Engine: starting…", false, None::<&str>)?;
-    let settings = MenuItem::with_id(app, SETTINGS, "Settings…", true, Some("Cmd+,"))?;
+    // Accelerators only where the modifier exists. Tauri maps "Cmd" to SUPER
+    // off macOS, so these rendered as "Windows+," and "Windows+Q" -- and
+    // Win+Q is a reserved OS shortcut, so the menu advertised a binding the
+    // system takes first.
+    let settings = MenuItem::with_id(app, SETTINGS, "Settings…", true, accel("Cmd+,"))?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, QUIT, "Quit PraisonAI", true, Some("Cmd+Q"))?;
+    let quit = MenuItem::with_id(app, QUIT, "Quit PraisonAI", true, accel("Cmd+Q"))?;
     let menu = Menu::with_items(app, &[&show, &engine, &sep, &settings, &sep, &quit])?;
 
     *ENGINE_ITEM.lock().unwrap() = Some(engine.clone());
@@ -53,9 +69,18 @@ pub fn build(app: &AppHandle<tauri::Wry>) -> tauri::Result<()> {
         // white block sitting among the system's line glyphs. icons/tray.png
         // carries the mark cut into the alpha instead.
         .icon(tray_icon()?)
-        .icon_as_template(true)
+        // Template rendering is a macOS concept: the system discards the
+        // colour and tints the alpha shape. Windows and Linux draw the actual
+        // pixels, and this glyph's pixels are black -- invisible against the
+        // Windows 11 taskbar and the GNOME top bar. Setting it only where it
+        // means something is half the fix; the other half is a light glyph,
+        // which is why the icon is chosen per platform below.
+        .icon_as_template(cfg!(target_os = "macos"))
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        // "Unsupported on Linux" per Tauri's own docs -- the menu opens on
+        // left click there regardless, so asking for the opposite only makes
+        // the code claim something untrue.
+        .show_menu_on_left_click(cfg!(not(target_os = "linux")))
         .on_menu_event(handle_menu)
         .on_tray_icon_event(|tray, event| {
             // Left click opens the window; right click opens the menu. Matching

@@ -380,3 +380,85 @@ mod hash_agreement {
         assert_eq!(fnv1a64("Tue 25 Aug 15:26:04 2026"), 0x1442_a707_ebec_e155);
     }
 }
+
+#[cfg(test)]
+mod spawn_hygiene {
+    //! A lint, not a behaviour test -- and labelled as one deliberately.
+    //!
+    //! Whether a child gets a console window is decided by a Windows creation
+    //! flag that has no observable effect on macOS or Linux, so there is
+    //! nothing to assert by running it here. What *can* be checked is that
+    //! every place we start a process goes through `no_console`, which is the
+    //! property that actually regressed: the helper existed, with a docstring
+    //! naming the exact symptom, and two of the six call sites did not use it
+    //! -- including the engine itself, which left a console window open beside
+    //! the app for the entire session.
+
+    const SOURCES: &[(&str, &str)] = &[
+        ("main.rs", include_str!("main.rs")),
+        ("supervisor.rs", include_str!("supervisor.rs")),
+        ("reclaim.rs", include_str!("reclaim.rs")),
+        ("provision.rs", include_str!("provision.rs")),
+    ];
+
+    /// Lines that start a process, excluding tests and Unix-only paths.
+    fn spawn_sites(source: &str) -> Vec<(usize, String)> {
+        let mut sites = Vec::new();
+        let mut in_test = false;
+        for (index, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("#[cfg(test)]") {
+                in_test = true;
+            }
+            if in_test || line.trim_start().starts_with("//") {
+                continue;
+            }
+            if line.contains("Command::new") {
+                sites.push((index + 1, line.trim().to_string()));
+            }
+        }
+        sites
+    }
+
+    #[test]
+    fn every_process_we_start_suppresses_the_console_window() {
+        let mut missing = Vec::new();
+        for (name, source) in SOURCES {
+            for (line_no, line) in spawn_sites(source) {
+                // The one exception: a command only ever built on Unix cannot
+                // open a Windows console, and is guarded by cfg already.
+                if line.contains("/bin/ps") || line.contains("\"curl\"") {
+                    continue;
+                }
+                // `no_console` must appear before the command is spawned.
+                // Scanned to the end of the statement rather than a fixed
+                // number of lines: a 12-line window failed on a call that was
+                // correctly guarded 16 lines down, past a comment.
+                let window: String = source
+                    .lines()
+                    .skip(line_no.saturating_sub(1))
+                    .take_while(|l| !l.contains("Command::new") || l.contains(&line[..8.min(line.len())]))
+                    .take(40)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !window.contains("no_console") {
+                    missing.push(format!("{name}:{line_no}  {line}"));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these spawn a process without suppressing the console window:\n  {}",
+            missing.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn the_lint_can_actually_fail() {
+        // A positive control: without it, a change that stops finding any
+        // spawn site at all would make the test above vacuously pass.
+        let sites: usize = SOURCES.iter().map(|(_, s)| spawn_sites(s).len()).sum();
+        assert!(sites >= 4, "the spawn-site scanner found almost nothing ({sites})");
+        let unguarded = "fn x() { std::process::Command::new(\"uv\").spawn(); }";
+        assert_eq!(spawn_sites(unguarded).len(), 1, "the scanner missed a plain spawn");
+    }
+}
