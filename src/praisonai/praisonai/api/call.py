@@ -153,6 +153,9 @@ class CallAppState:
         return False
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
 def _configured_public_base() -> Optional[str]:
     """``ws(s)://`` base for outbound Twilio media-stream URLs.
 
@@ -164,6 +167,33 @@ def _configured_public_base() -> Optional[str]:
     externally-visible URLs come from config, never a request header.
     """
     return os.getenv("PRAISONAI_CALL_PUBLIC_BASE")
+
+
+def _validate_public_base(base: Optional[str]) -> Optional[str]:
+    """Return an error string if ``base`` is not a safe media-stream base URL.
+
+    A prefix check alone is insufficient: a value like ``ws://`` has no host
+    (Twilio cannot connect) and a cleartext ``ws://`` to a non-local host sends
+    the live audio *and* the one-shot session token over an unencrypted
+    transport. Require a structurally valid ``wss://`` URL with a host; permit
+    cleartext ``ws://`` only for localhost (dev / tunnelled setups).
+
+    Returns ``None`` when the base is acceptable.
+    """
+    if not base:
+        return "unset"
+    from urllib.parse import urlparse
+    parsed = urlparse(base)
+    if parsed.scheme not in ("ws", "wss"):
+        return "PRAISONAI_CALL_PUBLIC_BASE must be a ws:// or wss:// URL"
+    if not parsed.hostname:
+        return "PRAISONAI_CALL_PUBLIC_BASE must include a host"
+    if parsed.scheme == "ws" and parsed.hostname not in _LOCAL_HOSTS:
+        return (
+            "PRAISONAI_CALL_PUBLIC_BASE must use wss:// for non-local hosts; "
+            "cleartext ws:// would expose live audio and the session token"
+        )
+    return None
 
 
 def _tokens_match(provided: Optional[str], expected: Optional[str]) -> bool:
@@ -401,10 +431,11 @@ async def handle_incoming_call(request):
                 "derive the media-stream URL from the client Host header."
             ),
         )
-    if not base.startswith(("wss://", "ws://")):
+    validation_error = _validate_public_base(base)
+    if validation_error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="PRAISONAI_CALL_PUBLIC_BASE must be a ws:// or wss:// URL",
+            detail=validation_error,
         )
 
     response = VoiceResponse()

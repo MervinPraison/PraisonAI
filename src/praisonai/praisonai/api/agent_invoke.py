@@ -335,22 +335,34 @@ def _swap_llm(agent: Any, model: Any) -> None:
 
     Prefers the SDK's own ``_apply_default_llm`` (which drops ``_llm_instance``,
     ``_unified_dispatcher`` and re-seeds ``_llm_init_params`` atomically). That
-    method self-guards when the agent explicitly chose a model, so the guard is
-    temporarily cleared — an API override IS an explicit choice. Falls back to
-    mirroring the SDK's invalidation contract when the method is absent.
+    method self-guards when the agent explicitly chose a model *or* was built
+    with a panel descriptor, so both guards are temporarily cleared — an API
+    override IS an explicit choice that supersedes a panel selection. Without
+    clearing ``_panel_descriptor`` the SDK returns early and the request would
+    silently continue on the panel model. Falls back to mirroring the SDK's
+    invalidation contract when the method is absent.
     """
     apply = getattr(agent, "_apply_default_llm", None)
     if callable(apply):
         had_explicit = getattr(agent, "_llm_explicit", None)
+        had_panel = getattr(agent, "_panel_descriptor", None)
         agent._llm_explicit = False
+        if had_panel is not None:
+            agent._panel_descriptor = None
         try:
             apply(model)
         finally:
             if had_explicit is not None:
                 agent._llm_explicit = had_explicit
+            # ``_panel_descriptor`` is intentionally NOT restored: the override
+            # replaces the panel selection for the lifetime of this isolated
+            # clone. Restoring it would let ``_ensure_llm_instance`` rebuild the
+            # panel LLM and drift back to the old model.
         return
     # Fallback: mirror the SDK invalidation contract manually.
     agent.llm = model
+    if getattr(agent, "_panel_descriptor", None) is not None:
+        agent._panel_descriptor = None
     for attr in ("_llm_instance", "_unified_dispatcher"):
         if hasattr(agent, attr):
             setattr(agent, attr, None)
