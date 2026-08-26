@@ -22,6 +22,23 @@ from ..protocols import KnowledgeStoreProtocol
 logger = logging.getLogger(__name__)
 
 
+def _default_chroma_path() -> str:
+    """Absolute default persist directory for the Chroma vector store.
+
+    The historical default was the relative string ``"knowledge_db"`` which
+    resolves against the current working directory. Two projects (or a test
+    harness that ``cd``s around) then share one on-disk sqlite, and Chroma's
+    rust bindings can panic on a corrupt/short slice (issue #4376). Persisting
+    under the project's ``.praisonai/knowledge/chroma`` keeps the store
+    absolute and isolated per project.
+    """
+    try:
+        from ...paths import get_project_knowledge_dir
+        return str(get_project_knowledge_dir() / "chroma")
+    except Exception:
+        return str(os.path.join(os.getcwd(), ".praisonai", "knowledge", "chroma"))
+
+
 def create_mem0_knowledge_adapter(**kwargs) -> KnowledgeStoreProtocol:
     """
     Factory function to create Mem0 knowledge adapter.
@@ -119,14 +136,29 @@ class ChromaKnowledgeAdapter:
         vector_config = config.get("vector_store", {}).get("config", {})
         
         collection_name = vector_config.get("collection_name", "praisonai_knowledge")
-        persist_dir = vector_config.get("path", "knowledge_db")
+        persist_dir = vector_config.get("path") or _default_chroma_path()
         os.makedirs(persist_dir, exist_ok=True)
         
-        # Initialize ChromaDB client
-        self.client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=chromadb.config.Settings(anonymized_telemetry=False)
-        )
+        # Initialize ChromaDB client.
+        # ChromaDB's rust bindings can raise a pyo3 PanicException (a
+        # BaseException, not Exception) on a corrupt/locked sqlite store; catch
+        # BaseException and re-raise as a Python RuntimeError so callers stay
+        # alive and get an actionable persist-path hint (issue #4376).
+        try:
+            self.client = chromadb.PersistentClient(
+                path=persist_dir,
+                settings=chromadb.config.Settings(anonymized_telemetry=False)
+            )
+        except (KeyboardInterrupt, SystemExit, GeneratorExit):
+            # Interpreter control-flow signals must propagate untouched so a
+            # Ctrl+C / interpreter shutdown is not masked as a backend failure.
+            raise
+        except BaseException as exc:
+            raise RuntimeError(
+                f"Chroma persist failed at {persist_dir!r} "
+                f"({type(exc).__name__}: {exc}). Pass a fresh directory via "
+                f"knowledge config vector_store.config.path."
+            ) from exc
         
         # Initialize collection
         try:

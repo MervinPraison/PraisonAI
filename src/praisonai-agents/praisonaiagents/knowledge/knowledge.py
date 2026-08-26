@@ -95,8 +95,12 @@ class Knowledge:
         # Use deterministic collection name for persistence across restarts
         # Only generate unique name if explicitly requested via config
         default_collection = "praisonai_knowledge"
-        from ..paths import get_project_data_dir
-        persist_dir = str(get_project_data_dir())
+        # Default to an absolute, per-project ``.praisonai/knowledge/chroma``
+        # directory so unrelated projects/harnesses don't share one on-disk
+        # sqlite store (issue #4376). A user-supplied
+        # vector_store.config.path still overrides this default below.
+        from ..paths import get_project_knowledge_dir
+        persist_dir = str(get_project_knowledge_dir() / "chroma")
 
         # Create persistent client config (protocol-driven)
         base_config = {
@@ -532,6 +536,24 @@ class Knowledge:
                                 all_results.extend(result.get('results', []))
                             except Exception as e:
                                 logger.warning(f"Failed to process file {file_path}: {e}")
+                            except (KeyboardInterrupt, SystemExit, GeneratorExit):
+                                # Interpreter control-flow signals must propagate
+                                # untouched so a Ctrl+C / interpreter shutdown is
+                                # not masked as a backend failure.
+                                raise
+                            except BaseException as e:
+                                # A native backend (e.g. Chroma's rust bindings)
+                                # can raise a pyo3 PanicException, which is a
+                                # BaseException and would otherwise unwind and
+                                # kill the process. Re-raise as a Python
+                                # RuntimeError so callers stay alive (issue #4376).
+                                logger.error(
+                                    "Knowledge backend crashed while indexing %s: %s",
+                                    file_path, e,
+                                )
+                                raise RuntimeError(
+                                    f"Knowledge indexing backend crashed on {file_path}"
+                                ) from e
                 
                 if not all_results:
                     logger.warning(f"No supported files found in directory: {input_path}")
