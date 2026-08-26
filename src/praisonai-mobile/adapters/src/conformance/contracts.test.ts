@@ -21,6 +21,7 @@ import { createFakeShell, PHONE_INSETS } from "../../../testing/src/fake-shell.t
 import { createWebStorage } from "../web/storage.ts";
 import { createWebSecrets } from "../web/secrets.ts";
 import { createWebShell } from "../web/shell.ts";
+import { INSET_VARIABLES } from "../../../core/src/ports/shell.ts";
 import { createFakeWindow } from "../web/fake-window.ts";
 import { createWebTime } from "../web/time.ts";
 import { createTauriBridge, type TauriBridge } from "../tauri/bridge.ts";
@@ -840,4 +841,42 @@ test("the shell refuses to hand a javascript: URL to the OS", async () => {
   await assert.rejects(() => shell.openExternal("file:///etc/passwd"), TypeError);
   await assert.doesNotReject(() => shell.openExternal("https://example.com"));
   await assert.doesNotReject(() => shell.openExternal("mailto:someone@example.com"));
+});
+
+// ---- the stylesheet seam ---------------------------------------------------
+
+test("every webview shell reads the SAME safe-area variable names", async () => {
+  // The bug this exists for: the Tauri shell read `--safe-area-inset-*` and the
+  // web shell read `--sai-*`. Both passed the whole shell contract, because
+  // each is driven through its own harness and neither ever reads real CSS --
+  // so on a device one of them would have found "", parsed it to 0, and laid
+  // content flush against the notch with no error anywhere.
+  //
+  // Asserted by giving each shell a stylesheet that defines ONLY the shared
+  // names, which is what a real page will have.
+  const fake = createFakeWindow();
+  fake.setInsets(PHONE_INSETS);
+  assert.deepEqual(createWebShell(fake.window).insets, PHONE_INSETS);
+
+  const declared = Object.values(INSET_VARIABLES);
+  const tauri = createTauriShell({
+    bridge: probeBridge().bridge,
+    insetSource: cssSource(Object.fromEntries(
+      declared.map((name, i) => [name, `${[47, 0, 34, 0][i]}px`]),
+    )),
+  });
+  assert.deepEqual(tauri.insets, PHONE_INSETS);
+});
+
+test("the shared names are the env() spellings a stylesheet can mirror", () => {
+  // `--sai-top` would work too, but only if every reader agreed. Matching the
+  // env() name means a stylesheet line reads `--safe-area-inset-top:
+  // env(safe-area-inset-top, 0px)` -- self-evidently correct at a glance,
+  // which is worth more than four characters.
+  assert.deepEqual(Object.values(INSET_VARIABLES), [
+    "--safe-area-inset-top",
+    "--safe-area-inset-right",
+    "--safe-area-inset-bottom",
+    "--safe-area-inset-left",
+  ]);
 });

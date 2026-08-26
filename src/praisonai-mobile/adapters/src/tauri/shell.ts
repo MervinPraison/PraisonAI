@@ -1,3 +1,4 @@
+import { INSET_VARIABLES } from "../../../core/src/ports/shell.ts";
 import { isOpenableExternally } from "../../../core/src/ports/shell.ts";
 /**
  * ShellPort over Tauri 2.
@@ -76,12 +77,6 @@ const ZERO_INSETS: SafeAreaInsets = { top: 0, right: 0, bottom: 0, left: 0 };
  * first. Reading a property that was never mirrored returns "" -- which is
  * exactly why "" must mean 0 and not NaN.
  */
-const INSET_VARIABLES: Readonly<Record<keyof SafeAreaInsets, string>> = {
-  top: "--safe-area-inset-top",
-  right: "--safe-area-inset-right",
-  bottom: "--safe-area-inset-bottom",
-  left: "--safe-area-inset-left",
-};
 
 /** The narrowest possible read of the safe area: one CSS custom property. */
 export interface InsetSource {

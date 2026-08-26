@@ -15,6 +15,7 @@
  * which reports 0 forever -- correct.
  */
 import {
+  INSET_VARIABLES,
   isOpenableExternally,
   type HapticKind,
   type LifecyclePhase,
@@ -27,8 +28,8 @@ import {
 /** Read one `env(safe-area-inset-*)` value as a finite, non-negative number.
  *  A missing or unparseable value is 0 -- never NaN, which does not throw and
  *  instead silently drops the `calc()` it lands in, blanking the screen. */
-export function insetFrom(styles: CSSStyleDeclaration, edge: string): number {
-  const raw = styles.getPropertyValue(`--sai-${edge}`).trim();
+export function insetFrom(styles: CSSStyleDeclaration, name: string): number {
+  const raw = styles.getPropertyValue(name).trim();
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -36,10 +37,10 @@ export function insetFrom(styles: CSSStyleDeclaration, edge: string): number {
 export function readInsets(el: Element, view: Window): SafeAreaInsets {
   const styles = view.getComputedStyle(el);
   return {
-    top: insetFrom(styles, "top"),
-    right: insetFrom(styles, "right"),
-    bottom: insetFrom(styles, "bottom"),
-    left: insetFrom(styles, "left"),
+    top: insetFrom(styles, INSET_VARIABLES.top),
+    right: insetFrom(styles, INSET_VARIABLES.right),
+    bottom: insetFrom(styles, INSET_VARIABLES.bottom),
+    left: insetFrom(styles, INSET_VARIABLES.left),
   };
 }
 

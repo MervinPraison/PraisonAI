@@ -24,6 +24,28 @@ export type Unsubscribe = () => void;
  * `calc()` declaration it lands in and blanks the screen with a clean console.
  * `parseFloat` of a missing CSS env() var returns exactly that.
  */
+/**
+ * The CSS custom properties a stylesheet must mirror `env(safe-area-inset-*)`
+ * onto, and the ONE place they are spelled.
+ *
+ * `env()` is not readable from script -- `getComputedStyle().getPropertyValue`
+ * can only read a custom property -- so every webview-based shell reads these
+ * names, and they have to be the same names.
+ *
+ * They were not. The Tauri shell read `--safe-area-inset-*` and the web shell
+ * read `--sai-*`, so one of them was always going to find `""` on a real page,
+ * parse it to 0, and lay content flush against the notch with no error
+ * anywhere. The conformance suite could not catch it: each shell is driven
+ * through its harness, so neither ever reads real CSS. Naming them once is
+ * what makes that class of drift impossible rather than merely tested for.
+ */
+export const INSET_VARIABLES: Readonly<Record<keyof SafeAreaInsets, string>> = {
+  top: "--safe-area-inset-top",
+  right: "--safe-area-inset-right",
+  bottom: "--safe-area-inset-bottom",
+  left: "--safe-area-inset-left",
+};
+
 export interface SafeAreaInsets {
   readonly top: number;
   readonly right: number;

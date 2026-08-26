@@ -1,3 +1,4 @@
+import { INSET_VARIABLES } from "../../../core/src/ports/shell.ts";
 /**
  * Just enough `Window` to drive the web shell under `node:test`.
  *
@@ -87,7 +88,7 @@ export function createFakeWindow(): FakeWindow {
     window: view,
     setInsets(insets) {
       for (const [edge, value] of Object.entries(insets)) {
-        vars.set(`--sai-${edge}`, `${value}px`);
+        vars.set(INSET_VARIABLES[edge as "top" | "right" | "bottom" | "left"], `${value}px`);
       }
       fire(listeners, "resize");
     },
