@@ -7,6 +7,15 @@ import type { LLMProvider } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
 import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 
+/** Safe accessor for process.env that works in non-Node runtimes. */
+function safeEnv(key: string): string | undefined {
+  try {
+    return typeof process !== 'undefined' && process.env ? process.env[key] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Agent Configuration
  * 
@@ -233,9 +242,9 @@ export class Agent {
     }
     
     this.name = config.name || `Agent_${Math.random().toString(36).substr(2, 9)}`;
-    this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
-    this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
-    this.llm = config.llm || process.env.OPENAI_MODEL_NAME || process.env.PRAISONAI_MODEL || 'gpt-4o-mini';
+    this.verbose = config.verbose ?? safeEnv('PRAISON_VERBOSE') !== 'false';
+    this.pretty = config.pretty ?? safeEnv('PRAISON_PRETTY') === 'true';
+    this.llm = config.llm || safeEnv('OPENAI_MODEL_NAME') || safeEnv('PRAISONAI_MODEL') || 'gpt-4o-mini';
     this.markdown = config.markdown ?? true;
     this.streamEnabled = config.stream ?? true;
     // NOTE: this.tools is rebuilt below from a snapshot of config.tools —
@@ -1338,8 +1347,8 @@ export class AgentTeam {
       : configOrAgents;
     
     this.agents = config.agents;
-    this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
-    this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
+    this.verbose = config.verbose ?? safeEnv('PRAISON_VERBOSE') !== 'false';
+    this.pretty = config.pretty ?? safeEnv('PRAISON_PRETTY') === 'true';
     this.process = config.process || 'sequential';
 
     // Auto-generate tasks if not provided

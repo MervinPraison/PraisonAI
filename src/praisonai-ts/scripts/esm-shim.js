@@ -112,14 +112,19 @@ const CJS_BANNER = [
   'const module = { exports: {} };',
 ].join('\n');
 
+function stripStrings(code) {
+  return code.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+}
+
 function needsCjsBanner(code) {
+  const stripped = stripStrings(code);
   return (
-    /\brequire\b/.test(code) ||
-    /\b__dirname\b/.test(code) ||
-    /\b__filename\b/.test(code) ||
-    /\bmodule\.exports\b/.test(code) ||
-    /===\s*module\b/.test(code) ||
-    /\bmodule\s*===/.test(code)
+    /\brequire\b/.test(stripped) ||
+    /\b__dirname\b/.test(stripped) ||
+    /\b__filename\b/.test(stripped) ||
+    /\bmodule\.exports\b/.test(stripped) ||
+    /===\s*module\b/.test(stripped) ||
+    /\bmodule\s*===/.test(stripped)
   );
 }
 
