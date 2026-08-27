@@ -272,6 +272,11 @@ class LeafStoreDeletion(unittest.TestCase):
     """
 
     def setUp(self):
+        # These leaves are the macOS keychain (`security`) and Linux libsecret
+        # (`secret-tool`); neither exists on Windows, and the fakes that stand
+        # in for them are `#!/bin/sh` scripts a Windows shell cannot execute.
+        if os.name == "nt":
+            self.skipTest("the keychain and secret-tool stores are POSIX-only")
         self.bin = tempfile.mkdtemp(prefix="praison-fakebin-")
         self.old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = self.bin + os.pathsep + self.old_path
