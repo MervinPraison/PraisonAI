@@ -181,10 +181,10 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
 
 async function dispatchMergeGateForOldestReady(github, owner, repo, readyCandidates, core) {
   if (!readyCandidates.length) return 0;
+  const mergeGate = require('./merge-gate.js');
   readyCandidates.sort((a, b) => a.createdAt - b.createdAt);
   for (const cand of readyCandidates) {
-    if ((cand.labels || []).includes('claude-merge-gate-active')) {
-      core?.info?.(`Skip dispatch PR #${cand.prNumber}: merge gate already active`);
+    if (await mergeGate.shouldSkipMergeGateDispatch(github, owner, repo, cand.prNumber, core)) {
       continue;
     }
     await github.rest.repos.createDispatchEvent({

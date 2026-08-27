@@ -464,6 +464,55 @@ function hasBlockingClaudeRunForPr(runs, headRef) {
   return (runs || []).some((r) => claudeRunBlocksPr(r, headRef));
 }
 
+const MERGE_GATE_WORKFLOW_FILE = 'claude-merge-gate.yml';
+const MERGE_GATE_ACTIVE_LABEL = 'claude-merge-gate-active';
+const MAX_PENDING_MERGE_GATE_RUNS = 3;
+
+function mergeGateDispatchBlockedReason({ labels, pendingRuns, maxPending = MAX_PENDING_MERGE_GATE_RUNS }) {
+  if ((labels || []).includes(MERGE_GATE_ACTIVE_LABEL)) {
+    return 'merge gate already active on PR';
+  }
+  if (pendingRuns >= maxPending) {
+    return `${pendingRuns} merge gate run(s) already queued or in progress (max ${maxPending})`;
+  }
+  return null;
+}
+
+async function countPendingMergeGateRuns(github, owner, repo) {
+  let pending = 0;
+  for (const status of ['queued', 'in_progress']) {
+    try {
+      const { data } = await github.rest.actions.listWorkflowRuns({
+        owner,
+        repo,
+        workflow_id: MERGE_GATE_WORKFLOW_FILE,
+        status,
+        per_page: 30,
+      });
+      pending += (data.workflow_runs || []).length;
+    } catch {
+      // Best-effort backpressure only.
+    }
+  }
+  return pending;
+}
+
+async function shouldSkipMergeGateDispatch(github, owner, repo, prNumber, core, options = {}) {
+  const maxPending = options.maxPending ?? MAX_PENDING_MERGE_GATE_RUNS;
+  const ctx = await loadPrContext(github, owner, repo, prNumber);
+  const pendingRuns = await countPendingMergeGateRuns(github, owner, repo);
+  const reason = mergeGateDispatchBlockedReason({
+    labels: ctx.labels,
+    pendingRuns,
+    maxPending,
+  });
+  if (reason) {
+    core?.info?.(`Skip merge gate dispatch for PR #${prNumber}: ${reason}`);
+    return true;
+  }
+  return false;
+}
+
 async function hasInProgressClaudeAssistant(github, owner, repo, prNumber = null) {
   try {
     const { data } = await github.rest.actions.listWorkflowRuns({
@@ -1013,4 +1062,10 @@ module.exports = {
   isAutomatedFallbackVerdict,
   AUTOMATED_FALLBACK_MARKER,
   findMergeGateVerdict,
+  MERGE_GATE_WORKFLOW_FILE,
+  MERGE_GATE_ACTIVE_LABEL,
+  MAX_PENDING_MERGE_GATE_RUNS,
+  mergeGateDispatchBlockedReason,
+  countPendingMergeGateRuns,
+  shouldSkipMergeGateDispatch,
 };
