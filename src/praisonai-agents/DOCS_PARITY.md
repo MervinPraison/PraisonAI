@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2790 |
 | ✅ Bots | 7 | 32 | 13616 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 37022 |
+| ✅ CLI | 5 | 122 | 37123 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 43286 |
+| ✅ Tools | 12 | 144 | 43301 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
