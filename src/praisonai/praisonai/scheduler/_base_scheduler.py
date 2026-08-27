@@ -537,7 +537,9 @@ class _BaseAgentScheduler:
             ),
             # Delivery-outcome accounting (Issue #4454): distinguish a run that
             # actually reached the user from one whose delivery failed. A run
-            # can be a successful *execution* yet an undelivered *result*.
+            # can be a successful *execution* yet an undelivered *result*. Both
+            # use explicit counters (not success-minus-undelivered inference) so
+            # NOT_CONFIGURED / SUPPRESSED runs never over-report a delivery.
             "delivered_deliveries": getattr(self, "_delivered_count", 0),
             "undelivered_deliveries": getattr(self, "_undelivered_count", 0),
         }

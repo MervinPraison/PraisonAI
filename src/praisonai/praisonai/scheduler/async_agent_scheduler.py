@@ -174,6 +174,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self._execution_count = 0
         self._success_count = 0
         self._failure_count = 0
+        self._undelivered_count = 0
         self._start_time: Optional[datetime] = None
         
         # Sync lock for async primitives creation and bound loop tracking
@@ -397,6 +398,9 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
             "total_cost_usd": round(self._total_cost, 4),
             "remaining_budget": round(self.max_cost - self._total_cost, 4) if self.max_cost is not None else None,
+            # Explicit delivery-outcome counters (Issue #4454): never inferred
+            # from success minus undelivered, so NOT_CONFIGURED / SUPPRESSED
+            # runs never over-report a delivery.
             "delivered_deliveries": getattr(self, "_delivered_count", 0),
             "undelivered_deliveries": getattr(self, "_undelivered_count", 0),
         }
