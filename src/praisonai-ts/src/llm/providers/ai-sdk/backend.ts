@@ -96,18 +96,20 @@ export class AISDKBackend implements LLMProvider {
       return;
     }
     
-    // Validate API key
-    if (!validateProviderApiKey(this.providerId)) {
+    // Get provider options from config
+    const providerOptions: AISDKProviderOptions = 
+      this.config.providers?.[this.providerId] || {};
+
+    // Validate API key. A key passed via provider options counts: it is handed
+    // straight to the AI SDK provider below, so requiring the env var too would
+    // reject a perfectly authenticated request.
+    if (!validateProviderApiKey(this.providerId, providerOptions.apiKey)) {
       throw new AISDKError(
         getMissingApiKeyMessage(this.providerId),
         'AUTHENTICATION',
         false
       );
     }
-    
-    // Get provider options from config
-    const providerOptions: AISDKProviderOptions = 
-      this.config.providers?.[this.providerId] || {};
     
     // Create the AI SDK provider
     this.provider = await createAISDKProvider(this.providerId, providerOptions);

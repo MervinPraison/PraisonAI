@@ -140,9 +140,25 @@ export async function resolveBackend(
       try {
         // Lazy import AI SDK backend
         const { createAISDKBackend } = await import('./providers/ai-sdk');
-        
+
+        // The AI-SDK backend keys credentials by provider id
+        // (config.providers[providerId]), while ProviderConfig is flat
+        // (apiKey/baseUrl). Map the flat per-agent key onto the resolved
+        // provider so a programmatic apiKey authenticates here too -- not
+        // only via a provider env var.
+        const providers =
+          options.config?.apiKey || options.config?.baseUrl
+            ? {
+                [providerId]: {
+                  ...(options.config.apiKey ? { apiKey: options.config.apiKey } : {}),
+                  ...(options.config.baseUrl ? { baseURL: options.config.baseUrl } : {}),
+                },
+              }
+            : undefined;
+
         const backend = createAISDKBackend(modelString, {
           ...options.config,
+          providers,
           attribution: options.attribution ? {
             agentId: options.attribution.agentId,
             runId: options.attribution.runId,

@@ -253,6 +253,12 @@ export class Agent {
   private _backendPromise: Promise<BackendResolutionResult> | null = null;
   private _backendSource: 'ai-sdk' | 'native' | 'custom' | 'legacy' = 'legacy';
   private _useAISDKBackend: boolean = false;
+  // Per-agent credentials. When a bare claude-*/gemini-* name routes to the
+  // AI-SDK backend, this key must reach resolveBackend() too -- otherwise the
+  // caller who passed apiKey (and no provider env var) authenticates on the
+  // OpenAI path but not on the one their model actually takes.
+  private _apiKey?: string;
+  private _baseURL?: string;
 
   constructor(config: SimpleAgentConfig) {
     // Build instructions from either simple or advanced mode
@@ -332,6 +338,8 @@ export class Agent {
     // For OpenAI, use OpenAIService directly for backward compatibility
     // For other providers, we'll use the AI SDK backend via getBackend()
     this._useAISDKBackend = providerId !== 'openai';
+    this._apiKey = config.apiKey;
+    this._baseURL = config.baseURL;
     this.llmService = new OpenAIService(modelId, {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
@@ -1334,7 +1342,17 @@ export class Agent {
     if (!this._backendPromise) {
       this._backendPromise = (async () => {
         const { resolveBackend } = await import('../llm/backend-resolver');
+        // Forward the per-agent apiKey/baseURL so a bare claude-*/gemini-*
+        // that now routes here can authenticate on the same key the caller
+        // gave the constructor -- not only via a provider env var.
+        const config = (this._apiKey || this._baseURL)
+          ? {
+              ...(this._apiKey ? { apiKey: this._apiKey } : {}),
+              ...(this._baseURL ? { baseUrl: this._baseURL } : {}),
+            }
+          : undefined;
         const result = await resolveBackend(this.llm, {
+          config,
           attribution: {
             agentId: this.name,
             runId: this.runId,
