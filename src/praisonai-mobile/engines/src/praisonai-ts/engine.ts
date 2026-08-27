@@ -5,16 +5,17 @@
  * -- the run controller, the transcript reducer, the views -- imports nothing
  * from here and nothing from `praisonai`.
  *
- * THE CAPABILITY GAP IS DELIBERATE AND DECLARED.
+ * THE REMAINING CAPABILITY GAP IS DELIBERATE AND DECLARED.
  *
- * Upstream `streamEvents` emits three variants: `text`, `finish`, `error`.
- * Protocol v2 has eleven. praisonai-ts *executes* tools -- it just does not
- * announce them on the event channel -- so a tool call is invisible to any
- * consumer of this engine. `capabilities.tools` is therefore FALSE: the flag
- * describes what the engine can report, not what it can do internally, because
- * a UI that renders tool rows from a flag would render nothing and look broken.
- * See gaps.md, and the conformance harness's `unsupported` map, which prints
- * every scenario this engine cannot be driven into.
+ * Upstream `streamEvents` now emits five variants: `text`, `tool_call`,
+ * `tool_result`, `finish`, `error`. Protocol v2 has eleven. Tool activity is
+ * therefore reportable and `capabilities.tools` is TRUE. What is still absent
+ * is the approval channel: praisonai-ts's `ApprovalManager` gates tool
+ * execution upstream but never surfaces its prompt on the event channel, so
+ * `capabilities.approvals` stays FALSE. The flag describes what the engine can
+ * report, not what it can do internally. See gaps.md, and the conformance
+ * harness's `unsupported` map, which prints every scenario this engine cannot
+ * be driven into.
  *
  * `end.userIndex` cannot be computed here and is not invented. It comes from
  * the injected `RunPersistence`, which returns null when the write failed --
@@ -52,7 +53,11 @@ export interface RunPersistence {
 export const PRAISONAI_TS_CAPABILITIES: EngineCapabilities = {
   streaming: true,
   reasoning: false, // upstream has no reasoning channel
-  tools: false, // executed, but never announced -- see the header
+  // True since upstream gained tool_call/tool_result. It was false for a real
+  // reason rather than caution: praisonai-ts executed tools and never
+  // announced them, so a UI rendering rows from a `true` flag would have
+  // rendered nothing and looked broken.
+  tools: true,
   approvals: false, // ApprovalManager exists upstream but cannot reach the stream
   cancellation: true, // AgentStreamOptions.signal, added for this port
   attachments: false,
@@ -108,6 +113,27 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
           if (event.delta === "") continue;
           answer += event.delta;
           yield { type: "delta", msgId, text: event.delta };
+        } else if (event.type === "tool_call") {
+          // Announced before the tool runs, so a view can show a call in
+          // progress rather than materialising a finished row out of nowhere.
+          yield { type: "tool_call", msgId, callId: event.callId, name: event.name, args: event.args };
+        } else if (event.type === "tool_result") {
+          // `ok` is passed straight through and never re-derived. Inferring it
+          // from a non-empty output is the exact defect the protocol's own
+          // comment was written against.
+          //
+          // `seconds: null` is honest rather than lazy: upstream does not
+          // report a duration, and null means "unknown", which the view
+          // renders differently from zero.
+          yield {
+            type: "tool_result",
+            msgId,
+            callId: event.callId,
+            name: event.name,
+            ok: event.ok,
+            output: event.output,
+            seconds: null,
+          };
         } else if (event.type === "finish") {
           // `finish` carries the FULL text. Trust it over the accumulation:
           // upstream may normalise, and a turn that never streamed still

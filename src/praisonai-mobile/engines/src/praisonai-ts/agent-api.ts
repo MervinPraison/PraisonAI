@@ -9,21 +9,43 @@
  *     without a provider, a network, or an API key.
  *  2. It documents the coupling. This file IS the list of what would have to
  *     be re-implemented to swap frameworks. Right now that list is one class,
- *     three methods and a three-variant union -- which is the strongest
+ *     three methods and a five-variant union -- which is the strongest
  *     evidence available that the seam is real.
  *  3. It fails fast on drift. The adapter assigns the real `Agent` to this
  *     type at composition, so a signature change upstream is a typecheck error
  *     here rather than a runtime surprise on a device.
  *
- * The `AgentEvent` union really does have only three variants upstream --
- * `text`, `finish`, `error`. Protocol v2 has eleven. That gap is not an
- * oversight in this file; it is why `capabilities` below declares `reasoning`,
- * `approvals` and `attachments` false, and it is recorded in gaps.md.
+ * The `AgentEvent` union has five variants upstream -- `text`, `tool_call`,
+ * `tool_result`, `finish`, `error`. Protocol v2 has eleven. The remaining gap
+ * is not an oversight in this file; it is why `capabilities` below declares
+ * `reasoning`, `approvals` and `attachments` false, and it is recorded in
+ * gaps.md.
  */
 
 /** Upstream: `praisonai`'s `AgentEvent`, verbatim. */
 export type PraisonAgentEvent =
   | { readonly type: "text"; readonly delta: string }
+  /** Upstream gained these two, so tools are no longer invisible to a consumer
+   *  of the event channel. Before them praisonai-ts executed tools perfectly
+   *  well and never said so, and a UI had to infer tool activity from the
+   *  model's own prose -- which is how a tool call that silently failed still
+   *  looks like a normal answer. */
+  | {
+      readonly type: "tool_call";
+      readonly callId: string;
+      readonly name: string;
+      readonly args: Record<string, unknown>;
+    }
+  | {
+      readonly type: "tool_result";
+      readonly callId: string;
+      readonly name: string;
+      /** THE signal of success. Never inferred from a non-empty `output`: a
+       *  tool that failed with a message is byte-identical to one that
+       *  succeeded with a message. */
+      readonly ok: boolean;
+      readonly output: string;
+    }
   | { readonly type: "finish"; readonly text: string }
   | { readonly type: "error"; readonly error: Error };
 

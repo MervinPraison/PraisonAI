@@ -266,9 +266,12 @@ test("dispose aborts everything still running and is idempotent", async () => {
 });
 
 test("capabilities describe what the engine can REPORT, not what it does inside", async () => {
-  // praisonai-ts executes tools but never announces them. A UI rendering tool
-  // rows from a true flag would render nothing and look broken.
-  assert.equal(PRAISONAI_TS_CAPABILITIES.tools, false);
+  // `tools` was false for a real reason and is true for a real reason. It was
+  // false because praisonai-ts EXECUTED tools and never announced them, so a
+  // UI rendering rows from a true flag would render nothing and look broken.
+  // Upstream now emits tool_call/tool_result, so the flag and the behaviour
+  // agree again -- which is the only thing the flag ever claimed.
+  assert.equal(PRAISONAI_TS_CAPABILITIES.tools, true);
   assert.equal(PRAISONAI_TS_CAPABILITIES.approvals, false);
   assert.equal(PRAISONAI_TS_CAPABILITIES.streaming, true);
   assert.equal(PRAISONAI_TS_CAPABILITIES.cancellation, true);

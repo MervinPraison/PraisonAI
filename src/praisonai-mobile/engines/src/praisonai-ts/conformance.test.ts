@@ -4,14 +4,15 @@
  * Passing this IS the definition of implementing the agent-framework seam --
  * the same suite the remote-http engine and the scripted fake already run.
  *
- * Five scenarios are declared unsupported, with reasons. That is not the suite
+ * Two scenarios are declared unsupported, with reasons. That is not the suite
  * being lenient: `unsupported` prints every omission, so a shrinking contract
- * is visible in the output rather than silently green. The five are all one
- * fact -- upstream `streamEvents` emits three variants (text/finish/error)
- * against protocol v2's eleven, so tool and approval events cannot be produced
- * by this engine at all. It is recorded in gaps.md and reflected in
- * `capabilities`, which the suite checks in the negative direction: an engine
- * declaring approvals:false must never emit an approval_request.
+ * is visible in the output rather than silently green. Both are one fact --
+ * upstream `streamEvents` now emits tool_call/tool_result (so the three tool
+ * scenarios are produced and passing) but still has no approval channel, so
+ * `approval` and `two_approvals` cannot be produced by this engine. It is
+ * recorded in gaps.md and reflected in `capabilities`, which the suite checks
+ * in the negative direction: an engine declaring approvals:false must never
+ * emit an approval_request.
  */
 import { describeEngineContract, type ScenarioName } from "../conformance.ts";
 import { createPraisonTsEngine } from "./engine.ts";
@@ -46,6 +47,33 @@ const SCRIPTS: Partial<Record<ScenarioName, {
     events: [{ type: "text", delta: "par" }],
     stop: "cancelled",
   },
+  tool_ok: {
+    events: [
+      { type: "text", delta: "Checking. " },
+      { type: "tool_call", callId: "c1", name: "search", args: { q: "x" } },
+      { type: "tool_result", callId: "c1", name: "search", ok: true, output: "42" },
+      { type: "finish", text: "Checking. The answer is 42." },
+    ],
+    stop: "completed",
+  },
+  tool_failed: {
+    events: [
+      { type: "tool_call", callId: "c1", name: "search", args: {} },
+      // A non-empty output on a FAILED call: the case that proves the suite
+      // reads `ok` rather than inferring success from content.
+      { type: "tool_result", callId: "c1", name: "search", ok: false, output: "upstream is down" },
+      { type: "finish", text: "That tool is unavailable." },
+    ],
+    stop: "completed",
+  },
+  tool_unresolved: {
+    events: [
+      // A call with no result. The row must end unresolved, never successful.
+      { type: "tool_call", callId: "c1", name: "search", args: {} },
+      { type: "finish", text: "I could not finish that." },
+    ],
+    stop: "completed",
+  },
 };
 
 function agentFor(scenario: ScenarioName): PraisonAgent {
@@ -79,10 +107,10 @@ describeEngineContract({
       newMsgId: () => `m${++counter}`,
     }),
   unsupported: {
-    tool_ok: "upstream streamEvents has no tool_call/tool_result variant -- tools run but are never announced",
-    tool_failed: "same: no tool_result, so `ok: false` cannot be reported",
-    tool_unresolved: "same: no tool_call, so there is no row to leave unresolved",
-    approval: "ApprovalManager exists upstream but cannot reach the event channel",
+    // The three tool scenarios lived here until upstream gained tool_call and
+    // tool_result. They are produced above now -- which is the point of a map
+    // that records what an engine cannot do rather than what it never will.
+    approval: "ApprovalManager gates tool execution upstream, but its prompt cannot reach the event channel",
     two_approvals: "same as approval",
   },
 });
