@@ -41,6 +41,27 @@ const FORBIDDEN = new Set([
  */
 export const WEBVIEW_ENTRIES = ["src/mobile.ts", "src/agent/simple.ts"];
 
+/**
+ * The BUILT entries, which are what a consumer actually resolves.
+ *
+ * Checking the TypeScript sources alone is not enough, and this gate shipped
+ * with exactly that hole. `scripts/esm-shim.js` prepends a CJS banner --
+ * `import { createRequire } from "module"`, plus `url` and `path` -- to any
+ * emitted file whose source uses a bare synchronous `require()`. Three
+ * first-party files on the mobile graph do.
+ *
+ * That banner does not exist until `build:esm` has run. So the source check
+ * passed while `dist/esm/mobile.js` -- what `package.json` resolves
+ * `praisonai/mobile` to -- failed with ten unresolved builtins, because the
+ * banner had turned three LAZY requires into three STATIC Node imports. That
+ * is precisely the failure this gate was written to prevent, arriving through
+ * the one input it was not looking at.
+ *
+ * Checked only when `dist/` exists, so the gate still runs on a fresh clone;
+ * CI builds first.
+ */
+export const BUILT_ENTRIES = ["dist/esm/mobile.js", "dist/esm/agent/simple.js"];
+
 /** The webview baseline. iOS ships WKWebView with the OS, so the floor is the
  *  oldest iOS worth supporting rather than the newest Safari. */
 export const TARGETS = ["safari16", "chrome108"];
@@ -89,8 +110,15 @@ const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split("/").pop());
 
 if (invokedDirectly) {
+  const { existsSync } = await import("node:fs");
+  const built = BUILT_ENTRIES.filter((e) => existsSync(e));
+  if (built.length === 0) {
+    console.log("  note: dist/ is not built, so only sources were checked.");
+    console.log("        Run `npm run build` first to check what actually ships.");
+  }
+
   let failed = false;
-  for (const entry of WEBVIEW_ENTRIES) {
+  for (const entry of [...WEBVIEW_ENTRIES, ...built]) {
     const { fatal, lazy } = await inspect(entry);
     for (const name of lazy) {
       console.log(`  ~ ${entry}: ${name} imported lazily, fine while no webview path calls it`);

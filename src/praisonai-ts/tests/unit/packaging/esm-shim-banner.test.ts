@@ -19,7 +19,11 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { applyBanner, needsCjsBanner, CJS_BANNER } = require('../../../scripts/esm-shim.js');
 
-const BANNER_MARKER = '__praisonCreateRequire(import.meta.url)';
+// What the banner is FOR, rather than how it happens to be spelled. The old
+// marker was `__praisonCreateRequire(import.meta.url)` -- an internal
+// identifier -- so renaming it broke four tests that were not about naming.
+// A banner that stopped defining `require` would still fail these.
+const BANNER_MARKER = 'const require =';
 
 function hasBanner(code: string): boolean {
   return code.includes(BANNER_MARKER);
