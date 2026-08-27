@@ -1995,7 +1995,6 @@ Your Goal: {self.goal}"""
             
             # Use structured error classification for all error types (replaces legacy heuristic checks)
             from ..llm.error_classifier import classify_llm_error
-            from ..llm.retry_utils import jittered_backoff
             
             model_name = self.llm if isinstance(self.llm, str) else "unknown"
             session_id = getattr(self, '_session_id', 'unknown')
