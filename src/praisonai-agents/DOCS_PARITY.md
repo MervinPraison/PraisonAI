@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 16 | 5009 |
 | ✅ LLM | 3 | 15 | 5390 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 62 | 14278 |
+| ✅ MCP | 1 | 62 | 14407 |
 | ✅ Memory | 6 | 18 | 7212 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
