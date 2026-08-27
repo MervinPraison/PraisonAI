@@ -641,7 +641,13 @@ export class Agent {
     for (const toolCall of toolCalls) {
       const { id, function: { name, arguments: argsString } } = toolCall;
       await Logger.debug(`Processing tool call: ${name}`, { arguments: argsString });
-      
+
+      // Track whether tool_call was already announced so the catch below can
+      // announce it if a parse/validation failure rejected the call before the
+      // normal emission point -- otherwise that path emits an orphan
+      // tool_result with no matching tool_call to pair by callId.
+      let toolCallEmitted = false;
+
       try {
         // Cancellation reaches the side-effecting boundary: if the caller
         // aborts after the model returned tool calls, stop before invoking the
@@ -667,6 +673,7 @@ export class Agent {
         // tool_call to pair with by callId. Emitting it only past the gates
         // left a denied or unregistered call producing an orphan result.
         onEvent?.({ type: 'tool_call', callId: id, name, args });
+        toolCallEmitted = true;
 
         // Check if function exists
         if (!this.toolFunctions[name]) {
@@ -727,6 +734,13 @@ export class Agent {
         await Logger.error(`Error executing tool ${name}:`, error);
         const failure = `Error: ${error.message || 'Unknown error'}`;
         results.push({ role: 'tool', tool_call_id: id, name, content: failure });
+        // Malformed JSON or a non-object args value throws before the normal
+        // tool_call emission. Announce it here (with empty args, since none
+        // could be parsed) so this failure result still has a matching
+        // tool_call by callId rather than orphaning it.
+        if (!toolCallEmitted) {
+          onEvent?.({ type: 'tool_call', callId: id, name, args: {} });
+        }
         // The case the whole `ok` field exists for: a tool that failed WITH a
         // message is byte-identical to one that succeeded with a message, so
         // success can never be inferred from a non-empty output.

@@ -152,6 +152,51 @@ describe('tool activity is announced, not inferred', () => {
     expect(kinds.indexOf('tool_call')).toBeLessThan(kinds.indexOf('tool_result'));
   });
 
+  it('MALFORMED arguments still emit tool_call before the failing tool_result', async () => {
+    // JSON.parse throws before the normal tool_call emission, and a non-object
+    // value is rejected too. Both land in the catch, which must still announce
+    // the call so the failure result has a matching tool_call by callId rather
+    // than orphaning it.
+    install(twoRounds('not json'));
+    const probe = (q: string) => `ok ${q}`;
+    const agent = new Agent({
+      instructions: 'x', llm: 'gpt-4o-mini', stream: true, verbose: false,
+      tools: [probe],
+    });
+
+    const events = await collect(agent);
+    const call = events.find((e) => e.type === 'tool_call');
+    const result = events.find((e) => e.type === 'tool_result');
+    expect(call).toBeDefined();
+    expect(result).toBeDefined();
+    expect(result!.type === 'tool_result' && result!.ok).toBe(false);
+    // Same callId, and the call comes first.
+    expect(call!.type === 'tool_call' && call!.callId).toBe(result!.type === 'tool_result' && result!.callId);
+    const kinds = events.map((e) => e.type);
+    expect(kinds.indexOf('tool_call')).toBeLessThan(kinds.indexOf('tool_result'));
+  });
+
+  it('NON-OBJECT arguments (a JSON array) still emit tool_call before the failing tool_result', async () => {
+    // JSON.parse succeeds but yields an array; AgentEvent.args declares
+    // Record<string, unknown>, so it is rejected. The rejection must still pair.
+    install(twoRounds('[1,2,3]'));
+    const probe = (q: string) => `ok ${q}`;
+    const agent = new Agent({
+      instructions: 'x', llm: 'gpt-4o-mini', stream: true, verbose: false,
+      tools: [probe],
+    });
+
+    const events = await collect(agent);
+    const call = events.find((e) => e.type === 'tool_call');
+    const result = events.find((e) => e.type === 'tool_result');
+    expect(call).toBeDefined();
+    expect(result).toBeDefined();
+    expect(result!.type === 'tool_result' && result!.ok).toBe(false);
+    expect(call!.type === 'tool_call' && call!.callId).toBe(result!.type === 'tool_result' && result!.callId);
+    const kinds = events.map((e) => e.type);
+    expect(kinds.indexOf('tool_call')).toBeLessThan(kinds.indexOf('tool_result'));
+  });
+
   it('a run with NO tools emits no tool events at all', async () => {
     // The pair: an implementation emitting a spurious tool_call would satisfy
     // every case above and put a phantom row in every plain answer.
