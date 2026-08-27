@@ -52,7 +52,11 @@ export interface RunPersistence {
 export const PRAISONAI_TS_CAPABILITIES: EngineCapabilities = {
   streaming: true,
   reasoning: false, // upstream has no reasoning channel
-  tools: false, // executed, but never announced -- see the header
+  // True since upstream gained tool_call/tool_result. It was false for a real
+  // reason rather than caution: praisonai-ts executed tools and never
+  // announced them, so a UI rendering rows from a `true` flag would have
+  // rendered nothing and looked broken.
+  tools: true,
   approvals: false, // ApprovalManager exists upstream but cannot reach the stream
   cancellation: true, // AgentStreamOptions.signal, added for this port
   attachments: false,
@@ -108,6 +112,27 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
           if (event.delta === "") continue;
           answer += event.delta;
           yield { type: "delta", msgId, text: event.delta };
+        } else if (event.type === "tool_call") {
+          // Announced before the tool runs, so a view can show a call in
+          // progress rather than materialising a finished row out of nowhere.
+          yield { type: "tool_call", msgId, callId: event.callId, name: event.name, args: event.args };
+        } else if (event.type === "tool_result") {
+          // `ok` is passed straight through and never re-derived. Inferring it
+          // from a non-empty output is the exact defect the protocol's own
+          // comment was written against.
+          //
+          // `seconds: null` is honest rather than lazy: upstream does not
+          // report a duration, and null means "unknown", which the view
+          // renders differently from zero.
+          yield {
+            type: "tool_result",
+            msgId,
+            callId: event.callId,
+            name: event.name,
+            ok: event.ok,
+            output: event.output,
+            seconds: null,
+          };
         } else if (event.type === "finish") {
           // `finish` carries the FULL text. Trust it over the accumulation:
           // upstream may normalise, and a turn that never streamed still

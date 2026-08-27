@@ -24,6 +24,27 @@
 /** Upstream: `praisonai`'s `AgentEvent`, verbatim. */
 export type PraisonAgentEvent =
   | { readonly type: "text"; readonly delta: string }
+  /** Upstream gained these two, so tools are no longer invisible to a consumer
+   *  of the event channel. Before them praisonai-ts executed tools perfectly
+   *  well and never said so, and a UI had to infer tool activity from the
+   *  model's own prose -- which is how a tool call that silently failed still
+   *  looks like a normal answer. */
+  | {
+      readonly type: "tool_call";
+      readonly callId: string;
+      readonly name: string;
+      readonly args: Record<string, unknown>;
+    }
+  | {
+      readonly type: "tool_result";
+      readonly callId: string;
+      readonly name: string;
+      /** THE signal of success. Never inferred from a non-empty `output`: a
+       *  tool that failed with a message is byte-identical to one that
+       *  succeeded with a message. */
+      readonly ok: boolean;
+      readonly output: string;
+    }
   | { readonly type: "finish"; readonly text: string }
   | { readonly type: "error"; readonly error: Error };
 

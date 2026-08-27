@@ -29,11 +29,17 @@ declared unsupported rather than faked.
 | `streaming` | `true` | `text` deltas map straight to `delta`. |
 | `cancellation` | `true` | Via `AgentStreamOptions.signal` (added upstream in #4426). |
 | `reasoning` | `false` | No reasoning channel upstream. |
-| `tools` | **`false`** | See the note below — this one is easy to misread. |
+| `tools` | **`true`** | Since upstream gained `tool_call`/`tool_result`. Was false — see the note below. |
 | `approvals` | `false` | `ApprovalManager` exists upstream but cannot reach the event channel. |
 | `attachments` | `false` | `streamEvents` takes a prompt string only. |
 
-**`tools: false` does not mean tools do not run.** praisonai-ts executes tools
+**RESOLVED.** Upstream now emits `tool_call` and `tool_result`, so the flag is
+`true` and three conformance scenarios that were declared unsupported
+(`tool_ok`, `tool_failed`, `tool_unresolved`) are produced and passing. The
+original note is kept below because the reasoning is what made the flag
+trustworthy in the first place.
+
+**`tools: false` did not mean tools do not run.** praisonai-ts executes tools
 normally; it just never *announces* them. The flag describes what the engine can
 **report**, because a UI that renders tool rows from a `true` flag would render
 nothing and look broken. A tool call that silently failed would then be
