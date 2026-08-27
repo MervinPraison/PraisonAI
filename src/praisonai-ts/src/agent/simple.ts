@@ -7,6 +7,7 @@ import type { BackendResolutionResult } from '../llm/backend-resolver';
 import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 import { getEnv } from '../llm/openaiClientOptions';
 import { randomUUID } from '../utils/uuid';
+import { parseModelString } from '../llm/backend-resolver';
 
 /**
  * The default token sink for `start()` when no `onToken` is supplied.
@@ -306,10 +307,27 @@ export class Agent {
     this.telemetryEnabled = config.telemetry ?? false;
     this.signal = config.signal;
     
-    // Parse model string to extract provider and model ID
-    // Format: "provider/model" or just "model"
-    const providerId = this.llm.includes('/') ? this.llm.split('/')[0] : 'openai';
-    const modelId = this.llm.includes('/') ? this.llm.split('/').slice(1).join('/') : this.llm;
+    // Parse model string to extract provider and model ID.
+    //
+    // This was a private copy of the parsing rule that defaulted EVERY
+    // slash-less name to OpenAI -- so `new Agent({ llm:
+    // 'claude-3-5-sonnet-latest' })` sent an OpenAI-format request, with
+    // OpenAI-format tools, to the OpenAI endpoint. Not a dropped tool: the
+    // whole call went to the wrong vendor, surfacing as model-not-found or
+    // as a confusing bill. parseModelString already infers anthropic from a
+    // `claude-` prefix and google from `gemini-`, so there is one rule now
+    // rather than two that disagree.
+    //
+    // A custom baseURL is the exception, deliberately: pointing at an
+    // OpenAI-compatible proxy that serves `claude-*` is a real deployment,
+    // and prefix inference would route it away from the endpoint the caller
+    // explicitly asked for.
+    const hasCustomEndpoint = config.baseURL !== undefined && config.baseURL !== '';
+    const parsed = hasCustomEndpoint && !this.llm.includes('/')
+      ? { providerId: 'openai', modelId: this.llm }
+      : parseModelString(this.llm);
+    const providerId = parsed.providerId;
+    const modelId = parsed.modelId;
     
     // For OpenAI, use OpenAIService directly for backward compatibility
     // For other providers, we'll use the AI SDK backend via getBackend()
