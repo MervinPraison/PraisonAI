@@ -923,7 +923,7 @@ Methods:
 Types/Exports:
 ```ts
 export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from "./agent";
-export type { AgentEvent, AgentStreamOptions, AgentTeamConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig, StopReason } from "./agent";
+export type { AgentEvent, AgentMessage, AgentStreamOptions, AgentTeamConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig, StopReason } from "./agent";
 export { AudioAgent, createAudioAgent } from "./agent/audio";
 export type { AudioAgentConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
 export { ContextAgent, createContextAgent } from "./agent/context";
