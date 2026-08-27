@@ -175,6 +175,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self._success_count = 0
         self._failure_count = 0
         self._undelivered_count = 0
+        self._delivered_count = 0
         self._start_time: Optional[datetime] = None
         
         # Sync lock for async primitives creation and bound loop tracking

@@ -329,8 +329,11 @@ class _BaseAgentScheduler:
     _failure_count: int
     _total_cost: float
     _start_time: Optional[datetime]
-    # Delivery-outcome accounting (Issue #4454): a run whose configured
-    # delivery fails is counted as ``undelivered`` — never a plain success.
+    # Delivery-outcome accounting (Issue #4454): tracked with explicit counters
+    # rather than inferred from success counts, so a run with no target
+    # (NOT_CONFIGURED) or intentional silence (SUPPRESSED) is never mislabelled
+    # as delivered, and a run whose delivery fails is counted ``undelivered`` —
+    # never a plain success.
     _delivered_count: int = 0
     _undelivered_count: int = 0
 

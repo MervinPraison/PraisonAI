@@ -358,3 +358,33 @@ class TestAsyncDeliveryOutcomeAccounting:
         on_success.assert_called_once()
         on_failure.assert_not_called()
         assert scheduler._undelivered_count == 0
+        assert scheduler._delivered_count == 1
+        assert scheduler.get_stats_sync()["delivered_deliveries"] == 1
+
+    @pytest.mark.asyncio
+    async def test_not_configured_run_reports_zero_delivered(self):
+        on_success = Mock()
+        mock_agent = Mock()
+        mock_agent.astart = AsyncMock(return_value="Daily summary")
+        scheduler = AsyncAgentScheduler(mock_agent, "task", on_success=on_success)
+        await scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        assert scheduler._delivered_count == 0
+        stats = scheduler.get_stats_sync()
+        assert stats["delivered_deliveries"] == 0
+        assert stats["undelivered_deliveries"] == 0
+
+    @pytest.mark.asyncio
+    async def test_suppressed_run_reports_zero_delivered(self):
+        on_success = Mock()
+        mock_agent = Mock()
+        mock_agent.astart = AsyncMock(return_value="NO_REPLY")
+        scheduler = AsyncAgentScheduler(
+            mock_agent, "task", deliver="telegram:123", on_success=on_success,
+        )
+        scheduler._delivery = Mock()
+        scheduler._delivery.deliver = Mock(return_value=True)
+        await scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        assert scheduler._delivered_count == 0
+        assert scheduler.get_stats_sync()["delivered_deliveries"] == 0

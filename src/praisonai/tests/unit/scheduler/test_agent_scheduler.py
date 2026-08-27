@@ -601,6 +601,7 @@ class TestDeliveryOutcomeAccounting:
         on_success.assert_called_once()
         on_failure.assert_not_called()
         assert scheduler._undelivered_count == 0
+        assert scheduler._delivered_count == 1
         assert scheduler.get_stats()["delivered_deliveries"] == 1
 
     def test_delivery_exception_is_undelivered_not_success(self):
@@ -617,3 +618,23 @@ class TestDeliveryOutcomeAccounting:
         on_success.assert_not_called()
         on_failure.assert_called_once()
         assert scheduler._undelivered_count == 1
+
+    def test_not_configured_run_reports_zero_delivered(self):
+        on_success = Mock()
+        scheduler = AgentScheduler(Mock(), "Test task", on_success=on_success)
+        _stub_execute(scheduler, return_value="Daily summary")
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        assert scheduler._delivered_count == 0
+        stats = scheduler.get_stats()
+        assert stats["delivered_deliveries"] == 0
+        assert stats["undelivered_deliveries"] == 0
+
+    def test_suppressed_run_reports_zero_delivered(self):
+        on_success = Mock()
+        scheduler = self._scheduler(delivered=True, on_success=on_success)
+        _stub_execute(scheduler, return_value="NO_REPLY")
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        assert scheduler._delivered_count == 0
+        assert scheduler.get_stats()["delivered_deliveries"] == 0
