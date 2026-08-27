@@ -86,6 +86,14 @@ export interface AgentMessage {
   }>;
   /** Present on a tool turn; pairs it to the `tool_calls` entry above. */
   readonly tool_call_id?: string;
+  /**
+   * The tool's name, present on a `tool` turn. Required so the AI SDK adapter
+   * (`toAISDKPrompt`) can set a non-empty `toolName` on the tool-result part —
+   * without it, a restored tool history sent to a non-OpenAI provider is
+   * rejected. The live tool loop already records this (`processToolCalls`); it
+   * must survive the getHistory/setHistory round-trip too.
+   */
+  readonly name?: string;
 }
 
 export interface SimpleAgentConfig {
@@ -261,7 +269,7 @@ export class Agent {
   private dbAdapter?: DbAdapter;
   private sessionId: string;
   private runId: string;
-  private messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }> = [];
+  private messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [];
   private dbInitialized: boolean = false;
   private historyLimit: number;
   private autoRestore: boolean;
@@ -845,6 +853,9 @@ export class Agent {
         const replay: any = { role: msg.role, content: msg.content };
         if (msg.tool_calls) replay.tool_calls = msg.tool_calls;
         if (msg.tool_call_id) replay.tool_call_id = msg.tool_call_id;
+        // Carry the tool name so a restored tool result keeps a non-empty
+        // toolName on the AI SDK path (toAISDKPrompt reads msg.name).
+        if (msg.name) replay.name = msg.name;
         messages.push(replay);
       }
       
@@ -1427,7 +1438,7 @@ export class Agent {
 
     const validRoles = new Set(['system', 'user', 'assistant', 'tool']);
     const knownToolCallIds = new Set<string>();
-    const restored: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }> = [];
+    const restored: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [];
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
@@ -1459,13 +1470,17 @@ export class Agent {
     }
 
     this.messages = restored;
+    // Replacing the conversation invalidates any cached answers keyed by prompt
+    // alone: a repeat prompt must be re-evaluated against the restored history,
+    // not served the previous conversation's response.
+    this.responseCache.clear();
   }
 
   /**
    * Deep-copy a single message so neither getHistory() nor setHistory() shares
    * the caller's mutable references (tool_calls is an array of objects).
    */
-  private copyMessage(m: AgentMessage | { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }): any {
+  private copyMessage(m: AgentMessage | { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }): any {
     const copy: any = { role: m.role, content: m.content };
     if (m.tool_calls) {
       copy.tool_calls = m.tool_calls.map((c: any) => ({
@@ -1476,6 +1491,11 @@ export class Agent {
     }
     if (m.tool_call_id) {
       copy.tool_call_id = m.tool_call_id;
+    }
+    // Preserve the tool name so a restored tool result keeps a non-empty
+    // toolName when converted for the AI SDK backend (adapter.ts toAISDKPrompt).
+    if (m.name) {
+      copy.name = m.name;
     }
     return copy;
   }

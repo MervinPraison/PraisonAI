@@ -23,7 +23,7 @@ function toolConversation(): AgentMessage[] {
         { id: 'call_1', type: 'function', function: { name: 'getWeather', arguments: '{"city":"Paris"}' } },
       ],
     },
-    { role: 'tool', content: '20C and sunny', tool_call_id: 'call_1' },
+    { role: 'tool', content: '20C and sunny', tool_call_id: 'call_1', name: 'getWeather' },
     { role: 'assistant', content: 'It is 20C and sunny in Paris.' },
   ];
 }
@@ -112,6 +112,63 @@ describe('getHistory()/setHistory() conversation restore', () => {
     const again = agent.getHistory();
     expect(again.find((m) => m.role === 'assistant' && m.tool_calls)!.tool_calls![0].id).toBe('call_1');
     expect(again.length).toBe(4);
+  });
+
+  it('preserves the tool name so a restored tool result reaches the provider with toolName intact', async () => {
+    let captured: any[] | null = null;
+    jest
+      .spyOn(OpenAIService.prototype as any, 'generateChat')
+      .mockImplementation(async (...args: any[]) => {
+        captured = args[0];
+        return { content: 'ok' };
+      });
+
+    const agent = new Agent({ instructions: 'x', llm: 'openai/gpt-4o-mini', stream: false, verbose: false });
+    agent.setHistory(toolConversation());
+
+    // Round-trip keeps the tool name (adapter.ts toAISDKPrompt reads msg.name).
+    const toolMsg = agent.getHistory().find((m) => m.role === 'tool');
+    expect(toolMsg!.name).toBe('getWeather');
+
+    await agent.start('and tomorrow?');
+    const replayedTool = captured!.find((m) => m.role === 'tool');
+    expect(replayedTool.name).toBe('getWeather');
+
+    jest.restoreAllMocks();
+  });
+
+  it('clears the response cache so a repeat prompt is re-evaluated against restored history', async () => {
+    // The no-history path uses generateText; the post-restore path uses
+    // generateChat. Mock both and count total provider calls to prove the
+    // second prompt was NOT served from the prompt-keyed cache.
+    const genText = jest
+      .spyOn(OpenAIService.prototype as any, 'generateText')
+      .mockResolvedValue('fresh');
+    const genChat = jest
+      .spyOn(OpenAIService.prototype as any, 'generateChat')
+      .mockResolvedValue({ content: 'fresh' });
+
+    const agent = new Agent({
+      instructions: 'x',
+      llm: 'openai/gpt-4o-mini',
+      stream: false,
+      verbose: false,
+      cache: true,
+    });
+
+    const first = await agent.chat('same prompt');
+    expect(first).toBe('fresh');
+    expect(genText.mock.calls.length + genChat.mock.calls.length).toBe(1);
+
+    // Restoring a different conversation must invalidate the prompt-keyed cache;
+    // otherwise the repeat prompt returns the pre-restore answer without hitting
+    // the model against the newly restored history.
+    agent.setHistory([{ role: 'user', content: 'earlier' }, { role: 'assistant', content: 'earlier reply' }]);
+
+    await agent.chat('same prompt');
+    expect(genText.mock.calls.length + genChat.mock.calls.length).toBe(2);
+
+    jest.restoreAllMocks();
   });
 
   it('replays the restored messages to the provider on the next start()', async () => {
