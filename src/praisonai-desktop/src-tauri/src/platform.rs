@@ -49,7 +49,12 @@ impl Platform {
     /// Where a virtualenv puts its interpreter, relative to the venv root.
     pub const fn venv_python_rel(self) -> &'static str {
         match self {
-            Platform::Windows => "Scripts/python.exe",
+            // Backslash on purpose: `Path::join` appends a relative path
+            // verbatim, so a '/' here survives into the string the lockfile is
+            // compared against -- and `sys.executable` is always backslashed on
+            // Windows. `adopt::decide` also normalises separators, but keeping
+            // the produced path canonical means the two agree at the source.
+            Platform::Windows => "Scripts\\python.exe",
             _ => "bin/python3",
         }
     }
@@ -97,7 +102,9 @@ mod tests {
 
     #[test]
     fn windows_venvs_keep_their_interpreter_in_scripts() {
-        assert_eq!(Platform::Windows.venv_python_rel(), "Scripts/python.exe");
+        // Backslash-separated so the joined path matches the backslashed
+        // `sys.executable` the engine records in its lockfile.
+        assert_eq!(Platform::Windows.venv_python_rel(), "Scripts\\python.exe");
         assert_eq!(Platform::Mac.venv_python_rel(), "bin/python3");
     }
 
