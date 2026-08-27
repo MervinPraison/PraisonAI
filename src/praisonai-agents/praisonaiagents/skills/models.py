@@ -290,6 +290,8 @@ class SkillProperties:
             result["paths"] = self.paths
         if self.shell is not None:
             result["shell"] = self.shell
+        if self.automation is not None:
+            result["automation"] = self.automation.to_dict()
         if self.agent_created:
             result["agent-created"] = True
         if self.created_at is not None:
@@ -300,8 +302,6 @@ class SkillProperties:
             result["last-used"] = self.last_used
         if self.patch_count:
             result["patch-count"] = self.patch_count
-        if self.automation is not None:
-            result["automation"] = self.automation.to_dict()
         return result
 
     @property
