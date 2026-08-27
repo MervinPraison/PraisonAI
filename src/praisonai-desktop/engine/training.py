@@ -158,6 +158,11 @@ class Run:
         self.events = []             # [(cursor, kind, payload)]
         self._next_cursor = 0        # never derived from len(events): see emit
         self._proc = None
+        # The child's pid, recorded on disk so a *later* engine process can
+        # find a run it never spawned: _proc is unpicklable and dies with us,
+        # but the pid outlives the restart and is how stop() reaches an
+        # adopted run.
+        self.pid = None
         self._lock = threading.Lock()
 
     # -- event history --------------------------------------------------
@@ -223,6 +228,70 @@ class Trainer:
         # without limit -- each retains its event ring and metric series.
         self.history = collections.deque(maxlen=MAX_HISTORY)
         self._lock = threading.Lock()
+        # Rebuild what an earlier engine process left on disk. Without this a
+        # restart during a run reports the run as never having happened: it
+        # vanishes from history, stop() has nothing to stop, and start()
+        # cheerfully launches a second trainer beside the live one -- the OOM
+        # that "one GPU runs one job" exists to refuse.
+        self._reload()
+
+    # -- surviving a restart --------------------------------------------
+    def _state_path(self, run_id):
+        return os.path.join(self.dir, run_id, "run.json")
+
+    def _persist(self, run):
+        """Enough on disk to answer 'is a job on the GPU right now'.
+
+        Only config.yaml and train.log were ever written; neither records the
+        state or the pid, so a new process could not tell a live run from a
+        finished one. Best-effort: a run that trains but cannot write its state
+        file is still better than one that refuses to start.
+        """
+        try:
+            with open(self._state_path(run.id), "w", encoding="utf-8") as fh:
+                json.dump({**run.summary(), "pid": run.pid}, fh)
+        except OSError:
+            pass
+
+    def _existing_ids(self):
+        """Run directories on disk, whether or not this process created them."""
+        try:
+            return [name for name in os.listdir(self.dir)
+                    if os.path.isdir(os.path.join(self.dir, name))]
+        except OSError:
+            return []
+
+    def _reload(self):
+        """Rebuild history, adopting a run whose process is still alive.
+
+        A run the new process cannot see is not 'missing' -- it is either still
+        on the GPU (adopt it, so stop() can reach it) or it was interrupted
+        (say so). Reporting neither is how a second fine-tune got started
+        beside a live one.
+        """
+        for name in sorted(self._existing_ids()):
+            try:
+                with open(self._state_path(name), encoding="utf-8") as fh:
+                    saved = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            run_dir = os.path.join(self.dir, name)
+            run = Run(name, os.path.join(run_dir, "config.yaml"),
+                      os.path.join(run_dir, "train.log"))
+            run.state = saved.get("state", FAILED)
+            run.step, run.total = saved.get("step", 0), saved.get("total", 0)
+            run.started = saved.get("started", run.started)
+            run.ended, run.error = saved.get("ended"), saved.get("error")
+            run.pid = saved.get("pid")
+            if run.state not in TERMINAL:
+                if run.pid and _pid_alive(run.pid):
+                    run.state = RUNNING
+                    self.current = run          # stop() signals run.pid's group
+                else:
+                    run.finish(FAILED,
+                               "the engine restarted while this run was live")
+                    self._persist(run)
+            self.history.appendleft(run)
 
     # -- starting --------------------------------------------------------
     def start(self, config, run_id=None):
@@ -335,6 +404,11 @@ class Trainer:
             run.finish(FAILED, f"could not start the trainer: {exc}")
             return
         run._proc = proc
+        run.pid = proc.pid
+        # Written now, before the RUNNING transition, so a crash in the next
+        # instruction still leaves a pid on disk for the next process to adopt
+        # or reap rather than a run that looks like it never spawned.
+        self._persist(run)
         # Honour a stop that arrived before the process existed.
         #
         # start() returns as soon as this thread is created, so there is a
@@ -351,6 +425,7 @@ class Trainer:
             _terminate_group(proc)
         else:
             run.emit("state", {"state": RUNNING})
+        self._persist(run)          # RUNNING (or STOPPING) is now on disk
         try:
             with open(run.log_path, "a", encoding="utf-8") as log:
                 for line in proc.stdout:
@@ -365,6 +440,9 @@ class Trainer:
             run.finish(DONE)
         else:
             run.finish(FAILED, _last_meaningful_line(run.log_path) or f"exit {code}")
+        # Record the ending, so a restart after the run finishes reads it as
+        # terminal rather than adopting a dead pid.
+        self._persist(run)
 
     def _consume(self, run, line):
         run.emit("log", {"line": line})
@@ -395,8 +473,20 @@ class Trainer:
         proc = run._proc
         if proc and proc.poll() is None:
             _terminate_group(proc)
-        # If proc is still None the run has not spawned yet; _supervise sees
-        # STOPPING under the same lock and terminates it on arrival.
+            # _supervise is reading proc.stdout; it sees STOPPING, calls
+            # finish(CANCELLED) and persists when the pipe closes.
+        elif proc is None and run.pid:
+            # An adopted run from a previous process: there is no _proc and no
+            # supervisor reading its output, so this process owns the ending.
+            # Signal the pid's group -- the group is what the original spawn
+            # created -- then record the ending ourselves.
+            _terminate_pid_group(run.pid)
+            run.finish(CANCELLED)
+            self._persist(run)
+        # If proc is still None *and* there is no pid the run has not spawned
+        # yet; _supervise sees STOPPING under the same lock and terminates it
+        # on arrival.
+        self._persist(run)
         return True
 
     def get(self, run_id):
@@ -521,6 +611,92 @@ def _terminate_group(proc):
         os.killpg(group, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         proc.terminate()
+
+
+def _pid_alive(pid):
+    """Whether `pid` is a live process, without touching it.
+
+    Only asked at startup, to decide whether a run from a previous engine is
+    still on the GPU (adopt it) or was interrupted (fail it). On POSIX,
+    `os.kill(pid, 0)` is the liveness idiom -- signal 0 is not delivered, it
+    only checks. On Windows signal 0 is *not* a query: CPython maps every
+    signal but CTRL_C/CTRL_BREAK to TerminateProcess, so it would kill a live
+    pid; Windows therefore gets an OpenProcess probe that only observes.
+
+    This does not guard against pid reuse -- a minimal version, as the audit
+    noted. The window is a restart landing on a recycled pid, which is narrow
+    on the desktop; the cost of getting it wrong is one adopted-then-reaped
+    run, not a lost GPU.
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if IS_WINDOWS:
+        return _pid_alive_windows(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True             # exists, owned by someone else
+    except OSError:
+        return False
+    return True
+
+
+def _pid_alive_windows(pid):
+    """Observe, never signal: open the process and read its exit code."""
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _terminate_pid_group(pid):
+    """Stop an adopted run reached only by its pid, tree and all.
+
+    The sibling of `_terminate_group`, for a run this process did not spawn and
+    so has no Popen for. On POSIX the pid *is* its own group leader -- `_spawn`
+    started it with a new session -- so killpg on the pid reaches the trainer
+    and everything it spawned; on Windows taskkill /T walks the tree. The same
+    self-preservation guard applies: never signal our own group.
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return
+    if IS_WINDOWS:
+        _taskkill_tree(pid)
+        return
+    try:
+        group = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    if group == os.getpgid(0):
+        # The adopted pid is not in its own group -- refuse rather than take
+        # the engine down with it.
+        return
+    try:
+        os.killpg(group, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
 def _write_config(path, config):
