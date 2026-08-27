@@ -182,3 +182,99 @@ class TestValidationError:
         from praisonaiagents.skills.models import ValidationError
         
         assert issubclass(ValidationError, Exception)
+
+
+class TestSkillAutomation:
+    """Tests for SkillAutomation dataclass (proactive-automation contract)."""
+
+    def test_required_schedule_only(self):
+        """Automation needs only a schedule; deliver/prompt default to None."""
+        from praisonaiagents.skills.models import SkillAutomation
+
+        auto = SkillAutomation(schedule="daily")
+
+        assert auto.schedule == "daily"
+        assert auto.deliver is None
+        assert auto.prompt is None
+
+    def test_all_fields(self):
+        """All fields are stored as given."""
+        from praisonaiagents.skills.models import SkillAutomation
+
+        auto = SkillAutomation(
+            schedule="cron:0 8 * * mon-fri",
+            deliver="origin",
+            prompt="Give me today's brief.",
+        )
+
+        assert auto.schedule == "cron:0 8 * * mon-fri"
+        assert auto.deliver == "origin"
+        assert auto.prompt == "Give me today's brief."
+
+    def test_to_dict_excludes_none(self):
+        """to_dict omits None deliver/prompt."""
+        from praisonaiagents.skills.models import SkillAutomation
+
+        assert SkillAutomation(schedule="daily").to_dict() == {"schedule": "daily"}
+        assert SkillAutomation(
+            schedule="daily", deliver="all", prompt="Go"
+        ).to_dict() == {"schedule": "daily", "deliver": "all", "prompt": "Go"}
+
+    def test_from_metadata_parses_block(self):
+        """from_metadata reads metadata.praisonai.automation."""
+        from praisonaiagents.skills.models import SkillAutomation
+
+        auto = SkillAutomation.from_metadata(
+            {
+                "praisonai": {
+                    "automation": {
+                        "schedule": "cron:0 8 * * mon-fri",
+                        "deliver": "telegram:12345",
+                        "prompt": "Brief me.",
+                    }
+                }
+            }
+        )
+
+        assert auto is not None
+        assert auto.schedule == "cron:0 8 * * mon-fri"
+        assert auto.deliver == "telegram:12345"
+        assert auto.prompt == "Brief me."
+
+    def test_from_metadata_absent_returns_none(self):
+        """No block, wrong shape, or missing schedule -> None."""
+        from praisonaiagents.skills.models import SkillAutomation
+
+        assert SkillAutomation.from_metadata({}) is None
+        assert SkillAutomation.from_metadata({"praisonai": {}}) is None
+        assert SkillAutomation.from_metadata(
+            {"praisonai": {"automation": {}}}
+        ) is None
+        assert SkillAutomation.from_metadata(
+            {"praisonai": {"automation": {"schedule": "  "}}}
+        ) is None
+        assert SkillAutomation.from_metadata("not-a-dict") is None
+
+    def test_properties_default_automation_none(self):
+        """SkillProperties.automation defaults to None (backward compatible)."""
+        from praisonaiagents.skills.models import SkillProperties
+
+        props = SkillProperties(name="s", description="d")
+
+        assert props.automation is None
+        assert "automation" not in props.to_dict()
+
+    def test_properties_to_dict_includes_automation(self):
+        """SkillProperties.to_dict serialises automation when present."""
+        from praisonaiagents.skills.models import SkillProperties, SkillAutomation
+
+        props = SkillProperties(
+            name="morning-brief",
+            description="Daily brief.",
+            automation=SkillAutomation(schedule="daily", deliver="origin"),
+        )
+
+        assert props.to_dict()["automation"] == {
+            "schedule": "daily",
+            "deliver": "origin",
+        }
