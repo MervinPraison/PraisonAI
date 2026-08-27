@@ -272,11 +272,7 @@ def _dispatch_remote(resolved, remote_overrides, config_path, dataset):
     # resolved dataset when the positional argument is absent, but only when it
     # points at a local file -- a HuggingFace id or a path already on the remote
     # host is not something to ship.
-    ship_dataset = dataset
-    if not ship_dataset:
-        resolved_dataset = resolved.get("dataset")
-        if isinstance(resolved_dataset, str) and Path(resolved_dataset).is_file():
-            ship_dataset = resolved_dataset
+    ship_dataset = dataset or _local_dataset_in(resolved)
     try:
         run = runner.start(config_path=shipped,
                            dataset_path=Path(ship_dataset) if ship_dataset else None,
@@ -305,6 +301,44 @@ def _dispatch_remote(resolved, remote_overrides, config_path, dataset):
     if state.startswith("failed"):
         raise typer.Exit(1)
     return True
+
+
+def _local_dataset_in(resolved):
+    """The one local dataset file the resolved config names, or None.
+
+    The trainer accepts a dataset as a bare string or as the list-of-mappings
+    it normalises to -- `[{name: ...}]`, optionally with `data_files` -- and
+    loads any `name`/`data_files` that `os.path.exists` as a local file
+    (praisonai_train/train/llm/trainer.py:882). A remote run has to copy that
+    file, or the far side is handed a path that exists only on this machine.
+    Only the string form was covered before, so the canonical list form went
+    unshipped.
+
+    A HuggingFace id or a path already on the remote host is not a file here,
+    so it is left alone. Only the first local file is returned: the runner
+    ships a single positional dataset, which matches how a `--config` run is
+    launched.
+    """
+    entries = resolved.get("dataset")
+    if isinstance(entries, str):
+        entries = [entries]
+    elif not isinstance(entries, list):
+        return None
+
+    for entry in entries:
+        if isinstance(entry, str):
+            candidate = entry
+        elif isinstance(entry, dict):
+            # `data_files` is the explicit local file; `name` doubles as a path
+            # when it is one, exactly as the trainer treats it.
+            candidate = entry.get("data_files") or entry.get("name")
+            if isinstance(candidate, (list, tuple)):
+                candidate = candidate[0] if candidate else None
+        else:
+            continue
+        if isinstance(candidate, str) and Path(candidate).is_file():
+            return candidate
+    return None
 
 
 def _write_shipped_config(resolved):

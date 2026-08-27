@@ -125,6 +125,34 @@ class TestWhatIsHandedOver:
         _dispatch({"remote": {"host": "gpubox"}, "dataset": "org/dataset"})
         assert FakeRunner.instances[0].started_with["dataset"] is None
 
+    def test_a_list_form_local_dataset_is_shipped(self, tmp_path):
+        # The trainer's canonical shape is a list of mappings, and a `name`
+        # that is a local file is loaded from disk. The string-only fallback
+        # missed it, so the file never reached the host and the run failed on a
+        # path that exists only here.
+        data = tmp_path / "d.json"
+        data.write_text("[]", encoding="utf-8")
+        _dispatch({"remote": {"host": "gpubox"},
+                   "dataset": [{"name": str(data)}]})
+        sent = FakeRunner.instances[0].started_with["dataset"]
+        assert sent is not None and pathlib.Path(sent) == data
+
+    def test_a_list_form_data_files_local_dataset_is_shipped(self, tmp_path):
+        # `data_files` names the local file explicitly, with `name` free to be
+        # a label. The trainer loads `data_files`, so it is what must ship.
+        data = tmp_path / "d.jsonl"
+        data.write_text("", encoding="utf-8")
+        _dispatch({"remote": {"host": "gpubox"},
+                   "dataset": [{"name": "my-set", "data_files": str(data)}]})
+        sent = FakeRunner.instances[0].started_with["dataset"]
+        assert sent is not None and pathlib.Path(sent) == data
+
+    def test_a_list_form_hub_dataset_is_not_shipped(self, tmp_path):
+        # A hub id in list form is not a local file; nothing to copy.
+        _dispatch({"remote": {"host": "gpubox"},
+                   "dataset": [{"name": "org/dataset"}]})
+        assert FakeRunner.instances[0].started_with["dataset"] is None
+
     def test_the_gpu_expectation_is_passed_through(self):
         _dispatch({"remote": {"host": "gpubox", "gpus": 4}})
         assert FakeRunner.instances[0].started_with["gpus"] == 4
