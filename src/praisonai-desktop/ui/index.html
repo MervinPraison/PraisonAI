@@ -1095,7 +1095,9 @@ const stick=()=>{ if(atBottom) thread.scrollTop=thread.scrollHeight; };
 // Compact markdown renderer. Deliberately small and dependency-free: a CDN is
 // unavailable to a packaged app, and the alternative -- shipping a full parser --
 // is a decision to make with measurements, not by default.
-const esc=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Quotes included: without them a model-authored URL closes the href built in
+// inline() and injects attributes of its own -- id="f" clobbers getElementById('f').
+const esc=t=>t.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // Small tokeniser rather than a highlighter library: a CDN is unreachable from a
 // packaged app, and shipping a grammar engine is a decision to make with
 // measurements. Strings and comments match first, so a keyword inside one is
