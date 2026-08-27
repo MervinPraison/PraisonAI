@@ -437,6 +437,16 @@ class ChatsListing(unittest.TestCase):
         self.assertTrue(corrupt, "the array file was not surfaced as corrupt")
         self.assertIn("backup", [r["id"] for r in corrupt])
 
+    def test_a_json_array_does_not_drop_projects_or_search(self):
+        # /projects and /search call load_chat() on every file list_chats()
+        # walks -- including the array. Hardening only list_chats() left those
+        # two routes crashing on load_chat().get(...) with the same file.
+        (self.chats / "backup.json").write_text(json.dumps([{"id": "good1"}]))
+        status, body = self.engine.request("/projects")
+        self.assertEqual(status, 200, body)
+        status, body = self.engine.request("/search?q=hello")
+        self.assertEqual(status, 200, body)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
