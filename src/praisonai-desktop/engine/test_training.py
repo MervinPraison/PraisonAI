@@ -763,6 +763,35 @@ class RunLifecycle(unittest.TestCase):
         self.assertGreater(len(events), 100,
                            "events stopped growing when the log write failed")
 
+    def test_a_log_close_failure_does_not_wedge_the_run(self):
+        """A raise from log.close() must not skip finalization.
+
+        close() flushes, so a full disk or a revoked directory can fail there
+        just as a per-line write can. If that escapes the reader's finally
+        block, proc.wait() and run.finish() never run and the run reads
+        "running" forever -- the same permanent wedge, moved to the last line.
+        The log opens fine here; only its close() raises.
+        """
+        import builtins
+        real_open = builtins.open
+
+        def closing_fails_open(path, *args, **kwargs):
+            handle = real_open(path, *args, **kwargs)
+            if str(path).endswith("train.log"):
+                def boom():
+                    raise OSError(28, "No space left on device")
+                handle.close = boom
+            return handle
+
+        builtins.open = closing_fails_open
+        try:
+            run = self._start(_script("print('a line')"))
+            self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 10),
+                            f"log-close failure wedged the run at {run.state}")
+        finally:
+            builtins.open = real_open
+        self.assertEqual(run.state, training.DONE)
+
     def test_the_log_is_flushed_while_the_run_is_live(self):
         """train.log must be readable during the run, not only after it.
 

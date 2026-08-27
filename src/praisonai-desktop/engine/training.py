@@ -376,7 +376,14 @@ class Trainer:
                     run.emit("log", {"line": f"[reader error: {exc}]"})
         finally:
             if log is not None:
-                log.close()
+                # close() flushes, so a full disk or revoked directory can raise
+                # here too. Swallow it: the pipe is already drained, and letting
+                # it escape would skip proc.wait()/finish() and wedge the run --
+                # the very failure this reader exists to prevent.
+                try:
+                    log.close()
+                except OSError:
+                    pass
         code = proc.wait()
         if run.state == STOPPING:
             run.finish(CANCELLED)
