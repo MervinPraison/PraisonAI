@@ -1832,8 +1832,19 @@ const cfgGet = k => (k in cfg ? cfg[k] : DEFAULTS[k]);
 async function saveCfg(patch){
   CFG={...CFG,...patch}; applyPrefs(CFG);
   cfg = {...cfg, ...patch};
-  await fetch('http://127.0.0.1:'+PORT+'/settings',{method:'POST',
-    headers:{'content-type':'application/json'},body:JSON.stringify(patch)});
+  let saved=null;
+  try{
+    saved=await (await fetch('http://127.0.0.1:'+PORT+'/settings',{method:'POST',
+      headers:{'content-type':'application/json'},body:JSON.stringify(patch)})).json();
+  }catch{}
+  // The server persists what actually happened, not what we asked. Reconcile
+  // any key it wrote back so the current session never shows a value that was
+  // never saved -- e.g. "Open at login" the OS refused to register.
+  if(saved && typeof saved==='object'){
+    for(const k of Object.keys(patch)) if(k in saved){ CFG[k]=saved[k]; cfg[k]=saved[k]; }
+    applyPrefs(CFG);
+  }
+  return saved;
 }
 
 function control(def, onChange){
@@ -1985,10 +1996,18 @@ function settingRow(def){
     err.style.display='none';
     if(def.confirm && def.confirm.when(cfgGet(def.key),nv)
        && !await askConfirm(def.confirm.message,{ok:'Continue'})) { renderSettings(); return; }
-    await saveCfg({[def.key]:nv});
+    const saved=await saveCfg({[def.key]:nv});
     if(def.key==='theme') applyTheme(nv);
     if(def.key==='model') modelName.textContent=nv;
     renderSettings();
+    // If the OS declined to register the login item, the toggle has already
+    // snapped back to the persisted value above; tell the user why.
+    if(def.key==='launch_at_login' && saved && saved.launch_at_login_result
+       && nv && !saved.launch_at_login_result.enabled){
+      const r=document.getElementById('setting-launch_at_login');
+      const w=r&&r.querySelector('.warn');
+      if(w){ w.textContent=saved.launch_at_login_result.message||'Not available.'; w.style.display=''; }
+    }
   };
 
   const multiline = def.control.kind==='text' && def.control.multiline;
