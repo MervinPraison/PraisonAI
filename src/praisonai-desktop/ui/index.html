@@ -855,7 +855,7 @@ window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
 const { invoke } = window.__TAURI__.core;
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
-let PORT=null, atBottom=true, activeRun=null, activeReader=null;
+let PORT=null, engineBlocked=true, atBottom=true, activeRun=null, activeReader=null;
 /** Set by Regenerate for exactly one submit, then cleared. */
 let regenerateOf=null;
 // The renderer honours these directly -- everything in here was previously
@@ -1380,6 +1380,8 @@ function gate(){
 async function boot(){
 try{ globalThis.__PRAISONAI_DESKTOP_VERSION__=await window.__TAURI__.app.getVersion(); }catch{}
 const st=await invoke('engine_status');
+engineBlocked=st.state!=='ready';
+if(engineBlocked) showView('chat',{persist:false});
 if(st.state==='ready'){
   PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
   box.disabled=send.disabled=false; box.focus(); refreshChats(); refreshModelName();
@@ -1510,7 +1512,7 @@ function firstRun(st){
     }finally{ if(un) un(); }
   };
 }
-boot();
+const initialBoot=boot();
 
 document.getElementById('f').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -2206,7 +2208,9 @@ const METHOD_HINTS={
 let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[];
 const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
 
-function showView(name){
+function showView(name,{persist=true}={}){
+  const requested=name;
+  if(name==='train' && engineBlocked) name='chat';
   const training=name==='train';
   document.body.classList.toggle('training',training);
   trainView.classList.toggle('on',training);
@@ -2214,7 +2218,7 @@ function showView(name){
   viewChat.setAttribute('aria-selected',String(!training));
   viewTrain.classList.toggle('active',training);
   viewChat.classList.toggle('active',!training);
-  try{ localStorage.setItem('view',name); }catch(e){}
+  if(persist) try{ localStorage.setItem('view',requested); }catch(e){}
   if(training) refreshTraining();
 }
 viewChat.addEventListener('click',()=>showView('chat'));
@@ -2477,5 +2481,12 @@ document.getElementById('tRunOn').addEventListener('change',e=>{
 // looking selected on first launch.
 let startView='chat';
 try{ if(localStorage.getItem('view')==='train') startView='train'; }catch(e){}
-showView(startView);
+initialBoot.then(()=>{
+  let nextView=startView;
+  try{
+    const savedView=localStorage.getItem('view');
+    if(savedView==='chat'||savedView==='train') nextView=savedView;
+  }catch(e){}
+  showView(nextView);
+});
 </script></body></html>

@@ -32,18 +32,23 @@ process.on('exit', () => SRV.close());
  * Boot with no interpreter. `provision` decides what the setup run does:
  * `'ok'` succeeds and the engine comes up, `'fail'` rejects.
  */
-async function boot({ provision = 'ok', steps = [] } = {}) {
+async function boot({ provision = 'ok', steps = [], savedView = null,
+                      engineStatusDelay = 0 } = {}) {
   const invoked = [];
   let listener = null;
   let readyAfterProvision = provision === 'ok';
   const dom = new JSDOM(HTML, {
     runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
     beforeParse(w) {
+      if (savedView) w.localStorage.setItem('view', savedView);
       w.__TAURI__ = {
         core: {
           invoke: async (cmd) => {
             invoked.push(cmd);
             if (cmd === 'engine_status') {
+              if (engineStatusDelay) {
+                await new Promise((resolve) => setTimeout(resolve, engineStatusDelay));
+              }
               return invoked.filter((c) => c === 'provision_engine').length && readyAfterProvision
                 ? { state: 'ready', port: 65000, python: '/venv/bin/python3' }
                 : { state: 'failed', reason: 'No usable Python',
@@ -85,6 +90,38 @@ test('no Python offers setup instead of an error block', async () => {
   assert.equal(b.doc.querySelector('.err'), null,
     'still shown as a failure the user cannot act on');
   assert.match(b.doc.getElementById('status').textContent, /setup/i);
+});
+
+test('a saved or clicked Train view cannot hide first-run setup', async () => {
+  const b = await boot({ savedView: 'train' });
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'the saved Train view hid the setup screen');
+  assert.ok(b.doc.querySelector('.setup'), 'no setup screen after restoring Train');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'forcing Chat during setup overwrote the saved Train preference');
+
+  click(b.doc.getElementById('viewTrain'));
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'Train can replace setup even though it has no engine');
+  assert.ok(b.doc.querySelector('.setup'), 'clicking Train hid the setup screen');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'clicking Train during setup discarded the requested view');
+});
+
+test('Train stays blocked while initial engine status is still pending', async () => {
+  const b = await boot({ engineStatusDelay: 1000 });
+  click(b.doc.getElementById('viewTrain'));
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'Train replaced setup before engine readiness was known');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'clicking Train while readiness was pending discarded the requested view');
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'the stale startup view replaced setup after readiness resolved');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'startup completion overwrote the view selected while readiness was pending');
+  assert.ok(b.doc.querySelector('.setup'),
+    'startup completion hid setup after a Train click during readiness detection');
 });
 
 test('the steps are listed before anything starts', async () => {
