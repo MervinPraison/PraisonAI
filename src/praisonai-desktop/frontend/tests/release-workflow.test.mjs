@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { releaseVersion } from '../../tools/set-release-version.mjs';
 
 const root = new URL('../../../../', import.meta.url);
 const workflow = readFileSync(new URL('.github/workflows/desktop-release.yml', root), 'utf8');
@@ -22,6 +23,20 @@ const ci = readFileSync(new URL('.github/workflows/desktop.yml', root), 'utf8');
 const config = JSON.parse(
   readFileSync(new URL('src/praisonai-desktop/src-tauri/tauri.conf.json', root), 'utf8'));
 const install = readFileSync(new URL('src/praisonai-desktop/INSTALL.md', root), 'utf8');
+
+test('the release tag becomes the desktop product version before bundling', () => {
+  const runnable = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const sync = runnable.indexOf('node src/praisonai-desktop/tools/set-release-version.mjs');
+  const build = runnable.indexOf('cargo tauri build');
+  assert.notEqual(sync, -1, 'the release never writes its tag into tauri.conf.json');
+  assert.ok(sync < build, 'the desktop version is updated after the bundle is built');
+  assert.equal(releaseVersion('v4.7.3'), '4.7.3');
+  assert.equal(releaseVersion('4.8.0-rc.1'), '4.8.0-rc.1');
+  assert.throws(() => releaseVersion('latest'), /not a semantic version/);
+});
 
 /** The matrix legs, as (bundles, asset, ext) triples. */
 function legs() {

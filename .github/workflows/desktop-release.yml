@@ -122,6 +122,12 @@ jobs:
         # let a failure be a failure.
         run: command -v cargo-tauri >/dev/null || cargo install tauri-cli --version '^2' --locked
 
+      - name: Set the desktop version from the release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: node src/praisonai-desktop/tools/set-release-version.mjs "$RELEASE_TAG"
+
       - name: Build the bundle
         working-directory: src/praisonai-desktop/src-tauri
         run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
