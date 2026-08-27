@@ -347,7 +347,44 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
 /// Debounce flag for geometry saves; see the window event handler.
 static SAVE_PENDING: AtomicBool = AtomicBool::new(false);
 
+/// Leave a line on disk saying this launch happened, before anything can exit.
+///
+/// The Windows first-run report was a launch that left "no window, no folder,
+/// no logs" -- and with the single-instance guard exiting a secondary with
+/// code 0, there was no way after the fact to tell a shell that died from one
+/// that simply handed off to the primary and quit. This writes that fact
+/// somewhere that exists whether or not `%APPDATA%\PraisonAI` does. Best
+/// effort: a shell must never fail to start because it could not write a log.
+fn breadcrumb(primary: bool) {
+    use praisonai_desktop_core::startup_log::{line, log_path};
+    use std::io::Write;
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let entry = line(secs, Platform::current(), primary, std::process::id());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path(&std::env::temp_dir()))
+    {
+        let _ = f.write_all(entry.as_bytes());
+    }
+}
+
 fn main() {
+    // Before the single-instance guard can quit this process: a launch that
+    // hands off to the primary and exits 0 must still leave a trace, or it is
+    // indistinguishable from one that crashed on the way up. Every launch
+    // records itself as `secondary` here -- honest, because this process does
+    // not yet know it is the first, and the pid is its own. The true primary
+    // upgrades its own line from `setup()` below, which the single-instance
+    // plugin runs only in the first instance. That keeps each line's pid and
+    // role telling the truth about the *same* process: a secondary that exits 0
+    // leaves `secondary pid=<its own>`, and the primary leaves `primary
+    // pid=<its own>`. Writing `primary` here and `secondary` in the guard
+    // callback (which runs in the primary, not the secondary) reversed both.
+    breadcrumb(false);
     // First, before anything can open an X connection. GTK will not do this
     // for us and the failure without it is a silent exit(1) with no message.
     praisonai_desktop_core::x11_threads::init();
@@ -355,6 +392,13 @@ fn main() {
         // Must be registered first: the guard has to run before anything else
         // touches the lockfile or the engine.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // Runs in the *primary* when a secondary launches. The secondary has
+            // already recorded its own `secondary` line and is exiting 0; the
+            // primary already recorded its own `primary` line in `setup()`. Do
+            // not write here: this process is the primary, and its pid is not
+            // the secondary's, so any line written here would mislabel one of
+            // them.
+            //
             // A second launch raises the window that already exists rather than
             // starting a rival shell.
             if let Some(w) = app.get_webview_window("main") {
@@ -366,6 +410,10 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Only the first instance reaches `setup()`; a secondary is told to
+            // exit by the guard before it gets here. So this is where the
+            // primary honestly upgrades its own breadcrumb, with its own pid.
+            breadcrumb(true);
             app.manage(AppState { engine: Mutex::new(None) });
             // Deliberately not `?`. On Linux the tray goes through
             // libappindicator, which is dlopen'd at first use and *panics* if
