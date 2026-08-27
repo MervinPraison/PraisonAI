@@ -40,7 +40,8 @@ function sseReader(frames) {
     : { done: true, value: undefined }) };
 }
 
-async function boot(cfg = {}, { confirmAnswer = true, sse = [], prefersReducedMotion = false } = {}) {
+async function boot(cfg = {}, { confirmAnswer = true, sse = [], prefersReducedMotion = false,
+                                failSettingsWrite = false } = {}) {
   const calls = [];
   const bodies = [];
   const settings = {
@@ -52,6 +53,11 @@ async function boot(cfg = {}, { confirmAnswer = true, sse = [], prefersReducedMo
     calls.push(`${opts.method || 'GET'} ${path}`);
     if (opts.body) { try { bodies.push(JSON.parse(opts.body)); } catch {} }
     const u = String(url);
+    // Simulate the engine rejecting a settings write -- the very case the UI
+    // itself warns about across a base_url/api_key change that restarts it.
+    if (failSettingsWrite && (opts.method || 'GET') === 'POST' && u.includes('/settings')) {
+      return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
+    }
     const body =
       u.includes('/settings') ? settings
       : u.includes('/chats/') ? { id: 'c1', title: 'Hi', messages: [] }
@@ -164,6 +170,59 @@ test('the saved theme is applied at launch, not just when changed', async () => 
 test('theme "system" leaves the attribute off so the OS decides', async () => {
   const b = await boot({ theme: 'system' });
   assert.equal(b.doc.documentElement.getAttribute('data-theme'), null);
+});
+
+// --- a settings write the engine rejects ------------------------------------
+
+/** Open Settings and switch to the named section, waiting for it to render. */
+async function openSettings(b, section) {
+  click(b.doc.getElementById('settings'));
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    if (b.doc.getElementById('setbody')) break;
+  }
+  assert.ok(b.doc.querySelector('#setbody .srow'), 'settings never opened');
+  const nav = [...b.doc.querySelectorAll('#setside button')]
+    .find((x) => x.textContent.includes(section));
+  assert.ok(nav, `the ${section} section is missing`);
+  click(nav);
+  await new Promise((r) => setTimeout(r, 40));
+}
+
+test('a rejected theme write applies nothing and tells the user', async () => {
+  // saveCfg used to mutate first and never check r.ok, so a 500 left the button
+  // un-highlighted, no data-theme, and no error -- a completely dead button.
+  const b = await boot({ theme: 'system' }, { failSettingsWrite: true });
+  await openSettings(b, 'Appearance');
+  const light = [...b.doc.querySelectorAll('#setting-theme .seg button')]
+    .find((x) => x.textContent === 'Light');
+  assert.ok(light, 'the Light option is missing');
+  click(light);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(b.doc.documentElement.getAttribute('data-theme'), null,
+    'a failed write still applied the theme');
+  const t = b.doc.getElementById('toast');
+  assert.ok(t && t.classList.contains('show'), 'no error was surfaced');
+});
+
+test('a rejected toggle write leaves the switch where it was', async () => {
+  // The toggle mutated cfg before the write, so a rejection left the switch and
+  // the stored value disagreeing and the next click flipped the wrong one back.
+  // The observable contract: a failed write must not move the switch, and the
+  // engine must never see a value the user did not manage to persist.
+  const b = await boot({ confirm_delete: true }, { failSettingsWrite: true });
+  await openSettings(b, 'Safety');
+  const sw = b.doc.querySelector('#setting-confirm_delete .sw');
+  assert.ok(sw, 'the confirm_delete toggle is missing');
+  assert.equal(sw.classList.contains('on'), true, 'toggle did not start on');
+  b.bodies.length = 0;
+  click(sw);
+  await new Promise((r) => setTimeout(r, 80));
+  const now = b.doc.querySelector('#setting-confirm_delete .sw');
+  assert.equal(now.classList.contains('on'), true,
+    'a failed write moved the switch to a state that was never persisted');
+  assert.equal(b.bodies.some((x) => x && 'confirm_delete' in x && x.confirm_delete === false),
+    true, 'the attempted write should still have been sent');
 });
 
 // --- safety ------------------------------------------------------------------
