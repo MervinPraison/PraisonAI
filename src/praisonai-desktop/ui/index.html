@@ -1483,7 +1483,7 @@ function firstRun(st){
     }finally{ if(un) un(); }
   };
 }
-boot();
+const initialBoot=boot();
 
 document.getElementById('f').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -2419,5 +2419,5 @@ document.getElementById('tMethod').addEventListener('change',e=>{
 // looking selected on first launch.
 let startView='chat';
 try{ if(localStorage.getItem('view')==='train') startView='train'; }catch(e){}
-showView(startView);
+initialBoot.then(()=>showView(startView));
 </script></body></html>
