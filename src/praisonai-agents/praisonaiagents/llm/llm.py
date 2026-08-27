@@ -5123,6 +5123,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
+                        self._record_finish_reason(resp)
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
                         
