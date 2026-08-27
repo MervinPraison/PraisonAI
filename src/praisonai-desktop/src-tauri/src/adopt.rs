@@ -80,10 +80,10 @@ pub fn decide(
         // process, so this is the one rejection that must never escalate to a kill.
         return Decision::Spawn(Rejected::PidReused);
     }
-    if lock.interpreter != expected.interpreter {
+    if !same_path(&lock.interpreter, expected.interpreter) {
         return Decision::KillAndRespawn(Rejected::DifferentInterpreter);
     }
-    if lock.venv_root != expected.venv_root {
+    if !same_path(&lock.venv_root, expected.venv_root) {
         return Decision::KillAndRespawn(Rejected::DifferentVenv);
     }
     if lock.config_hash != expected.config_hash {
@@ -93,6 +93,22 @@ pub fn decide(
         return Decision::KillAndRespawn(Rejected::UnhealthyProbe);
     }
     Decision::Adopt { port: lock.port }
+}
+
+/// Two spellings of one path. The lockfile records the engine's `sys.executable`
+/// verbatim -- fully backslashed on Windows -- while the expected value is built
+/// by joining a relative `venv_python_rel` that may still carry a `/`. A byte
+/// mismatch there is not a different engine, it is a different separator or
+/// letter case, and treating it as different escalates to `taskkill /T`, which
+/// takes the running trainer with it. On Windows we therefore fold `/` to `\`
+/// and lower-case (its filesystem is case-insensitive); elsewhere the path is
+/// case-sensitive and separators are already canonical, so we compare as-is.
+fn same_path(a: &str, b: &str) -> bool {
+    #[cfg(windows)]
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    #[cfg(not(windows))]
+    let norm = |s: &str| s.to_string();
+    norm(a) == norm(b)
 }
 
 #[cfg(test)]
@@ -185,6 +201,38 @@ mod tests {
             decide(Some(&l), Observed::NoSuchProcess, expected(), |_| true),
             Decision::Spawn(Rejected::ProcessGone)
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_engine_is_adopted_across_separator_and_case_spellings() {
+        // The dead-adopt bug: the lock records the backslashed, lower-drive
+        // `sys.executable`; the expected value is the '/'-joined path built from
+        // `venv_python_rel`. Byte-comparing them always said DifferentInterpreter
+        // and taskkill'd a healthy engine (and its trainer) every launch.
+        let l = Lock {
+            interpreter: r"C:\app\venv\Scripts\python.exe".into(),
+            venv_root: r"C:\app\venv".into(),
+            ..lock()
+        };
+        let e = Expected {
+            interpreter: "C:\\app\\venv/Scripts/python.exe",
+            venv_root: "C:\\app\\venv",
+            config_hash: "abc123",
+        };
+        assert_eq!(decide(Some(&l), running(), e, |_| true), Decision::Adopt { port: 51234 });
+    }
+
+    #[test]
+    fn same_path_is_exact_off_windows_and_separator_insensitive_on_it() {
+        assert!(same_path("/v/bin/python3", "/v/bin/python3"));
+        if cfg!(windows) {
+            assert!(same_path(r"C:\v\Scripts\python.exe", "C:\\v/Scripts/python.exe"));
+            assert!(same_path(r"C:\V\Scripts\Python.exe", r"c:\v\scripts\python.exe"));
+        } else {
+            // POSIX paths are case-sensitive and already '/'-separated.
+            assert!(!same_path("/V/bin/python3", "/v/bin/python3"));
+        }
     }
 
     #[test]
