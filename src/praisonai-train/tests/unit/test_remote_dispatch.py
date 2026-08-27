@@ -28,7 +28,11 @@ class FakeRunner:
         self.host, self.python, self.workdir = host, python, workdir
         self.started_with = None
         self.tailed = False
-        self.state = "done"
+        # The vocabulary the real runner speaks, not one invented here. It
+        # returned "done" before, and the dispatch compared against "failed"
+        # with ==, so a run that ended "failed (exit 1)" was reported as a
+        # success and the fake agreed with the bug.
+        self.state = "completed"
         FakeRunner.instances.append(self)
 
     def start(self, config_path=None, dataset_path=None, expect_gpus=1, **_):
@@ -133,13 +137,53 @@ class TestWhatIsHandedOver:
         assert made.workdir == "~/runs"
 
 
+class TestTheStatusVocabulary:
+    """The fake must speak the language the real runner speaks."""
+
+    def test_the_fake_only_returns_states_the_runner_can_return(self):
+        # Read from disk, not through the module: the autouse fixture has
+        # already swapped RemoteRunner for the fake, so inspecting the
+        # attribute would have this test confirm the fake agrees with itself.
+        source = (pathlib.Path(__file__).resolve().parents[2]
+                  / "praisonai_train" / "remote" / "runner.py").read_text()
+        for word in ("completed", "running", "unknown"):
+            assert word in source, (
+                f"the runner no longer reports {word!r}; the fakes here are "
+                "built on that vocabulary")
+        assert "failed (exit" in source, (
+            "the runner no longer reports 'failed (exit N)' -- the dispatch "
+            "matches that shape by prefix")
+
+    @pytest.mark.parametrize("state", ["failed (exit 1)", "failed (exit 137)"])
+    def test_a_failed_run_is_a_failure_however_it_is_spelled(self, state, monkeypatch):
+        import typer
+
+        class Failing(FakeRunner):
+            def status(self, run):
+                return state
+
+        import praisonai_train.remote.runner as runner_mod
+        monkeypatch.setattr(runner_mod, "RemoteRunner", Failing)
+        with pytest.raises(typer.Exit):
+            _dispatch({"remote": {"host": "gpubox"}})
+
+    def test_a_completed_run_is_not_a_failure(self, monkeypatch):
+        class Completed(FakeRunner):
+            def status(self, run):
+                return "completed"
+
+        import praisonai_train.remote.runner as runner_mod
+        monkeypatch.setattr(runner_mod, "RemoteRunner", Completed)
+        assert _dispatch({"remote": {"host": "gpubox"}}) is True
+
+
 class TestFailure:
     def test_a_run_that_ends_failed_is_reported_as_failure(self, monkeypatch):
         import typer
 
         class Failing(FakeRunner):
             def status(self, run):
-                return "failed"
+                return "failed (exit 1)"
 
         import praisonai_train.remote.runner as runner_mod
         monkeypatch.setattr(runner_mod, "RemoteRunner", Failing)
@@ -187,7 +231,8 @@ class TestTheCommandActuallyDispatches:
         def _boom(*_a, **_k):
             raise AssertionError("the local trainer was reached for a remote run")
 
-        monkeypatch.setattr(train_cmd, "import_code_module", _boom, raising=False)
+        import praisonai_train._code_bridge as bridge
+        monkeypatch.setattr(bridge, "import_code_module", _boom)
         train_cmd.train_llm(config=config)
 
         assert len(FakeRunner.instances) == 1, "the run was not sent anywhere"
@@ -206,9 +251,9 @@ class TestTheCommandActuallyDispatches:
         # Stop before the heavy import; the point is only that nothing was sent.
         import typer
 
-        monkeypatch.setattr(train_cmd, "import_code_module",
-                            lambda *_a, **_k: (_ for _ in ()).throw(ImportError("no")),
-                            raising=False)
+        import praisonai_train._code_bridge as bridge
+        monkeypatch.setattr(bridge, "import_code_module",
+                            lambda *_a, **_k: (_ for _ in ()).throw(ImportError("no")))
         # The ImportError is surfaced as a typer.Exit; asserting it keeps this
         # test honest -- a blind `except Exception` would pass even if the
         # command failed for an unrelated reason before the local trainer.
