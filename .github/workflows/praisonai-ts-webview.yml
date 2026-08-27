@@ -1,0 +1,57 @@
+# Can praisonai-ts still be loaded in a webview?
+#
+# Issue #4437 was this failing: `crypto` and `events` were static imports on
+# the Agent graph, so a webview bundle died at IMPORT time with no error
+# boundary and a blank screen. PR #4438 fixed it, and nothing stopped it
+# coming back.
+#
+# `npm test` cannot catch a regression here, structurally: it runs in Node,
+# where every one of these imports works perfectly. One `import { x } from
+# "fs"` added to a file the Agent happens to reach would silently un-ship the
+# mobile app, and the first signal would be a blank screen on a device.
+#
+# Deliberately narrow. It runs only when praisonai-ts changes, installs only
+# what it needs, and asserts one thing.
+name: praisonai-ts webview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/praisonai-ts/src/**'
+      - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/scripts/webview-gate.mjs'
+      - '.github/workflows/praisonai-ts-webview.yml'
+  pull_request:
+    paths:
+      - 'src/praisonai-ts/src/**'
+      - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/scripts/webview-gate.mjs'
+      - '.github/workflows/praisonai-ts-webview.yml'
+
+concurrency:
+  group: praisonai-ts-webview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  webview:
+    name: loadable in a webview
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: src/praisonai-ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+      # `npm install`, not `npm ci`: praisonai-ts gitignores its lockfile
+      # (src/praisonai-ts/.gitignore), so `npm ci` has nothing to install from.
+      # `--legacy-peer-deps` because the dependency tree does not otherwise
+      # resolve -- bedrock-agentcore wants a peer of @strands-agents/sdk that
+      # is not installed. That is pre-existing and out of scope here; without
+      # the flag this job fails on something unrelated to what it checks.
+      - name: Install
+        run: npm install --no-audit --no-fund --legacy-peer-deps
+      - name: Check
+        run: npm run check:webview
