@@ -2,7 +2,7 @@
  * Session Management - Session, Run, and Trace tracking
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 export interface SessionConfig {
   id?: string;

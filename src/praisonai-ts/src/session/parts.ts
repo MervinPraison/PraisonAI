@@ -4,7 +4,7 @@
  * Manages context, memory, and tools within sessions.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Part type

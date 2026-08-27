@@ -4,7 +4,7 @@
  * Provides file, search, and web scraping tools.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Tool result

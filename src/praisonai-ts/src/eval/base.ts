@@ -4,7 +4,7 @@
  * Provides base evaluator classes and result types.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Evaluation criteria

@@ -4,7 +4,7 @@
  * Provides WebSocket, SSE, and HTTP streaming transports.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Transport message

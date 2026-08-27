@@ -4,7 +4,7 @@
  * Reduces context size while preserving important information.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Optimization strategy

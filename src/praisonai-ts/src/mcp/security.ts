@@ -4,7 +4,7 @@
  * Provides security policies for MCP servers.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Security policy type

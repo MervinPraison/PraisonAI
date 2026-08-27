@@ -27,7 +27,7 @@
  * ```
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Hook event types - matching Python HooksManager + industry standard additions

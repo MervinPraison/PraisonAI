@@ -4,7 +4,7 @@
  * Manages token allocation across context components.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Budget allocation

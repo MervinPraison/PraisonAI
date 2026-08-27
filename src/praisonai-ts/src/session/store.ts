@@ -4,7 +4,7 @@
  * Provides in-memory and file-based session storage.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Session data for storage

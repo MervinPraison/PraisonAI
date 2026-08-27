@@ -4,7 +4,7 @@
  * Provides hooks for connecting to external observability systems.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Telemetry sink types

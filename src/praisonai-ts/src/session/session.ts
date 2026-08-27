@@ -5,7 +5,7 @@
  * Provides session management with persistent state, memory, and knowledge.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 import type { DbAdapter } from '../db/types';
 
 // ============================================================================
