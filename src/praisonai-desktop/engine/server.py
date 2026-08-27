@@ -598,14 +598,22 @@ def _builtin_tools():
             url: An http(s) URL.
         """
         import re as _re
+        import urllib.error as _e
         import urllib.request as _r
 
         if not url.startswith(("http://", "https://")):
             return "Only http and https URLs are supported."
         if not _gate("fetch_url", {"url": url}):
             return "The user declined this tool call."
+
+        class _NoRedirect(_r.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                raise _e.HTTPError(req.full_url, code,
+                                   f"redirect to {newurl} was not approved",
+                                   headers, fp)
+
         try:
-            with _r.urlopen(url, timeout=20) as resp:
+            with _r.build_opener(_NoRedirect).open(url, timeout=20) as resp:
                 body = resp.read(400_000).decode("utf-8", "replace")
         except Exception as exc:  # noqa: BLE001
             return f"Fetch failed: {type(exc).__name__}: {exc}"
