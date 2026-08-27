@@ -338,7 +338,36 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
 /// Debounce flag for geometry saves; see the window event handler.
 static SAVE_PENDING: AtomicBool = AtomicBool::new(false);
 
+/// Leave a line on disk saying this launch happened, before anything can exit.
+///
+/// The Windows first-run report was a launch that left "no window, no folder,
+/// no logs" -- and with the single-instance guard exiting a secondary with
+/// code 0, there was no way after the fact to tell a shell that died from one
+/// that simply handed off to the primary and quit. This writes that fact
+/// somewhere that exists whether or not `%APPDATA%\PraisonAI` does. Best
+/// effort: a shell must never fail to start because it could not write a log.
+fn breadcrumb(primary: bool) {
+    use praisonai_desktop_core::startup_log::{line, log_path};
+    use std::io::Write;
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let entry = line(secs, Platform::current(), primary, std::process::id());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path(&std::env::temp_dir()))
+    {
+        let _ = f.write_all(entry.as_bytes());
+    }
+}
+
 fn main() {
+    // Before the single-instance guard can quit this process: a launch that
+    // hands off to the primary and exits 0 must still leave a trace, or it is
+    // indistinguishable from one that crashed on the way up.
+    breadcrumb(true);
     // First, before anything can open an X connection. GTK will not do this
     // for us and the failure without it is a silent exit(1) with no message.
     praisonai_desktop_core::x11_threads::init();
@@ -346,6 +375,10 @@ fn main() {
         // Must be registered first: the guard has to run before anything else
         // touches the lockfile or the engine.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // This callback runs in the *primary*; the secondary that triggered
+            // it has already recorded itself and is exiting 0. Note that so the
+            // log reads as "handed off", not "died".
+            breadcrumb(false);
             // A second launch raises the window that already exists rather than
             // starting a rival shell.
             if let Some(w) = app.get_webview_window("main") {

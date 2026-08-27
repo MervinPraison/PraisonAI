@@ -20,3 +20,4 @@ pub mod tray;
 pub mod engine_paths;
 pub mod reclaim;
 pub mod provision;
+pub mod startup_log;
