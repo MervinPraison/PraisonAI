@@ -350,6 +350,28 @@ def test_uniform_timeout_cli_wins():
     assert gen._resolve_uniform_tool_timeout(config) == 15.0
 
 
+def test_uniform_timeout_none_when_one_agent_declares_and_another_omits():
+    # Greptile P1: a lone declared budget must NOT be treated as uniform, or the
+    # undeclared agent inherits it via the shared-dict wrap and its valid
+    # long-running calls fail with ToolTimeoutError. The per-agent resolver must
+    # own this case instead.
+    gen = _make_generator()
+    gen.cli_config = {}
+    config = {"roles": {"declared": {"tool_timeout": 5}, "undeclared": {}}}
+    assert gen._resolve_uniform_tool_timeout(config) is None
+
+
+def test_per_agent_resolver_leaves_undeclared_agent_unwrapped():
+    # The declaring agent gets its budget; the agent that omitted tool_timeout
+    # gets no wrap at all (None), so its tools run without an imposed timeout.
+    gen = _make_generator()
+    gen.cli_config = {}
+    config = {"roles": {"declared": {"tool_timeout": 5}, "undeclared": {}}}
+    resolver = gen.make_agent_tool_wrap_resolver(config)
+    assert callable(resolver("declared"))
+    assert resolver("undeclared") is None
+
+
 def test_resolve_agent_tool_timeout_per_agent():
     # Each agent gets its own declared budget, no cross-agent downgrade.
     gen = _make_generator()

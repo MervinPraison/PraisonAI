@@ -983,24 +983,32 @@ class AgentsGenerator:
         """Return a single timeout to wrap every tool with, or ``None``.
 
         A uniform value exists when the CLI sets ``tool_timeout`` (applies to all
-        agents), or when every declared per-agent ``tool_timeout`` is identical.
-        Heterogeneous per-agent budgets return ``None`` so the caller falls back
-        to per-agent wrapping (see ``make_agent_tool_wrap_resolver``) instead of
-        silently downgrading larger budgets to the tightest value.
+        agents), or when *every* agent/role declares ``tool_timeout`` and they
+        all declare the *same* value. If any agent omits ``tool_timeout``, or
+        declared values differ, returns ``None`` so the shared dict stays
+        unwrapped and the per-agent resolver becomes the sole guard — this
+        avoids both the old "tightest wins for everyone" downgrade and forcing a
+        lone declared budget onto agents that never asked for one (greptile P1).
         """
         cli_timeout = (self.cli_config or {}).get("tool_timeout")
         if isinstance(cli_timeout, (int, float)) and not isinstance(cli_timeout, bool):
             return float(cli_timeout)
 
         entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
-        timeouts = [
-            t for t in (self._declared_agent_timeout(e) for e in entities.values())
-            if t is not None
-        ]
-        if not timeouts:
+        if not entities:
             return None
-        if len(set(timeouts)) == 1:
-            return timeouts[0]
+
+        values = set()
+        for entity in entities.values():
+            t = self._declared_agent_timeout(entity)
+            if t is None:
+                # An agent without a declared budget must not inherit another
+                # agent's timeout via the shared-dict wrap. Defer entirely to the
+                # per-agent resolver.
+                return None
+            values.add(t)
+        if len(values) == 1:
+            return next(iter(values))
         return None
 
     def resolve_agent_tool_timeout(self, agent_key, config):
