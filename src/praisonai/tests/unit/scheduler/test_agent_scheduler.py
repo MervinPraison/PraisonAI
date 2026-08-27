@@ -541,3 +541,100 @@ class TestDeliverResultSilence:
         scheduler._delivery = Mock()
         scheduler._deliver_result("hello")
         scheduler._delivery.deliver.assert_not_called()
+
+
+class TestDeliveryOutcomeAccounting:
+    """A failed scheduled delivery is truthful, not a silent success."""
+
+    def _scheduler(self, delivered, on_success=None, on_failure=None):
+        from praisonai.scheduler._base_scheduler import DeliveryOutcome  # noqa: F401
+        scheduler = AgentScheduler(
+            Mock(), "Test task", deliver="telegram:123",
+            on_success=on_success, on_failure=on_failure,
+        )
+        scheduler._delivery = Mock()
+        scheduler._delivery.deliver = Mock(return_value=delivered)
+        _stub_execute(scheduler, return_value="Daily summary")
+        return scheduler
+
+    def test_outcome_delivered_when_router_accepts(self):
+        from praisonai.scheduler._base_scheduler import DeliveryOutcome
+        scheduler = self._scheduler(delivered=True)
+        assert scheduler._deliver_result("hi") is DeliveryOutcome.DELIVERED
+
+    def test_outcome_undelivered_when_router_rejects(self):
+        from praisonai.scheduler._base_scheduler import DeliveryOutcome
+        scheduler = self._scheduler(delivered=False)
+        assert scheduler._deliver_result("hi") is DeliveryOutcome.UNDELIVERED
+
+    def test_outcome_not_configured_without_target(self):
+        from praisonai.scheduler._base_scheduler import DeliveryOutcome
+        scheduler = AgentScheduler(Mock(), "Test task")
+        assert scheduler._deliver_result("hi") is DeliveryOutcome.NOT_CONFIGURED
+
+    def test_outcome_suppressed_on_silence_marker(self):
+        from praisonai.scheduler._base_scheduler import DeliveryOutcome
+        scheduler = self._scheduler(delivered=True)
+        assert scheduler._deliver_result("NO_REPLY") is DeliveryOutcome.SUPPRESSED
+
+    def test_undelivered_run_fires_on_failure_not_on_success(self):
+        on_success = Mock()
+        on_failure = Mock()
+        scheduler = self._scheduler(
+            delivered=False, on_success=on_success, on_failure=on_failure
+        )
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_not_called()
+        on_failure.assert_called_once()
+        assert scheduler._undelivered_count == 1
+        stats = scheduler.get_stats()
+        assert stats["undelivered_deliveries"] == 1
+        assert stats["delivered_deliveries"] == 0
+
+    def test_delivered_run_fires_on_success(self):
+        on_success = Mock()
+        on_failure = Mock()
+        scheduler = self._scheduler(
+            delivered=True, on_success=on_success, on_failure=on_failure
+        )
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        on_failure.assert_not_called()
+        assert scheduler._undelivered_count == 0
+        assert scheduler._delivered_count == 1
+        assert scheduler.get_stats()["delivered_deliveries"] == 1
+
+    def test_delivery_exception_is_undelivered_not_success(self):
+        on_success = Mock()
+        on_failure = Mock()
+        scheduler = AgentScheduler(
+            Mock(), "Test task", deliver="telegram:123",
+            on_success=on_success, on_failure=on_failure,
+        )
+        scheduler._delivery = Mock()
+        scheduler._delivery.deliver = Mock(side_effect=RuntimeError("boom"))
+        _stub_execute(scheduler, return_value="Daily summary")
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_not_called()
+        on_failure.assert_called_once()
+        assert scheduler._undelivered_count == 1
+
+    def test_not_configured_run_reports_zero_delivered(self):
+        on_success = Mock()
+        scheduler = AgentScheduler(Mock(), "Test task", on_success=on_success)
+        _stub_execute(scheduler, return_value="Daily summary")
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        assert scheduler._delivered_count == 0
+        stats = scheduler.get_stats()
+        assert stats["delivered_deliveries"] == 0
+        assert stats["undelivered_deliveries"] == 0
+
+    def test_suppressed_run_reports_zero_delivered(self):
+        on_success = Mock()
+        scheduler = self._scheduler(delivered=True, on_success=on_success)
+        _stub_execute(scheduler, return_value="NO_REPLY")
+        scheduler._execute_with_retry(max_retries=1)
+        on_success.assert_called_once()
+        assert scheduler._delivered_count == 0
+        assert scheduler.get_stats()["delivered_deliveries"] == 0

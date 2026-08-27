@@ -122,6 +122,8 @@ class AgentScheduler(_BaseAgentScheduler):
         self._execution_count = 0
         self._success_count = 0
         self._failure_count = 0
+        self._undelivered_count = 0
+        self._delivered_count = 0
         self._total_cost = 0.0
         self._start_time = None
         self._stats_lock = threading.Lock()
