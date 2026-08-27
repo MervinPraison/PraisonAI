@@ -1926,14 +1926,20 @@ async function runAction(def){
     closeOverlay();
   } else if(def.action==='clear'){
     const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
-    let failed=0;
+    let failed=0, activeGone=false;
     for(const c of chats){
       const r=await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id,{method:'DELETE'})
                 .catch(()=>null);
       if(!r||!r.ok) failed++;
+      else if(c.id===chatId) activeGone=true;
     }
+    // The open transcript follows storage, not the batch result: if the active
+    // conversation was one of the deletes that succeeded, blank it even when a
+    // *different* one failed -- otherwise it lingers on screen while gone on disk.
+    if(activeGone){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
     if(failed){ toast(`Could not delete ${failed} conversation(s).`); refreshChats(); closeOverlay(); return; }
-    chatId=rid(); turns.innerHTML=''; syncEmpty(); refreshChats(); closeOverlay();
+    if(!activeGone){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
+    refreshChats(); closeOverlay();
   } else if(def.action==='reveal'){
     const where=await actualDataFolder();
     await navigator.clipboard.writeText(where);
