@@ -30,6 +30,7 @@ Or alongside remote channels in one process::
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import sys
@@ -120,6 +121,14 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         self._is_running = False
         self._started_at: Optional[float] = None
         self._bot_user: Optional[BotUser] = None
+        # Dedicated single daemon-thread executor for the blocking stdin read.
+        # Using our own executor (rather than the loop's default) keeps the
+        # blocking ``readline()`` off the default pool, so a shutdown that
+        # cancels ``start()`` while a read is in flight never blocks
+        # ``asyncio.run``'s ``shutdown_default_executor`` on a line/EOF that may
+        # never arrive — the daemon thread is simply abandoned on interpreter
+        # exit. Created lazily in ``start()``.
+        self._read_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
 
         from ._session import build_session_manager
         # Exposed as ``_session`` (not ``_session_mgr``) so the gateway routing
@@ -233,15 +242,23 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
             display_name="Local",
             is_bot=True,
         )
-        logger.info("Local channel reading from stdin (Ctrl-D or /stop to exit)")
+        logger.info("Local channel reading from stdin (Ctrl-D to exit; /stop cancels the current run)")
 
         loop = asyncio.get_event_loop()
+        self._read_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="praison-local-stdin",
+        )
         try:
             while self._is_running:
                 try:
-                    # Read stdin off the event loop so concurrent channels keep
-                    # running while we wait for a line.
-                    line = await loop.run_in_executor(None, self._read_line)
+                    # Read stdin off the event loop (on a dedicated daemon
+                    # thread) so concurrent channels keep running while we wait
+                    # for a line — and so a cancelled ``start()`` never blocks
+                    # event-loop teardown on a read that may never complete.
+                    line = await loop.run_in_executor(
+                        self._read_executor, self._read_line
+                    )
                 except asyncio.CancelledError:
                     raise
                 if line is None:  # EOF (Ctrl-D) — clean end of the terminal session
@@ -273,8 +290,26 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         return line
 
     async def stop(self) -> None:
-        """Stop the read loop."""
+        """Stop the read loop.
+
+        Tears down the stdin read executor without waiting on the worker: a
+        blocking ``sys.stdin.readline()`` cannot be interrupted from another
+        thread, so joining it would re-introduce the shutdown hang this channel
+        is designed to avoid. We abandon the (daemon-style) worker instead —
+        an unread line is discarded, which is the correct behaviour for a
+        terminal that is being torn down.
+        """
         self._is_running = False
+        executor = self._read_executor
+        self._read_executor = None
+        if executor is not None:
+            try:
+                # ``cancel_futures`` is available on 3.9+; drop still-queued
+                # reads. ``wait=False`` guarantees we never block teardown on an
+                # in-flight ``readline()`` that may never return.
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:  # pragma: no cover — very old Python
+                executor.shutdown(wait=False)
         logger.info("Local channel stopped")
 
     # ── Receiving ───────────────────────────────────────────────────
@@ -364,8 +399,15 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         try:
             sys.stdout.write(text + "\n")
             sys.stdout.flush()
-        except Exception as e:  # noqa: BLE001 — never let a write error kill a turn
+        except Exception as e:  # noqa: BLE001
+            # Propagate: a failed terminal write means the message was NOT
+            # delivered. Swallowing it here would make the shared DeliveryRouter
+            # record a phantom success (skipping its failure handling/retries),
+            # so we surface it like every other adapter's "raise on failure"
+            # contract. ``_handle_line`` still guards its own sends, so a broken
+            # stdout cannot kill the read loop.
             logger.debug("Local send failed: %s", e)
+            raise
         return BotMessage(
             message_id=str(time.time()),
             content=text,

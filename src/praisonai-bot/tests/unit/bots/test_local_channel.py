@@ -96,3 +96,83 @@ def test_deliver_local_routes_through_router(monkeypatch):
     )
     assert ok is True
     assert "proactive-ping" in out.getvalue()
+
+
+def test_send_message_raises_on_write_failure(monkeypatch):
+    """A failed stdout write must propagate so the router records a failure."""
+
+    class _BrokenStdout:
+        def write(self, _):
+            raise OSError("stdout closed")
+
+        def flush(self):
+            pass
+
+    bot = LocalBot()
+    monkeypatch.setattr(sys, "stdout", _BrokenStdout())
+
+    with pytest.raises(OSError):
+        asyncio.run(bot.send_message("local", "hi"))
+
+
+def test_deliver_local_reports_failure_on_broken_stdout(monkeypatch):
+    """The DeliveryRouter must return False when the terminal write fails."""
+    from praisonai_bot.bots import BotOS
+
+    botos = BotOS(agent=_Agent(), platforms=["local"])
+    bot = botos.get_bot("local")
+    bot._adapter = bot._build_adapter()
+
+    class _BrokenStdout:
+        def write(self, _):
+            raise OSError("stdout closed")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(sys, "stdout", _BrokenStdout())
+
+    ok = asyncio.run(
+        botos._delivery_router.deliver("local:local", "proactive-ping")
+    )
+    assert ok is False
+
+
+def test_shutdown_does_not_block_on_pending_stdin_read():
+    """Cancelling ``start()`` mid-read must not hang: the executor is abandoned.
+
+    A blocking ``readline()`` cannot be interrupted, so we verify that
+    ``start()`` cancels promptly and ``stop()`` tears the read executor down
+    without waiting on the in-flight worker.
+    """
+    import threading
+
+    release = threading.Event()
+
+    class _BlockingStdin:
+        def readline(self):
+            release.wait(5)  # simulate a terminal with no input yet
+            return ""
+
+        def isatty(self):
+            return False
+
+    async def _scenario():
+        bot = LocalBot()
+        import sys as _sys
+
+        original = _sys.stdin
+        _sys.stdin = _BlockingStdin()
+        try:
+            task = asyncio.ensure_future(bot.start())
+            await asyncio.sleep(0.05)  # let the read enter the executor
+            task.cancel()
+            # Must complete promptly despite the worker still blocked in read.
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2)
+            assert bot.is_running is False
+            assert bot._read_executor is None
+        finally:
+            release.set()
+            _sys.stdin = original
+
+    asyncio.run(_scenario())
