@@ -652,9 +652,22 @@ export class Agent {
           throw (signal as any).reason ?? new Error('The operation was aborted');
         }
 
-        // Parse arguments
-        const args = JSON.parse(argsString);
-        
+        // Parse arguments. JSON.parse can yield null, an array or a scalar;
+        // AgentEvent.args declares Record<string, unknown>, and a tool wrapper
+        // expecting named arguments cannot use any of those. Reject them here
+        // so the contract holds for both the event and the invocation.
+        const parsedArgs: unknown = JSON.parse(argsString);
+        if (parsedArgs === null || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+          throw new Error(`Invalid arguments for tool ${name}: expected a JSON object`);
+        }
+        const args = parsedArgs as Record<string, unknown>;
+
+        // Announced BEFORE anything can reject it, so every tool_result -- a
+        // denial, a missing function, a thrown error -- has a matching
+        // tool_call to pair with by callId. Emitting it only past the gates
+        // left a denied or unregistered call producing an orphan result.
+        onEvent?.({ type: 'tool_call', callId: id, name, args });
+
         // Check if function exists
         if (!this.toolFunctions[name]) {
           throw new Error(`Function ${name} not registered`);
@@ -679,10 +692,6 @@ export class Agent {
             continue;
           }
         }
-
-        // Announced BEFORE it runs, so a view can show a call in progress
-        // rather than materialising a finished row out of nowhere.
-        onEvent?.({ type: 'tool_call', callId: id, name, args });
 
         // Call the function - registered wrappers handle positional mapping
         const result = await this.toolFunctions[name](args);
