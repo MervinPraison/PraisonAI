@@ -886,12 +886,21 @@ class ToolExecutionMixin:
                             # Strip the private control-plane tag before it can reach
                             # the model or be re-surfaced as the tool's payload.
                             result.pop("_praison_retryable", None)
-                            raise ToolExecutionError(
-                                result.get("error", f"Tool '{function_name}' failed"),
-                                tool_name=function_name,
-                                agent_id=self.name,
-                                is_retryable=is_retryable,
-                            )
+                            if is_retryable:
+                                raise ToolExecutionError(
+                                    result.get("error", f"Tool '{function_name}' failed"),
+                                    tool_name=function_name,
+                                    agent_id=self.name,
+                                    is_retryable=True,
+                                )
+                            # A plain tool-authored {"error": ...} with none of the
+                            # transient/denial markers is the tool's own documented
+                            # way of reporting a recoverable failure (see
+                            # tools/shell_tools.py and the other bundled tools). It is
+                            # the tool's answer, not a framework-level crash — hand it
+                            # back as a normal tool result so the LLM can see it and
+                            # self-correct, instead of aborting the whole run.
+                            break
                         else:
                             # Success path - return the result
                             break

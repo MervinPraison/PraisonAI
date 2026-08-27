@@ -4763,6 +4763,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "applied to streamed responses (iter_stream / stream=True). "
                 "Use chat() for guardrail-validated output."
             )
+        # The input-side guardrail has no streaming constraint (the full prompt
+        # is known before the first token is requested, exactly like chat()),
+        # so validate it here too. Otherwise start(stream=True)/iter_stream()
+        # would silently skip the input guardrail that chat()/achat() enforce.
+        if hasattr(self, '_validate_input_with_guardrail'):
+            _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            if not _in_ok:
+                logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
+                yield f"[Input blocked by guardrail: {_in_err}]"
+                return
+            prompt = _in_prompt
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
