@@ -19,7 +19,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
 | ✅ AI SDK | 38 | 8 | 1121 |
-| ✅ Agent | 68 | 7 | 2103 |
+| ✅ Agent | 68 | 7 | 2170 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 9 | 1 | 165 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -40,7 +40,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Display | 20 | 1 | 342 |
 | ✅ Embeddings | 6 | 3 | 813 |
 | ✅ Evaluation | 8 | 4 | 866 |
-| ✅ Events | 4 | 1 | 157 |
+| ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 4 | 1 | 157 |
 | ✅ Failover | 2 | 1 | 160 |
 | ✅ Files | 10 | 1 | 151 |
@@ -78,7 +78,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Security | 2 | 1 | 157 |
 | ✅ Sessions | 3 | 2 | 429 |
 | ✅ Skills | 7 | 2 | 380 |
-| ✅ Streaming | 2 | 2 | 389 |
+| ✅ Streaming | 2 | 3 | 654 |
 | ✅ Tasks | 4 | 1 | 165 |
 | ✅ Teams | 1 | 1 | 170 |
 | ✅ Telemetry | 6 | 2 | 269 |
