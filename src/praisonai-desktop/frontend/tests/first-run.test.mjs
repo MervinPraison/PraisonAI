@@ -40,7 +40,9 @@ async function boot({ provision = 'ok', steps = [], savedView = null,
   const dom = new JSDOM(HTML, {
     runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
     beforeParse(w) {
-      if (savedView) w.localStorage.setItem('view', savedView);
+      // Model a machine where the user last used the Train tab: the app
+      // restores that view synchronously, before the async engine check runs.
+      if (savedView) try { w.localStorage.setItem('view', savedView); } catch {}
       w.__TAURI__ = {
         core: {
           invoke: async (cmd) => {
@@ -185,4 +187,23 @@ test('a failed setup says why and offers another go', async () => {
   assert.match(b.doc.querySelector('.setup .why').textContent, /no network/,
     'the reason was swallowed');
   assert.ok(b.doc.querySelector('.setup li.failed'), 'the failing step is not marked');
+});
+
+// A restored Train view hides #thread, where the setup wizard renders. Left
+// alone, that buries setup: the title bar says "setup needed" and nothing is on
+// screen to act on -- the reported Windows dead end. The engine gate must win
+// over the restored view while the engine is not ready.
+test('a restored Train view does not hide the setup screen', async () => {
+  const b = await boot({ savedView: 'train' });
+  assert.ok(b.doc.querySelector('.setup'), 'no setup screen');
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'the Train view is still up, hiding the setup wizard');
+});
+
+// The forced switch must not clobber the deliberate choice: once the engine is
+// up, the user's Train tab should return, so we must not have persisted 'chat'.
+test('the forced Chat switch does not overwrite the saved Train choice', async () => {
+  const b = await boot({ savedView: 'train' });
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'the saved view was overwritten by the engine gate');
 });
