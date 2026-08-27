@@ -4,6 +4,7 @@
 //! the webview a validated port. After that the webview talks to the engine
 //! directly over loopback and nothing streams through Tauri IPC.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -111,11 +112,19 @@ pub fn start(
     script: &str,
     timeout: Duration,
     shell_version: &str,
+    env: &BTreeMap<String, String>,
 ) -> Result<Engine, StartError> {
     let mut command = Command::new(python);
     command
         .arg("-u") // unbuffered, or the announcement sits in a pipe buffer
         .arg(script)
+        // The resolved environment, not the inherited one. An exported
+        // PYTHONHOME or PYTHONPATH points the engine at another interpreter's
+        // stdlib or site-packages, so the venv the resolver just proved is
+        // discarded at spawn -- the module written to prevent exactly that
+        // never ran. Clear first, then apply what `spawn_env` produced.
+        .env_clear()
+        .envs(env)
         // Force UTF-8 on both sides of the pipe. Python encodes redirected
         // streams with the locale code page on Windows -- cp1252, or cp932 on
         // a Japanese install -- and those bytes are not valid UTF-8. One of
