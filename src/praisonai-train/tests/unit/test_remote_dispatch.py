@@ -105,6 +105,22 @@ class TestWhatIsHandedOver:
         assert not (tmp_path / "config.yaml").exists(), (
             "a remote run clobbered ./config.yaml")
 
+    def test_a_dataset_named_only_in_the_config_is_shipped(self, tmp_path):
+        # No positional dataset argument, but the resolved config names a local
+        # file. It must still be copied, or the remote process gets a path that
+        # exists only on this machine.
+        data = tmp_path / "d.json"
+        data.write_text("[]", encoding="utf-8")
+        _dispatch({"remote": {"host": "gpubox"}, "dataset": str(data)})
+        sent = FakeRunner.instances[0].started_with["dataset"]
+        assert sent is not None and pathlib.Path(sent) == data
+
+    def test_a_non_local_dataset_is_not_shipped(self, tmp_path):
+        # A HuggingFace id (or a path already on the far side) is not a file to
+        # copy.
+        _dispatch({"remote": {"host": "gpubox"}, "dataset": "org/dataset"})
+        assert FakeRunner.instances[0].started_with["dataset"] is None
+
     def test_the_gpu_expectation_is_passed_through(self):
         _dispatch({"remote": {"host": "gpubox", "gpus": 4}})
         assert FakeRunner.instances[0].started_with["gpus"] == 4
@@ -124,6 +140,20 @@ class TestFailure:
         class Failing(FakeRunner):
             def status(self, run):
                 return "failed"
+
+        import praisonai_train.remote.runner as runner_mod
+        monkeypatch.setattr(runner_mod, "RemoteRunner", Failing)
+        with pytest.raises(typer.Exit):
+            _dispatch({"remote": {"host": "gpubox"}})
+
+    def test_a_failed_status_with_an_exit_code_is_reported_as_failure(self, monkeypatch):
+        # status() returns "failed (exit N)", not a bare "failed". An equality
+        # check matched neither and reported a failed run as success.
+        import typer
+
+        class Failing(FakeRunner):
+            def status(self, run):
+                return "failed (exit 1)"
 
         import praisonai_train.remote.runner as runner_mod
         monkeypatch.setattr(runner_mod, "RemoteRunner", Failing)
@@ -174,13 +204,16 @@ class TestTheCommandActuallyDispatches:
         monkeypatch.chdir(tmp_path)
         config = _config(tmp_path, {"model_name": "unsloth/tiny", "dataset": "d.json"})
         # Stop before the heavy import; the point is only that nothing was sent.
+        import typer
+
         monkeypatch.setattr(train_cmd, "import_code_module",
                             lambda *_a, **_k: (_ for _ in ()).throw(ImportError("no")),
                             raising=False)
-        try:
+        # The ImportError is surfaced as a typer.Exit; asserting it keeps this
+        # test honest -- a blind `except Exception` would pass even if the
+        # command failed for an unrelated reason before the local trainer.
+        with pytest.raises(typer.Exit):
             train_cmd.train_llm(config=config)
-        except Exception:
-            pass
         assert FakeRunner.instances == [], "a local run was sent to a remote host"
 
     def test_dry_run_shows_the_remote_block_and_sends_nothing(self, tmp_path, monkeypatch):

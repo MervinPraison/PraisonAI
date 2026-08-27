@@ -116,3 +116,15 @@ class TestRefusals:
     def test_a_non_mapping_remote_block_is_refused(self):
         with pytest.raises(settings.RemoteSettingsError):
             settings.resolve({"remote": "gpubox"}, {})
+
+    def test_a_falsey_non_mapping_remote_block_is_refused(self):
+        # [], "" and false are present but malformed. `remote: or {}` would
+        # have swallowed them into local training instead of flagging the
+        # mistake -- only an omitted or null value means "train here".
+        for bad in ([], "", False):
+            with pytest.raises(settings.RemoteSettingsError):
+                settings.resolve({"remote": bad}, {})
+
+    def test_an_omitted_or_null_remote_block_trains_here(self):
+        assert settings.resolve({}, {}) == {}
+        assert settings.resolve({"remote": None}, {}) == {}

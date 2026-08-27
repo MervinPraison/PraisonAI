@@ -55,11 +55,18 @@ def resolve(config: dict, overrides: dict) -> dict:
     wins. Returns {} when no host is settled, which is how "train locally" is
     expressed -- there is no separate mode switch to get out of step with it.
     """
-    block = config.get("remote") or {}
-    if not isinstance(block, dict):
+    # Only an omitted or null `remote` means "train locally". A falsey but
+    # present value -- [], "", false -- is a malformed block, not an absence,
+    # and `... or {}` would have quietly swallowed it into local training.
+    raw = config.get("remote")
+    if raw is None:
+        block = {}
+    elif not isinstance(raw, dict):
         raise RemoteSettingsError(
             "remote: must be a mapping of key: value, not "
-            f"{type(block).__name__}")
+            f"{type(raw).__name__}")
+    else:
+        block = raw
 
     merged = defaults()
     merged.update({k: v for k, v in block.items() if v is not None})
