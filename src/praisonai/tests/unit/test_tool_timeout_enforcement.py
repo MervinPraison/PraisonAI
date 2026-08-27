@@ -280,3 +280,265 @@ def test_autogen_adapter_passes_through_normal_result():
 
     guarded = AutoGenAdapter._wrap_tool_for_execution(_ok, "_ok")
     assert guarded(41) == 42
+
+
+# --- Issue #4449: wrapper gaps -------------------------------------------------
+
+
+def test_uniform_timeout_all_equal_declared():
+    # When every declared per-agent tool_timeout is identical a single uniform
+    # wrap is applied (cheapest path, same behaviour as before).
+    gen = _make_generator()
+    config = {"roles": {"a": {"tool_timeout": 10}, "b": {"tool_timeout": 10}}}
+    assert gen._resolve_uniform_tool_timeout(config) == 10.0
+
+
+def test_uniform_timeout_none_for_heterogeneous():
+    # Heterogeneous per-agent budgets must NOT collapse to a single value; the
+    # uniform resolver returns None so the caller falls back to per-agent wraps.
+    gen = _make_generator()
+    config = {"roles": {"a": {"tool_timeout": 5}, "b": {"tool_timeout": 120}}}
+    assert gen._resolve_uniform_tool_timeout(config) is None
+
+
+def test_uniform_timeout_cli_wins():
+    gen = _make_generator()
+    gen.cli_config = {"tool_timeout": 15}
+    config = {"roles": {"a": {"tool_timeout": 5}, "b": {"tool_timeout": 120}}}
+    assert gen._resolve_uniform_tool_timeout(config) == 15.0
+
+
+def test_resolve_agent_tool_timeout_per_agent():
+    # Each agent gets its own declared budget, no cross-agent downgrade.
+    gen = _make_generator()
+    config = {"roles": {"fast": {"tool_timeout": 5}, "slow": {"tool_timeout": 120}}}
+    assert gen.resolve_agent_tool_timeout("fast", config) == 5.0
+    assert gen.resolve_agent_tool_timeout("slow", config) == 120.0
+
+
+def test_resolve_agent_tool_timeout_falls_back_to_cli():
+    gen = _make_generator()
+    gen.cli_config = {"tool_timeout": 42}
+    config = {"roles": {"fast": {"tool_timeout": 5}, "plain": {}}}
+    assert gen.resolve_agent_tool_timeout("fast", config) == 5.0
+    assert gen.resolve_agent_tool_timeout("plain", config) == 42.0
+
+
+def test_make_agent_tool_wrap_resolver_none_without_declarations():
+    gen = _make_generator()
+    assert gen.make_agent_tool_wrap_resolver({"roles": {"a": {}}}) is None
+
+
+def test_heterogeneous_per_agent_timeouts_honoured_end_to_end():
+    # A heterogeneous config leaves the shared tools_dict unwrapped and instead
+    # exposes a per-agent resolver so each agent's tools carry its own budget.
+    gen = _make_generator()
+    gen.cli_config = {}
+
+    never = threading.Event()
+
+    def _blocking():
+        never.wait(30)
+        return "done"
+
+    def _fast():
+        return "quick"
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"scrape_page": _blocking, "internet_search": _fast}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+
+    config = {
+        "roles": {
+            "fast_router": {"tool_timeout": 0.3, "tools": ["internet_search"]},
+            "slow_analyst": {"tool_timeout": 30, "tools": ["scrape_page"]},
+        }
+    }
+
+    try:
+        from praisonai.agents_generator import ToolTimeoutError
+
+        tools_dict = gen._build_tools_dict(config)
+        # Shared dict is NOT uniformly wrapped (heterogeneous budgets).
+        assert tools_dict["scrape_page"] is _blocking
+        # A per-agent resolver was exposed for adapters to apply.
+        resolver = gen.cli_config.get("_agent_tool_wrap_resolver")
+        assert callable(resolver)
+
+        # The fast agent's tools get a tight 0.3s guard.
+        fast_wrap = resolver("fast_router")
+        assert callable(fast_wrap)
+        # The slow agent keeps its own larger budget (not downgraded to 0.3).
+        assert gen.resolve_agent_tool_timeout("slow_analyst", config) == 30.0
+
+        guarded_blocking = fast_wrap(_blocking)
+        with pytest.raises(ToolTimeoutError) as exc_info:
+            guarded_blocking()
+        assert exc_info.value.timeout_seconds == 0.3
+    finally:
+        never.set()
+        gen.close()
+
+
+def test_build_agent_specs_applies_per_agent_wrap():
+    # build_agent_specs wraps each agent's resolved tools with that agent's
+    # resolver-provided wrap; tool objects stay shared (only the guard differs).
+    from praisonai.framework_adapters._config_builder import build_agent_specs
+
+    def tool_a():
+        return "a"
+
+    tools_dict = {"tool_a": tool_a}
+
+    def _fmt(v, topic=""):
+        return v
+
+    seen = {}
+
+    def resolver(agent_key):
+        seen[agent_key] = True
+
+        def wrap(tool, _key=agent_key):
+            def _wrapped(*args, **kwargs):
+                return (_key, tool(*args, **kwargs))
+            return _wrapped
+
+        return wrap
+
+    config = {
+        "roles": {
+            "alpha": {"role": "A", "tools": ["tool_a"]},
+            "beta": {"role": "B", "tools": ["tool_a"]},
+        }
+    }
+
+    specs = build_agent_specs(
+        config, "topic", tools_dict, _fmt, agent_tool_wrap_resolver=resolver
+    )
+    by_key = {s.key: s for s in specs}
+    assert by_key["alpha"].tools[0]() == ("alpha", "a")
+    assert by_key["beta"].tools[0]() == ("beta", "a")
+    assert seen == {"alpha": True, "beta": True}
+
+
+def test_build_agent_specs_no_wrap_when_resolver_absent():
+    from praisonai.framework_adapters._config_builder import build_agent_specs
+
+    def tool_a():
+        return "a"
+
+    def _fmt(v, topic=""):
+        return v
+
+    config = {"roles": {"alpha": {"role": "A", "tools": ["tool_a"]}}}
+    specs = build_agent_specs(config, "topic", {"tool_a": tool_a}, _fmt)
+    assert specs[0].tools[0] is tool_a
+
+
+def test_maybe_inject_centric_tools_applies_wrap():
+    # Injected ACP/LSP centric tools must carry the same timeout wrap as the
+    # YAML-declared tools instead of silently bypassing it.
+    try:
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+    except ImportError:
+        pytest.skip("PraisonAIAdapter not available")
+
+    adapter = PraisonAIAdapter.__new__(PraisonAIAdapter)
+
+    class _FakeRuntime:
+        pass
+
+    def _lsp_tool():
+        return "def"
+
+    # Patch the lazily-imported factory used inside the method.
+    import sys
+    import types
+
+    fake_mod = types.ModuleType("praisonai.cli.features.agent_tools")
+    fake_mod.create_agent_centric_tools = lambda rt: {"lsp_find_definition": _lsp_tool}
+    sys.modules["praisonai.cli.features.agent_tools"] = fake_mod
+    try:
+        marker = []
+
+        def wrap(tool):
+            marker.append(tool)
+            return lambda *a, **k: ("wrapped", tool())
+
+        merged = adapter._maybe_inject_centric_tools(
+            _FakeRuntime(), {"existing": lambda: "x"}, wrap=wrap
+        )
+        assert marker == [_lsp_tool]
+        assert merged["lsp_find_definition"]() == ("wrapped", "def")
+    finally:
+        del sys.modules["praisonai.cli.features.agent_tools"]
+
+
+def test_autogen_code_execution_disabled_by_default():
+    # Safe-by-default: without config.autogen.code_execution the resolved config
+    # must disable local code execution (no host RCE surface).
+    _assert_autogen_code_exec({}, expected=False, expected_human="TERMINATE")
+
+
+def test_autogen_code_execution_opt_in_defaults_docker():
+    _assert_autogen_code_exec(
+        {"config": {"autogen": {"code_execution": True}}},
+        expected={"work_dir": "coding", "use_docker": True},
+        expected_human="TERMINATE",
+    )
+
+
+def test_autogen_code_execution_dict_defaults_docker_true():
+    _assert_autogen_code_exec(
+        {"config": {"autogen": {"code_execution": {"work_dir": "x"}}}},
+        expected={"work_dir": "x", "use_docker": True},
+        expected_human="TERMINATE",
+    )
+
+
+def test_autogen_human_input_mode_overridable():
+    _assert_autogen_code_exec(
+        {"config": {"autogen": {"human_input_mode": "ALWAYS"}}},
+        expected=False,
+        expected_human="ALWAYS",
+    )
+
+
+def _assert_autogen_code_exec(config, *, expected, expected_human):
+    """Drive AutoGenAdapter.run just far enough to capture UserProxyAgent kwargs."""
+    try:
+        from praisonai.framework_adapters.autogen_adapter import AutoGenAdapter
+    except ImportError:
+        pytest.skip("AutoGen adapter not available")
+
+    import sys
+    import types
+    from unittest import mock
+
+    captured = {}
+
+    class _FakeUserProxy:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    fake_autogen = types.ModuleType("autogen")
+    fake_autogen.UserProxyAgent = _FakeUserProxy
+    fake_autogen.AssistantAgent = lambda **k: None
+
+    adapter = AutoGenAdapter()
+
+    # Stop execution right after user_proxy construction by making the shared
+    # spec builder raise; we only care about the captured UserProxyAgent kwargs.
+    with mock.patch.dict(sys.modules, {"autogen": fake_autogen}):
+        with mock.patch(
+            "praisonai.framework_adapters._config_builder.build_agent_specs",
+            side_effect=RuntimeError("stop after user_proxy"),
+        ):
+            with pytest.raises(RuntimeError, match="stop after user_proxy"):
+                adapter.run(config, [{"model": "gpt-4o-mini"}], "topic")
+
+    assert captured["code_execution_config"] == expected
+    assert captured["human_input_mode"] == expected_human

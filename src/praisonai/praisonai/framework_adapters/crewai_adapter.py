@@ -74,8 +74,14 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 tasks = []
                 tasks_dict = {}
 
-                # Single canonical YAML -> spec conversion (shared across adapters)
-                specs = build_agent_specs(config, topic, tools_dict, self._format_template)
+                # Single canonical YAML -> spec conversion (shared across adapters).
+                # Honour per-agent tool_timeout budgets via the resolver threaded
+                # from the generator through cli_config.
+                agent_tool_wrap_resolver = (cli_config or {}).get("_agent_tool_wrap_resolver")
+                specs = build_agent_specs(
+                    config, topic, tools_dict, self._format_template,
+                    agent_tool_wrap_resolver=agent_tool_wrap_resolver,
+                )
 
                 # Create agents from the normalized specs
                 for spec in specs:

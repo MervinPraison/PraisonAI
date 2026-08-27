@@ -134,16 +134,51 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         import autogen
         
         llm_config_dict = {"config_list": llm_config}
-        
+
+        # Safe-by-default local code execution. Previously the user_proxy was
+        # hard-wired with human_input_mode="NEVER" and use_docker=False, so every
+        # framework=autogen run silently executed LLM-emitted code blocks on the
+        # host with no consent, sandbox, or opt-out. Code execution is now opt-in
+        # via config.autogen.code_execution and defaults Docker ON when enabled.
+        autogen_cfg = (config.get("config") or {}).get("autogen", {}) if isinstance(config, dict) else {}
+        if not isinstance(autogen_cfg, dict):
+            autogen_cfg = {}
+        code_exec_cfg = autogen_cfg.get("code_execution")  # None | False | True | dict
+
+        if code_exec_cfg is None or code_exec_cfg is False:
+            # Safe default: disable local code execution unless explicitly opted in.
+            resolved_code_exec = False
+        elif code_exec_cfg is True:
+            # Opt-in with no overrides: keep Docker on, sandbox the working dir.
+            resolved_code_exec = {"work_dir": "coding", "use_docker": True}
+        elif isinstance(code_exec_cfg, dict):
+            # Dict opt-in: honour user overrides but default use_docker to True.
+            resolved_code_exec = {"work_dir": "coding", "use_docker": True, **code_exec_cfg}
+        else:
+            logger.warning(
+                "framework=autogen: config.autogen.code_execution=%r is not a "
+                "recognised value (expected bool/dict); disabling code execution.",
+                code_exec_cfg,
+            )
+            resolved_code_exec = False
+
+        if isinstance(resolved_code_exec, dict) and not resolved_code_exec.get("use_docker", True):
+            logger.warning(
+                "framework=autogen: code_execution is enabled with use_docker=False; "
+                "LLM-generated code will run directly on the host. "
+                "Set config.autogen.code_execution.use_docker: true to sandbox."
+            )
+
+        # No longer force human_input_mode="NEVER"; default to TERMINATE so an
+        # operator can intervene, while remaining overridable via YAML.
+        human_input_mode = autogen_cfg.get("human_input_mode", "TERMINATE")
+
         # Set up user proxy agent
         user_proxy = autogen.UserProxyAgent(
             name="User",
-            human_input_mode="NEVER",
+            human_input_mode=human_input_mode,
             is_termination_msg=lambda x: (x.get("content") or "").rstrip().rstrip(".").lower().endswith("terminate") or "TERMINATE" in (x.get("content") or ""),
-            code_execution_config={
-                "work_dir": "coding",
-                "use_docker": False,
-            }
+            code_execution_config=resolved_code_exec,
         )
         
         from ._config_builder import build_agent_specs
@@ -155,8 +190,15 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         # first callable in AutoGen's _function_map (last-write-wins).
         registered_for_execution = set()
 
-        # Single canonical YAML -> spec conversion (shared across adapters)
-        specs = build_agent_specs(config, topic, tools_dict, self._format_template)
+        # Single canonical YAML -> spec conversion (shared across adapters).
+        # Honour per-agent tool_timeout budgets via the resolver threaded from
+        # the generator through cli_config (each tool still passes through
+        # _wrap_tool_for_execution below to translate a timeout for the LLM).
+        agent_tool_wrap_resolver = (cli_config or {}).get("_agent_tool_wrap_resolver")
+        specs = build_agent_specs(
+            config, topic, tools_dict, self._format_template,
+            agent_tool_wrap_resolver=agent_tool_wrap_resolver,
+        )
 
         # Create agents from the normalized specs
         for spec in specs:
