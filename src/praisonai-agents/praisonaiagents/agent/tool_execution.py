@@ -883,23 +883,35 @@ class ToolExecutionMixin:
                                     # the _outer_timeout clause above already does.
                                     and not self._tool_declares_not_idempotent(function_name))
                             )
+                            # A tool that *raised* is flattened into an error dict
+                            # tagged with ``_praison_retryable`` (see
+                            # _execute_tool_impl). A raised exception is a
+                            # framework-level tool FAILURE — it must surface as a
+                            # ToolExecutionError so the run is finalized failed and
+                            # a genuine RuntimeError/SMTP-down/rate-limit-text tool
+                            # is never silently downgraded to a success (parity with
+                            # the base behaviour and test_tool_failure_not_relabelled).
+                            # ``is_retryable`` above decides only whether the outer
+                            # loop retries, not whether it raises.
+                            raised_exception = "_praison_retryable" in result
                             # Strip the private control-plane tag before it can reach
                             # the model or be re-surfaced as the tool's payload.
                             result.pop("_praison_retryable", None)
-                            if is_retryable:
+                            if is_retryable or raised_exception:
                                 raise ToolExecutionError(
                                     result.get("error", f"Tool '{function_name}' failed"),
                                     tool_name=function_name,
                                     agent_id=self.name,
-                                    is_retryable=True,
+                                    is_retryable=is_retryable,
                                 )
                             # A plain tool-authored {"error": ...} with none of the
-                            # transient/denial markers is the tool's own documented
-                            # way of reporting a recoverable failure (see
-                            # tools/shell_tools.py and the other bundled tools). It is
-                            # the tool's answer, not a framework-level crash — hand it
-                            # back as a normal tool result so the LLM can see it and
-                            # self-correct, instead of aborting the whole run.
+                            # transient/denial markers and no raised-exception tag is
+                            # the tool's own documented way of *returning* a
+                            # recoverable failure (see tools/shell_tools.py and the
+                            # other bundled tools). It is the tool's answer, not a
+                            # framework-level crash — hand it back as a normal tool
+                            # result so the LLM can see it and self-correct, instead
+                            # of aborting the whole run.
                             break
                         else:
                             # Success path - return the result
