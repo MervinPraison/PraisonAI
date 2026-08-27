@@ -2610,20 +2610,47 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         return False
 
+    def _own_agent_names(self) -> set:
+        """Names of this instance's own agents, for token-report scoping."""
+        return {
+            getattr(agent, "name", None)
+            for agent in (self.agents or [])
+            if getattr(agent, "name", None)
+        }
+
+    def _scoped_recent_interactions(self, own_names: set) -> List[Dict[str, Any]]:
+        """Return this instance's own recorded interactions, most-recent last.
+
+        The process-wide collector keeps a bounded window of every agent's
+        interactions; filter it to this instance's agent names so per-model
+        totals, interaction counts, and the detailed report never leak another
+        concurrent instance's records.
+        """
+        try:
+            interactions = get_token_collector().get_recent_interactions(
+                limit=get_token_collector()._max_recent
+            )
+        except Exception:
+            interactions = get_token_collector().get_recent_interactions(limit=100)
+        return [i for i in interactions if i.get("agent") in own_names]
+
     def _scoped_token_summary(self) -> Dict[str, Any]:
         """Return the global token summary filtered to this instance's agents.
 
         The process-wide TokenCollector aggregates every agent in the process,
         so two concurrent PraisonAIAgents instances would otherwise read each
-        other's tokens (a cross-tenant usage/cost leak). This instance's own
-        agent names are a natural scoping key: the collector already breaks
-        usage down by_agent, so we sum only the rows belonging to this team.
+        other's totals. Scope every reported field — ``by_agent``, ``by_model``,
+        ``total_interactions`` and the totals — to this instance's own agent
+        names so per-instance/per-tenant cost accounting reports only its own
+        spend. ``by_agent`` is taken from the collector's aggregate breakdown;
+        ``by_model`` and ``total_interactions`` are re-derived from this
+        instance's own interaction records (the aggregate cannot be split by
+        model per agent). Falls back to the unfiltered summary when this
+        instance has no named agents to scope by.
         """
-        collector = get_token_collector()
-        summary = collector.get_session_summary()
+        summary = get_token_collector().get_session_summary()
+        own_names = self._own_agent_names()
         by_agent = summary.get("by_agent", {})
-        own_names = {getattr(a, "name", None) for a in (self.agents or [])}
-        own_names.discard(None)
         # No named agents to scope by (or nothing tracked yet): fall back to the
         # unfiltered summary rather than silently reporting zeros.
         if not own_names or not by_agent:
@@ -2638,51 +2665,34 @@ class AgentTeam(SpawnAnnounceProtocol):
             "total_tokens": 0,
         }
         for metrics in scoped_by_agent.values():
-            for key in totals:
-                totals[key] += metrics.get(key, 0)
+            for key, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    totals[key] = totals.get(key, 0) + value
 
-        # total_interactions and by_model are aggregated process-wide by the
-        # collector, so copying them would leak other teams' activity into this
-        # team's report. Rebuild both from the per-interaction log, keeping only
-        # rows tagged with one of this team's agent names. The recent log is
-        # capped (see TokenCollector._max_recent), so these two fields are a
-        # best-effort scoped view over the retained window; the token totals
-        # above stay exact because they come from the full by_agent aggregate.
-        scoped_by_model: Dict[str, Dict[str, int]] = {}
-        scoped_interactions = 0
-        for row in collector.get_recent_interactions(limit=collector._max_recent):
-            if row.get("agent") not in own_names:
+        # Re-derive per-model totals and the interaction count from this
+        # instance's own records so they are not copied wholesale from the
+        # process-global summary (which mixes in other instances' models and
+        # counts). The collector's ``by_agent`` aggregate cannot be split by
+        # model, so the per-interaction window is the correct source.
+        own_interactions = self._scoped_recent_interactions(own_names)
+        by_model: Dict[str, Dict[str, int]] = {}
+        for interaction in own_interactions:
+            model = interaction.get("model")
+            metrics = interaction.get("metrics") or {}
+            if not model:
                 continue
-            scoped_interactions += 1
-            model = row.get("model") or "unknown"
-            row_metrics = row.get("metrics", {})
-            bucket = scoped_by_model.setdefault(model, {})
-            for key, value in row_metrics.items():
-                bucket[key] = bucket.get(key, 0) + value
+            bucket = by_model.setdefault(model, {})
+            for key, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    bucket[key] = bucket.get(key, 0) + value
 
         return {
-            "total_interactions": scoped_interactions,
-            "total_tokens": totals["total_tokens"],
+            "total_interactions": len(own_interactions),
+            "total_tokens": totals.get("total_tokens", 0),
             "total_metrics": totals,
-            "by_model": scoped_by_model,
+            "by_model": by_model,
             "by_agent": scoped_by_agent,
         }
-
-    def _scoped_recent_interactions(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Recent interactions filtered to this team's agents.
-
-        Mirrors the scoping in _scoped_token_summary so get_detailed_token_report
-        never surfaces another concurrent team's interaction log. Falls back to
-        the unfiltered recent list only when this team has no named agents.
-        """
-        collector = get_token_collector()
-        own_names = {getattr(a, "name", None) for a in (self.agents or [])}
-        own_names.discard(None)
-        recent = collector.get_recent_interactions(limit=collector._max_recent)
-        if not own_names:
-            return recent[-limit:]
-        scoped = [row for row in recent if row.get("agent") in own_names]
-        return scoped[-limit:]
 
     def get_token_usage_summary(self) -> Dict[str, Any]:
         """Get a summary of token usage across this team's agents and tasks."""
@@ -2697,7 +2707,13 @@ class AgentTeam(SpawnAnnounceProtocol):
             return {"error": "Token tracking not available"}
         
         summary = self._scoped_token_summary()
-        recent = self._scoped_recent_interactions(limit=20)
+        own_names = self._own_agent_names()
+        if own_names:
+            # Only surface this instance's own interactions so the detailed
+            # report never exposes another concurrent instance's records.
+            recent = self._scoped_recent_interactions(own_names)[-20:]
+        else:
+            recent = get_token_collector().get_recent_interactions(limit=20)
         
         # Calculate cost estimates (example rates)
         cost_per_1k_input = 0.0005  # $0.0005 per 1K input tokens
