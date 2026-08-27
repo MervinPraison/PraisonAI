@@ -254,6 +254,62 @@ class HealthReportsWhereItLives(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
 
+class LeafStoreDeletion(unittest.TestCase):
+    """The real stores, not a stand-in.
+
+    FallbackSecretStore was hardened so a delete must succeed everywhere it
+    could be read from -- but it was only ever tested against a fake, and the
+    real leaves underneath it returned True whatever happened. The write path
+    checked its exit status; the delete path did not. A locked keychain, or a
+    Linux session with no D-Bus, left the credential intact and reported that
+    it had been removed. It then came back on the next launch.
+
+    A fake binary on PATH stands in for `security` / `secret-tool`, so this
+    never touches a real keychain.
+    """
+
+    def setUp(self):
+        self.bin = tempfile.mkdtemp(prefix="praison-fakebin-")
+        self.old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = self.bin + os.pathsep + self.old_path
+
+    def tearDown(self):
+        os.environ["PATH"] = self.old_path
+        shutil.rmtree(self.bin, ignore_errors=True)
+
+    def _fake(self, name, script):
+        path = pathlib.Path(self.bin) / name
+        path.write_text("#!/bin/sh\n" + script, encoding="utf-8")
+        path.chmod(0o755)
+
+    def test_a_locked_keychain_does_not_report_a_successful_delete(self):
+        # 51 is what `security` returns when the keychain will not unlock.
+        self._fake("security", 'if [ "$1" = "delete-generic-password" ]; then exit 51; fi\nexit 0\n')
+        self.assertFalse(server.KeychainSecretStore().set("api_key", ""),
+                         "a delete that could not happen reported success")
+
+    def test_deleting_something_already_absent_is_a_success(self):
+        # 44 is "no such item". The key is gone, which is what was asked for.
+        self._fake("security", 'if [ "$1" = "delete-generic-password" ]; then exit 44; fi\nexit 0\n')
+        self.assertTrue(server.KeychainSecretStore().set("api_key", ""),
+                        "an already-absent key was reported as a failed delete")
+
+    def test_a_keychain_delete_that_works_still_reports_success(self):
+        self._fake("security", "exit 0\n")
+        self.assertTrue(server.KeychainSecretStore().set("api_key", ""))
+
+    def test_secret_tool_failure_is_not_reported_as_a_delete(self):
+        # No D-Bus session: `secret-tool` cannot reach the collection.
+        self._fake("secret-tool", 'if [ "$1" = "clear" ]; then exit 1; fi\nexit 0\n')
+        self.assertFalse(server.SecretToolSecretStore().set("api_key", ""),
+                         "a delete that could not happen reported success")
+
+    def test_secret_tool_success_is_reported(self):
+        # `secret-tool clear` exits 0 whether or not it matched anything.
+        self._fake("secret-tool", "exit 0\n")
+        self.assertTrue(server.SecretToolSecretStore().set("api_key", ""))
+
+
 class SecretDeletion(unittest.TestCase):
     """Clearing a secret must clear it everywhere it could have landed.
 

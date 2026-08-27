@@ -707,10 +707,18 @@ class KeychainSecretStore:
                                check=True, capture_output=True, timeout=10,
                                **_quiet_subprocess_kwargs())
             else:
-                subprocess.run(["security", "delete-generic-password",
-                                "-s", KEYCHAIN_SERVICE, "-a", name],
-                               capture_output=True, timeout=10,
-                               **_quiet_subprocess_kwargs())
+                # The write path above checks its exit status; this one did
+                # not, and returned True regardless. A locked keychain leaves
+                # the item intact, so "your key was removed" was reported
+                # while the credential stayed live and came back on the next
+                # launch. 44 is "no such item", which is a delete that has
+                # already happened.
+                removed = subprocess.run(
+                    ["security", "delete-generic-password",
+                     "-s", KEYCHAIN_SERVICE, "-a", name],
+                    capture_output=True, timeout=10,
+                    **_quiet_subprocess_kwargs())
+                return removed.returncode in (0, 44)
             return True
         except Exception:  # noqa: BLE001 - a keychain failure must not lose the turn
             return False
@@ -740,9 +748,15 @@ class SecretToolSecretStore:
                                input=value.encode(), check=True,
                                capture_output=True, timeout=10)
             else:
-                subprocess.run(["secret-tool", "clear",
-                                "service", KEYCHAIN_SERVICE, "account", name],
-                               capture_output=True, timeout=10)
+                # As above: unchecked, so an unavailable D-Bus session (a
+                # headless or SSH login) reported a delete that never
+                # happened. `secret-tool clear` exits 0 when it matches
+                # nothing, so a non-zero status here is a real failure.
+                cleared = subprocess.run(
+                    ["secret-tool", "clear",
+                     "service", KEYCHAIN_SERVICE, "account", name],
+                    capture_output=True, timeout=10)
+                return cleared.returncode == 0
             return True
         except Exception:  # noqa: BLE001
             return False
@@ -1887,7 +1901,13 @@ class Handler(BaseHTTPRequestHandler):
 
             for chunk in agent.start(prompt, stream=True,
                                      **_llm_overrides(load_settings())):
-                _drain_tools()
+                # Counted here too. This call drains the queue, so discarding
+                # its result meant the tally further down always read zero
+                # unless the loop body never ran at all -- and the tests only
+                # covered that one case, so the count looked right while every
+                # stream that yielded anything before dying still reported
+                # "the engine produced no output" under its own tool cards.
+                tools_shown += _drain_tools()
                 if run_id and _is_cancelled(run_id):
                     # Verified by side effect: emission stops. The client is told
                     # explicitly rather than inferring it from a stream that ends.

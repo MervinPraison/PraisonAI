@@ -130,6 +130,34 @@ class ChatStream(unittest.TestCase):
         results = [d for k, d in frames if k == "tool_result"]
         self.assertEqual(results[0]["output"], "2026-08-27 00:13:35")
 
+    def test_a_stream_that_yielded_something_first_still_counts_its_tools(self):
+        # Every tool-then-die test above uses chunks=(), which is the one path
+        # where the loop body never runs -- so the drain inside the loop was
+        # never exercised and its discarded return value went unnoticed. One
+        # frame of anything is enough to take the other path.
+        self._install(chunks=[{"type": "reasoning", "text": "thinking"}], tools=[_tool()])
+        frames = self._chat()
+        errors = [d for k, d in frames if k == "error"]
+        self.assertTrue(errors, "no error was reported")
+        self.assertEqual(
+            errors[0].get("kind"), "no_answer",
+            "a stream that yielded a non-text frame lost its tool count")
+        self.assertIn("1 tool call(s)", errors[0]["message"])
+
+    def test_an_empty_text_chunk_does_not_lose_the_tool_count(self):
+        self._install(chunks=[""], tools=[_tool()])
+        errors = [d for k, d in self._chat() if k == "error"]
+        self.assertTrue(errors, "no error was reported")
+        self.assertEqual(errors[0].get("kind"), "no_answer")
+
+    def test_tools_are_counted_once_not_twice(self):
+        # The queue is drained in two places now. Counting the same event in
+        # both would inflate the number the user is shown.
+        self._install(chunks=[{"type": "reasoning", "text": "x"}],
+                      tools=[_tool("a"), _tool("b")])
+        errors = [d for k, d in self._chat() if k == "error"]
+        self.assertIn("2 tool call(s)", errors[0]["message"])
+
     def test_the_message_says_how_many_tools_ran(self):
         self._install(chunks=(), tools=[_tool("a"), _tool("b")])
         errors = [d for k, d in self._chat() if k == "error"]
