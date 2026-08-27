@@ -287,4 +287,17 @@ assert('fork sync PR link rejected', !mg.isInternalPullRequestLink(
   'PraisonAI'
 ));
 
+assert('dispatch blocked when merge gate active', mg.mergeGateDispatchBlockedReason({
+  labels: ['claude-merge-gate-active'],
+  pendingRuns: 0,
+}) === 'merge gate already active on PR');
+assert('dispatch blocked when queue saturated', mg.mergeGateDispatchBlockedReason({
+  labels: [],
+  pendingRuns: 3,
+})?.includes('already queued or in progress'));
+assert('dispatch allowed when queue below cap', mg.mergeGateDispatchBlockedReason({
+  labels: [],
+  pendingRuns: 2,
+}) == null);
+
 process.exit(failed ? 1 : 0);

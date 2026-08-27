@@ -33,7 +33,8 @@ on:
       - claude-merge-gate
 
 concurrency:
-  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || github.event.workflow_run.id || 'scan' }}
+  # Serialize workflow_run auto-dispatches (Core Tests / Claude Assistant fan-out).
+  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || (github.event_name == 'workflow_run' && 'auto-dispatch') || 'scan' }}
   cancel-in-progress: false
 
 env:
@@ -104,6 +105,10 @@ jobs:
             );
             if (!check.ready) {
               core.info(`PR #${prNumber} not ready: ${check.reasons.join(', ')}`);
+              return;
+            }
+
+            if (await mergeGate.shouldSkipMergeGateDispatch(github, owner, repo, prNumber, core)) {
               return;
             }
 
