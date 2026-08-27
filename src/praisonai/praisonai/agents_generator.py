@@ -897,12 +897,40 @@ class AgentsGenerator:
         # Enforce tool_timeout from CLI/YAML at the wrapper layer so the field is
         # not silently dropped. The timeout stack (_wrap_tool_with_timeout) is
         # framework-agnostic and works for both the native and external adapters.
-        effective = self._resolve_effective_tool_timeout(config)
-        if effective and effective > 0:
-            tools_dict = {
-                name: self._wrap_tool_with_timeout(tool, effective)
-                for name, tool in tools_dict.items()
-            }
+        # Determine whether a single uniform timeout applies to every agent, or
+        # whether agents declared *heterogeneous* per-agent budgets. A uniform
+        # value can still be wrapped once onto the shared dict (cheapest path);
+        # heterogeneous values must be wrapped per-agent so a documented
+        # per-agent ``tool_timeout`` is honoured instead of being silently
+        # downgraded to the tightest value for the whole run.
+        # The uniform and per-agent paths are mutually exclusive. Always resolve
+        # BOTH internal keys on every call (setting the inactive one to None) so
+        # that when the *same* generator instance is reused with a different
+        # timeout layout, a stale closure from a previous run can never leak into
+        # the adapters and apply the wrong budget to the current run.
+        uniform = self._resolve_uniform_tool_timeout(config)
+        wrap = None
+        resolver = None
+        if uniform and uniform > 0:
+            wrap = lambda t, _sec=uniform: self._wrap_tool_with_timeout(t, _sec)
+            tools_dict = {name: wrap(tool) for name, tool in tools_dict.items()}
+        else:
+            # No single uniform timeout. If any agent declared a per-agent
+            # tool_timeout, expose a resolver so adapters wrap each agent's tools
+            # with that agent's own budget (tools stay shared; only the guard
+            # closure differs). Falls back to no wrap for agents without one.
+            resolver = self.make_agent_tool_wrap_resolver(config)
+
+        # Expose the per-run wrap so adapters that inject *more* tools after this
+        # point (e.g. PraisonAIAdapter's ACP/LSP centric tools) apply the same
+        # timeout guard instead of silently bypassing it; expose the per-agent
+        # resolver for heterogeneous budgets. Both keys are written every time so
+        # the inactive path is cleared rather than left holding a prior closure.
+        self.cli_config = {
+            **(self.cli_config or {}),
+            "_tool_timeout_wrap": wrap,
+            "_agent_tool_wrap_resolver": resolver,
+        }
         return tools_dict
 
     def _resolve_effective_tool_timeout(self, config):
@@ -942,6 +970,76 @@ class AgentsGenerator:
                     name, v, tightest,
                 )
         return tightest
+
+    @staticmethod
+    def _declared_agent_timeout(entity):
+        """Return a positive numeric ``tool_timeout`` declared on an entity, else None."""
+        v = entity.get("tool_timeout") if isinstance(entity, dict) else None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return float(v)
+        return None
+
+    def _resolve_uniform_tool_timeout(self, config):
+        """Return a single timeout to wrap every tool with, or ``None``.
+
+        A uniform value exists when the CLI sets ``tool_timeout`` (applies to all
+        agents), or when every declared per-agent ``tool_timeout`` is identical.
+        Heterogeneous per-agent budgets return ``None`` so the caller falls back
+        to per-agent wrapping (see ``make_agent_tool_wrap_resolver``) instead of
+        silently downgrading larger budgets to the tightest value.
+        """
+        cli_timeout = (self.cli_config or {}).get("tool_timeout")
+        if isinstance(cli_timeout, (int, float)) and not isinstance(cli_timeout, bool):
+            return float(cli_timeout)
+
+        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
+        timeouts = [
+            t for t in (self._declared_agent_timeout(e) for e in entities.values())
+            if t is not None
+        ]
+        if not timeouts:
+            return None
+        if len(set(timeouts)) == 1:
+            return timeouts[0]
+        return None
+
+    def resolve_agent_tool_timeout(self, agent_key, config):
+        """Per-agent effective timeout: agent value > CLI value > ``None``.
+
+        Never downgrades across agents — each agent gets its own declared budget
+        (or the CLI default, or nothing).
+        """
+        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
+        val = self._declared_agent_timeout(entities.get(agent_key) or {})
+        if val is not None:
+            return val
+        cli_timeout = (self.cli_config or {}).get("tool_timeout")
+        if isinstance(cli_timeout, (int, float)) and not isinstance(cli_timeout, bool):
+            return float(cli_timeout)
+        return None
+
+    def make_agent_tool_wrap_resolver(self, config):
+        """Return ``resolver(agent_key) -> wrap|None`` for heterogeneous budgets.
+
+        Returns ``None`` when no agent declares a per-agent ``tool_timeout`` (so
+        adapters skip per-agent wrapping entirely). The returned ``wrap`` closes
+        over that agent's timeout; tool objects stay shared, only the guard
+        closure differs per agent.
+        """
+        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
+        declared_any = any(
+            self._declared_agent_timeout(e) is not None for e in entities.values()
+        )
+        if not declared_any:
+            return None
+
+        def resolver(agent_key):
+            t = self.resolve_agent_tool_timeout(agent_key, config)
+            if not t or t <= 0:
+                return None
+            return lambda tool, _sec=t: self._wrap_tool_with_timeout(tool, _sec)
+
+        return resolver
 
     # Mirror the legacy CLI's --tool-timeout argparse default so the workflow
     # validation can tell an implicit default apart from a user request.

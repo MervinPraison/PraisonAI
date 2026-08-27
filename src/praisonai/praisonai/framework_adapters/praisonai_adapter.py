@@ -316,15 +316,24 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             logger.warning(f"InteractiveRuntime startup failed: {e}")
             return None
 
-    def _maybe_inject_centric_tools(self, interactive_runtime, tools_dict):
-        """Inject agent-centric tools if runtime is available."""
+    def _maybe_inject_centric_tools(self, interactive_runtime, tools_dict, *, wrap=None):
+        """Inject agent-centric tools, honouring the caller's timeout wrap.
+
+        The generator's ``_build_tools_dict`` wraps every YAML-declared tool with
+        the per-run ``tool_timeout`` guard, but the ACP/LSP centric tools are
+        added here — *after* that wrap — so without applying the same ``wrap``
+        they would silently bypass the timeout (an LSP/ACP call could then hang
+        forever). ``wrap`` is threaded through ``cli_config`` by the generator.
+        """
         if interactive_runtime is None:
             return tools_dict or {}
-            
+
         try:
             from praisonai.cli.features.agent_tools import create_agent_centric_tools
             centric_tools = create_agent_centric_tools(interactive_runtime)
             logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+            if callable(wrap):
+                centric_tools = {name: wrap(tool) for name, tool in centric_tools.items()}
             return {**(tools_dict or {}), **centric_tools}
         except Exception as e:
             logger.warning(f"Failed to inject agent-centric tools: {e}")
@@ -336,7 +345,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             return llm_config[0]['model']
         return "gpt-4o-mini"
 
-    def _build_agents_and_tasks(self, config, topic, tools_dict, agent_callback, task_callback, model_name):
+    def _build_agents_and_tasks(self, config, topic, tools_dict, agent_callback, task_callback, model_name, agent_tool_wrap_resolver=None):
         """Build agents and tasks from configuration."""
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask
         from ._config_builder import build_agent_specs
@@ -344,8 +353,14 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         agents = {}
         tasks = []
 
-        # Single canonical YAML -> spec conversion (shared across adapters)
-        specs = build_agent_specs(config, topic, tools_dict, self._format_template)
+        # Single canonical YAML -> spec conversion (shared across adapters).
+        # The optional per-agent tool_timeout wrap resolver (threaded from the
+        # generator via cli_config) is applied inside build_agent_specs so each
+        # agent's tools carry that agent's own budget instead of a shared one.
+        specs = build_agent_specs(
+            config, topic, tools_dict, self._format_template,
+            agent_tool_wrap_resolver=agent_tool_wrap_resolver,
+        )
 
         # Process agents from the normalized specs
         for spec in specs:
@@ -750,12 +765,21 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # Initialize InteractiveRuntime for ACP/LSP if enabled
             interactive_runtime = await self._astart_interactive_runtime(config)
 
-            # Inject agent-centric tools if runtime is available
-            tools_dict = self._maybe_inject_centric_tools(interactive_runtime, tools_dict)
+            # Inject agent-centric tools if runtime is available. Thread the
+            # generator's per-run tool_timeout wrap (stashed in cli_config) so the
+            # injected ACP/LSP tools carry the same timeout guard as YAML tools.
+            wrap = (cli_config or {}).get("_tool_timeout_wrap")
+            tools_dict = self._maybe_inject_centric_tools(
+                interactive_runtime, tools_dict, wrap=wrap
+            )
 
-            # Build agents and tasks from config
+            # Build agents and tasks from config. Thread the per-agent
+            # tool_timeout wrap resolver (heterogeneous budgets) from cli_config
+            # so each agent's tools carry its own timeout, not a shared one.
+            agent_tool_wrap_resolver = (cli_config or {}).get("_agent_tool_wrap_resolver")
             agents, tasks = self._build_agents_and_tasks(
-                config, topic, tools_dict, agent_callback, task_callback, model_name
+                config, topic, tools_dict, agent_callback, task_callback, model_name,
+                agent_tool_wrap_resolver=agent_tool_wrap_resolver,
             )
 
             # Resolve CLI session continuity (--continue/--session/--fork) that the
