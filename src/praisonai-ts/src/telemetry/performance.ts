@@ -4,7 +4,7 @@
  * Provides latency, throughput, and error tracking for agents.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Metric types

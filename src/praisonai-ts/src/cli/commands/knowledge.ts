@@ -11,7 +11,7 @@ import { EXIT_CODES } from '../spec/cli-spec';
 import { ERROR_CODES } from '../output/errors';
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../../utils/uuid';
 
 export interface KnowledgeOptions {
   verbose?: boolean;

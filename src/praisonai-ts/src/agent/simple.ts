@@ -6,6 +6,7 @@ import type { LLMProvider } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
 import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 import { getEnv } from '../llm/openaiClientOptions';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * The default token sink for `start()` when no `onToken` is supplied.
@@ -20,36 +21,6 @@ export function writeTokenToStdout(token: string): void {
   }
 }
 
-/**
- * Generate a RFC-4122 v4 UUID using WebCrypto.
- *
- * Uses `globalThis.crypto.randomUUID` (available in all supported webviews and
- * Node >= 19), falling back to a `getRandomValues`-based implementation so the
- * Agent import graph never pulls in the Node `crypto` builtin. This keeps the
- * module bundleable for browser/webview targets.
- */
-function randomUUID(): string {
-  const c = globalThis.crypto;
-  if (c?.randomUUID) {
-    return c.randomUUID();
-  }
-  const bytes = new Uint8Array(16);
-  if (c?.getRandomValues) {
-    c.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
-  return (
-    hex[0] + hex[1] + hex[2] + hex[3] + '-' +
-    hex[4] + hex[5] + '-' +
-    hex[6] + hex[7] + '-' +
-    hex[8] + hex[9] + '-' +
-    hex[10] + hex[11] + hex[12] + hex[13] + hex[14] + hex[15]
-  );
-}
 
 /**
  * Agent Configuration
@@ -211,6 +182,19 @@ export interface SimpleAgentConfig {
  */
 export type AgentEvent =
   | { type: 'text'; delta: string }
+  /**
+   * A tool is about to run. `callId` is the provider's id for this invocation
+   * and is the ONLY key that may pair a result to its call -- matching by
+   * position holds only while exactly one call is ever in flight, and silently
+   * attributes the wrong output the moment that stops being true.
+   */
+  | { type: 'tool_call'; callId: string; name: string; args: Record<string, unknown> }
+  /**
+   * A tool finished. `ok` is the only signal of success: never infer it from a
+   * non-empty `output`, because a tool that failed with a message looks
+   * identical to one that succeeded with one.
+   */
+  | { type: 'tool_result'; callId: string; name: string; ok: boolean; output: string }
   | { type: 'finish'; text: string }
   | { type: 'error'; error: Error };
 
@@ -651,7 +635,7 @@ export class Agent {
    * @param signal Optional AbortSignal; if already aborted, no tool is invoked
    * @returns Array of tool results
    */
-  private async processToolCalls(toolCalls: Array<any>, signal?: AbortSignal): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
+  private async processToolCalls(toolCalls: Array<any>, signal?: AbortSignal, onEvent?: (event: AgentEvent) => void): Promise<Array<{role: string, tool_call_id: string, name: string, content: string}>> {
     const results = [];
     
     for (const toolCall of toolCalls) {
@@ -687,15 +671,18 @@ export class Agent {
           });
           if (!approved) {
             await Logger.debug(`Tool call denied by approval gate: ${name}`);
-            results.push({
-              role: 'tool',
-              tool_call_id: id,
-              name,
-              content: `Error: Tool call "${name}" was denied by the approval gate.`
-            });
+            const denial = `Error: Tool call "${name}" was denied by the approval gate.`;
+            results.push({ role: 'tool', tool_call_id: id, name, content: denial });
+            // ok:false -- a denied tool did not run, and rendering it as a
+            // success tells the user something happened that did not.
+            onEvent?.({ type: 'tool_result', callId: id, name, ok: false, output: denial });
             continue;
           }
         }
+
+        // Announced BEFORE it runs, so a view can show a call in progress
+        // rather than materialising a finished row out of nowhere.
+        onEvent?.({ type: 'tool_call', callId: id, name, args });
 
         // Call the function - registered wrappers handle positional mapping
         const result = await this.toolFunctions[name](args);
@@ -719,7 +706,8 @@ export class Agent {
           name,
           content
         });
-        
+        onEvent?.({ type: 'tool_result', callId: id, name, ok: true, output: content });
+
         await Logger.debug(`Tool call result for ${name}:`, { result });
       } catch (error: any) {
         // Cancellation is terminal: surface it to the caller instead of
@@ -728,19 +716,30 @@ export class Agent {
           throw (signal as any).reason ?? error;
         }
         await Logger.error(`Error executing tool ${name}:`, error);
-        results.push({
-          role: 'tool',
-          tool_call_id: id,
-          name,
-          content: `Error: ${error.message || 'Unknown error'}`
-        });
+        const failure = `Error: ${error.message || 'Unknown error'}`;
+        results.push({ role: 'tool', tool_call_id: id, name, content: failure });
+        // The case the whole `ok` field exists for: a tool that failed WITH a
+        // message is byte-identical to one that succeeded with a message, so
+        // success can never be inferred from a non-empty output.
+        onEvent?.({ type: 'tool_result', callId: id, name, ok: false, output: failure });
       }
     }
     
     return results;
   }
 
-  async start(prompt: string, previousResult?: string, onToken?: (token: string) => void, signal?: AbortSignal): Promise<string> {
+  async start(
+    prompt: string,
+    previousResult?: string,
+    onToken?: (token: string) => void,
+    signal?: AbortSignal,
+    /**
+     * Structured events, for callers that need to SEE tool activity rather
+     * than infer it from prose. Optional and additive: every existing caller
+     * passes four arguments and gets exactly the behaviour it had before.
+     */
+    onEvent?: (event: AgentEvent) => void,
+  ): Promise<string> {
     await Logger.debug(`Agent ${this.name} starting with prompt: ${prompt}`);
 
     // Token sink: when a caller (e.g. stream()) supplies onToken, tokens go
@@ -815,7 +814,7 @@ export class Agent {
             });
 
             if (result.toolCalls && result.toolCalls.length > 0) {
-              const toolResults = await this.processToolCalls(result.toolCalls, abortSignal);
+              const toolResults = await this.processToolCalls(result.toolCalls, abortSignal, onEvent);
               messages.push(...toolResults);
               continueConversation = true;
             } else {
@@ -948,7 +947,7 @@ export class Agent {
             }
 
             // Process tool calls and add results to messages
-            const toolResults = await this.processToolCalls(perTurn, abortSignal);
+            const toolResults = await this.processToolCalls(perTurn, abortSignal, onEvent);
             messages.push(...toolResults);
 
             // Continue conversation to get final response
@@ -1098,7 +1097,7 @@ export class Agent {
    * ```
    */
   async *streamEvents(prompt: string, opts?: AgentStreamOptions): AsyncIterable<AgentEvent> {
-    const queue: string[] = [];
+    const queue: AgentEvent[] = [];
     let notify: (() => void) | null = null;
     let done = false;
     let cancelled = false;
@@ -1125,11 +1124,21 @@ export class Agent {
     const wake = () => { const n = notify; notify = null; n?.(); };
     const onToken = (token: string) => {
       if (cancelled) return;
-      queue.push(token);
+      queue.push({ type: 'text', delta: token });
+      wake();
+    };
+    // Structured events share the SAME queue as the text, which is what keeps
+    // a tool call in its true position. A separate channel would let it arrive
+    // before the sentence that introduced it, or after the one reporting its
+    // result -- and a reader cannot tell a reordered transcript from a model
+    // that genuinely said things in that order.
+    const onEvent = (event: AgentEvent) => {
+      if (cancelled) return;
+      queue.push(event);
       wake();
     };
 
-    const run = this.start(prompt, opts?.previousResult, onToken, controller.signal)
+    const run = this.start(prompt, opts?.previousResult, onToken, controller.signal, onEvent)
       .then((text) => ({ text } as { text: string }))
       .catch((error) => ({
         error: error instanceof Error ? error : new Error(String(error)),
@@ -1142,7 +1151,7 @@ export class Agent {
           await new Promise<void>((resolve) => { notify = resolve; });
           continue;
         }
-        yield { type: 'text', delta: queue.shift()! };
+        yield queue.shift()!;
       }
 
       const result = await run;

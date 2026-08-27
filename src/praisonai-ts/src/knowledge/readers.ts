@@ -13,7 +13,7 @@
  * ```
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Parsed document result

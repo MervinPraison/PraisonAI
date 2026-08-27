@@ -4,7 +4,7 @@
  * Enables session inheritance and scoping for multi-agent workflows.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Hierarchical session configuration

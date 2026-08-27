@@ -4,7 +4,7 @@
  * Provides structured result types and visualization helpers.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Individual test result

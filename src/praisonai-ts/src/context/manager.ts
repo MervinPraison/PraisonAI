@@ -4,7 +4,7 @@
  * Handles context budgeting, windowing, and optimization.
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Context item

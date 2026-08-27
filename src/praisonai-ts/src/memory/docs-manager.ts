@@ -14,7 +14,7 @@
  * ```
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * Document entry

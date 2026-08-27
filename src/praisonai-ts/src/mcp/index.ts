@@ -29,7 +29,7 @@
  * ```
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * MCP Transport types

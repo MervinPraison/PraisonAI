@@ -2,7 +2,7 @@
  * Workflows - Pipeline and orchestration patterns
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 
 // Re-export Loop and Repeat classes (Python-parity workflow patterns)
 export { Loop, loop as loopPattern, type LoopConfig, type LoopResult } from './loop';

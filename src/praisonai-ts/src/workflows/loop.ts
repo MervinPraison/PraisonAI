@@ -25,7 +25,7 @@
  * ```
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID } from '../utils/uuid';
 import type { WorkflowContext } from './index';
 
 /**

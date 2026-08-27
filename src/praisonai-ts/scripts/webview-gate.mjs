@@ -39,7 +39,7 @@ const FORBIDDEN = new Set([
  * server and the tool registry, none of which a phone loads, and gating on it
  * would report failures nobody can act on.
  */
-export const WEBVIEW_ENTRIES = ["src/agent/simple.ts"];
+export const WEBVIEW_ENTRIES = ["src/mobile.ts", "src/agent/simple.ts"];
 
 /** The webview baseline. iOS ships WKWebView with the OS, so the floor is the
  *  oldest iOS worth supporting rather than the newest Safari. */
