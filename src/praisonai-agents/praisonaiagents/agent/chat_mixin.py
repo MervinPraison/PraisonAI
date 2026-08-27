@@ -5182,6 +5182,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}
                             )
+                        else:
+                            # Tools ran and the model then said nothing. Simply
+                            # returning here is indistinguishable from a model
+                            # that had nothing to say, and that is exactly how
+                            # this reached users: the generator ended having
+                            # yielded not one character, and the caller could
+                            # only report "no output" for a turn whose tools
+                            # had all succeeded. Fail loudly instead.
+                            raise RuntimeError(
+                                "the model called {} tool(s) and then returned "
+                                "no answer".format(len(tool_calls_data)))
                     else:
                         # Add complete response to chat history (text-only response)
                         if response_text:

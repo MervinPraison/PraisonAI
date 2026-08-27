@@ -188,7 +188,18 @@ pub fn plan(uv: &Path, data_dir: &Path, packages: &[&str], platform: Platform) -
 
 /// What the engine needs to import. Kept here so the provisioning plan and the
 /// failure message cannot disagree about it.
-pub const ENGINE_PACKAGES: &[&str] = &["praisonaiagents"];
+// Pinned to a floor, not left open.
+//
+// The desktop app installs this once, on first run, and never again -- so an
+// unpinned name resolves to whatever was on PyPI that day and stays there
+// forever. 1.7.1 ends a tool-using turn without ever asking the model for its
+// answer: the stream yields nothing, the engine reports "the engine produced
+// no output", and the user sees a failure for a turn whose tools all ran. The
+// fix is in 1.7.2.
+//
+// A floor rather than an exact pin, so a user who already has something newer
+// is not downgraded.
+pub const ENGINE_PACKAGES: &[&str] = &["praisonaiagents>=1.7.2"];
 
 #[cfg(test)]
 mod tests {

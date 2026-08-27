@@ -30,8 +30,27 @@ from urllib.parse import urlparse
 # the one being edited -- the same source/installed-copy divergence that makes
 # a fix appear to have no effect. Explicit and visible here rather than via
 # PYTHONPATH, which would follow every child process invisibly.
-_SOURCE = pathlib.Path(__file__).resolve().parents[2] / "praisonai-agents"
-if (_SOURCE / "praisonaiagents" / "__init__.py").is_file():
+# Searched upward rather than counted: this file is copied into the bundle at
+# src-tauri/target/<profile>/engine/, where a fixed parents[2] resolves to
+# target/praisonai-agents -- which does not exist. So the branch quietly never
+# taken was the one whose whole purpose is to stop a fix having no effect.
+def _checkout_source():
+    """The praisonai-agents checkout above this file, if there is one."""
+    override = os.environ.get("PRAISONAI_AGENTS_SOURCE", "").strip()
+    if override:
+        candidate = pathlib.Path(override)
+        return candidate if (candidate / "praisonaiagents" / "__init__.py").is_file() else None
+    here = pathlib.Path(__file__).resolve()
+    for parent in here.parents:
+        for candidate in (parent / "praisonai-agents",
+                          parent / "src" / "praisonai-agents"):
+            if (candidate / "praisonaiagents" / "__init__.py").is_file():
+                return candidate
+    return None
+
+
+_SOURCE = _checkout_source()
+if _SOURCE is not None:
     sys.path.insert(0, str(_SOURCE))
 
 
@@ -1127,6 +1146,53 @@ def _get_agent(session_id: str = "default", tools: bool = True):
         return _agents[key]
 
 
+def _seed_history(agent, chat_id: str) -> int:
+    """Give the agent the conversation the user can already see.
+
+    The history existed in two places and only one of them was durable: the
+    transcript on disk, which the sidebar renders, and the agent's
+    chat_history, which is what the model is actually shown. Nothing ever
+    copied the first into the second.
+
+    The agent cache is a plain dict in this process (`_agents`), so it is empty
+    after any restart; `save_settings` clears it outright, because a model
+    change must not run on the previous agent; and the tools toggle keys a
+    *different* agent for the same session. After any of those, reopening a
+    chat showed the user their whole conversation while the model was handed a
+    blank slate -- and it said so: "I don't have access to your previous
+    questions. Each session is treated independently."
+
+    Only when the agent has nothing. An agent mid-session already holds the
+    turns, including tool messages this transcript never stored, and replaying
+    over the top would duplicate them.
+
+    Returns how many messages were replayed, for the log.
+    """
+    try:
+        if agent.chat_history:
+            return 0
+    except Exception:  # noqa: BLE001 - an agent without the attribute is not ours to seed
+        return 0
+    try:
+        stored = load_chat(chat_id).get("messages") or []
+    except Exception:  # noqa: BLE001 - a missing or broken transcript is not fatal
+        return 0
+
+    replayed = 0
+    for message in stored:
+        role, content = message.get("role"), message.get("content")
+        # Only the two roles a transcript holds, and never a blank turn: an
+        # empty assistant message is what a failed turn leaves behind, and
+        # feeding it back teaches the model that silence is an acceptable
+        # answer.
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            agent._append_to_chat_history({"role": role, "content": content})
+            replayed += 1
+    if replayed:
+        log(f"replayed {replayed} messages into the agent for chat {chat_id}")
+    return replayed
+
+
 # --- stream protocol v2 -------------------------------------------------------
 # v1 carried only start/delta/end/error, which is enough to print text and
 # nothing else. Tool calls, reasoning and usage have to be first-class events or
@@ -1793,16 +1859,23 @@ class Handler(BaseHTTPRequestHandler):
             _tool_queue().clear()
             _apply_env(load_settings())
             agent = _get_agent(session, tools=tools_on)
+            # Before the turn, not at construction: the agent is cached per
+            # session and the transcript is per chat, and a settings change
+            # can drop the agent between one turn and the next.
+            _seed_history(agent, chat_id)
             emit("start", {"run_id": run_id})
             streamed = False
+            tools_shown = 0
             def _emit_drafting(name):
                 emit("tool_drafting", {"name": name})
 
             def _drain_tools():
                 """Emit any tool activity recorded since the last check."""
+                shown = 0
                 q = _tool_queue()
                 while q:
                     ev = q.pop(0)
+                    shown += 1
                     _emit_drafting(ev["name"])
                     emit("tool_call", {"call_id": ev["call_id"], "name": ev["name"],
                                        "args": ev["args"]})
@@ -1810,6 +1883,7 @@ class Handler(BaseHTTPRequestHandler):
                     emit("tool_result", {"call_id": ev["call_id"], "name": ev["name"],
                                          "ok": ev["ok"], "output": ev["output"],
                                          "seconds": ev["seconds"]})
+                return shown
 
             for chunk in agent.start(prompt, stream=True,
                                      **_llm_overrides(load_settings())):
@@ -1844,6 +1918,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     emit(event, frame)
             else:
+                # Tool activity belongs to the user even when the turn failed.
+                # Draining only on the success path meant a turn that ran tools
+                # and then died showed neither the answer nor the tools -- the
+                # work happened and left no trace.
+                tools_shown += _drain_tools()
                 if not streamed:
                     # A stream that yielded nothing is a failure, not an empty
                     # answer -- and the cause is usually in the logs, not here.
@@ -1856,11 +1935,19 @@ class Handler(BaseHTTPRequestHandler):
                     elif captured:
                         emit("error", {"kind": "internal",
                                        "message": captured[-1][:300]})
+                    elif tools_shown:
+                        # Not the same failure as "nothing happened". The tools
+                        # ran and their results are on screen; what is missing
+                        # is the model's answer about them. Saying "no output"
+                        # here described the turn to the user as a dead end
+                        # when most of it had in fact succeeded.
+                        emit("error", {"kind": "no_answer", "message":
+                             f"{tools_shown} tool call(s) ran, but the model "
+                             "sent no answer afterwards. Their results are above."})
                     else:
                         emit("error", {"message": "the engine produced no output",
                                        "kind": "empty"})
                 else:
-                    _drain_tools()
                     elapsed = time.perf_counter() - started
                     user_index = _persist(chat_id, prompt, reply, regenerate_of)
                     if cfg_now.get("show_stats", True):

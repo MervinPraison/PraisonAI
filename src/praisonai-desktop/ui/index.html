@@ -1496,7 +1496,7 @@ document.getElementById('f').addEventListener('submit',async e=>{
   const out=turn('a','PraisonAI');
   out.innerHTML='<span class="caret"></span>';
 
-  let acc='', streamed=0, userIndex=null, versions=1, vactive=0;
+  let acc='', streamed=0, userIndex=null, versions=1, vactive=0, banner=false;
   const regen=regenerateOf; regenerateOf=null;   // consumed by this submit only
   const canPublish=gate();
   const host=out.parentElement;
@@ -1582,11 +1582,13 @@ document.getElementById('f').addEventListener('submit',async e=>{
           st.textContent=`${data.chars} chars · ${data.seconds}s`
             +(data.ttft!=null?` · ${data.ttft}s to first token`:'');
           host.appendChild(st); }
-        else if(ev==='error'){ out.innerHTML=md(acc);
+        else if(ev==='error'){ out.innerHTML=md(acc); banner=true;
           const titles={auth:'Authentication failed',rate_limit:'Rate limited',
-                        empty:'No output',internal:'The engine reported an error'};
+                        empty:'No output',
+                        no_answer:'The tools ran, but no answer came back',
+                        internal:'The engine reported an error'};
           fail(titles[data.kind]||titles.internal, data.message,'', text); }
-        else if(ev==='cancelled'){ paint();
+        else if(ev==='cancelled'){ paint(); banner=true;
           const c=document.createElement('div'); c.className='cancelled';
           c.textContent='Stopped'; out.parentElement.appendChild(c); }
         else if(ev==='end'){ paint(); userIndex=data?.user_index ?? null;
@@ -1594,7 +1596,13 @@ document.getElementById('f').addEventListener('submit',async e=>{
       }
     }
     paint();
-    if(!acc) fail('No output','The engine finished without producing any text.','',text);
+    // Only when nothing has already been said about it. The engine reports
+    // its own failures, and this line used to add a second banner underneath
+    // the first -- the screenshot of the bug shows both, which reads as two
+    // separate failures when it was one turn. It also fired after a deliberate
+    // Stop, calling the user's own cancellation an error.
+    if(!acc && !banner)
+      fail('No output','The engine finished without producing any text.','',text);
   }catch(err){ fail('Connection to the engine failed', String(err),'', text); }
   finally{
     clearInterval(thinkTimer); draft?.remove();
