@@ -172,7 +172,12 @@ const SETTINGS = [
 
   // ---- About --------------------------------------------------------------
   { key: "version", section: "about", label: "PraisonAI Desktop",
-    control: { kind: "readout", value: () => "0.1.0" } },
+    control: { kind: "readout", value: () =>
+      globalThis.__PRAISONAI_DESKTOP_VERSION__ || "unknown" } },
+
+  { key: "agents_version", section: "about", label: "PraisonAI Agents",
+    control: { kind: "readout", value: () =>
+      globalThis.__PRAISONAI_AGENTS_VERSION__ || "unknown" } },
 
   { key: "engine_status", section: "about", label: "Engine",
     description: "The Python process this window is talking to.",

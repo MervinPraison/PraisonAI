@@ -122,9 +122,32 @@ jobs:
         # let a failure be a failure.
         run: command -v cargo-tauri >/dev/null || cargo install tauri-cli --version '^2' --locked
 
+      - name: Set the desktop version from the release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: node src/praisonai-desktop/tools/set-release-version.mjs "$RELEASE_TAG"
+
       - name: Build the bundle
         working-directory: src/praisonai-desktop/src-tauri
         run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: The Windows binary must carry the release version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: src/praisonai-desktop/src-tauri
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          $expected = $env:RELEASE_TAG -replace '^v', ''
+          $numeric = ($expected -split '[-+]')[0] + '.0'
+          $version = (Get-Item "target/${{ matrix.target }}/release/praisonai-desktop.exe").VersionInfo
+          if ($version.ProductVersion -ne $expected) {
+            throw "ProductVersion $($version.ProductVersion) does not match $expected"
+          }
+          if ($version.FileVersion -ne $numeric) {
+            throw "FileVersion $($version.FileVersion) does not match $numeric"
+          }
 
       - name: The macOS bundle must carry a valid signature
         if: runner.os == 'macOS'

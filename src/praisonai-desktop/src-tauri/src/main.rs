@@ -258,6 +258,10 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
             }
         }
     };
+    // The engine exposes this beside its own package version in /health. Read
+    // from Tauri package metadata, which the release workflow derives from the
+    // tag, rather than from Cargo.toml's development-only package version.
+    let shell_version = app.package_info().version.to_string();
     // Reap or adopt whatever the last run left. Neither `Drop` nor the reap on
     // exit runs when the shell is killed by a signal, and that was observed:
     // `kill -TERM` on the app left the Python child alive with a lockfile still
@@ -266,8 +270,13 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
         let venv = venv_root_for_python(&python, &RealFs, Platform::current())
             .map(|l| l.root.display().to_string())
             .unwrap_or_default();
-        match reclaim(dir, &python.display().to_string(), &venv,
-                      supervisor::probe_health, kill_pid) {
+        match reclaim(
+            dir,
+            &python.display().to_string(),
+            &venv,
+            |port| supervisor::probe_health(port, &shell_version),
+            kill_pid,
+        ) {
             Decision::Adopt { port } => {
                 log_decision(&Decision::Adopt { port });
                 praisonai_desktop_core::tray::set_engine_label(
@@ -301,11 +310,11 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
         Some(b) => std::env::set_var("PRAISONAI_APP_BUNDLE", b),
         None => std::env::remove_var("PRAISONAI_APP_BUNDLE"),
     }
-
     match supervisor::start(
         &python.display().to_string(),
         &layout.script.display().to_string(),
         Duration::from_secs(30),
+        &shell_version,
     ) {
         Ok(engine) => {
             let port = engine.port;

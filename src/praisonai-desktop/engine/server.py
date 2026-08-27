@@ -1570,6 +1570,9 @@ class Handler(BaseHTTPRequestHandler):
         # rather than reproduce the default and hand the user a path the app
         # is not actually using.
         body = json.dumps({"ok": True, "version": PROTOCOL_VERSION,
+                           "shell_version": os.environ.get(
+                               "PRAISONAI_DESKTOP_VERSION", "unknown"),
+                           "agents_version": _installed_version(),
                            "data_dir": str(DATA_DIR)}).encode()
         self.send_response(200)
         self._cors()

@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { releaseVersion } from '../../tools/set-release-version.mjs';
 
 const root = new URL('../../../../', import.meta.url);
 const workflow = readFileSync(new URL('.github/workflows/desktop-release.yml', root), 'utf8');
@@ -22,6 +23,51 @@ const ci = readFileSync(new URL('.github/workflows/desktop.yml', root), 'utf8');
 const config = JSON.parse(
   readFileSync(new URL('src/praisonai-desktop/src-tauri/tauri.conf.json', root), 'utf8'));
 const install = readFileSync(new URL('src/praisonai-desktop/INSTALL.md', root), 'utf8');
+const ui = readFileSync(new URL('src/praisonai-desktop/ui/index.html', root), 'utf8');
+
+test('the release tag becomes the desktop product version before bundling', () => {
+  const runnable = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const sync = runnable.indexOf('node src/praisonai-desktop/tools/set-release-version.mjs');
+  const build = runnable.indexOf('cargo tauri build');
+  assert.notEqual(sync, -1, 'the release never writes its tag into tauri.conf.json');
+  assert.ok(sync < build, 'the desktop version is updated after the bundle is built');
+  assert.equal(releaseVersion('v4.7.3'), '4.7.3');
+  assert.equal(releaseVersion('4.8.0-rc.1'), '4.8.0-rc.1');
+  assert.throws(() => releaseVersion('latest'), /not a semantic version/);
+  assert.throws(() => releaseVersion('1.2.3-01'), /not a semantic version/);
+});
+
+test('the packaged About view reads the same Tauri version', () => {
+  const start = ui.indexOf('{ key: "version", section: "about"');
+  const end = ui.indexOf('{ key: "engine_status"', start);
+  const desktopVersion = ui.slice(start, end);
+  assert.match(ui,
+               /__PRAISONAI_DESKTOP_VERSION__\s*=\s*await\s+window\.__TAURI__\.app\.getVersion\(\)/,
+               'the UI does not assign the version embedded by Tauri to the About value');
+  assert.match(desktopVersion, /__PRAISONAI_DESKTOP_VERSION__/,
+               'About does not use the version returned by Tauri');
+  assert.doesNotMatch(desktopVersion, /0\.1\.0/, 'About still hardcodes the development version');
+  assert.ok(ui.includes('label: "PraisonAI Agents"'),
+            'About does not distinguish the agents package from the desktop shell');
+});
+
+test('the Windows release fails if its embedded version drifts', () => {
+  const start = workflow.indexOf('The Windows binary must carry the release version');
+  const end = workflow.indexOf('The macOS bundle must carry a valid signature', start);
+  const gate = workflow.slice(start, end);
+  assert.match(gate, /VersionInfo/, 'the release never reads the binary version resource');
+  assert.match(gate, /ProductVersion/, 'the release does not verify ProductVersion');
+  assert.match(gate, /FileVersion/, 'the release does not verify FileVersion');
+  assert.match(gate, /\$version\.ProductVersion\s+-ne\s+\$expected/,
+               'ProductVersion is not compared with the release version');
+  assert.match(gate, /\$version\.FileVersion\s+-ne\s+\$numeric/,
+               'FileVersion is not compared with the numeric release version');
+  assert.ok(start > workflow.indexOf('cargo tauri build'), 'the binary is checked before it exists');
+  assert.ok(start < workflow.indexOf('gh release upload'), 'the binary is checked after upload');
+});
 
 /** The matrix legs, as (bundles, asset, ext) triples. */
 function legs() {
