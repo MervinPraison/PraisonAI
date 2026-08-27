@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 54 | 17255 |
+| ✅ Agent | 22 | 54 | 17260 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
 | ✅ Approval | 1 | 6 | 2915 |
@@ -27,13 +27,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2790 |
 | ✅ Bots | 7 | 32 | 13616 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 36971 |
+| ✅ CLI | 5 | 122 | 37022 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1347 |
 | ✅ Configuration | 3 | 8 | 3173 |
-| ✅ Context Management | 16 | 36 | 13988 |
+| ✅ Context Management | 16 | 36 | 14000 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -43,20 +43,20 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 82 | 30269 |
+| ✅ Gateway | 7 | 83 | 30682 |
 | ✅ Guardrails | 4 | 4 | 2228 |
 | ✅ Handoffs | 11 | 6 | 2626 |
-| ✅ Hooks | 2 | 9 | 4509 |
+| ✅ Hooks | 2 | 9 | 4542 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 16 | 4967 |
-| ✅ LLM | 3 | 15 | 5376 |
+| ✅ Knowledge | 4 | 16 | 4978 |
+| ✅ LLM | 3 | 15 | 5386 |
 | ✅ Loops | 4 | 5 | 1475 |
 | ✅ MCP | 1 | 62 | 14278 |
-| ✅ Memory | 6 | 18 | 7193 |
+| ✅ Memory | 6 | 18 | 7195 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1265 |
+| ✅ Output | 3 | 5 | 1273 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1605 |
 | ✅ Plugins | 8 | 5 | 3120 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 43272 |
+| ✅ Tools | 12 | 144 | 43286 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1215 |
 | ✅ Video | 2 | 6 | 649 |
