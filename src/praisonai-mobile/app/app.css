@@ -1,0 +1,204 @@
+/*
+ * The stylesheet, and the one job only it can do.
+ *
+ * env(safe-area-inset-*) is not readable from script -- getComputedStyle can
+ * only read a custom PROPERTY -- so these four lines are the bridge between
+ * what the OS knows and what ShellPort can report. The names come from
+ * core/src/ports/shell.ts (INSET_VARIABLES) and a test asserts every shell
+ * reads exactly these, because the two adapters once disagreed and one of
+ * them silently measured zero.
+ */
+:root {
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+
+  --ground: #ffffff;
+  --panel: #f5f6f8;
+  --ink: #14171c;
+  --soft: #5b636e;
+  --rule: #e2e5ea;
+  --accent: #1f7a63;
+  --bad: #a6413c;
+  --warn: #b34700;
+  --radius: 12px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1114;
+    --panel: #1a1e24;
+    --ink: #e8eaed;
+    --soft: #9aa1ac;
+    --rule: #262b33;
+    --accent: #7fd1b9;
+    --bad: #e58b86;
+    --warn: #f78c6c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  /* Suppress rubber-band scroll. In a webview it detaches the fixed composer
+     from the bottom edge and reads as the app coming apart. */
+  overscroll-behavior: none;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* NO viewport units anywhere in this file, deliberately. 100vh includes an
+   address bar that does not exist here and is wrong during every keyboard
+   transition; 100dvh is wrong differently. ui/src/layout/insets.ts computes
+   explicit pixel geometry from the shell's real insets, and main.ts writes it
+   onto these custom properties -- so the layout is measured, never guessed. */
+#root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: calc(var(--safe-area-inset-top) + .5rem) 
+           calc(var(--safe-area-inset-right) + .75rem) .5rem
+           calc(var(--safe-area-inset-left) + .75rem);
+  border-bottom: 1px solid var(--rule);
+  background: var(--ground);
+}
+.topbar h1 { font-size: 1rem; font-weight: 600; margin: 0; flex: 1; }
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: .75rem calc(var(--safe-area-inset-right) + .75rem) .75rem
+           calc(var(--safe-area-inset-left) + .75rem);
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.row { border-radius: var(--radius); padding: .55rem .75rem; max-width: 100%; }
+.row-text { background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; }
+.row-text.streaming::after {
+  content: "▍";
+  color: var(--accent);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .row-text.streaming::after { animation: none; }
+  * { transition: none !important; }
+}
+
+.row-reasoning { color: var(--soft); font-size: .9rem; border-left: 2px solid var(--rule); border-radius: 0; }
+.row-tool { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: baseline;
+  border: 1px solid var(--rule); font-family: var(--mono); font-size: .82rem; }
+.row-tool[data-status="failed"] { border-color: var(--bad); color: var(--bad); }
+.row-tool[data-status="ok"] { border-color: var(--accent); }
+.row-tool .tool-meta { color: var(--soft); margin-left: auto; }
+.tool-output { margin: .35rem 0 0; white-space: pre-wrap; overflow-x: auto; width: 100%;
+  color: var(--soft); font-size: .78rem; }
+
+.row-approval { border: 1px solid var(--warn); display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.row-approval p { margin: 0 0 .3rem; width: 100%; }
+.row-error { border: 1px solid var(--bad); color: var(--bad); }
+.row-notice { color: var(--soft); font-size: .88rem; text-align: center; }
+.row-dropped { color: var(--warn); font-size: .8rem; }
+
+.composer {
+  display: flex;
+  gap: .5rem;
+  align-items: flex-end;
+  border-top: 1px solid var(--rule);
+  background: var(--ground);
+  padding: .5rem calc(var(--safe-area-inset-right) + .75rem)
+           calc(var(--safe-area-inset-bottom) + .5rem)
+           calc(var(--safe-area-inset-left) + .75rem);
+  /* main.ts sets this from the shell's live keyboard height. It is a padding
+     rather than a transform so the transcript's scroll height shrinks with it
+     and the last message stays reachable. */
+  padding-bottom: calc(var(--keyboard-height, 0px) + var(--safe-area-inset-bottom) + .5rem);
+}
+.composer textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: .5rem .65rem;
+  /* 16px minimum: iOS zooms the whole page when focusing a smaller field. */
+  font-size: 16px;
+}
+
+button {
+  font: inherit;
+  font-size: .9rem;
+  cursor: pointer;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: var(--radius);
+  /* 44px is the platform minimum touch target on both platforms. */
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 .75rem;
+}
+button[data-variant="primary"] { background: var(--accent); border-color: var(--accent); color: var(--ground); }
+button:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.empty { margin: auto; color: var(--soft); text-align: center; padding: 2rem 1rem; }
+.chat-row { display: flex; align-items: center; gap: .5rem; width: 100%;
+  border: 1px solid var(--rule); border-radius: var(--radius); padding: .6rem .75rem;
+  background: var(--panel); text-align: left; }
+.chat-row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-row .when { color: var(--soft); font-size: .78rem; }
+
+.setting { display: flex; flex-direction: column; gap: .25rem; padding: .6rem 0; border-bottom: 1px solid var(--rule); }
+.setting .label { font-weight: 550; }
+.setting .help { color: var(--soft); font-size: .84rem; }
+.setting input, .setting select { font: inherit; font-size: 16px; padding: .45rem .55rem;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: inherit; }
+.section-heading { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--soft); margin: 1.2rem 0 .3rem; }
+.warning { border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius);
+  padding: .55rem .75rem; margin: .5rem 0; font-size: .86rem; }
+
+/*
+ * Visually hidden, still announced.
+ *
+ * `display: none` and `visibility: hidden` remove an element from the
+ * accessibility tree entirely, so a live region styled either way is a live
+ * region a screen reader never reads. This is the clip-rect idiom, which keeps
+ * the node rendered and reachable while occupying no visible space.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

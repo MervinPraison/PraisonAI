@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "The layer graph, as data. tools/depgraph.mjs reads this and reports every",
+    "import that crosses a line it should not.",
+    "",
+    "Two seams are the point of the whole arrangement:",
+    "  - the agent-framework seam: only engines/src/praisonai-ts may import",
+    "    'praisonai'. Swapping in another framework is then a new directory",
+    "    under engines/src plus a conformance run -- never a change above it.",
+    "  - the UI-shell seam: only adapters/src/tauri may import '@tauri-apps/*'.",
+    "    Swapping Tauri for React Native is then adapters/ plus ui/, and core,",
+    "    protocol and engines do not move.",
+    "",
+    "governedRoots exists so a NEW top-level directory is reported as ungoverned",
+    "rather than silently exempt. A rule that stops covering new code while still",
+    "reporting a clean pass is worse than no rule."
+  ],
+  "layers": {
+    "protocol": { "path": "protocol/src", "mayImport": [] },
+    "core":     { "path": "core/src",     "mayImport": ["protocol"] },
+    "engines":  { "path": "engines/src",  "mayImport": ["protocol", "core"] },
+    "adapters": { "path": "adapters/src", "mayImport": ["protocol", "core"] },
+    "testing":  { "path": "testing/src",  "mayImport": ["protocol", "core"] },
+    "ui":       { "path": "ui/src",       "mayImport": ["protocol", "core"] },
+    "app":      { "path": "app/src",      "mayImport": ["protocol", "core", "engines", "adapters", "ui"] }
+  },
+  "externals": {
+    "praisonai": ["engines/src/praisonai-ts"],
+    "@tauri-apps/api": ["adapters/src/tauri/bridge.ts"],
+    "@tauri-apps/plugin-*": ["adapters/src/tauri"],
+    "jsdom": ["**/*.test.ts"],
+    "esbuild": ["tools"]
+  },
+  "testImports": ["testing"],
+  "governedRoots": ["protocol", "core", "engines", "adapters", "testing", "ui", "app"]
+}

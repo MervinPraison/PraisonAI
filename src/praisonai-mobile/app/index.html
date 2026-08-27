@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      viewport-fit=cover is NOT optional. Without it, env(safe-area-inset-*)
+      resolves to 0px in WKWebView, every inset in the app collapses to flush,
+      and content sits under the notch and the home indicator with no error
+      anywhere -- 0 is the documented safe collapse for a missing inset, so
+      nothing reports it. The whole synchronous-first-paint design in
+      adapters/src/tauri/shell.ts rests on this one attribute.
+
+      user-scalable=no suppresses double-tap zoom, which in a chat transcript
+      fires constantly by accident.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>PraisonAI</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <!-- Populated by app/src/main.ts. Deliberately empty: a skeleton rendered
+         here would be a second source of truth for a layout the view models
+         already own. -->
+    <div id="root"></div>
+    <noscript>PraisonAI needs JavaScript to run.</noscript>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

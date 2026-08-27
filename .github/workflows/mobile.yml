@@ -1,0 +1,97 @@
+# The mobile package's tests.
+#
+# Written at the same time as the package, deliberately. praisonai-desktop's
+# suite existed and ran nowhere for months because no workflow referenced it,
+# and a package whose tests never run in CI is a package whose tests are
+# decoration -- the 523 here would go stale silently.
+#
+# Four gates, and they catch different things:
+#
+#   typecheck   -- the boundary between erasable and non-erasable TypeScript.
+#                  node:test strips types rather than compiling, so an enum or
+#                  a constructor parameter property is a runtime parse error at
+#                  import; `erasableSyntaxOnly` turns that into a typecheck
+#                  failure at the file that caused it.
+#   boundaries  -- the two seams. Only engines/src/praisonai-ts may import
+#                  'praisonai'; only adapters/src/tauri may import @tauri-apps.
+#                  These are the whole reason the package is swappable, and a
+#                  rule enforced only by review stops being enforced.
+#   test        -- the suite itself.
+#   bundle gate -- webview compatibility. This is the one a normal test run
+#                  CANNOT do: node:test runs in Node, where a `crypto` import
+#                  and a top-level `process.env` both work fine, and both kill
+#                  a webview bundle at import time.
+name: mobile
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/praisonai-mobile/**', '.github/workflows/mobile.yml']
+  pull_request:
+    paths: ['src/praisonai-mobile/**', '.github/workflows/mobile.yml']
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: src/praisonai-mobile
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.18 is the floor declared in package.json -- tested because a
+        # declared floor nobody runs is a guess. 24 is the forward check:
+        # native type-stripping is the feature this package depends on most,
+        # and it is exactly the kind of thing a major bump changes.
+        node: ['22.18', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Layer boundaries
+        run: npm run boundaries
+      - name: Tests
+        run: npm test
+      - name: Bundle gate fixtures
+        # Runs the gate's own suite, which proves each check can FAIL -- a
+        # build check that has only ever seen clean input is a check nobody
+        # knows the state of.
+        run: npm run test:bundle
+
+  upstream-parity:
+    name: upstream parity
+    # Its own job so drift from the real Agent is visible in the checks list
+    # rather than buried in another job's log.
+    #
+    # It needs only THIS package's install. praisonai-ts's own dependencies are
+    # neither needed nor installable -- `npm install` there fails with an
+    # ERESOLVE peer conflict (bedrock-agentcore -> @strands-agents/sdk) -- and
+    # every member the check looks at is declared locally in simple.ts. That is
+    # verified rather than assumed: with praisonai-ts's node_modules moved
+    # aside, injected drift is still caught as TS2741.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - run: npm ci
+      - name: Does the real Agent still satisfy PraisonAgent?
+        # Skips loudly if the praisonai-ts checkout is missing, rather than
+        # passing quietly -- a check that silently stops covering anything is
+        # worse than no check.
+        run: npm run check:upstream
