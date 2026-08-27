@@ -12,6 +12,12 @@
       "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./mobile": {
+      "types": "./dist/mobile.d.ts",
+      "import": "./dist/esm/mobile.js",
+      "require": "./dist/mobile.js",
+      "default": "./dist/mobile.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/esm/*.js",
