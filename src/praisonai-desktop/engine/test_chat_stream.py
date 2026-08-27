@@ -337,18 +337,25 @@ class FetchUrlDoesNotFollowRedirects(unittest.TestCase):
         server.load_settings = lambda: dict(self._orig(), approval_mode="never")
 
         secret = "SECRET-BODY-9c1f"
+        # A request reaching B is a breach on its own -- the fetch is a side
+        # effect (it can trigger actions, log the caller, exhaust rate limits)
+        # regardless of whether its body ever comes back. So the test records
+        # that B was contacted, not just that its body leaked.
+        b_hits = []
 
         class _Secret(BaseHTTPRequestHandler):
             def log_message(self, *a):  # noqa: A003 - quiet
                 pass
 
             def do_GET(inner):  # noqa: N805
+                b_hits.append(inner.path)
                 inner.send_response(200)
                 inner.send_header("Content-Length", str(len(secret)))
                 inner.end_headers()
                 inner.wfile.write(secret.encode())
 
         self.secret = secret
+        self.b_hits = b_hits
         self.b = ThreadingHTTPServer(("127.0.0.1", 0), _Secret)
         b_url = f"http://127.0.0.1:{self.b.server_address[1]}/leak"
 
@@ -378,6 +385,8 @@ class FetchUrlDoesNotFollowRedirects(unittest.TestCase):
         self.assertNotIn(self.secret, result,
                          "the approved URL redirected to an unapproved host "
                          "and its body was returned anyway")
+        self.assertEqual(self.b_hits, [],
+                         "the unapproved redirect target was contacted at all")
 
     def test_the_body_of_the_approved_url_still_comes_back(self):
         # A page that does not redirect must still be fetched normally.
