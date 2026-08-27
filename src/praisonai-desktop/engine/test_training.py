@@ -590,6 +590,117 @@ class StopBeforeSpawn(unittest.TestCase):
         self.assertEqual(run.state, training.DONE)
 
 
+class SurvivingARestart(unittest.TestCase):
+    """State must outlive the engine process, or a restart lies.
+
+    The engine kept the live run and the history in memory only, so a crash,
+    relaunch or kill left `/train/runs` empty, `stop` with nothing to stop, and
+    `start` willing to launch a second trainer beside a live one -- the OOM
+    that "one GPU runs one job" exists to refuse. A second Trainer over the
+    same home stands in for the process that comes back after the restart.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="praison-restart-")
+        self.first = training.Trainer(self.home, sys.executable)
+        self.config = {"model_name": "unsloth/tiny", "dataset": "d.json"}
+
+    def tearDown(self):
+        self.first.stop()
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _start_a_live_run(self):
+        self.first.command_builder = _script(
+            "import time\nprint('up', flush=True)\ntime.sleep(120)")
+        run = self.first.start(self.config, "run-live")
+        self.assertTrue(_wait(lambda: run.state == training.RUNNING), run.state)
+        return run
+
+    def test_a_live_run_reappears_after_a_restart(self):
+        run = self._start_a_live_run()
+        second = training.Trainer(self.home, sys.executable)
+        self.assertIn("run-live", [r.id for r in second.history],
+                      "the run vanished from history after the restart")
+        adopted = second.get("run-live")
+        self.assertEqual(adopted.state, training.RUNNING,
+                         "a run still on the GPU was not shown as running")
+
+    def test_a_second_finetune_is_refused_after_a_restart(self):
+        self._start_a_live_run()
+        second = training.Trainer(self.home, sys.executable)
+        second.command_builder = _script("pass")
+        with self.assertRaises(RuntimeError):
+            second.start(self.config, "run-two")
+
+    def test_stop_after_a_restart_actually_kills_the_live_pid(self):
+        run = self._start_a_live_run()
+        pid = run.pid
+        self.assertTrue(_alive(pid))
+        second = training.Trainer(self.home, sys.executable)
+        self.assertTrue(second.stop(), "stop() found nothing to stop after restart")
+        self.assertTrue(_wait(lambda: not _alive(pid), 15),
+                        "the adopted run's pid outlived stop()")
+        self.assertEqual(second.get("run-live").state, training.CANCELLED)
+
+    def test_an_interrupted_run_is_reported_failed_not_missing(self):
+        # No live process: a run.json left as RUNNING by a killed engine whose
+        # pid is now gone must read as failed, not adopted.
+        run_dir = os.path.join(self.home, "runs", "run-dead")
+        os.makedirs(run_dir, exist_ok=True)
+        import json
+        with open(os.path.join(run_dir, "run.json"), "w") as fh:
+            json.dump({"id": "run-dead", "state": training.RUNNING,
+                       "started": time.time(), "pid": 2 ** 31 - 1}, fh)
+        second = training.Trainer(self.home, sys.executable)
+        dead = second.get("run-dead")
+        self.assertIsNotNone(dead, "the interrupted run was dropped entirely")
+        self.assertEqual(dead.state, training.FAILED)
+        self.assertIsNone(second.current, "a dead run was adopted as live")
+
+    def test_a_finished_run_is_not_adopted_after_a_restart(self):
+        self.first.command_builder = _script("print('done')")
+        run = self.first.start(self.config, "run-done")
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL), run.state)
+        second = training.Trainer(self.home, sys.executable)
+        self.assertEqual(second.get("run-done").state, training.DONE)
+        self.assertIsNone(second.current, "a finished run was adopted as live")
+        second.command_builder = _script("pass")
+        again = second.start(self.config, "run-after")
+        self.assertTrue(_wait(lambda: again.state in training.TERMINAL), again.state)
+
+    def test_a_half_written_state_file_never_reaches_the_reader(self):
+        # _persist writes a temp file and os.replaces it, so a reader only ever
+        # sees the old whole file or the new whole file -- never the truncated
+        # middle a plain open("w") would leave if the engine were killed mid
+        # write. Were the write non-atomic, an interrupted _reload would skip
+        # the record, the live run would vanish, and stop() and the single-GPU
+        # guard would both lose it.
+        run = self._start_a_live_run()
+        state = pathlib.Path(self.home, "runs", "run-live", "run.json")
+        self.assertTrue(state.exists(), "the live run was never persisted")
+        import json
+        json.loads(state.read_text())          # complete JSON, not a fragment
+        siblings = list(state.parent.glob("run.json.*.tmp"))
+        self.assertEqual(siblings, [], f"a temp file was left behind: {siblings}")
+
+    def test_a_run_persisted_before_spawn_is_not_lost_on_an_early_restart(self):
+        # start() persists the run before the supervisor thread exists, so an
+        # engine that dies in that window still leaves a record. Simulate it: a
+        # pending run.json with no pid must reload as failed and not be adopted,
+        # rather than vanishing and letting a second trainer start.
+        run_dir = os.path.join(self.home, "runs", "run-early")
+        os.makedirs(run_dir, exist_ok=True)
+        import json
+        with open(os.path.join(run_dir, "run.json"), "w") as fh:
+            json.dump({"id": "run-early", "state": training.PENDING,
+                       "started": time.time(), "pid": None}, fh)
+        second = training.Trainer(self.home, sys.executable)
+        early = second.get("run-early")
+        self.assertIsNotNone(early, "a run persisted before spawn was dropped")
+        self.assertEqual(early.state, training.FAILED)
+        self.assertIsNone(second.current, "a pidless pending run was adopted")
+
+
 class RunLifecycle(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="praison-train-test-")
