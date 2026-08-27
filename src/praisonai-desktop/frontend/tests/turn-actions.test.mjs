@@ -210,6 +210,32 @@ test('Fork on that same turn asks for the assistant message', async () => {
   assert.equal(fork.split('/').pop(), '3', `sent ${fork}`);
 });
 
+// --- DOM clobbering via an unescaped quote in a link -------------------------
+
+/** A turn whose answer is a markdown link with a quote that closes the href. */
+const CLOBBER = [frame('start', { run_id: 'rc' }),
+                 frame('delta', { text: '[x](https://ok.example"id="f)' }),
+                 frame('end', { user_index: 0, assistant_index: 1 })];
+
+test('a quote in a model link cannot clobber getElementById("f")', async () => {
+  // esc() must escape " so the URL stays inside the href and never injects
+  // id="f", which would make document.getElementById('f') return the <a> instead
+  // of the composer <form> and break Enter-to-send.
+  const b = await boot();
+  b.enqueue(CLOBBER);
+  await send(b, 'read me a page');
+  const f = b.doc.getElementById('f');
+  assert.equal(f.tagName, 'FORM', 'a rendered <a> clobbered the composer form');
+
+  b.enqueue(OK_AT_0);
+  b.doc.getElementById('p').value = 'still works?';
+  b.doc.getElementById('p').dispatchEvent(
+    new b.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 250));
+  assert.ok(b.calls.some((c) => c === 'POST /chat'),
+    'Enter-to-send threw because requestSubmit was not on a form');
+});
+
 // --- versions ----------------------------------------------------------------
 
 /** A turn that persisted at 0 and reports `n` stored answers. */
