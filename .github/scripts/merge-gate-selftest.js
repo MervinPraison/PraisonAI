@@ -300,4 +300,41 @@ assert('dispatch allowed when queue below cap', mg.mergeGateDispatchBlockedReaso
   pendingRuns: 2,
 }) == null);
 
-process.exit(failed ? 1 : 0);
+// In-flight count = max(pending runs, active-labelled PRs) — closes TOCTOU window
+(async () => {
+  const stubGithub = ({ runsByStatus = {}, activeIssues = [] }) => ({
+    rest: {
+      actions: {
+        listWorkflowRuns: async ({ status }) => ({
+          data: { workflow_runs: runsByStatus[status] || [] },
+        }),
+      },
+      issues: {
+        listForRepo: async () => ({ data: activeIssues }),
+      },
+    },
+  });
+
+  const g1 = stubGithub({
+    runsByStatus: { queued: [{}], in_progress: [{}] },
+    activeIssues: [{ pull_request: {} }, { pull_request: {} }, { pull_request: {} }],
+  });
+  const inflight1 = await mg.countInFlightMergeGate(g1, 'o', 'r');
+  assert('in-flight uses active-label count when higher than runs', inflight1 === 3);
+
+  const g2 = stubGithub({
+    runsByStatus: { queued: [{}, {}, {}, {}], in_progress: [] },
+    activeIssues: [{ pull_request: {} }],
+  });
+  const inflight2 = await mg.countInFlightMergeGate(g2, 'o', 'r');
+  assert('in-flight uses run count when higher than labels', inflight2 === 4);
+
+  const g3 = stubGithub({
+    runsByStatus: { queued: [], in_progress: [] },
+    activeIssues: [{ pull_request: {} }, { /* plain issue, no PR */ }],
+  });
+  const inflight3 = await mg.countInFlightMergeGate(g3, 'o', 'r');
+  assert('in-flight ignores non-PR issues with active label', inflight3 === 1);
+
+  process.exit(failed ? 1 : 0);
+})();

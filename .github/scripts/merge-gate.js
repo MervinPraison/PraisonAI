@@ -497,10 +497,44 @@ async function countPendingMergeGateRuns(github, owner, repo) {
   return pending;
 }
 
+/**
+ * PRs already carrying the merge-gate active label. A repository_dispatch →
+ * workflow-run has propagation latency, so a just-dispatched assessment may not
+ * yet appear in listWorkflowRuns. Counting active-labelled PRs closes that
+ * count-then-dispatch (TOCTOU) window so overlapping callers converge on the cap.
+ */
+async function countActiveMergeGatePrs(github, owner, repo) {
+  try {
+    const { data } = await github.rest.issues.listForRepo({
+      owner,
+      repo,
+      state: 'open',
+      labels: MERGE_GATE_ACTIVE_LABEL,
+      per_page: 100,
+    });
+    return (data || []).filter((issue) => issue.pull_request).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Effective in-flight merge-gate work: the larger of queued/in-progress runs
+ * and active-labelled PRs. Using the max (not sum) avoids double-counting a run
+ * that appears in both signals while still catching either one in isolation.
+ */
+async function countInFlightMergeGate(github, owner, repo) {
+  const [pendingRuns, activePrs] = await Promise.all([
+    countPendingMergeGateRuns(github, owner, repo),
+    countActiveMergeGatePrs(github, owner, repo),
+  ]);
+  return Math.max(pendingRuns, activePrs);
+}
+
 async function shouldSkipMergeGateDispatch(github, owner, repo, prNumber, core, options = {}) {
   const maxPending = options.maxPending ?? MAX_PENDING_MERGE_GATE_RUNS;
   const ctx = await loadPrContext(github, owner, repo, prNumber);
-  const pendingRuns = await countPendingMergeGateRuns(github, owner, repo);
+  const pendingRuns = await countInFlightMergeGate(github, owner, repo);
   const reason = mergeGateDispatchBlockedReason({
     labels: ctx.labels,
     pendingRuns,
@@ -1067,5 +1101,7 @@ module.exports = {
   MAX_PENDING_MERGE_GATE_RUNS,
   mergeGateDispatchBlockedReason,
   countPendingMergeGateRuns,
+  countActiveMergeGatePrs,
+  countInFlightMergeGate,
   shouldSkipMergeGateDispatch,
 };
