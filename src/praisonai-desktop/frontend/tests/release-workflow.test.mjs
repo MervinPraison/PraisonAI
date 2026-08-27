@@ -44,8 +44,9 @@ test('the packaged About view reads the same Tauri version', () => {
   const start = ui.indexOf('{ key: "version", section: "about"');
   const end = ui.indexOf('{ key: "engine_status"', start);
   const desktopVersion = ui.slice(start, end);
-  assert.match(ui, /window\.__TAURI__\.app\.getVersion\(\)/,
-               'the UI never reads the version embedded by Tauri');
+  assert.match(ui,
+               /__PRAISONAI_DESKTOP_VERSION__\s*=\s*await\s+window\.__TAURI__\.app\.getVersion\(\)/,
+               'the UI does not assign the version embedded by Tauri to the About value');
   assert.match(desktopVersion, /__PRAISONAI_DESKTOP_VERSION__/,
                'About does not use the version returned by Tauri');
   assert.doesNotMatch(desktopVersion, /0\.1\.0/, 'About still hardcodes the development version');
@@ -60,6 +61,10 @@ test('the Windows release fails if its embedded version drifts', () => {
   assert.match(gate, /VersionInfo/, 'the release never reads the binary version resource');
   assert.match(gate, /ProductVersion/, 'the release does not verify ProductVersion');
   assert.match(gate, /FileVersion/, 'the release does not verify FileVersion');
+  assert.match(gate, /\$version\.ProductVersion\s+-ne\s+\$expected/,
+               'ProductVersion is not compared with the release version');
+  assert.match(gate, /\$version\.FileVersion\s+-ne\s+\$numeric/,
+               'FileVersion is not compared with the numeric release version');
   assert.ok(start > workflow.indexOf('cargo tauri build'), 'the binary is checked before it exists');
   assert.ok(start < workflow.indexOf('gh release upload'), 'the binary is checked after upload');
 });

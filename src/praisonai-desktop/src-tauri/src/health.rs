@@ -63,6 +63,15 @@ pub fn classify(probe: Probe<'_>, expected_version: u32) -> Result<Ready, NotRea
     Ok(Ready { version })
 }
 
+/// Confirm an engine was launched by the same desktop release as this shell.
+///
+/// Protocol compatibility alone is insufficient when adopting an engine left
+/// behind by a previous shell process: that child retains the old release
+/// version in its environment and would otherwise report stale About data.
+pub fn shell_version_matches(body: &str, expected: &str) -> bool {
+    field(body, "shell_version").as_deref() == Some(expected)
+}
+
 /// Extract a scalar JSON field. Returns `None` rather than a default, so a
 /// missing field can never be mistaken for a present one.
 fn field(body: &str, key: &str) -> Option<String> {
@@ -140,5 +149,14 @@ mod tests {
         // "not_ok" contains "ok"; a substring search would read the wrong field.
         let probe = Probe::Responded { status: 200, body: r#"{"not_ok": true, "ok": false}"# };
         assert!(matches!(classify(probe, V), Err(NotReady::Unhealthy(_))));
+    }
+
+    #[test]
+    fn an_adopted_engine_must_match_the_shell_release() {
+        let current = r#"{"ok": true, "version": 1, "shell_version": "4.7.3"}"#;
+        let stale = r#"{"ok": true, "version": 1, "shell_version": "4.7.2"}"#;
+        assert!(shell_version_matches(current, "4.7.3"));
+        assert!(!shell_version_matches(stale, "4.7.3"));
+        assert!(!shell_version_matches(r#"{"ok": true, "version": 1}"#, "4.7.3"));
     }
 }

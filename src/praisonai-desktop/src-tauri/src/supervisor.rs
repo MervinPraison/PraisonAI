@@ -177,7 +177,7 @@ pub fn start(
                     // A port parsed from a log line is a claim. Confirm it before
                     // handing it to the UI, or the first message goes to whatever
                     // else happens to be listening.
-                    if let Some(port) = announced.confirm(probe_health) {
+                    if let Some(port) = announced.confirm(|port| probe_health(port, shell_version)) {
                         return Ok(Engine { port, child });
                     }
                 }
@@ -203,8 +203,8 @@ pub fn start(
     }
 }
 
-/// Confirm the engine answers on `port` with the shape we expect.
-pub fn probe_health(port: u16) -> bool {
+/// Confirm the engine answers on `port` with the shape and shell version we expect.
+pub fn probe_health(port: u16, expected_shell_version: &str) -> bool {
     use std::io::{Read, Write};
     use std::net::TcpStream;
 
@@ -234,6 +234,7 @@ pub fn probe_health(port: u16) -> bool {
         crate::health::EXPECTED_VERSION,
     )
     .is_ok()
+        && crate::health::shell_version_matches(payload, expected_shell_version)
 }
 
 fn tail(buffer: &str) -> String {
