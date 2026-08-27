@@ -508,5 +508,53 @@ class QuitStopsTheTrainer(unittest.TestCase):
                         f"the trainer (pid {pid}) outlived the engine quit")
 
 
+class DeleteChats(unittest.TestCase):
+    """DELETE /chats/<id> must answer for the delete that actually happened."""
+
+    def setUp(self):
+        self.engine = EngineProcess(_python(SHORT_RUN))
+        self.chats_dir = pathlib.Path(self.engine.home) / "chats"
+        self.chats_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.engine.close()
+
+    def _write_chat(self, cid):
+        (self.chats_dir / f"{cid}.json").write_text(
+            json.dumps({"id": cid, "title": cid, "messages": []}))
+
+    def _listed_ids(self):
+        _, body = self.engine.request("/chats")
+        return {c["id"] for c in body.get("chats", [])}
+
+    def test_a_delete_that_succeeds_removes_the_chat(self):
+        self._write_chat("good1")
+        self.assertIn("good1", self._listed_ids())
+        status, body = self.engine.request("/chats/good1", method="DELETE")
+        self.assertEqual(status, 200, body)
+        self.assertNotIn("good1", self._listed_ids())
+
+    def test_a_delete_that_cannot_happen_is_not_reported_as_done(self):
+        # The read-only data dir and the synced folder mid-conflict from the
+        # report both surface as an OSError from unlink(). A directory standing
+        # where the chat file would be reproduces that deterministically -- even
+        # for root, unlink() refuses it -- where a chmod'd dir does not, since
+        # root ignores the permission bit. Answering 200 here is how the
+        # conversation closed on screen and was back in the sidebar on reopen.
+        blocker = self.chats_dir / "stuck.json"
+        blocker.mkdir()
+        status, body = self.engine.request("/chats/stuck", method="DELETE")
+        self.assertNotEqual(status, 200, "a delete that did not happen was reported done")
+        self.assertFalse(body.get("ok", True))
+        self.assertTrue(blocker.is_dir(), "the blocker vanished; the test proves nothing")
+
+    def test_an_empty_id_is_refused_rather_than_silently_ok(self):
+        # An id that reduces to nothing (the report's `../..` after the route
+        # is stripped) raised a ValueError that used to be swallowed as 200.
+        status, body = self.engine.request("/chats/..", method="DELETE")
+        self.assertEqual(status, 400, body)
+        self.assertFalse(body.get("ok", True))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
