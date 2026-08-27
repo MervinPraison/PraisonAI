@@ -261,7 +261,12 @@ export async function createAISDKProvider(
 /**
  * Validate that a provider has the required API key
  */
-export function validateProviderApiKey(providerId: string): boolean {
+export function validateProviderApiKey(providerId: string, explicitApiKey?: string): boolean {
+  // A key passed programmatically (e.g. new Agent({ apiKey })) is as valid as
+  // one in the environment; the AI SDK provider receives it directly.
+  if (explicitApiKey) {
+    return true;
+  }
   const envKey = getProviderEnvKey(providerId);
   if (!envKey) {
     return true; // Custom providers may not need env keys
