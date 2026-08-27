@@ -337,6 +337,117 @@ test('the method hint changes with the method', async () => {
   assert.match(after, /chosen/i);
 });
 
+test('a local run posts no remote block', async () => {
+  const { doc, calls } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  doc.getElementById('trainForm').dispatchEvent(
+    new doc.defaultView.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  const [start] = posted(calls, '/train/start');
+  assert.ok(start, 'submitting posted nothing');
+  assert.equal(start.body.config.remote, undefined,
+               'a local run asked for a remote host');
+});
+
+test('choosing a remote server posts the block the CLI and YAML use', async () => {
+  // The same shape as `remote:` in a config file and --remote-host on the
+  // CLI. The engine passes the config through untouched, so this is what
+  // decides where the run happens.
+  const { doc, calls } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  const runOn = doc.getElementById('tRunOn');
+  runOn.value = 'remote';
+  runOn.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
+  await settle();
+  doc.getElementById('tRemoteHost').value = 'gpubox';
+  doc.getElementById('tRemotePython').value = '/opt/conda/bin/python';
+  doc.getElementById('trainForm').dispatchEvent(
+    new doc.defaultView.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  const [start] = posted(calls, '/train/start');
+  assert.ok(start, 'submitting posted nothing');
+  assert.deepEqual(start.body.config.remote, {
+    host: 'gpubox',
+    python: '/opt/conda/bin/python',
+    workdir: '~/.praisonai-train',
+  });
+});
+
+test('the remote fields are hidden until they apply', async () => {
+  const { doc } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  const host = doc.getElementById('tRemoteHost');
+  assert.equal(doc.defaultView.getComputedStyle(host.closest('.tf')).display, 'none',
+               'the SSH host field is shown for a local run');
+  const runOn = doc.getElementById('tRunOn');
+  runOn.value = 'remote';
+  runOn.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
+  await settle();
+  assert.notEqual(doc.defaultView.getComputedStyle(host.closest('.tf')).display, 'none',
+                  'choosing a remote server did not reveal the host field');
+});
+
+/** Fill the remote fields, then submit, and return what was posted. */
+async function submitRemote(doc, calls, { host, python, workdir, runOn = 'remote' }) {
+  const select = doc.getElementById('tRunOn');
+  select.value = runOn;
+  select.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
+  await settle();
+  if (host !== undefined) doc.getElementById('tRemoteHost').value = host;
+  if (python !== undefined) doc.getElementById('tRemotePython').value = python;
+  if (workdir !== undefined) doc.getElementById('tRemoteWorkdir').value = workdir;
+  // `required` on the host field blocks a real submit, which silently made an
+  // earlier version of these tests assert nothing at all. Drive the handler.
+  doc.getElementById('tRemoteHost').required = false;
+  doc.getElementById('trainForm').dispatchEvent(
+    new doc.defaultView.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  return posted(calls, '/train/start')[0];
+}
+
+test('a whitespace-only host is not a host', async () => {
+  const { doc, calls } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  const start = await submitRemote(doc, calls, { host: '   ' });
+  assert.ok(start, 'nothing was posted, so this test proved nothing');
+  assert.equal(start.body.config.remote, undefined,
+               'posted a remote block whose host is blank');
+});
+
+test('switching back to this computer drops a host already typed', async () => {
+  // The block is built from the choice, not left behind by it.
+  const { doc, calls } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  const start = await submitRemote(doc, calls, { host: 'gpubox', runOn: 'local' });
+  assert.ok(start, 'nothing was posted');
+  assert.equal(start.body.config.remote, undefined,
+               'a local run carried the remote host that had been typed');
+});
+
+test('an emptied remote directory falls back to the default', async () => {
+  const { doc, calls } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  const start = await submitRemote(doc, calls, { host: 'gpubox', workdir: '' });
+  assert.ok(start, 'nothing was posted');
+  assert.equal(start.body.config.remote.workdir, '~/.praisonai-train',
+               'clearing the field sent an empty working directory');
+});
+
+test('an emptied remote python falls back to the default', async () => {
+  const { doc, calls } = await boot();
+  click(doc.getElementById('viewTrain'));
+  await settle();
+  const start = await submitRemote(doc, calls, { host: 'gpubox', python: '' });
+  assert.ok(start, 'nothing was posted');
+  assert.equal(start.body.config.remote.python, 'python3');
+});
+
 test('every method the engine accepts is offered', async () => {
   const { doc } = await boot();
   const offered = [...doc.getElementById('tMethod').options].map((o) => o.value).sort();
