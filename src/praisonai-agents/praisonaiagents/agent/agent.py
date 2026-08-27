@@ -3240,12 +3240,12 @@ Your Goal: {self.goal}
     
     @thinking_budget.setter
     def thinking_budget(self, value: Optional[int]) -> None:
-        self._thinking_budget = value
         # `thinking_budget` is a backward-compatible alias for the unified
-        # reasoning effort (Issue #4452). Route through the effort setter (which
-        # normalises the int budget to a graded level and keeps _llm_init_params /
-        # a cached LLM in sync) so a post-construction budget change actually
-        # reaches the request pipeline and session persistence.
+        # `reasoning_effort` control (Issue #4452). Setting it must route through
+        # the same request-pipeline sync as `reasoning_effort`, otherwise the
+        # CLI's `--thinking` (which assigns this property after construction)
+        # stays dormant — the value would be stored but never emitted.
+        self._thinking_budget = value if isinstance(value, int) else None
         self.reasoning_effort = value
 
     @property
@@ -3276,12 +3276,14 @@ Your Goal: {self.goal}
                 self._llm_init_params.pop('reasoning_effort', None)
             else:
                 self._llm_init_params['reasoning_effort'] = value
-        # If the LLM was already materialized (cached), _build_completion_params
-        # reads the instance attribute, not _llm_init_params, so update the live
-        # object too — otherwise subsequent requests keep the stale effort.
-        cached = getattr(self, "_llm_instance", None)
-        if cached is not None and hasattr(cached, "reasoning_effort"):
-            cached.reasoning_effort = value
+        # If an LLM instance has already been built (lazy cache), update it too so
+        # a post-construction change still takes effect without a rebuild.
+        instance = getattr(self, "_llm_instance", None)
+        if instance is not None:
+            try:
+                instance.reasoning_effort = value
+            except Exception:
+                pass
 
     @property
     def total_cost(self) -> float:

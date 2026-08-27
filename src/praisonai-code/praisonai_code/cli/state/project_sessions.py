@@ -344,8 +344,8 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
                 fields["model"] = model_name
         # Persist the graded reasoning effort alongside the model so a resume can
         # restore the effort the conversation was running (Issue #4452), mirroring
-        # the model-persist precedent (Issue #3685). Only recorded when set, so
-        # unset stays a no-op (update_session_metadata skips None values anyway).
+        # the model-persist precedent (Issue #3685). The agent's setter already
+        # normalises to a portable graded level, so record it only when set.
         effort = getattr(agent, "reasoning_effort", None)
         if isinstance(effort, str) and effort:
             fields["reasoning_effort"] = effort
