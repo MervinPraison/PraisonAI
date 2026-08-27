@@ -6716,7 +6716,15 @@ Answer:"""
         current_response = response_text
         
         while retry_count <= self.max_guardrail_retries:
-            success, result, error = self._validate_with_guardrail(current_response)
+            # A string/LLMGuardrail guardrail fires a *blocking* LLM call inside
+            # _validate_with_guardrail. Offload it to a thread so it does not
+            # stall the event loop (and every other concurrently-running task
+            # under asyncio.gather), mirroring async_memory_mixin's
+            # _run_memory_in_thread executor-offload pattern.
+            loop = asyncio.get_event_loop()
+            success, result, error = await loop.run_in_executor(
+                None, self._validate_with_guardrail, current_response
+            )
             
             if success:
                 logging.info(f"Agent {self.name}: Guardrail validation passed")

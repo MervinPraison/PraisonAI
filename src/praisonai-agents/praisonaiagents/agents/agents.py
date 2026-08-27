@@ -1338,6 +1338,20 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
             return task_output, True  # Signal retry needed
 
+    async def _aapply_task_guardrail(self, task, task_id, task_output):
+        """Async wrapper for _apply_task_guardrail.
+
+        A string/LLMGuardrail guardrail fires a *blocking* LLM call inside
+        _apply_task_guardrail. Offload it to a thread so it does not stall the
+        event loop (and every other task running concurrently under
+        asyncio.gather in arun_all_tasks/astart), mirroring the executor-offload
+        pattern used for synchronous memory calls in async_memory_mixin.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._apply_task_guardrail, task, task_id, task_output
+        )
+
     def _run_task_start_hook(self, task, task_id):
         """Run the on_task_start hook and propagate global variables to the task.
 
@@ -1417,8 +1431,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
-                    # Apply guardrail validation using shared helper
-                    task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    # Apply guardrail validation using shared helper (offloaded to
+                    # a thread so a blocking LLM guardrail does not stall the loop)
+                    task_output, should_retry = await self._aapply_task_guardrail(task, task_id, task_output)
                     if should_retry:
                         retries += 1
                         continue
