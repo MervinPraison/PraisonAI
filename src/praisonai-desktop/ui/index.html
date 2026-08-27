@@ -484,6 +484,14 @@ body.training #thread,body.training #f{display:none}
               <span class="hint">A Hugging Face id.</span>
             </div>
             <div class="tf">
+              <label for="tRunOn">Run on</label>
+              <select id="tRunOn" name="run_on">
+                <option value="local" selected>This computer</option>
+                <option value="remote">A remote server</option>
+              </select>
+              <span class="hint" id="tRunOnHint">Needs an NVIDIA GPU.</span>
+            </div>
+            <div class="tf">
               <label for="tMethod">Method</label>
               <select id="tMethod" name="method">
                 <option value="sft" selected>SFT — supervised fine-tuning</option>
@@ -496,6 +504,21 @@ body.training #thread,body.training #f{display:none}
                 <option value="cpo">CPO — contrastive preference</option>
               </select>
               <span class="hint" id="tMethodHint">Trains on completions.</span>
+            </div>
+            <div class="tf remote-only is-hidden">
+              <label for="tRemoteHost">SSH host</label>
+              <input id="tRemoteHost" name="remote_host" placeholder="gpubox"/>
+              <span class="hint">An alias from your ~/.ssh/config.</span>
+            </div>
+            <div class="tf remote-only is-hidden">
+              <label for="tRemotePython">Remote python</label>
+              <input id="tRemotePython" name="remote_python" value="python3"/>
+              <span class="hint">Interpreter on that machine.</span>
+            </div>
+            <div class="tf remote-only is-hidden">
+              <label for="tRemoteWorkdir">Remote directory</label>
+              <input id="tRemoteWorkdir" name="remote_workdir" value="~/.praisonai-train"/>
+              <span class="hint">Where the run works. Created if absent.</span>
             </div>
             <div class="tf">
               <label for="tDataset">Dataset</label>
@@ -2218,6 +2241,21 @@ function trainConfig(){
     train:true, ollama_save:false, huggingface_save:false};
   const steps=num('max_steps',0);
   if(steps>0) config.max_steps=steps;   // omitted, not zero: 0 means "no cap"
+
+  // Where it runs, expressed the same way the CLI and a hand-written YAML
+  // express it -- a `remote` block, or its absence. There is no separate mode
+  // flag to fall out of step with the block, and the engine passes the config
+  // through untouched, so `praisonai-train llm --config` does the routing.
+  if(get('run_on')==='remote'){
+    // get() already trims; the extra .trim() calls that were here implied
+    // otherwise.
+    const host=get('remote_host');
+    if(host){
+      config.remote={host,
+        python:get('remote_python')||'python3',
+        workdir:get('remote_workdir')||'~/.praisonai-train'};
+    }
+  }
   return config;
 }
 
@@ -2409,6 +2447,19 @@ async function refreshTraining(){
 
 document.getElementById('tMethod').addEventListener('change',e=>{
   document.getElementById('tMethodHint').textContent=METHOD_HINTS[e.target.value]||'';
+});
+
+document.getElementById('tRunOn').addEventListener('change',e=>{
+  const remote=e.target.value==='remote';
+  document.querySelectorAll('.remote-only').forEach(el=>{
+    el.classList.toggle('is-hidden',!remote); });
+  // Said plainly rather than discovered an hour in: fine-tuning needs CUDA,
+  // and a Mac does not have it, so "this computer" is not an option here on
+  // most of the machines this app runs on.
+  document.getElementById('tRunOnHint').textContent=remote
+    ? 'Runs over SSH. Uses your ssh agent — no password is stored.'
+    : 'Needs an NVIDIA GPU on this machine.';
+  document.getElementById('tRemoteHost').required=remote;
 });
 
 // Always go through showView, including for the default: it is what sets the
