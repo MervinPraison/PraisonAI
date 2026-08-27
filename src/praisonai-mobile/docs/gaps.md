@@ -8,19 +8,21 @@ fact rather than something a reader has to infer from a `false` in a struct.
 
 ### The one root cause
 
-Upstream `Agent.streamEvents()` emits a three-variant union:
+Upstream `Agent.streamEvents()` emits a five-variant union:
 
 ```ts
 type AgentEvent =
-  | { type: 'text';   delta: string }
-  | { type: 'finish'; text: string }
-  | { type: 'error';  error: Error }
+  | { type: 'text';        delta: string }
+  | { type: 'tool_call';   callId: string; name: string; args: Record<string, unknown> }
+  | { type: 'tool_result'; callId: string; name: string; ok: boolean; output: string }
+  | { type: 'finish';      text: string }
+  | { type: 'error';       error: Error }
 ```
 
-Protocol v2 has **eleven** events. Nothing in the upstream channel carries a
-tool call, a tool result, an approval request, reasoning, or usage — so this
-engine cannot produce them, and the five conformance scenarios below are
-declared unsupported rather than faked.
+Protocol v2 has **eleven** events. The channel now carries tool calls and
+results, so this engine reports tool activity. What it still cannot carry is an
+approval request, reasoning, or usage — so the two approval conformance
+scenarios below are declared unsupported rather than faked.
 
 ### What that means per capability
 
@@ -50,21 +52,21 @@ indistinguishable from a normal answer — which is the exact defect protocol v2
 
 | Scenario | Reason |
 |---|---|
-| `tool_ok` | no `tool_call`/`tool_result` variant upstream |
-| `tool_failed` | no `tool_result`, so `ok: false` cannot be reported |
-| `tool_unresolved` | no `tool_call`, so there is no row to leave unresolved |
-| `approval` | `ApprovalManager` cannot reach the event channel |
+| `approval` | `ApprovalManager` gates tool execution upstream but cannot reach the event channel |
 | `two_approvals` | same as `approval` |
 
-The suite prints every one of these on each run, so a contract that quietly
-shrinks is visible in the output rather than silently green.
+`tool_ok`, `tool_failed` and `tool_unresolved` were listed here until upstream
+gained `tool_call`/`tool_result`; they are now produced and passing. The suite
+prints every remaining omission on each run, so a contract that quietly shrinks
+is visible in the output rather than silently green.
 
-### Closing the gap
+### Closing the remaining gap
 
-This needs an upstream change: `AgentEvent` gaining tool and approval variants,
-mirroring Python's `StreamEventType` (17 members). Until then the mobile app
-either runs without tool visibility, or uses the `remote-http` engine — which
-speaks the full vocabulary because the desktop server already emits it.
+Approvals need a further upstream change: `AgentEvent` gaining an approval
+variant, mirroring Python's `StreamEventType` (17 members). Until then the
+mobile app either runs without approval prompts, or uses the `remote-http`
+engine — which speaks the full vocabulary because the desktop server already
+emits it.
 
 ## Node-only globals on the Agent import graph
 

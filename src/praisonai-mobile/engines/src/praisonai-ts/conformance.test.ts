@@ -4,14 +4,15 @@
  * Passing this IS the definition of implementing the agent-framework seam --
  * the same suite the remote-http engine and the scripted fake already run.
  *
- * Five scenarios are declared unsupported, with reasons. That is not the suite
+ * Two scenarios are declared unsupported, with reasons. That is not the suite
  * being lenient: `unsupported` prints every omission, so a shrinking contract
- * is visible in the output rather than silently green. The five are all one
- * fact -- upstream `streamEvents` emits three variants (text/finish/error)
- * against protocol v2's eleven, so tool and approval events cannot be produced
- * by this engine at all. It is recorded in gaps.md and reflected in
- * `capabilities`, which the suite checks in the negative direction: an engine
- * declaring approvals:false must never emit an approval_request.
+ * is visible in the output rather than silently green. Both are one fact --
+ * upstream `streamEvents` now emits tool_call/tool_result (so the three tool
+ * scenarios are produced and passing) but still has no approval channel, so
+ * `approval` and `two_approvals` cannot be produced by this engine. It is
+ * recorded in gaps.md and reflected in `capabilities`, which the suite checks
+ * in the negative direction: an engine declaring approvals:false must never
+ * emit an approval_request.
  */
 import { describeEngineContract, type ScenarioName } from "../conformance.ts";
 import { createPraisonTsEngine } from "./engine.ts";

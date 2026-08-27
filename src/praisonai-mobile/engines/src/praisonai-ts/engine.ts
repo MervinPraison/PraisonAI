@@ -5,16 +5,17 @@
  * -- the run controller, the transcript reducer, the views -- imports nothing
  * from here and nothing from `praisonai`.
  *
- * THE CAPABILITY GAP IS DELIBERATE AND DECLARED.
+ * THE REMAINING CAPABILITY GAP IS DELIBERATE AND DECLARED.
  *
- * Upstream `streamEvents` emits three variants: `text`, `finish`, `error`.
- * Protocol v2 has eleven. praisonai-ts *executes* tools -- it just does not
- * announce them on the event channel -- so a tool call is invisible to any
- * consumer of this engine. `capabilities.tools` is therefore FALSE: the flag
- * describes what the engine can report, not what it can do internally, because
- * a UI that renders tool rows from a flag would render nothing and look broken.
- * See gaps.md, and the conformance harness's `unsupported` map, which prints
- * every scenario this engine cannot be driven into.
+ * Upstream `streamEvents` now emits five variants: `text`, `tool_call`,
+ * `tool_result`, `finish`, `error`. Protocol v2 has eleven. Tool activity is
+ * therefore reportable and `capabilities.tools` is TRUE. What is still absent
+ * is the approval channel: praisonai-ts's `ApprovalManager` gates tool
+ * execution upstream but never surfaces its prompt on the event channel, so
+ * `capabilities.approvals` stays FALSE. The flag describes what the engine can
+ * report, not what it can do internally. See gaps.md, and the conformance
+ * harness's `unsupported` map, which prints every scenario this engine cannot
+ * be driven into.
  *
  * `end.userIndex` cannot be computed here and is not invented. It comes from
  * the injected `RunPersistence`, which returns null when the write failed --

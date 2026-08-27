@@ -9,16 +9,17 @@
  *     without a provider, a network, or an API key.
  *  2. It documents the coupling. This file IS the list of what would have to
  *     be re-implemented to swap frameworks. Right now that list is one class,
- *     three methods and a three-variant union -- which is the strongest
+ *     three methods and a five-variant union -- which is the strongest
  *     evidence available that the seam is real.
  *  3. It fails fast on drift. The adapter assigns the real `Agent` to this
  *     type at composition, so a signature change upstream is a typecheck error
  *     here rather than a runtime surprise on a device.
  *
- * The `AgentEvent` union really does have only three variants upstream --
- * `text`, `finish`, `error`. Protocol v2 has eleven. That gap is not an
- * oversight in this file; it is why `capabilities` below declares `reasoning`,
- * `approvals` and `attachments` false, and it is recorded in gaps.md.
+ * The `AgentEvent` union has five variants upstream -- `text`, `tool_call`,
+ * `tool_result`, `finish`, `error`. Protocol v2 has eleven. The remaining gap
+ * is not an oversight in this file; it is why `capabilities` below declares
+ * `reasoning`, `approvals` and `attachments` false, and it is recorded in
+ * gaps.md.
  */
 
 /** Upstream: `praisonai`'s `AgentEvent`, verbatim. */
