@@ -313,9 +313,19 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
     // Resolve the environment the engine actually spawns with, rather than
     // inheriting the shell's. An exported PYTHONHOME or PYTHONPATH would
     // otherwise redirect the engine's stdlib or site-packages away from the
-    // venv the resolver just proved. Collect `vars()` *after* setting
+    // venv the resolver just proved. Collect *after* setting
     // PRAISONAI_APP_BUNDLE above so it survives the `env_clear` in `start`.
-    let inherited: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    //
+    // `vars_os`, not `vars`: `vars` panics on any non-Unicode key or value,
+    // and with `panic = "abort"` in release that would take the whole app down
+    // before the engine ever started -- a single stray byte in the inherited
+    // environment (a locale-encoded value, a foreign tool's export) would abort
+    // startup. `spawn_env` only handles `String` anyway, so drop undecodable
+    // entries rather than aborting; a variable Python could not have received
+    // as UTF-8 is no loss.
+    let inherited: std::collections::BTreeMap<String, String> = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
     let spawn = venv_root_for_python(&python, &RealFs, Platform::current())
         .map(|layout| spawn_env(&layout, &inherited, Platform::current()))
         .unwrap_or(inherited);
