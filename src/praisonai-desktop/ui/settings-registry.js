@@ -191,7 +191,7 @@ const SETTINGS = [
 
   // ---- Integrations -------------------------------------------------------
   { key: "mcp_servers", section: "integrations", label: "MCP servers",
-    description: "Tool servers launched over stdio. Each is disabled until you enable it.",
+    description: "Saved for a future release. Servers listed here are stored only \u2014 the engine does not launch them yet, so the model cannot use them.",
     keywords: ["tools", "model context protocol", "stdio", "extensions"],
     control: { kind: "action", verb: "Manage" }, action: "mcp" },
 ];

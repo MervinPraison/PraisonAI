@@ -20,6 +20,20 @@ test('the registry copies are in sync with ui/index.html', () => {
   execFileSync(process.execPath, [TOOL, '--check'], { stdio: 'pipe' });
 });
 
+test('the mcp hint does not claim a launch the engine never performs', () => {
+  // engine/server.py load_mcp() is read only by GET/POST /mcp; _get_agent
+  // builds Agent(tools=_builtin_tools()) and never spawns a server. A hint
+  // that says the servers are "launched" is a claim with no consumer.
+  const html = readFileSync(HTML, 'utf8');
+  const m = html.match(/key: "mcp_servers"[\s\S]*?description: "([^"]*)"/);
+  assert.ok(m, 'mcp_servers setting not found');
+  const hint = m[1];
+  assert.ok(!/launched over stdio/.test(hint),
+    'mcp hint still claims servers are launched, but the engine never launches them');
+  assert.ok(/stored only|does not launch/.test(hint),
+    'mcp hint should state the servers are stored only');
+});
+
 test('every setting names a section that exists', () => {
   // A setting whose section has no tab is rendered by nothing -- the same
   // silent-nothing shape as a setting that is stored and never read.

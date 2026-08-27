@@ -817,7 +817,7 @@ const SETTINGS = [
 
   // ---- Integrations -------------------------------------------------------
   { key: "mcp_servers", section: "integrations", label: "MCP servers",
-    description: "Tool servers launched over stdio. Each is disabled until you enable it.",
+    description: "Saved for a future release. Servers listed here are stored only \u2014 the engine does not launch them yet, so the model cannot use them.",
     keywords: ["tools", "model context protocol", "stdio", "extensions"],
     control: { kind: "action", verb: "Manage" }, action: "mcp" },
 ];
@@ -1922,7 +1922,9 @@ async function runAction(def){
     toast(u.message || ('PraisonAI Desktop '+u.current));
   } else if(def.action==='mcp'){
     const {servers}=await (await fetch('http://127.0.0.1:'+PORT+'/mcp')).json();
-    panel.innerHTML='<h2>MCP servers</h2><div id="mcplist"></div>'
+    panel.innerHTML='<h2>MCP servers</h2>'
+      +'<div class="hint">Stored for a future release. The engine does not launch these yet, so the model cannot use them.</div>'
+      +'<div id="mcplist"></div>'
       +'<div class="fld"><label>Name</label><input id="m-name" placeholder="filesystem"/></div>'
       +'<div class="fld"><label>Command</label><input id="m-cmd" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp"/></div>'
       +'<div class="row"><button class="ghost" id="m-close">Close</button><button id="m-add">Add server</button></div>';
