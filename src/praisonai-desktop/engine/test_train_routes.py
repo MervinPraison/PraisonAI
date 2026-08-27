@@ -410,5 +410,33 @@ class TrainConcurrency(unittest.TestCase):
         self.assertIsNone(self.engine.proc.poll(), "the engine process exited")
 
 
+class ChatsListing(unittest.TestCase):
+    """A stray file in chats/ must not drop the connection.
+
+    list_chats() catches (OSError, ValueError) and reports the file as a
+    corrupt row -- but valid JSON that is not an object (the app's own Export
+    emits an array) reached c.get(...) and raised AttributeError, which
+    escaped the handler and closed the connection with no status. The front
+    end then blamed the engine for being down.
+    """
+
+    def setUp(self):
+        self.engine = EngineProcess(_python("print('ok')"))
+        self.chats = pathlib.Path(self.engine.home) / "chats"
+        self.chats.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.engine.close()
+
+    def test_a_json_array_in_chats_is_a_corrupt_row_not_a_dropped_connection(self):
+        (self.chats / "backup.json").write_text(json.dumps([{"id": "good1"}]))
+        status, body = self.engine.request("/chats")
+        self.assertEqual(status, 200, body)
+        rows = body["chats"]
+        corrupt = [r for r in rows if r.get("corrupt")]
+        self.assertTrue(corrupt, "the array file was not surfaced as corrupt")
+        self.assertIn("backup", [r["id"] for r in corrupt])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -336,6 +336,9 @@ def list_chats() -> list:
     for f in CHATS_DIR.glob("*.json"):
         try:
             c = json.loads(f.read_text())
+            if not isinstance(c, dict):
+                # Valid JSON, wrong shape -- the app's own export is a list.
+                raise ValueError("not a chat object")
             out.append({
                 "id": c.get("id", f.stem),
                 "title": c.get("title") or "New chat",
