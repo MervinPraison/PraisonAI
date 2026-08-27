@@ -110,15 +110,21 @@ export async function getOpenAIClient(): Promise<OpenAI> {
     const baseURL = getEnv('OPENAI_BASE_URL') ?? '';
     // Never log `identity`: it contains the secret API key.
     const identity = `${apiKey}\u0000${baseURL}`;
-    if (cachedClient === null || cachedIdentity !== identity) {
-        cachedClient = new OpenAI(buildOpenAIClientOptions({
-            apiKey,
-            ...(baseURL ? { baseURL } : {})
-        }));
-        cachedIdentity = identity;
-        await Logger.debug('OpenAI client initialized');
+    if (cachedClient !== null && cachedIdentity === identity) {
+        return cachedClient;
     }
-    return cachedClient;
+    // Build synchronously and capture in a local before any await. Returning
+    // the local (not the shared field) makes the result immune to a concurrent
+    // credential change or resetOpenAIClient() that runs during the await —
+    // each caller keeps the client it actually built for its own identity.
+    const client = new OpenAI(buildOpenAIClientOptions({
+        apiKey,
+        ...(baseURL ? { baseURL } : {})
+    }));
+    cachedClient = client;
+    cachedIdentity = identity;
+    await Logger.debug('OpenAI client initialized');
+    return client;
 }
 
 /**

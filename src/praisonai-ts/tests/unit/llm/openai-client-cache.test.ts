@@ -57,4 +57,24 @@ describe('getOpenAIClient cache invalidation', () => {
     const second = await getOpenAIClient();
     expect(second).not.toBe(first);
   });
+
+  it('returns the client built for its own key under overlapping calls', async () => {
+    process.env.OPENAI_API_KEY = 'sk-a';
+    const pA = getOpenAIClient();
+    process.env.OPENAI_API_KEY = 'sk-b';
+    const pB = getOpenAIClient();
+    const [a, b] = await Promise.all([pA, pB]);
+    // Each caller must keep the client it built for its own credentials,
+    // never the client another concurrent call installed into the cache.
+    expect(a).not.toBe(b);
+  });
+
+  it('does not return null when reset races an in-flight init', async () => {
+    process.env.OPENAI_API_KEY = 'sk-race';
+    const p = getOpenAIClient();
+    resetOpenAIClient();
+    const client = await p;
+    expect(client).toBeDefined();
+    expect(client).not.toBeNull();
+  });
 });
