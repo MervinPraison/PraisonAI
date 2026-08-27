@@ -113,6 +113,15 @@ test('Train stays blocked while initial engine status is still pending', async (
   click(b.doc.getElementById('viewTrain'));
   assert.equal(b.doc.body.classList.contains('training'), false,
     'Train replaced setup before engine readiness was known');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'clicking Train while readiness was pending discarded the requested view');
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'the stale startup view replaced setup after readiness resolved');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'startup completion overwrote the view selected while readiness was pending');
+  assert.ok(b.doc.querySelector('.setup'),
+    'startup completion hid setup after a Train click during readiness detection');
 });
 
 test('the steps are listed before anything starts', async () => {

@@ -2420,5 +2420,12 @@ document.getElementById('tMethod').addEventListener('change',e=>{
 // looking selected on first launch.
 let startView='chat';
 try{ if(localStorage.getItem('view')==='train') startView='train'; }catch(e){}
-initialBoot.then(()=>showView(startView));
+initialBoot.then(()=>{
+  let nextView=startView;
+  try{
+    const savedView=localStorage.getItem('view');
+    if(savedView==='chat'||savedView==='train') nextView=savedView;
+  }catch(e){}
+  showView(nextView);
+});
 </script></body></html>
