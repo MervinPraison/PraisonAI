@@ -2781,8 +2781,20 @@ Your Goal: {self.goal}
             if isinstance(_thinking_budget_alias, int)
             else None
         )
-        # Store the resolved unified reasoning-effort for session persistence.
-        self._reasoning_effort = reasoning_effort
+        # Store the resolved unified reasoning-effort as a canonical graded level
+        # (off|minimal|low|medium|high) for session persistence. A legacy int
+        # ``thinking_budget`` alias is normalised to its nearest level so the
+        # persisted/queried value is always provider-portable (Issue #4452). The
+        # LLM request pipeline still accepts the raw value too, so behaviour is
+        # unchanged when unset.
+        if reasoning_effort is not None:
+            try:
+                from ..thinking.effort import normalize_effort
+                self._reasoning_effort = normalize_effort(reasoning_effort)
+            except Exception:
+                self._reasoning_effort = reasoning_effort
+        else:
+            self._reasoning_effort = None
         
         # Context management (lazy loaded for zero overhead when disabled)
         # Smart default: auto-enable context when tools are present
@@ -3229,6 +3241,12 @@ Your Goal: {self.goal}
     @thinking_budget.setter
     def thinking_budget(self, value: Optional[int]) -> None:
         self._thinking_budget = value
+        # `thinking_budget` is a backward-compatible alias for the unified
+        # reasoning effort (Issue #4452). Route through the effort setter (which
+        # normalises the int budget to a graded level and keeps _llm_init_params /
+        # a cached LLM in sync) so a post-construction budget change actually
+        # reaches the request pipeline and session persistence.
+        self.reasoning_effort = value
 
     @property
     def reasoning_effort(self) -> Optional[str]:
@@ -3242,6 +3260,14 @@ Your Goal: {self.goal}
 
     @reasoning_effort.setter
     def reasoning_effort(self, value: Optional[str]) -> None:
+        # Normalise to a canonical graded level so the stored/persisted value is
+        # always provider-portable, whether set as a level or a legacy int budget.
+        if value is not None:
+            try:
+                from ..thinking.effort import normalize_effort
+                value = normalize_effort(value)
+            except Exception:
+                pass
         self._reasoning_effort = value
         # Keep the live LLM-init params in sync so a post-construction change
         # still reaches the request pipeline (mirrors thinking_budget aliasing).
@@ -3250,6 +3276,12 @@ Your Goal: {self.goal}
                 self._llm_init_params.pop('reasoning_effort', None)
             else:
                 self._llm_init_params['reasoning_effort'] = value
+        # If the LLM was already materialized (cached), _build_completion_params
+        # reads the instance attribute, not _llm_init_params, so update the live
+        # object too — otherwise subsequent requests keep the stale effort.
+        cached = getattr(self, "_llm_instance", None)
+        if cached is not None and hasattr(cached, "reasoning_effort"):
+            cached.reasoning_effort = value
 
     @property
     def total_cost(self) -> float:

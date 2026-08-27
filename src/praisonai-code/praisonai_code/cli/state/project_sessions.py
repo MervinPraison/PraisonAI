@@ -260,6 +260,31 @@ def find_session_model(
     return None
 
 
+def find_session_reasoning_effort(
+    session_id: str, project_path: Optional[str] = None
+) -> Optional[str]:
+    """Return the reasoning effort a resumable session was last run with.
+
+    Mirrors :func:`find_session_model`: searches the canonical CLI stores in the
+    same order and returns the first recorded graded effort so
+    ``--continue``/``--session`` can restore it alongside the model (Issue #4452).
+    Returns ``None`` when none was recorded, letting the caller fall back to the
+    default / per-invocation value.
+    """
+    if not session_id:
+        return None
+    for store in canonical_cli_stores(project_path):
+        try:
+            if not store.session_exists(session_id):
+                continue
+            effort = store.get_session_reasoning_effort(session_id)
+        except Exception:
+            continue
+        if isinstance(effort, str) and effort:
+            return effort
+    return None
+
+
 def build_cli_memory_config(
     session_id: Optional[str] = None,
     auto_save: Optional[str] = None,
@@ -317,6 +342,13 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
             model_name = getattr(model, "model", None)
             if isinstance(model_name, str):
                 fields["model"] = model_name
+        # Persist the graded reasoning effort alongside the model so a resume can
+        # restore the effort the conversation was running (Issue #4452), mirroring
+        # the model-persist precedent (Issue #3685). Only recorded when set, so
+        # unset stays a no-op (update_session_metadata skips None values anyway).
+        effort = getattr(agent, "reasoning_effort", None)
+        if isinstance(effort, str) and effort:
+            fields["reasoning_effort"] = effort
         store.update_session_metadata(session_id, **fields)
     except Exception:
         pass

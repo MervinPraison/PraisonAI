@@ -131,6 +131,46 @@ class TestAgentSurface:
         agent.reasoning_effort = "low"
         assert agent._llm_init_params.get("reasoning_effort") == "low"
 
+    def test_setter_updates_cached_llm_after_materialization(self):
+        pytest.importorskip("litellm")
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="x", llm="openai/gpt-5", reasoning_effort="low")
+        # Materialize (cache) the LLM, then change the effort post-construction.
+        _ = self._params(agent)
+        agent.reasoning_effort = "high"
+        # The already-cached LLM must reflect the new effort on the next request.
+        assert self._params(agent).get("reasoning_effort") == "high"
+
+    def test_thinking_budget_setter_reaches_request(self):
+        pytest.importorskip("litellm")
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="x", llm="openai/gpt-5")
+        _ = self._params(agent)  # cache the LLM first
+        agent.thinking_budget = 16000  # -> "high"
+        assert agent.reasoning_effort == "high"
+        assert self._params(agent).get("reasoning_effort") == "high"
+
+    def test_int_budget_normalises_to_graded_level_on_property(self):
+        pytest.importorskip("litellm")
+        from praisonaiagents import Agent
+
+        # Legacy int budget passed via the alias should surface as a graded level
+        # on the persisted/queried property (not the raw int).
+        agent = Agent(instructions="x", llm="openai/gpt-5", thinking_budget=8000)
+        assert agent.reasoning_effort == "medium"
+
+
+class TestEffortNormalizationNoLLM:
+    """Agent effort surface normalises without requiring LLM deps."""
+
+    def test_property_returns_graded_level_from_int(self):
+        from praisonaiagents.thinking.effort import normalize_effort
+
+        assert normalize_effort(16000) == "high"
+        assert normalize_effort(4000) == "low"
+
 
 class TestSessionPersistence:
     """Effort round-trips through the store and restores on resume (#3685)."""
