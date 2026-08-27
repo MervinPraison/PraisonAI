@@ -903,25 +903,34 @@ class AgentsGenerator:
         # heterogeneous values must be wrapped per-agent so a documented
         # per-agent ``tool_timeout`` is honoured instead of being silently
         # downgraded to the tightest value for the whole run.
+        # The uniform and per-agent paths are mutually exclusive. Always resolve
+        # BOTH internal keys on every call (setting the inactive one to None) so
+        # that when the *same* generator instance is reused with a different
+        # timeout layout, a stale closure from a previous run can never leak into
+        # the adapters and apply the wrong budget to the current run.
         uniform = self._resolve_uniform_tool_timeout(config)
+        wrap = None
+        resolver = None
         if uniform and uniform > 0:
             wrap = lambda t, _sec=uniform: self._wrap_tool_with_timeout(t, _sec)
             tools_dict = {name: wrap(tool) for name, tool in tools_dict.items()}
-            # Expose the per-run wrap so adapters that inject *more* tools after
-            # this point (e.g. PraisonAIAdapter's ACP/LSP centric tools) apply the
-            # same timeout guard instead of silently bypassing it.
-            self.cli_config = {**(self.cli_config or {}), "_tool_timeout_wrap": wrap}
         else:
             # No single uniform timeout. If any agent declared a per-agent
             # tool_timeout, expose a resolver so adapters wrap each agent's tools
             # with that agent's own budget (tools stay shared; only the guard
             # closure differs). Falls back to no wrap for agents without one.
             resolver = self.make_agent_tool_wrap_resolver(config)
-            if resolver is not None:
-                self.cli_config = {
-                    **(self.cli_config or {}),
-                    "_agent_tool_wrap_resolver": resolver,
-                }
+
+        # Expose the per-run wrap so adapters that inject *more* tools after this
+        # point (e.g. PraisonAIAdapter's ACP/LSP centric tools) apply the same
+        # timeout guard instead of silently bypassing it; expose the per-agent
+        # resolver for heterogeneous budgets. Both keys are written every time so
+        # the inactive path is cleared rather than left holding a prior closure.
+        self.cli_config = {
+            **(self.cli_config or {}),
+            "_tool_timeout_wrap": wrap,
+            "_agent_tool_wrap_resolver": resolver,
+        }
         return tools_dict
 
     def _resolve_effective_tool_timeout(self, config):

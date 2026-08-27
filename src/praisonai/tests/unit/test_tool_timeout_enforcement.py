@@ -124,6 +124,48 @@ def test_build_tools_dict_no_wrap_when_no_timeout():
     assert tools_dict["plain"] is sentinel
 
 
+def test_build_tools_dict_clears_stale_wrap_state_on_reuse():
+    # Reusing the same generator with a different timeout layout must not leak a
+    # previous run's closure: the uniform and per-agent keys are mutually
+    # exclusive, so the inactive one is always reset to None. Otherwise an
+    # adapter could apply an earlier run's budget to the current tools.
+    gen = _make_generator()
+
+    def sentinel():
+        return "ok"
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"plain": sentinel}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+
+    try:
+        # Run 1: uniform CLI timeout -> uniform wrap set, resolver cleared.
+        gen.cli_config = {"tool_timeout": 5}
+        gen._build_tools_dict({"roles": {"a": {}}})
+        assert callable(gen.cli_config.get("_tool_timeout_wrap"))
+        assert gen.cli_config.get("_agent_tool_wrap_resolver") is None
+
+        # Run 2: heterogeneous per-agent timeouts -> resolver set, stale uniform
+        # wrap MUST be cleared so adapters don't reuse run 1's budget.
+        gen.cli_config = {}
+        gen._build_tools_dict(
+            {"roles": {"a": {"tool_timeout": 10}, "b": {"tool_timeout": 30}}}
+        )
+        assert gen.cli_config.get("_tool_timeout_wrap") is None
+        assert callable(gen.cli_config.get("_agent_tool_wrap_resolver"))
+
+        # Run 3: no timeout at all -> both keys cleared.
+        gen.cli_config = {}
+        gen._build_tools_dict({"roles": {"a": {}}})
+        assert gen.cli_config.get("_tool_timeout_wrap") is None
+        assert gen.cli_config.get("_agent_tool_wrap_resolver") is None
+    finally:
+        gen.close()
+
+
 def test_timeout_proxy_preserves_isinstance_and_schema():
     # A shared framework-tool object wrapped for timeout must keep its type
     # identity: downstream executors (praisonaiagents tool_execution, CrewAI /
