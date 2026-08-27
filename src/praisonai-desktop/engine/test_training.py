@@ -668,6 +668,38 @@ class SurvivingARestart(unittest.TestCase):
         again = second.start(self.config, "run-after")
         self.assertTrue(_wait(lambda: again.state in training.TERMINAL), again.state)
 
+    def test_a_half_written_state_file_never_reaches_the_reader(self):
+        # _persist writes a temp file and os.replaces it, so a reader only ever
+        # sees the old whole file or the new whole file -- never the truncated
+        # middle a plain open("w") would leave if the engine were killed mid
+        # write. Were the write non-atomic, an interrupted _reload would skip
+        # the record, the live run would vanish, and stop() and the single-GPU
+        # guard would both lose it.
+        run = self._start_a_live_run()
+        state = pathlib.Path(self.home, "runs", "run-live", "run.json")
+        self.assertTrue(state.exists(), "the live run was never persisted")
+        import json
+        json.loads(state.read_text())          # complete JSON, not a fragment
+        siblings = list(state.parent.glob("run.json.*.tmp"))
+        self.assertEqual(siblings, [], f"a temp file was left behind: {siblings}")
+
+    def test_a_run_persisted_before_spawn_is_not_lost_on_an_early_restart(self):
+        # start() persists the run before the supervisor thread exists, so an
+        # engine that dies in that window still leaves a record. Simulate it: a
+        # pending run.json with no pid must reload as failed and not be adopted,
+        # rather than vanishing and letting a second trainer start.
+        run_dir = os.path.join(self.home, "runs", "run-early")
+        os.makedirs(run_dir, exist_ok=True)
+        import json
+        with open(os.path.join(run_dir, "run.json"), "w") as fh:
+            json.dump({"id": "run-early", "state": training.PENDING,
+                       "started": time.time(), "pid": None}, fh)
+        second = training.Trainer(self.home, sys.executable)
+        early = second.get("run-early")
+        self.assertIsNotNone(early, "a run persisted before spawn was dropped")
+        self.assertEqual(early.state, training.FAILED)
+        self.assertIsNone(second.current, "a pidless pending run was adopted")
+
 
 class RunLifecycle(unittest.TestCase):
     def setUp(self):

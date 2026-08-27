@@ -246,12 +246,28 @@ class Trainer:
         state or the pid, so a new process could not tell a live run from a
         finished one. Best-effort: a run that trains but cannot write its state
         file is still better than one that refuses to start.
+
+        The write is atomic -- a temp file in the same directory, fsynced, then
+        os.replace. A plain open("w") truncates first, so an engine killed mid
+        json.dump leaves empty or half-written JSON; _reload then skips that
+        record and the live run disappears from history, becomes unreachable
+        through stop(), and no longer refuses a second trainer. os.replace is
+        atomic on POSIX and Windows, so a reader only ever sees the old file or
+        the whole new one.
         """
+        path = self._state_path(run.id)
+        tmp = f"{path}.{os.getpid()}.tmp"
         try:
-            with open(self._state_path(run.id), "w", encoding="utf-8") as fh:
+            with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump({**run.summary(), "pid": run.pid}, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
         except OSError:
-            pass
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     def _existing_ids(self):
         """Run directories on disk, whether or not this process created them."""
@@ -335,6 +351,14 @@ class Trainer:
             # far end, which is the oldest run -- what the cap is for.
             self.history.appendleft(run)
 
+        # Record the run as pending *before* the supervisor thread exists.
+        # start() returns the moment the thread is created, so an engine that
+        # exits between here and the first post-spawn _persist would otherwise
+        # leave a child alive with no run.json: _reload skips it, stop() cannot
+        # reach it, and start() launches a second trainer beside it. A pending
+        # record with no pid is adopted as failed on the next boot, which is
+        # the honest reading of "spawned, engine died, pid unknown".
+        self._persist(run)
         run.emit("start", {"id": run.id, "config": config_path})
         threading.Thread(target=self._supervise, args=(run,), daemon=True).start()
         return run
@@ -402,6 +426,10 @@ class Trainer:
             proc = self._spawn(run)
         except Exception as exc:                       # noqa: BLE001
             run.finish(FAILED, f"could not start the trainer: {exc}")
+            # Persist the failure: start() left a pending record on disk, and
+            # without this a restart would read that stale pending run (no pid)
+            # as freshly interrupted rather than as the spawn failure it was.
+            self._persist(run)
             return
         run._proc = proc
         run.pid = proc.pid
