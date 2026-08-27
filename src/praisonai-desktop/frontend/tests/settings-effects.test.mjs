@@ -111,6 +111,23 @@ test('font_size changes the variable the message text is sized from', async () =
   assert.equal(large.doc.documentElement.style.getPropertyValue('--fs'), '20px');
 });
 
+test('rapid text-size steps accumulate instead of collapsing to one', async () => {
+  // saveCfg only updates CFG once the write resolves. Two quick zoom-in presses
+  // fired back-to-back would otherwise both read the same starting size and
+  // land on the same next value; the pending-target bookkeeping must let them
+  // walk 13 -> 14 -> 15 across the two writes.
+  const b = await boot({ font_size: 13 });
+  const zoom = () => b.doc.dispatchEvent(new b.window.KeyboardEvent('keydown',
+    { key: '=', metaKey: true, bubbles: true, cancelable: true }));
+  zoom();
+  zoom();
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(b.doc.documentElement.style.getPropertyValue('--fs'), '15px',
+    'two quick steps collapsed to a single step');
+  const sent = b.bodies.filter((x) => x && 'font_size' in x).map((x) => x.font_size);
+  assert.deepEqual(sent, [14, 15], `expected 14 then 15 to be persisted, got ${sent}`);
+});
+
 test('code_font_size is its own setting, and scales with the interface', async () => {
   // It used to be an absolute px value, so at text size 18 the prose grew and
   // code blocks stayed put. It is now multiplied by the same scale -- which

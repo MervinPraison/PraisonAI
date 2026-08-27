@@ -1815,16 +1815,25 @@ function textSizes(){
 async function setTextSize(px){
   // Await the write and only announce the size that actually stuck; toasting
   // "Text size N px" while every write failed is the same lie as the toggles.
-  if(await saveCfg({font_size:px})) toast('Text size '+px+' px');
+  const ok=await saveCfg({font_size:px});
+  if(ok) toast('Text size '+px+' px');
+  // Once the queue drains, drop the optimistic target so the next burst starts
+  // from CFG again -- and a failed write does not leave us stepping from a size
+  // that never persisted.
+  if(pendingTextSize===px) pendingTextSize=null;
 }
+// The size a rapid burst of steps is walking toward. saveCfg only updates CFG
+// once the write resolves, so consecutive presses would otherwise read the same
+// stale value and collapse to one step; track the pending target here instead.
+let pendingTextSize=null;
 function stepTextSize(dir){
   const sizes=textSizes();
-  const now=Number(CFG.font_size)||BASE_TEXT_PX;
+  const now=pendingTextSize!=null?pendingTextSize:(Number(CFG.font_size)||BASE_TEXT_PX);
   let i=sizes.indexOf(now);
   if(i<0){ i=sizes.reduce((best,v,k)=>
     Math.abs(v-now)<Math.abs(sizes[best]-now)?k:best,0); }
   const next=sizes[Math.min(sizes.length-1,Math.max(0,i+dir))];
-  if(next!==now) setTextSize(next);
+  if(next!==now){ pendingTextSize=next; setTextSize(next); }
 }
 
 
@@ -1832,7 +1841,17 @@ function stepTextSize(dir){
 let cfg = {};
 const cfgGet = k => (k in cfg ? cfg[k] : DEFAULTS[k]);
 
-async function saveCfg(patch){
+// Writes run one at a time, in the order they were requested. Without this a
+// burst of steps could resolve out of order and leave CFG -- and the persisted
+// value -- at an older selection than the last one the user asked for.
+let saveQueue=Promise.resolve();
+function saveCfg(patch){
+  const run=saveQueue.then(()=>persistCfg(patch));
+  // Keep the chain alive even if one write throws, so later writes still run.
+  saveQueue=run.catch(()=>{});
+  return run;
+}
+async function persistCfg(patch){
   // Persist first, mutate only on success. Mutating before the write and never
   // checking it is how a toggle moved in memory, never moved on screen, and
   // un-flipped itself on the next click.
