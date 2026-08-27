@@ -18,8 +18,8 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
-| ✅ AI SDK | 38 | 8 | 1121 |
-| ✅ Agent | 68 | 7 | 2170 |
+| ✅ AI SDK | 38 | 8 | 1143 |
+| ✅ Agent | 69 | 7 | 2305 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 9 | 1 | 165 |
 | ✅ Audio | 8 | 1 | 162 |
@@ -27,7 +27,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Autonomy | 5 | 1 | 164 |
 | ✅ Bots | 5 | 1 | 184 |
 | ✅ Budget | 1 | 1 | 197 |
-| ✅ CLI | 2 | 1 | 144 |
+| ✅ CLI | 2 | 1 | 159 |
 | ✅ Caching | 2 | 1 | 249 |
 | ✅ Chunking | 2 | 2 | 299 |
 | ✅ Citations | 3 | 1 | 156 |
@@ -41,7 +41,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Embeddings | 6 | 3 | 813 |
 | ✅ Evaluation | 8 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
-| ✅ Execution | 4 | 1 | 157 |
+| ✅ Execution | 4 | 1 | 159 |
 | ✅ Failover | 2 | 1 | 160 |
 | ✅ Files | 10 | 1 | 151 |
 | ✅ Flow | 4 | 1 | 164 |
@@ -65,7 +65,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Planning | 11 | 2 | 525 |
 | ✅ Plugins | 9 | 2 | 710 |
 | ✅ Prompts | 4 | 2 | 262 |
-| ✅ Providers | 24 | 116 | 8071 |
+| ✅ Providers | 24 | 116 | 8128 |
 | ✅ PubSub | 1 | 1 | 149 |
 | ✅ Query | 3 | 2 | 246 |
 | ✅ RAG | 6 | 2 | 386 |
@@ -76,15 +76,15 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Sandbox | 8 | 2 | 132 |
 | ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
-| ✅ Sessions | 3 | 2 | 429 |
+| ✅ Sessions | 3 | 2 | 433 |
 | ✅ Skills | 7 | 2 | 380 |
-| ✅ Streaming | 2 | 3 | 654 |
+| ✅ Streaming | 2 | 4 | 1211 |
 | ✅ Tasks | 4 | 1 | 165 |
 | ✅ Teams | 1 | 1 | 170 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 34 | 15 | 3218 |
+| ✅ Tools | 34 | 15 | 3267 |
 | ✅ Tracing | 8 | 3 | 477 |
 | ✅ Vector Store | 6 | 2 | 530 |
 | ✅ Video | 2 | 1 | 150 |
