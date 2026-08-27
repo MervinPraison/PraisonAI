@@ -3,7 +3,13 @@
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .models import ParseError, ValidationError, SkillProperties, SkillRequirements
+from .models import (
+    ParseError,
+    ValidationError,
+    SkillProperties,
+    SkillRequirements,
+    SkillAutomation,
+)
 
 
 def find_skill_md(skill_dir: Path) -> Optional[Path]:
@@ -54,9 +60,14 @@ def parse_frontmatter(content: str) -> Tuple[dict, str]:
     if not isinstance(metadata, dict):
         raise ParseError("SKILL.md frontmatter must be a YAML mapping")
 
-    # Convert metadata values to strings where needed
+    # Convert scalar metadata values to strings where needed, but preserve
+    # nested mappings (e.g. the namespaced ``praisonai`` bag carrying an
+    # optional automation block) so structured extensions survive parsing.
     if "metadata" in metadata and isinstance(metadata["metadata"], dict):
-        metadata["metadata"] = {str(k): str(v) for k, v in metadata["metadata"].items()}
+        metadata["metadata"] = {
+            str(k): v if isinstance(v, dict) else str(v)
+            for k, v in metadata["metadata"].items()
+        }
 
     return metadata, body
 
@@ -156,6 +167,9 @@ def read_properties(skill_dir: Path) -> SkillProperties:
         shell=metadata.get("shell"),
         # Parse capability requirements
         requirements=SkillRequirements.from_frontmatter(metadata),
+        # Parse optional proactive-automation descriptor from the namespaced
+        # metadata.praisonai.automation block (None when absent/malformed).
+        automation=SkillAutomation.from_metadata(metadata.get("metadata") or {}),
         # Provenance + usage telemetry (accept hyphen or underscore forms)
         agent_created=_coerce_bool(
             metadata.get("agent-created", metadata.get("agent_created")), False

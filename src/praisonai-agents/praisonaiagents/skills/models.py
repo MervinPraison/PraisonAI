@@ -143,6 +143,73 @@ class SkillRequirements:
 
 
 @dataclass
+class SkillAutomation:
+    """Optional proactive-automation descriptor parsed from a skill's frontmatter.
+
+    This is a protocol-only contract (no heavy imports): it carries just enough
+    for a wrapper consumer (the scheduler's consent-first ``SuggestionEngine`` and
+    ``DeliveryRouter``) to propose and, on user consent, materialise a scheduled,
+    self-delivering job. Nothing here runs a job or delivers a result — it is the
+    bridge data that lets an installed skill say "run me on this schedule".
+
+    Parsed from ``metadata.praisonai.automation`` so older parsers ignore it.
+
+    Attributes:
+        schedule: Schedule expression, e.g. "cron:0 8 * * mon-fri", "daily",
+            "*/30m", "at:<iso>" (required).
+        deliver: Delivery target token, e.g. "origin", "<platform>",
+            "<platform>:<chat>[:<thread>]", "all" (optional).
+        prompt: Task the scheduled run should perform (optional).
+    """
+
+    schedule: str
+    deliver: Optional[str] = None
+    prompt: Optional[str] = None
+
+    @classmethod
+    def from_metadata(cls, metadata: dict) -> Optional["SkillAutomation"]:
+        """Parse an automation block from a skill's ``metadata`` mapping.
+
+        Looks up ``metadata['praisonai']['automation']``. Returns None when the
+        block is absent or malformed (missing/empty ``schedule``), so skills
+        without automation simply parse to ``automation=None``.
+
+        Args:
+            metadata: The parsed ``metadata`` bag from SKILL.md frontmatter.
+
+        Returns:
+            SkillAutomation instance, or None when no valid block is present.
+        """
+        if not isinstance(metadata, dict):
+            return None
+        praisonai = metadata.get("praisonai")
+        if not isinstance(praisonai, dict):
+            return None
+        automation = praisonai.get("automation")
+        if not isinstance(automation, dict):
+            return None
+        schedule = automation.get("schedule")
+        if not isinstance(schedule, str) or not schedule.strip():
+            return None
+        deliver = automation.get("deliver")
+        prompt = automation.get("prompt")
+        return cls(
+            schedule=schedule.strip(),
+            deliver=str(deliver).strip() if deliver is not None else None,
+            prompt=str(prompt) if prompt is not None else None,
+        )
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary, excluding None values."""
+        result = {"schedule": self.schedule}
+        if self.deliver is not None:
+            result["deliver"] = self.deliver
+        if self.prompt is not None:
+            result["prompt"] = self.prompt
+        return result
+
+
+@dataclass
 class SkillProperties:
     """Properties parsed from a skill's SKILL.md frontmatter.
 
@@ -178,6 +245,10 @@ class SkillProperties:
     shell: Optional[str] = None  # "bash" | "powershell"
     # Capability requirements (new)
     requirements: Optional[SkillRequirements] = None
+    # Optional proactive-automation descriptor (parsed from
+    # metadata.praisonai.automation). Protocol-only bridge data consumed by the
+    # wrapper scheduler's consent-first SuggestionEngine + DeliveryRouter.
+    automation: Optional[SkillAutomation] = None
     # Provenance + usage telemetry (read by lifecycle/curator plugins).
     # These are protocol-only data fields; retention policy lives in plugins.
     agent_created: bool = False
@@ -229,6 +300,8 @@ class SkillProperties:
             result["last-used"] = self.last_used
         if self.patch_count:
             result["patch-count"] = self.patch_count
+        if self.automation is not None:
+            result["automation"] = self.automation.to_dict()
         return result
 
     @property
