@@ -56,6 +56,10 @@ def _webhook_loader():
 def _signal_loader():
     return _load_bot_class("signal", "SignalBot")
 
+
+def _local_loader():
+    return _load_bot_class("local", "LocalBot")
+
 # Built-in bot platforms with lazy loading
 _BUILTIN_PLATFORMS = {
     "telegram": _telegram_loader,
@@ -67,6 +71,7 @@ _BUILTIN_PLATFORMS = {
     "agentmail": _agentmail_loader,
     "webhook": _webhook_loader,
     "signal": _signal_loader,
+    "local": _local_loader,
 }
 
 
