@@ -99,13 +99,29 @@ function rewriteRelativeRequires(code, fileDir) {
   );
 }
 
+// STATIC imports of 'module', 'url' and 'path' were the previous form, and they
+// were import-time fatal for a browser: a bundler must resolve a static import
+// before any code runs, so three files whose `require()` calls were all LAZY
+// turned into three unconditional Node dependencies. dist/esm/mobile.js -- what
+// `praisonai/mobile` actually resolves to -- failed with ten unresolved
+// builtins while the TypeScript source it was built from passed cleanly.
+//
+// A guarded top-level await keeps Node byte-identical in behaviour and lets a
+// browser bundle load. The dynamic import is lazy, so a bundler defers it
+// rather than failing on it; when it does fail at runtime (there is no 'module'
+// in a browser) the catch installs a `require` that throws only if a lazy
+// provider path is actually taken -- which on a phone it is not.
 const CJS_BANNER = [
-  "import { createRequire as __praisonCreateRequire } from 'module';",
-  "import { fileURLToPath as __praisonFileURLToPath } from 'url';",
-  "import { dirname as __praisonDirname } from 'path';",
-  'const require = __praisonCreateRequire(import.meta.url);',
-  'const __filename = __praisonFileURLToPath(import.meta.url);',
-  'const __dirname = __praisonDirname(__filename);',
+  'const [__praisonMod, __praisonUrl, __praisonPath] = await Promise.all([',
+  "  import('module').catch(() => null),",
+  "  import('url').catch(() => null),",
+  "  import('path').catch(() => null),",
+  ']);',
+  'const require = __praisonMod',
+  '  ? __praisonMod.createRequire(import.meta.url)',
+  "  : (id) => { throw new Error('require(' + id + ') is unavailable outside Node'); };",
+  "const __filename = __praisonUrl ? __praisonUrl.fileURLToPath(import.meta.url) : '';",
+  "const __dirname = __praisonPath && __filename ? __praisonPath.dirname(__filename) : '';",
   // In ESM there is no CommonJS module object. Provide a stub so patterns like
   // `require.main === module` compile and evaluate to false (this file is not a
   // CLI entry point when imported), and `module.exports = ...` remains harmless.

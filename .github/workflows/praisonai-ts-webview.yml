@@ -53,5 +53,10 @@ jobs:
       # the flag this job fails on something unrelated to what it checks.
       - name: Install
         run: npm install --no-audit --no-fund --legacy-peer-deps
+      # Build first: the gate must see what actually SHIPS. The esm-shim adds
+      # a CJS banner that does not exist in the TypeScript sources, and that
+      # banner is what broke the published entry while the sources passed.
+      - name: Build
+        run: npm run build
       - name: Check
         run: npm run check:webview
