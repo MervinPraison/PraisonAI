@@ -93,11 +93,15 @@ test('a saved or clicked Train view cannot hide first-run setup', async () => {
   assert.equal(b.doc.body.classList.contains('training'), false,
     'the saved Train view hid the setup screen');
   assert.ok(b.doc.querySelector('.setup'), 'no setup screen after restoring Train');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'forcing Chat during setup overwrote the saved Train preference');
 
   click(b.doc.getElementById('viewTrain'));
   assert.equal(b.doc.body.classList.contains('training'), false,
     'Train can replace setup even though it has no engine');
   assert.ok(b.doc.querySelector('.setup'), 'clicking Train hid the setup screen');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'clicking Train during setup discarded the requested view');
 });
 
 test('the steps are listed before anything starts', async () => {

@@ -1352,7 +1352,7 @@ function gate(){
 async function boot(){
 const st=await invoke('engine_status');
 engineBlocked=st.state!=='ready';
-if(engineBlocked) showView('chat');
+if(engineBlocked) showView('chat',{persist:false});
 if(st.state==='ready'){
   PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
   box.disabled=send.disabled=false; box.focus(); refreshChats(); refreshModelName();
@@ -2175,7 +2175,8 @@ const METHOD_HINTS={
 let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[];
 const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
 
-function showView(name){
+function showView(name,{persist=true}={}){
+  const requested=name;
   if(name==='train' && engineBlocked) name='chat';
   const training=name==='train';
   document.body.classList.toggle('training',training);
@@ -2184,7 +2185,7 @@ function showView(name){
   viewChat.setAttribute('aria-selected',String(!training));
   viewTrain.classList.toggle('active',training);
   viewChat.classList.toggle('active',!training);
-  try{ localStorage.setItem('view',name); }catch(e){}
+  if(persist) try{ localStorage.setItem('view',requested); }catch(e){}
   if(training) refreshTraining();
 }
 viewChat.addEventListener('click',()=>showView('chat'));
