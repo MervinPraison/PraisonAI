@@ -77,6 +77,37 @@ for (const [id, label] of [['settings', 'Settings'], ['logsBtn', 'Engine log'], 
   });
 }
 
+test('Export does not fake a backup when the engine is unreachable', async () => {
+  const writes = [];
+  const dom = new JSDOM(HTML, {
+    runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
+    beforeParse(w) {
+      w.__TAURI__ = { core: { invoke: async () => ({
+        state: 'failed', reason: 'Engine crashed',
+        detail: 'exited before it was ready', tail: 'traceback' }) },
+        event: { listen: async () => () => {} } };
+      w.fetch = async () => { throw new TypeError('fetch failed'); };
+      w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+      w.navigator.clipboard = { writeText: async (t) => { writes.push(t); } };
+      w.confirm = () => true; w.prompt = () => 'x'; w.alert = () => {}; w.scrollTo = () => {};
+      w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+      Object.defineProperty(w.HTMLElement.prototype, 'scrollIntoView', { value() {} });
+    },
+  });
+  const { window } = dom;
+  await new Promise((r) => setTimeout(r, 400));
+
+  await window.runAction({ action: 'export' });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(writes, [],
+    'the clipboard was written despite the export failing -- a stale paste would masquerade as a backup');
+  assert.ok(window.document.getElementById('toast'),
+    'the failed export said nothing');
+  assert.match(window.document.getElementById('toast').textContent, /did not run|could not/i,
+    'the failed export produced no error message');
+});
+
 test('no unhandled rejection escapes any of the three', async () => {
   const b = await bootFailed();
   for (const id of ['settings', 'logsBtn', 'search']) {
