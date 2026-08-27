@@ -822,13 +822,47 @@ export class Agent {
               throw (abortSignal as any).reason ?? new Error('The operation was aborted');
             }
 
-            const result = await backend.generateText({
-              messages,
-              temperature: 0.7,
-              tools: toolDefinitions,
-              toolChoice: 'auto',
-              signal: abortSignal,
-            });
+            // Stream the round when streaming is on, instead of always calling
+            // generateText. Two things were wrong with doing it unconditionally:
+            // `stream: true` silently had no effect once tools were configured on
+            // any non-OpenAI provider, and -- worse -- the round's assistant text
+            // was DROPPED. A model that says "Let me check." before calling a
+            // tool had that sentence recorded into `messages` for its own context
+            // and never delivered to the caller, so a user saw a tool run with no
+            // explanation of why.
+            //
+            // StreamChunk carries text AND toolCalls, and StreamTextOptions
+            // extends GenerateTextOptions, so one shape covers both.
+            let result: { text: string; toolCalls?: any[] };
+            if (this.streamEnabled) {
+              const stream = await backend.streamText({
+                messages,
+                temperature: 0.7,
+                tools: toolDefinitions,
+                toolChoice: 'auto',
+                signal: abortSignal,
+              });
+              let streamedText = '';
+              const streamedCalls: any[] = [];
+              for await (const chunk of stream) {
+                if (chunk.text) {
+                  emitToken(chunk.text);
+                  streamedText += chunk.text;
+                }
+                if (chunk.toolCalls && chunk.toolCalls.length > 0) {
+                  streamedCalls.push(...chunk.toolCalls);
+                }
+              }
+              result = { text: streamedText, toolCalls: streamedCalls.length > 0 ? streamedCalls : undefined };
+            } else {
+              result = await backend.generateText({
+                messages,
+                temperature: 0.7,
+                tools: toolDefinitions,
+                toolChoice: 'auto',
+                signal: abortSignal,
+              });
+            }
 
             messages.push({
               role: 'assistant',
