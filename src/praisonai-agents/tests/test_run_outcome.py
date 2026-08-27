@@ -2,7 +2,11 @@
 
 import asyncio
 
-from praisonaiagents.agent.run_outcome import RunOutcome
+from praisonaiagents.agent.run_outcome import (
+    RunOutcome,
+    classify_finish_reason,
+    PROVIDER_BLOCK_REASONS,
+)
 from praisonaiagents.agent.execution_mixin import ExecutionMixin
 
 
@@ -59,8 +63,9 @@ class _FakeAgent(ExecutionMixin):
     autonomy_enabled = False
     stream = None
 
-    def __init__(self, behavior):
+    def __init__(self, behavior, stop_reason="completed"):
         self.behavior = behavior
+        self.last_stop_reason = stop_reason
 
     def _load_history_context(self):
         pass
@@ -71,6 +76,8 @@ class _FakeAgent(ExecutionMixin):
     def chat(self, prompt, **kwargs):
         if self.behavior == "ok":
             return "answer"
+        if self.behavior == "empty":
+            return ""
         raise ValueError("kaboom")
 
     async def achat(self, prompt, **kwargs):
@@ -146,3 +153,55 @@ def test_astart_external_cancellation_propagates():
         pass
     else:
         raise AssertionError("external cancellation should propagate")
+
+
+# --- Provider finish_reason classification (content-filter/refusal/length) ---
+
+
+def test_classify_finish_reason_normal_stops_are_none():
+    assert classify_finish_reason(None) is None
+    assert classify_finish_reason("stop") is None
+    assert classify_finish_reason("tool_calls") is None
+    assert classify_finish_reason("function_call") is None
+    # Unknown/absent finish reasons behave exactly as today.
+    assert classify_finish_reason("some_new_reason") is None
+
+
+def test_classify_finish_reason_blocks():
+    assert classify_finish_reason("content_filter") == "content_filtered"
+    assert classify_finish_reason("CONTENT_FILTER") == "content_filtered"
+    assert classify_finish_reason("length") == "length_truncated"
+    assert classify_finish_reason("max_tokens") == "length_truncated"
+    # A safety refusal is carried independently of finish_reason.
+    assert classify_finish_reason("stop", refusal="I can't help with that") == "refused"
+
+
+def test_provider_block_reasons_outrank_failed_but_not_cancel():
+    from praisonaiagents.agent.run_outcome import _REASON_PRECEDENCE
+    for reason in PROVIDER_BLOCK_REASONS:
+        assert _REASON_PRECEDENCE[reason] > _REASON_PRECEDENCE["failed"]
+        assert _REASON_PRECEDENCE[reason] < _REASON_PRECEDENCE["cancelled"]
+        assert _REASON_PRECEDENCE[reason] < _REASON_PRECEDENCE["hard_timeout"]
+
+
+def test_run_outcome_surfaces_provider_block_over_empty_completed():
+    # An empty result from a content-filtered turn must surface the specific,
+    # actionable reason instead of a silent empty "completed".
+    o = _FakeAgent("empty", stop_reason="content_filtered").run(
+        "hi", return_outcome=True
+    )
+    assert o.reason == "content_filtered"
+    assert o.succeeded is False
+
+
+def test_run_outcome_completed_when_no_block():
+    o = _FakeAgent("ok", stop_reason="completed").run("hi", return_outcome=True)
+    assert o.reason == "completed" and o.output == "answer"
+
+
+def test_astart_outcome_surfaces_refusal():
+    o = asyncio.run(
+        _FakeAgent("ok", stop_reason="refused").astart("hi", return_outcome=True)
+    )
+    assert o.reason == "refused"
+    assert o.succeeded is False

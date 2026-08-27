@@ -59,6 +59,68 @@ def _run_was_truncated(agent: Any) -> bool:
         return False
 
 
+# Provider-side terminal reasons the core records on ``agent.last_stop_reason``
+# from the LLM ``finish_reason``/refusal signal. Kept in lockstep with the core
+# ``run_outcome.PROVIDER_BLOCK_REASONS`` taxonomy; unknown reasons are ignored so
+# the completed/failed contract is preserved when the core reports nothing new.
+_BLOCK_REASON_MESSAGES = {
+    "content_filtered": (
+        "Run blocked: the provider's content filter blocked the response.",
+        "The model provider blocked this response with a content filter. "
+        "Rephrase the request or adjust provider safety settings.",
+    ),
+    "refused": (
+        "Run refused: the model declined to answer (safety refusal).",
+        "The model refused to answer. Rephrase the request or try a different "
+        "model.",
+    ),
+    "length_truncated": (
+        "Run truncated: the response hit the model's output length limit.",
+        "The response was cut off by the model's output length limit. "
+        "Re-run with a higher --max-tokens.",
+    ),
+}
+
+
+def _run_block_reason(agent: Any) -> Optional[str]:
+    """Return a provider block/refusal/truncation reason for the last run.
+
+    The core records a distinct terminal reason on ``agent.last_stop_reason``
+    when the provider ``finish_reason``/refusal signalled a content filter,
+    refusal, or length cutoff. Returns that reason when recognised, else None so
+    the existing completed/failed/max_steps contract is unchanged.
+
+    Best-effort: any agent without the accessor (or a raising one) yields None.
+    """
+    if agent is None:
+        return None
+    try:
+        reason = getattr(agent, "last_stop_reason", None)
+    except Exception:
+        return None
+    return reason if reason in _BLOCK_REASON_MESSAGES else None
+
+
+def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
+    """Report a provider-blocked/refused/truncated run distinctly and exit 2.
+
+    Mirrors ``_report_run_truncated``: any partial text is preserved in the
+    emitted result, but the *status* is the specific reason so ``--output json``
+    consumers and CI can branch on *why* nothing usable came back. Exits with
+    code 2 (an incomplete run), distinct from a hard failure (exit 1) and a
+    clean completion (exit 0).
+    """
+    message, remediation = _BLOCK_REASON_MESSAGES[reason]
+    text = str(result) if result else None
+    output.emit_result(
+        message=message,
+        data={"status": reason, "result": text},
+    )
+    if not getattr(output, "is_json_mode", False):
+        output.print_warning(f"{message} {remediation}")
+    raise typer.Exit(2)
+
+
 def _report_run_failure(output: Any) -> None:
     """Report an agent-run failure and exit non-zero.
 
@@ -1998,6 +2060,10 @@ def _run_prompt(
                 detach_bridge(agent, bridge)
 
             succeeded = _run_succeeded(result)
+            # A provider content-filter/refusal/length cutoff is a distinct
+            # terminal reason recorded by the core; surface it (even for an empty
+            # result) so a blocked run isn't collapsed into a generic ``failed``.
+            block_reason = _run_block_reason(agent)
             # A non-empty finalisation summary from a step-limit-truncated run
             # is not a genuine completion: classify it *before* emitting the
             # terminal stream event so a `--output stream-json` consumer never
@@ -2005,8 +2071,14 @@ def _run_prompt(
             # ``status: "truncated"`` outcome (exit 2) reported below.
             truncated = succeeded and _run_was_truncated(agent)
             if bridge is not None:
-                bridge.emit_run_result(result, ok=succeeded and not truncated)
+                bridge.emit_run_result(
+                    result, ok=succeeded and not truncated and not block_reason
+                )
             _record_session_usage(session_id or auto_save_name, model, output)
+            # A provider block/refusal/truncation wins over a generic empty-result
+            # failure so the specific, actionable reason is not masked.
+            if block_reason:
+                _report_run_blocked(output, result, block_reason)
             if not succeeded:
                 _report_run_failure(output)
             # Report the truncated run distinctly (exit 2 + status "truncated")
@@ -2580,14 +2652,24 @@ def _run_custom_agent(
             detach_bridge(agent, bridge)
 
         succeeded = _run_succeeded(result)
+        # A provider content-filter/refusal/length cutoff is a distinct terminal
+        # reason recorded by the core; surface it (even when the result is empty)
+        # so a blocked run isn't collapsed into a generic ``failed``.
+        block_reason = _run_block_reason(agent)
         # Classify a step-limit-truncated run *before* the terminal stream
         # event so a `--output stream-json` consumer never receives a
         # contradictory ``run.result {ok: true}`` ahead of the ``truncated``
         # outcome (exit 2) reported below.
         truncated = succeeded and _run_was_truncated(agent)
         if bridge is not None:
-            bridge.emit_run_result(result, ok=succeeded and not truncated)
+            bridge.emit_run_result(
+                result, ok=succeeded and not truncated and not block_reason
+            )
         _record_session_usage(session_id or auto_save_name, model, output)
+        # A provider block/refusal/truncation wins over a generic empty-result
+        # failure so the specific, actionable reason is not masked.
+        if block_reason:
+            _report_run_blocked(output, result, block_reason)
         if not succeeded:
             _report_run_failure(output)
         if result and not output.is_json_mode:
@@ -2733,6 +2815,12 @@ def _run_prompt_profiled(
     # Print profiling report
     profiler.print_report()
 
+    # A provider block/refusal/truncation is a distinct terminal reason (exit 2)
+    # that wins over a generic empty-result failure, so the specific reason is
+    # not masked. Reported after the profile so the timing breakdown is shown.
+    _block_reason = _run_block_reason(agent)
+    if _block_reason:
+        _report_run_blocked(get_output_controller(), response, _block_reason)
     # Honour the same failure contract as the non-profiled paths: an empty
     # agent result is a run failure and must exit non-zero (the report is
     # emitted after the profiling output so the profile is still shown).

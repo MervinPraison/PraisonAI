@@ -2974,6 +2974,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         response_text = resp["choices"][0]["message"]["content"]
                         final_response = resp
                         _final_llm_response = resp  # Store for token usage extraction
+                        self._record_finish_reason(resp)
                         
                         # Emit StreamEvent for reasoning content if callback provided
                         if _emit and reasoning_content:
@@ -3201,6 +3202,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                                 )
                                             )
                                             _final_llm_response = final_response  # Store for token usage extraction
+                                            self._record_finish_reason(final_response)
                                             # Handle None content from Gemini
                                             response_content = final_response["choices"][0]["message"].get("content")
                                             response_text = response_content if response_content is not None else ""
@@ -3390,6 +3392,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                         )
                                     )
                                     _final_llm_response = final_response  # Store for token usage extraction
+                                    self._record_finish_reason(final_response)
                                 # Handle None content from Gemini
                                 response_content = final_response["choices"][0]["message"].get("content")
                                 response_text = response_content if response_content is not None else ""
@@ -4840,6 +4843,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                     )
+                    self._record_finish_reason(resp)
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                     response_text = resp["choices"][0]["message"]["content"]
                     
@@ -4948,6 +4952,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
+                        self._record_finish_reason(tool_response)
                         # Handle None content from Gemini
                         response_content = tool_response.choices[0].message.get("content")
                         response_text = response_content if response_content is not None else ""
@@ -5169,6 +5174,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             )
+                            self._record_finish_reason(resp)
                             response_text = resp["choices"][0]["message"].get("content") or ""
                             # If the response also contains new tool_calls, treat this as a
                             # tool-calling round rather than a final answer (Anthropic pattern)
@@ -5643,6 +5649,47 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.warning(f"Failed to track token usage: {e}")
             return None
     
+    def _record_finish_reason(self, response: Union[Dict[str, Any], Any]) -> None:
+        """Classify the provider ``finish_reason``/refusal and record it.
+
+        Sets ``self._last_stop_reason`` to a distinct provider block/refusal/
+        truncation reason (``content_filtered | refused | length_truncated``)
+        when the last completion was blocked, so a blocked/refused/truncated turn
+        is surfaced as an explicit terminal reason instead of a silent empty
+        ``completed``. Only updates when the reason is still ``"completed"`` so a
+        prior ``max_steps`` (sticky truncation) is never downgraded. Absent or
+        unrecognised finish reasons are a no-op — zero overhead on success.
+        """
+        try:
+            finish_reason = None
+            refusal = None
+            if isinstance(response, dict):
+                choices = response.get("choices") or []
+                if choices:
+                    choice = choices[0]
+                    finish_reason = choice.get("finish_reason")
+                    msg = choice.get("message") or {}
+                    if isinstance(msg, dict):
+                        refusal = msg.get("refusal")
+                    else:
+                        refusal = getattr(msg, "refusal", None)
+            else:
+                choices = getattr(response, "choices", None) or []
+                if choices:
+                    choice = choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    msg = getattr(choice, "message", None)
+                    refusal = getattr(msg, "refusal", None) if msg is not None else None
+            if finish_reason is None and not refusal:
+                return
+            from ..agent.run_outcome import classify_finish_reason
+            reason = classify_finish_reason(finish_reason, refusal)
+            if reason is not None and self._last_stop_reason == "completed":
+                self._last_stop_reason = reason
+        except Exception:
+            # Never let outcome classification break the response path.
+            return
+
     def _extract_token_usage(self, response: Union[Dict[str, Any], Any]) -> Optional[TokenUsage]:
         """Extract token usage from LiteLLM response for public API."""
         try:

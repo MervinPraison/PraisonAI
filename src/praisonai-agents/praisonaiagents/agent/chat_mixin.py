@@ -1244,6 +1244,13 @@ Your Goal: {self.goal}"""
                             f"Agent {self.name}: model returned no content "
                             f"(finish_reason={finish_reason!r}, refused={bool(refusal)})"
                         )
+                        # Record a distinct terminal reason so the empty answer is
+                        # actionable end-to-end (RunOutcome / CLI exit / --output
+                        # json) instead of a silent "completed" with empty text.
+                        from .run_outcome import classify_finish_reason
+                        stop_reason = classify_finish_reason(finish_reason, refusal)
+                        if stop_reason is not None:
+                            self._last_stop_reason = stop_reason
                     return ""
         except (AttributeError, IndexError, TypeError) as e:
             logging.warning(
@@ -1746,6 +1753,12 @@ Your Goal: {self.goal}"""
 
     def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0, cancel_token=None):
         start_time = time.time()
+
+        # Reset the agent-level finish-reason classification at the start of each
+        # OpenAI-native turn so a provider block/refusal recorded on a previous
+        # run (see ``_extract_llm_response_content``) never leaks into this one.
+        # The LiteLLM path resets its own backend flag independently.
+        self._last_stop_reason = "completed"
 
         # --- Proactive Context Budget Management (default-on) ---
         # Analyzes token budget BEFORE LLM call and applies appropriate strategy
