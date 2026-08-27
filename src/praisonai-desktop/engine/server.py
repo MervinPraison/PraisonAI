@@ -1674,11 +1674,16 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 self.send_error(400)
                 return
-            saved = save_settings(patch)
             if "launch_at_login" in patch:
-                saved = dict(saved)
-                saved["launch_at_login_result"] = set_launch_at_login(
-                    bool(patch["launch_at_login"]))
+                # Persist what actually happened, not what was asked. Writing
+                # the request first made the toggle report a login item that
+                # was never registered -- and survive restarts saying so.
+                result = set_launch_at_login(bool(patch["launch_at_login"]))
+                patch = {**patch, "launch_at_login": bool(result.get("enabled"))}
+                saved = dict(save_settings(patch))
+                saved["launch_at_login_result"] = result
+            else:
+                saved = save_settings(patch)
             self._json(saved)
             return
 
