@@ -6722,8 +6722,16 @@ Answer:"""
             # under asyncio.gather), mirroring async_memory_mixin's
             # _run_memory_in_thread executor-offload pattern.
             loop = asyncio.get_event_loop()
+            # Preserve contextvars (trace emission, session context) across the
+            # executor thread so a custom guardrail sees the same contextual
+            # state as the synchronous path, matching every other
+            # run_in_executor call site in the SDK.
+            from ..trace.context_events import copy_context_to_callable
             success, result, error = await loop.run_in_executor(
-                None, self._validate_with_guardrail, current_response
+                None,
+                copy_context_to_callable(
+                    lambda: self._validate_with_guardrail(current_response)
+                ),
             )
             
             if success:

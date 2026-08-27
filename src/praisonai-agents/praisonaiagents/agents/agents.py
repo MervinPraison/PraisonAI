@@ -1348,8 +1348,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         pattern used for synchronous memory calls in async_memory_mixin.
         """
         loop = asyncio.get_event_loop()
+        # Preserve contextvars (trace emission, session context) across the
+        # executor thread so a custom task guardrail sees the same contextual
+        # state as the synchronous path, matching every other run_in_executor
+        # call site in this module.
+        from ..trace.context_events import copy_context_to_callable
         return await loop.run_in_executor(
-            None, self._apply_task_guardrail, task, task_id, task_output
+            None,
+            copy_context_to_callable(
+                lambda: self._apply_task_guardrail(task, task_id, task_output)
+            ),
         )
 
     def _run_task_start_hook(self, task, task_id):
