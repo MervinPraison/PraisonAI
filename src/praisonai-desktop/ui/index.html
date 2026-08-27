@@ -1989,11 +1989,14 @@ async function runAction(def){
     panel.querySelector('#m-add').onclick=async()=>{
       const name=panel.querySelector('#m-name').value.trim();
       const cmd=panel.querySelector('#m-cmd').value.trim();
-      if(!name){ toast('A name is required.'); return; }
+      // The toast intentionally sits below the settings scrim, so it is dimmed
+      // and unreadable while this overlay is open. Errors that occur here must
+      // surface through the in-app dialog, which paints above the scrim.
+      if(!name){ await askConfirm('A name is required.',{danger:false,ok:'OK',cancel:'Dismiss'}); return; }
       const r=await (await fetch('http://127.0.0.1:'+PORT+'/mcp',{method:'POST',
         headers:{'content-type':'application/json'},
         body:JSON.stringify({action:'add',name,command:cmd,enabled:false})})).json();
-      if(!r.ok){ toast(r.error); return; }
+      if(!r.ok){ await askConfirm(r.error,{danger:false,ok:'OK',cancel:'Dismiss'}); return; }
       runAction(def);
     };
     overlay.classList.add('open');
