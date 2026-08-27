@@ -44,7 +44,7 @@
 // Agent - Single agent with instructions, tools, and optional persistence
 // AgentTeam is the primary class (Python parity), Agents/PraisonAIAgents are silent aliases
 export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from './agent';
-export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig, AgentEvent, AgentStreamOptions, StopReason } from './agent';
+export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './agent';
 
 // Workflow - Step-based workflow execution
 // AgentFlow is the primary class (Python parity), Workflow/Pipeline are silent aliases

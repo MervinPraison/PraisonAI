@@ -309,7 +309,15 @@ def _chat_path(cid: str) -> pathlib.Path:
 
 def load_chat(cid: str) -> dict:
     try:
-        return json.loads(_chat_path(cid).read_text())
+        chat = json.loads(_chat_path(cid).read_text())
+        if not isinstance(chat, dict):
+            # Valid JSON, wrong shape -- the app's own export is a list. Every
+            # caller does chat.get(...), so a non-dict escapes as AttributeError
+            # and drops the connection. /projects and /search both call this on
+            # the same files list_chats() walks, so hardening only list_chats()
+            # left those two routes crashing on exactly the file this fixes.
+            raise ValueError("not a chat object")
+        return chat
     except (OSError, ValueError):
         # Absent and corrupt are answered the same way here on purpose: the
         # caller is opening a conversation, and either way there is nothing to
@@ -336,6 +344,9 @@ def list_chats() -> list:
     for f in CHATS_DIR.glob("*.json"):
         try:
             c = json.loads(f.read_text())
+            if not isinstance(c, dict):
+                # Valid JSON, wrong shape -- the app's own export is a list.
+                raise ValueError("not a chat object")
             out.append({
                 "id": c.get("id", f.stem),
                 "title": c.get("title") or "New chat",

@@ -19,7 +19,7 @@
 |--------|-------|
 | Python Core Features | 411 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 1193 |
+| TypeScript Features | 1194 |
 | **Gap Count** | **116** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
@@ -729,10 +729,10 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (67 exports)</summary>
+<summary><strong>agent</strong> (68 exports)</summary>
 
 ```typescript
-import { Agent, AgentEvent, AgentStreamOptions, AgentTeam, AgentTeamConfig, Agents, AudioAgent, AudioAgentConfig, AudioProvider, AudioSpeakOptions... } from 'praisonai';
+import { Agent, AgentEvent, AgentMessage, AgentStreamOptions, AgentTeam, AgentTeamConfig, Agents, AudioAgent, AudioAgentConfig, AudioProvider... } from 'praisonai';
 ```
 
 </details>

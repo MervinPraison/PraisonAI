@@ -64,6 +64,38 @@ export function writeTokenToStdout(token: string): void {
  */
 export type StopReason = 'completed' | 'max_steps' | 'cancelled' | 'error';
 
+/**
+ * A single conversation message, as stored on the Agent.
+ *
+ * This is the shape returned by {@link Agent.getHistory} and accepted by
+ * {@link Agent.setHistory}. It carries the tool context (`tool_calls`,
+ * `tool_call_id`) so a saved conversation round-trips without silently
+ * dropping tool calls or their results — persisting `getHistory()` output is
+ * the intended way to save a chat for later restoration.
+ */
+export interface AgentMessage {
+  /** The provider role. A restored message with any other value is rejected. */
+  readonly role: 'system' | 'user' | 'assistant' | 'tool';
+  /** Text content. `null` on an assistant turn that only called tools. */
+  readonly content: string | null;
+  /** Present on an assistant turn that called tools. */
+  readonly tool_calls?: ReadonlyArray<{
+    id: string;
+    type: string;
+    function: { name: string; arguments: string };
+  }>;
+  /** Present on a tool turn; pairs it to the `tool_calls` entry above. */
+  readonly tool_call_id?: string;
+  /**
+   * The tool's name, present on a `tool` turn. Required so the AI SDK adapter
+   * (`toAISDKPrompt`) can set a non-empty `toolName` on the tool-result part —
+   * without it, a restored tool history sent to a non-OpenAI provider is
+   * rejected. The live tool loop already records this (`processToolCalls`); it
+   * must survive the getHistory/setHistory round-trip too.
+   */
+  readonly name?: string;
+}
+
 export interface SimpleAgentConfig {
   /** Agent instructions/system prompt (required) */
   instructions: string;
@@ -237,7 +269,7 @@ export class Agent {
   private dbAdapter?: DbAdapter;
   private sessionId: string;
   private runId: string;
-  private messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }> = [];
+  private messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [];
   private dbInitialized: boolean = false;
   private historyLimit: number;
   private autoRestore: boolean;
@@ -811,11 +843,20 @@ export class Agent {
         { role: 'system', content: this.createSystemPrompt() }
       ];
       
-      // Add conversation history (excluding the current prompt which will be added below)
+      // Add conversation history (excluding the current prompt which will be added below).
+      // Preserve tool context so a restored tool-calling conversation replays
+      // intact: an assistant turn that only called tools has null content but
+      // still carries tool_calls, and its paired tool result carries tool_call_id.
       for (const msg of this.messages) {
-        if (msg.role && msg.content) {
-          messages.push({ role: msg.role, content: msg.content });
-        }
+        if (!msg.role) continue;
+        if (msg.content == null && !msg.tool_calls) continue;
+        const replay: any = { role: msg.role, content: msg.content };
+        if (msg.tool_calls) replay.tool_calls = msg.tool_calls;
+        if (msg.tool_call_id) replay.tool_call_id = msg.tool_call_id;
+        // Carry the tool name so a restored tool result keeps a non-empty
+        // toolName on the AI SDK path (toAISDKPrompt reads msg.name).
+        if (msg.name) replay.name = msg.name;
+        messages.push(replay);
       }
       
       // Add current user prompt
@@ -1088,6 +1129,20 @@ export class Agent {
           abortSignal
         );
         finalResponse = response.content || '';
+      } else if (this.messages.length > 0) {
+        // Prior conversation history exists (e.g. restored via setHistory).
+        // generateText only takes a single prompt + system prompt and drops
+        // every earlier turn, so a restored chat would be invisible to the
+        // model. generateChat sends the full `messages` history built above.
+        const response = await this.llmService.generateChat(
+          messages,
+          0.7,
+          undefined,
+          undefined,
+          this.getResponseFormat(),
+          abortSignal
+        );
+        finalResponse = response.content || '';
       } else {
         // Use regular text generation without streaming
         const response = await this.llmService.generateText(
@@ -1336,10 +1391,113 @@ export class Agent {
   }
 
   /**
-   * Get conversation history
+   * Get the full conversation history, including tool context.
+   *
+   * The returned messages carry `tool_calls` and `tool_call_id`, so persisting
+   * this output is a lossless way to save a chat — a tool-calling conversation
+   * survives the round-trip through {@link Agent.setHistory}. The array and its
+   * messages are copied on read: mutating the result does not change the
+   * agent's state.
+   *
+   * @returns A copy of the conversation history.
    */
-  getHistory(): Array<{ role: string; content: string | null }> {
-    return [...this.messages];
+  getHistory(): AgentMessage[] {
+    return this.messages.map(m => this.copyMessage(m));
+  }
+
+  /**
+   * Restore a previously saved conversation so the model regains its memory of
+   * it. Without this, reopening a saved chat renders the transcript on screen
+   * while the model behaves as though the conversation never happened.
+   *
+   * Input is validated because it comes from disk, and disk contents outlive
+   * the code that wrote them. A malformed history accepted here would fail on
+   * the *next* model call, far from the code that loaded it, so it is refused
+   * loudly and immediately:
+   *
+   * - a non-array input, or a message that is not an object, is rejected
+   * - an unknown `role` is rejected
+   * - a `tool` message whose `tool_call_id` matches no preceding `tool_calls`
+   *   entry is rejected (an orphaned tool result is a 400 from every provider)
+   *
+   * `system` messages: a leading `system` message is accepted and stripped.
+   * `start()` prepends the agent's own instructions as the system prompt on
+   * every run, so keeping a restored one would double it. Any non-leading
+   * `system` message is rejected as malformed.
+   *
+   * The input is copied on write, mirroring {@link Agent.getHistory}'s copy on
+   * read: mutating the array you pass in does not change the agent's state.
+   *
+   * @param messages The conversation to restore, e.g. from `getHistory()`.
+   * @throws {Error} If the history is malformed (see rules above).
+   */
+  setHistory(messages: readonly AgentMessage[]): void {
+    if (!Array.isArray(messages)) {
+      throw new Error('setHistory: expected an array of messages');
+    }
+
+    const validRoles = new Set(['system', 'user', 'assistant', 'tool']);
+    const knownToolCallIds = new Set<string>();
+    const restored: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
+        throw new Error(`setHistory: message at index ${i} is not an object`);
+      }
+      if (!validRoles.has(msg.role)) {
+        throw new Error(`setHistory: message at index ${i} has unknown role "${msg.role}"`);
+      }
+      if (msg.role === 'system') {
+        // A leading system message is redundant with the instructions start()
+        // prepends, so strip it. Anywhere else it is malformed.
+        if (i === 0) continue;
+        throw new Error(`setHistory: unexpected system message at index ${i} (only a leading system message is allowed)`);
+      }
+      if (msg.role === 'tool') {
+        if (!msg.tool_call_id || !knownToolCallIds.has(msg.tool_call_id)) {
+          throw new Error(`setHistory: tool message at index ${i} has orphaned tool_call_id "${msg.tool_call_id}" (no preceding assistant tool call matches it)`);
+        }
+      }
+      if (Array.isArray(msg.tool_calls)) {
+        for (const call of msg.tool_calls) {
+          if (call && typeof call.id === 'string') {
+            knownToolCallIds.add(call.id);
+          }
+        }
+      }
+      restored.push(this.copyMessage(msg));
+    }
+
+    this.messages = restored;
+    // Replacing the conversation invalidates any cached answers keyed by prompt
+    // alone: a repeat prompt must be re-evaluated against the restored history,
+    // not served the previous conversation's response.
+    this.responseCache.clear();
+  }
+
+  /**
+   * Deep-copy a single message so neither getHistory() nor setHistory() shares
+   * the caller's mutable references (tool_calls is an array of objects).
+   */
+  private copyMessage(m: AgentMessage | { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }): any {
+    const copy: any = { role: m.role, content: m.content };
+    if (m.tool_calls) {
+      copy.tool_calls = m.tool_calls.map((c: any) => ({
+        id: c.id,
+        type: c.type,
+        function: c.function ? { name: c.function.name, arguments: c.function.arguments } : c.function
+      }));
+    }
+    if (m.tool_call_id) {
+      copy.tool_call_id = m.tool_call_id;
+    }
+    // Preserve the tool name so a restored tool result keeps a non-empty
+    // toolName when converted for the AI SDK backend (adapter.ts toAISDKPrompt).
+    if (m.name) {
+      copy.name = m.name;
+    }
+    return copy;
   }
 
   /**
