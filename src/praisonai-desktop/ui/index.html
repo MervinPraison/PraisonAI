@@ -827,7 +827,7 @@ window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
 const { invoke } = window.__TAURI__.core;
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
-let PORT=null, engineBlocked=false, atBottom=true, activeRun=null, activeReader=null;
+let PORT=null, engineBlocked=true, atBottom=true, activeRun=null, activeReader=null;
 /** Set by Regenerate for exactly one submit, then cleared. */
 let regenerateOf=null;
 // The renderer honours these directly -- everything in here was previously
