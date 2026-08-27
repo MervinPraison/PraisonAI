@@ -106,7 +106,12 @@ pub fn read_lines_lossy(stream: impl std::io::Read) -> impl Iterator<Item = Stri
 ///
 /// Output is captured from the instant of spawn -- attaching a reader later is
 /// how a first-run failure ends up reported as an exit code with no explanation.
-pub fn start(python: &str, script: &str, timeout: Duration) -> Result<Engine, StartError> {
+pub fn start(
+    python: &str,
+    script: &str,
+    timeout: Duration,
+    shell_version: &str,
+) -> Result<Engine, StartError> {
     let mut command = Command::new(python);
     command
         .arg("-u") // unbuffered, or the announcement sits in a pipe buffer
@@ -119,6 +124,7 @@ pub fn start(python: &str, script: &str, timeout: Duration) -> Result<Engine, St
         // is a lie about what happened and depends on the user's locale.
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
+        .env("PRAISONAI_DESKTOP_VERSION", shell_version)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // No console window, and its own process group so stopping the engine also

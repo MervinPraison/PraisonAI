@@ -2,8 +2,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const CONFIG = fileURLToPath(new URL('../src-tauri/tauri.conf.json', import.meta.url));
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const NUMERIC = '(?:0|[1-9]\\d*)';
+const PRERELEASE = `(?:${NUMERIC}|\\d*[A-Za-z-][0-9A-Za-z-]*)`;
+const SEMVER = new RegExp(
+  `^${NUMERIC}\\.${NUMERIC}\\.${NUMERIC}(?:-${PRERELEASE}(?:\\.${PRERELEASE})*)?` +
+  '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$');
 
+/** Strip one conventional `v` prefix and validate a strict semantic version. */
 export function releaseVersion(tag) {
   const version = tag?.startsWith('v') ? tag.slice(1) : tag;
   if (!version || !SEMVER.test(version)) {
@@ -12,6 +17,7 @@ export function releaseVersion(tag) {
   return version;
 }
 
+/** Write the release version into the Tauri config consumed by the bundler. */
 export function setReleaseVersion(tag, configPath = CONFIG) {
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   config.version = releaseVersion(tag);

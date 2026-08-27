@@ -775,7 +775,12 @@ const SETTINGS = [
 
   // ---- About --------------------------------------------------------------
   { key: "version", section: "about", label: "PraisonAI Desktop",
-    control: { kind: "readout", value: () => "0.1.0" } },
+    control: { kind: "readout", value: () =>
+      globalThis.__PRAISONAI_DESKTOP_VERSION__ || "unknown" } },
+
+  { key: "agents_version", section: "about", label: "PraisonAI Agents",
+    control: { kind: "readout", value: () =>
+      globalThis.__PRAISONAI_AGENTS_VERSION__ || "unknown" } },
 
   { key: "engine_status", section: "about", label: "Engine",
     description: "The Python process this window is talking to.",
@@ -1350,6 +1355,7 @@ function gate(){
 }
 
 async function boot(){
+try{ globalThis.__PRAISONAI_DESKTOP_VERSION__=await window.__TAURI__.app.getVersion(); }catch{}
 const st=await invoke('engine_status');
 if(st.state==='ready'){
   PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
@@ -2043,6 +2049,10 @@ document.getElementById('settings').addEventListener('click',async()=>{
   try{
     cfg = await (await fetch('http://127.0.0.1:'+PORT+'/settings')).json();
   }catch(e){ engineDownPanel('Settings'); return; }
+  try{
+    const health=await (await fetch('http://127.0.0.1:'+PORT+'/health')).json();
+    globalThis.__PRAISONAI_AGENTS_VERSION__=health.agents_version||'unknown';
+  }catch(e){}
   settingsQuery=''; renderSettings(); overlay.classList.add('open');
   panel.querySelector('#setq').focus();
 });

@@ -228,6 +228,7 @@ class HealthReportsWhereItLives(unittest.TestCase):
         engine = os.path.join(os.path.dirname(os.path.abspath(server.__file__)), "server.py")
         proc = _sp.Popen([_sys.executable, "-u", engine],
                          env=dict(os.environ, PRAISONAI_DESKTOP_HOME=home,
+                                  PRAISONAI_DESKTOP_VERSION="4.7.3",
                                   PRAISONAI_KEYCHAIN_SERVICE="ai.praison.desktop.test"),
                          stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True)
         try:
@@ -245,6 +246,8 @@ class HealthReportsWhereItLives(unittest.TestCase):
                 health = _json.loads(r.read())
             self.assertEqual(health.get("data_dir"), home,
                              "health does not report the directory actually in use")
+            self.assertEqual(health.get("shell_version"), "4.7.3")
+            self.assertIn("agents_version", health)
         finally:
             proc.terminate()
             try:

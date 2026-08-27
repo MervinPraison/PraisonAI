@@ -301,11 +301,16 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
         Some(b) => std::env::set_var("PRAISONAI_APP_BUNDLE", b),
         None => std::env::remove_var("PRAISONAI_APP_BUNDLE"),
     }
+    // The engine exposes this beside its own package version in /health. Read
+    // from Tauri package metadata, which the release workflow derives from the
+    // tag, rather than from Cargo.toml's development-only package version.
+    let shell_version = app.package_info().version.to_string();
 
     match supervisor::start(
         &python.display().to_string(),
         &layout.script.display().to_string(),
         Duration::from_secs(30),
+        &shell_version,
     ) {
         Ok(engine) => {
             let port = engine.port;
