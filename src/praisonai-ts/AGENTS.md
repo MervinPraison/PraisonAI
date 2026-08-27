@@ -71,6 +71,36 @@ gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI
 
 Direction is **monorepo → praisonai-js** only. Do not implement TS fixes in praisonai-js for PraisonAI issues.
 
+### 2.1.2 Issue triage and PR review
+
+Use this section when triaging GitHub issues or reviewing PRs that touch `src/praisonai-ts/`. Root [`AGENTS.md`](../../AGENTS.md) and [`.github/workflows/claude.yml`](../../.github/workflows/claude.yml) point here for TypeScript scope.
+
+**Triage**
+
+| Step | Action |
+|------|--------|
+| 1 | Confirm the issue is TypeScript/JavaScript (`npm install praisonai`), not Python-only |
+| 2 | Read this file and §25 (Python parity) before planning |
+| 3 | Route agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; docs → PraisonAIDocs |
+| 4 | Plan changes under `src/praisonai-ts/src/` — never in `praisonaiagents/` |
+
+**PR review checklist** (same bar as Python SDK: lightweight and powerful)
+
+- [ ] **Scope:** Fix belongs in TS SDK, not duplicate of Python-only logic in the wrong package
+- [ ] **API surface:** Prefer existing `Agent` options; reject knobs with no consumer or that duplicate behaviour
+- [ ] **Types:** Full TypeScript types; no `any` without justification
+- [ ] **Parity:** If the change mirrors Python, check §25 and update parity trackers when needed
+- [ ] **Tests:** `npm run build && npm test` pass; new behaviour has unit tests in `tests/`
+- [ ] **Deps:** Optional deps only; lazy import heavy modules
+- [ ] **Backward compatible:** Public API breaks require deprecation path
+- [ ] **Mirror:** Do not merge direct fixes to praisonai-js — sync workflow publishes after monorepo merge
+
+**Commands for reviewers and CI**
+
+```bash
+cd src/praisonai-ts && npm install && npm run build && npm test
+```
+
 ### 2.2 TypeScript SDK Source Structure
 
 ```
