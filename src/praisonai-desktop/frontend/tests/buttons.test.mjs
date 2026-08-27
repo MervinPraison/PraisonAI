@@ -63,8 +63,11 @@ async function boot() {
       w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
       w.navigator.clipboard = { writeText: async () => {} };
       w.confirm = () => true;
-      w.prompt = () => 'Research';
-      w.alert = () => {};
+      // This webview has no JS dialog panel: prompt returns null and alert
+      // shows nothing. Modelling the real platform is the point -- a stub that
+      // returns 'x' hid that "Move to project" issued no request at all.
+      w.prompt = () => null;
+      w.alert = () => { throw new Error('no dialog panel here'); };
       w.scrollTo = () => {};
       Object.defineProperty(w.HTMLElement.prototype, 'scrollIntoView', { value() {} });
     },
@@ -183,6 +186,24 @@ test('Engine log opens and shows lines', async () => {
   click(doc.getElementById('logsBtn'));
   await settle();
   assert.match(doc.getElementById('panel').textContent, /turn start/);
+});
+
+test('right-click on a chat moves it to a project via the in-app prompt', async () => {
+  const { doc, window, calls } = await boot();
+  await settle();
+  const row = doc.querySelector('#chats .chat, #chats > div');
+  assert.ok(row, 'no chat row rendered');
+  // window.prompt returns null here, so if the handler used it this issues
+  // nothing. The in-app askText panel must appear instead.
+  row.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await settle();
+  const inp = doc.querySelector('.confirm-back .txt');
+  assert.ok(inp, 'no in-app text prompt shown (window.prompt returned null)');
+  inp.value = 'Research';
+  click([...doc.querySelectorAll('.confirm-back .ok')].pop());
+  await settle();
+  assert.ok(calls.some((c) => c.startsWith('POST /project/')),
+    'moving to a project issued no request');
 });
 
 test('every shell button produces its own observable effect', async () => {
