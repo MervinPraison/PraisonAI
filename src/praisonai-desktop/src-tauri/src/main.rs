@@ -366,8 +366,16 @@ fn breadcrumb(primary: bool) {
 fn main() {
     // Before the single-instance guard can quit this process: a launch that
     // hands off to the primary and exits 0 must still leave a trace, or it is
-    // indistinguishable from one that crashed on the way up.
-    breadcrumb(true);
+    // indistinguishable from one that crashed on the way up. Every launch
+    // records itself as `secondary` here -- honest, because this process does
+    // not yet know it is the first, and the pid is its own. The true primary
+    // upgrades its own line from `setup()` below, which the single-instance
+    // plugin runs only in the first instance. That keeps each line's pid and
+    // role telling the truth about the *same* process: a secondary that exits 0
+    // leaves `secondary pid=<its own>`, and the primary leaves `primary
+    // pid=<its own>`. Writing `primary` here and `secondary` in the guard
+    // callback (which runs in the primary, not the secondary) reversed both.
+    breadcrumb(false);
     // First, before anything can open an X connection. GTK will not do this
     // for us and the failure without it is a silent exit(1) with no message.
     praisonai_desktop_core::x11_threads::init();
@@ -375,10 +383,13 @@ fn main() {
         // Must be registered first: the guard has to run before anything else
         // touches the lockfile or the engine.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            // This callback runs in the *primary*; the secondary that triggered
-            // it has already recorded itself and is exiting 0. Note that so the
-            // log reads as "handed off", not "died".
-            breadcrumb(false);
+            // Runs in the *primary* when a secondary launches. The secondary has
+            // already recorded its own `secondary` line and is exiting 0; the
+            // primary already recorded its own `primary` line in `setup()`. Do
+            // not write here: this process is the primary, and its pid is not
+            // the secondary's, so any line written here would mislabel one of
+            // them.
+            //
             // A second launch raises the window that already exists rather than
             // starting a rival shell.
             if let Some(w) = app.get_webview_window("main") {
@@ -390,6 +401,10 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Only the first instance reaches `setup()`; a secondary is told to
+            // exit by the guard before it gets here. So this is where the
+            // primary honestly upgrades its own breadcrumb, with its own pid.
+            breadcrumb(true);
             app.manage(AppState { engine: Mutex::new(None) });
             // Deliberately not `?`. On Linux the tray goes through
             // libappindicator, which is dlopen'd at first use and *panics* if
