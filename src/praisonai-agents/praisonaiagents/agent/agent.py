@@ -626,6 +626,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
         retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
+        reasoning_effort: Optional[str] = None,  # Provider-portable reasoning effort: off|minimal|low|medium|high (Issue #4452)
         **legacy_kwargs: Any,  # Deprecated params (see _LEGACY_AGENT_PARAMS) consolidated into config objects
     ):
         """Initialize an Agent instance.
@@ -799,6 +800,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # LLMConfig(fallback_models=[...])), so accept it here without exposing
         # it in the signature and seed the local below.
         _cloned_fallback_models = legacy_kwargs.pop("fallback_models", None)
+        # `thinking_budget` is a backward-compatible alias for `reasoning_effort`
+        # (Issue #4452); accept it here (like fallback_models) without exposing
+        # it in the signature so the unknown-kwarg guard below does not reject it.
+        _thinking_budget_alias = legacy_kwargs.pop("thinking_budget", None)
         _unknown = set(legacy_kwargs) - _legacy_defaults.keys()
         if _unknown:
             # Unknown kwargs are rejected rather than swallowed, so a typo can
@@ -1026,7 +1031,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         planning_reasoning = False
         policy = None
         output_style = None
-        thinking_budget = None
+        # `thinking_budget` (popped above) is a backward-compatible alias for
+        # `reasoning_effort` (Issue #4452). Fold the legacy int budget / graded
+        # level into one internal effort value for the LLM request pipeline.
+        if reasoning_effort is None and _thinking_budget_alias is not None:
+            reasoning_effort = _thinking_budget_alias
         skills_dirs = None
         
         # ─────────────────────────────────────────────────────────────────────
@@ -2092,6 +2101,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             'claude_memory': claude_memory,
             **_retry_init_params,
         }
+        # Forward the unified reasoning-effort control to every LLM-construction
+        # branch (Issue #4452). Only set when provided so unset stays a no-op and
+        # older dict/string branches that don't spread these kwargs are unaffected.
+        if reasoning_effort is not None:
+            self._llm_option_kwargs['reasoning_effort'] = reasoning_effort
 
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.
@@ -2213,7 +2227,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 self._llm_init_params = llm_params
                 self._using_custom_llm = True
             self.llm = model_name
-        
+
+        # Thread the unified reasoning-effort control into whichever LLM-init
+        # params the branch chain above produced (Issue #4452), so it reaches the
+        # LLM request pipeline regardless of how the model was specified. Only set
+        # when provided and not already present, keeping unset a zero-cost no-op.
+        if reasoning_effort is not None and getattr(self, "_llm_init_params", None):
+            self._llm_init_params.setdefault('reasoning_effort', reasoning_effort)
+
         # Store fallback models for resilience (defensive copy to avoid external mutations)
         self.fallback_models = list(fallback_models) if fallback_models else []
         
@@ -2752,7 +2773,16 @@ Your Goal: {self.goal}
         self._auto_memory = auto_memory
         self._policy = policy
         self._output_style = output_style
-        self._thinking_budget = thinking_budget
+        # Backward-compatible: `thinking_budget` property mirrors the legacy int
+        # budget when supplied via the alias (Issue #4452); the unified effort is
+        # what actually drives the request pipeline via `_llm_init_params`.
+        self._thinking_budget = (
+            _thinking_budget_alias
+            if isinstance(_thinking_budget_alias, int)
+            else None
+        )
+        # Store the resolved unified reasoning-effort for session persistence.
+        self._reasoning_effort = reasoning_effort
         
         # Context management (lazy loaded for zero overhead when disabled)
         # Smart default: auto-enable context when tools are present
@@ -3199,6 +3229,27 @@ Your Goal: {self.goal}
     @thinking_budget.setter
     def thinking_budget(self, value: Optional[int]) -> None:
         self._thinking_budget = value
+
+    @property
+    def reasoning_effort(self) -> Optional[str]:
+        """Unified, provider-portable reasoning-effort level (Issue #4452).
+
+        One of ``off|minimal|low|medium|high``. Core translates it to the
+        target provider's native parameter (OpenAI/xAI ``reasoning_effort``,
+        Anthropic/Gemini extended-thinking budget) on the request path.
+        """
+        return getattr(self, "_reasoning_effort", None)
+
+    @reasoning_effort.setter
+    def reasoning_effort(self, value: Optional[str]) -> None:
+        self._reasoning_effort = value
+        # Keep the live LLM-init params in sync so a post-construction change
+        # still reaches the request pipeline (mirrors thinking_budget aliasing).
+        if getattr(self, "_llm_init_params", None) is not None:
+            if value is None:
+                self._llm_init_params.pop('reasoning_effort', None)
+            else:
+                self._llm_init_params['reasoning_effort'] = value
 
     @property
     def total_cost(self) -> float:
