@@ -827,7 +827,7 @@ window.__REGISTRY__ = { SECTIONS, SETTINGS, DEFAULTS, searchSettings };
 const { invoke } = window.__TAURI__.core;
 const turns=document.getElementById('turns'), thread=document.getElementById('thread');
 const status=document.getElementById('status'), box=document.getElementById('p'), send=document.getElementById('send');
-let PORT=null, atBottom=true, activeRun=null, activeReader=null;
+let PORT=null, engineBlocked=false, atBottom=true, activeRun=null, activeReader=null;
 /** Set by Regenerate for exactly one submit, then cleared. */
 let regenerateOf=null;
 // The renderer honours these directly -- everything in here was previously
@@ -1351,6 +1351,8 @@ function gate(){
 
 async function boot(){
 const st=await invoke('engine_status');
+engineBlocked=st.state!=='ready';
+if(engineBlocked) showView('chat');
 if(st.state==='ready'){
   PORT=st.port; status.textContent=`engine :${PORT}`; status.className='s-ready';
   box.disabled=send.disabled=false; box.focus(); refreshChats(); refreshModelName();
@@ -2174,6 +2176,7 @@ let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[
 const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
 
 function showView(name){
+  if(name==='train' && engineBlocked) name='chat';
   const training=name==='train';
   document.body.classList.toggle('training',training);
   trainView.classList.toggle('on',training);
