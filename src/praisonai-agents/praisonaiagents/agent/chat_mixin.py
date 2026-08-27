@@ -5766,6 +5766,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def _achat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """Async retry/backoff core for chat completion (middleware-agnostic)."""
+        # Reset the agent-level finish-reason classification at the start of each
+        # async OpenAI-native turn, mirroring the sync ``_chat_completion`` reset,
+        # so a provider block/refusal recorded on a previous run (see
+        # ``_extract_llm_response_content``) never leaks into this one. The LiteLLM
+        # path resets its own backend flag independently.
+        self._last_stop_reason = "completed"
+
         retry_config = getattr(self, '_retry_config', None)
         if not retry_config:
             return await self._execute_unified_achat_completion(

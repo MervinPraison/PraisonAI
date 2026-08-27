@@ -312,9 +312,14 @@ class ExecutionMixin:
         """
         from .run_outcome import RunOutcome, PROVIDER_BLOCK_REASONS
         output = str(result) if result is not None else None
+        # Read the recorded classification without letting a lookup problem mask a
+        # provider block as a successful ``completed``. Only an expected
+        # missing-state lookup (``AttributeError``) is treated as "no reason
+        # recorded"; anything else propagates rather than silently succeeding.
+        reason = None
         try:
             reason = getattr(self, "last_stop_reason", None)
-        except Exception:
+        except AttributeError:
             reason = None
         if reason in PROVIDER_BLOCK_REASONS:
             return RunOutcome(reason=reason, output=output)
