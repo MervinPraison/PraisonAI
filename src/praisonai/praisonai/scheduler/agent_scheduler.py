@@ -402,16 +402,31 @@ class AgentScheduler(_BaseAgentScheduler):
                 success = True
 
                 # Deliver the result to the configured chat target (if any)
-                # through the shared resilient router. Best-effort — a delivery
-                # failure must not fail the run or block the callback.
-                self._deliver_result(result)
+                # through the shared resilient router, and fold the delivery
+                # outcome into truthful accounting (Issue #4454): a run whose
+                # delivery ultimately fails is recorded ``undelivered`` and
+                # fires ``on_failure`` — it is no longer a silent success.
+                delivered_ok = self._finalize_delivery(result)
 
-                if self.on_success:
-                    try:
-                        self.on_success(result)
-                    except Exception as e:
-                        logger.error(f"Callback error in on_success: {e}")
-                
+                if delivered_ok:
+                    if self.on_success:
+                        try:
+                            self.on_success(result)
+                        except Exception as e:
+                            logger.error(f"Callback error in on_success: {e}")
+                else:
+                    logger.error(
+                        "Scheduled run executed but its result could not be "
+                        "delivered to the configured target"
+                    )
+                    if self.on_failure:
+                        try:
+                            self.on_failure(
+                                "scheduled result could not be delivered"
+                            )
+                        except Exception as e:
+                            logger.error(f"Callback error in on_failure: {e}")
+
                 # Update state file after successful execution
                 self._update_state_if_daemon()
                     
@@ -455,14 +470,29 @@ class AgentScheduler(_BaseAgentScheduler):
             result = self._executor.execute(self.task)
             logger.debug(f"One-time execution successful: {result}")
 
-            self._deliver_result(result)
+            # Fold the delivery outcome in so a one-time run is not silently
+            # undelivered either (Issue #4454).
+            delivered_ok = self._finalize_delivery(result)
 
-            if self.on_success:
-                try:
-                    self.on_success(result)
-                except Exception as e:
-                    logger.error(f"Callback error in on_success: {e}")
-            
+            if delivered_ok:
+                if self.on_success:
+                    try:
+                        self.on_success(result)
+                    except Exception as e:
+                        logger.error(f"Callback error in on_success: {e}")
+            else:
+                logger.error(
+                    "One-time run executed but its result could not be "
+                    "delivered to the configured target"
+                )
+                if self.on_failure:
+                    try:
+                        self.on_failure(
+                            "scheduled result could not be delivered"
+                        )
+                    except Exception as e:
+                        logger.error(f"Callback error in on_failure: {e}")
+
             return result
         except Exception as e:
             logger.error(f"One-time execution failed: {e}")

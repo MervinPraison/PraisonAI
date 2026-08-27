@@ -5,10 +5,37 @@ Shared, lock-agnostic scheduler logic for both sync and async variants.
 import os
 import json
 import logging
+from enum import Enum
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
+
+
+class DeliveryOutcome(str, Enum):
+    """Typed outcome of routing a scheduled run's result to its chat target.
+
+    Makes the fire-time delivery result *observable* instead of a discarded
+    ``bool``: the caller folds it into the run's recorded outcome so a
+    scheduled run never reports plain success when the user received nothing.
+
+    - ``NOT_CONFIGURED``: no ``deliver`` target — nothing to send.
+    - ``SUPPRESSED``: intentional silence (NO_REPLY / [SILENT]) — a *recorded*
+      non-outcome, not a failure.
+    - ``DELIVERED``: the router accepted the send.
+    - ``UNDELIVERED``: the send failed (dead target, package missing,
+      unresolvable token, transient error) — surfaced, never silent.
+    """
+
+    NOT_CONFIGURED = "not_configured"
+    SUPPRESSED = "suppressed"
+    DELIVERED = "delivered"
+    UNDELIVERED = "undelivered"
+
+    @property
+    def undelivered(self) -> bool:
+        """True only for an *unintended* delivery failure that must surface."""
+        return self is DeliveryOutcome.UNDELIVERED
 
 
 def _to_non_negative_int(value: Any) -> int:
@@ -302,6 +329,25 @@ class _BaseAgentScheduler:
     _failure_count: int
     _total_cost: float
     _start_time: Optional[datetime]
+    # Delivery-outcome accounting (Issue #4454): a run whose configured
+    # delivery fails is counted as ``undelivered`` — never a plain success.
+    _delivered_count: int = 0
+    _undelivered_count: int = 0
+
+    @property
+    def _delivery_lock(self):
+        """Lazily-created lock guarding the delivery-outcome counters.
+
+        Created on first use so both the sync and async schedulers (whose own
+        counters use their own locks) can safely bump delivery counts from a
+        worker thread without either subclass having to declare it.
+        """
+        lock = getattr(self, "_delivery_lock_obj", None)
+        if lock is None:
+            import threading as _threading
+            lock = _threading.Lock()
+            self._delivery_lock_obj = lock
+        return lock
 
     def _should_suppress_delivery(self, text: str) -> bool:
         """Return True when a run's whole output is an exact silence marker.
@@ -317,39 +363,117 @@ class _BaseAgentScheduler:
         except Exception:  # pragma: no cover - core primitive always present
             return False
 
-    def _deliver_result(self, result: Any) -> None:
+    def _deliver_result(self, result: Any) -> "DeliveryOutcome":
         """Route a successful result to the configured chat target.
 
-        No-op when no ``deliver`` target is set. The delivery target is
-        resolved and sent through the shared ``DeliveryRouter`` (rate limiting,
-        idempotency dedup, dead-target self-heal), reusing the same machinery
-        the gateway uses — without requiring the full gateway. Never raises: a
-        delivery problem must not tear down the scheduler. Shared by both the
-        sync and async schedulers.
+        Returns a typed :class:`DeliveryOutcome` so the caller can fold the
+        fire-time delivery result into the run's recorded outcome instead of
+        discarding it — a scheduled run whose delivery fails must never report
+        plain success (Issue #4454). The delivery target is resolved and sent
+        through the shared ``DeliveryRouter`` (rate limiting, idempotency dedup,
+        dead-target self-heal), reusing the same machinery the gateway uses —
+        without requiring the full gateway. Never raises: a delivery problem
+        must not tear down the scheduler. Shared by both the sync and async
+        schedulers.
         """
         if not self.deliver:
-            return
+            return DeliveryOutcome.NOT_CONFIGURED
         text = str(result)
         # Honour the core intentional-silence contract on the unattended path:
         # a run whose whole output is an exact silence marker (NO_REPLY /
         # [SILENT] / SILENT) means "nothing worth sending — stay quiet". The
         # run still completes and is recorded in history; only delivery is
         # suppressed. Prose that merely mentions the token is unaffected
-        # (is_intentional_silence_response is exact-match).
+        # (is_intentional_silence_response is exact-match). This is a *recorded*
+        # non-outcome, not an unintended failure.
         if self._should_suppress_delivery(text):
             logger.info(
                 "Scheduled run chose intentional silence; delivery suppressed"
             )
-            return
+            return DeliveryOutcome.SUPPRESSED
         try:
             if self._delivery is None:
                 # Normally built eagerly at __init__ for a creation-time
                 # pre-flight; rebuild here as a fallback if that was skipped.
                 self._build_delivery()
-            if self._delivery is not None:
-                self._delivery.deliver(text)
+            if self._delivery is None:
+                # The wrapper could not be built (e.g. praisonai-bot missing):
+                # the result was configured for delivery but went nowhere.
+                logger.error(
+                    "Scheduler delivery target configured but unavailable; "
+                    "result not delivered"
+                )
+                return DeliveryOutcome.UNDELIVERED
+            delivered = self._delivery.deliver(text)
+            return (
+                DeliveryOutcome.DELIVERED if delivered
+                else DeliveryOutcome.UNDELIVERED
+            )
         except Exception as e:
             logger.error(f"Scheduler delivery error: {e}")
+            return DeliveryOutcome.UNDELIVERED
+
+    def _finalize_delivery(self, result: Any) -> bool:
+        """Deliver ``result`` and fold the outcome into truthful accounting.
+
+        Runs the configured delivery, then records the outcome so a scheduled
+        run whose delivery fails is never reported as a plain success
+        (Issue #4454). Returns ``True`` when the run should fire ``on_success``
+        (delivered, suppressed, or no target) and ``False`` when it must fire
+        the delivery-failure path instead. Shared by both schedulers.
+        """
+        outcome = self._deliver_result(result)
+        if outcome is DeliveryOutcome.DELIVERED:
+            with self._delivery_lock:
+                self._delivered_count += 1
+            return True
+        if outcome.undelivered:
+            self._record_undelivered(result)
+            return False
+        # NOT_CONFIGURED / SUPPRESSED: nothing was supposed to be sent, so the
+        # run's success is unaffected.
+        return True
+
+    def _record_undelivered(self, result: Any) -> None:
+        """Record + surface a scheduled result that could not be delivered.
+
+        A run whose ``deliver=`` target ultimately fails is *not* a plain
+        success: it bumps the ``undelivered`` counter, best-effort fires the
+        core ``MESSAGE_UNDELIVERED`` hook (reusing the existing protocol seam —
+        no new protocol) if a hook runner is attached to the agent, and lets
+        the caller invoke ``on_failure``. Never raises. Shared by both the
+        sync and async schedulers.
+        """
+        with self._delivery_lock:
+            self._undelivered_count += 1
+        runner = getattr(self.agent, "hook_runner", None) or getattr(
+            self.agent, "_hook_runner", None
+        )
+        if runner is None:
+            return
+        try:
+            from praisonaiagents.hooks.types import HookEvent
+            from praisonaiagents.hooks.events import MessageUndeliveredInput
+            import time as _time
+
+            target = getattr(self._delivery, "_target", None)
+            platform = getattr(target, "channel", "") or str(self.deliver)
+            channel_id = getattr(target, "channel_id", "") or ""
+            event_input = MessageUndeliveredInput(
+                session_id="",
+                cwd=os.getcwd(),
+                event_name=HookEvent.MESSAGE_UNDELIVERED,
+                timestamp=str(_time.time()),
+                agent_name=getattr(self.agent, "name", "scheduler"),
+                platform=platform,
+                content=str(result),
+                channel_id=channel_id,
+                error="scheduled result could not be delivered",
+                notice_delivered=False,
+            )
+            runner.execute_sync(HookEvent.MESSAGE_UNDELIVERED, event_input)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("MESSAGE_UNDELIVERED hook failed: %s", e)
 
     def _build_delivery(self) -> None:
         """Construct the delivery wrapper, running its creation-time pre-flight.
@@ -411,6 +535,11 @@ class _BaseAgentScheduler:
             "cost_per_execution": (
                 round(total_cost / execs, 4) if execs > 0 else 0
             ),
+            # Delivery-outcome accounting (Issue #4454): distinguish a run that
+            # actually reached the user from one whose delivery failed. A run
+            # can be a successful *execution* yet an undelivered *result*.
+            "delivered_deliveries": getattr(self, "_delivered_count", 0),
+            "undelivered_deliveries": getattr(self, "_undelivered_count", 0),
         }
 
     def _update_state_if_daemon(self) -> None:
