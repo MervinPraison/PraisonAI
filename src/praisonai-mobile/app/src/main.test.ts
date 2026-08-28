@@ -40,7 +40,7 @@ import { createFakeDom } from "../../testing/src/fake-dom.ts";
 import { createFakeShell, PHONE_INSETS } from "../../testing/src/fake-shell.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
-import { createFakeHttp, sseResponse } from "../../testing/src/fake-http.ts";
+import { createFakeHttp, jsonResponse, sseResponse } from "../../testing/src/fake-http.ts";
 import { mount } from "./main.ts";
 import type { Platform } from "./platform.ts";
 
@@ -89,6 +89,22 @@ const submit = (dom: ReturnType<typeof createFakeDom>, text: string): void => {
   const form = dom.find((n) => n.tagName === "FORM");
   if (box !== null) box.value = text;
   form?.dispatch("submit", { preventDefault: () => {} });
+};
+
+// Accept every /cancel, whatever the run id. The controller mints run ids from
+// a module-global counter, so the exact `/cancel/<id>` a test will see is not
+// predictable across the file -- and `on()` matches by suffix, which a run id
+// tail defeats. Wrapping `send` lets a test make Stop genuinely succeed, which
+// is what fires the trailing publish the New-chat guard has to survive.
+const acceptAnyCancel = (http: ReturnType<typeof createFakeHttp>): void => {
+  const inner = http.send.bind(http);
+  (http as { send: typeof http.send }).send = async (request) => {
+    if (request.url.includes("/cancel/")) {
+      (http.sent as unknown as Array<typeof request>).push(request);
+      return jsonResponse(200, { ok: true });
+    }
+    return inner(request);
+  };
 };
 
 test("a failure before the first token says WHAT failed, not that nothing came back", async () => {
@@ -292,6 +308,31 @@ const held = (frames: readonly (readonly [string, unknown])[]) => ({
   }),
 });
 
+// A live turn whose reader keeps RESOLVING. `held` never closes, so
+// `reader.read()` hangs and the engine's abort check between reads is never
+// reached -- the run cannot actually be stopped, only reported as asked to
+// stop. Pumping keep-alive whitespace on a tick lets each read return, so an
+// abort is seen on the next loop and the run genuinely ends: the only shape
+// that fires the trailing publish New chat has to survive.
+const streaming = (frames: readonly (readonly [string, unknown])[]) => ({
+  status: 200,
+  headers: { "content-type": "text/event-stream" },
+  body: new ReadableStream<Uint8Array>({
+    start(controller) {
+      const enc = new TextEncoder();
+      controller.enqueue(enc.encode(sse(frames)));
+      const tick = setInterval(() => {
+        try {
+          controller.enqueue(enc.encode(": keepalive\n\n"));
+        } catch {
+          clearInterval(tick);
+        }
+      }, 10);
+      (tick as { unref?: () => void }).unref?.();
+    },
+  }),
+});
+
 test("the Send button becomes Stop while a run is streaming", async () => {
   // `phase === "streaming" ? "stop" : "send"` -> `"send"` survived. The Stop
   // button never appears, so a run cannot be cancelled from the UI at all --
@@ -416,6 +457,88 @@ test("New chat clears the previous conversation off the screen", async () => {
     false,
     "and the live regions, which still held the previous conversation's answer in the "
       + "accessibility tree of what the user believes is an empty chat",
+  );
+  app?.dispose();
+});
+
+test("New chat during a live run leaves no trailing frame in the fresh chat", async () => {
+  // `controller.stop()` in the New chat handler is a real network cancel and is
+  // NOT awaited, so the cancelled run's `finally` fires one last publish AFTER
+  // the reset has emptied the screen. Reconciled against the just-cleared
+  // render that trailing frame re-inserted the old answer's rows, and `announce`
+  // wrote "Stopped" back into the live regions the reset had emptied -- both in
+  // what the user believes is a brand-new, empty conversation.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    streaming([
+      ["start", { msg_id: "m1", run_id: "r1" }],
+      ["delta", { msg_id: "m1", text: "the first answer" }],
+    ]),
+  );
+  // Cancel must genuinely succeed, or the run never aborts and never fires the
+  // trailing publish this test exists to catch -- the defect would pass unseen.
+  acceptAnyCancel(http);
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "one");
+  await settle();
+  assert.match(dom.text(), /the first answer/, "the run must actually be live before New chat");
+
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  // Let the unawaited cancel resolve and the old run's finally publish fire.
+  await settle(120);
+
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.equal(transcript?.children.length, 0, "the trailing frame must not repaint the old rows");
+
+  const polite = dom.find((n) => n.getAttribute("aria-live") === "polite");
+  const assertive = dom.find((n) => n.getAttribute("aria-live") === "assertive");
+  assert.equal(polite?.textContent ?? "", "", "no stale polite announcement in the fresh chat");
+  assert.equal(assertive?.textContent ?? "", "", "no stale assertive announcement in the fresh chat");
+  assert.equal(
+    /the first answer|Stopped/i.test(dom.text()),
+    false,
+    "nothing from the cancelled run may survive into the empty conversation",
+  );
+  app?.dispose();
+});
+
+test("a send after New chat still paints, the fresh guard lifting on the new run", async () => {
+  // The trailing-frame guard must release the moment a real run begins, or the
+  // reply to the first message of the new chat would be swallowed too. The
+  // first turn is allowed to COMPLETE before New chat, so the guard is raised
+  // with a settled turn behind it -- exactly the state that must not eat the
+  // next conversation's answer.
+  const { dom, http, platform } = harness();
+  let n = 0;
+  http.on("/chat", () => {
+    n += 1;
+    const id = `m${n}`;
+    return sseResponse(
+      sse([
+        ["start", { msg_id: id, run_id: `r${n}` }],
+        ["delta", { msg_id: id, text: n === 1 ? "first answer" : "second answer" }],
+        ["end", { msg_id: id, user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    );
+  });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "one");
+  await settle(120);
+  assert.match(dom.text(), /first answer/, "the first turn must complete before New chat");
+
+  dom.click(dom.find((node) => node.dataset["action"] === "new-chat") as never);
+  await settle(120);
+
+  submit(dom, "two");
+  await settle(120);
+
+  assert.match(dom.text(), /second answer/, "the fresh conversation's own answer must paint");
+  assert.equal(
+    /first answer/.test(dom.text()),
+    false,
+    "and the previous conversation must not still be on screen",
   );
   app?.dispose();
 });

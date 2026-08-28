@@ -158,8 +158,25 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   let render: RenderState = emptyRender;
   const nodes: RowNodes = emptyNodes();
   let announcer: AnnouncerState = initialAnnouncer;
+  // True from the moment New chat resets the chrome until the next run begins.
+  //
+  // New chat stops the live run without awaiting it -- `controller.stop()` is a
+  // real network cancel -- so the old run's `finally` still fires ONE last
+  // publish AFTER the reset has run. That trailing publish carries the settled,
+  // cancelled turn: reconciling it against the just-emptied render re-inserts
+  // the old answer's rows into the new chat, and `announce` writes "Stopped"
+  // back into the live regions the reset had cleared -- both landing in what
+  // the user believes is an empty conversation. While reset, a publish for a
+  // turn that has already ended is that trailing frame and is dropped; the
+  // fresh run's first publish (an un-started `initialTurn`) lifts the flag.
+  let awaitingFreshRun = false;
 
   const publish = (view: RunView): void => {
+    const ended = view.turn.outcome !== null || view.turn.phase === "ended";
+    if (awaitingFreshRun) {
+      if (ended) return; // the previous run's trailing publish, after New chat
+      awaitingFreshRun = false;
+    }
     const built = buildTranscript(view.turn, view.approvals);
     const diff = reconcile(render, built.rows);
     applyOps(transcript, nodes, diff.ops, strings);
@@ -299,6 +316,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // again -- but still there for anyone navigating the page.
         polite.textContent = "";
         assertive.textContent = "";
+        // The stop above is not awaited, so the cancelled run's `finally` fires
+        // one more publish after this handler returns. Mark the chrome fresh so
+        // that trailing frame does not repaint the old answer or re-announce
+        // "Stopped" into the regions we just emptied.
+        awaitingFreshRun = true;
         return;
       }
       case "navigate":
