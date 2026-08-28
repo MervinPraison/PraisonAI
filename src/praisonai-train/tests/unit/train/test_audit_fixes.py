@@ -90,6 +90,93 @@ def test_the_remote_launch_puts_the_config_behind_its_flag():
     assert script.index("ds.jsonl") < script.index("--config")
 
 
+def test_the_recorded_pid_owns_the_trainer_signalable_by_group(tmp_path):
+    """The pid file must name the process that owns the trainer's group.
+
+    `$!` in the outer shell caught the transient subshell that backgrounded the
+    whole `&&` list -- a process that can exit while training runs on, at which
+    point `status` reports `unknown`. The launch now records the pid of the
+    wrapper that owns the trainer and, where `setsid` exists, makes that wrapper
+    a process-group leader so its children (dataloader workers, torchrun ranks)
+    share one group. `status` probes the recorded pid and `stop` resolves that
+    pid's group and signals ``-$pgid`` -- so a TERM reaches the trainer through
+    the group rather than a wrapper that would never forward it.
+
+    Run the real launch script under /bin/sh with a stand-in trainer that
+    records its own pid, then assert the recorded pid owns the trainer (it is
+    the trainer's parent) and that a TERM to the recorded pid's group actually
+    reaches the trainer (it stops).
+    """
+    import os
+    import signal
+    import subprocess
+    import time
+
+    # A stand-in "trainer" invoked in place of the python interpreter: it
+    # records its own pid and parent, and lingers so the processes are still
+    # around to inspect and signal.
+    stub = tmp_path / "fake-trainer"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f"echo $$ > {tmp_path / 'trainer_pid'}\n"
+        f"ps -o ppid= -p $$ | tr -d ' ' > {tmp_path / 'trainer_ppid'}\n"
+        "sleep 30\n"
+    )
+    os.chmod(stub, 0o755)
+
+    runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
+    runner.host = rr.RemoteHost(alias="h", python=str(stub),
+                                workdir=str(tmp_path))
+    run = rr.RemoteRun(host="h", run_id="run-1", remote_dir=str(tmp_path),
+                       log_path=str(tmp_path / "train.log"))
+
+    script = runner._launch_script(run, "", None)
+    subprocess.run(["/bin/sh", "-c", script], cwd=str(tmp_path), check=True)
+
+    pid_file = tmp_path / "train.pid"
+    trainer_pid_file = tmp_path / "trainer_pid"
+    trainer_ppid_file = tmp_path / "trainer_ppid"
+    for _ in range(50):
+        if (pid_file.exists() and trainer_pid_file.exists()
+                and trainer_ppid_file.exists()):
+            break
+        time.sleep(0.1)
+    assert pid_file.exists(), "no pid was recorded"
+    assert trainer_pid_file.exists(), "the stand-in trainer never ran"
+
+    recorded = pid_file.read_text().strip()
+    trainer_pid = trainer_pid_file.read_text().strip()
+    trainer_ppid = trainer_ppid_file.read_text().strip()
+    try:
+        # The recorded pid must own the trainer: it is the trainer's parent, so
+        # `status` probes a live process and `stop` can resolve its group.
+        assert trainer_ppid == recorded, (
+            f"recorded pid {recorded} does not own the trainer "
+            f"(trainer's parent is {trainer_ppid})")
+
+        # A TERM to the recorded pid's group must actually stop the trainer:
+        # prove `stop`'s group signal reaches the work, not a non-forwarding
+        # wrapper that would leave the trainer orphaned.
+        os.killpg(os.getpgid(int(recorded)), signal.SIGTERM)
+        for _ in range(50):
+            try:
+                os.kill(int(trainer_pid), 0)
+            except OSError:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(
+                f"trainer {trainer_pid} survived TERM to recorded pid "
+                f"{recorded}'s group -- stop does not reach the trainer")
+    finally:
+        # Leave no descendants behind regardless of assertion outcome.
+        for stray in (recorded, trainer_pid):
+            try:
+                os.kill(int(stray), signal.SIGKILL)
+            except (OSError, ValueError):
+                pass
+
+
 # --------------------------------------------------------------------------- #
 # 3. remote command injection and path traversal
 # --------------------------------------------------------------------------- #
