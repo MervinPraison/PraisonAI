@@ -562,20 +562,29 @@ def _mask_url(url: str) -> str:
     return masked
 
 
+def _detect_store_backend(url: str, default: str) -> str:
+    """Reuse the canonical resolver; fall back leniently for the doctor.
+
+    Delegates to ``PraisonAIDB._detect_backend`` (the single, tested source of
+    truth) so the doctor recognises the same schemes as the live path
+    (e.g. ``libsql://`` -> turso, ``*.supabase.co`` -> supabase). Unknown
+    schemes fall back to the doctor's lenient ``default`` instead of failing.
+    """
+    try:
+        from praisonai.db.adapter import PraisonAIDB
+        return PraisonAIDB._detect_backend(PraisonAIDB, url)
+    except ValueError:
+        return default
+    except Exception:
+        return default
+
+
 def _test_conversation_store(url: str) -> tuple:
     """Test conversation store connectivity."""
     try:
         from praisonai.persistence.factory import create_conversation_store
         
-        # Detect backend
-        if "postgresql" in url or "postgres" in url:
-            backend = "postgres"
-        elif "mysql" in url:
-            backend = "mysql"
-        elif url.endswith(".db") or "sqlite" in url:
-            backend = "sqlite"
-        else:
-            backend = "sqlite"
+        backend = _detect_store_backend(url, default="sqlite")
         
         store = create_conversation_store(backend, url=url)
         
@@ -593,13 +602,12 @@ def _test_knowledge_store(url: str) -> tuple:
     try:
         from praisonai.persistence.factory import create_knowledge_store
         
-        # Detect backend
-        if "qdrant" in url or ":6333" in url:
-            backend = "qdrant"
-        elif "chroma" in url:
+        # Knowledge stores model a chroma/qdrant distinction the unified
+        # resolver does not; keep the chroma special-case, default to qdrant.
+        if "chroma" in url:
             backend = "chroma"
         else:
-            backend = "qdrant"
+            backend = _detect_store_backend(url, default="qdrant")
         
         store = create_knowledge_store(backend, url=url)
         
@@ -617,11 +625,7 @@ def _test_state_store(url: str) -> tuple:
     try:
         from praisonai.persistence.factory import create_state_store
         
-        # Detect backend
-        if "redis" in url:
-            backend = "redis"
-        else:
-            backend = "memory"
+        backend = _detect_store_backend(url, default="memory")
         
         store = create_state_store(backend, url=url)
         
