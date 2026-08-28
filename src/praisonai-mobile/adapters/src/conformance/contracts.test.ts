@@ -91,7 +91,19 @@ describeTimeContract("fake time", () => createFakeTime(), async (time, ms) => {
 describeTimeContract(
   "web time",
   () => createWebTime(),
-  async (_time, ms) => { await new Promise((r) => setTimeout(r, ms + 10)); },
+  // Node coalesces an overdue setInterval to one callback per event-loop turn
+  // rather than firing a burst to catch up, so a single stalled macrotask on a
+  // loaded CI worker can deliver only one tick for the whole wait. Yielding the
+  // loop across several shorter turns lets each overdue callback dispatch on its
+  // own turn, so a correct adapter accumulates its ticks without the contract
+  // ever measuring a duration.
+  async (_time, ms) => {
+    const turns = 4;
+    const slice = Math.max(1, Math.ceil((ms + 10) / turns));
+    for (let i = 0; i < turns; i++) {
+      await new Promise((r) => setTimeout(r, slice));
+    }
+  },
   true,
 );
 
