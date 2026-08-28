@@ -245,3 +245,63 @@ test("the tick stops when the turn ends", async () => {
   h.time.tick();
   assert.equal(h.views.length, before, "a tick after the turn must publish nothing");
 });
+
+// ---- an approval the engine refuses -----------------------------------------
+
+test("an approval the engine refuses is shown as failed, never as sent", async () => {
+  // `ok ? acknowledge : reject` collapsing to always-acknowledge survived the
+  // whole suite. The engine says "I did not accept that decision" -- because it
+  // restarted, or the approval expired -- and the row still renders resolved.
+  // The user sees their Deny confirmed against a command the engine never
+  // denied, which is the one failure this table exists to make visible.
+  const views: RunView[] = [];
+  const engine = createScriptedEngine({
+    id: "scripted",
+    script: [
+      { type: "start", msgId: "m", runId: "r" },
+      { type: "approval_request", msgId: "m", approvalId: "a1", callId: "c1", name: "rm", args: { path: "/" } },
+    ],
+    approvals: [], // the engine does not recognise a1
+  });
+  const controller = createRunController({
+    engine,
+    time: createFakeTime(),
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("do the thing");
+  await controller.decide("a1", "deny");
+
+  const entry = views[views.length - 1]?.approvals.entries.find((e) => e.approvalId === "a1");
+  assert.ok(entry, "the approval should still be on screen");
+  assert.equal(entry.state.status, "failed", "a refused decision must not read as sent");
+  assert.equal(
+    entry.state.status === "failed" ? entry.state.choice : null,
+    "deny",
+    "the choice the user made is still what failed",
+  );
+});
+
+test("an approval the engine accepts is shown as sent", async () => {
+  // The other half. Without it the test above passes against a controller that
+  // rejects every decision, which is just as broken in the opposite direction.
+  const views: RunView[] = [];
+  const engine = createScriptedEngine({
+    id: "scripted",
+    script: [
+      { type: "start", msgId: "m", runId: "r" },
+      { type: "approval_request", msgId: "m", approvalId: "a1", callId: "c1", name: "ls", args: {} },
+    ],
+  });
+  const controller = createRunController({
+    engine,
+    time: createFakeTime(),
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("do the thing");
+  await controller.decide("a1", "allow");
+
+  const entry = views[views.length - 1]?.approvals.entries.find((e) => e.approvalId === "a1");
+  assert.equal(entry?.state.status, "sent");
+});

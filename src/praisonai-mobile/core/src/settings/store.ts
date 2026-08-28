@@ -99,6 +99,28 @@ export function secretRefOf(def: SettingDef): SecretRef | null {
 
 const STORAGE_KEY = { namespace: "settings" as const, id: "app" };
 
+/**
+ * Everything in `values` that is safe to write to StoragePort.
+ *
+ * Extracted so a test can call it. The guard it contains is defence in depth:
+ * `set` refuses a secret-flagged key and `load` drops one, so through the
+ * public API nothing can put a secret into the map in the first place. That is
+ * exactly why it needs its own test -- an unreachable guard is a guard nobody
+ * notices the deletion of, and the day a new write path forgets the rule this
+ * line is the only thing between an API key and a plaintext settings file.
+ */
+export function plainOnly(
+  values: ReadonlyMap<string, SettingValue>,
+  byKey: ReadonlyMap<string, SettingDef>,
+): Record<string, SettingValue> {
+  const plain: Record<string, SettingValue> = {};
+  for (const [key, value] of values) {
+    if (byKey.get(key)?.secret === true) continue;
+    plain[key] = value;
+  }
+  return plain;
+}
+
 export function createSettingsStore(
   defs: readonly SettingDef[],
   storage: StoragePort,
@@ -108,15 +130,7 @@ export function createSettingsStore(
   const values = new Map<string, SettingValue>(defs.map((d) => [d.key, d.default]));
 
   const persist = async (): Promise<void> => {
-    const plain: Record<string, SettingValue> = {};
-    for (const [key, value] of values) {
-      const def = byKey.get(key);
-      // The guarantee. A secret-flagged setting never reaches StoragePort,
-      // even if something upstream put one in the map.
-      if (def?.secret === true) continue;
-      plain[key] = value;
-    }
-    await storage.write(STORAGE_KEY, JSON.stringify(plain));
+    await storage.write(STORAGE_KEY, JSON.stringify(plainOnly(values, byKey)));
   };
 
   const subscribers = new Set<() => void>();
