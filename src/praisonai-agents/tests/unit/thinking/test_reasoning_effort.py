@@ -143,6 +143,11 @@ class TestAgentSurface:
         assert self._params(agent).get("reasoning_effort") == "high"
 
     def test_thinking_budget_setter_reaches_request(self):
+        # The CLI assigns ``agent.thinking_budget`` AFTER construction (the
+        # ``--thinking`` per-invocation override). This must route through the
+        # unified effort so the provider request actually carries it — the
+        # previous dormant-alias bug (Issue #4452) only stored ``_thinking_budget``
+        # and never emitted the native parameter.
         pytest.importorskip("litellm")
         from praisonaiagents import Agent
 
@@ -150,7 +155,20 @@ class TestAgentSurface:
         _ = self._params(agent)  # cache the LLM first
         agent.thinking_budget = 16000  # -> "high"
         assert agent.reasoning_effort == "high"
+        assert agent.thinking_budget == 16000
         assert self._params(agent).get("reasoning_effort") == "high"
+
+    def test_thinking_budget_setter_updates_live_instance(self):
+        # Build the LLM instance first (as ``.start()`` would), then change the
+        # budget: the cached instance must reflect the new effort without a
+        # rebuild, so the CLI override is never silently dropped.
+        pytest.importorskip("litellm")
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="x", llm="openai/gpt-5")
+        _ = agent.llm_instance  # force lazy build
+        agent.thinking_budget = 4000  # -> "low"
+        assert self._params(agent).get("reasoning_effort") == "low"
 
     def test_int_budget_normalises_to_graded_level_on_property(self):
         pytest.importorskip("litellm")
