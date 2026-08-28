@@ -17,6 +17,7 @@ without pulling in torch or unsloth.
 from __future__ import annotations
 
 import pathlib
+import re
 import shlex
 import subprocess
 import time
@@ -87,10 +88,22 @@ class RemoteHost:
     def resolve_workdir(self) -> str:
         """Absolute working directory on the host, expanded and cached."""
         if self._resolved_workdir is None:
-            # `cd ... && pwd` expands ~ using the host's own shell.
+            # Quoting the workdir stops the remote shell expanding `~`, so a
+            # directory literally named `~` is created and every derived path
+            # lands there. The workdir has to reach the shell unquoted --
+            # validate it (same rule as settings.validate) so it stays safe.
+            if not re.fullmatch(r"~?[A-Za-z0-9._/-]*", self.workdir):
+                raise RemoteError(
+                    f"{self.alias}: workdir {self.workdir!r} may only contain "
+                    "letters, digits and ._-/~ -- it is expanded by the remote "
+                    "shell."
+                )
+            # `cd ... && pwd` expands ~ using the host's own shell. `-m 700`
+            # because the run directory holds the shipped config and any
+            # dataset; a shared box's umask should not decide who can read them.
             expanded = self.run(
-                f"mkdir -p {shlex.quote(self.workdir)} && "
-                f"cd {shlex.quote(self.workdir)} && pwd"
+                f"mkdir -p -m 700 {self.workdir} && "
+                f"cd {self.workdir} && pwd"
             )
             if not expanded.ok:
                 raise RemoteError(
