@@ -139,3 +139,55 @@ test("the fallback never throws, whatever it is handed", () => {
     assert.doesNotThrow(() => directionFromTables(tag), `threw on ${JSON.stringify(tag)}`);
   }
 });
+
+test("the fallback tables agree with Intl across a corpus of real tags", (t) => {
+  // The test that finds the NEXT drift, rather than the thirteen languages
+  // that were missing when it was written.
+  //
+  // `direction()` prefers `Intl.Locale.textInfo` and falls back to these
+  // tables, so a tag the tables get wrong is invisible on every host that has
+  // textInfo -- which is every host a test runs on. The only way to see it is
+  // to ask both and compare. Thirteen disagreed: Baluchi, Rohingya, Saraiki,
+  // Luri, Mazanderani, Gilaki, Hazaragi and five spoken Arabic varieties, all
+  // rendering the whole UI left to right on the older WebViews that reach the
+  // fallback.
+  //
+  // Skips tags this Node cannot answer for, so a small-ICU build reports
+  // nothing rather than failing for the wrong reason.
+  const CORPUS = [
+    "ar", "he", "fa", "ur", "ps", "sd", "yi", "dv", "ckb", "ug", "syr", "nqo",
+    "ks", "pnb", "arc", "bal", "rhg", "aeb", "ary", "arz", "apc", "acm", "ajp",
+    "skr", "lrc", "mzn", "glk", "haz",
+    "en", "fr", "de", "es", "pt", "it", "nl", "ru", "uk", "pl", "tr", "hi",
+    "bn", "ta", "th", "vi", "id", "ja", "ko", "zh-Hans", "zh-Hant", "sw", "am",
+  ];
+
+  const disagreements: string[] = [];
+  let compared = 0;
+  for (const tag of CORPUS) {
+    let fromIntl: string | null = null;
+    try {
+      const locale = new Intl.Locale(tag) as unknown as {
+        readonly textInfo?: { readonly direction?: string };
+      };
+      fromIntl = locale.textInfo?.direction ?? null;
+    } catch {
+      fromIntl = null;
+    }
+    if (fromIntl === null) continue; // this Node cannot answer; not a failure
+    compared += 1;
+    const fromTables = directionFromTables(tag);
+    if (fromIntl !== fromTables) disagreements.push(`${tag}: Intl=${fromIntl} tables=${fromTables}`);
+  }
+
+  // A small-ICU build answers `textInfo` for few tags or none. That is not a
+  // drift, so the test SKIPS rather than fails -- as the header promises. The
+  // threshold catches the different failure of a full-ICU host that somehow
+  // compared almost nothing, which would mean the corpus stopped exercising
+  // the tables. Below it we cannot tell the two apart, so we skip.
+  if (compared <= 20) {
+    t.skip(`only ${compared} tags were comparable; treating as a limited-ICU host`);
+    return;
+  }
+  assert.deepEqual(disagreements, [], "the fallback tables have drifted from Intl");
+});
