@@ -132,3 +132,30 @@ export function createSession(deps: SessionDeps): Session {
     repository,
   };
 }
+
+
+/**
+ * A `Session` seen as the engine's `RunPersistence`.
+ *
+ * The two halves were designed apart and never reconciled, and that is exactly
+ * why nothing was ever wired: `Session.record` takes a prompt, the engine's
+ * `RunPersistence.record` takes a whole `RunRequest`, and the signatures do not
+ * line up. So the session was built, the port was declared, and no conversation
+ * was ever written -- a gap that read as closed from either end.
+ *
+ * Naming the adapter rather than inlining a lambda at the call site is
+ * deliberate: this is the one place the two vocabularies meet, and a lambda
+ * buried in composition is a seam nobody can find later.
+ *
+ * `chatId` is deliberately NOT used to switch chats here. The session already
+ * knows which conversation is open; taking direction from the request instead
+ * would let an in-flight turn write into whichever chat the user has since
+ * navigated to.
+ */
+export function persistenceFor(session: Session): {
+  record(request: { readonly prompt: string }, answer: string): Promise<RecordedIndices | null>;
+} {
+  return {
+    record: (request, answer) => session.record(request.prompt, answer),
+  };
+}

@@ -17,7 +17,7 @@ import type { ShellPort } from "../../core/src/ports/shell.ts";
 import type { StoragePort } from "../../core/src/ports/storage.ts";
 import type { SecretsPort } from "../../core/src/ports/secrets.ts";
 import type { TimePort } from "../../core/src/ports/time.ts";
-import { createSession, type Session } from "../../core/src/chat/session.ts";
+import { createSession, persistenceFor, type Session } from "../../core/src/chat/session.ts";
 import {
   createSettingsStore,
   facadeFor,
@@ -28,13 +28,23 @@ import {
 import { createRunController, type RunController, type RunView } from "../../core/src/run/controller.ts";
 import { attachBackGesture, createRouter, type Router } from "../../ui/src/router.ts";
 import { selectEngine, type EngineChoice } from "./engines.ts";
+import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 
 export interface AppDeps {
   readonly storage: StoragePort;
   readonly secrets: SecretsPort;
   readonly time: TimePort;
   readonly shell: ShellPort;
-  readonly engines: readonly EngineChoice[];
+  /**
+   * Built FROM the session, not before it.
+   *
+   * A pre-built list was the bug: the session existed, the engine's
+   * `persistence` port existed, and nothing connected them -- so `record()`
+   * never ran in a real turn and no conversation was ever saved. Taking a
+   * factory makes that impossible to express: there is no way to obtain the
+   * engine list without being handed the thing engines write through.
+   */
+  readonly engines: (persistence: RunPersistence) => readonly EngineChoice[];
   readonly settingDefs: readonly SettingDef[];
   /** Which engine to start with, normally read from settings. */
   readonly engineId: string;
@@ -64,15 +74,6 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   //    so anything built before this would be built with defaults and rebuilt.
   const settingsStore: SettingsStore = createSettingsStore(deps.settingDefs, deps.storage, deps.secrets);
   await settingsStore.load();
-
-  // 2. The engine, verified. A protocol mismatch stops the boot HERE, with a
-  //    name, rather than mid-answer.
-  const selection = await selectEngine(deps.engineId, deps.engines);
-  if (!selection.ok) {
-    return { ok: false, reason: selection.reason, detail: selection.detail };
-  }
-  const engine = selection.engine;
-
   // 3. Everything above the seam. None of these can name a concrete adapter.
   // The session owns the join between the assistant-only TurnState and the
   // two-sided StoredChat, and it is what engines call to record a turn -- so
@@ -83,6 +84,21 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
     now: deps.now,
     newChatId: deps.newChatId,
   });
+
+
+  // 2. The engine, verified. A protocol mismatch stops the boot HERE, with a
+  //    name, rather than mid-answer.
+  //
+  //    NOTE the ordering: the session is built above, because the in-process
+  //    engine writes THROUGH it. `main.ts` builds the engine list from
+  //    `enginesFor({ ..., persistence: session })`, so a turn recorded by the
+  //    engine and a chat read by the UI are the same store.
+  const selection = await selectEngine(deps.engineId, deps.engines(persistenceFor(session)));
+  if (!selection.ok) {
+    return { ok: false, reason: selection.reason, detail: selection.detail };
+  }
+  const engine = selection.engine;
+
   const controller = createRunController({
     engine,
     time: deps.time,

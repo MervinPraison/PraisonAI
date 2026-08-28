@@ -53,11 +53,33 @@ export interface WebShell extends ShellPort {
   pressBack(): boolean;
 }
 
+/** The keyboard's height right now, from the only browser API that reports one.
+ *  Clamped at 0: overscroll can make the gap briefly negative, and a negative
+ *  height would push the composer off the bottom of the screen.
+ *
+ *  Pinch-zoom ALSO shrinks the visual viewport below `innerHeight`, so the same
+ *  subtraction would report a phantom keyboard the moment the user zooms -- most
+ *  visibly at construction, where a page opened already zoomed would seed a
+ *  height and push the composer up on the first frame. A software keyboard never
+ *  changes `scale`, so a `scale` above 1 is zoom, not a keyboard, and the gap is
+ *  not the keyboard's. */
+export function readKeyboardHeight(view: Window): number {
+  const viewport = view.visualViewport;
+  if (viewport === null || viewport === undefined) return 0;
+  if (viewport.scale > 1) return 0;
+  return Math.max(0, view.innerHeight - viewport.height - viewport.offsetTop);
+}
+
 export function createWebShell(view: Window = window): WebShell {
   const root = view.document.documentElement;
 
   let insets = readInsets(root, view);
-  let keyboardHeightPx = 0;
+  // SEEDED, not just declared. The property was added so a component mounting
+  // while the keyboard is already up -- a warm resume, a hardware or floating
+  // keyboard -- lays out correctly on its FIRST frame. Starting at 0 and
+  // waiting for an event reproduces exactly the bug it was added to fix: one
+  // frame at the wrong height, then a jump.
+  let keyboardHeightPx = readKeyboardHeight(view);
 
   const insetSubs = new Set<(i: SafeAreaInsets) => void>();
   const keyboardSubs = new Set<(px: number) => void>();
@@ -84,10 +106,11 @@ export function createWebShell(view: Window = window): WebShell {
   const viewport = view.visualViewport;
   if (viewport !== null && viewport !== undefined) {
     const publishKeyboard = () => {
-      // The keyboard is the gap between the layout viewport and the visual
-      // one. Clamped at 0: overscroll can make this briefly negative, and a
-      // negative height would push the composer off the bottom of the screen.
-      const height = Math.max(0, view.innerHeight - viewport.height - viewport.offsetTop);
+      // The keyboard is the gap between the layout viewport and the visual one,
+      // read through the SAME function the snapshot is seeded from -- so the
+      // clamp at 0 and the pinch-zoom guard live in one place and cannot drift
+      // between the first frame and every frame after it.
+      const height = readKeyboardHeight(view);
       keyboardHeightPx = height;
       for (const cb of keyboardSubs) cb(height);
     };

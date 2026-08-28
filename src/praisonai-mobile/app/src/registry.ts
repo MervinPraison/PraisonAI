@@ -17,6 +17,7 @@ import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.t
 import { clampNum } from "../../core/src/settings/store.ts";
 import { createRemoteHttpEngine } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
+import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 
 export const ENGINE_REMOTE_HTTP = "remote-http";
 export const ENGINE_PRAISONAI_TS = "praisonai-ts";
@@ -101,7 +102,21 @@ export interface RegistryDeps {
    * means the app builds and runs today with the remote engine, and gains the
    * in-process one by passing a factory rather than by a refactor.
    */
-  readonly createInProcess?: () => AgentEnginePort | Promise<AgentEnginePort>;
+  readonly createInProcess?: (persistence: RunPersistence) => AgentEnginePort | Promise<AgentEnginePort>;
+  /**
+   * Where a completed turn is written.
+   *
+   * Passed to the in-process engine, which is what makes `end.userIndex` real:
+   * the engine records the turn and reports the indices it actually wrote.
+   * Without this the session existed, the engine's `persistence` port existed,
+   * and NOTHING connected them -- so `record()` never ran in a real turn and no
+   * conversation was ever saved.
+   *
+   * The remote engine deliberately does not take it: the server it talks to
+   * persists, and it is the only thing that can report indices for its own
+   * store. Two engines, two owners of the write, one honest `userIndex`.
+   */
+  readonly persistence: RunPersistence;
 }
 
 function stringSetting(settings: SettingsFacade, key: string, fallback: string): string {
@@ -131,7 +146,8 @@ export function enginesFor(deps: RegistryDeps): readonly EngineChoice[] {
   ];
 
   if (deps.createInProcess !== undefined) {
-    choices.push({ id: ENGINE_PRAISONAI_TS, create: deps.createInProcess });
+    const build = deps.createInProcess;
+    choices.push({ id: ENGINE_PRAISONAI_TS, create: () => build(deps.persistence) });
   }
   return choices;
 }

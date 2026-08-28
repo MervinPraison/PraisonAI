@@ -152,7 +152,9 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     secrets: platform.secrets,
     time: platform.time,
     shell: platform.shell,
-    engines: enginesFor({ settings: facadeStub(), http: platform.http }),
+    // The factory receives the session boot just built, so the engine that
+    // records a turn and the repository the UI reads are the same store.
+    engines: (persistence) => enginesFor({ settings: facadeStub(), http: platform.http, persistence }),
     settingDefs: SETTING_DEFS,
     engineId: "remote-http",
     onPublish: publish,

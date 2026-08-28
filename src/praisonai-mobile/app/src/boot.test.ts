@@ -39,7 +39,7 @@ function deps(over: Partial<AppDeps> = {}): AppDeps {
     secrets: createFakeSecrets(),
     time: createFakeTime(),
     shell: createFakeShell(),
-    engines: [{ id: "scripted", create: () => engine }],
+    engines: () => [{ id: "scripted", create: () => engine }],
     settingDefs: DEFS,
     engineId: "scripted",
     onPublish: () => {},
@@ -75,7 +75,7 @@ test("an engine too old to hold to the contract stops the boot", async () => {
   // halfway through the first answer leaves text on screen and no honest way
   // to explain it.
   const engine = engineWith({ id: "scripted", protocolVersion: MIN_ENGINE_PROTOCOL - 1 });
-  const result = await createApp(deps({ engines: [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
 
   assert.equal(result.ok, false);
   if (result.ok) return;
@@ -88,7 +88,7 @@ test("an engine that cannot state its protocol is refused, not assumed current",
   // what it speaks is not one that can be held to a contract.
   const engine = engineWith({ id: "scripted" });
   const broken = { ...engine, protocolVersion: undefined as unknown as number };
-  const result = await createApp(deps({ engines: [{ id: "scripted", create: () => broken }] }));
+  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => broken }] }));
   assert.equal(result.ok, false);
 });
 
@@ -98,7 +98,7 @@ test("a NEWER engine is accepted, because unknown events degrade rather than bre
   // decode.ts drops an unrecognised event and keeps the answer rendering, so a
   // v3 client against a v4 engine loses an affordance, not the conversation.
   const engine = engineWith({ id: "scripted", protocolVersion: PROTOCOL_VERSION + 1 });
-  const result = await createApp(deps({ engines: [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, true);
   if (result.ok) await result.app.dispose();
 });
@@ -114,7 +114,7 @@ test("an engine rejected for its protocol is still disposed", async () => {
     protocolVersion: MIN_ENGINE_PROTOCOL - 1,
     dispose: async () => void (disposed = true),
   };
-  await createApp(deps({ engines: [{ id: "scripted", create: () => engine }] }));
+  await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
   assert.equal(disposed, true);
 });
 
@@ -123,7 +123,7 @@ test("a factory whose engine reports a different id is refused", async () => {
   // another writes transcripts attributing themselves to an engine the user
   // never selected.
   const engine = engineWith({ id: "something-else" });
-  const result = await createApp(deps({ engines: [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.detail, /something-else/);
@@ -139,7 +139,7 @@ test("settings are loaded before the engine is built", async () => {
   const engine = engineWith({ id: "scripted" });
   const result = await createApp(deps({
     storage,
-    engines: [{ id: "scripted", create: () => { order.push("engine"); return engine; } }],
+    engines: () => [{ id: "scripted", create: () => { order.push("engine"); return engine; } }],
   }));
 
   assert.equal(result.ok, true);
@@ -159,7 +159,7 @@ test("backgrounding stops the run", async () => {
     cancel: async () => { stopped = true; return true; },
   };
 
-  const result = await createApp(deps({ shell, engines: [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ shell, engines: () => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
@@ -230,4 +230,48 @@ test("selectEngine accepts a matching engine", async () => {
   const outcome = await selectEngine("a", [{ id: "a", create: () => engineWith({ id: "a" }) }]);
   assert.equal(outcome.ok, true);
   if (outcome.ok) await outcome.engine.dispose();
+});
+
+// ---- the wire ---------------------------------------------------------------
+
+test("the engine writes through the SAME session the app hands out", async () => {
+  // The gap this closes: createSession was called, RunPersistence.record was
+  // called, and nothing connected them -- so record() never ran in a real turn
+  // and no conversation was ever saved. Both halves looked done from either end.
+  const storage = createFakeStorage();
+  let handed: unknown = null;
+
+  const result = await createApp(deps({
+    storage,
+    engines: (persistence) => {
+      handed = persistence;
+      return [{ id: "scripted", create: () => engineWith({ id: "scripted" }) }];
+    },
+  }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.notEqual(handed, null, "the engine factory must be handed a persistence");
+
+  // Recording through what the engine received must land in what the UI reads.
+  const indices = await (handed as { record: (r: { prompt: string }, a: string) => Promise<unknown> })
+    .record({ prompt: "what is 2+2?" }, "4");
+  assert.notEqual(indices, null);
+
+  const chats = await result.app.session.list();
+  assert.equal(chats.length, 1, "the turn must be visible to the session the app exposes");
+  await result.app.dispose();
+});
+
+test("the engine list cannot be built before the session exists", () => {
+  // Enforced by the type, not by a comment: `engines` is a factory taking the
+  // persistence, so there is no way to obtain the list without being handed
+  // the thing engines write through. A pre-built array was the original bug.
+  const built: string[] = [];
+  const factory = (p: unknown) => {
+    built.push(p === null || p === undefined ? "no-persistence" : "has-persistence");
+    return [];
+  };
+  factory({ record: async () => null });
+  assert.deepEqual(built, ["has-persistence"]);
 });

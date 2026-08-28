@@ -142,7 +142,7 @@ audit trail: after the turn ends the transcript can never say "you allowed
 future author reintroduces index-pairing, which is the bug the whole
 `approvalId` design exists to prevent.
 
-### 4. There is no user-message side, and no stable identity for a live turn — MECHANISM LANDED, NOT WIRED
+### ~~4. There is no user-message side, and no stable identity for a live turn~~ — CLOSED
 
 `TurnState` is assistant-only; `StoredChat.messages` has a different shape
 (`role`/`content`/`at`). `end.userIndex` is the only link and it is `null` until
@@ -160,7 +160,7 @@ gap is about is still not stable end-to-end. Closing this needs the composition
 root to pass `session` as the praisonai-ts engine's persistence, and a persist
 step for `remote-http`.
 
-### 5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback — PROPERTY ADDED, SNAPSHOT NOT SEEDED
+### ~~5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback~~ — CLOSED
 
 First paint therefore has to assume height 0. Correct on a cold launch, wrong on
 a warm resume with a hardware or floating keyboard already up: one wrong frame,
@@ -253,3 +253,40 @@ Gaps **2**, **3**, **4**, **5** and **7** above. None blocks shipping:
 Also open, and larger than any of them: **route→view dispatch** (the view models
 exist and nothing mounts them) and the **Tauri Rust crate**. Neither is a gap in
 the sense this file records — they are unbuilt work, not defects.
+
+
+## Gaps 4 and 5, actually closed this time
+
+A reviewer amended both of these back to open after I marked them closed, and
+was right to. The corrections are worth keeping, because both are the same
+mistake: **a mechanism existing is not the same as a mechanism working.**
+
+- **Gap 4 was "MECHANISM LANDED, NOT WIRED".** `createSession` was called and
+  `RunPersistence.record` was called, and nothing connected them -- the two
+  signatures did not even line up (`record(prompt, answer)` against
+  `record(request, answer)`), which is why nobody had noticed. So no
+  conversation was ever written, and the gap read as closed from either end.
+  `persistenceFor()` is now the named adapter where the two vocabularies meet,
+  and `AppDeps.engines` is a FACTORY taking the persistence -- so there is no
+  longer a way to obtain the engine list without being handed the thing engines
+  write through. Enforced by the type, not by a comment.
+
+  SCOPE, stated so it is not read later as an oversight: only the in-process
+  `praisonai-ts` engine writes through this session. `remote-http` deliberately
+  does not, because the desktop server it talks to is the owner of that write
+  and the only thing that can report authoritative indices for its own store
+  (registry.ts). A reviewer flagged that a turn answered by the default remote
+  engine therefore leaves the *local* mobile session empty; that is true and
+  intended -- local mirroring of a server-owned transcript is a separate feature
+  (it needs a read-back from the server on connect), not part of closing this
+  wiring gap. What this gap was about -- the in-process engine's turn never
+  reaching disk -- is now closed and asserted end to end.
+
+- **Gap 5 was "PROPERTY ADDED, SNAPSHOT NOT SEEDED".** `keyboardHeightPx` was
+  declared `= 0` and only ever updated by an event, so a component mounting
+  while the keyboard was already up laid out at 0 for one frame and then
+  jumped -- exactly the bug the synchronous property was added to prevent. It
+  is seeded from `visualViewport` at construction now.
+
+Both are verified by a positive control: reverting either makes a named test
+fail.

@@ -880,3 +880,44 @@ test("the shared names are the env() spellings a stylesheet can mirror", () => {
     "--safe-area-inset-left",
   ]);
 });
+
+test("the web shell reports a keyboard that is ALREADY up at construction", async () => {
+  // The case the synchronous property exists for, and the one it did not
+  // actually cover: it was declared `= 0` and only ever updated by an event.
+  // A component mounting during a warm resume, or with a hardware keyboard
+  // already present, laid out at 0 for one frame and then jumped -- which is
+  // precisely the bug the snapshot was added to prevent.
+  const fake = createFakeWindow();
+  fake.setKeyboardHeight(336);           // up BEFORE the shell is constructed
+  assert.equal(createWebShell(fake.window).keyboardHeightPx, 336);
+});
+
+test("the web shell reports 0 when no keyboard is up", async () => {
+  // The pair: seeding from a wrong source, or always reporting a height, would
+  // hold the composer permanently off the bottom of the screen.
+  const fake = createFakeWindow();
+  assert.equal(createWebShell(fake.window).keyboardHeightPx, 0);
+});
+
+test("a page opened pinch-zoomed is not mistaken for a keyboard at construction", async () => {
+  // Pinch-zoom shrinks the visual viewport exactly as a keyboard does, so the
+  // bare `innerHeight - viewport.height` seed would report a phantom keyboard
+  // on the first frame and push the composer up. `scale > 1` is what separates
+  // zoom from a keyboard. Reverting the guard makes this fail with a positive
+  // height.
+  const fake = createFakeWindow();
+  fake.setZoom(2);                       // zoomed BEFORE the shell is constructed
+  assert.equal(createWebShell(fake.window).keyboardHeightPx, 0);
+});
+
+test("zooming after construction does not report a phantom keyboard", async () => {
+  // The live path reads through the same function, so the guard holds for every
+  // frame and not just the first one.
+  const fake = createFakeWindow();
+  const shell = createWebShell(fake.window);
+  const seen: number[] = [];
+  shell.onKeyboardHeightChanged((px) => void seen.push(px));
+  fake.setZoom(2);
+  assert.equal(shell.keyboardHeightPx, 0);
+  assert.deepEqual(seen, [0]);
+});
