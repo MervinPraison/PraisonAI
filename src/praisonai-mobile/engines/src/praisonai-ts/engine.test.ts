@@ -388,3 +388,54 @@ test("with no finish event, the streamed deltas are what gets persisted", async 
   );
   assert.deepEqual(p.writes.map((w) => w.answer), ["one two"]);
 });
+
+test("a run started with an ALREADY-aborted signal produces no answer", async () => {
+  // `if (signal.aborted) controller.abort()` -> `if (false)` survived. The
+  // `else` branch's `addEventListener("abort")` never fires for a signal that
+  // aborted BEFORE the listener was attached, so the run streams to completion
+  // and persists an answer nobody is waiting for.
+  //
+  // Reachable through dispose-then-new-run, and through Stop followed
+  // immediately by Send: the controller hands the engine a signal that is
+  // already down.
+  const p = capturing();
+  const engine = build(
+    fakeAgent([
+      { type: "text", delta: "this should never be streamed" },
+      { type: "finish", text: "nor persisted" },
+    ]),
+    p.port,
+  );
+
+  const controller = new AbortController();
+  controller.abort(); // down BEFORE the run starts
+
+  const events = [];
+  for await (const event of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    controller.signal,
+  )) {
+    events.push(event);
+  }
+
+  assert.equal(
+    events.some((e) => e.type === "delta"),
+    false,
+    `an already-aborted run streamed: ${events.map((e) => e.type).join(", ")}`,
+  );
+  assert.deepEqual(p.writes, [], "and it must not have persisted an answer");
+});
+
+test("a run with a live signal still streams, so the abort test is not vacuous", async () => {
+  const p = capturing();
+  const engine = build(fakeAgent([{ type: "text", delta: "kept" }, { type: "finish", text: "kept" }]), p.port);
+  const events = [];
+  for await (const event of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    events.push(event);
+  }
+  assert.ok(events.some((e) => e.type === "delta"));
+  assert.deepEqual(p.writes.map((w) => w.answer), ["kept"]);
+});

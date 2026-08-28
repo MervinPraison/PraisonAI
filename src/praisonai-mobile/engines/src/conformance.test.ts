@@ -208,6 +208,7 @@ function runFixture(mode: string): { status: number | null; output: string } {
 /** Each break mode, and the contract case that must go red because of it. */
 const BREAKS: readonly { readonly mode: string; readonly expects: RegExp }[] = [
   { mode: "no_start", expects: /a run emits start first and exactly one terminal event last/ },
+  { mode: "start_only", expects: /a run emits start first and exactly one terminal event last/ },
   { mode: "tool_failure_as_ok", expects: /a failed tool is reported failed and never inferred from its output/ },
   { mode: "empty_is_fine", expects: /an empty stream is an error, not an empty answer/ },
   { mode: "decide_always_true", expects: /deciding an unknown approval returns false rather than reporting success/ },

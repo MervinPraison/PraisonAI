@@ -23,7 +23,13 @@ import type { RunEvent } from "../../protocol/src/events.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 
 /** Each mode breaks exactly one rule, so exactly one case should go red. */
-export type BreakMode = "none" | "no_start" | "tool_failure_as_ok" | "empty_is_fine" | "decide_always_true";
+export type BreakMode =
+  | "none"
+  | "no_start"
+  | "start_only"
+  | "tool_failure_as_ok"
+  | "empty_is_fine"
+  | "decide_always_true";
 
 const M = "m1";
 const mode = (process.argv[2] ?? "none") as BreakMode;
@@ -50,6 +56,12 @@ function scriptFor(scenario: ScenarioName): readonly RunEvent[] {
   if (scenario === "tool_failed") return toolFailed;
   if (scenario === "empty") return mode === "empty_is_fine" ? happy : [];
   // THE BREAK for no_start: the opening event is missing.
+  // THE BREAK for start_only: the run opens and then simply stops -- no
+  // terminal event at all. The contract asserted `events.length >= 2`, which
+  // this satisfies the moment there are two events of any kind, and separately
+  // asserted exactly one terminal; weakening the length check to `>= 1` let a
+  // start-only run through, which is a turn that never ends.
+  if (mode === "start_only") return happy.slice(0, 1);
   return mode === "no_start" ? happy.slice(1) : happy;
 }
 
