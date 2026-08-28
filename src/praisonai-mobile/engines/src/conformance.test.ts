@@ -188,11 +188,20 @@ function childEnv(): NodeJS.ProcessEnv {
 
 function runFixture(mode: string): { status: number | null; output: string } {
   const here = dirname(fileURLToPath(import.meta.url));
-  const run = spawnSync(process.execPath, [join(here, "contract-fixture.ts"), mode], {
-    encoding: "utf8",
-    timeout: 120_000,
-    env: childEnv(),
-  });
+  // The reporter is FORCED. Node's default differs by version -- 22 emits TAP
+  // when stdout is a pipe, 24 emits the spec reporter -- so a test that greps
+  // for "not ok" passes on one and fails on the other while the code under
+  // test is identical. Depending on an incidental output format is the same
+  // mistake as depending on an incidental default anywhere else.
+  const run = spawnSync(
+    process.execPath,
+    ["--test-reporter=tap", join(here, "contract-fixture.ts"), mode],
+    {
+      encoding: "utf8",
+      timeout: 120_000,
+      env: childEnv(),
+    },
+  );
   return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
 }
 
