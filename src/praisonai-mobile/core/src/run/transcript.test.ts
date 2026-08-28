@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { apply, finish, initialTurn, isPersisted, type TurnState } from "./transcript.ts";
+import { apply, finish, initialTurn, isPersisted, type TurnState, noteDropped } from "./transcript.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
 
 const M = "m1";
@@ -19,6 +19,8 @@ const delta = (text: string): RunEvent => ({ type: "delta", msgId: M, text });
 /** Feed a sequence from the initial state. */
 const run = (...events: readonly RunEvent[]): TurnState =>
   events.reduce<TurnState>(apply, initialTurn);
+
+const END_M1 = { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 } as const;
 
 test("an event arriving before start is recorded as dropped and never applied", () => {
   const state = apply(initialTurn, delta("hello"));
@@ -360,4 +362,51 @@ test("an approval survives an ERROR ending too, not just a cancellation", () => 
   ] as RunEvent[]) s = apply(s, e);
   assert.equal(s.approvals.length, 1);
   assert.equal(s.approvals[0]?.resolved, true);
+});
+
+// ---- drops belong to the turn they happened on ------------------------------
+
+test("a clean turn after a damaged one reports nothing dropped", () => {
+  // `start` carried `state.dropped` -- the previous turn's ENTIRE list. So one
+  // refusal on turn 1 made every later turn report itself damaged for the
+  // lifetime of the app, and the count could never mean "this stream is 40%
+  // unparseable". Harmless while nothing could produce a decode rejection;
+  // user-visible the moment the refusal channel was wired.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = noteDropped(s, "unknown_event", "thinking_budget");
+  s = apply(s, END_M1);
+  assert.equal(s.dropped.length, 1, "the turn that dropped it must show it");
+
+  s = apply(s, { type: "start", msgId: "m2", runId: "r2" });
+  s = apply(s, { type: "delta", msgId: "m2", text: "clean" });
+  assert.deepEqual(s.dropped, [], "a clean turn must not inherit the last one's failures");
+});
+
+test("a drop between turns still reaches the turn that follows it", () => {
+  // The pair, and the reason `start` carried anything at all: a frame refused
+  // while nothing was streaming has no turn of its own, and dropping it on the
+  // floor loses the evidence entirely.
+  let s = initialTurn;
+  s = noteDropped(s, "unparseable_json", "<html>502</html>");
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  assert.deepEqual(s.dropped, [{ reason: "unparseable_json", detail: "<html>502</html>" }]);
+});
+
+test("a between-turns drop is carried ONCE, not to every later turn", () => {
+  // Carrying without clearing would reintroduce the leak one turn later.
+  let s = initialTurn;
+  s = noteDropped(s, "unparseable_json", "pre");
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, END_M1);
+  s = apply(s, { type: "start", msgId: "m2", runId: "r2" });
+  assert.deepEqual(s.dropped, []);
+});
+
+test("a drop DURING a turn does not leak into the carry", () => {
+  // If it did, the turn would show it and so would the next one.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = noteDropped(s, "unknown_event", "mid");
+  assert.deepEqual(s.carry, [], "a drop on a live turn belongs to that turn alone");
 });

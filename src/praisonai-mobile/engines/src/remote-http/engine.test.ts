@@ -227,3 +227,49 @@ test("a clean stream reports no refusals", async () => {
   }
   assert.deepEqual(refused, []);
 });
+
+test("each kind of unreadable frame reports its own reason and keeps the payload", async () => {
+  // `safeParse` returned `{}` for anything it could not read, and the caller
+  // spread it and added `type` -- so an HTML error page from a proxy, a body
+  // truncated by a cut connection, an array, a bare string and `null` ALL came
+  // back as `missing_msg_id`, with the payload gone so `detail` could not
+  // recover it. Now that rejections are user-visible prose, that told the user
+  // "an event arrived with no message it belongs to" about a 502 page and
+  // pointed their support engineer at an engine bug that does not exist.
+  const cases: { body: string; reason: string; detailHas: string }[] = [
+    { body: "<html>502 Bad Gateway</html>", reason: "unparseable_json", detailHas: "502" },
+    { body: '{"msg_id":"m1","te', reason: "unparseable_json", detailHas: "msg_id" },
+    { body: "[1,2,3]", reason: "not_an_object", detailHas: "array" },
+    { body: '"just a string"', reason: "not_an_object", detailHas: "string" },
+    { body: "null", reason: "not_an_object", detailHas: "object" },
+  ];
+
+  for (const c of cases) {
+    const http = createFakeHttp();
+    const refused: { reason: string; detail: string }[] = [];
+    http.on("/chat", () =>
+      sseResponse(
+        `event: start\ndata: ${JSON.stringify({ msg_id: "m1", run_id: "r1" })}\n\n` +
+          `event: delta\ndata: ${c.body}\n\n` +
+          `event: end\ndata: ${JSON.stringify({ msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 })}\n\n`,
+      ),
+    );
+    const engine = createRemoteHttpEngine({
+      baseUrl: "http://engine.test",
+      http,
+      onIgnored: (reason, detail) => refused.push({ reason, detail }),
+    });
+    for await (const _ of engine.run(
+      { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+      new AbortController().signal,
+    )) {
+      // drain
+    }
+    assert.equal(refused[0]?.reason, c.reason, `wrong reason for ${c.body}`);
+    assert.match(
+      refused[0]?.detail ?? "",
+      new RegExp(c.detailHas),
+      `the detail must carry enough to identify the frame: ${c.body}`,
+    );
+  }
+});

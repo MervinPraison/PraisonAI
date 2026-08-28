@@ -18,9 +18,22 @@ export function createWebSecrets(): SecretsPort {
   const store = new Map<string, string>();
 
   return {
-    // Never true for this adapter. The composition root refuses to hand a
+    // Never true for this adapter, and the reason is above: a module-scoped
+    // Map is not a keychain.
+    //
+    // This comment used to claim "the composition root refuses to hand a
     // hardware-backed secret to an engine when the transport is not native,
-    // and this flag is half of that check.
+    // and this flag is half of that check". There is no such check. The flag
+    // is read in exactly one place -- the settings view's warning row
+    // (ui/src/settings/view-model.ts) -- and app/src/boot.ts has never
+    // consulted it. Describing a guard that does not exist is worse than
+    // having no guard, because it stops the next reader looking for one.
+    //
+    // Nor is the guard needed yet: no secret reaches an engine at all.
+    // `createRemoteHttpEngine` accepts a `token`, and registry.ts does not
+    // pass one, so the stored API key is currently read by nothing. When that
+    // is wired, THIS is the flag the refusal should consult -- and it should
+    // arrive with a test, not with a comment.
     isHardwareBacked: false,
 
     async has(ref) {

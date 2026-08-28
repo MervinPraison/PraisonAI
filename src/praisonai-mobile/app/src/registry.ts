@@ -40,7 +40,13 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     label: "Engine",
     help: "Which agent runtime answers. Remote talks to a PraisonAI engine over HTTP; in-process runs the agent loop on this device.",
     section: "Engine",
-    choices: [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS],
+    // Only what `enginesFor` can actually build in the shipping composition.
+    // ENGINE_PRAISONAI_TS was listed here and is only pushed when
+    // `createInProcess` is supplied, which main.ts does not do -- so selecting
+    // it persisted an id `selectEngine` then rejects, and the NEXT launch died
+    // at `renderFatal` with no way back except editing storage by hand. A
+    // picker must not offer a choice that bricks the app.
+    choices: [ENGINE_REMOTE_HTTP],
   },
   {
     key: "baseUrl",
@@ -71,6 +77,15 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     section: "Display",
   },
   {
+    // NOT YET CONSUMED, and unlike its neighbours this one contradicts what
+    // the app actually does: the dropped row is rendered unconditionally
+    // (ui/src/transcript/view-model.ts), so the `false` default describes a
+    // hiding that does not happen. Left declared rather than deleted because
+    // the row SHOULD be gated once a settings screen exists -- but the gate
+    // must default to showing, since a diagnostic nobody can find is the same
+    // as no diagnostic. `model`, `temperature` and `showReasoning` are also
+    // declared ahead of their consumers; the difference is that they make no
+    // claim about behaviour that already exists.
     key: "showDiagnostics",
     default: false,
     label: "Show dropped events",

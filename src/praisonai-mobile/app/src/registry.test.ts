@@ -94,11 +94,25 @@ test("every setting is grouped, so no row lands in an unnamed section", async ()
   }
 });
 
-test("the engine setting offers exactly the engines that exist", async () => {
+test("the engine setting offers exactly the engines the SHIPPING build can make", async () => {
   // A picker offering an id `selectEngine` will reject is a dead end the user
-  // cannot get out of without editing storage by hand.
+  // cannot get out of without editing storage by hand: the choice persists,
+  // the next launch cannot build it, and boot dies at renderFatal.
+  //
+  // This test used to assert the static array equalled itself -- it named the
+  // same two constants the def named, so the def and reality could not
+  // disagree in a way it could see. It now compares against what `enginesFor`
+  // actually offers in the composition main.ts uses (no `createInProcess`),
+  // which is the only comparison that can fail.
+  const { settings, http, persistence } = await build();
+  const buildable = enginesFor({ settings, http, persistence }).map((c) => c.id);
+
   const def = SETTING_DEFS.find((d) => d.key === "engineId");
-  assert.deepEqual(def?.choices, [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS]);
+  assert.deepEqual(
+    [...(def?.choices ?? [])].sort(),
+    [...buildable].sort(),
+    "the picker and the registry disagree about which engines exist",
+  );
 });
 
 test("the default engine is one that works with nothing configured", async () => {

@@ -344,6 +344,13 @@ It also used to omit **route→view dispatch**, which the body of this file list
 as open and which is still open; dropping it from the closing line implied it
 had landed.
 
+Four settings are declared and not yet consumed by anything: `model`,
+`temperature`, `showReasoning` and `showDiagnostics`. That is expected — they
+were written for the settings screen and the engine parameterisation that do
+not exist yet — but it is recorded here so nobody reads the registry and
+concludes they work. `showDiagnostics` is the one to watch: it claims to hide
+dropped events, which are currently rendered unconditionally.
+
 What actually remains for praisonai-mobile, all of it unbuilt rather than
 broken:
 

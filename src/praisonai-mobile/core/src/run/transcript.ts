@@ -96,6 +96,16 @@ export interface TurnState {
    * quiet success, which is the failure this whole package is built against.
    */
   readonly dropped: readonly Dropped[];
+  /**
+   * Drops recorded while NO turn was streaming, waiting for the next `start`.
+   *
+   * `start` used to carry `state.dropped` wholesale, which is the previous
+   * turn's ENTIRE list -- so one refusal on turn 1 made every later turn
+   * report itself damaged, for the lifetime of the app, and the count could
+   * never be used for "this stream is 40% unparseable". Only what arrived
+   * between the turns belongs to the next one.
+   */
+  readonly carry: readonly Dropped[];
 }
 
 export const initialTurn: TurnState = {
@@ -111,12 +121,19 @@ export const initialTurn: TurnState = {
   usage: null,
   outcome: null,
   dropped: [],
+  carry: [],
 };
 
-const drop = (state: TurnState, reason: Dropped["reason"], detail: string): TurnState => ({
-  ...state,
-  dropped: [...state.dropped, { reason, detail }],
-});
+const drop = (state: TurnState, reason: Dropped["reason"], detail: string): TurnState => {
+  const d: Dropped = { reason, detail };
+  return {
+    ...state,
+    dropped: [...state.dropped, d],
+    // A drop that arrives while nothing is streaming belongs to the turn that
+    // has not started yet, so `start` can carry exactly those and nothing else.
+    carry: state.phase === "streaming" ? state.carry : [...state.carry, d],
+  };
+};
 
 /**
  * Record a frame the DECODER refused, before it could ever become an event.
@@ -151,14 +168,21 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
       phase: "streaming",
       msgId: event.msgId,
       runId: event.runId,
-      // Carried across ONLY from a turn that had not yet ended -- a frame the
-      // decoder refused BEFORE this run's own `start` (recorded while `idle`)
-      // belongs to the turn now opening. A turn that already ENDED owns its
-      // drops; carrying them into the next `start` painted a previous turn's
-      // dropped-event warning onto a clean follow-up answer, which is the same
-      // "a defect looks like a success" failure inverted -- a success made to
-      // look like a defect.
-      dropped: state.phase === "ended" ? [] : state.dropped,
+      // Carried across deliberately: a turn that dropped events before it
+      // started still dropped them, and hiding that would lose the evidence.
+      // ONLY those, though: carrying `state.dropped` meant inheriting the
+      // whole previous turn and reporting every later turn as damaged.
+      //
+      // `state.carry` rather than `state.phase === "ended" ? [] : state.dropped`
+      // -- the two fixes for this landed independently and both stop the leak,
+      // but the phase test loses a frame refused BETWEEN turns: the previous
+      // turn has ENDED, so its list is discarded wholesale and the refusal that
+      // arrived after it goes with it. Measured on both: the clean-turn case
+      // passes either way; the between-turns case is 1 with `carry` and 0
+      // without. Losing evidence quietly is the failure this whole channel
+      // exists to undo.
+      dropped: state.carry,
+      carry: [],
     };
   }
 
