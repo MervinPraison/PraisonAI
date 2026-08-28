@@ -32,5 +32,13 @@
     "esbuild": ["tools"]
   },
   "testImports": ["testing"],
-  "governedRoots": ["protocol", "core", "engines", "adapters", "testing", "ui", "app"]
+  "governedRoots": ["protocol", "core", "engines", "adapters", "testing", "ui", "app"],
+
+  "_ungovernedComment": [
+    "Top-level directories deliberately outside the layer rule. Listing one is",
+    "a decision someone made; NOT listing one is caught, because the checker",
+    "compares this pair against what is actually on disk. Adding a directory",
+    "and forgetting both lists fails the build rather than passing cleanly."
+  ],
+  "ungovernedRoots": ["tools", "src-tauri", "docs"]
 }

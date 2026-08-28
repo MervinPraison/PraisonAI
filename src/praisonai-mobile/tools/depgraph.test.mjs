@@ -19,11 +19,12 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { importsOf, layerOf, targetOf, matchesAllowlist, violations } from "./depgraph.mjs";
+import { importsOf, layerOf, targetOf, matchesAllowlist, ungovernedRootsIn, violations } from "./depgraph.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -176,4 +177,99 @@ test("a test file may import the shared fakes but production code may not", () =
     inProd.some((v) => v.kind === "cross-layer" && v.to === "testing"),
     `production code importing a fake should be reported, got ${JSON.stringify(inProd)}`,
   );
+});
+
+// ---- the hole above the layer rule -----------------------------------------
+//
+// Every test above asks "is this import legal from where it sits?". None asks
+// whether the checker LOOKS at where a file sits. governedRoots was only a
+// list of directories to walk, so a new top-level directory was never visited
+// -- it could import across both seams and the run still printed "no
+// violations". boundaries.json asserted this was enforced from the day it was
+// written, which made it the same failure the fixtures above exist to prevent,
+// one level up: a clean pass over code nothing checked.
+
+function tree(spec) {
+  const root = mkdtempSync(join(tmpdir(), "boundaries-"));
+  for (const [path, body] of Object.entries(spec)) {
+    const full = join(root, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, body);
+  }
+  return root;
+}
+
+const CONFIG = { governedRoots: ["core"], ungovernedRoots: ["tools"] };
+
+test("a new top-level directory holding source is reported, not walked past", () => {
+  const root = tree({
+    "core/src/a.ts": "export const a = 1;",
+    "features/src/sneaky.ts": 'import { invoke } from "@tauri-apps/api/core";\nexport const x = invoke;',
+  });
+  try {
+    const found = ungovernedRootsIn(root, CONFIG);
+    assert.deepEqual(found, [{ name: "features", count: 1 }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a governed root is not reported as ungoverned", () => {
+  // The positive control. Without it a function returning every directory
+  // passes the test above and fails every real run.
+  const root = tree({ "core/src/a.ts": "export const a = 1;" });
+  try {
+    assert.deepEqual(ungovernedRootsIn(root, CONFIG), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a directory declared ungoverned is exempt, because someone decided it", () => {
+  const root = tree({ "tools/build.mjs": "export const b = 1;" });
+  try {
+    assert.deepEqual(ungovernedRootsIn(root, CONFIG), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a directory with no source files is not reported", () => {
+  // docs/ and fixture folders would otherwise fail every build, and a checker
+  // that cries wolf gets its list padded until it stops meaning anything.
+  const root = tree({ "assets/logo.png": "not source", "core/src/a.ts": "export const a = 1;" });
+  try {
+    assert.deepEqual(ungovernedRootsIn(root, CONFIG), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("source nested deep inside a new directory still counts", () => {
+  // The shallow version of this check passes on features/src/deep/x.ts.
+  const root = tree({ "features/a/b/c/x.ts": "export const x = 1;" });
+  try {
+    assert.deepEqual(ungovernedRootsIn(root, CONFIG), [{ name: "features", count: 1 }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("node_modules and dist are never reported", () => {
+  const root = tree({
+    "node_modules/pkg/index.mjs": "export const x = 1;",
+    "dist/out.ts": "export const x = 1;",
+    "core/src/a.ts": "export const a = 1;",
+  });
+  try {
+    assert.deepEqual(ungovernedRootsIn(root, CONFIG), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the real boundaries.json accounts for every directory actually on disk", () => {
+  // The one that will fail on somebody's future branch, which is the point.
+  const real = JSON.parse(readFileSync(join(here, "boundaries.json"), "utf8"));
+  assert.deepEqual(ungovernedRootsIn(join(here, ".."), real), []);
 });
