@@ -39,9 +39,9 @@ function deps(over: Partial<AppDeps> = {}): AppDeps {
     secrets: createFakeSecrets(),
     time: createFakeTime(),
     shell: createFakeShell(),
-    engines: () => [{ id: "scripted", create: () => engine }],
+    engines: (_p, _s) => [{ id: "scripted", create: () => engine }],
     settingDefs: DEFS,
-    engineId: "scripted",
+    fallbackEngineId: "scripted",
     onPublish: () => {},
     now: () => 1000,
     newChatId: () => "c1",
@@ -63,7 +63,16 @@ test("a good boot returns an app with every collaborator wired", async () => {
 
 test("an unknown engine id fails the boot with the available ones named", async () => {
   // The user lands on a settings screen that says which and why, not a crash.
-  const result = await createApp(deps({ engineId: "nope" }));
+  //
+  // Driven through SETTINGS rather than the fallback, because that is the
+  // realistic route: a stored engineId naming an engine a later build removed.
+  // The fallback is only consulted when settings name nothing.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "settings", id: "app" },
+    JSON.stringify({ engineId: "nope" }),
+  );
+  const result = await createApp(deps({ storage }));
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.reason, "unknown_engine");
@@ -75,7 +84,7 @@ test("an engine too old to hold to the contract stops the boot", async () => {
   // halfway through the first answer leaves text on screen and no honest way
   // to explain it.
   const engine = engineWith({ id: "scripted", protocolVersion: MIN_ENGINE_PROTOCOL - 1 });
-  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ engines: (_p, _s) => [{ id: "scripted", create: () => engine }] }));
 
   assert.equal(result.ok, false);
   if (result.ok) return;
@@ -88,7 +97,7 @@ test("an engine that cannot state its protocol is refused, not assumed current",
   // what it speaks is not one that can be held to a contract.
   const engine = engineWith({ id: "scripted" });
   const broken = { ...engine, protocolVersion: undefined as unknown as number };
-  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => broken }] }));
+  const result = await createApp(deps({ engines: (_p, _s) => [{ id: "scripted", create: () => broken }] }));
   assert.equal(result.ok, false);
 });
 
@@ -98,7 +107,7 @@ test("a NEWER engine is accepted, because unknown events degrade rather than bre
   // decode.ts drops an unrecognised event and keeps the answer rendering, so a
   // v3 client against a v4 engine loses an affordance, not the conversation.
   const engine = engineWith({ id: "scripted", protocolVersion: PROTOCOL_VERSION + 1 });
-  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ engines: (_p, _s) => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, true);
   if (result.ok) await result.app.dispose();
 });
@@ -114,7 +123,7 @@ test("an engine rejected for its protocol is still disposed", async () => {
     protocolVersion: MIN_ENGINE_PROTOCOL - 1,
     dispose: async () => void (disposed = true),
   };
-  await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
+  await createApp(deps({ engines: (_p, _s) => [{ id: "scripted", create: () => engine }] }));
   assert.equal(disposed, true);
 });
 
@@ -123,7 +132,7 @@ test("a factory whose engine reports a different id is refused", async () => {
   // another writes transcripts attributing themselves to an engine the user
   // never selected.
   const engine = engineWith({ id: "something-else" });
-  const result = await createApp(deps({ engines: () => [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ engines: (_p, _s) => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.detail, /something-else/);
@@ -139,7 +148,7 @@ test("settings are loaded before the engine is built", async () => {
   const engine = engineWith({ id: "scripted" });
   const result = await createApp(deps({
     storage,
-    engines: () => [{ id: "scripted", create: () => { order.push("engine"); return engine; } }],
+    engines: (_p, _s) => [{ id: "scripted", create: () => { order.push("engine"); return engine; } }],
   }));
 
   assert.equal(result.ok, true);
@@ -159,7 +168,7 @@ test("backgrounding stops the run", async () => {
     cancel: async () => { stopped = true; return true; },
   };
 
-  const result = await createApp(deps({ shell, engines: () => [{ id: "scripted", create: () => engine }] }));
+  const result = await createApp(deps({ shell, engines: (_p, _s) => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
@@ -274,4 +283,71 @@ test("the engine list cannot be built before the session exists", () => {
   };
   factory({ record: async () => null });
   assert.deepEqual(built, ["has-persistence"]);
+});
+
+// ---- settings must actually reach the engine --------------------------------
+
+test("the engine is built from the SAVED settings, not from defaults", async () => {
+  // The defect this closes: `engines` was built from a stub whose get()
+  // returned undefined, so every setting fell through to a hardcoded default
+  // while the settings screen displayed the user's saved value back to them.
+  // A base URL typed by the user was stored, shown, and never used.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "settings", id: "app" },
+    JSON.stringify({ baseUrl: "https://saved.example", engineId: "scripted" }),
+  );
+
+  let seen: string | undefined;
+  const result = await createApp(deps({
+    storage,
+    settingDefs: [{ key: "engineId", default: "scripted" }, { key: "baseUrl", default: "http://unused" }],
+    engines: (_persistence, settings) => {
+      seen = settings.get("baseUrl") as string | undefined;
+      return [{ id: "scripted", create: () => engineWith({ id: "scripted" }) }];
+    },
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(seen, "https://saved.example", "the engine factory got the stub's default, not the saved value");
+  if (result.ok) await result.app.dispose();
+});
+
+test("the engine the user CHOSE is the one selected", async () => {
+  // Same defect, the other half: engineId was a string literal at the call
+  // site, so a user switching engines in settings changed nothing.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "settings", id: "app" },
+    JSON.stringify({ engineId: "chosen" }),
+  );
+
+  const result = await createApp(deps({
+    storage,
+    settingDefs: [{ key: "engineId", default: "fallback" }],
+    fallbackEngineId: "fallback",
+    engines: () => [
+      { id: "fallback", create: () => engineWith({ id: "fallback" }) },
+      { id: "chosen", create: () => engineWith({ id: "chosen" }) },
+    ],
+  }));
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.app.engine.id, "chosen");
+  await result.app.dispose();
+});
+
+test("the fallback is used only when settings name no engine", async () => {
+  // The pair: always using the fallback would satisfy nothing above, and
+  // always using settings would break a first launch, where there are none.
+  const result = await createApp(deps({
+    settingDefs: [{ key: "engineId", default: "" }],
+    fallbackEngineId: "scripted",
+    engines: () => [{ id: "scripted", create: () => engineWith({ id: "scripted" }) }],
+  }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.app.engine.id, "scripted");
+  await result.app.dispose();
 });

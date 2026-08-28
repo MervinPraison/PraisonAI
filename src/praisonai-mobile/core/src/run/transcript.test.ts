@@ -344,3 +344,46 @@ test("an approval survives an ERROR ending too, not just a cancellation", () => 
   assert.equal(s.approvals.length, 1);
   assert.equal(s.approvals[0]?.resolved, true);
 });
+
+// ---- a failure before the turn began ---------------------------------------
+
+test("an auth error before start keeps its kind, so the UI can offer settings", () => {
+  // The worst outcome in the package, before this: the remote engine
+  // synthesises error{kind:"auth"} for a 401 precisely so the UI can link to
+  // settings -- and the reducer dropped it as `before_start`, leaving no
+  // outcome and no text, so finish() substituted error{kind:"empty"}. That
+  // maps to Retry. A wrong API key produced a Retry button that would fail
+  // identically forever, and never the one link that could fix it.
+  const s = apply(initialTurn, {
+    type: "error", msgId: M, kind: "auth", message: "401 unauthorized",
+  } as RunEvent);
+
+  assert.equal(s.phase, "ended");
+  assert.equal(s.outcome?.type, "error");
+  assert.equal(s.outcome?.type === "error" && s.outcome.kind, "auth", "the kind must survive");
+  assert.deepEqual(s.dropped, [], "and it must not be recorded as dropped");
+});
+
+test("finish() does not overwrite a pre-start error with 'empty'", () => {
+  // The second half of the same bug: even settled, an empty-text turn used to
+  // be rewritten to error{empty} by finish().
+  const s = finish(apply(initialTurn, {
+    type: "error", msgId: M, kind: "rate_limit", message: "429",
+  } as RunEvent));
+  assert.equal(s.outcome?.type === "error" && s.outcome.kind, "rate_limit");
+});
+
+test("a cancellation before start is still a cancellation", () => {
+  // Not an error. A user who pressed Stop before the first token should not be
+  // shown a failure they did not cause.
+  const s = apply(initialTurn, { type: "cancelled", msgId: M, runId: "r1" } as RunEvent);
+  assert.equal(s.outcome?.type, "cancelled");
+});
+
+test("a NON-terminal event before start is still dropped", () => {
+  // The pair. Accepting everything early would let a stray delta from a
+  // previous run open a turn that never started.
+  const s = apply(initialTurn, { type: "delta", msgId: M, text: "stray" } as RunEvent);
+  assert.equal(s.phase, "idle");
+  assert.equal(s.dropped[0]?.reason, "before_start");
+});

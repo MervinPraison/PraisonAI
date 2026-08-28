@@ -142,8 +142,31 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
   }
 
   if (state.phase === "idle") {
-    // engine/server.py emits `start` first, always. Anything before it is
-    // either a bug or a frame from a previous run arriving late.
+    // A TERMINAL event before `start` is the engine failing before it could
+    // begin, and it carries the only diagnosis the user will ever get. It is
+    // settled rather than dropped.
+    //
+    // Dropping it produced the worst outcome in the package: the remote engine
+    // synthesises `error{kind:"auth"}` for a 401 -- exactly so the UI can offer
+    // the settings screen -- and the reducer discarded it here, leaving no
+    // outcome and no text, so `finish()` substituted `error{kind:"empty"}`
+    // ("the engine produced no output"). `recoveryFor` maps that to Retry. So a
+    // wrong API key produced a Retry button that would fail identically
+    // forever, and never the one link that could fix it.
+    if (event.type === "error") {
+      return settle({ ...state, msgId: event.msgId }, {
+        type: "error",
+        kind: event.kind,
+        message: event.message,
+      });
+    }
+    if (event.type === "cancelled") {
+      return settle({ ...state, msgId: event.msgId, runId: event.runId }, { type: "cancelled" });
+    }
+
+    // Anything else before `start` is a stray: engine/server.py emits `start`
+    // first, always, so a non-terminal event here is a bug or a frame from a
+    // previous run arriving late.
     return drop(state, "before_start", event.type);
   }
 

@@ -44,10 +44,21 @@ export interface AppDeps {
    * factory makes that impossible to express: there is no way to obtain the
    * engine list without being handed the thing engines write through.
    */
-  readonly engines: (persistence: RunPersistence) => readonly EngineChoice[];
+  readonly engines: (
+    persistence: RunPersistence,
+    settings: SettingsFacade,
+  ) => readonly EngineChoice[];
   readonly settingDefs: readonly SettingDef[];
   /** Which engine to start with, normally read from settings. */
-  readonly engineId: string;
+  /**
+   * The engine to use when settings do not name one -- a first launch, or a
+   * settings file that predates the key.
+   *
+   * NOT the engine to always use. It was exactly that, and `main.ts` passed a
+   * string literal, so the engine the user selected in settings was stored,
+   * displayed back to them, and ignored on every run.
+   */
+  readonly fallbackEngineId: string;
   readonly onPublish: (view: RunView) => void;
   /** Injected so boot is deterministic under test. */
   readonly now: () => number;
@@ -80,7 +91,7 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   // `end.userIndex` is produced by whatever actually did the write.
   const session = createSession({
     storage: deps.storage,
-    engineId: deps.engineId,
+    engineId: deps.fallbackEngineId,
     now: deps.now,
     newChatId: deps.newChatId,
   });
@@ -93,7 +104,18 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   //    engine writes THROUGH it. `main.ts` builds the engine list from
   //    `enginesFor({ ..., persistence: session })`, so a turn recorded by the
   //    engine and a chat read by the UI are the same store.
-  const selection = await selectEngine(deps.engineId, deps.engines(persistenceFor(session)));
+  // The REAL facade, not a stub. The engine list is built from the settings
+  // the user actually saved -- the base URL, the credentials, the choice of
+  // engine. Building it from a stub meant every one of those was read from a
+  // hardcoded default while the settings screen displayed the user's value.
+  const settings = facadeFor(settingsStore, deps.secrets);
+
+  // And the selection comes from settings too, falling back only when they do
+  // not name one.
+  const chosen = settings.get("engineId");
+  const engineId = typeof chosen === "string" && chosen !== "" ? chosen : deps.fallbackEngineId;
+
+  const selection = await selectEngine(engineId, deps.engines(persistenceFor(session), settings));
   if (!selection.ok) {
     return { ok: false, reason: selection.reason, detail: selection.detail };
   }
@@ -129,7 +151,7 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
       engine,
       controller,
       session,
-      settings: facadeFor(settingsStore, deps.secrets),
+      settings,
       router,
       shell: deps.shell,
 

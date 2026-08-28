@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, OPENAI_KEY, SETTING_DEFS } from "./registry.ts";
+import { ENGINE_REMOTE_HTTP, enginesFor, OPENAI_KEY, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -154,9 +154,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     shell: platform.shell,
     // The factory receives the session boot just built, so the engine that
     // records a turn and the repository the UI reads are the same store.
-    engines: (persistence) => enginesFor({ settings: facadeStub(), http: platform.http, persistence }),
+    // The facade comes FROM boot, built on the loaded settings store. It used
+    // to be a stub whose get() returned undefined, so every setting fell
+    // through to a hardcoded default while the settings screen displayed the
+    // user's saved value back to them.
+    engines: (persistence, settings) => enginesFor({ settings, http: platform.http, persistence }),
     settingDefs: SETTING_DEFS,
-    engineId: "remote-http",
+    // Only when settings do not name one. Boot reads the user's choice.
+    fallbackEngineId: ENGINE_REMOTE_HTTP,
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),
     newChatId: deps.newChatId ?? (() => globalThis.crypto.randomUUID()),
@@ -245,20 +250,6 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   return app;
 }
 
-/** A settings facade before settings exist, used only to build the engine
- *  list at boot. Replaced by the real one immediately after. */
-function facadeStub() {
-  return {
-    get: () => undefined,
-    set: async () => false,
-    defs: () => SETTING_DEFS,
-    subscribe: () => () => {},
-    hasSecret: async () => false,
-    setSecret: async () => {},
-    clearSecret: async () => {},
-    secretsAreHardwareBacked: false,
-  };
-}
 
 // Auto-mount when loaded as a page, never when imported by a test.
 const el = globalThis.document?.getElementById("root");
