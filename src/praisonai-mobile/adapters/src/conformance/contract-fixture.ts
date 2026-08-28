@@ -26,8 +26,11 @@
  *   node adapters/src/conformance/contract-fixture.ts <mode>
  */
 import { describeSecretsContract } from "./secrets-contract.ts";
+import { describeShellContract, type ShellHarness } from "./shell-contract.ts";
 import { describeStorageContract } from "./storage-contract.ts";
 import { describeTimeContract } from "./time-contract.ts";
+import { createWebShell } from "../web/shell.ts";
+import { createFakeWindow } from "../web/fake-window.ts";
 import type { SecretsPort } from "../../../core/src/ports/secrets.ts";
 import type { StoragePort } from "../../../core/src/ports/storage.ts";
 import type { TimePort } from "../../../core/src/ports/time.ts";
@@ -138,6 +141,93 @@ function time(): TimePort {
   };
 }
 
+// ---- shell ------------------------------------------------------------------
+//
+// The largest of the four contracts -- 33 cases, including seven `openExternal`
+// refusals -- and it was the ONE this fixture did not register. A re-measure
+// proved the consequence: every assertion in it could be deleted, the whole
+// security section removed, and the entire contract replaced with
+// `assert.ok(shell)`, with the suite green each time.
+//
+// A `javascript:` URL reaching `openExternal` inside a webview is script
+// execution in the app's own origin with the user's session, from a URL that
+// routinely arrives from a model, a tool result, or pasted text. The RULE lives
+// in core/src/ports/shell.ts and both adapters call it; the contract proving
+// each adapter calls it is what was undefended.
+//
+// Built by wrapping a real web shell rather than hand-rolling a ShellPort, so
+// the fixture cannot drift from the interface it is meant to exercise.
+function shellHarness(): ShellHarness {
+  const window = createFakeWindow();
+  const real = createWebShell(window.window);
+
+  const shell = {
+    ...real,
+    get insets() { return real.insets; },
+    get keyboardHeightPx() { return real.keyboardHeightPx; },
+    onInsetsChanged: real.onInsetsChanged.bind(real),
+    onKeyboardHeightChanged: real.onKeyboardHeightChanged.bind(real),
+    onLifecycleChanged: real.onLifecycleChanged.bind(real),
+    haptic: real.haptic.bind(real),
+    share: real.share.bind(real),
+
+    async openExternal(url: string): Promise<void> {
+      // The defect: opening whatever it is handed. `javascript:`, `data:` and
+      // `file:` all reach the OS.
+      if (mode === "shell_opens_anything") {
+        window.window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      return real.openExternal(url);
+    },
+
+    onBackGesture(cb: () => boolean) {
+      // The defect: the FIRST handler registered answers, rather than the most
+      // recent. A screen pushed on top of another then never gets the back
+      // press -- the bystander bug the contract has a named case for.
+      if (mode === "shell_back_in_registration_order") {
+        backHandlers.push(cb);
+        return () => {
+          const at = backHandlers.indexOf(cb);
+          if (at !== -1) backHandlers.splice(at, 1);
+        };
+      }
+      return real.onBackGesture(cb);
+    },
+
+    pressBack(): boolean {
+      if (mode === "shell_back_in_registration_order") {
+        for (const handler of backHandlers) if (handler()) return true;
+        return false;
+      }
+      return real.pressBack();
+    },
+
+    listenerCount(): number {
+      // The defect: a leak that cannot be seen. An unsubscribed listener still
+      // counts, so "unsubscribing drops the live listener count" cannot fail.
+      if (mode === "shell_listener_count_stuck") return 0;
+      return real.listenerCount();
+    },
+  } as typeof real;
+
+  const backHandlers: (() => boolean)[] = [];
+
+  return {
+    shell,
+    pressBack: () => shell.pressBack(),
+    emitInsets: (insets) => window.setInsets(insets),
+    emitKeyboardHeight: (px) => window.setKeyboardHeight(px),
+    emitLifecycle: (phase) => {
+      if (phase === "background") window.setHidden(true);
+      else if (phase === "inactive") window.setFocused(false);
+      else window.setHidden(false);
+    },
+    listenerCount: () => shell.listenerCount(),
+  };
+}
+
 describeSecretsContract("fixture secrets", () => secrets());
 describeStorageContract("fixture storage", () => storage());
 describeTimeContract("fixture time", () => time(), advance, true);
+describeShellContract("fixture shell", shellHarness);

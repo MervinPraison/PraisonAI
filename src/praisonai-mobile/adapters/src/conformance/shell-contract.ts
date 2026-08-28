@@ -234,6 +234,38 @@ export function describeShellContract(
     assert.equal(pressBack(), false);
   });
 
+  test(`${name}: unsubscribing removes the RIGHT registration of a repeated handler`, async () => {
+    // The case above registers two DIFFERENT closures, so `indexOf` and
+    // `lastIndexOf` behave identically and the mutation between them survives.
+    // React StrictMode double-invokes effects, so the same function reference
+    // being registered twice is the ordinary case, not an exotic one.
+    //
+    // Registering A, B, A and then dropping the SECOND A must leave B on top
+    // and the FIRST A beneath it. Removing the first instead leaves the stack
+    // inverted: B is buried and the back press goes to the wrong screen.
+    const { shell, pressBack } = await make();
+    const order: string[] = [];
+    const routeHandler = (): boolean => {
+      order.push("route");
+      return false; // pass it on, so the whole stack is observable
+    };
+
+    shell.onBackGesture(routeHandler);
+    shell.onBackGesture(() => {
+      order.push("modal");
+      return false;
+    });
+    const dropSecond = shell.onBackGesture(routeHandler);
+    dropSecond();
+
+    pressBack();
+    assert.deepEqual(
+      order,
+      ["modal", "route"],
+      "unsubscribing removed the wrong registration, so the stack is inverted",
+    );
+  });
+
   test(`${name}: the most recently registered back handler gets first refusal`, async () => {
     // A modal opened over a route must consume the gesture. In registration
     // order the route pops first and the modal is left floating over the wrong
