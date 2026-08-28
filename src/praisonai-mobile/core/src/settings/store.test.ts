@@ -342,3 +342,22 @@ test("a REFUSED write does not mark the key as chosen", () => {
     assert.equal(store.isSet("temperature"), false);
   });
 });
+
+test("a subscriber that unsubscribes another during notify does not silence it", () => {
+  // `for (const cb of [...subscribers])` -> `for (const cb of subscribers)`
+  // survived: notify iterates the LIVE set, so removing an entry mid-iteration
+  // skips the next one. A settings screen tearing down one row while another
+  // is still mounted silently drops the second row's update.
+  const { store } = build();
+  const fired: string[] = [];
+  let stopB = (): void => {};
+  store.subscribe(() => {
+    fired.push("A");
+    stopB();
+  });
+  stopB = store.subscribe(() => void fired.push("B"));
+
+  return store.set("model", "gpt-4o").then(() => {
+    assert.deepEqual(fired, ["A", "B"], "B was skipped because the set was mutated while iterating");
+  });
+});

@@ -392,3 +392,70 @@ test("the SSE event name decides the type, not a field inside the payload", asyn
   assert.ok(delta, `the delta was lost: ${events.map((e) => e.type).join(", ")}`);
   assert.equal(delta.type === "delta" ? delta.text : null, "kept");
 });
+
+test("the request carries the RUN id and the CHAT id in their own fields", () => {
+  // `run_id: request.runId` -> `request.chatId` survived. `POST /cancel/{runId}`
+  // could then never match a live run, so Stop is permanently dead against the
+  // remote engine -- which keeps generating and keeps billing -- and the two
+  // ids are the same shape, so nothing about the payload looks wrong.
+  const http = createFakeHttp();
+  http.on("/chat", () => sseResponse(""));
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+  return (async () => {
+    for await (const _ of engine.run(
+      { prompt: "hi", chatId: "chat-42", runId: "run-7", tools: true, regenerateOf: null, attachments: [] },
+      new AbortController().signal,
+    )) {
+      // drain
+    }
+    const body = JSON.parse(String(http.sent.find((r) => r.url.includes("/chat"))?.body ?? "{}"));
+    assert.equal(body.run_id, "run-7", "the run id must be the run id");
+    assert.equal(body.chat_id, "chat-42", "and the chat id must be the chat id");
+  })();
+});
+
+test("the stream request advertises that it wants SSE", () => {
+  // Dropping `accept: "text/event-stream"` survived. A conforming proxy or
+  // engine is then free to answer with something else entirely, and the
+  // failure surfaces as an unparseable stream rather than as a bad request.
+  const http = createFakeHttp();
+  http.on("/chat", () => sseResponse(""));
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+  return (async () => {
+    for await (const _ of engine.run(
+      { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+      new AbortController().signal,
+    )) {
+      // drain
+    }
+    const sent = http.sent.find((r) => r.url.includes("/chat"));
+    assert.equal(sent?.headers["accept"], "text/event-stream");
+  })();
+});
+
+test("a base URL with several trailing slashes still builds one clean path", () => {
+  // `/\/+$/` -> `/\/$/` survived: `http://host//` becomes `http://host//chat`,
+  // which 404s. A user pasting an address with a stray slash gets an engine
+  // that cannot be reached, and nothing says why.
+  for (const base of ["http://engine.test", "http://engine.test/", "http://engine.test//", "http://engine.test///"]) {
+    const http = createFakeHttp();
+    http.on("/chat", () => sseResponse(""));
+    const engine = createRemoteHttpEngine({ baseUrl: base, http });
+    void engine;
+    // The URL is built when the run starts; assert on what was sent.
+  }
+  const http = createFakeHttp();
+  http.on("/chat", () => sseResponse(""));
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test///", http });
+  return (async () => {
+    for await (const _ of engine.run(
+      { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+      new AbortController().signal,
+    )) {
+      // drain
+    }
+    assert.equal(http.sent[0]?.url, "http://engine.test/chat");
+  })();
+});

@@ -458,3 +458,46 @@ test("text after a tool call keeps the tool card between the two paragraphs", ()
   );
   assert.equal(s.text, "Let me check. There is one file.");
 });
+
+test("a tool_result keeps the arguments its tool_call recorded", () => {
+  // `args: existing === -1 ? {} : (state.tools[existing]?.args ?? {})` -> `{}`
+  // survived: the result WIPES the arguments the call recorded. The transcript
+  // can then no longer say what a completed tool actually ran -- and the args
+  // are what an approval row shows the user before they allow it.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, {
+    type: "tool_call", msgId: "m1", callId: "c1", name: "sh", args: { command: "rm -rf /tmp/x" },
+  });
+  assert.deepEqual(s.tools[0]?.args, { command: "rm -rf /tmp/x" }, "recorded while running");
+
+  s = apply(s, {
+    type: "tool_result", msgId: "m1", callId: "c1", name: "sh", ok: true, output: "done", seconds: 0.1,
+  });
+  assert.deepEqual(
+    s.tools[0]?.args,
+    { command: "rm -rf /tmp/x" },
+    "a finished tool must still say what it ran",
+  );
+});
+
+test("a tool_result with no matching call records empty args rather than inventing them", () => {
+  // The pair: the `existing === -1` branch is the one that must yield {}.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, {
+    type: "tool_result", msgId: "m1", callId: "orphan", name: "sh", ok: true, output: "x", seconds: 0.1,
+  });
+  assert.deepEqual(s.tools[0]?.args, {});
+});
+
+test("reasoning accumulates across chunks", () => {
+  // `reasoning: state.reasoning + event.text` -> `event.text` survived: only
+  // the LAST chunk is ever shown, so a model's visible thinking is truncated
+  // to its final fragment.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, { type: "reasoning", msgId: "m1", text: "First I will " });
+  s = apply(s, { type: "reasoning", msgId: "m1", text: "read the file." });
+  assert.equal(s.reasoning, "First I will read the file.");
+});
