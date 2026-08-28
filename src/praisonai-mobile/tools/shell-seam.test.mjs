@@ -18,8 +18,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const pkg = join(here, "..");   // tools/ -> the package root
 
 const rust = readFileSync(join(pkg, "src-tauri/src/shell/mod.rs"), "utf8");

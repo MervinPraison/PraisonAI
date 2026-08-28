@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main webview must subscribe to the four shell events and answer the back gesture. Without this, Tauri rejects `plugin:event|listen` and the `back_gesture_result` command silently, and the shell contract stops working with no error anywhere.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "allow-back-gesture-result"
+  ]
+}
