@@ -438,24 +438,29 @@ test("the stream request advertises that it wants SSE", () => {
 test("a base URL with several trailing slashes still builds one clean path", () => {
   // `/\/+$/` -> `/\/$/` survived: `http://host//` becomes `http://host//chat`,
   // which 404s. A user pasting an address with a stray slash gets an engine
-  // that cannot be reached, and nothing says why.
-  for (const base of ["http://engine.test", "http://engine.test/", "http://engine.test//", "http://engine.test///"]) {
-    const http = createFakeHttp();
-    http.on("/chat", () => sseResponse(""));
-    const engine = createRemoteHttpEngine({ baseUrl: base, http });
-    void engine;
-    // The URL is built when the run starts; assert on what was sent.
-  }
-  const http = createFakeHttp();
-  http.on("/chat", () => sseResponse(""));
-  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test///", http });
+  // that cannot be reached, and nothing says why. `/\/$/` strips only ONE
+  // slash, so the two- and three-slash cases are exactly where it breaks.
   return (async () => {
-    for await (const _ of engine.run(
-      { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
-      new AbortController().signal,
-    )) {
-      // drain
+    for (const base of [
+      "http://engine.test",
+      "http://engine.test/",
+      "http://engine.test//",
+      "http://engine.test///",
+    ]) {
+      const http = createFakeHttp();
+      http.on("/chat", () => sseResponse(""));
+      const engine = createRemoteHttpEngine({ baseUrl: base, http });
+      for await (const _ of engine.run(
+        { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+        new AbortController().signal,
+      )) {
+        // drain
+      }
+      assert.equal(
+        http.sent[0]?.url,
+        "http://engine.test/chat",
+        `base ${JSON.stringify(base)} must collapse to one clean path`,
+      );
     }
-    assert.equal(http.sent[0]?.url, "http://engine.test/chat");
   })();
 });
