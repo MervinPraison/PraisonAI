@@ -48,6 +48,10 @@ export function createFakeTime(): FakeTime {
       for (const cb of [...intervals]) cb();
     },
     advance(ms) {
+      // Monotonic, like createFakeClock: nowMs is a monotonic TimePort, so a
+      // test that could rewind it would exercise a state the platform never
+      // produces and let a pacing test pass or fail for the wrong reason.
+      if (ms < 0) throw new Error("fake time cannot go backwards");
       offset += ms;
     },
     releaseFrames() {
