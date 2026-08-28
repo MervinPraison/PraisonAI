@@ -305,3 +305,86 @@ test("a run before dispose is unaffected", async () => {
   const engine = build(fakeAgent([{ type: "finish", text: "x" }]));
   assert.equal((await collect(engine)).at(-1)!.type, "end");
 });
+
+// ---- what is WRITTEN, not only what is streamed -----------------------------
+//
+// The fake persistence above records `req` and throws the answer away, so no
+// test in this file could see what actually reaches the repository. A mutation
+// sweep found the consequence: `answer = event.text` -> `+=` survived. The
+// screen is built from the streamed deltas and looks right; the PERSISTED
+// transcript contains the answer twice. Reopening the chat shows it doubled.
+
+/** A persistence that keeps the answer, which the one above does not. */
+function capturing() {
+  const writes: { prompt: string; answer: string }[] = [];
+  const port: RunPersistence = {
+    async record(req, answer) {
+      writes.push({ prompt: req.prompt, answer });
+      return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+  };
+  return { writes, port };
+}
+
+const runAll = async (engine: ReturnType<typeof build>): Promise<void> => {
+  for await (const _ of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    // drain
+  }
+};
+
+test("the finish text REPLACES the streamed accumulation when persisting", async () => {
+  // `finish` carries the full text and the engine trusts it over the
+  // accumulation, because upstream may normalise. Appending instead writes the
+  // answer twice to disk while the screen, built from the deltas, looks
+  // perfectly correct.
+  const p = capturing();
+  await runAll(
+    build(
+      fakeAgent([
+        { type: "text", delta: "Hello" },
+        { type: "text", delta: " world" },
+        { type: "finish", text: "Hello world" },
+      ]),
+      p.port,
+    ),
+  );
+  assert.deepEqual(p.writes.map((w) => w.answer), ["Hello world"]);
+});
+
+test("a normalising finish wins over what was streamed", async () => {
+  // The reason the assignment exists at all: upstream may return a tidied
+  // version. Persisting the concatenation would store text the model did not
+  // finally say.
+  const p = capturing();
+  await runAll(
+    build(
+      fakeAgent([
+        { type: "text", delta: "helo" },
+        { type: "finish", text: "hello" },
+      ]),
+      p.port,
+    ),
+  );
+  assert.deepEqual(p.writes.map((w) => w.answer), ["hello"]);
+});
+
+test("a turn that never streamed still persists the text it finished with", async () => {
+  // The other half of trusting `finish`: a non-streaming provider produces no
+  // deltas at all, and the accumulation would be empty.
+  const p = capturing();
+  await runAll(build(fakeAgent([{ type: "finish", text: "the whole answer" }]), p.port));
+  assert.deepEqual(p.writes.map((w) => w.answer), ["the whole answer"]);
+});
+
+test("with no finish event, the streamed deltas are what gets persisted", async () => {
+  // The pair. Trusting only `finish` would persist nothing for a provider
+  // that streams and then simply stops.
+  const p = capturing();
+  await runAll(
+    build(fakeAgent([{ type: "text", delta: "one " }, { type: "text", delta: "two" }]), p.port),
+  );
+  assert.deepEqual(p.writes.map((w) => w.answer), ["one two"]);
+});
