@@ -73,8 +73,8 @@ class TestVideoAgentInit:
         """Test initialization with llm parameter."""
         from praisonaiagents import VideoAgent
         
-        agent = VideoAgent(llm="gemini/veo-3.0-generate-preview")
-        assert agent.llm == "gemini/veo-3.0-generate-preview"
+        agent = VideoAgent(llm="gemini/veo-3.1-generate-preview")
+        assert agent.llm == "gemini/veo-3.1-generate-preview"
     
     def test_with_model_alias(self):
         """Test initialization with model= alias for llm=."""
@@ -336,14 +336,14 @@ class TestVideoAgentProviders:
         """Test Gemini Veo configuration."""
         from praisonaiagents import VideoAgent
         
-        agent = VideoAgent(llm="gemini/veo-3.0-generate-preview")
+        agent = VideoAgent(llm="gemini/veo-3.1-generate-preview")
         assert "veo" in agent.llm
     
     def test_vertex_ai_provider(self):
         """Test Vertex AI configuration."""
         from praisonaiagents import VideoAgent
         
-        agent = VideoAgent(llm="vertex_ai/veo-3.0-generate-preview")
+        agent = VideoAgent(llm="vertex_ai/veo-3.1-generate-001")
         assert "vertex_ai" in agent.llm
     
     def test_runwayml_provider(self):

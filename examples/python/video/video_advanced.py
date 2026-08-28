@@ -15,4 +15,4 @@ if completed.status == "completed":
 # List all videos
 videos = agent.list()
 
-# Models: openai/sora-2, gemini/veo-3.0-generate-preview, azure/sora-2
+# Models: openai/sora-2, gemini/veo-3.1-generate-preview, azure/sora-2
