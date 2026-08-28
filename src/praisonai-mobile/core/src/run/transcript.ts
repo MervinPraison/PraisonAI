@@ -151,9 +151,14 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
       phase: "streaming",
       msgId: event.msgId,
       runId: event.runId,
-      // Carried across deliberately: a turn that dropped events before it
-      // started still dropped them, and hiding that would lose the evidence.
-      dropped: state.dropped,
+      // Carried across ONLY from a turn that had not yet ended -- a frame the
+      // decoder refused BEFORE this run's own `start` (recorded while `idle`)
+      // belongs to the turn now opening. A turn that already ENDED owns its
+      // drops; carrying them into the next `start` painted a previous turn's
+      // dropped-event warning onto a clean follow-up answer, which is the same
+      // "a defect looks like a success" failure inverted -- a success made to
+      // look like a defect.
+      dropped: state.phase === "ended" ? [] : state.dropped,
     };
   }
 

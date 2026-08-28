@@ -183,9 +183,12 @@ test("a full turn accumulates text, reasoning and usage", () => {
   assert.deepEqual(state.dropped, [], "a clean stream drops nothing");
 });
 
-test("a start after a finished turn opens a fresh turn but keeps the drop record", () => {
-  // Regenerate reuses the same controller. The new turn must not inherit the
-  // old one's text, and must not lose the evidence that events were dropped.
+test("a start after a FINISHED turn opens a fresh turn and clears the drop record", () => {
+  // A completed turn OWNS its drops. Carrying them into the next `start`
+  // painted the previous turn's dropped-event warning onto a clean follow-up
+  // answer -- a success made to look like a defect, the mirror of the failure
+  // this whole package exists against. The old turn's transcript already
+  // recorded them; the new turn must not inherit them.
   const first = run(start, delta("old"), { type: "cancelled", msgId: M, runId: "r1" }, delta("late"));
   assert.equal(first.dropped.length, 1);
 
@@ -193,7 +196,21 @@ test("a start after a finished turn opens a fresh turn but keeps the drop record
   assert.equal(second.text, "");
   assert.equal(second.msgId, "m2");
   assert.equal(second.phase, "streaming");
-  assert.equal(second.dropped.length, 1, "the earlier drop must still be visible");
+  assert.deepEqual(second.dropped, [], "a finished turn's drops must not cross into the next turn");
+});
+
+test("a start after a BEFORE-start drop keeps it, because that drop belongs to this turn", () => {
+  // The pair. A frame the decoder refused before this run's own `start` was
+  // recorded while idle and belongs to the turn now opening -- clearing it
+  // would hide a real defect. Only an ALREADY-ENDED turn's drops are cleared.
+  const early = apply(initialTurn, delta("orphan")); // dropped: before_start, still idle
+  assert.equal(early.phase, "idle");
+  assert.equal(early.dropped.length, 1);
+
+  const opened = apply(early, start);
+  assert.equal(opened.phase, "streaming");
+  assert.equal(opened.dropped.length, 1, "a before-start drop must survive into its own turn");
+  assert.equal(opened.dropped[0]?.reason, "before_start");
 });
 
 // ---- render order ----------------------------------------------------------

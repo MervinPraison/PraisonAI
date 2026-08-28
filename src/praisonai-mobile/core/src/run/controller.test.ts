@@ -395,3 +395,41 @@ test("a clean run still drops nothing", async () => {
   await h.controller.send("hi");
   assert.deepEqual(h.last().turn.dropped, []);
 });
+
+test("a drop on one turn does not cross onto the next clean turn", async () => {
+  // The controller keeps ONE turn across sends, so a refusal on turn 1 that
+  // was carried across `start` painted turn 2's clean answer as damaged --
+  // a success made to look like a defect. The fresh turn must start clean.
+  const views: RunView[] = [];
+  const sink = createDropSink();
+  const engine = createScriptedEngine({ id: "scripted", script: SCRIPTS.happy });
+  let run = 0;
+
+  const controller = createRunController({
+    engine: {
+      ...engine,
+      async *run(req, signal) {
+        run += 1;
+        const dropOnThisRun = run === 1;
+        for await (const event of engine.run(req, signal)) {
+          if (dropOnThisRun && event.type === "delta") sink.note("missing_msg_id", "tool_result");
+          yield event;
+        }
+      },
+    },
+    time: createFakeTime(),
+    dropSink: sink,
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("first");
+  const afterFirst = views.at(-1)?.turn.dropped ?? [];
+  assert.ok(afterFirst.length > 0, "the first turn must show its own drop");
+
+  await controller.send("second");
+  assert.deepEqual(
+    views.at(-1)?.turn.dropped,
+    [],
+    "the second, clean turn must not inherit the first turn's dropped row",
+  );
+});

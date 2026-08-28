@@ -371,3 +371,12 @@ frame is still shown. Eight mutations, one per hop, each fails -- including
 the two that make it *wired* rather than merely present: removing the sink
 from `createRunController` and dropping the registry's forward both left the
 suite green until composition tests were added for each.
+
+One correction landed with it. `apply(start)` carried `dropped` across every
+new `start`, including one that followed a FINISHED turn -- so a refusal on
+turn 1 painted turn 2's clean answer as damaged, a success made to look like a
+defect (the same failure this channel exists against, inverted). A turn that
+already ended owns its drops; only a `before_start` drop, recorded while
+`idle`, belongs to the turn now opening. Fixed by clearing `dropped` on a
+`start` that replaces an ended turn, pinned at both hops: reverting it fails
+one reducer test and one controller test.
