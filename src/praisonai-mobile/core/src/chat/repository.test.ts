@@ -137,3 +137,68 @@ test("a chat file with no engineId reads as unknown rather than failing", async 
   assert.equal(loaded.ok, true);
   assert.equal(loaded.ok === true ? loaded.chat.engineId : null, "unknown");
 });
+
+// ---- a bad file must not take the good ones with it -------------------------
+
+test("one corrupt chat does not hide every chat listed after it", () => {
+  // `if (!result.ok) continue` -> `break` survived. Half the user's library
+  // vanishes with no error anywhere, and listUnreadable still reports only the
+  // one bad file -- so the app is confidently wrong about how much is missing.
+  const storage = createFakeStorage();
+  const repo = createChatRepository(storage);
+
+  const write = async (id: string, body: string): Promise<void> => {
+    await storage.write({ namespace: "chats", id }, body);
+  };
+
+  return (async () => {
+    await write("a", JSON.stringify({ version: 1, chat: { id: "a", title: "A", messages: [], updated: 1 } }));
+    await write("b", "{ not json at all");
+    await write("c", JSON.stringify({ version: 1, chat: { id: "c", title: "C", messages: [], updated: 2 } }));
+    await write("d", JSON.stringify({ version: 1, chat: { id: "d", title: "D", messages: [], updated: 3 } }));
+
+    const listed = await repo.list();
+    assert.deepEqual(
+      listed.map((s) => s.id).sort(),
+      ["a", "c", "d"],
+      "every readable chat must survive an unreadable neighbour",
+    );
+    assert.deepEqual(await repo.listUnreadable(), ["b"]);
+  })();
+});
+
+test("a chat file with no id is reported unreadable, not loaded with an undefined id", () => {
+  // Dropping `typeof chat.id !== "string"` survived. The file loads ok:true
+  // with id undefined, shows in list() as a row addressed at nothing, and
+  // DISAPPEARS from listUnreadable -- so the one rule the header states,
+  // "a chat that fails to parse is reported, not skipped", breaks in the
+  // direction nobody checks. Saving it then writes to the key "chats/undefined".
+  const storage = createFakeStorage();
+  const repo = createChatRepository(storage);
+
+  return (async () => {
+    await storage.write(
+      { namespace: "chats", id: "x" },
+      JSON.stringify({ version: 1, chat: { title: "no id here", messages: [], updated: 1 } }),
+    );
+    assert.deepEqual(await repo.list(), [], "a chat with no id must not be listed");
+    assert.deepEqual(await repo.listUnreadable(), ["x"], "and must be reported as unreadable");
+  })();
+});
+
+test("an id that vanishes between listing and reading is not called corrupt", () => {
+  // Reporting `missing` as unreadable shows a permanent corruption warning for
+  // a file that is simply gone -- deleted by another tab, or evicted.
+  const storage = createFakeStorage();
+  const ghosting = {
+    ...storage,
+    listIds: async () => ["ghost"],
+    read: async () => null,
+  };
+  const repo = createChatRepository(ghosting);
+
+  return (async () => {
+    assert.deepEqual(await repo.list(), []);
+    assert.deepEqual(await repo.listUnreadable(), [], "absent is not the same as corrupt");
+  })();
+});

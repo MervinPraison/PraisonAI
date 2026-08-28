@@ -179,3 +179,29 @@ test("clearing the queue does not release the in-flight turn", () => {
   assert.equal(depth(queue), 0);
   assert.equal(queue.busy, true);
 });
+
+test("acknowledge does not resurrect a decision the engine already REFUSED", () => {
+  // `state.status !== "sending"` -> allowing "failed" through survived. A
+  // refused decision would be marked `sent`: isActionable flips to false, the
+  // buttons go dead, outstanding drops to zero, and the run stays blocked on a
+  // prompt the engine never received until its 300-second timeout.
+  //
+  // That is verbatim the desktop failure this file's header says it exists to
+  // prevent -- silence read as success.
+  let table = add(emptyApprovals, { approvalId: "ap1", callId: "c1", name: "rm", args: {} });
+  table = choose(table, "ap1", "deny");
+  table = reject(table, "ap1", "the engine did not accept the decision");
+  assert.equal(find(table, "ap1")?.state.status, "failed");
+
+  const after = acknowledge(table, "ap1");
+  assert.equal(find(after, "ap1")?.state.status, "failed", "a refusal must not become a success");
+  assert.equal(isActionable(find(after, "ap1")!), true, "and the user must still be able to retry");
+});
+
+test("acknowledge still promotes a decision that IS in flight", () => {
+  // The pair: refusing every acknowledge would leave a real decision showing
+  // as unsent forever.
+  let table = add(emptyApprovals, { approvalId: "ap1", callId: "c1", name: "ls", args: {} });
+  table = choose(table, "ap1", "allow");
+  assert.equal(find(acknowledge(table, "ap1"), "ap1")?.state.status, "sent");
+});

@@ -118,3 +118,32 @@ test("the innermost actionable ancestor wins", () => {
   ]);
   assert.deepEqual(intent, { kind: "delete-chat", chatId: "c1" });
 });
+
+test("a DISABLED control fires nothing, and does not fall through to its row", () => {
+  // `if (el.disabled === true) return null` -> `continue` survived. The walk
+  // would skip the disabled element and keep climbing, so a tap on a greyed-out
+  // approval button reaches the enclosing row and fires THAT row's intent.
+  //
+  // This is the only thing standing between a double-tap and a second send,
+  // and between a tap on a decision already in flight and a second decision.
+  const chain = [
+    { dataset: { action: "send" }, disabled: true },
+    { dataset: { action: "stop" }, disabled: false },
+  ];
+  assert.equal(intentFrom(chain), null, "a disabled control must stop the walk, not skip itself");
+});
+
+test("an ENABLED control still resolves through its ancestors", () => {
+  // The pair: returning null unconditionally would disable the whole app.
+  const chain = [
+    { dataset: {}, disabled: false },
+    { dataset: { action: "stop" }, disabled: false },
+  ];
+  assert.deepEqual(intentFrom(chain), { kind: "stop" });
+});
+
+test("a delete-chat with no chat id is refused, not addressed at nothing", () => {
+  // Defaulting to "" produced a delete request aimed at no chat -- or, if any
+  // chat is keyed "", at the wrong one.
+  assert.equal(intentFrom([{ dataset: { action: "delete-chat" }, disabled: false }]), null);
+});
