@@ -248,6 +248,58 @@ def schedule_start(
     raise typer.Exit(_run_schedule(args))
 
 
+@app.command("run")
+def schedule_run(
+    poll: float = typer.Option(15.0, "--poll", "-p", help="Seconds between store polls (default 15)"),
+):
+    """Poll and fire store-backed jobs in the foreground (Ctrl-C to stop).
+
+    Hosts the store poller standalone — without the messaging gateway or UI
+    host — so a job added via ``praisonai schedule add`` actually runs. Firing
+    is lease-safe (``claim_due_jobs``), so this never double-fires alongside a
+    running gateway.
+
+    Examples:
+        praisonai schedule add "brief" -s daily -m "morning brief" --deliver telegram
+        praisonai schedule run
+    """
+    output = get_output_controller()
+    try:
+        from praisonaiagents.scheduler import get_default_store, ScheduleLoop
+        from praisonai.integration.bridges.schedules_runner import _build_executor
+    except ImportError as e:
+        output.print_error(f"Scheduler module not available: {e}")
+        raise typer.Exit(4)
+
+    store = get_default_store()
+    executor = _build_executor(store)
+    if executor is None:
+        output.print_error(
+            "Schedule executor unavailable; cannot run the poller. "
+            "Install the bot extras (praisonai_bot) to execute scheduled jobs."
+        )
+        raise typer.Exit(4)
+
+    from praisonai._async_bridge import run_sync_or_offload
+
+    def on_trigger(job):
+        run_sync_or_offload(
+            executor._execute_one(job),
+            timeout=None,
+            thread_name="praisonai-schedule-run",
+        )
+
+    loop = ScheduleLoop(on_trigger=on_trigger, store=store)
+    output.print_info(
+        f"Polling store schedules every {poll:g}s (Ctrl-C to stop)…"
+    )
+    try:
+        loop.run_forever(poll_seconds=poll)
+    except KeyboardInterrupt:
+        pass
+    output.print_info("Scheduler stopped.")
+
+
 @app.command("stop")
 def schedule_stop(
     job_id: Optional[str] = typer.Argument(None, help="Job ID to stop (or 'all')"),

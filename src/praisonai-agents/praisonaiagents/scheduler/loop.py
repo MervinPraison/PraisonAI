@@ -117,6 +117,47 @@ class ScheduleLoop:
         self._thread.start()
         logger.info("ScheduleLoop started (tick=%ss)", self._tick)
 
+    def run_forever(
+        self,
+        *,
+        poll_seconds: Optional[float] = None,
+        owner_id: Optional[str] = None,
+    ) -> None:
+        """Block the calling thread, claiming and firing due jobs until interrupted.
+
+        This is the *foreground* counterpart to :meth:`start` (which runs the
+        same tick body on a background daemon thread). It lets a standalone CLI
+        daemon host the store poller without a gateway/UI host, so a job added
+        via ``schedule add`` actually fires. Firing goes through the same
+        lease-based :meth:`fire_due`, so a foreground poller cannot double-fire
+        alongside a gateway (at-most-once ``claim_due_jobs``).
+
+        Returns on ``KeyboardInterrupt`` (Ctrl-C) so a CLI can exit cleanly.
+
+        Args:
+            poll_seconds: Seconds between polls; defaults to the loop's
+                ``tick_seconds``.
+            owner_id: Override the per-process claim identity (host:pid:uuid by
+                default).
+        """
+        if poll_seconds is not None:
+            self._tick = poll_seconds
+        if owner_id is not None:
+            self._owner_id = owner_id
+        self._stop_event.clear()
+        logger.info("ScheduleLoop.run_forever started (poll=%ss)", self._tick)
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    self.fire_due()
+                except Exception:
+                    logger.exception("ScheduleLoop tick error")
+                self._stop_event.wait(timeout=self._tick)
+        except KeyboardInterrupt:
+            logger.info("ScheduleLoop.run_forever interrupted")
+        finally:
+            self._stop_event.set()
+
     def stop(self, timeout: float = 5.0) -> None:
         """Signal the loop to stop and wait for the thread to exit.
 
