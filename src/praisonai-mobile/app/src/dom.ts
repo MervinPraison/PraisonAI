@@ -134,6 +134,9 @@ export function applyOps(
       case "move": {
         const el = state.nodes.get(op.id);
         if (el === undefined) break;
+        // `children[op.index]` is read BEFORE insertBefore detaches the node,
+        // so it names a real sibling and the placement is relative to that
+        // node, not to an index that shifts underneath it.
         host.insertBefore(el, host.children[op.index] ?? null);
         break;
       }
