@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createApp, type AppDeps } from "./boot.ts";
+import { chosenStringOr, createApp, type AppDeps } from "./boot.ts";
 import { selectEngine, type EngineChoice } from "./engines.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
@@ -19,6 +19,7 @@ import { createFakeTime } from "../../testing/src/fake-time.ts";
 import { SCRIPTS } from "../../testing/src/scripts.ts";
 import { MIN_ENGINE_PROTOCOL, PROTOCOL_VERSION } from "../../protocol/src/version.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
+import type { RunEvent } from "../../protocol/src/events.ts";
 import type { SettingDef } from "../../core/src/settings/store.ts";
 
 const DEFS: readonly SettingDef[] = [
@@ -147,25 +148,74 @@ test("settings are loaded before the engine is built", async () => {
   if (result.ok) await result.app.dispose();
 });
 
-test("backgrounding stops the run", async () => {
+test("backgrounding stops a run that is actually in flight", async () => {
   // On iOS the app can be killed while suspended with no further callback, so
   // anything still in flight at this moment is simply lost.
+  //
+  // This test used to assert `stopped || true`, which is true for every value
+  // of `stopped` -- and `stopped` was in fact FALSE, because the test never
+  // started a run: `controller.stop()` returns early when nothing is live, so
+  // `cancel` was never reached. Deleting the whole lifecycle subscription from
+  // boot.ts passed. The run must genuinely be in flight for backgrounding to
+  // have anything to stop.
   const shell = createFakeShell();
-  let stopped = false;
+  let cancelled = false;
+  let releaseRun: () => void = () => {};
+  const held = new Promise<void>((resolve) => { releaseRun = resolve; });
+
   const inner = createScriptedEngine({ script: SCRIPTS.happy });
   const engine: AgentEnginePort = {
     ...inner,
     id: "scripted",
-    cancel: async () => { stopped = true; return true; },
+    async *run(req, signal) {
+      yield { type: "start", msgId: "m1", runId: req.runId } as RunEvent;
+      // Hold the turn open so there is a live run to cancel.
+      await held;
+      if (signal.aborted) return;
+      yield { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 } as RunEvent;
+    },
+    cancel: async () => { cancelled = true; releaseRun(); return true; },
   };
 
   const result = await createApp(deps({ shell, engines: () => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
+  const sent = result.app.controller.send("hello");
+  // Let the run reach its first yield, so a run is genuinely live.
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
   shell.setLifecycle("background");
-  await Promise.resolve();
-  assert.equal(stopped || true, true); // stop() is called; cancel is its path
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
+  assert.equal(cancelled, true, "backgrounding must cancel the in-flight run");
+
+  releaseRun();
+  await sent;
+  await result.app.dispose();
+});
+
+test("a lifecycle phase that is not background does not stop the run", async () => {
+  // The pair. Without it, `if (phase === "background")` widened to `if (true)`
+  // passes -- and every foreground/resume notification would kill the turn the
+  // user is watching.
+  const shell = createFakeShell();
+  let cancelled = false;
+  const inner = createScriptedEngine({ script: SCRIPTS.happy });
+  const engine: AgentEnginePort = {
+    ...inner,
+    id: "scripted",
+    cancel: async () => { cancelled = true; return true; },
+  };
+
+  const result = await createApp(deps({ shell, engines: () => [{ id: "scripted", create: () => engine }] }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  shell.setLifecycle("active");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(cancelled, false, "only backgrounding stops the run");
+
   await result.app.dispose();
 });
 
@@ -274,4 +324,80 @@ test("the engine list cannot be built before the session exists", () => {
   };
   factory({ record: async () => null });
   assert.deepEqual(built, ["has-persistence"]);
+});
+
+// ---- settings the user actually set ----------------------------------------
+
+test("the engine factory is handed the REAL settings, not a stub", async () => {
+  // main.ts used to build the engine list with a stub whose `get` returned
+  // undefined for everything, and the engine closed over it at boot. Nothing
+  // rebuilt it -- the comment claiming it was "replaced by the real one
+  // immediately after" was simply false. So the engine address a user set was
+  // loaded from disk at boot and then thrown away in favour of the hardcoded
+  // default, with no error anywhere.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "settings", id: "app" },
+    JSON.stringify({ baseUrl: "https://my-engine.example.com" }),
+  );
+
+  let seen: string | undefined;
+  const engine = engineWith({ id: "scripted" });
+  const result = await createApp(deps({
+    storage,
+    settingDefs: [...DEFS, { key: "baseUrl", default: "http://127.0.0.1:8765" }],
+    engines: (_persistence, settings) => {
+      seen = settings.get("baseUrl") as string;
+      return [{ id: "scripted", create: () => engine }];
+    },
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(seen, "https://my-engine.example.com", "the engine was built with the stub's undefined");
+  if (result.ok) await result.app.dispose();
+});
+
+test("a persisted engineId is preferred over the caller's default", async () => {
+  // `engineId` is a declared setting with a `choices` list, and selecting one
+  // had no effect whatsoever: main.ts passed the literal "remote-http".
+  const storage = createFakeStorage();
+  await storage.write({ namespace: "settings", id: "app" }, JSON.stringify({ engineId: "second" }));
+
+  const first = engineWith({ id: "scripted" });
+  const second = engineWith({ id: "second" });
+  const result = await createApp(deps({
+    storage,
+    settingDefs: [{ key: "engineId", default: "scripted" }],
+    engineId: "scripted", // the caller's default
+    engines: () => [
+      { id: "scripted", create: () => first },
+      { id: "second", create: () => second },
+    ],
+  }));
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.app.engine.id, "second", "the persisted choice must win");
+  await result.app.dispose();
+});
+
+test("a settings DEFAULT never overrides the caller's explicit engineId", async () => {
+  // The pair, and the one that matters. `get()` returns the def's default for
+  // a key nobody ever set, which reads exactly like a deliberate choice --
+  // so reading it without `isSet` lets a default nobody chose outrank the
+  // engine the composition root actually asked for.
+  const result = await createApp(deps({ engineId: "nope" }));
+  assert.equal(result.ok, false, "an unset default must not rescue an unknown id");
+  if (result.ok) return;
+  assert.equal(result.reason, "unknown_engine");
+});
+
+test("chosenStringOr distinguishes a chosen value from a defaulted one", () => {
+  const facade = {
+    get: (k: string) => (k === "a" ? "chosen" : "defaulted"),
+    isSet: (k: string) => k === "a",
+  } as unknown as Parameters<typeof chosenStringOr>[0];
+
+  assert.equal(chosenStringOr(facade, "a", "fallback"), "chosen");
+  assert.equal(chosenStringOr(facade, "b", "fallback"), "fallback", "a default is not a choice");
 });

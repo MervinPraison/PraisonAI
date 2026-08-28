@@ -11,7 +11,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
 
-import { importsOf, violations } from "./depgraph.mjs";
+import { importsOf, ungovernedRootsIn, violations } from "./depgraph.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -39,6 +39,19 @@ function sourceFiles() {
   };
   for (const rootName of config.governedRoots) walk(join(root, rootName));
   return out;
+}
+
+const ungoverned = ungovernedRootsIn(root, config);
+if (ungoverned.length > 0) {
+  for (const { name, count } of ungoverned) {
+    console.error(
+      `boundaries: [ungoverned-root] ${name}/ holds ${count} source file(s) that no layer rule covers.\n` +
+        `    Add "${name}" to governedRoots in tools/boundaries.json (with a matching entry in\n` +
+        `    "layers"), or to ungovernedRoots if it is deliberately exempt.`,
+    );
+  }
+  console.error(`\nboundaries: ${ungoverned.length} ungoverned top-level director(y|ies)`);
+  process.exit(1);
 }
 
 const files = sourceFiles();

@@ -130,3 +130,31 @@ test("the mobile constants are tighter than the desktop's", () => {
   assert.ok(UNPAINTED_REOPEN_MS > 0);
   assert.ok(MAX_HELD_CHARS > 0);
 });
+
+// ---- the delay the fallback timer is armed with ------------------------------
+
+test("the unpainted-fallback timer is armed with UNPAINTED_REOPEN_MS, not any delay", () => {
+  // The fake used to take `setTimer(cb)` and discard the delay, so
+  // `setTimer(reopen, 0)` was indistinguishable from the tuned constant and
+  // survived this whole file -- including the positive control above, which
+  // never involves a timer. At 0 the gate reopens on the next macrotask, so
+  // pacing is defeated entirely and every token publishes: exactly what this
+  // module exists to prevent, with the suite green.
+  const scheduler = createFakeScheduler();
+  const gate = createPublishGate(scheduler);
+
+  gate(5);
+  assert.equal(scheduler.timerArmed, true, "a fallback timer should be armed");
+  assert.equal(scheduler.timerDelayMs, UNPAINTED_REOPEN_MS);
+});
+
+test("the armed delay is a real bound, not zero", () => {
+  // The pair. Pinning it to the constant alone would still pass if the
+  // constant itself were set to 0, which is the same shipped behaviour.
+  const scheduler = createFakeScheduler();
+  createPublishGate(scheduler)(5);
+  assert.ok(
+    (scheduler.timerDelayMs ?? 0) > 0,
+    "a zero-delay fallback reopens on the next macrotask, which is no pacing at all",
+  );
+});

@@ -437,3 +437,63 @@ test("a plain answer is still a single text row", () => {
   const view = buildTranscript(run(start, delta("hello"), endAt(0)));
   assert.deepEqual(view.rows.map((r) => r.kind), ["text"]);
 });
+
+// ---- two approvals, and the join that must not become a zip ------------------
+
+test("each approval row carries ITS OWN decision, not the first one in the table", () => {
+  // approvalRow's own comment says "Looked up by approvalId in both -- never
+  // zipped by index". Replacing that lookup with `table.entries[0]` passed the
+  // entire suite, because every existing test has exactly ONE approval in
+  // flight, where the first entry and the right entry are the same object.
+  //
+  // With two outstanding, the second row renders the first row's state: a
+  // `rm -rf /` prompt shows as already-allowed with dead buttons, against a
+  // decision the user never made. This is the precise defect the approvalId
+  // design exists to prevent, reintroduced at the last hop before the DOM.
+  const turn = run(
+    start,
+    { type: "tool_call", msgId: M, callId: "c1", name: "ls", args: {} },
+    { type: "approval_request", msgId: M, approvalId: "ap1", callId: "c1", name: "ls", args: {} },
+    { type: "tool_call", msgId: M, callId: "c2", name: "rm", args: { path: "/" } },
+    { type: "approval_request", msgId: M, approvalId: "ap2", callId: "c2", name: "rm", args: { path: "/" } },
+  );
+
+  // Only the FIRST is decided. The second is still awaiting the user.
+  let table = add(emptyApprovals, { approvalId: "ap1", callId: "c1", name: "ls", args: {} });
+  table = add(table, { approvalId: "ap2", callId: "c2", name: "rm", args: { path: "/" } });
+  table = choose(table, "ap1", "allow");
+
+  const rows = buildTranscript(turn, table).rows.filter(
+    (r): r is ApprovalRowView => r.kind === "approval",
+  );
+  assert.equal(rows.length, 2, "both approvals should render");
+
+  const ls = approvalFor(rows, "c1");
+  const rm = approvalFor(rows, "c2");
+
+  assert.equal(ls.state.status, "sending", "the decided one carries its decision");
+  assert.equal(
+    rm.state.status,
+    "pending",
+    "the UNDECIDED rm -rf / must not inherit the ls decision",
+  );
+  assert.equal(rm.actionable, true, "and its buttons must still work");
+});
+
+test("an approval with no table entry renders pending rather than borrowing one", () => {
+  // The other direction of the same join. Falling back to any entry at all
+  // would attach a stranger's decision to a prompt that has none.
+  const turn = run(
+    start,
+    { type: "tool_call", msgId: M, callId: "c1", name: "ls", args: {} },
+    { type: "approval_request", msgId: M, approvalId: "ap1", callId: "c1", name: "ls", args: {} },
+  );
+  let table = add(emptyApprovals, { approvalId: "other", callId: "cX", name: "curl", args: {} });
+  table = choose(table, "other", "deny");
+
+  const rows = buildTranscript(turn, table).rows.filter(
+    (r): r is ApprovalRowView => r.kind === "approval",
+  );
+  assert.equal(rows[0]?.state.status, "pending");
+  assert.equal(rows[0]?.actionable, true);
+});

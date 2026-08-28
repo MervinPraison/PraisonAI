@@ -16,6 +16,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describeEngineContract, type ScenarioName } from "./conformance.ts";
 import { createScriptedEngine } from "../../testing/src/scripted-engine.ts";
@@ -159,4 +162,74 @@ test("every conformance scenario has a script", () => {
     assert.ok((SCRIPTS[scenario]?.length ?? 0) > 0, `empty script for ${scenario}`);
   }
   assert.equal(Object.keys(SCRIPTS).length, scenarios.length, "SCRIPTS has an unlisted scenario");
+});
+
+// ---- the contract itself, proven able to fail -------------------------------
+//
+// Everything above drives BROKEN ENGINES THROUGH THE REDUCER and asserts what
+// the reducer did. That is a real check of the reducer and no check at all of
+// the contract: `describeEngineContract` was only ever called with conforming
+// engines, so gutting any contract case to assert nothing left the whole suite
+// green. This file's header claimed each broken engine "is asserted to fail a
+// NAMED case"; none of them ran a single contract assertion.
+//
+// `contract-fixture.ts` registers the REAL contract against an engine broken
+// in one named way, and is spawned once per mode.
+
+/** The environment for a spawned fixture, with node's own test-runner marker
+ *  removed. Left in place, the child believes it is a worker of THIS run and
+ *  reports through the parent instead of printing its own result -- so the
+ *  output this test reads would carry no verdict at all. */
+function childEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env["NODE_TEST_CONTEXT"];
+  return env;
+}
+
+function runFixture(mode: string): { status: number | null; output: string } {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // The reporter is FORCED. Node's default differs by version -- 22 emits TAP
+  // when stdout is a pipe, 24 emits the spec reporter -- so a test that greps
+  // for "not ok" passes on one and fails on the other while the code under
+  // test is identical. Depending on an incidental output format is the same
+  // mistake as depending on an incidental default anywhere else.
+  const run = spawnSync(
+    process.execPath,
+    ["--test-reporter=tap", join(here, "contract-fixture.ts"), mode],
+    {
+      encoding: "utf8",
+      timeout: 120_000,
+      env: childEnv(),
+    },
+  );
+  return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
+}
+
+/** Each break mode, and the contract case that must go red because of it. */
+const BREAKS: readonly { readonly mode: string; readonly expects: RegExp }[] = [
+  { mode: "no_start", expects: /a run emits start first and exactly one terminal event last/ },
+  { mode: "tool_failure_as_ok", expects: /a failed tool is reported failed and never inferred from its output/ },
+  { mode: "empty_is_fine", expects: /an empty stream is an error, not an empty answer/ },
+  { mode: "decide_always_true", expects: /deciding an unknown approval returns false rather than reporting success/ },
+];
+
+for (const { mode, expects } of BREAKS) {
+  test(`the contract can fail: "${mode}" fails its own named case`, () => {
+    const { status, output } = runFixture(mode);
+    assert.notEqual(status, 0, `the fixture PASSED -- that contract case asserts nothing:\n${output}`);
+    assert.match(
+      output,
+      new RegExp(`not ok .*${expects.source}`),
+      `something failed, but not the case "${mode}" breaks:\n${output}`,
+    );
+  });
+}
+
+test("the contract can PASS: an unbroken fixture succeeds under the same runner", () => {
+  // The control that makes the four above mean anything. If the runner
+  // reported failure for everything -- a bad path, a syntax error, a process
+  // that never started -- every assertion above would pass while proving
+  // nothing whatsoever.
+  const { status, output } = runFixture("none");
+  assert.equal(status, 0, `a conforming engine must pass the same runner:\n${output}`);
 });

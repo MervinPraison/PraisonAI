@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createSession, titleFrom } from "./session.ts";
+import { createSession, persistenceFor, titleFrom } from "./session.ts";
 import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 
 const build = (over: Partial<Parameters<typeof createSession>[0]> = {}) => {
@@ -166,4 +166,43 @@ test("a long title is cut on a code point, never mid-emoji", () => {
 
 test("a short title is not truncated", () => {
   assert.equal(titleFrom("short"), "short");
+});
+
+// ---- the adapter where the two vocabularies meet ----------------------------
+
+test("persistenceFor keeps the prompt and the answer the right way round", () => {
+  // Swapping these two same-typed arguments survived the entire suite. Every
+  // persisted conversation would have the user's message and the model's reply
+  // transposed -- and a transposed transcript still renders, still round-trips,
+  // and still reads as a working app until someone actually reads one back.
+  const { session } = build();
+  const persistence = persistenceFor(session);
+
+  return persistence.record({ prompt: "what is 2+2?" }, "4").then(() => {
+    const messages = session.current()?.messages ?? [];
+    assert.equal(messages[0]?.role, "user");
+    assert.equal(messages[0]?.content, "what is 2+2?", "the user's message must be the user's");
+    assert.equal(messages[1]?.role, "assistant");
+    assert.equal(messages[1]?.content, "4", "the answer must be the assistant's");
+  });
+});
+
+test("persistenceFor reports the indices the session produced", () => {
+  // The engine puts these into `end.userIndex`, which decides whether Fork and
+  // Delete are offered at all. Returning a fabricated pair would offer actions
+  // against messages that are not there.
+  const { session } = build();
+  return persistenceFor(session).record({ prompt: "hi" }, "hello").then((indices) => {
+    assert.deepEqual(indices, { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 });
+  });
+});
+
+test("persistenceFor propagates a failed write as null", () => {
+  // null is what withholds Fork and Delete. Swallowing the failure here would
+  // report a turn as on disk when it is not.
+  const { storage, session } = build();
+  storage.failNext("disk full");
+  return persistenceFor(session).record({ prompt: "hi" }, "hello").then((indices) => {
+    assert.equal(indices, null);
+  });
 });

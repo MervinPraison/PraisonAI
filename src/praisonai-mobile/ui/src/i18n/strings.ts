@@ -65,6 +65,9 @@ export interface Strings {
   /** The crash screen. It has to say the conversations survived, because the
    *  user's next thought is that they did not. */
   readonly crashed: string;
+  /** The engine refused the cancellation. Said out loud because the button
+   *  going quiet is indistinguishable from having worked. */
+  readonly stopRefused: string;
 
   // ---- screens -----------------------------------------------------------
   readonly routeChats: string;
@@ -253,6 +256,7 @@ export const en: Strings = {
   appName: "PraisonAI",
   newChat: "New chat",
   bootFailed: (detail) => `PraisonAI could not start: ${detail}`,
+  stopRefused: "The engine did not accept the stop. It may still be running.",
   crashed: "Something went wrong. Your conversations are saved.",
 
   routeChats: "Chats",

@@ -44,9 +44,14 @@ export interface AppDeps {
    * factory makes that impossible to express: there is no way to obtain the
    * engine list without being handed the thing engines write through.
    */
-  readonly engines: (persistence: RunPersistence) => readonly EngineChoice[];
+  readonly engines: (
+    persistence: RunPersistence,
+    settings: SettingsFacade,
+  ) => readonly EngineChoice[];
   readonly settingDefs: readonly SettingDef[];
-  /** Which engine to start with, normally read from settings. */
+  /** Which engine to start with when settings name none. The persisted
+   *  `engineId` wins over this -- "normally read from settings" was written
+   *  here from the beginning and nothing read them. */
   readonly engineId: string;
   readonly onPublish: (view: RunView) => void;
   /** Injected so boot is deterministic under test. */
@@ -68,6 +73,28 @@ export interface App {
 export type BootResult =
   | { readonly ok: true; readonly app: App }
   | { readonly ok: false; readonly reason: string; readonly detail: string };
+
+
+/** A string setting, or the fallback when it is absent or not a string.
+ *
+ * Named and exported so a test calls it rather than asserting the expression
+ * appears in the source.
+ */
+export function chosenStringOr(
+  settings: SettingsFacade,
+  key: string,
+  fallback: string,
+): string {
+  // `isSet`, not just `get`. A def's DEFAULT must never outrank the caller's
+  // explicit argument: get() returns the default for a key nobody has ever
+  // touched, which is indistinguishable from a deliberate choice. Reading it
+  // with get() alone made a settings default silently override the engine the
+  // composition root asked for -- caught by an existing boot test, which is
+  // the whole reason that test exists.
+  if (!settings.isSet(key)) return fallback;
+  const value = settings.get(key);
+  return typeof value === "string" && value !== "" ? value : fallback;
+}
 
 export async function createApp(deps: AppDeps): Promise<BootResult> {
   // 1. Settings first: the engine choice and its credentials come from here,
@@ -93,7 +120,24 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   //    engine writes THROUGH it. `main.ts` builds the engine list from
   //    `enginesFor({ ..., persistence: session })`, so a turn recorded by the
   //    engine and a chat read by the UI are the same store.
-  const selection = await selectEngine(deps.engineId, deps.engines(persistenceFor(session)));
+  // The facade is built HERE rather than in main.ts, because main.ts has no
+  // settings until this function has loaded them -- which is why it used to
+  // pass a stub whose `get` returned undefined for everything. The engine
+  // closed over that stub at boot and nothing ever rebuilt it, so a user's
+  // engine address, engine choice and credentials were read, stored, and
+  // discarded. The comment on the stub said it was "replaced by the real one
+  // immediately after"; it was not.
+  const settings = facadeFor(settingsStore, deps.secrets);
+
+  // The persisted choice wins over the caller's default. `engineId` is a
+  // declared setting with a `choices` list, and until now selecting one had
+  // no effect whatsoever.
+  const chosenEngineId = chosenStringOr(settings, "engineId", deps.engineId);
+
+  const selection = await selectEngine(
+    chosenEngineId,
+    deps.engines(persistenceFor(session), settings),
+  );
   if (!selection.ok) {
     return { ok: false, reason: selection.reason, detail: selection.detail };
   }
@@ -129,7 +173,7 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
       engine,
       controller,
       session,
-      settings: facadeFor(settingsStore, deps.secrets),
+      settings,
       router,
       shell: deps.shell,
 

@@ -42,6 +42,7 @@ function fakeFacade(
 ): SettingsFacade {
   return {
     get: (key) => values[key] ?? defs.find((d) => d.key === key)?.default,
+    isSet: (key) => key in values,
     set: async () => true,
     defs: () => defs,
     subscribe: () => () => undefined,

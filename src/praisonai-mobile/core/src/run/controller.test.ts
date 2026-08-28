@@ -195,3 +195,131 @@ test("the view is a snapshot, not a live reference", async () => {
   assert.notEqual(early, final);
   assert.notEqual(early.turn, final.turn, "each publish must carry its own turn object");
 });
+
+// ---- the coalescer's time bound --------------------------------------------
+
+test("a short answer paints while it streams, not in one lump at the end", async () => {
+  // The defect: the coalescer flushed only at maxBytes (256) or on a
+  // structured event, because nothing ever called tick(). So an answer shorter
+  // than 256 characters produced ZERO intermediate paints and appeared all at
+  // once when the run ended -- time-to-first-visible-token was the whole
+  // answer's latency, in an app whose stated first priority is streaming.
+  const deltas: RunEvent[] = Array.from({ length: 20 }, () => ({
+    type: "delta", msgId: "m1", text: "short ",
+  }));
+  const h = harness([
+    { type: "start", msgId: "m1", runId: "r1" },
+    ...deltas,
+    { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 },
+  ]);
+
+  const sent = h.controller.send("hi");
+  for (let i = 0; i < 40; i++) {
+    h.time.advance(20);
+    h.time.tick();
+    await Promise.resolve();
+  }
+  await sent;
+
+  // PARTIAL text is the signal, not "more than one paint". Without a tick the
+  // text goes straight from "" to the whole answer -- the `end` event flushes
+  // and publishes regardless, so a weaker assertion passes against the very
+  // defect this test exists for. That mistake was made here first.
+  const full = h.views.at(-1)?.turn.text ?? "";
+  const partial = h.views.filter((v) => v.turn.text !== "" && v.turn.text !== full);
+  assert.ok(partial.length > 0, `text never appeared partially: only ever "" or the whole ${full.length} chars`);
+});
+
+test("the tick stops when the turn ends", async () => {
+  // A tick firing after the turn settled would paint a frame into a finished
+  // transcript -- and worse, keep a timer alive for the app's lifetime.
+  const h = harness([
+    { type: "start", msgId: "m1", runId: "r1" },
+    { type: "delta", msgId: "m1", text: "hi" },
+    { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 },
+  ]);
+  await h.controller.send("go");
+
+  const before = h.views.length;
+  h.time.advance(1000);
+  h.time.tick();
+  assert.equal(h.views.length, before, "a tick after the turn must publish nothing");
+});
+
+// ---- an approval the engine refuses -----------------------------------------
+
+test("an approval the engine refuses is shown as failed, never as sent", async () => {
+  // `ok ? acknowledge : reject` collapsing to always-acknowledge survived the
+  // whole suite. The engine says "I did not accept that decision" -- because it
+  // restarted, or the approval expired -- and the row still renders resolved.
+  // The user sees their Deny confirmed against a command the engine never
+  // denied, which is the one failure this table exists to make visible.
+  const views: RunView[] = [];
+  const engine = createScriptedEngine({
+    id: "scripted",
+    script: [
+      { type: "start", msgId: "m", runId: "r" },
+      { type: "approval_request", msgId: "m", approvalId: "a1", callId: "c1", name: "rm", args: { path: "/" } },
+    ],
+    approvals: [], // the engine does not recognise a1
+  });
+  const controller = createRunController({
+    engine,
+    time: createFakeTime(),
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("do the thing");
+  await controller.decide("a1", "deny");
+
+  const entry = views[views.length - 1]?.approvals.entries.find((e) => e.approvalId === "a1");
+  assert.ok(entry, "the approval should still be on screen");
+  assert.equal(entry.state.status, "failed", "a refused decision must not read as sent");
+  assert.equal(
+    entry.state.status === "failed" ? entry.state.choice : null,
+    "deny",
+    "the choice the user made is still what failed",
+  );
+});
+
+test("an approval the engine accepts is shown as sent", async () => {
+  // The other half. Without it the test above passes against a controller that
+  // rejects every decision, which is just as broken in the opposite direction.
+  const views: RunView[] = [];
+  const engine = createScriptedEngine({
+    id: "scripted",
+    script: [
+      { type: "start", msgId: "m", runId: "r" },
+      { type: "approval_request", msgId: "m", approvalId: "a1", callId: "c1", name: "ls", args: {} },
+    ],
+  });
+  const controller = createRunController({
+    engine,
+    time: createFakeTime(),
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("do the thing");
+  await controller.decide("a1", "allow");
+
+  const entry = views[views.length - 1]?.approvals.entries.find((e) => e.approvalId === "a1");
+  assert.equal(entry?.state.status, "sent");
+});
+
+test("the flush tick is armed at maxDelayMs, not at some other period", async () => {
+  // The fake's `every` discarded its period, so arming the coalescer's flush
+  // at 60_000 instead of maxDelayMs left the entire suite green -- while
+  // restoring the one-lump answer the streaming test above exists to prevent.
+  // A period nothing observes is a period nothing has to get right.
+  const time = createFakeTime();
+  const controller = createRunController({
+    engine: createScriptedEngine({ id: "scripted", script: SCRIPTS.happy }),
+    time,
+    maxDelayMs: 16,
+    onPublish: () => {},
+  });
+
+  const sent = controller.send("hi");
+  assert.deepEqual(time.intervalMs, [16], "the tick must be armed at maxDelayMs");
+  await sent;
+});
