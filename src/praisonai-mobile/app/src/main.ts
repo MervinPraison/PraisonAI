@@ -62,20 +62,39 @@ export function stopNotice(stopped: boolean, strings: Strings): string | null {
   return stopped ? null : strings.stopRefused;
 }
 
+/** `createApp`, with a thrown failure turned into the same typed result the
+ *  anticipated failures already produce. */
+async function bootOrFail(
+  options: Parameters<typeof createApp>[0],
+): Promise<Awaited<ReturnType<typeof createApp>>> {
+  try {
+    return await createApp(options);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "storage_unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    } as Awaited<ReturnType<typeof createApp>>;
+  }
+}
+
 export async function mount(deps: MountDeps): Promise<App | null> {
   const strings = deps.strings ?? en;
   const root = deps.root;
   const doc = root.ownerDocument;
-  const platform = deps.platform ?? detectPlatform();
-
-  // Installed BEFORE anything else can throw. A crash during boot with no
-  // handler is a blank page and a silent console on a device nobody can attach
-  // a debugger to.
+  // Installed BEFORE anything else can throw -- and `detectPlatform()` is
+  // something that can throw: it reads `window.localStorage`, which raises
+  // SecurityError in a WKWebView with site data blocked. It used to run first,
+  // directly contradicting this comment, and a throw there left the root
+  // completely empty: a blank white page, no crash screen, on a device nobody
+  // can attach a debugger to.
   const owner = doc.defaultView;
   installCrashHandler({
     ...(owner === null ? {} : { view: owner }),
     onCrash: () => renderFatal(root, strings.crashed),
   });
+
+  const platform = deps.platform ?? detectPlatform();
 
   // ---- the frame the app paints into -------------------------------------
   const screen = doc.createElement("div");
@@ -155,16 +174,38 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       nowMs: Date.now(),
     });
     announcer = spoken.state;
-    for (const item of spoken.announcements) {
-      const region = item.politeness === "assertive" ? assertive : polite;
-      region.textContent = item.text;
-    }
+    // Each region is assigned ONCE, with every utterance of that politeness
+    // joined. Assigning per item overwrote the earlier ones in the same task,
+    // so only the LAST survived to be read.
+    //
+    // Measured: a short answer completing inside one interval produced
+    // [polite "The capital of France is Paris.", polite "Response complete"],
+    // and a screen-reader user heard only "Response complete." That is exactly
+    // the failure announce.ts rule 4 exists to prevent -- "the user would never
+    // hear the end of the response" -- reintroduced at the single point where
+    // the pure function meets the DOM.
+    const polites = spoken.announcements.filter((a) => a.politeness !== "assertive");
+    const assertives = spoken.announcements.filter((a) => a.politeness === "assertive");
+    if (polites.length > 0) polite.textContent = polites.map((a) => a.text).join(" ");
+    if (assertives.length > 0) assertive.textContent = assertives.map((a) => a.text).join(" ");
 
     sendButton.textContent = view.turn.phase === "streaming" ? strings.actionStop : strings.actionSend;
     sendButton.dataset["action"] = view.turn.phase === "streaming" ? "stop" : "send";
   };
 
-  const booted = await createApp({
+  // `createApp` returns a typed BootResult for the failures it anticipated --
+  // an unknown engine, a protocol mismatch. It can also THROW, and did: an
+  // unguarded `settingsStore.load()` propagates a StoragePort failure, which
+  // is reachable on the real platform (SecurityError with site data blocked,
+  // QuotaExceededError under the storage pressure platform.ts documents).
+  //
+  // The chrome is already built and appended by this point, so a rejection
+  // here skipped the fatal screen AND the listener registrations below,
+  // leaving a perfectly rendered app -- top bar, composer, green Send button
+  // -- in which nothing whatsoever happened, forever.
+  const mintChatId = deps.newChatId ?? ((): string => globalThis.crypto.randomUUID());
+
+  const booted = await bootOrFail({
     storage: platform.storage,
     secrets: platform.secrets,
     time: platform.time,
@@ -183,7 +224,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     engineId: "remote-http",
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),
-    newChatId: deps.newChatId ?? (() => globalThis.crypto.randomUUID()),
+    newChatId: mintChatId,
   });
 
   if (!booted.ok) {
@@ -234,13 +275,25 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       case "approve":
         await app.controller.decide(intent.approvalId, intent.choice);
         return;
-      case "new-chat":
+      case "new-chat": {
+        // Stop the turn FIRST. Clearing the screen without stopping left the
+        // previous run streaming: the next token reconciled against an empty
+        // render and re-inserted the old conversation's rows into what the
+        // user believed was a fresh chat, where it then finished.
+        void app.controller.stop();
+        // And give the new conversation its own id. `setChat` was never called
+        // anywhere in the app, so every request from every chat carried
+        // `chat_id: "unassigned"` -- controller.ts says in as many words that
+        // "an engine cannot tell two conversations apart if every turn claims
+        // the same id".
+        app.controller.setChat(mintChatId());
         app.session.reset();
         render = emptyRender;
         nodes.nodes.clear();
         announcer = initialAnnouncer;
         transcript.textContent = ""; // safe now: this is no longer a live region
         return;
+      }
       case "navigate":
         app.router.push({ name: intent.route } as Route);
         return;
