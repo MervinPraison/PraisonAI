@@ -57,10 +57,10 @@ function scriptFor(scenario: ScenarioName): readonly RunEvent[] {
   if (scenario === "empty") return mode === "empty_is_fine" ? happy : [];
   // THE BREAK for no_start: the opening event is missing.
   // THE BREAK for start_only: the run opens and then simply stops -- no
-  // terminal event at all. The contract asserted `events.length >= 2`, which
-  // this satisfies the moment there are two events of any kind, and separately
-  // asserted exactly one terminal; weakening the length check to `>= 1` let a
-  // start-only run through, which is a turn that never ends.
+  // terminal event at all. The contract independently asserts exactly one
+  // terminal event, so this stays invalid even if the `events.length >= 2`
+  // guard is weakened to `>= 1`; the length assertion is therefore redundant
+  // for this mode rather than the thing that catches it.
   if (mode === "start_only") return happy.slice(0, 1);
   return mode === "no_start" ? happy.slice(1) : happy;
 }
