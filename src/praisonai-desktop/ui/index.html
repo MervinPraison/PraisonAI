@@ -20,6 +20,9 @@ html{font-size:calc(16px * var(--ui-scale,1))}
 .confirm-box p{margin:0 0 1rem;font-size:.88rem;line-height:1.5}
 .confirm-box .row{display:flex;gap:.5rem;justify-content:flex-end}
 .confirm-box .ok.danger{background:var(--bad)}
+.confirm-box .txt{width:100%;box-sizing:border-box;margin:0 0 1rem;background:var(--ground);
+  color:var(--ink);border:1px solid var(--rule);border-radius:6px;padding:.4rem .55rem;
+  font:inherit;font-size:.88rem}
 .updbar .updx{font-size:.72rem;padding:.25rem .6rem}
 /* In normal flow above the composer. Fixed-position at bottom:18px put it
    directly on top of the text field -- and a composer that grows to ten
@@ -952,6 +955,38 @@ function askConfirm(message, {danger=true, ok='Delete', cancel='Cancel'}={}){
   });
 }
 
+/**
+ * In-app text prompt, because `window.prompt` does not work here either.
+ *
+ * The same WKWebView that has no confirm panel has no prompt panel, so
+ * `prompt()` returns null without ever showing anything -- which is why the
+ * "Move to project" menu item issued no request at all. Mirrors askConfirm:
+ * resolves to the entered string, or null if cancelled.
+ */
+function askText(message, value='', {ok='OK', cancel='Cancel'}={}){
+  return new Promise(resolve=>{
+    const back=document.createElement('div'); back.className='confirm-back';
+    back.innerHTML='<div class="confirm-box" role="dialog" aria-modal="true">'
+      +'<p></p><input type="text" class="txt"/>'
+      +'<div class="row"><button type="button" class="ghost cx"></button>'
+      +'<button type="button" class="ok"></button></div></div>';
+    back.querySelector('p').textContent=message;
+    const inp=back.querySelector('.txt'); inp.value=value;
+    const okBtn=back.querySelector('.ok'), cxBtn=back.querySelector('.cx');
+    okBtn.textContent=ok; cxBtn.textContent=cancel;
+    const close=v=>{ back.remove(); document.removeEventListener('keydown',key); resolve(v); };
+    const key=e=>{
+      if(e.key==='Escape'){ e.preventDefault(); close(null); }
+      else if(e.key==='Enter'){ e.preventDefault(); close(inp.value); }
+    };
+    okBtn.onclick=()=>close(inp.value); cxBtn.onclick=()=>close(null);
+    back.onclick=e=>{ if(e.target===back) close(null); };
+    document.addEventListener('keydown',key);
+    document.body.appendChild(back);
+    inp.focus(); inp.select();
+  });
+}
+
 let toastTimer=null;
 /** Brief, non-blocking confirmation. Silence after an action the user did not
  *  explicitly ask for -- a paste turning into a chip -- reads as a bug. */
@@ -1051,7 +1086,7 @@ async function refreshChats(){
       };
       d.oncontextmenu=async ev=>{
         ev.preventDefault();
-        const name=prompt('Move to project (blank to remove):', c.project||'');
+        const name=await askText('Move to project (blank to remove):', c.project||'');
         if(name===null) return;
         await fetch('http://127.0.0.1:'+PORT+'/project/'+c.id,{method:'POST',
           headers:{'content-type':'application/json'},body:JSON.stringify({project:name})});
@@ -2023,11 +2058,14 @@ async function runActionInner(def){
     panel.querySelector('#m-add').onclick=async()=>{
       const name=panel.querySelector('#m-name').value.trim();
       const cmd=panel.querySelector('#m-cmd').value.trim();
-      if(!name){ alert('A name is required.'); return; }
+      // The toast intentionally sits below the settings scrim, so it is dimmed
+      // and unreadable while this overlay is open. Errors that occur here must
+      // surface through the in-app dialog, which paints above the scrim.
+      if(!name){ await askConfirm('A name is required.',{danger:false,ok:'OK',cancel:'Dismiss'}); return; }
       const r=await (await fetch('http://127.0.0.1:'+PORT+'/mcp',{method:'POST',
         headers:{'content-type':'application/json'},
         body:JSON.stringify({action:'add',name,command:cmd,enabled:false})})).json();
-      if(!r.ok){ alert(r.error); return; }
+      if(!r.ok){ await askConfirm(r.error,{danger:false,ok:'OK',cancel:'Dismiss'}); return; }
       runAction(def);
     };
     overlay.classList.add('open');
