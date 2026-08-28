@@ -7,9 +7,9 @@
  *
  * `npm run boundaries`
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join } from "node:path";
 
 import { importsOf, sourceFilesUnder, ungovernedRootsIn, violations } from "./depgraph.mjs";
 
@@ -19,8 +19,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 // two independent ways to turn the whole gate into a no-op with a green build.
 const root = process.argv[2] ?? join(here, "..");
 const config = JSON.parse(readFileSync(join(here, "boundaries.json"), "utf8"));
-
-const norm = (p) => p.split(sep).join("/");
 
 /** Top-level directories holding source that neither `governedRoots` nor
  *  `ungovernedRoots` accounts for.
