@@ -26,11 +26,11 @@ Usage:
     # Compute an adaptive token budget for a given task complexity (0.0-1.0)
     tokens = budget.get_tokens_for_complexity(0.8)
 
-    # Note: `agent.thinking_budget` stores this object on the agent as a hint,
-    # but the core Agent request pipeline does not yet apply it automatically.
-    # To influence step-by-step reasoning today, use the built-in
-    # `reasoning_steps` option instead:
-    agent = Agent(instructions="...", reasoning_steps=True)
+    # `agent.thinking_budget` is a backward-compatible alias for the unified
+    # `reasoning_effort` control. Prefer the graded level directly, which the
+    # core request pipeline translates to each provider's native parameter
+    # (OpenAI/xAI `reasoning_effort`, Anthropic/Gemini extended-thinking budget):
+    agent = Agent(instructions="...", reasoning_effort="high")
 """
 
 __all__ = [
@@ -40,6 +40,10 @@ __all__ = [
     # Tracking
     "ThinkingUsage",
     "ThinkingTracker",
+    # Reasoning-effort translation (provider-portable)
+    "resolve_reasoning_params",
+    "normalize_effort",
+    "EFFORT_LEVELS",
 ]
 
 
@@ -60,5 +64,9 @@ def __getattr__(name: str):
     if name == "ThinkingTracker":
         from .tracker import ThinkingTracker
         return ThinkingTracker
-    
+
+    if name in ("resolve_reasoning_params", "normalize_effort", "EFFORT_LEVELS"):
+        from . import effort
+        return getattr(effort, name)
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

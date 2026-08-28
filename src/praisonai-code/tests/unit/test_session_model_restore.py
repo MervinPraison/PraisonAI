@@ -116,3 +116,24 @@ def test_find_session_model_none_for_unknown_session(project):
     from praisonai_code.cli.state.project_sessions import find_session_model
 
     assert find_session_model("does-not-exist") is None
+
+
+def test_find_session_reasoning_effort_resolves_recorded(project):
+    """The graded reasoning effort restores from the project store (Issue #4452)."""
+    from praisonai_code.cli.state.project_sessions import (
+        find_session_reasoning_effort,
+        get_project_session_store,
+    )
+
+    store = get_project_session_store()
+    store.add_message("sess-effort", "user", "hello")
+    store.update_session_metadata("sess-effort", reasoning_effort="high")
+
+    assert find_session_reasoning_effort("sess-effort") == "high"
+
+
+def test_find_session_reasoning_effort_none_for_unknown(project):
+    """An unrecorded effort resolves to None so the default is used."""
+    from praisonai_code.cli.state.project_sessions import find_session_reasoning_effort
+
+    assert find_session_reasoning_effort("does-not-exist") is None

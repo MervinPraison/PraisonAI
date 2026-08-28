@@ -242,7 +242,8 @@ class SessionData:
         }
         if self.last_compaction is not None:
             data["last_compaction"] = self.last_compaction.to_dict()
-        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
+        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source",
+                    "reasoning_effort"):
             if key in self.metadata:
                 data[key] = self.metadata[key]
         return data
@@ -270,7 +271,8 @@ class SessionData:
         # resume can recover the recorded model instead of silently reverting to
         # the current default (Issue #3685). Existing metadata always wins.
         metadata = dict(data.get("metadata") or {})
-        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
+        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source",
+                    "reasoning_effort"):
             if key not in metadata and data.get(key) is not None:
                 metadata[key] = data[key]
         return cls(
@@ -1445,6 +1447,28 @@ class DefaultSessionStore:
             return model
         for message in reversed(session.messages):
             recorded = (message.metadata or {}).get("model")
+            if isinstance(recorded, str) and recorded:
+                return recorded
+        return None
+
+    def get_session_reasoning_effort(self, session_id: str) -> Optional[str]:
+        """Return the reasoning effort a session was last run with (Issue #4452).
+
+        Mirrors :meth:`get_session_model`: resolves the session-level
+        ``reasoning_effort`` recorded in metadata so a resume (``--continue`` /
+        ``--session``) can restore the graded effort alongside the model. Returns
+        ``None`` when none was recorded, so a caller falls back to the default /
+        per-invocation value.
+        """
+        try:
+            session = self._read_session_fresh(session_id)
+        except Exception:
+            return None
+        effort = session.metadata.get("reasoning_effort")
+        if isinstance(effort, str) and effort:
+            return effort
+        for message in reversed(session.messages):
+            recorded = (message.metadata or {}).get("reasoning_effort")
             if isinstance(recorded, str) and recorded:
                 return recorded
         return None

@@ -492,6 +492,14 @@ Respond with ONLY a valid JSON tool call in this format:
         self.max_reflect = extra_settings.get('max_reflect', 3)
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
+        # Unified, provider-portable reasoning-effort control (Issue #4452).
+        # Accepts a graded level (off|minimal|low|medium|high) or a legacy
+        # ``thinking_budget`` int; both normalise to one internal value that is
+        # translated to each provider's native parameter in
+        # ``_build_completion_params``. ``None``/``off`` is a zero-overhead no-op.
+        self.reasoning_effort = extra_settings.get(
+            'reasoning_effort', extra_settings.get('thinking_budget')
+        )
         self.metrics = extra_settings.get('metrics', False)
         # Auto-detect XML tool format for known models, or allow manual override
         self.xml_tool_format = extra_settings.get('xml_tool_format', 'auto')
@@ -5824,9 +5832,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'max_tool_calls_per_turn', 'parallel_tool_calls',  # Tool execution settings
             'in_loop_compaction', 'clear_threshold_pct', 'compact_threshold_pct',  # In-loop context management
             'keep_recent_tool_results',  # In-loop context management
+            'reasoning_effort', 'thinking_budget',  # Reasoning-effort (translated below, Issue #4452)
         ]
         for param in internal_params:
             params.pop(param, None)
+
+        # Translate the unified reasoning-effort level to the target provider's
+        # native request parameter (Issue #4452): OpenAI/xAI reasoning models get
+        # ``reasoning_effort``, Anthropic/Gemini get an extended-thinking budget,
+        # and models with no reasoning control are left untouched. A per-call
+        # override wins over the instance-level setting; ``off``/unset is a no-op.
+        effort = override_params.get('reasoning_effort', self.reasoning_effort)
+        if effort is not None:
+            from ..thinking.effort import resolve_reasoning_params
+            reasoning_params = resolve_reasoning_params(effort, self.model)
+            # Don't clobber an explicit native param the caller already set.
+            for key, value in reasoning_params.items():
+                params.setdefault(key, value)
 
         # Reasoning models (o1/o3/gpt-5.x) require max_completion_tokens and
         # reject the legacy max_tokens parameter plus several sampling params.

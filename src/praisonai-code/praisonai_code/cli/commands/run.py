@@ -1339,6 +1339,31 @@ def run_main(
             # Model restore is best-effort; fall back to default resolution.
             pass
 
+    # Restore the graded reasoning effort a resumed session was running when the
+    # user did not pass an explicit --thinking (Issue #4452), mirroring the model
+    # restore above (#3685). The recorded graded level is re-resolved to the core
+    # thinking_budget so it flows through the same path already threaded below.
+    if thinking is None and thinking_budget is None and (continue_session or session):
+        try:
+            from ..state.project_sessions import (
+                find_last_session,
+                find_session_reasoning_effort,
+            )
+
+            resumed_id = session or find_last_session()
+            if resumed_id:
+                recorded_effort = find_session_reasoning_effort(resumed_id)
+                if recorded_effort:
+                    restored = thinking_to_budget(recorded_effort)
+                    if restored is not None:
+                        thinking_budget = restored
+                        output.print_info(
+                            f"Restored session reasoning effort: {recorded_effort}"
+                        )
+        except Exception:
+            # Effort restore is best-effort; fall back to the default.
+            pass
+
     # Early credential check before any processing. Uses the shared first-run
     # gate (issue #4024) so `run`, `code`, `chat`, and the bare invocation route
     # a keyless newcomer to `setup` (or a detected keyless local endpoint)
