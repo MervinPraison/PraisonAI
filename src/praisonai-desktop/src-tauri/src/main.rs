@@ -372,6 +372,28 @@ fn breadcrumb(primary: bool) {
     }
 }
 
+/// Create the user data directory on the primary launch, before any window.
+///
+/// The first-run report was a clean machine where the window opened, the setup
+/// screen appeared, and yet `%APPDATA%\PraisonAI` never came into existence:
+/// the only code that made the directory was `provision_engine`, which runs
+/// only after the user clicks "Get started". So a fresh install that a user
+/// merely opened -- or a machine whose data folder was deleted to repair a
+/// corrupt state -- left no Roaming directory at all, indistinguishable to a
+/// clean-start check from a shell that never started. Making it here, on the
+/// primary path (a secondary never reaches `setup()`), means the directory
+/// exists the moment the app is running, whether or not provisioning has begun.
+/// Best effort: a shell must never fail to start because it could not create
+/// its data directory -- `engine_status` and `provision_engine` still create
+/// it later if this could not.
+fn ensure_data_dir() {
+    if let Some(dir) = user_data_dir() {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("[praisonai] could not create {}: {e}", dir.display());
+        }
+    }
+}
+
 fn main() {
     // Before the single-instance guard can quit this process: a launch that
     // hands off to the primary and exits 0 must still leave a trace, or it is
@@ -414,6 +436,10 @@ fn main() {
             // exit by the guard before it gets here. So this is where the
             // primary honestly upgrades its own breadcrumb, with its own pid.
             breadcrumb(true);
+            // And where the primary makes its data directory exist, so a clean
+            // machine that is merely opened -- not yet provisioned -- has the
+            // Roaming folder it was reported to be missing.
+            ensure_data_dir();
             app.manage(AppState { engine: Mutex::new(None) });
             // Deliberately not `?`. On Linux the tray goes through
             // libappindicator, which is dlopen'd at first use and *panics* if
