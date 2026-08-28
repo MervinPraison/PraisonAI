@@ -20,7 +20,7 @@ use praisonai_desktop_core::engine_paths::{
     app_bundle, data_dir, python_candidates, resolve_engine, RealFs as PathFs,
 };
 use praisonai_desktop_core::supervisor::{self, Engine, StartError};
-use praisonai_desktop_core::venv_resolve::{venv_root_for_python, RealFs};
+use praisonai_desktop_core::venv_resolve::{spawn_env, venv_root_for_python, RealFs};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
@@ -310,11 +310,31 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
         Some(b) => std::env::set_var("PRAISONAI_APP_BUNDLE", b),
         None => std::env::remove_var("PRAISONAI_APP_BUNDLE"),
     }
+    // Resolve the environment the engine actually spawns with, rather than
+    // inheriting the shell's. An exported PYTHONHOME or PYTHONPATH would
+    // otherwise redirect the engine's stdlib or site-packages away from the
+    // venv the resolver just proved. Collect *after* setting
+    // PRAISONAI_APP_BUNDLE above so it survives the `env_clear` in `start`.
+    //
+    // `vars_os`, not `vars`: `vars` panics on any non-Unicode key or value,
+    // and with `panic = "abort"` in release that would take the whole app down
+    // before the engine ever started -- a single stray byte in the inherited
+    // environment (a locale-encoded value, a foreign tool's export) would abort
+    // startup. `spawn_env` only handles `String` anyway, so drop undecodable
+    // entries rather than aborting; a variable Python could not have received
+    // as UTF-8 is no loss.
+    let inherited: std::collections::BTreeMap<String, String> = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
+    let spawn = venv_root_for_python(&python, &RealFs, Platform::current())
+        .map(|layout| spawn_env(&layout, &inherited, Platform::current()))
+        .unwrap_or(inherited);
     match supervisor::start(
         &python.display().to_string(),
         &layout.script.display().to_string(),
         Duration::from_secs(30),
         &shell_version,
+        &spawn,
     ) {
         Ok(engine) => {
             let port = engine.port;

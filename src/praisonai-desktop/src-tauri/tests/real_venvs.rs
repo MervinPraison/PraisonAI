@@ -79,3 +79,55 @@ fn every_real_venv_resolves_to_itself_and_never_to_a_sibling() {
     seen_roots.dedup();
     assert_eq!(before, seen_roots.len(), "two interpreters collapsed onto one venv root");
 }
+
+/// A poisoned PYTHONHOME/PYTHONPATH in the inherited environment must not reach
+/// the spawned engine. `supervisor::start` applies the resolved environment
+/// verbatim after `env_clear`, so what `spawn_env` strips is what the child
+/// never sees. Before the fix the whole defence was dead code -- every caller
+/// was a test -- and an exported PYTHONHOME redirected the engine's stdlib.
+///
+/// Driven through a real interpreter so it observes the child's *actual*
+/// environment, not the map in isolation. Skips when no venv is present.
+#[test]
+fn a_poisoned_pythonhome_never_reaches_the_spawned_child() {
+    let Some(interpreter) = candidate_interpreters().into_iter().next() else {
+        eprintln!("no venvs on this machine; skipping");
+        return;
+    };
+
+    let layout = venv_root_for_python(&interpreter, &RealFs, Platform::current())
+        .expect("a real venv resolves");
+
+    // Exactly the shape the audit describes: the vars a shell might export that
+    // would point the engine at another interpreter.
+    let inherited = BTreeMap::from([
+        ("PYTHONHOME".to_string(), "/nonexistent".to_string()),
+        ("PYTHONPATH".to_string(), "/some/other/venv/site-packages".to_string()),
+    ]);
+    let spawn = spawn_env(&layout, &inherited, Platform::current());
+
+    // The map `supervisor::start` applies must have dropped both.
+    assert!(!spawn.contains_key("PYTHONHOME"), "PYTHONHOME survived into the spawn env");
+    assert!(!spawn.contains_key("PYTHONPATH"), "PYTHONPATH survived into the spawn env");
+
+    // And prove it against a real process: run the resolved interpreter with the
+    // resolved environment (the same `env_clear` + `envs` that `start` does) and
+    // let Python report what it actually inherited.
+    let output = std::process::Command::new(&interpreter)
+        .arg("-c")
+        .arg("import os; print(os.environ.get('PYTHONHOME','')); print(os.environ.get('PYTHONPATH',''))")
+        .env_clear()
+        .envs(&spawn)
+        .output()
+        .expect("the resolved interpreter runs");
+
+    assert!(
+        output.status.success(),
+        "interpreter did not start under the resolved env: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let seen = String::from_utf8_lossy(&output.stdout);
+    let mut lines = seen.lines();
+    assert_eq!(lines.next().unwrap_or("").trim(), "", "the child inherited a poisoned PYTHONHOME");
+    assert_eq!(lines.next().unwrap_or("").trim(), "", "the child inherited a poisoned PYTHONPATH");
+}
