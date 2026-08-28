@@ -28,29 +28,33 @@ const build = async () => {
   const secrets = createFakeSecrets();
   const store = createSettingsStore(SETTING_DEFS, storage, secrets);
   await store.load();
-  return { store, settings: facadeFor(store, secrets), http: createFakeHttp(), storage };
+  // A RunPersistence that records nothing: these cases are about WHICH
+  // engines are offered, not about what a turn writes.
+  const persistence = { async record() { return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 }; } };
+  return { store, settings: facadeFor(store, secrets), http: createFakeHttp(), storage, persistence };
 };
 
 test("the remote engine is always offered, because it needs nothing injected", async () => {
-  const { settings, http } = await build();
-  const ids = enginesFor({ settings, http }).map((c) => c.id);
+  const { settings, http, persistence } = await build();
+  const ids = enginesFor({ settings, http, persistence }).map((c) => c.id);
   assert.deepEqual(ids, [ENGINE_REMOTE_HTTP]);
 });
 
 test("the in-process engine is omitted when no factory is supplied", async () => {
   // A picker listing a choice that cannot work is a support ticket. praisonai
   // is not a dependency yet -- issue #4437 -- so offering it would be a lie.
-  const { settings, http } = await build();
-  assert.equal(enginesFor({ settings, http }).some((c) => c.id === ENGINE_PRAISONAI_TS), false);
+  const { settings, http, persistence } = await build();
+  assert.equal(enginesFor({ settings, http, persistence }).some((c) => c.id === ENGINE_PRAISONAI_TS), false);
 });
 
 test("the in-process engine appears once a factory is supplied", async () => {
   // The pair: without it, "never offer it" would satisfy the test above and
   // the engine could never be selected at all.
-  const { settings, http } = await build();
+  const { settings, http, persistence } = await build();
   const choices = enginesFor({
     settings,
     http,
+      persistence,
     createInProcess: () => createScriptedEngine({ id: ENGINE_PRAISONAI_TS, script: SCRIPTS.happy }),
   });
   assert.deepEqual(choices.map((c) => c.id), [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS]);
@@ -58,8 +62,8 @@ test("the in-process engine appears once a factory is supplied", async () => {
 
 test("every offered engine actually constructs", async () => {
   // The registry's whole job. An id that cannot be built is worse than absent.
-  const { settings, http } = await build();
-  for (const choice of enginesFor({ settings, http })) {
+  const { settings, http, persistence } = await build();
+  for (const choice of enginesFor({ settings, http, persistence })) {
     const engine = await choice.create();
     assert.equal(engine.id, choice.id, "an engine must report the id it is registered under");
     await engine.dispose();
@@ -69,9 +73,9 @@ test("every offered engine actually constructs", async () => {
 test("the engine address comes from settings and loses a trailing slash", async () => {
   // `${baseUrl}/v1/run` against "http://host/" produces a double slash, which
   // some servers 404 and others silently redirect -- losing the POST body.
-  const { store, settings, http } = await build();
+  const { store, settings, http, persistence } = await build();
   await store.set("baseUrl", "http://example.test:9000///");
-  const engine = await enginesFor({ settings, http })[0]!.create();
+  const engine = await enginesFor({ settings, http, persistence })[0]!.create();
   assert.ok(engine);
   await engine.dispose();
 });

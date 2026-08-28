@@ -53,11 +53,25 @@ export interface WebShell extends ShellPort {
   pressBack(): boolean;
 }
 
+/** The keyboard's height right now, from the only browser API that reports one.
+ *  Clamped at 0: overscroll can make the gap briefly negative, and a negative
+ *  height would push the composer off the bottom of the screen. */
+export function readKeyboardHeight(view: Window): number {
+  const viewport = view.visualViewport;
+  if (viewport === null || viewport === undefined) return 0;
+  return Math.max(0, view.innerHeight - viewport.height - viewport.offsetTop);
+}
+
 export function createWebShell(view: Window = window): WebShell {
   const root = view.document.documentElement;
 
   let insets = readInsets(root, view);
-  let keyboardHeightPx = 0;
+  // SEEDED, not just declared. The property was added so a component mounting
+  // while the keyboard is already up -- a warm resume, a hardware or floating
+  // keyboard -- lays out correctly on its FIRST frame. Starting at 0 and
+  // waiting for an event reproduces exactly the bug it was added to fix: one
+  // frame at the wrong height, then a jump.
+  let keyboardHeightPx = readKeyboardHeight(view);
 
   const insetSubs = new Set<(i: SafeAreaInsets) => void>();
   const keyboardSubs = new Set<(px: number) => void>();
