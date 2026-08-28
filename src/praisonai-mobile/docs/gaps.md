@@ -344,6 +344,49 @@ It also used to omit **route→view dispatch**, which the body of this file list
 as open and which is still open; dropping it from the closing line implied it
 had landed.
 
+## The publish gate is wired and unreachable
+
+`core/src/pacing/publish-gate.ts` is a verbatim port of the desktop's
+stream-pacing, with two constants tightened deliberately for mobile
+(`MAX_HELD_CHARS = 96`, `UNPAINTED_REOPEN_MS = 200`). It IS called --
+`controller.ts` has `if (frames.length > 0 && gate(streamed)) publish()` -- but
+in the shipped pipeline that condition is almost never true, so neither
+constant affects anything.
+
+The reason is the coalescer's flush tick, added to fix answers arriving in one
+lump. The tick drains the coalescer every `maxDelayMs`, so by the time a delta
+arrives `push()` usually returns `[]` and the gate is not consulted at all. The
+tick's own publish is deliberately ungated, which is correct -- that frame
+exists precisely because nothing has painted recently.
+
+Measured by driving the real controller with a virtual clock and counting
+whether the gate was consulted even once (it calls `requestFrame` on its first
+invocation, so the count is exact rather than inferred):
+
+| tokens/sec | publishes for 2000 tokens | gate consulted |
+|-----------:|--------------------------:|:---------------|
+|         20 |                      2004 | no             |
+|         60 |                      2004 | no             |
+|        150 |                       670 | no             |
+|        400 |                       289 | no             |
+|       1600 |                        80 | no             |
+|       3200 |                        42 | YES            |
+|       8000 |                        42 | YES            |
+
+The threshold is where 256 bytes land inside a single 16ms window. Real model
+streaming is 20-150 tokens/sec, so the gate is unreachable in practice.
+
+This is not currently a defect: paints stay bounded by time (20-38/sec
+observed), which is the property that matters, and the per-publish view work is
+under 9% of a frame even in the worst measured case. It is recorded because
+two things follow from it. There is no backpressure path at all -- the gate is
+the mechanism that notices the renderer cannot keep up, and it never runs. And
+a module with its own tuned constants that never executes will read as load-
+bearing to the next person who changes pacing.
+
+Fix it by wiring the tick's publish through the gate, or delete the module and
+its constants. Do not leave it looking wired.
+
 Four settings are declared and not yet consumed by anything: `model`,
 `temperature`, `showReasoning` and `showDiagnostics`. That is expected — they
 were written for the settings screen and the engine parameterisation that do
