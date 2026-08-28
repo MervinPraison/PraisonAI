@@ -147,6 +147,32 @@ export function createRunController(deps: ControllerDeps): RunController {
     const abort = new AbortController();
     live = { runId, abort };
 
+    // The TURN is per turn, not per app -- and this is the same class of defect
+    // as the approval table below, found the same way one round later.
+    //
+    // `turn` was only ever reset by a `start` event. So a turn that produces
+    // NO start -- which is every pre-first-token failure: 401, 403, offline, a
+    // refused connection, a wrong baseUrl -- met a state left `ended` by the
+    // previous turn. `apply()` dropped the error as `wrong_msg_id` or
+    // `after_terminal`, and `finish()` returned the PREVIOUS turn untouched
+    // because its outcome was already set.
+    //
+    // Measured: turn 1 answers, turn 2 gets a 401, and the screen still shows
+    // turn 1's answer with turn 1's `end` outcome. The user types a second
+    // question, taps Send, the composer clears -- and nothing happens. No
+    // error, no retry, no auth prompt, not even a hint that a run was
+    // attempted. Silent, repeatable, and permanent. The default baseUrl is
+    // 127.0.0.1:8765, so "engine unreachable" is the common case, not an
+    // exotic one.
+    //
+    // Two amplifiers made it worse: the dropped error landed in `carry`, so
+    // the next SUCCESSFUL turn inherited a "1 event could not be read" row
+    // blaming itself for its predecessor; and because `send()` publishes
+    // before `runTurn` begins, a stale turn was painted into what the user
+    // believed was a new conversation.
+    turn = initialTurn;
+    publish();
+
     // The approval table is per TURN, not per app.
     //
     // It was initialised once with the controller and only ever appended to,
@@ -249,15 +275,27 @@ export function createRunController(deps: ControllerDeps): RunController {
         if (frames.length > 0 && gate(streamed)) publish();
       }
     } catch (error) {
-      // A dying stream is normal on a phone. The text already on screen must
-      // survive it, and the failure must be distinguishable from an engine
-      // error so the UI can offer retry for one and not the other.
-      turn = apply(turn, {
-        type: "error",
-        msgId: turn.msgId ?? "unknown",
-        kind: "transport",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      // A stream that dies BECAUSE WE ABORTED IT is not a failure.
+      //
+      // This catch mapped every thrown iterator to `transport`, without asking
+      // whether the abort was ours. Tapping Stop cancels the engine, aborts
+      // the reader, and the real `fetch` then errors the body stream -- so the
+      // throw landed here and the deliberately-stopped turn rendered as a red
+      // "Connection lost" with a Retry button, and announced "Connection lost"
+      // to a screen reader. The `cancelled` outcome and its "Stopped" notice
+      // were reachable only if the engine's goodbye frame won a race against
+      // our own abort, which it usually loses.
+      turn = abort.signal.aborted
+        ? apply(turn, { type: "cancelled", msgId: turn.msgId ?? "unknown", runId })
+        : // A dying stream is normal on a phone. The text already on screen
+          // must survive it, and the failure must be distinguishable from an
+          // engine error so the UI can offer retry for one and not the other.
+          apply(turn, {
+            type: "error",
+            msgId: turn.msgId ?? "unknown",
+            kind: "transport",
+            message: error instanceof Error ? error.message : String(error),
+          });
     } finally {
       // First: a tick firing after the turn ended would paint into a
       // settled transcript.
@@ -291,6 +329,15 @@ export function createRunController(deps: ControllerDeps): RunController {
   return {
     setChat(next: string) {
       chatId = next;
+      // A different conversation cannot inherit the last one's transcript.
+      // Without this, `send()` publishes the stale turn before the new run
+      // starts, so New chat cleared the screen only until the user's next
+      // message -- and the previous chat's PENDING APPROVAL reappeared under
+      // it. Measured: a prompt to run `rm -rf /`, abandoned by starting a new
+      // chat, came back with live buttons, and Allow posted the decision to
+      // the engine. `setChat` had already cleared the approvals table, so the
+      // row found no entry and rendered itself actionable.
+      turn = initialTurn;
       // A different conversation cannot inherit the last one's prompts. The
       // next turn would clear these anyway; this covers the window between
       // switching chats and sending, where the UI renders whatever is here.

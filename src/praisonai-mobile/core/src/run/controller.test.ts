@@ -989,3 +989,220 @@ test("an ACCEPTED stop is still idempotent", async () => {
   release();
   await sent;
 });
+
+// ---- the turn belongs to the turn, not to the app ---------------------------
+
+/** An engine whose first run answers and whose later runs fail BEFORE `start`
+ *  -- which is every pre-first-token failure: 401, 403, offline, a refused
+ *  connection, a wrong baseUrl. */
+function answerThenFail(kind: "auth" | "transport", message: string) {
+  let n = 0;
+  return {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: true, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }) {
+      n += 1;
+      if (n === 1) {
+        yield { type: "start", msgId: "m1", runId: req.runId };
+        yield { type: "delta", msgId: "m1", text: "first answer" };
+        yield { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+        return;
+      }
+      yield { type: "error", msgId: `m${n}`, kind, message };
+    },
+    async decide() { return false; },
+    async cancel() { return false; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+}
+
+test("a failure on the SECOND turn is reported, not silently swallowed", async () => {
+  // `turn` was only ever reset by a `start` event, so a turn producing no
+  // start met a state left `ended` by its predecessor: the error was dropped
+  // as stale and `finish()` returned the PREVIOUS turn untouched.
+  //
+  // The user types a second question, taps Send, the composer clears -- and
+  // nothing happens. The old answer stays on screen. No error, no retry, no
+  // auth prompt, not even a hint a run was attempted. The default baseUrl is
+  // 127.0.0.1:8765, so "engine unreachable" is the common case here.
+  const views: RunView[] = [];
+  const controller = createRunController({
+    engine: answerThenFail("auth", "engine responded 401"),
+    time: createFakeTime(),
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("one");
+  assert.equal(views.at(-1)?.turn.text, "first answer");
+
+  await controller.send("two");
+  const second = views.at(-1);
+  assert.equal(second?.turn.text, "", "the previous answer must not still be on screen");
+  assert.equal(second?.turn.outcome?.type, "error", "the failure must be reported");
+  assert.equal(
+    second?.turn.outcome?.type === "error" ? second.turn.outcome.kind : null,
+    "auth",
+    "and with its real kind, so the UI can offer credentials rather than retry",
+  );
+  assert.deepEqual(second?.turn.dropped, [], "a real failure is not an unreadable frame");
+});
+
+test("a clean turn after a failed one inherits nothing from it", async () => {
+  // The other direction of the same reset, and the amplifier: the dropped
+  // error landed in `carry`, so the next SUCCESSFUL turn rendered a "1 event
+  // could not be read" row blaming itself for its predecessor.
+  const views: RunView[] = [];
+  let n = 0;
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: true, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }) {
+      n += 1;
+      if (n === 1) {
+        yield { type: "error", msgId: "m1", kind: "transport", message: "network down" };
+        return;
+      }
+      yield { type: "start", msgId: `m${n}`, runId: req.runId };
+      yield { type: "delta", msgId: `m${n}`, text: "second answer" };
+      yield { type: "end", msgId: `m${n}`, userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+    async decide() { return false; },
+    async cancel() { return false; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: (v) => views.push(v) });
+  await controller.send("one");
+  await controller.send("two");
+
+  const second = views.at(-1);
+  assert.equal(second?.turn.text, "second answer");
+  assert.equal(second?.turn.outcome?.type, "end");
+  assert.deepEqual(second?.turn.dropped, [], "a clean turn must not inherit the last one's failure");
+});
+
+test("switching chats clears the transcript, so nothing resurrects on the next send", async () => {
+  // `send()` publishes before `runTurn` starts, so a stale turn was painted
+  // into what the user believed was a new conversation. With a PENDING
+  // APPROVAL in it, the previous chat's prompt reappeared with live buttons --
+  // `setChat` had already cleared the approvals table, so the row found no
+  // entry and rendered itself actionable, and Allow posted to the engine.
+  //
+  // The scenario is a user abandoning a chat BECAUSE it asked to run something
+  // dangerous, and being asked again under an unrelated question.
+  const views: RunView[] = [];
+  const controller = createRunController({
+    engine: createScriptedEngine({
+      id: "s",
+      script: [
+        { type: "start", msgId: "m1", runId: "r1" },
+        { type: "tool_call", msgId: "m1", callId: "c1", name: "bash", args: { command: "rm -rf /" } },
+        { type: "approval_request", msgId: "m1", approvalId: "a1", callId: "c1", name: "bash", args: { command: "rm -rf /" } },
+      ],
+      approvals: ["a1"],
+    }),
+    time: createFakeTime(),
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("do something");
+  assert.ok((views.at(-1)?.turn.approvals.length ?? 0) > 0, "the approval should be outstanding");
+
+  controller.setChat("a-different-chat");
+  const afterSwitch = controller.view();
+  assert.deepEqual(afterSwitch.turn.approvals, [], "a new chat must not inherit a pending approval");
+  assert.equal(afterSwitch.turn.text, "", "nor the previous conversation's text");
+});
+
+test("a turn the USER stopped reads as cancelled, not as a connection failure", async () => {
+  // The catch mapped every thrown iterator to `transport` without asking
+  // whether the abort was ours. Stop cancels the engine, aborts the reader,
+  // and a real fetch then errors the body stream -- so the deliberately
+  // stopped turn rendered as a red "Connection lost" WITH A RETRY BUTTON, and
+  // announced "Connection lost" to a screen reader.
+  //
+  // The `cancelled` outcome was reachable only if the engine's goodbye frame
+  // won a race against our own abort, which it usually loses.
+  const views: RunView[] = [];
+  let release: () => void = () => {};
+
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }, signal: AbortSignal) {
+      yield { type: "start", msgId: "m1", runId: req.runId };
+      yield { type: "delta", msgId: "m1", text: "the answer so far" };
+      // Wait for OUR abort specifically, so the test is not racing it. A real
+      // fetch behaves this way: the body stream errors when the reader is
+      // aborted mid-response.
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) return resolve();
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("aborted");
+    },
+    async decide() { return false; },
+    async cancel() { release(); return true; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: (v) => views.push(v) });
+  const sent = controller.send("go");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  await controller.stop();
+  await sent;
+
+  const final = views.at(-1);
+  assert.equal(final?.turn.text, "the answer so far", "the text so far must survive a stop");
+  assert.equal(
+    final?.turn.outcome?.type,
+    "cancelled",
+    "a stop the user asked for must not render as a transport error with Retry",
+  );
+});
+
+test("a stream that dies on its OWN is still a transport error", async () => {
+  // The pair. Treating every throw as cancelled would hide real network
+  // failures behind a calm "Stopped" and remove the retry the user needs.
+  const views: RunView[] = [];
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }) {
+      yield { type: "start", msgId: "m1", runId: req.runId };
+      yield { type: "delta", msgId: "m1", text: "partial" };
+      throw new Error("socket reset by peer");
+    },
+    async decide() { return false; },
+    async cancel() { return false; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: (v) => views.push(v) });
+  await controller.send("go");
+
+  const final = views.at(-1);
+  assert.equal(final?.turn.text, "partial");
+  assert.equal(final?.turn.outcome?.type, "error");
+  assert.equal(
+    final?.turn.outcome?.type === "error" ? final.turn.outcome.kind : null,
+    "transport",
+    "a genuine network failure must still offer retry",
+  );
+});
