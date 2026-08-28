@@ -137,3 +137,32 @@ test("the screen change is announced, so it is not silent even if focus is quiet
   assert.equal(screenAnnouncement(en, chats), "Chats screen");
   assert.notEqual(screenAnnouncement(en, settings), screenAnnouncement(en, chats));
 });
+
+test("focus never lands on a control that is itself being disabled", () => {
+  // `find((id) => !disabledIds.includes(id))` -> `find(() => true)` survived:
+  // the survivor search returns the FIRST enabled id without checking whether
+  // it is in the set being disabled. A screen-reader user answering an
+  // approval lands on the dead Allow button they just pressed -- and VoiceOver
+  // drops focus on a disabled element back to the top of the screen, so they
+  // lose their place in the conversation entirely.
+  const target = focusAfterDisable({
+    focusedId: "allow",
+    disabledIds: ["allow", "always", "deny"],
+    enabledIds: ["allow", "always", "deny", "composer"],
+    containerId: "approval:a1",
+  });
+  assert.deepEqual(target, { kind: "element", id: "composer" });
+});
+
+test("focus stays put when the focused control is NOT being disabled", () => {
+  // The pair, and the rule the function's header states: moving focus the user
+  // did not ask to move is its own bug. An approval resolving in the
+  // background must not steal the caret out of the composer.
+  const target = focusAfterDisable({
+    focusedId: "composer",
+    disabledIds: ["allow", "always", "deny"],
+    enabledIds: ["composer"],
+    containerId: "approval:a1",
+  });
+  assert.deepEqual(target, { kind: "none" });
+});
