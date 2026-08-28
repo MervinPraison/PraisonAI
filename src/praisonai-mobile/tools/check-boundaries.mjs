@@ -19,6 +19,25 @@ const config = JSON.parse(readFileSync(join(here, "boundaries.json"), "utf8"));
 
 const norm = (p) => p.split(sep).join("/");
 
+// A new top-level source directory omitted from both root lists is never
+// walked, so it could import across every seam while the run still printed
+// "no violations". Extracting the walk turned governedRoots back into a bare
+// list of directories to walk, which silently dropped this guard -- the exact
+// failure boundaries.json's own comment warns about: a rule that stops
+// covering new code while reporting a clean pass is worse than no rule.
+const ungoverned = ungovernedRootsIn(root, config);
+if (ungoverned.length > 0) {
+  for (const { name, count } of ungoverned) {
+    console.error(
+      `boundaries: [ungoverned-root] ${name}/ holds ${count} source file(s) that no layer rule covers.\n` +
+        `    Add "${name}" to governedRoots in tools/boundaries.json (with a matching entry in\n` +
+        `    "layers"), or to ungovernedRoots if it is deliberately exempt.`,
+    );
+  }
+  console.error(`\nboundaries: ${ungoverned.length} ungoverned top-level director(y|ies)`);
+  process.exit(1);
+}
+
 const files = sourceFilesUnder(root, config.governedRoots);
 
 if (files.length === 0) {
