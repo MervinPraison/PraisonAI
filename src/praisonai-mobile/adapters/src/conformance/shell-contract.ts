@@ -49,6 +49,12 @@ export interface ShellHarness {
   emitLifecycle(phase: LifecyclePhase): void;
   /** Live subscriber count, so a leak is provable rather than inferred. */
   listenerCount(): number;
+  /** The URLs `openExternal` actually handed the OS, in order. A shell can
+   *  validate one string and forward another, and `doesNotReject` cannot see
+   *  the difference -- so the harness surfaces the forwarded value and the
+   *  contract reads it. Every real shell can supply this; it is required rather
+   *  than optional so a shell cannot opt out of being checked. */
+  forwarded(): readonly string[];
 }
 
 const PHONE: SafeAreaInsets = { top: 47, right: 0, bottom: 34, left: 0 };
@@ -467,16 +473,30 @@ export function describeShellContract(
   test(`${name}: a padded URL reaches the OS trimmed, or not at all`, async () => {
     // `url.trim()` -> `url` survived: the allowlist still refuses a padded
     // `javascript:`, but a URL that passes validation in one form and is handed
-    // to the OS in another is the shape of a scheme-confusion bypass. Nothing
-    // asserted what the shell actually forwarded.
-    const { shell } = await make();
+    // to the OS in another is the shape of a scheme-confusion bypass. And
+    // `doesNotReject` only proves the call did not throw, never that it did the
+    // right thing -- for a security boundary that gap is the whole question. So
+    // this reads what the shell FORWARDED, not merely whether it settled.
+    const harness = await make();
+    const { shell } = harness;
     await assert.doesNotReject(() => shell.openExternal("  https://ok.example  "));
+    assert.deepEqual(
+      harness.forwarded(),
+      ["https://ok.example"],
+      "the OS must receive the trimmed URL the allowlist actually approved, not the padded input",
+    );
     // And padding must not smuggle a refused scheme past the allowlist.
     await assert.rejects(
       () => shell.openExternal("  javascript:alert(1)  "),
       "whitespace must not launder a refused scheme",
     );
     await assert.rejects(() => shell.openExternal("\tdata:text/html,<script>x</script>"));
+    // A refused scheme must never reach the OS, however it was padded.
+    assert.deepEqual(
+      harness.forwarded(),
+      ["https://ok.example"],
+      "a refused scheme was forwarded to the OS despite the rejection",
+    );
   });
 
 }

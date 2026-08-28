@@ -312,6 +312,7 @@ function fakeHarness(): ShellHarness {
     emitKeyboardHeight: (px) => fake.setKeyboardHeight(px),
     emitLifecycle: (phase) => fake.setLifecycle(phase),
     listenerCount: () => fake.listenerCount(),
+    forwarded: () => fake.opened,
   };
 }
 
@@ -337,6 +338,7 @@ function tauriHarness(): ShellHarness {
     emitKeyboardHeight: (px) => probe.emit("keyboard-height", px),
     emitLifecycle: (phase) => probe.emit("lifecycle", phase),
     listenerCount: () => shell.listenerCount(),
+    forwarded: () => probe.opened,
   };
 }
 
@@ -357,6 +359,7 @@ function webHarness(): ShellHarness {
       else fake.setHidden(false);
     },
     listenerCount: () => shell.listenerCount(),
+    forwarded: () => fake.opened,
   };
 }
 

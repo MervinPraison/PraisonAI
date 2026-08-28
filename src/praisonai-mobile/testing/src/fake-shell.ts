@@ -103,7 +103,10 @@ export function createFakeShell(initial: SafeAreaInsets = NO_INSETS): FakeShell 
       if (!isOpenableExternally(url)) {
         throw new TypeError(`refusing to open ${url.split(":")[0] ?? ""}: externally`);
       }
-      opened.push(url);
+      // Record the trimmed form the allowlist actually validated, matching the
+      // real shells: the fake is the reference the whole suite runs against, so
+      // a fake that forwarded padded input would let the trim regress unseen.
+      opened.push(url.trim());
     },
 
     // ---- test controls ----
