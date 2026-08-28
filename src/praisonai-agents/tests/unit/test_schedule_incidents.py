@@ -37,9 +37,31 @@ class TestErrorSignature:
     def test_different_cause_different_signature(self):
         assert error_signature("429 rate limit") != error_signature("500 server error")
 
-    def test_normalise_strips_numbers_and_hex(self):
-        assert normalise_error("Error at line 42: 0xDEADBEEF") == normalise_error(
-            "Error at line 99: 0xCAFEBABE"
+    def test_normalise_strips_hex_and_volatile_ids(self):
+        # Hex blobs / uuids / long digit runs (request ids, timestamps, pids)
+        # are volatile and must collapse so a retry does not re-alert.
+        assert normalise_error("boom 0xDEADBEEF") == normalise_error("boom 0xCAFEBABE")
+        assert normalise_error("failed at 1700000001") == normalise_error(
+            "failed at 1700009999"
+        )
+        assert normalise_error("worker7 crashed") == normalise_error("worker3 crashed")
+
+    def test_distinct_numeric_codes_keep_distinct_signature(self):
+        # A short standalone number is a meaningful *category* (HTTP status,
+        # error/exit code): different codes must NOT collapse, else the promised
+        # re-alert on a changed failure is suppressed (regression: Greptile P1).
+        assert error_signature("HTTP 404 not found") != error_signature(
+            "HTTP 500 server error"
+        )
+        assert error_signature("error code 404") != error_signature("error code 500")
+        assert error_signature("exited with code 12") != error_signature(
+            "exited with code 34"
+        )
+
+    def test_same_code_changing_id_still_groups(self):
+        # Same category code with a changing request id stays one incident.
+        assert error_signature("429 rate limit req abc12345678") == error_signature(
+            "429 rate limit req def87654321"
         )
 
     def test_signature_is_hex_sha256(self):
@@ -80,6 +102,17 @@ class TestIncidentTrackerDefault:
         assert tracker.observe(_failed("429 rate limit"), state) is not None
         assert tracker.observe(_failed("429 rate limit"), state) is None
         second = tracker.observe(_failed("500 server error"), state)
+        assert second is not None
+        assert second.state == "alerted"
+
+    def test_changed_status_code_re_alerts(self):
+        # Failures differing only by a meaningful numeric code (404 → 500) must
+        # be treated as distinct incidents and re-alert (Greptile P1 regression).
+        tracker = IncidentTracker()
+        state = {}
+        assert tracker.observe(_failed("HTTP 404 not found"), state) is not None
+        assert tracker.observe(_failed("HTTP 404 not found"), state) is None
+        second = tracker.observe(_failed("HTTP 500 server error"), state)
         assert second is not None
         assert second.state == "alerted"
 

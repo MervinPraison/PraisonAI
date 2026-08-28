@@ -34,8 +34,21 @@ from typing import Any, Dict, Literal, Optional
 # Normalise volatile tokens out of an error so "429 rate limit (req id abc)" and
 # "429 rate limit (req id xyz)" collapse to the *same* signature — otherwise
 # every retry mints a "new" incident and re-alerts (the fatigue we prevent).
+#
+# We must NOT blanket-delete every digit run: a short number is frequently the
+# *category* of the failure (HTTP status 404 vs 500, error/exit code 12 vs 34).
+# Dropping it would collapse genuinely different failures onto one signature and
+# suppress the required re-alert (Greptile P1). So we strip only clearly volatile
+# numbers — long digit runs (timestamps, epochs, pids, ports, request ids) — and
+# any number glued to letters (``req42``, ``id7f`` fragments) while KEEPING short
+# standalone codes (1–3 digits) that carry meaning.
 _HEX_RE = re.compile(r"0x[0-9a-fA-F]+|\b[0-9a-fA-F]{8,}\b")
-_NUM_RE = re.compile(r"\d+")
+# Digits fused to an adjacent letter/underscore (e.g. "worker3", "id42") are ids,
+# not categories — drop the whole alnum run so it can't leak a volatile number.
+_ALNUM_ID_RE = re.compile(r"\b(?=\w*\d)(?=\w*[a-z])\w+\b")
+# Long standalone digit runs (>= 4) are volatile (timestamps, epochs, pids); a
+# short run (1–3 digits) is a meaningful code and is preserved verbatim.
+_LONG_NUM_RE = re.compile(r"\b\d{4,}\b")
 _WS_RE = re.compile(r"\s+")
 _SIGNATURE_PREFIX_CHARS = 200
 
@@ -43,14 +56,18 @@ _SIGNATURE_PREFIX_CHARS = 200
 def normalise_error(error: str) -> str:
     """Return a stable, comparable form of an error message.
 
-    Lower-cases, strips volatile tokens (hex ids / UUID-ish blobs and bare
-    numbers such as line numbers, timestamps, request ids) and collapses
-    whitespace, then keeps a bounded prefix. Two failures of the *same* cause
-    normalise to the same string even when their message carries a changing id.
+    Lower-cases and strips *volatile* tokens — hex ids / UUID-ish blobs, long
+    digit runs (timestamps, epochs, pids, request ids) and numbers fused into
+    identifier-like words — then collapses whitespace and keeps a bounded
+    prefix. Short standalone numeric codes (HTTP status, error/exit codes) are
+    **preserved** so genuinely different failures (``404`` vs ``500``) keep
+    distinct signatures and re-alert, while a changing request id does not mint
+    a new incident every retry.
     """
     text = (error or "").strip().lower()
     text = _HEX_RE.sub("", text)
-    text = _NUM_RE.sub("", text)
+    text = _ALNUM_ID_RE.sub("", text)
+    text = _LONG_NUM_RE.sub("", text)
     text = _WS_RE.sub(" ", text).strip()
     return text[:_SIGNATURE_PREFIX_CHARS]
 
