@@ -147,6 +147,23 @@ export function createRunController(deps: ControllerDeps): RunController {
     const abort = new AbortController();
     live = { runId, abort };
 
+    // The chat this run belongs to, captured the instant it starts.
+    //
+    // `setChat` resets the shared `turn` so a switched-to conversation opens
+    // clean -- but a run already in flight keeps yielding, and its `catch` and
+    // `finally` still run AFTER the switch. Without this fence they applied
+    // `cancelled`/`error` to the new chat's freshly-reset `turn` and published
+    // it, so abandoning a conversation with New chat painted a red "Stopped"
+    // -- or, if the engine's cancel lost the race, the OLD answer -- into what
+    // the user believed was a fresh chat. The New chat handler fires `stop()`
+    // but does not await it, so it cannot be relied on to have finished first.
+    //
+    // A run may only touch the transcript while the controller is still on the
+    // chat it started in. `runId` distinguishes overlapping runs; `mine`
+    // distinguishes the run's chat from whichever one is now on screen.
+    const runChatId = chatId;
+    const mine = (): boolean => chatId === runChatId;
+
     // The TURN is per turn, not per app -- and this is the same class of defect
     // as the approval table below, found the same way one round later.
     //
@@ -206,6 +223,9 @@ export function createRunController(deps: ControllerDeps): RunController {
     // deliberately for mobile, never bound either -- the coalescer upstream
     // was already withholding more than that.
     const stopTicking = deps.time.every(maxDelayMs, () => {
+      // A tick that fires after the chat was switched must not paint this run
+      // into the new conversation. See `mine` above.
+      if (!mine()) return;
       // Refusals drain on the tick as well as per decoded event. When EVERY
       // frame is refused -- a proxy answering a stream with HTML, say --
       // nothing is ever yielded, so the loop body never runs and the only
@@ -243,6 +263,13 @@ export function createRunController(deps: ControllerDeps): RunController {
 
     try {
       for await (const event of deps.engine.run(request, abort.signal)) {
+        // The user switched chats while this run was still yielding. Its events
+        // belong to a conversation no longer on screen, so applying them would
+        // overwrite the new chat's transcript. The run is left to drain to its
+        // natural end (the queue and `live` are still settled in `finally`),
+        // but it may no longer touch what the user is looking at.
+        if (!mine()) continue;
+
         // The transcript is applied for EVERY event, always. Only the paint is
         // paced -- dropping an event to save a frame would lose content.
         turn = apply(turn, event);
@@ -285,34 +312,47 @@ export function createRunController(deps: ControllerDeps): RunController {
       // to a screen reader. The `cancelled` outcome and its "Stopped" notice
       // were reachable only if the engine's goodbye frame won a race against
       // our own abort, which it usually loses.
-      turn = abort.signal.aborted
-        ? apply(turn, { type: "cancelled", msgId: turn.msgId ?? "unknown", runId })
-        : // A dying stream is normal on a phone. The text already on screen
-          // must survive it, and the failure must be distinguishable from an
-          // engine error so the UI can offer retry for one and not the other.
-          apply(turn, {
-            type: "error",
-            msgId: turn.msgId ?? "unknown",
-            kind: "transport",
-            message: error instanceof Error ? error.message : String(error),
-          });
+      //
+      // `mine()` first: a run whose chat was switched away throws when its
+      // reader is aborted by the switch, and that throw must not stamp a
+      // `cancelled` (or `transport`) outcome onto the new conversation.
+      if (mine()) {
+        turn = abort.signal.aborted
+          ? apply(turn, { type: "cancelled", msgId: turn.msgId ?? "unknown", runId })
+          : // A dying stream is normal on a phone. The text already on screen
+            // must survive it, and the failure must be distinguishable from an
+            // engine error so the UI can offer retry for one and not the other.
+            apply(turn, {
+              type: "error",
+              msgId: turn.msgId ?? "unknown",
+              kind: "transport",
+              message: error instanceof Error ? error.message : String(error),
+            });
+      }
     } finally {
       // First: a tick firing after the turn ended would paint into a
       // settled transcript.
       stopTicking();
       live = null;
       coalescer.push({ kind: "end" }, deps.time.nowMs());
-      // A refusal can arrive beside the LAST frame, or while the stream was
-      // dying. Drained here rather than after the loop so it is reached on
-      // every path -- the first version of this sat at the end of the `catch`
-      // and therefore only ran when the turn had already failed.
-      turn = drainDrops(turn);
-      turn = finish(turn);
+      // The queue must drain whatever chat this run belonged to, so a follow-up
+      // is never stranded -- but the transcript it settles is the SWITCHED-TO
+      // chat's, not this run's. `finish`/`publish` only when the run still owns
+      // the screen; otherwise this run's EOF would `finish()` the new chat's
+      // fresh turn and publish a spurious "no output" error into it.
       queue = markIdle(queue);
-      // ALWAYS published, whatever the gate decided. The gate skips
-      // intermediate paints; skipping the last one leaves the answer truncated
-      // at whatever the penultimate frame happened to contain.
-      publish();
+      if (mine()) {
+        // A refusal can arrive beside the LAST frame, or while the stream was
+        // dying. Drained here rather than after the loop so it is reached on
+        // every path -- the first version of this sat at the end of the `catch`
+        // and therefore only ran when the turn had already failed.
+        turn = drainDrops(turn);
+        turn = finish(turn);
+        // ALWAYS published, whatever the gate decided. The gate skips
+        // intermediate paints; skipping the last one leaves the answer
+        // truncated at whatever the penultimate frame happened to contain.
+        publish();
+      }
     }
 
     await drain();

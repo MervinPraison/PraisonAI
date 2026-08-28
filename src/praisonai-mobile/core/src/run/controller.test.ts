@@ -1206,3 +1206,56 @@ test("a stream that dies on its OWN is still a transport error", async () => {
     "a genuine network failure must still offer retry",
   );
 });
+
+test("a run whose chat is switched away cannot repaint the new conversation", async () => {
+  // The New chat handler fires `stop()` WITHOUT awaiting it, then `setChat`,
+  // which resets the shared `turn`. The old run is still in flight: its reader
+  // aborts, its iterator throws, and its `catch`/`finally` run AFTER the
+  // switch. Without a fence they stamp `cancelled` (or, if cancel lost the
+  // race, the old answer) onto the fresh conversation and publish it -- so the
+  // user abandons a chat, lands in a clean one, and a red "Stopped" or the
+  // previous chat's content appears underneath what they type next.
+  //
+  // Built deliberately: the first run is held open until its OWN abort fires,
+  // exactly as a real fetch body errors when the reader is cancelled mid-run.
+  const views: RunView[] = [];
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }, signal: AbortSignal) {
+      yield { type: "start", msgId: "m1", runId: req.runId };
+      yield { type: "delta", msgId: "m1", text: "old chat answer" };
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) return resolve();
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("aborted");
+    },
+    async decide() { return false; },
+    async cancel() { return true; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: (v) => views.push(v) });
+  const sent = controller.send("first chat");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(controller.view().turn.text, "old chat answer", "the old run must genuinely be live");
+
+  // Exactly what the New chat handler does: stop (unawaited), then switch.
+  void controller.stop();
+  controller.setChat("a-fresh-chat");
+  await sent; // let the aborted run finish its catch/finally
+
+  const final = controller.view();
+  assert.equal(final.turn.text, "", "the old answer must not survive into the new chat");
+  assert.equal(
+    final.turn.outcome,
+    null,
+    "the aborted old run must not stamp a cancelled/error outcome onto the fresh chat",
+  );
+  assert.deepEqual(final.turn.approvals, [], "and no pending approval may resurrect either");
+});
