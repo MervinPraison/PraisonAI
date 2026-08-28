@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 
 import { applyOps, emptyNodes } from "./dom.ts";
 import type { Row } from "../../ui/src/transcript/view-model.ts";
+import { UNKNOWN } from "../../ui/src/format.ts";
 
 /** Records how text was set, which is the entire point of these tests. */
 function fakeDoc() {
@@ -134,4 +135,70 @@ test("an approval button carries the approvalId, never the callId", () => {
     assert.equal(b.dataset.approvalId, "ap-1");
     assert.notEqual(b.dataset.approvalId, "call-9");
   }
+});
+
+// ---- the last hop: what actually reaches the element ------------------------
+
+const toolRow = (over: Partial<Row & { kind: "tool" }> = {}): Row => ({
+  kind: "tool",
+  id: "tool:c1",
+  callId: "c1",
+  name: "rm",
+  args: {},
+  status: "failed",
+  tone: "failure",
+  output: "boom",
+  preview: "boom",
+  seconds: null,
+  durationLabel: "—",
+  durationKnown: false,
+  ...over,
+} as Row);
+
+test("a failed tool reaches the element as failed, not as ok", () => {
+  // The `ok`-is-the-only-signal chain is airtight through decode, the reducer
+  // and the view model -- every mutation aimed at those dies. Then dom.ts
+  // writes the attribute the CSS keys off, and hardcoding it to "ok" passed
+  // the whole suite. A failed tool would render with the success styling and
+  // nothing anywhere would fail.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ status: "failed" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  assert.ok(row, "the row element was not created");
+  assert.equal(row.dataset.status, "failed");
+});
+
+test("a successful tool reaches the element as ok", () => {
+  // The pair. Without it, hardcoding the attribute to "failed" passes above.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ status: "ok", tone: "success" }) },
+  ]);
+  assert.equal(created.find((el) => el.dataset.rowId === "tool:c1")?.dataset.status, "ok");
+});
+
+test("an unobserved duration renders as unknown, not as the label", () => {
+  // `seconds: null` means the engine never saw the call begin, which is not
+  // zero. Rendering the label regardless states a duration that was never
+  // measured -- and the invariant is written in a comment two lines above the
+  // code that had nothing checking it.
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ durationKnown: false, durationLabel: "3.2s" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  const meta = row?.children.find((c: any) => c.className === "tool-meta");
+  assert.equal(meta?._text, UNKNOWN, "an unmeasured duration must not render a number");
+});
+
+test("a measured duration renders its label", () => {
+  const { host, created } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    { kind: "insert", id: "tool:c1", index: 0, row: toolRow({ durationKnown: true, durationLabel: "3.2s" }) },
+  ]);
+  const row = created.find((el) => el.dataset.rowId === "tool:c1");
+  const meta = row?.children.find((c: any) => c.className === "tool-meta");
+  assert.equal(meta?._text, "3.2s");
 });
