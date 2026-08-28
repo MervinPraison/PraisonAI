@@ -51,8 +51,23 @@ export function createSseReader(): (chunk: string) => readonly SseFrame[] {
     // Normalise line endings once, here, rather than in every field match. A
     // proxy is free to rewrite them and the spec permits either.
     let text = chunk;
-    if (swallowLeadingLf && text.startsWith("\n")) text = text.slice(1);
-    swallowLeadingLf = text.endsWith("\r");
+    const swallowed = swallowLeadingLf && text.startsWith("\n");
+    if (swallowed) text = text.slice(1);
+    // A chunk that decodes to NOTHING must not touch the pending-CR state.
+    //
+    // Reading `"".endsWith("\r")` as false would drop the swallow flag, and a
+    // `\n` arriving in a LATER chunk would then survive as a false frame
+    // boundary -- splitting one CRLF frame into two malformed ones. The
+    // regression is only reachable with an empty chunk (or a bare `\n` chunk
+    // that the swallow consumed) landing between the `\r` and its `\n`, but a
+    // proxy chunking on the radio's whim produces exactly that.
+    //
+    // When there ARE characters, the trailing `\r` decides the flag as before.
+    // When there are none but we just swallowed the LF, the CRLF is complete,
+    // so the flag clears. When there are none and nothing was swallowed (a
+    // truly empty chunk), the flag is left as-is so the pending `\r` survives.
+    if (text.length > 0) swallowLeadingLf = text.endsWith("\r");
+    else if (swallowed) swallowLeadingLf = false;
     buffer += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
     const frames: SseFrame[] = [];

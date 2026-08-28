@@ -102,8 +102,19 @@ export function createRunController(deps: ControllerDeps): RunController {
   let queue: PromptQueue = emptyQueue;
   let publishes = 0;
 
-  /** The run currently in flight, if any. */
-  let live: { readonly runId: string; readonly abort: AbortController } | null = null;
+  /** The run currently in flight, if any.
+   *
+   *  `cancelling` memoises the in-flight `engine.cancel` for THIS run. Two
+   *  `stop()` calls can overlap -- the background -> dispose path fires one and
+   *  the user's Stop button another -- and both would read `aborted === false`
+   *  before either `engine.cancel` (a real network call) resolves. Each would
+   *  then issue its own cancel; an honest engine answers `false` for the
+   *  duplicate of an already-cancelled run, and the UI announced "the engine
+   *  did not accept the stop" for a stop that DID happen. Sharing the one
+   *  promise makes overlapping stops report the single true result. */
+  let live:
+    | { readonly runId: string; readonly abort: AbortController; cancelling?: Promise<boolean> }
+    | null = null;
 
   const view = (): RunView => ({ turn, approvals, queue, publishes });
 
@@ -323,13 +334,24 @@ export function createRunController(deps: ControllerDeps): RunController {
       // The background -> dispose path calls stop() twice by design.
       if (run.abort.signal.aborted) return true;
 
+      // A stop already in flight for THIS run gets that same promise, not a
+      // fresh cancel. The `aborted` guard above only catches a SECOND tap after
+      // the first completed; two stops that OVERLAP -- dispose and the Stop
+      // button, say -- both pass it before either `engine.cancel` (a network
+      // call) resolves, and without this each would issue its own cancel and
+      // the duplicate would be refused, reporting a real stop as rejected.
+      if (run.cancelling !== undefined) return run.cancelling;
+
       // Engine first, then the reader. The desktop found the ordering matters:
       // aborting the reader first can leave the engine generating into a socket
       // nobody is draining.
-      const stopped = await deps.engine.cancel(run.runId);
-      // `run`, never `live`: by now `live` may be null or a different turn.
-      run.abort.abort();
-      return stopped;
+      run.cancelling = (async () => {
+        const stopped = await deps.engine.cancel(run.runId);
+        // `run`, never `live`: by now `live` may be null or a different turn.
+        run.abort.abort();
+        return stopped;
+      })();
+      return run.cancelling;
     },
 
     async decide(approvalId, choice) {

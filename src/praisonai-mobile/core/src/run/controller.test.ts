@@ -724,6 +724,54 @@ test("stop with nothing running still reports false", async () => {
   assert.equal(await controller.stop(), false);
 });
 
+test("two OVERLAPPING stops share one cancel and both report success", async () => {
+  // The `aborted` guard is sequential: it only catches a second tap AFTER the
+  // first completed. Two stops that overlap -- the background -> dispose path
+  // and the user's Stop button -- both pass it before either `engine.cancel`
+  // (a real network call) resolves. Without coalescing, each issues its own
+  // cancel; an honest engine answers false for the duplicate of an
+  // already-cancelled run, so the second stop reported the real cancellation as
+  // refused and stopNotice announced "the engine did not accept the stop". The
+  // sequential idempotence test could not see this because it awaited the first
+  // stop before the second, letting the abort propagate in between.
+  const cancels: string[] = [];
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }) {
+      yield { type: "start", msgId: "m", runId: req.runId };
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+      yield { type: "end", msgId: "m", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+    async decide() { return false; },
+    async cancel(runId: string) {
+      cancels.push(runId);
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+      // Honest engine: the FIRST cancel of a run succeeds, a duplicate for the
+      // same already-cancelled run is refused.
+      return cancels.filter((id) => id === runId).length === 1;
+    },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({
+    engine,
+    time: createFakeTime(),
+    onPublish: () => {},
+  });
+
+  const sent = controller.send("one");
+  const [a, b] = await Promise.all([controller.stop(), controller.stop()]);
+  assert.equal(a, true, "the first overlapping stop must report success");
+  assert.equal(b, true, "the second overlapping stop must not read as a refusal");
+  assert.equal(cancels.length, 1, "overlapping stops must ask the engine only once");
+  await sent;
+});
+
 test("more than one refusal in a single drain all reach the transcript", async () => {
   // `drainDrops` accumulates: `next = noteDropped(next, ...)`. Restarting from
   // `state` each iteration keeps only the LAST refusal of a batch, and every
