@@ -195,3 +195,53 @@ test("the view is a snapshot, not a live reference", async () => {
   assert.notEqual(early, final);
   assert.notEqual(early.turn, final.turn, "each publish must carry its own turn object");
 });
+
+// ---- the coalescer's time bound --------------------------------------------
+
+test("a short answer paints while it streams, not in one lump at the end", async () => {
+  // The defect: the coalescer flushed only at maxBytes (256) or on a
+  // structured event, because nothing ever called tick(). So an answer shorter
+  // than 256 characters produced ZERO intermediate paints and appeared all at
+  // once when the run ended -- time-to-first-visible-token was the whole
+  // answer's latency, in an app whose stated first priority is streaming.
+  const deltas: RunEvent[] = Array.from({ length: 20 }, () => ({
+    type: "delta", msgId: "m1", text: "short ",
+  }));
+  const h = harness([
+    { type: "start", msgId: "m1", runId: "r1" },
+    ...deltas,
+    { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 },
+  ]);
+
+  const sent = h.controller.send("hi");
+  for (let i = 0; i < 40; i++) {
+    h.time.advance(20);
+    h.time.tick();
+    await Promise.resolve();
+  }
+  await sent;
+
+  // PARTIAL text is the signal, not "more than one paint". Without a tick the
+  // text goes straight from "" to the whole answer -- the `end` event flushes
+  // and publishes regardless, so a weaker assertion passes against the very
+  // defect this test exists for. That mistake was made here first.
+  const full = h.views.at(-1)?.turn.text ?? "";
+  const partial = h.views.filter((v) => v.turn.text !== "" && v.turn.text !== full);
+  assert.ok(partial.length > 0, `text never appeared partially: only ever "" or the whole ${full.length} chars`);
+});
+
+test("the tick stops when the turn ends", async () => {
+  // A tick firing after the turn settled would paint a frame into a finished
+  // transcript -- and worse, keep a timer alive for the app's lifetime.
+  const h = harness([
+    { type: "start", msgId: "m1", runId: "r1" },
+    { type: "delta", msgId: "m1", text: "hi" },
+    { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 },
+  ]);
+  await h.controller.send("go");
+
+  const before = h.views.length;
+  h.time.advance(1000);
+  h.time.tick();
+  assert.equal(h.views.length, before, "a tick after the turn must publish nothing");
+});

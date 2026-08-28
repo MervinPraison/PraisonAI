@@ -124,6 +124,28 @@ export function createRunController(deps: ControllerDeps): RunController {
     const gate = createPublishGate(deps.time.createScheduler());
     let streamed = 0;
 
+    // The coalescer's TIME bound, which was declared, documented and never
+    // connected -- TimePort.every's own comment calls it "the coalescer's
+    // flush tick" and nothing called it.
+    //
+    // Without it the coalescer flushed only on maxBytes (256) or a structured
+    // event, so maxDelayMs never fired. Measured before this: a 130-character
+    // answer produced ZERO intermediate paints and arrived in one lump when
+    // the run ended, and a long answer advanced in 256-character jumps roughly
+    // every 420ms. The publish gate's MAX_HELD_CHARS = 96, tightened
+    // deliberately for mobile, never bound either -- the coalescer upstream
+    // was already withholding more than that.
+    const stopTicking = deps.time.every(maxDelayMs, () => {
+      const frame = coalescer.tick(deps.time.nowMs());
+      if (frame === null) return;
+      applyFrame(frame);
+      // Deliberately NOT gated. The gate skips intermediate paints when the
+      // renderer cannot keep up; this frame exists precisely because nothing
+      // has painted for maxDelayMs, so skipping it reintroduces the stall it
+      // was added to prevent.
+      publish();
+    });
+
     const request: RunRequest = {
       prompt: prompt.text,
       chatId,
@@ -176,6 +198,9 @@ export function createRunController(deps: ControllerDeps): RunController {
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
+      // First: a tick firing after the turn ended would paint into a
+      // settled transcript.
+      stopTicking();
       live = null;
       coalescer.push({ kind: "end" }, deps.time.nowMs());
       turn = finish(turn);
