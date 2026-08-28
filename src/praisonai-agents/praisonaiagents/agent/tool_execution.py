@@ -2106,7 +2106,8 @@ class ToolExecutionMixin:
 
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(
-            function_name, arguments, agent_name=getattr(self, "name", None)
+            function_name, arguments, agent_name=getattr(self, "name", None),
+            scope_id=getattr(self, "_approval_scope_id", None),
         )
         return None, arguments
 
@@ -2151,7 +2152,8 @@ class ToolExecutionMixin:
 
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(
-            function_name, arguments, agent_name=getattr(self, "name", None)
+            function_name, arguments, agent_name=getattr(self, "name", None),
+            scope_id=getattr(self, "_approval_scope_id", None),
         )
         return None, arguments
 

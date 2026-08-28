@@ -1865,6 +1865,17 @@ Write the complete compiled report:"""
 
             except Exception as e:
                 logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
+                # Circuit breaker (failure on raised exception) — a raised tool
+                # exception is a failure just like an error-dict result, and the
+                # sync path's ``breaker.call`` counts it. Record it here so the
+                # breaker still opens after repeated raises; otherwise the
+                # post-invoke record block above is skipped and raised failures
+                # never trip the breaker. Approval/permission/policy/guardrail
+                # denials surface as error dicts (handled above), not raises, so
+                # this path only ever sees genuine tool failures.
+                breaker_record = getattr(self, '_circuit_breaker_record', None)
+                if breaker_record is not None:
+                    breaker_record(function_name, False)
                 # Record the failed invocation so repeated identical failures
                 # accumulate toward the loop-guard BLOCK/HALT thresholds — a raised
                 # tool exception is a failure just like an error-dict result on the

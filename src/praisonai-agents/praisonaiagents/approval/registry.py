@@ -245,23 +245,34 @@ class ApprovalRegistry:
 
     @staticmethod
     def _approval_cache_key(
-        tool_name: str, arguments: Dict, agent_name: Optional[str] = None
+        tool_name: str,
+        arguments: Dict,
+        agent_name: Optional[str] = None,
+        scope_id: Optional[str] = None,
     ) -> str:
         # Scope the key to the requesting agent so one agent's approval never
         # silently pre-authorizes an identical call from a different, stricter
-        # agent in the same context. ``*`` is the sentinel for calls made
-        # outside any Agent (e.g. bare module-level tool calls).
+        # agent in the same context. Prefer the per-instance ``scope_id`` (e.g.
+        # ``Agent._approval_scope_id``) when supplied: the display ``agent_name``
+        # defaults to ``"Agent"`` for every unnamed agent, so keying the
+        # context cache by name alone lets two same-named instances sharing an
+        # execution context pre-authorize each other before the per-instance
+        # session lookup runs. Falls back to ``agent_name`` for backward compat.
+        # ``*`` is the sentinel for calls made outside any Agent (e.g. bare
+        # module-level tool calls).
         from .utils import hash_tool_args
-        return f"{agent_name or '*'}:{tool_name}:{hash_tool_args(arguments)}"
+        scope = scope_id or agent_name or '*'
+        return f"{scope}:{tool_name}:{hash_tool_args(arguments)}"
 
     def mark_approved(
         self,
         tool_name: str,
         arguments: Optional[Dict] = None,
         agent_name: Optional[str] = None,
+        scope_id: Optional[str] = None,
     ) -> None:
         approved = self._approved_context.get(set())
-        approved.add(self._approval_cache_key(tool_name, arguments or {}, agent_name))
+        approved.add(self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id))
         self._approved_context.set(approved)
 
     def is_already_approved(
@@ -269,10 +280,11 @@ class ApprovalRegistry:
         tool_name: str,
         arguments: Optional[Dict] = None,
         agent_name: Optional[str] = None,
+        scope_id: Optional[str] = None,
     ) -> bool:
         # Honour an explicit mark_approved() from the agent approval path even
         # for critical tools (e.g. execute_command after AutoApproveBackend).
-        if self._approval_cache_key(tool_name, arguments or {}, agent_name) in self._approved_context.get(set()):
+        if self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id) in self._approved_context.get(set()):
             return True
         return False
 
@@ -467,27 +479,27 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="No approval required")
 
         # Already approved in this context
-        if self.is_already_approved(tool_name, arguments, agent_name):
+        if self.is_already_approved(tool_name, arguments, agent_name, scope_id):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # "This session" scoped grant covers matching calls for the run
         if self._is_session_scoped(agent_name, tool_name, arguments, scope_id):
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, auto_scope):
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         # Env auto-approve
         if self.is_env_auto_approve():
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (env)", approver="env")
 
         # YAML auto-approve
         if self.is_yaml_approved(tool_name):
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (yaml)", approver="yaml")
 
         # Delegate to backend
@@ -511,7 +523,7 @@ class ApprovalRegistry:
             )
 
         if decision.approved:
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
         self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
         return decision
 
@@ -535,25 +547,25 @@ class ApprovalRegistry:
         if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
 
-        if self.is_already_approved(tool_name, arguments, agent_name):
+        if self.is_already_approved(tool_name, arguments, agent_name, scope_id):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # "This session" scoped grant covers matching calls for the run
         if self._is_session_scoped(agent_name, tool_name, arguments, scope_id):
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, auto_scope):
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         if self.is_env_auto_approve():
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (env)", approver="env")
 
         if self.is_yaml_approved(tool_name):
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (yaml)", approver="yaml")
 
         backend = self.get_backend(agent_name)
@@ -573,6 +585,6 @@ class ApprovalRegistry:
             decision = ApprovalDecision(approved=False, reason="Approval timed out")
 
         if decision.approved:
-            self.mark_approved(tool_name, arguments, agent_name)
+            self.mark_approved(tool_name, arguments, agent_name, scope_id)
         self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
         return decision
