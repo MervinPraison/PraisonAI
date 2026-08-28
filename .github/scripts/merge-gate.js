@@ -500,7 +500,9 @@ async function countPendingMergeGateRuns(github, owner, repo) {
         status,
         per_page: 30,
       });
-      pending += (data.workflow_runs || []).length;
+      // workflow_run probes (auto-dispatch) share concurrency and must not
+      // count toward backpressure — they blocked dispatches for merge-ready PRs.
+      pending += (data.workflow_runs || []).filter((r) => r.event !== 'workflow_run').length;
     } catch {
       // Best-effort backpressure only.
     }
