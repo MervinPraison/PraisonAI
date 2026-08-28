@@ -2029,7 +2029,21 @@ def main():
     print(f"praisonai runtime listening on 127.0.0.1:{port}", flush=True)
     write_lock(port)
     atexit.register(clear_lock)
-    register_exit_signals(lambda *_: sys.exit(0))
+
+    def _stop_everything(*_):
+        # The trainer runs in its own session (start_new_session=True), so a
+        # signal aimed at the engine's process group never reaches it. If the
+        # engine simply exits, the fine-tune is reparented to init and keeps
+        # the GPU with nothing left that can find or stop it. Trainer.stop()
+        # terminates the trainer's own group first, so quit takes it down too.
+        if _TRAINER is not None:
+            try:
+                _TRAINER.stop()
+            except Exception:  # noqa: BLE001 - never block the quit
+                pass
+        sys.exit(0)
+
+    register_exit_signals(_stop_everything)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

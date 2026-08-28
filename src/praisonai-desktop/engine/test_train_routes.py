@@ -14,6 +14,7 @@ import os
 import pathlib
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -446,6 +447,65 @@ class ChatsListing(unittest.TestCase):
         self.assertEqual(status, 200, body)
         status, body = self.engine.request("/search?q=hello")
         self.assertEqual(status, 200, body)
+
+
+@unittest.skipIf(os.name == "nt", "POSIX orphaning; Windows uses taskkill /T")
+class QuitStopsTheTrainer(unittest.TestCase):
+    """Quitting the engine must take the fine-tune down with it.
+
+    The trainer is spawned in its own session, so a signal aimed at the
+    engine's process group never reaches it. If the engine exits without
+    calling Trainer.stop(), the run is reparented to init (ppid 1) and keeps
+    the GPU with nothing left that can find it -- the exact failure this
+    guards against.
+    """
+
+    def setUp(self):
+        # A stub trainer that records its pid, then sleeps well past the test.
+        self.pidfile = os.path.join(
+            tempfile.mkdtemp(prefix="praison-trainer-pid-"), "pid")
+        body = (
+            "import os, time\n"
+            f"open({self.pidfile!r}, 'w').write(str(os.getpid()))\n"
+            "print('training', flush=True)\n"
+            "time.sleep(300)\n")
+        self.engine = EngineProcess(_python(body))
+
+    def tearDown(self):
+        self.engine.close()
+        shutil.rmtree(os.path.dirname(self.pidfile), ignore_errors=True)
+
+    def _trainer_pid(self):
+        if not os.path.exists(self.pidfile):
+            return None
+        text = pathlib.Path(self.pidfile).read_text().strip()
+        return int(text) if text else None
+
+    def _alive(self, pid):
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def test_quitting_the_engine_kills_the_running_trainer(self):
+        status, body = self.engine.request("/train/start", {"config": CONFIG})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(_wait(
+            lambda: (self.engine.request("/train/status")[1].get("run") or {})
+            .get("state") == "running"))
+        self.assertTrue(_wait(lambda: self._trainer_pid() is not None),
+                        "the stub trainer never recorded its pid")
+        pid = self._trainer_pid()
+
+        # Quit exactly as the Tauri shell does: one SIGTERM to the engine.
+        self.engine.proc.send_signal(signal.SIGTERM)
+        self.engine.proc.wait(timeout=15)
+
+        self.assertTrue(_wait(lambda: not self._alive(pid), 10),
+                        f"the trainer (pid {pid}) outlived the engine quit")
 
 
 if __name__ == "__main__":
