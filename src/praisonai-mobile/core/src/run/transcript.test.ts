@@ -410,3 +410,30 @@ test("a drop DURING a turn does not leak into the carry", () => {
   s = noteDropped(s, "unknown_event", "mid");
   assert.deepEqual(s.carry, [], "a drop on a live turn belongs to that turn alone");
 });
+
+test("a decoder refusal AFTER a turn ended reaches the next turn, not the last one", () => {
+  // The case that separates the two ways of fixing the leak, and the reason
+  // this file needed both. Clearing on `phase === "ended"` also stops the
+  // leak -- and passes the between-turns test above, because that one starts
+  // from `idle`. It loses THIS: the previous turn has ended, so its whole list
+  // is discarded, and a frame the decoder refused in the gap goes with it.
+  //
+  // Such a refusal has no msgId at all -- that is often WHY it was refused --
+  // so it cannot be attributed backwards to the turn that just finished. It
+  // belongs to the turn about to open, and losing it quietly is the exact
+  // failure the refusal channel exists to undo.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, { type: "delta", msgId: "m1", text: "answered" });
+  s = apply(s, END_M1);
+  assert.equal(s.phase, "ended");
+
+  s = noteDropped(s, "unparseable_json", "<html>502 Bad Gateway</html>");
+  s = apply(s, { type: "start", msgId: "m2", runId: "r2" });
+
+  assert.deepEqual(
+    s.dropped,
+    [{ reason: "unparseable_json", detail: "<html>502 Bad Gateway</html>" }],
+    "a refusal in the gap between turns must not be discarded with the old turn",
+  );
+});

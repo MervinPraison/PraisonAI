@@ -131,7 +131,17 @@ const drop = (state: TurnState, reason: Dropped["reason"], detail: string): Turn
     dropped: [...state.dropped, d],
     // A drop that arrives while nothing is streaming belongs to the turn that
     // has not started yet, so `start` can carry exactly those and nothing else.
-    carry: state.phase === "streaming" ? state.carry : [...state.carry, d],
+    //
+    // Except `after_terminal`, which is the one out-of-band drop that IS about
+    // the turn just finished: a frame from the old run arriving late is
+    // evidence against the old run, and moving it forward would blame the next
+    // answer for its predecessor's mess. A decoder refusal between turns is
+    // different -- it has no msgId at all, so it cannot be attributed
+    // backwards and belongs to the turn about to open.
+    carry:
+      state.phase === "streaming" || reason === "after_terminal"
+        ? state.carry
+        : [...state.carry, d],
   };
 };
 
