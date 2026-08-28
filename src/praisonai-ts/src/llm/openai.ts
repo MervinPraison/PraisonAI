@@ -92,22 +92,53 @@ function convertToOpenAITool(tool: any): ChatCompletionTool {
     };
 }
 
-// Singleton instance for OpenAI client
-let openAIInstance: OpenAI | null = null;
+// Cached OpenAI client for the env-only fallback path, keyed on the
+// credentials that determine client identity (API key + base URL). Keying on
+// existence alone would reuse a client built from a stale key even after the
+// environment changed — a real defect for long-lived processes (e.g. a mobile
+// app whose settings screen updates the key without restarting).
+let cachedClient: OpenAI | null = null;
+let cachedIdentity: string | null = null;
 
-// Get cached OpenAI client instance
-async function getOpenAIClient(): Promise<OpenAI> {
-    if (!openAIInstance) {
-        const apiKey = getEnv('OPENAI_API_KEY');
-        if (!apiKey) {
-            throw new Error('OPENAI_API_KEY not found in environment variables');
-        }
-        openAIInstance = new OpenAI(buildOpenAIClientOptions({
-            apiKey
-        }));
-        await Logger.debug('OpenAI client initialized');
+// Get cached OpenAI client instance. Rebuilds when the API key or base URL
+// changes so a rotated/updated credential is picked up without a restart.
+export async function getOpenAIClient(): Promise<OpenAI> {
+    const apiKey = getEnv('OPENAI_API_KEY');
+    if (!apiKey) {
+        throw new Error('OPENAI_API_KEY not found in environment variables');
     }
-    return openAIInstance;
+    const baseURL = getEnv('OPENAI_BASE_URL') ?? '';
+    // Never log `identity`: it contains the secret API key.
+    const identity = `${apiKey}\u0000${baseURL}`;
+    if (cachedClient !== null && cachedIdentity === identity) {
+        return cachedClient;
+    }
+    // Build synchronously and capture in a local before any await. Returning
+    // the local (not the shared field) makes the result immune to a concurrent
+    // credential change or resetOpenAIClient() that runs during the await —
+    // each caller keeps the client it actually built for its own identity.
+    const client = new OpenAI(buildOpenAIClientOptions({
+        apiKey,
+        ...(baseURL ? { baseURL } : {})
+    }));
+    cachedClient = client;
+    cachedIdentity = identity;
+    await Logger.debug('OpenAI client initialized');
+    return client;
+}
+
+/**
+ * Reset the cached env-only OpenAI client so the next call rebuilds it.
+ *
+ * Useful for tests and for a settings screen that wants to force a rebuild
+ * after updating credentials without depending on the cache-invalidation rule.
+ *
+ * @example
+ * resetOpenAIClient();
+ */
+export function resetOpenAIClient(): void {
+    cachedClient = null;
+    cachedIdentity = null;
 }
 
 /** response_format payload for Chat Completions (json_schema / json_object). */
