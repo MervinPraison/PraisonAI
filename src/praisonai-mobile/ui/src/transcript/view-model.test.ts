@@ -551,7 +551,11 @@ test("an empty text block never becomes a message bubble", () => {
   // exactly what the file's own comment forbids -- it "makes a failure look
   // like a short answer". A turn whose text block was closed by a tool call
   // before any delta arrived renders one.
+  // `decode` rejects an empty delta, but `apply` is a public reducer and does
+  // not -- so an engine adapter that does not go through decode can produce
+  // exactly this state.
   let turn = run(start);
+  turn = apply(turn, { type: "delta", msgId: M, text: "" });
   turn = apply(turn, { type: "tool_call", msgId: M, callId: "c1", name: "bash", args: {} });
   turn = apply(turn, { type: "delta", msgId: M, text: "after the tool" });
 
