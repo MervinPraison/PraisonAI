@@ -910,3 +910,82 @@ test("the coalescer is built with maxBytes and maxDelayMs THE RIGHT WAY ROUND", 
   );
   assert.equal(views.at(-1)?.turn.text, "1234512345123451234512345123451234512345");
 });
+
+/** An engine whose turn stays open until `release()` is called, so a test can
+ *  be sure a run is genuinely live when it presses Stop. Without this the
+ *  scripted engine can finish first and `stop()` returns false for the boring
+ *  reason, which passes a refusal test for entirely the wrong reason. */
+function heldEngine(cancel: (runId: string) => Promise<boolean>) {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }, signal: AbortSignal) {
+      yield { type: "start", msgId: "m", runId: req.runId };
+      await held;
+      if (signal.aborted) return;
+      yield { type: "end", msgId: "m", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+    async decide() { return false; },
+    cancel,
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+  return { engine, release: () => release() };
+}
+
+test("a REFUSED stop can be retried, and does not report success on the retry", async () => {
+  // The idempotence guard added two commits ago aborted the reader even when
+  // the engine answered FALSE. That set `aborted`, so the next tap hit the
+  // guard and returned true without asking the engine again -- and it detached
+  // the reader from a run the engine said it had NOT cancelled, leaving it
+  // generating and billing into a socket nobody drains.
+  //
+  // The user is told the stop was refused, taps the only affordance offered,
+  // and is told nothing at all -- which stopNotice defines as success. The
+  // defect that notice exists for, inverted, one layer down.
+  const cancels: string[] = [];
+  let refuse = true;
+  const { engine, release } = heldEngine(async (runId) => {
+    cancels.push(runId);
+    if (refuse) { refuse = false; return false; }
+    return true;
+  });
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: () => {} });
+
+  const sent = controller.send("go");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
+  assert.equal(await controller.stop(), false, "the engine refused this one");
+  assert.equal(await controller.stop(), true, "the retry must actually reach the engine");
+  assert.equal(cancels.length, 2, "a refused stop must not swallow the retry");
+
+  release();
+  await sent;
+});
+
+test("an ACCEPTED stop is still idempotent", async () => {
+  // The pair, and the reason the guard exists: the documented background ->
+  // dispose path calls stop() twice, and the second must not re-issue a cancel
+  // the engine would rightly refuse.
+  const cancels: string[] = [];
+  const { engine, release } = heldEngine(async (runId) => {
+    cancels.push(runId);
+    return true;
+  });
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: () => {} });
+
+  const sent = controller.send("go");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
+  assert.equal(await controller.stop(), true);
+  assert.equal(await controller.stop(), true);
+  assert.equal(cancels.length, 1, "an accepted stop must not be asked twice");
+
+  release();
+  await sent;
+});
