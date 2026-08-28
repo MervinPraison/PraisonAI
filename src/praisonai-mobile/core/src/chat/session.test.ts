@@ -235,7 +235,7 @@ test("every turn advances the chat's updated time", () => {
 });
 
 test("a title of exactly the maximum length is not truncated", () => {
-  // `points.length <= 60` -> `< 60` survived: a title of exactly 60 graphemes
+  // `points.length <= 60` -> `< 60` survived: a title of exactly 60 code points
   // gets an ellipsis it does not need, and loses its last character to make
   // room for it.
   const { session } = build();
