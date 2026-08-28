@@ -463,4 +463,20 @@ export function describeShellContract(
     assert.equal(seen, 291, "the snapshot must be current inside the callback");
   });
 
+
+  test(`${name}: a padded URL reaches the OS trimmed, or not at all`, async () => {
+    // `url.trim()` -> `url` survived: the allowlist still refuses a padded
+    // `javascript:`, but a URL that passes validation in one form and is handed
+    // to the OS in another is the shape of a scheme-confusion bypass. Nothing
+    // asserted what the shell actually forwarded.
+    const { shell } = await make();
+    await assert.doesNotReject(() => shell.openExternal("  https://ok.example  "));
+    // And padding must not smuggle a refused scheme past the allowlist.
+    await assert.rejects(
+      () => shell.openExternal("  javascript:alert(1)  "),
+      "whitespace must not launder a refused scheme",
+    );
+    await assert.rejects(() => shell.openExternal("\tdata:text/html,<script>x</script>"));
+  });
+
 }

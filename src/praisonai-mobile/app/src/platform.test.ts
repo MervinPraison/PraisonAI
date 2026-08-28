@@ -59,3 +59,33 @@ test("the probe is synchronous", () => {
   assert.equal(typeof (p as unknown as { then?: unknown }).then, "undefined");
   assert.equal(typeof p.shell.insets, "object", "insets must be readable immediately");
 });
+
+test("the web platform stores chats in localStorage, not sessionStorage", () => {
+  // `view.localStorage` -> `view.sessionStorage` survived. Every chat would
+  // die with the tab, which on a phone is every time the OS reclaims the
+  // webview. platform.ts's own comment is about localStorage EVICTION being a
+  // risk; nothing asserted which store it actually reached for.
+  const used: string[] = [];
+  const spy = (name: string): Storage =>
+    ({
+      getItem: () => { used.push(name); return null; },
+      setItem: () => void used.push(name),
+      removeItem: () => void used.push(name),
+      key: () => null,
+      clear: () => void used.push(name),
+      length: 0,
+    }) as unknown as Storage;
+
+  // A real fake window, because createWebShell needs getComputedStyle and a
+  // hand-rolled stub cannot keep up with what the adapter reads.
+  const fake = createFakeWindow();
+  const view = fake.window as unknown as { localStorage: Storage; sessionStorage: Storage };
+  view.localStorage = spy("local");
+  view.sessionStorage = spy("session");
+
+  const platform = detectPlatform({ isNative: () => false, view: fake.window as unknown as Window });
+  void platform.storage.read({ namespace: "chats", id: "any" });
+
+  assert.ok(used.includes("local"), `the chat store must be localStorage, got ${used.join(",") || "none"}`);
+  assert.equal(used.includes("session"), false, "sessionStorage dies with the tab");
+});

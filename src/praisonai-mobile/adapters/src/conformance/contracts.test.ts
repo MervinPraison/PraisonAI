@@ -263,6 +263,7 @@ interface BridgeProbe {
   readonly bridge: TauriBridge;
   emit(event: string, payload: unknown): void;
   readonly invocations: ReadonlyArray<{ command: string; args: Record<string, unknown> }>;
+  readonly opened: readonly string[];
   /** How many NATIVE listeners exist, as opposed to app subscribers. */
   nativeListenerCount(): number;
 }
@@ -270,6 +271,9 @@ interface BridgeProbe {
 function probeBridge(options: { readonly slowListen?: boolean } = {}): BridgeProbe {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const invocations: Array<{ command: string; args: Record<string, unknown> }> = [];
+  /** What `openExternal` actually handed the OS. Nothing read this before, so
+   *  a shell could validate one string and forward a different one. */
+  const opened: string[] = [];
   return {
     bridge: {
       isPresent: () => true,
@@ -286,7 +290,7 @@ function probeBridge(options: { readonly slowListen?: boolean } = {}): BridgePro
           ? new Promise((resolve) => void queueMicrotask(() => resolve(unsubscribe)))
           : Promise.resolve(unsubscribe);
       },
-      openExternal: () => Promise.resolve(true),
+      openExternal: (url: string) => { opened.push(url); return Promise.resolve(true); },
       haptic: () => Promise.resolve(true),
       share: () => Promise.resolve(true),
     },
@@ -294,6 +298,7 @@ function probeBridge(options: { readonly slowListen?: boolean } = {}): BridgePro
       for (const handler of [...(listeners.get(event) ?? [])]) handler(payload);
     },
     invocations,
+    opened,
     nativeListenerCount: () => [...listeners.values()].reduce((n, set) => n + set.size, 0),
   };
 }
@@ -354,6 +359,24 @@ function webHarness(): ShellHarness {
     listenerCount: () => shell.listenerCount(),
   };
 }
+
+test("the tauri shell forwards the URL it validated, not the one it was given", () => {
+  // `url.trim()` -> `url` survived every contract case, because a contract can
+  // only observe REJECTION and the allowlist tolerates padding either way. What
+  // changes is what reaches the OS: a URL validated in one form and forwarded
+  // in another is the shape of a scheme-confusion bypass, and nothing in the
+  // suite read what the bridge was handed.
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, insetSource: cssSource({}) });
+
+  return shell.openExternal("  https://ok.example/path  ").then(() => {
+    assert.deepEqual(
+      probe.opened,
+      ["https://ok.example/path"],
+      "the OS must receive the trimmed URL the allowlist actually approved",
+    );
+  });
+});
 
 describeShellContract("fake shell", fakeHarness);
 describeShellContract("tauri shell", tauriHarness);
@@ -1063,7 +1086,7 @@ test("a contract cannot quietly shrink", () => {
   assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
   assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
-  assert.ok(casesFor("shell") >= 34, `the shell contract shrank to ${casesFor("shell")} cases`);
+  assert.ok(casesFor("shell") >= 35, `the shell contract shrank to ${casesFor("shell")} cases`);
 
   // The break table needs a floor of its own. Deleting a row from
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
