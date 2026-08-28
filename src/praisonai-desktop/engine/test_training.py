@@ -840,6 +840,88 @@ class RunLifecycle(unittest.TestCase):
         self.assertTrue(any("still reading" in (l or "") for l in lines),
                         f"the reader stopped at the bad byte: {lines}")
 
+    def test_a_log_write_failure_does_not_wedge_the_run(self):
+        """A failing log write must not abandon the pipe.
+
+        If the reader stops on the first log-write OSError, the child blocks
+        on a full pipe, proc.wait() blocks on the child, run.finish() never
+        runs, and the run reads "running" forever -- refusing every later run.
+        The pipe must be drained whatever happens to the log, so the run still
+        ends and metrics/events still grow past the pre-failure count.
+        """
+        import builtins
+        real_open = builtins.open
+
+        def failing_open(path, *args, **kwargs):
+            if str(path).endswith("train.log"):
+                raise OSError(28, "No space left on device")
+            return real_open(path, *args, **kwargs)
+
+        builtins.open = failing_open
+        try:
+            run = self._start(_script(
+                "print(\"{'loss': 0.5, 'learning_rate': 0.0002, 'epoch': 1.0}\")\n"
+                "for i in range(20000):\n"
+                "    print('line', i)"))
+            self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 10),
+                            f"log-write failure wedged the run at {run.state}")
+        finally:
+            builtins.open = real_open
+        self.assertEqual(run.state, training.DONE)
+        self.assertTrue(run.metrics, "the metric never arrived past the log failure")
+        self.assertEqual(run.metrics[-1]["loss"], 0.5)
+        events = [e for e in run.events if e[1] == "log"]
+        self.assertGreater(len(events), 100,
+                           "events stopped growing when the log write failed")
+
+    def test_a_log_close_failure_does_not_wedge_the_run(self):
+        """A raise from log.close() must not skip finalization.
+
+        close() flushes, so a full disk or a revoked directory can fail there
+        just as a per-line write can. If that escapes the reader's finally
+        block, proc.wait() and run.finish() never run and the run reads
+        "running" forever -- the same permanent wedge, moved to the last line.
+        The log opens fine here; only its close() raises.
+        """
+        import builtins
+        real_open = builtins.open
+
+        def closing_fails_open(path, *args, **kwargs):
+            handle = real_open(path, *args, **kwargs)
+            if str(path).endswith("train.log"):
+                def boom():
+                    raise OSError(28, "No space left on device")
+                handle.close = boom
+            return handle
+
+        builtins.open = closing_fails_open
+        try:
+            run = self._start(_script("print('a line')"))
+            self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 10),
+                            f"log-close failure wedged the run at {run.state}")
+        finally:
+            builtins.open = real_open
+        self.assertEqual(run.state, training.DONE)
+
+    def test_the_log_is_flushed_while_the_run_is_live(self):
+        """train.log must be readable during the run, not only after it.
+
+        The engine caps in-memory events on the premise that "the log file is
+        the full record". A block-buffered, never-flushed log is 0 bytes on
+        disk throughout a live run, so that record does not exist until exit.
+        """
+        run = self._start(_script(
+            "import time\n"
+            "print('first line', flush=True)\n"
+            "time.sleep(3)\n"
+            "print('second line', flush=True)"))
+        self.assertTrue(_wait(
+            lambda: os.path.exists(run.log_path)
+            and os.path.getsize(run.log_path) > 0, 5),
+            "the log was empty on disk while the run was live")
+        self.trainer.stop()
+        self.assertTrue(_wait(lambda: run.state in training.TERMINAL, 15))
+
     def test_the_config_is_written_where_the_trainer_will_read_it(self):
         run = self._start(_script("pass"))
         self.assertTrue(os.path.exists(run.config_path))

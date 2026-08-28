@@ -455,12 +455,38 @@ class Trainer:
             run.emit("state", {"state": RUNNING})
         self._persist(run)          # RUNNING (or STOPPING) is now on disk
         try:
-            with open(run.log_path, "a", encoding="utf-8") as log:
-                for line in proc.stdout:
-                    log.write(line)
+            log = open(run.log_path, "a", encoding="utf-8")
+        except OSError as exc:
+            log = None
+            run.emit("log", {"line": f"[log unavailable: {exc}]"})
+        try:
+            for line in proc.stdout:
+                # The pipe is drained whatever happens to the log. Stopping the
+                # loop leaves the child blocked on a full pipe and proc.wait()
+                # blocked on the child, so the run never ends and every later
+                # run is refused.
+                if log is not None:
+                    try:
+                        log.write(line)
+                        log.flush()   # the log is the full record only if it exists
+                    except OSError as exc:
+                        run.emit("log", {"line": f"[log stopped: {exc}]"})
+                        log.close()
+                        log = None
+                try:
                     self._consume(run, line.rstrip("\n"))
-        except Exception as exc:                       # noqa: BLE001
-            run.emit("log", {"line": f"[reader stopped: {exc}]"})
+                except Exception as exc:               # noqa: BLE001
+                    run.emit("log", {"line": f"[reader error: {exc}]"})
+        finally:
+            if log is not None:
+                # close() flushes, so a full disk or revoked directory can raise
+                # here too. Swallow it: the pipe is already drained, and letting
+                # it escape would skip proc.wait()/finish() and wedge the run --
+                # the very failure this reader exists to prevent.
+                try:
+                    log.close()
+                except OSError:
+                    pass
         code = proc.wait()
         if run.state == STOPPING:
             run.finish(CANCELLED)
