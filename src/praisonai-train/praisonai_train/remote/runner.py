@@ -409,12 +409,15 @@ class RemoteRunner:
         (dataloader workers, torchrun ranks) share its process group and each
         hold the GPU. Signalling the pid alone leaves them running, reparented
         to init. So we resolve the group on the host and signal ``-$pgid``,
-        then *re-probe* -- reporting success for a ``kill`` that was merely
-        issued would let a UI label a live paid run "cancelled".
+        then *re-probe the whole group* -- a wrapper can exit while a child
+        survives SIGTERM, so checking only the recorded pid would report
+        success while paid GPU work continues; reporting success for a ``kill``
+        that was merely issued would likewise let a UI label a live run
+        "cancelled".
 
         Refuses to signal our own group (a defensive guard against a corrupt
-        pid file resolving to the ssh session's group), and raises if the
-        process survives the signal rather than lying about it.
+        pid file resolving to the ssh session's group), and raises if any
+        process in the group survives the signal rather than lying about it.
         """
         result = self.host.run(
             f"if [ ! -f {shlex.quote(run.pid_path)} ]; then echo not-running; "
@@ -429,7 +432,9 @@ class RemoteRunner:
             f"    else "
             f"      kill -TERM -\"$g\" 2>/dev/null; "
             f"      sleep 2; "
-            f"      if kill -0 $pid 2>/dev/null; then echo still-running; "
+            f"      alive=$(ps -o pgid= -o pid= -A 2>/dev/null "
+            f"        | awk -v g=\"$g\" '$1==g{{print $2}}'); "
+            f"      if [ -n \"$alive\" ]; then echo still-running; "
             f"      else echo stopped; fi; "
             f"    fi; "
             f"  fi; "

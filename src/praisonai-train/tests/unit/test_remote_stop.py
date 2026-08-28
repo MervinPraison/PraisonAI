@@ -96,6 +96,11 @@ def _sh_quote(s):
     return shlex.quote(s)
 
 
+def _has_setsid():
+    import shutil
+    return shutil.which("setsid") is not None
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX signals only")
 class TestStopKillsTheWork:
     def test_the_child_is_gone_after_stop(self, tmp_path):
@@ -135,6 +140,46 @@ class TestStopKillsTheWork:
         dead.wait()
         pathlib.Path(run.pid_path).write_text(str(dead.pid))
         assert runner.stop(run) is False
+
+    def test_stop_does_not_lie_when_a_child_survives_after_wrapper_exits(
+        self, tmp_path
+    ):
+        # The defect one level up: the recorded wrapper exits promptly, but a
+        # child in the same group traps SIGTERM and lives on. Probing only the
+        # wrapper pid would report `stopped` while the child keeps the GPU.
+        if not _has_setsid():
+            pytest.skip("setsid required to isolate the run's process group")
+        host = LocalHost()
+        runner = _runner_over(host)
+        remote_dir = str(tmp_path)
+        run = RemoteRun(host="local", run_id="run-orphan",
+                        remote_dir=remote_dir,
+                        log_path=f"{remote_dir}/train.log")
+        child_pidfile = f"{remote_dir}/child.pid"
+        # A child that traps SIGTERM, records its own pid, then outlives its
+        # wrapper: the wrapper backgrounds it and exits at once, so only the
+        # child remains in the group after `stop` signals it.
+        inner = (
+            f"nohup sh -c 'trap \"\" TERM; echo $$ > {child_pidfile}; "
+            f"sleep 120' >/dev/null 2>&1 & "
+            f"echo $! > {run.pid_path}"
+        )
+        host.run(f"cd {remote_dir} && setsid sh -c {_sh_quote(inner)}")
+        for _ in range(50):
+            if pathlib.Path(child_pidfile).exists():
+                break
+            time.sleep(0.05)
+        child_pid = int(pathlib.Path(child_pidfile).read_text().strip())
+        try:
+            assert _alive(child_pid), "child never started; test inconclusive"
+            with pytest.raises(RemoteError, match="did not stop"):
+                runner.stop(run)
+            assert _alive(child_pid), "child should have survived SIGTERM"
+        finally:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except OSError:
+                pass
 
     def test_stop_raises_when_the_process_ignores_sigterm(self, tmp_path):
         host = LocalHost()
