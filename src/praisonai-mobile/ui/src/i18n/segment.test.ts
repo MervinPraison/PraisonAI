@@ -118,3 +118,21 @@ test("the fallback splitter recombines to exactly the input", () => {
     assert.equal(fallbackSentences(text).join(""), text, `lost characters in ${JSON.stringify(text)}`);
   }
 });
+
+test("a one-character sentence is complete", () => {
+  // `end === 0` -> `end === 1` survived: a chunk whose only character is a
+  // terminator reports incomplete, so `completedLength` returns 0 and the
+  // screen-reader announcement stalls. CJK writes short sentences and "。" is
+  // a whole one; so is "." after a trimmed fragment.
+  for (const one of [".", "!", "?", "。", "！", "？"]) {
+    assert.equal(endsSentence(one), true, `${one} is a complete sentence`);
+  }
+  assert.equal(completedLength("en", "。"), 1, "a single terminator is one complete character");
+});
+
+test("a chunk with no terminator is still incomplete", () => {
+  // The pair. Reporting everything complete announces half-sentences as they
+  // stream, which is the stutter announce.ts exists to prevent.
+  assert.equal(endsSentence("still typing"), false);
+  assert.equal(endsSentence(""), false);
+});

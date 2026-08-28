@@ -526,3 +526,22 @@ test("Copy is not offered for a turn with nothing in it", () => {
   const answered = run(start, delta("something"));
   assert.equal(buildTranscript(answered).actions.copy, true);
 });
+
+test("a multi-line tool output previews as ONE line", () => {
+  // Dropping `firstLine(...)` survived: the preview keeps its newlines and a
+  // one-line row renders as several, breaking the transcript's layout for
+  // every `ls`, every stack trace, every file read.
+  const turn = run(
+    start,
+    { type: "tool_call", msgId: M, callId: "c1", name: "ls", args: {} },
+    {
+      type: "tool_result", msgId: M, callId: "c1", name: "ls", ok: true,
+      output: "total 3\n-rw-r--r-- a.txt\n-rw-r--r-- b.txt", seconds: 0.1,
+    },
+  );
+  const row = buildTranscript(turn).rows.find((r) => r.kind === "tool");
+  assert.ok(row && row.kind === "tool");
+  assert.equal(row.preview.includes("\n"), false, `the preview spans lines: ${JSON.stringify(row.preview)}`);
+  assert.equal(row.preview, "total 3");
+  assert.match(row.output, /b\.txt/, "the full output is still carried for the expanded view");
+});

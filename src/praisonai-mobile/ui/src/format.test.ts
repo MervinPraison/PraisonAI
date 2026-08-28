@@ -198,3 +198,13 @@ test("formatElapsed switches format AT the boundary, not one past it", () => {
   assert.equal(formatElapsed(3600), "1h 00m", "sixty minutes is an hour, not 60m 00s");
   assert.equal(formatElapsed(7260), "2h 01m");
 });
+
+test("formatRelative's just-now threshold is 45 seconds exactly", () => {
+  // `seconds < 45` -> `< 44` survived. The threshold is the whole contract of
+  // the function, and no test placed a value on it. `format-intl.ts` has the
+  // same boundary and is pinned separately -- the two must not drift.
+  const now = 1_700_000_000_000;
+  assert.match(formatRelative(now - 44_000, now), /just now/i, "44s is still just now");
+  assert.doesNotMatch(formatRelative(now - 45_000, now), /just now/i, "45s is not");
+  assert.doesNotMatch(formatRelative(now - 46_000, now), /just now/i);
+});

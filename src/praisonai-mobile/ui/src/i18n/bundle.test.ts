@@ -113,3 +113,13 @@ test("the report reads as a sentence a human can act on", () => {
   assert.ok(describeBundle(createBundle("de", {})).includes("missing"));
   assert.equal(markMissing("Stopped"), "⟦Stopped⟧");
 });
+
+test("a half-bracketed string is not a marked-missing one", () => {
+  // `&&` -> `||` in isMarked survived: "⟦x" and "x⟧" both report as marked.
+  // A translator's literal bracket then reads as a missing key, and the report
+  // names strings that are present.
+  assert.equal(isMarked(`${"⟦"}missing${"⟧"}`), true);
+  assert.equal(isMarked(`${"⟦"}half`), false, "an opening bracket alone is not a mark");
+  assert.equal(isMarked(`half${"⟧"}`), false, "nor is a closing one");
+  assert.equal(isMarked("plain"), false);
+});
