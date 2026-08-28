@@ -277,13 +277,23 @@ class ApprovalRegistry:
         return False
 
     def _is_session_scoped(
-        self, agent_name: Optional[str], tool_name: str, arguments: Optional[Dict]
+        self,
+        agent_name: Optional[str],
+        tool_name: str,
+        arguments: Optional[Dict],
+        scope_id: Optional[str] = None,
     ) -> bool:
         """Return True if a "this session" grant covers this call for the run.
 
         Checks the in-memory session store by the reusable permission target so
         a single ``session`` approval covers matching calls (e.g. the same
         ``bash:git status *`` prefix) without persisting anything to disk.
+
+        ``scope_id`` is a per-Agent-instance key (e.g. ``Agent._approval_scope_id``).
+        When provided it is used as the store key instead of the display name so
+        two same-named agents (every unnamed ``Agent()`` defaults to ``"Agent"``)
+        can't inherit each other's human-granted session approval. Falls back to
+        ``agent_name`` for backward compatibility when no id is supplied.
         """
         if not self._session_scoped_targets:
             return False
@@ -293,7 +303,8 @@ class ApprovalRegistry:
             target = build_permission_target(tool_name, arguments)
         except Exception:  # noqa: BLE001 — never block on target derivation
             return False
-        return (agent_name, target) in self._session_scoped_targets
+        key = scope_id if scope_id is not None else agent_name
+        return (key, target) in self._session_scoped_targets
 
     def _persist_scoped_decision(
         self,
@@ -301,6 +312,7 @@ class ApprovalRegistry:
         tool_name: str,
         arguments: Optional[Dict],
         decision: ApprovalDecision,
+        scope_id: Optional[str] = None,
     ) -> None:
         """Record a ``session``/``always`` decision for reuse this run (or beyond).
 
@@ -326,12 +338,17 @@ class ApprovalRegistry:
         if not decision.approved:
             return
 
+        # In-memory "this session" grants are keyed per Agent instance
+        # (scope_id) when available, so a session approval granted on one worker
+        # cannot silently unlock the same tool for a distinct same-named worker.
+        session_key = scope_id if scope_id is not None else agent_name
+
         if scope == "session":
             try:
                 from .utils import build_permission_target
 
                 target = build_permission_target(tool_name, arguments)
-                self._session_scoped_targets.add((agent_name, target))
+                self._session_scoped_targets.add((session_key, target))
             except Exception as e:  # noqa: BLE001 — best-effort, in-memory only
                 logger.debug(
                     "Could not record session approval for tool '%s': %s",
@@ -351,7 +368,7 @@ class ApprovalRegistry:
                 from .utils import build_permission_target
 
                 self._session_scoped_targets.add(
-                    (agent_name, build_permission_target(tool_name, arguments))
+                    (session_key, build_permission_target(tool_name, arguments))
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -423,6 +440,7 @@ class ApprovalRegistry:
         arguments: Dict,
         force: bool = False,
         auto_approve_scope: Optional[str] = None,
+        scope_id: Optional[str] = None,
     ) -> ApprovalDecision:
         """Synchronous approval — used by ``Agent._execute_tool_impl``.
 
@@ -436,6 +454,12 @@ class ApprovalRegistry:
         that don't pass it keep the old behaviour; passing a per-instance id
         (e.g. ``Agent._approval_scope_id``) prevents skill grants from leaking
         across unrelated agents that share the same display name.
+
+        ``scope_id`` is the same per-instance key applied to the in-memory
+        "this session" grant store, so a human "[s] this session" approval on
+        one agent can't silently unlock the tool for a distinct same-named
+        agent. ``agent_name`` is still used for name-keyed lookups (per-agent
+        backend, risk level, ``ask`` rules, durable ``always`` persistence).
         """
         auto_scope = auto_approve_scope or agent_name
         # Fast-path: not required (checks both global and this agent's scope)
@@ -447,7 +471,7 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # "This session" scoped grant covers matching calls for the run
-        if self._is_session_scoped(agent_name, tool_name, arguments):
+        if self._is_session_scoped(agent_name, tool_name, arguments, scope_id):
             self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
@@ -488,7 +512,7 @@ class ApprovalRegistry:
 
         if decision.approved:
             self.mark_approved(tool_name, arguments, agent_name)
-        self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
+        self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
         return decision
 
     async def approve_async(
@@ -498,11 +522,13 @@ class ApprovalRegistry:
         arguments: Dict,
         force: bool = False,
         auto_approve_scope: Optional[str] = None,
+        scope_id: Optional[str] = None,
     ) -> ApprovalDecision:
         """Asynchronous approval — used by async tool execution path.
 
-        See :meth:`approve_sync` for the ``force`` and ``auto_approve_scope``
-        semantics (per-call gate, no shared-state mutation).
+        See :meth:`approve_sync` for the ``force``, ``auto_approve_scope`` and
+        ``scope_id`` semantics (per-call gate, no shared-state mutation,
+        per-instance session-grant keying).
         """
         auto_scope = auto_approve_scope or agent_name
         # Fast-path: not required (checks both global and this agent's scope)
@@ -513,7 +539,7 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # "This session" scoped grant covers matching calls for the run
-        if self._is_session_scoped(agent_name, tool_name, arguments):
+        if self._is_session_scoped(agent_name, tool_name, arguments, scope_id):
             self.mark_approved(tool_name, arguments, agent_name)
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
@@ -548,5 +574,5 @@ class ApprovalRegistry:
 
         if decision.approved:
             self.mark_approved(tool_name, arguments, agent_name)
-        self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
+        self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
         return decision

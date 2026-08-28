@@ -1699,6 +1699,18 @@ Write the complete compiled report:"""
                 logging.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
 
+            # Circuit breaker (pre-execution) — parity with the sync path
+            # (_execute_tool_with_circuit_breaker_impl). Without this the async
+            # tool path never engages the per-agent breaker, so a persistently
+            # failing external tool is hammered indefinitely via achat()/astart()
+            # and the model never receives the ``circuit_open`` signal the async
+            # retry loop already checks for. The helpers are pure/sync.
+            breaker_precheck = getattr(self, '_circuit_breaker_precheck', None)
+            if breaker_precheck is not None:
+                open_result = breaker_precheck(function_name)
+                if open_result is not None:
+                    return open_result
+
             # Loop guard (pre-execution) — parity with the sync path in
             # tool_execution.py. The async path previously had no loop-guard or
             # doom-loop protection, so a repeatedly-failing tool could be hammered
@@ -1804,6 +1816,25 @@ Write the complete compiled report:"""
                         }
                 else:
                     result = await _invoke()
+
+                # Circuit breaker (post-execution) — record the outcome so
+                # repeated failures open the breaker, mirroring the sync path's
+                # breaker.call. Approval/permission/policy/guardrail denials are
+                # NOT counted as tool failures (same exclusions the sync wrapper
+                # applies in _execute_tool_with_circuit_breaker_impl), so a gated
+                # tool never trips the breaker.
+                breaker_record = getattr(self, '_circuit_breaker_record', None)
+                if breaker_record is not None:
+                    is_breaker_failure = (
+                        isinstance(result, dict)
+                        and result.get("error")
+                        and not result.get("approval_denied")
+                        and not result.get("permission_denied")
+                        and not result.get("approval_error")
+                        and not result.get("policy_denied")
+                        and not result.get("guardrail_denied")
+                    )
+                    breaker_record(function_name, not is_breaker_failure)
 
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring
