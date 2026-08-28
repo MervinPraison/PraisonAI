@@ -161,3 +161,107 @@ test("every entry point answers instead of throwing on a bad tag or a bad number
   assert.equal(formatCountLocalised("en", -1), UNKNOWN);
   assert.equal(formatDate("en", Number.NaN, "UTC"), UNKNOWN);
 });
+
+// ---- the no-Intl fallbacks --------------------------------------------------
+//
+// Seven `fmt === null` branches, every one of them dead to this suite: the
+// test host has full ICU, so `memo(...)` always returns a formatter and the
+// fallback never runs. A mutation sweep put this file at 67% survival for
+// exactly that reason.
+//
+// They are trivially reachable, though, and reachable IN PRODUCTION: every
+// Intl constructor throws RangeError on an underscore tag, and "en_US" is what
+// a stored preference looks like as often as "en-US" -- locale.ts says so in
+// its own header. So these are not hypothetical old-WebView paths; they are
+// one bad settings value away.
+
+/** A tag every Intl constructor refuses, so `memo()` returns null. */
+const NO_INTL = "en_US";
+
+test("formatNumber falls back to the raw number, not to nothing", () => {
+  // `String(value)` -> `""` or a rounded value both survived.
+  assert.equal(formatNumber(NO_INTL, 1234.5), "1234.5");
+  assert.equal(formatNumber(NO_INTL, 0), "0");
+  assert.equal(formatNumber(NO_INTL, -7), "-7");
+  // And the formatted path still differs, so the test is not passing because
+  // BOTH sides went unformatted.
+  assert.notEqual(formatNumber("en", 1234.5), formatNumber(NO_INTL, 1234.5));
+});
+
+test("formatCountLocalised falls back to the whole count", () => {
+  assert.equal(formatCountLocalised(NO_INTL, 1234), "1234");
+  assert.equal(formatCountLocalised(NO_INTL, 0), "0");
+  assert.notEqual(formatCountLocalised("en", 1234), formatCountLocalised(NO_INTL, 1234));
+});
+
+test("formatDate falls back to an ISO date, not to a half-formed one", () => {
+  // `slice(0, 10)` -> `slice(0, 7)` survived: the day disappears and every
+  // date in the chat list reads as a month.
+  assert.equal(formatDate(NO_INTL, 0, null), "1970-01-01");
+  assert.equal(formatDate(NO_INTL, 1_700_000_000_000, null), "2023-11-14");
+  assert.match(formatDate(NO_INTL, 0, null), /^\d{4}-\d{2}-\d{2}$/, "a date needs its day");
+});
+
+test("formatRelativeLocalised falls back to the string table, not to a number", () => {
+  // The fallback delegates to `formatRelativeFromStrings`, which is what makes
+  // "10 minutes ago" possible without Intl. Replacing it with a raw value
+  // survived.
+  const now = 1_700_000_000_000;
+  const tenMinutesAgo = now - 10 * 60 * 1000;
+  const out = formatRelativeLocalised(NO_INTL, en, tenMinutesAgo, now, null);
+  assert.match(out, /10/, "the magnitude must survive");
+  assert.match(out, /minute/i, "and be expressed in words, not left as a number");
+});
+
+test("formatElapsedLocalised falls back with its units intact", () => {
+  // `padStart(2, "0")` dropped survived: "1h 2m" instead of "1h 02m", which
+  // sorts and scans wrongly in a list of durations.
+  assert.equal(formatElapsedLocalised(NO_INTL, en, 3720), "1h 02m");
+  assert.equal(formatElapsedLocalised(NO_INTL, en, 65), "1m 05s");
+  assert.equal(formatElapsedLocalised(NO_INTL, en, 5.25), "5.3s");
+});
+
+test("an unmeasured elapsed is still unknown without Intl", () => {
+  // The guard has to survive the fallback path too, or a null duration renders
+  // as a number the engine never reported.
+  assert.equal(formatElapsedLocalised(NO_INTL, en, null), en.unknownValue);
+  assert.equal(formatElapsedLocalised(NO_INTL, en, -1), en.unknownValue);
+  assert.equal(formatElapsedLocalised(NO_INTL, en, Number.NaN), en.unknownValue);
+});
+
+test("every no-Intl fallback differs from its formatted twin", () => {
+  // The control for the whole block. If a future change made `memo()` succeed
+  // for "en_US" -- or made the formatted path degrade -- these tests would
+  // start passing while testing the wrong branch entirely.
+  //
+  // Number, count and date each have a formatted twin whose English output
+  // already differs from the ASCII fallback (grouping, k/M suffix, "Jan 1,
+  // 1970" vs ISO), so "en" is enough to discriminate the branch for them.
+  const now = 1_700_000_000_000;
+  const pairs: readonly [string, string][] = [
+    [formatNumber("en", 1234.5), formatNumber(NO_INTL, 1234.5)],
+    [formatCountLocalised("en", 1234), formatCountLocalised(NO_INTL, 1234)],
+    [formatDate("en", 0, null), formatDate(NO_INTL, 0, null)],
+  ];
+  for (const [formatted, fallback] of pairs) {
+    assert.notEqual(formatted, fallback, `"${formatted}" -- this test is not reaching the fallback`);
+  }
+
+  // Elapsed and relative are different: their ENGLISH formatted output is
+  // byte-identical to the ASCII fallback ("1h 02m", "10 minutes ago"), so an
+  // "en" twin cannot tell the fallback branch from a successful `memo()`. The
+  // discriminating twin has to be a locale whose Intl output genuinely differs
+  // -- de-DE writes a comma decimal and its own relative-time phrasing -- while
+  // the "en_US" fallback stays ASCII/English regardless of the requested tag.
+  const tenMinutesAgo = now - 10 * 60 * 1000;
+  const elapsedPairs: readonly [string, string][] = [
+    [formatElapsedLocalised("de-DE", en, 5.25), formatElapsedLocalised(NO_INTL, en, 5.25)],
+    [
+      formatRelativeLocalised("de-DE", en, tenMinutesAgo, now, null),
+      formatRelativeLocalised(NO_INTL, en, tenMinutesAgo, now, null),
+    ],
+  ];
+  for (const [formatted, fallback] of elapsedPairs) {
+    assert.notEqual(formatted, fallback, `"${formatted}" -- this test is not reaching the fallback`);
+  }
+});
