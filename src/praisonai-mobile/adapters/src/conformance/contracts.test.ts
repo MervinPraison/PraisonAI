@@ -1226,3 +1226,32 @@ test("the web storage adapter namespaces its keys", () => {
       assert.match(keys[0] ?? "", /chats/);
     });
 });
+
+test("the web shell re-pushes history after consuming a back gesture", () => {
+  // `pushState` -> `replaceState` survived. After the app consumes a back
+  // press, the browser's entry is replaced rather than restored -- so the NEXT
+  // back press exits the app instead of going one screen up. The user presses
+  // back twice and finds themselves out of the conversation.
+  const fake = createFakeWindow();
+  const shell = createWebShell(fake.window);
+  const stop = shell.onBackGesture(() => true);
+
+  const before = fake.pushed;
+  fake.popstate();
+  assert.ok(fake.pushed > before, "a consumed back gesture must restore the history entry it used");
+  stop();
+});
+
+test("a back gesture the app DECLINES does not touch history", () => {
+  // The pair. Pushing unconditionally traps the user on the page: the OS back
+  // gesture can never leave the app, which is the defect the root handler
+  // returning false exists to prevent.
+  const fake = createFakeWindow();
+  const shell = createWebShell(fake.window);
+  const stop = shell.onBackGesture(() => false);
+
+  const before = fake.pushed;
+  fake.popstate();
+  assert.equal(fake.pushed, before, "an unconsumed back must be allowed to navigate away");
+  stop();
+});

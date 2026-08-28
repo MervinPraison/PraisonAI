@@ -436,3 +436,22 @@ test("an unrecognised type really is unknown_event, so the pair is not vacuous",
   assert.ok(isIgnored(out));
   assert.equal(out.reason, "unknown_event");
 });
+
+test("a tool_result with no seconds decodes as unknown, not as zero", () => {
+  // `seconds === undefined ? null : seconds` -> `? 0 :` survived. A tool the
+  // engine never timed then renders "0.0s" -- a measurement presented as fact.
+  // `durationKnown` exists precisely to keep those apart.
+  const out = decodeEvent({
+    type: "tool_result", msg_id: "m1", call_id: "c1", name: "ls", ok: true, output: "x",
+  });
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "tool_result" ? out.event.seconds : "wrong", null);
+});
+
+test("a tool_result WITH seconds keeps the number it was given", () => {
+  const out = decodeEvent({
+    type: "tool_result", msg_id: "m1", call_id: "c1", name: "ls", ok: true, output: "x", seconds: 0,
+  });
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "tool_result" ? out.event.seconds : null, 0, "a measured zero is not unknown");
+});
