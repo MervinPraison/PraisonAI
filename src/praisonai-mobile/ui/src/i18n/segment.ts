@@ -121,7 +121,18 @@ export function completedLength(locale: string, text: string): number {
  * a way that loses text -- the pieces still concatenate back to the input --
  * so the seam guarantee above holds either way.
  */
-function fallbackSentences(text: string): readonly string[] {
+/**
+ * The no-Segmenter splitter, exported so a test can call it.
+ *
+ * `sentences()` uses `Intl.Segmenter` whenever it exists, and it always does
+ * on the test host -- so this path never ran. Three mutations survived in it,
+ * one per failure this file's own header names: splitting on a decimal point,
+ * splitting mid-CJK, and failing to split after a quoted full stop. A fourth
+ * dropped the unterminated tail entirely, which on a host without Segmenter
+ * means a blind user never hears the in-progress end of an answer, and breaks
+ * the documented seam guarantee that slice(0,n) + slice(n) recombine.
+ */
+export function fallbackSentences(text: string): readonly string[] {
   const out: string[] = [];
   let start = 0;
   for (let i = 0; i < text.length; i += 1) {

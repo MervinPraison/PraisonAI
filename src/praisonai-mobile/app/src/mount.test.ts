@@ -133,3 +133,31 @@ test("applying the same transition twice mounts nothing new", () => {
   screens.apply(transition(chat, chat, screens.live()));
   assert.equal(root.children.length, 1);
 });
+
+test("an unmounted screen is forgotten, so it can be built again", () => {
+  // Dropping `nodes.delete(id)` after unmount survived. `live()` then lies:
+  // screens.ts asks `live.has(next)` to decide whether to mount, gets a stale
+  // yes, and never rebuilds -- a blank screen the user cannot get out of.
+  const dom = fakeDom();
+  const { root, screens } = build(dom);
+
+  screens.apply({ mount: ["chat"], unmount: [], hide: [], show: "chat", noop: false });
+  assert.deepEqual([...screens.live()], ["chat"]);
+
+  screens.apply({ mount: [], unmount: ["chat"], hide: [], show: "chat", noop: false });
+  assert.deepEqual([...screens.live()], [], "an unmounted screen must not report as live");
+  assert.equal(root.children.length, 0);
+
+  screens.apply({ mount: ["chat"], unmount: [], hide: [], show: "chat", noop: false });
+  assert.equal(root.children.length, 1, "and must be rebuilt when mounted again");
+});
+
+test("mounting a screen that is already live does not build it twice", () => {
+  // The pair. Dropping the `has` guard appends a second copy and orphans the
+  // first, so the leak and the double render arrive together.
+  const dom = fakeDom();
+  const { root, screens } = build(dom);
+  screens.apply({ mount: ["chat"], unmount: [], hide: [], show: "chat", noop: false });
+  screens.apply({ mount: ["chat"], unmount: [], hide: [], show: "chat", noop: false });
+  assert.equal(root.children.length, 1);
+});

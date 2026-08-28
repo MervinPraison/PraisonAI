@@ -13,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { completedLength, endsSentence, sentences } from "./segment.ts";
+import { completedLength, endsSentence, sentences, fallbackSentences } from "./segment.ts";
 
 test("an unfinished trailing clause is not counted as complete", () => {
   // THE RULE the announcement policy rests on. Announcing the tail means the
@@ -76,4 +76,45 @@ test("a trailing quote or bracket after the terminator still closes the sentence
 test("segmentation never loses text", () => {
   const text = "First. Second! Third? Trailing";
   assert.equal(sentences("en", text).join(""), text);
+});
+
+// ---- the degraded host: no Intl.Segmenter -----------------------------------
+
+test("the fallback splitter does not split on a decimal point", () => {
+  // The first failure this file's header names. On a host without
+  // Intl.Segmenter, "Version 1.2.3 is out." became three sentences.
+  assert.deepEqual(fallbackSentences("Version 1.2.3 is out."), ["Version 1.2.3 is out."]);
+});
+
+test("the fallback splitter splits after a quoted full stop", () => {
+  // The second. `He said "stop." Then left.` is two sentences, and returning
+  // it as one unsplit blob means a screen reader reads it as one breath.
+  assert.deepEqual(
+    fallbackSentences('He said "stop." Then left.'),
+    ['He said "stop." ', "Then left."],
+  );
+});
+
+test("the fallback splitter keeps the unterminated tail", () => {
+  // The one that loses data: dropping the tail means the in-progress end of a
+  // streaming answer is never spoken, and it breaks the seam guarantee that
+  // slice(0, n) + slice(n) recombine to the original.
+  const parts = fallbackSentences("Done. And now this is still be");
+  assert.equal(parts.join(""), "Done. And now this is still be", "no character may be lost");
+  assert.ok(parts.length >= 2, "the finished sentence and the tail are separate");
+});
+
+test("the fallback splitter recombines to exactly the input", () => {
+  // The general form of the guarantee, over the awkward cases together.
+  for (const text of [
+    "",
+    "One.",
+    "One. Two. Three.",
+    "Version 1.2.3 is out. Next.",
+    'He said "stop." Then left.',
+    "No terminator at all",
+    "Trailing space. ",
+  ]) {
+    assert.equal(fallbackSentences(text).join(""), text, `lost characters in ${JSON.stringify(text)}`);
+  }
 });

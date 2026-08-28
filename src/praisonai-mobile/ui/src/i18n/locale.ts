@@ -110,7 +110,21 @@ function directionFromIntl(tag: string): Direction | null {
 }
 
 /** The fallback: an explicit script subtag if there is one, else the language. */
-function directionFromTables(tag: string): Direction {
+/**
+ * The table lookup, exported so a test can call it.
+ *
+ * `direction()` is `directionFromIntl(tag) ?? directionFromTables(tag)`, and
+ * the test host is a Node with full ICU where the first half always answers --
+ * so this half never ran under test. A mutation sweep found FIVE
+ * indistinguishable mutations in it: Arabic, Hebrew, Farsi and Urdu rendering
+ * LTR; `az-Arab` and `ku-Arab` rendering LTR; `ar-Latn` and `ks-Deva`
+ * rendering RTL.
+ *
+ * This is the branch that runs on an older Android WebView without
+ * `Intl.Locale.textInfo` -- exactly the devices most likely to be affected --
+ * and the failure is the whole UI mirrored the wrong way, or not at all.
+ */
+export function directionFromTables(tag: string): Direction {
   const parts = subtags(tag).map((part) => part.toLowerCase());
   const language = parts[0] ?? "";
 

@@ -15,11 +15,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { describeStorageContract } from "./storage-contract.ts";
+import { describeSecretsContract } from "./secrets-contract.ts";
 import { describeShellContract, type ShellHarness } from "./shell-contract.ts";
 import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 import { createFakeShell, PHONE_INSETS } from "../../../testing/src/fake-shell.ts";
 import { createWebStorage } from "../web/storage.ts";
 import { createWebSecrets } from "../web/secrets.ts";
+import { createFakeSecrets } from "../../../testing/src/fake-secrets.ts";
 import { createWebShell } from "../web/shell.ts";
 import { INSET_VARIABLES } from "../../../core/src/ports/shell.ts";
 import { createFakeWindow } from "../web/fake-window.ts";
@@ -54,6 +56,12 @@ function memoryStorage(): Storage {
 
 describeStorageContract("fake storage", () => createFakeStorage());
 describeStorageContract("web storage", () => createWebStorage(memoryStorage()));
+
+// The SecretsPort had no contract and no test of any kind. Collapsing the web
+// adapter's key from `${slot}:${account}` to `${slot}` survived the whole
+// suite -- two accounts in one slot then share one credential.
+describeSecretsContract("fake secrets", () => createFakeSecrets());
+describeSecretsContract("web secrets", () => createWebSecrets());
 
 // ---- the contract can fail ------------------------------------------------
 
