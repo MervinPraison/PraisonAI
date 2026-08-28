@@ -361,10 +361,13 @@ broken:
   blocker — bare `crypto` and `events` imports on the Agent graph — is fixed
   upstream; the wiring here is not done.
 
-One known defect is deliberately still open: the remote-http engine discards
-decode rejections, so a malformed frame makes a tool vanish and the turn
-renders as a clean answer. The reducer's `Dropped` type, the view model's
-dropped row and seven user-facing strings are unreachable because of it.
-Fixing it needs a channel from the engine to the transcript that does not
-exist yet, and half-wiring one would be the same mechanism-connected-to-nothing
-this file keeps recording.
+The decode-rejection defect recorded here is now closed. remote-http was the
+only production caller of `decodeEvent` and discarded every rejection, so a
+malformed frame made its tool vanish and the turn rendered as a clean answer.
+`core/src/run/drop-sink.ts` is the channel between the engine (built at
+composition) and the controller (built per app); refusals are drained onto the
+transcript per event and again in `finally`, so one arriving beside the last
+frame is still shown. Eight mutations, one per hop, each fails -- including
+the two that make it *wired* rather than merely present: removing the sink
+from `createRunController` and dropping the registry's forward both left the
+suite green until composition tests were added for each.
