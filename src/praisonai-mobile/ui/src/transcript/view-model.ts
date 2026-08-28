@@ -252,7 +252,13 @@ function approvalRow(
     name: pending.name,
     args: pending.args,
     state,
-    actionable: entry === null ? true : isActionable(entry),
+    // A resolved approval is history, not a live prompt: the turn ended
+    // without it being answered, so its buttons must be dead no matter what
+    // the decision table still says. `settle()` marks the turn's approval
+    // `resolved` but leaves the ApprovalTable entry `pending`, so reading the
+    // table alone would keep an ended turn's controls enabled -- letting a
+    // finished run submit and retry a decision it can no longer deliver.
+    actionable: pending.resolved ? false : entry === null ? true : isActionable(entry),
   };
 }
 

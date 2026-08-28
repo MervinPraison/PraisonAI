@@ -220,6 +220,32 @@ const RECOVERY: Readonly<Record<Recovery, string>> = {
   none: "Dismiss",
 };
 
+const DROPPED_REASON: Readonly<Record<string, string>> = {
+  unparseable_json: "the engine sent something that was not valid JSON",
+  not_an_object: "the engine sent a value where an event was expected",
+  missing_type: "an event arrived with no type",
+  unknown_event: "the engine sent an event this version does not know",
+  missing_msg_id: "an event arrived with no message it belongs to",
+  missing_required_field: "an event was missing a field it needs",
+  empty_text: "an empty piece of text, which is not the same as no answer",
+  before_start: "an event arrived before the turn began",
+  wrong_msg_id: "an event belonged to a different message",
+  after_terminal: "an event arrived after the turn had already ended",
+};
+
+/**
+ * A dropped event's reason, in English words.
+ *
+ * Module-level so both `droppedReason` and `droppedEvents` route through it --
+ * bundle.ts lifts each string function off the table individually, so a
+ * function that reached for a sibling key via `this` would find none. An
+ * unknown tag passes through rather than becoming "unknown reason": a newer
+ * engine can invent one, and the tag is still the thing worth reporting.
+ */
+function enDroppedReason(reason: string): string {
+  return DROPPED_REASON[reason] ?? reason;
+}
+
 /** English. The reference table: bundle.ts compares every other locale's shape
  *  against this object, so a key added here is a key every translation is
  *  measured against. */
@@ -262,24 +288,7 @@ export const en: Strings = {
   streaming: "Responding",
   reasoningLabel: "Reasoning",
   draftingTool: (name) => `Preparing ${name}…`,
-  droppedReason: (reason) => {
-    const WORDS: Record<string, string> = {
-      unparseable_json: "the engine sent something that was not valid JSON",
-      not_an_object: "the engine sent a value where an event was expected",
-      missing_type: "an event arrived with no type",
-      unknown_event: "the engine sent an event this version does not know",
-      missing_msg_id: "an event arrived with no message it belongs to",
-      missing_required_field: "an event was missing a field it needs",
-      empty_text: "an empty piece of text, which is not the same as no answer",
-      before_start: "an event arrived before the turn began",
-      wrong_msg_id: "an event belonged to a different message",
-      after_terminal: "an event arrived after the turn had already ended",
-    };
-    // An unknown tag passes through rather than becoming "unknown reason": a
-    // newer engine can invent one, and the tag is still the thing worth
-    // reporting.
-    return WORDS[reason] ?? reason;
-  },
+  droppedReason: enDroppedReason,
 
   droppedEvents: (count, reasons) => {
     const phrase = countedPhrase(EN, count, String(count), {
@@ -290,8 +299,14 @@ export const en: Strings = {
     // for whoever they report it to. Translating the tag away would make the
     // one searchable string in the whole message unsearchable -- and a tag on
     // its own tells the reader nothing at all.
+    //
+    // The explanation comes from the module-level formatter, NOT from a sibling
+    // key on `this` table -- these functions are lifted off the object by
+    // bundle.ts and have no reliable `this`. A locale that wants localised
+    // reason sentences overrides BOTH `droppedReason` and `droppedEvents`; the
+    // English table keeps them in step by routing both through one source.
     if (reasons.length === 0) return phrase;
-    const explained = reasons.map((r) => `${en.droppedReason(r)} [${r}]`);
+    const explained = reasons.map((r) => `${enDroppedReason(r)} [${r}]`);
     return `${phrase}: ${explained.join("; ")}`;
   },
 
