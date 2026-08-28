@@ -90,6 +90,58 @@ def test_the_remote_launch_puts_the_config_behind_its_flag():
     assert script.index("ds.jsonl") < script.index("--config")
 
 
+def test_the_recorded_pid_owns_the_trainer_not_a_wrapper(tmp_path):
+    """The pid file must name the process that has the trainer as its child.
+
+    `$!` in the outer shell caught the transient subshell that backgrounded the
+    whole `&&` list -- a process that can exit while training runs on, at which
+    point `status` reports `unknown` and `stop` signals the wrong pid. Run the
+    real launch script under /bin/sh with a stand-in trainer that records its
+    own parent, then assert that parent is the pid the launch script recorded.
+    Asserting only that a pid file exists is what let the old shape pass.
+    """
+    import os
+    import subprocess
+    import time
+
+    # A stand-in "trainer" invoked in place of the python interpreter: it
+    # records its own parent (the wrapper the pid file should name) and lingers
+    # so the process is still around to inspect.
+    stub = tmp_path / "fake-trainer"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f"ps -o ppid= -p $$ | tr -d ' ' > {tmp_path / 'trainer_ppid'}\n"
+        "sleep 30\n"
+    )
+    os.chmod(stub, 0o755)
+
+    runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
+    runner.host = rr.RemoteHost(alias="h", python=str(stub),
+                                workdir=str(tmp_path))
+    run = rr.RemoteRun(host="h", run_id="run-1", remote_dir=str(tmp_path),
+                       log_path=str(tmp_path / "train.log"))
+
+    script = runner._launch_script(run, "", None)
+    subprocess.run(["/bin/sh", "-c", script], cwd=str(tmp_path), check=True)
+
+    pid_file = tmp_path / "train.pid"
+    ppid_file = tmp_path / "trainer_ppid"
+    for _ in range(50):
+        if pid_file.exists() and ppid_file.exists():
+            break
+        time.sleep(0.1)
+    assert pid_file.exists(), "no pid was recorded"
+    assert ppid_file.exists(), "the stand-in trainer never ran"
+
+    recorded = pid_file.read_text().strip()
+    trainer_ppid = ppid_file.read_text().strip()
+    assert trainer_ppid == recorded, (
+        f"recorded pid {recorded} does not own the trainer "
+        f"(trainer's parent is {trainer_ppid})")
+
+    subprocess.run(["kill", recorded], capture_output=True)
+
+
 # --------------------------------------------------------------------------- #
 # 3. remote command injection and path traversal
 # --------------------------------------------------------------------------- #

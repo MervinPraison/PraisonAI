@@ -332,15 +332,20 @@ class RemoteRunner:
         # session, so its children -- dataloader workers, torchrun ranks -- are
         # in one group `stop` can take down together. `setsid` is not on macOS,
         # so fall back to plain `nohup`; `stop` resolves the real pgid on the
-        # host at kill time, so the group is signalled either way.
+        # host at kill time, so the group is signalled either way. `</dev/null`
+        # releases ssh's stdin so the launch returns immediately instead of
+        # holding the connection open for the run's duration. The inner program
+        # is quoted as one argument so a run dir with whitespace or shell
+        # metacharacters can't break the command apart.
         inner = (
             f"nohup sh -c '{train} > train.log 2>&1; "
-            f"echo $? > status' >/dev/null 2>&1 & "
+            f"echo $? > status' </dev/null >/dev/null 2>&1 & "
             f"echo $! > {shlex.quote(run.pid_path)}"
         )
         body = (
             f"{exports}{cd} && "
-            f"if command -v setsid >/dev/null 2>&1; then setsid sh -c {shlex.quote(inner)}; "
+            f"if command -v setsid >/dev/null 2>&1; then "
+            f"setsid sh -c {shlex.quote(inner)} </dev/null; "
             f"else {inner}; fi"
         )
         return body
