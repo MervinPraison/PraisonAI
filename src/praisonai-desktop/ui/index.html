@@ -1915,10 +1915,23 @@ function control(def, onChange){
 
 async function runAction(def){
   if(def.confirm && !await askConfirm(def.confirm.message,{ok:'Continue'})) return;
+  // A failed export that says nothing is worse than no export: the user pastes
+  // a stale clipboard into a file and believes they have a backup. Every branch
+  // is a bare fetch that rejects when the engine is unreachable, so report it.
+  try{ await runActionInner(def); }
+  catch(e){ toast('That did not run: '+(e && e.message ? e.message : e)); }
+}
+async function runActionInner(def){
   if(def.action==='export'){
-    const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
+    const cr=await fetch('http://127.0.0.1:'+PORT+'/chats');
+    if(!cr.ok) throw new Error('Could not read conversations ('+cr.status+')');
+    const {chats}=await cr.json();
     const all=[];
-    for(const c of chats) all.push(await (await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id)).json());
+    for(const c of chats){
+      const dr=await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id);
+      if(!dr.ok) throw new Error('Could not read a conversation ('+dr.status+')');
+      all.push(await dr.json());
+    }
     // A sandboxed webview blocks a download the page starts itself, so the
     // export goes to the clipboard and says so rather than failing silently.
     await navigator.clipboard.writeText(JSON.stringify(all,null,2));
