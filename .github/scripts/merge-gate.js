@@ -17,7 +17,8 @@ const PR_MAX_AUTO_FILES = 30;
 const MANUAL_ONLY_LABELS = new Set(['security', 'breaking-change', 'needs-manual-review', 'release']);
 const WORKFLOW_ONLY_LABEL = 'merge-gate-ci-only';
 const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/merge-gate'];
-const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/'];
+const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/', 'src/praisonai-ts/'];
+const TS_SDK_SOURCE_PREFIX = 'src/praisonai-ts/src/';
 const SENSITIVE_PATH_PATTERNS = [
   /^\.github\/workflows\//,
   /praisonaiagents\/(auth|approval|policy|sandbox)\//,
@@ -26,7 +27,17 @@ const SENSITIVE_PATH_PATTERNS = [
   /\.env(\.|$)/,
   /credentials\.json$/i,
 ];
-const REQUIRED_SDK_CHECK_PATTERNS = [/test/i, /smoke/i, /core/i, /python package/i, /comprehensive/i, /optimized/i];
+const REQUIRED_SDK_CHECK_PATTERNS = [
+  /test/i,
+  /smoke/i,
+  /core/i,
+  /python package/i,
+  /comprehensive/i,
+  /optimized/i,
+  /praisonai-ts/i,
+  /npm/i,
+  /webview/i,
+];
 const SECRET_PATTERNS = [
   /sk-[a-zA-Z0-9]{20,}/,
   /AKIA[0-9A-Z]{16}/,
@@ -308,7 +319,7 @@ function finalClaudeCompletedOnSha(comments, headPushedAt) {
 }
 
 const FINAL_CLAUDE_REVIEW_BODY =
-  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Review changes in this PR. Python SDK: praisonaiagents, praisonai. TypeScript SDK: src/praisonai-ts/. Do NOT modify src/praisonai-rust. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
+  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Review changes in this PR. Python SDK: praisonaiagents, praisonai. TypeScript SDK: src/praisonai-ts/. Do NOT modify src/praisonai-rust. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**MANDATORY READ (before reviewing):**\n- Always read src/praisonai-agents/AGENTS.md\n- If this PR touches src/praisonai-ts/, also read src/praisonai-ts/AGENTS.md §2.1.2 (TS triage + PR review checklist)\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n6. Repo routing: agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; optional sandbox backends → PraisonAI-Plugins (`praisonai.sandbox` entry point) — request changes if wrongly added to praisonaiagents/\n\n**MANDATORY COMMENT FORMAT — include this Phase 1 table in your review comment:**\n#### Phase 1 — AGENTS.md review\n| Check | Result |\n|---|---|\n| Protocol-driven / no heavy impl in core | ✅ or ❌ + one-line rationale |\n| Backward compatible | ✅ or ❌ + one-line rationale |\n| Performance (hot path) | ✅ or ❌ + one-line rationale |\n| **SDK value** | ✅ or ❌ + one-line rationale (explicitly judge whether the change strengthens the SDK) |\n| No Agent param bloat | ✅ or ❌ + one-line rationale |\n| Repo routing | ✅ or ❌ + one-line rationale |\n\nFor TypeScript PRs (src/praisonai-ts/), also add:\n| TS types / parity / tests | ✅ or ❌ + one-line rationale (npm run build && npm test) |\n\n**Phase 2: FIX Valid Issues**\n7. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n8. Also independently identify and fix any gaps or issues you find in the changed code — do not rely only on prior reviewer feedback\n9. Push all code fixes directly to THIS branch (do NOT create a new PR)\n10. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n11. If all issues are resolved, approve the PR / close the Issue\n12. If blocking issues remain, request changes / leave clear action items';
 
 async function getMergeState(github, owner, repo, prNumber) {
   const query = `
@@ -676,18 +687,35 @@ function prSizeReasons(files) {
 }
 
 function missingTestsReason(files) {
-  const sdkAdds = files.filter(
+  const pySdkAdds = files.filter(
     (f) =>
       f.filename.startsWith('src/praisonai-agents/') &&
       f.filename.endsWith('.py') &&
       !f.filename.endsWith('__init__.py') &&
       (f.additions || 0) > 0
   );
-  if (sdkAdds.length === 0) return null;
-  const hasTestChange = files.some(
+  const tsSdkAdds = files.filter(
+    (f) =>
+      f.filename.startsWith(TS_SDK_SOURCE_PREFIX) &&
+      f.filename.endsWith('.ts') &&
+      !f.filename.endsWith('.d.ts') &&
+      (f.additions || 0) > 0
+  );
+  if (pySdkAdds.length === 0 && tsSdkAdds.length === 0) return null;
+  const hasPyTestChange = files.some(
     (f) => /\/tests?\//.test(f.filename) || /test_.*\.py$/.test(f.filename) || /_test\.py$/.test(f.filename)
   );
-  if (!hasTestChange) return 'SDK code added without test file changes — requires manual review';
+  const hasTsTestChange = files.some(
+    (f) =>
+      f.filename.startsWith('src/praisonai-ts/tests/') ||
+      /\.(test|spec)\.ts$/.test(f.filename)
+  );
+  if (pySdkAdds.length > 0 && !hasPyTestChange) {
+    return 'Python SDK code added without test file changes — requires manual review';
+  }
+  if (tsSdkAdds.length > 0 && !hasTsTestChange) {
+    return 'TS SDK code added without test file changes — requires manual review';
+  }
   return null;
 }
 
