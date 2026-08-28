@@ -136,13 +136,28 @@ def test_the_recorded_pid_owns_the_trainer_signalable_by_group(tmp_path):
     pid_file = tmp_path / "train.pid"
     trainer_pid_file = tmp_path / "trainer_pid"
     trainer_ppid_file = tmp_path / "trainer_ppid"
+    # Wait for CONTENT, not for existence. `>` creates the target before the
+    # command on its left produces a byte, so `ps ... > trainer_ppid` leaves an
+    # empty file for as long as `ps` takes to run. Breaking on existence read
+    # that empty file and compared '' to the recorded pid -- a real intermittent
+    # failure in CI, not a slow machine: the window is the runtime of `ps`.
+    def _settled(path):
+        try:
+            return path.read_text().strip() != ""
+        except OSError:
+            return False
+
     for _ in range(50):
-        if (pid_file.exists() and trainer_pid_file.exists()
-                and trainer_ppid_file.exists()):
+        if all(_settled(f) for f in (pid_file, trainer_pid_file, trainer_ppid_file)):
             break
         time.sleep(0.1)
     assert pid_file.exists(), "no pid was recorded"
     assert trainer_pid_file.exists(), "the stand-in trainer never ran"
+    # Named separately from the equality below, so a timeout reads as "the
+    # trainer never reported its parent" rather than as the ownership bug this
+    # test exists to catch.
+    assert _settled(trainer_ppid_file), (
+        "the stand-in trainer never recorded its parent pid within 5s")
 
     recorded = pid_file.read_text().strip()
     trainer_pid = trainer_pid_file.read_text().strip()
