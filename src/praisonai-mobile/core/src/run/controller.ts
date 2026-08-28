@@ -113,7 +113,7 @@ export function createRunController(deps: ControllerDeps): RunController {
    *  did not accept the stop" for a stop that DID happen. Sharing the one
    *  promise makes overlapping stops report the single true result. */
   let live:
-    | { readonly runId: string; readonly abort: AbortController; cancelling?: Promise<boolean> }
+    | { readonly runId: string; readonly abort: AbortController; cancelling?: Promise<boolean> | undefined }
     | null = null;
 
   const view = (): RunView => ({ turn, approvals, queue, publishes });
@@ -347,8 +347,23 @@ export function createRunController(deps: ControllerDeps): RunController {
       // nobody is draining.
       run.cancelling = (async () => {
         const stopped = await deps.engine.cancel(run.runId);
-        // `run`, never `live`: by now `live` may be null or a different turn.
-        run.abort.abort();
+        if (stopped) {
+          // `run`, never `live`: by now `live` may be null or a different turn.
+          run.abort.abort();
+        } else {
+          // A REFUSED stop must stay retryable, and must not look like a
+          // success. Aborting here did both kinds of damage: it detached the
+          // reader from a run the engine said it had NOT cancelled -- leaving
+          // it generating and billing into a socket nobody drains -- and it
+          // set `aborted`, so the very next tap hit the idempotence guard
+          // above and returned true without asking the engine again.
+          //
+          // The user is told the stop was refused, taps the only affordance
+          // offered, and is told nothing at all, which stopNotice defines as
+          // success. That is the defect stopNotice exists for, inverted, one
+          // layer down -- introduced by the idempotence guard two commits ago.
+          run.cancelling = undefined;
+        }
         return stopped;
       })();
       return run.cancelling;

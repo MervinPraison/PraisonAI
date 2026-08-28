@@ -197,7 +197,28 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
   }
 
   if (state.phase === "idle") {
-    // engine/server.py emits `start` first, always. Anything before it is
+    // An `error` is the exception, and it is the common case on a phone.
+    //
+    // A failure before the first token -- 401, 403, 500, a refused connection,
+    // no network, a wrong baseUrl -- is still THIS turn's outcome, not a stray
+    // frame from a previous run. Dropping it threw the real reason away and
+    // `finish()` then substituted `kind: "empty"`, so every one of those
+    // rendered identically as "the engine produced no output" plus a dropped
+    // row accusing the engine of sending an event before the turn began.
+    //
+    // The default baseUrl is 127.0.0.1:8765, which on a phone is the phone
+    // itself, so that was the FIRST thing every new user saw. It also made the
+    // `kind: "auth"` -> `recovery: "settings"` branch unreachable: the one
+    // distinction between "retry this" and "go fix your credentials" never
+    // survived to the view model.
+    if (event.type === "error") {
+      return apply(
+        { ...state, phase: "streaming", msgId: event.msgId, dropped: state.carry, carry: [] },
+        event,
+      );
+    }
+
+    // engine/server.py emits `start` first, always. Anything else before it is
     // either a bug or a frame from a previous run arriving late.
     return drop(state, "before_start", event.type);
   }
