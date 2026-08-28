@@ -280,6 +280,30 @@ assert('ts sdk with tests ok', mg.missingTestsReason([
   { filename: 'src/praisonai-ts/tests/unit/agent/history-restore.test.ts', additions: 10 },
 ]) === null);
 assert('touches ts sdk', mg.touchesSdk([{ filename: 'src/praisonai-ts/src/agent/simple.ts' }]));
+
+// Cross-SDK test contamination: unrelated test must NOT satisfy the other SDK's gate
+assert('py sdk not satisfied by ts test', mg.missingTestsReason([
+  { filename: 'src/praisonai-agents/a/b.py', additions: 3 },
+  { filename: 'src/praisonai-ts/tests/unit/x.test.ts', additions: 10 },
+]) !== null);
+assert('ts sdk not satisfied by py test', mg.missingTestsReason([
+  { filename: 'src/praisonai-ts/src/agent/simple.ts', additions: 5 },
+  { filename: 'src/praisonai-agents/tests/test_x.py', additions: 10 },
+]) !== null);
+assert('ts sdk not satisfied by out-of-package spec', mg.missingTestsReason([
+  { filename: 'src/praisonai-ts/src/agent/simple.ts', additions: 5 },
+  { filename: 'docs/example.spec.ts', additions: 10 },
+]) !== null);
+
+// SDK check patterns scoped per language
+assert('py check pattern matches core', mg.REQUIRED_PY_SDK_CHECK_PATTERNS.some((p) => p.test('test-core')));
+assert('py check pattern rejects npm', !mg.REQUIRED_PY_SDK_CHECK_PATTERNS.some((p) => p.test('npm-build')));
+assert('ts check pattern matches praisonai-ts', mg.REQUIRED_TS_SDK_CHECK_PATTERNS.some((p) => p.test('praisonai-ts CI')));
+assert('ts check pattern rejects test-core', !mg.REQUIRED_TS_SDK_CHECK_PATTERNS.some((p) => p.test('test-core')));
+assert('touches py sdk helper', mg.touchesPySdk([{ filename: 'src/praisonai-agents/a/b.py' }]));
+assert('touches ts sdk helper', mg.touchesTsSdk([{ filename: 'src/praisonai-ts/src/x.ts' }]));
+assert('py sdk not ts', !mg.touchesTsSdk([{ filename: 'src/praisonai-agents/a/b.py' }]));
+
 assert('final body requires sdk value table', mg.FINAL_CLAUDE_REVIEW_BODY.includes('| **SDK value** |'));
 assert('final body requires ts agents md', mg.FINAL_CLAUDE_REVIEW_BODY.includes('src/praisonai-ts/AGENTS.md'));
 

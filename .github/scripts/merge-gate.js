@@ -27,16 +27,23 @@ const SENSITIVE_PATH_PATTERNS = [
   /\.env(\.|$)/,
   /credentials\.json$/i,
 ];
-const REQUIRED_SDK_CHECK_PATTERNS = [
+const REQUIRED_PY_SDK_CHECK_PATTERNS = [
   /test/i,
   /smoke/i,
   /core/i,
   /python package/i,
   /comprehensive/i,
   /optimized/i,
+];
+const REQUIRED_TS_SDK_CHECK_PATTERNS = [
   /praisonai-ts/i,
   /npm/i,
   /webview/i,
+  /typescript/i,
+];
+const REQUIRED_SDK_CHECK_PATTERNS = [
+  ...REQUIRED_PY_SDK_CHECK_PATTERNS,
+  ...REQUIRED_TS_SDK_CHECK_PATTERNS,
 ];
 const SECRET_PATTERNS = [
   /sk-[a-zA-Z0-9]{20,}/,
@@ -703,12 +710,15 @@ function missingTestsReason(files) {
   );
   if (pySdkAdds.length === 0 && tsSdkAdds.length === 0) return null;
   const hasPyTestChange = files.some(
-    (f) => /\/tests?\//.test(f.filename) || /test_.*\.py$/.test(f.filename) || /_test\.py$/.test(f.filename)
+    (f) =>
+      (f.filename.startsWith('src/praisonai-agents/') || f.filename.startsWith('src/praisonai/')) &&
+      f.filename.endsWith('.py') &&
+      (/\/tests?\//.test(f.filename) || /test_.*\.py$/.test(f.filename) || /_test\.py$/.test(f.filename))
   );
   const hasTsTestChange = files.some(
     (f) =>
-      f.filename.startsWith('src/praisonai-ts/tests/') ||
-      /\.(test|spec)\.ts$/.test(f.filename)
+      f.filename.startsWith('src/praisonai-ts/') &&
+      (f.filename.startsWith('src/praisonai-ts/tests/') || /\.(test|spec)\.ts$/.test(f.filename))
   );
   if (pySdkAdds.length > 0 && !hasPyTestChange) {
     return 'Python SDK code added without test file changes — requires manual review';
@@ -733,6 +743,17 @@ function secretScanReasons(files) {
   return [];
 }
 
+function touchesPySdk(files) {
+  return files.some(
+    (f) =>
+      f.filename.startsWith('src/praisonai-agents/') || f.filename.startsWith('src/praisonai/')
+  );
+}
+
+function touchesTsSdk(files) {
+  return files.some((f) => f.filename.startsWith('src/praisonai-ts/'));
+}
+
 async function sdkTestChecksReason(github, owner, repo, sha, files, core) {
   if (!touchesSdk(files)) return null;
   const { data } = await github.rest.checks.listForRef({
@@ -745,11 +766,25 @@ async function sdkTestChecksReason(github, owner, repo, sha, files, core) {
   if (runs.length === 0) {
     return 'SDK code changed but no CI checks on HEAD';
   }
-  const testRuns = runs.filter((r) => REQUIRED_SDK_CHECK_PATTERNS.some((p) => p.test(r.name || '')));
-  if (testRuns.length === 0) {
-    return 'SDK code changed but no test check runs on HEAD';
+  const matchRuns = (patterns) =>
+    runs.filter((r) => patterns.some((p) => p.test(r.name || '')));
+
+  if (touchesPySdk(files)) {
+    const pyRuns = matchRuns(REQUIRED_PY_SDK_CHECK_PATTERNS);
+    if (pyRuns.length === 0) {
+      return 'Python SDK code changed but no Python test check runs on HEAD';
+    }
+    core?.info?.(`Python SDK test checks on HEAD: ${pyRuns.map((r) => r.name).join(', ')}`);
   }
-  core?.info?.(`SDK test checks on HEAD: ${testRuns.map((r) => r.name).join(', ')}`);
+
+  if (touchesTsSdk(files)) {
+    const tsRuns = matchRuns(REQUIRED_TS_SDK_CHECK_PATTERNS);
+    if (tsRuns.length === 0) {
+      return 'TypeScript SDK code changed but no TypeScript test check runs on HEAD';
+    }
+    core?.info?.(`TypeScript SDK test checks on HEAD: ${tsRuns.map((r) => r.name).join(', ')}`);
+  }
+
   return null;
 }
 
@@ -1064,6 +1099,10 @@ module.exports = {
   countNewAgentParams,
   listPullFiles,
   touchesSdk,
+  touchesPySdk,
+  touchesTsSdk,
+  REQUIRED_PY_SDK_CHECK_PATTERNS,
+  REQUIRED_TS_SDK_CHECK_PATTERNS,
   hasManualOnlyLabel,
   sensitivePathReasons,
   prSizeReasons,
