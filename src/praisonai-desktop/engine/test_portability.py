@@ -282,6 +282,9 @@ class LeafStoreDeletion(unittest.TestCase):
         os.environ["PATH"] = self.bin + os.pathsep + self.old_path
 
     def tearDown(self):
+        # setUp skips before these are set on Windows.
+        if getattr(self, "bin", None) is None:
+            return
         os.environ["PATH"] = self.old_path
         shutil.rmtree(self.bin, ignore_errors=True)
 

@@ -153,7 +153,7 @@ def train_llm(
         # the difference between a caught typo and a wasted run. Resolved and
         # printed WITHOUT loading the (heavy, optional) runner, so a preview
         # never depends on the training deps being installed.
-        _print_resolved_config(config, overrides)
+        _print_resolved_config(config, overrides, remote_overrides)
         return
 
     if not dataset and not config:
@@ -268,9 +268,14 @@ def _dispatch_remote(resolved, remote_overrides, config_path, dataset):
                           workdir=block["workdir"])
 
     shipped = _write_shipped_config(resolved)
+    # A dataset named only in --config still has to be copied. Fall back to the
+    # resolved dataset when the positional argument is absent, but only when it
+    # points at a local file -- a HuggingFace id or a path already on the remote
+    # host is not something to ship.
+    ship_dataset = dataset or _local_dataset_in(resolved)
     try:
         run = runner.start(config_path=shipped,
-                           dataset_path=Path(dataset) if dataset else None,
+                           dataset_path=Path(ship_dataset) if ship_dataset else None,
                            expect_gpus=block["gpus"])
     except RemoteError as exc:
         output.print_error(f"Could not start the run on {block['host']}",
@@ -290,9 +295,50 @@ def _dispatch_remote(resolved, remote_overrides, config_path, dataset):
     runner.tail(run, on_line=typer.echo)
     state = runner.status(run)
     typer.echo(f"status: {state}")
-    if state == "failed":
+    # status() returns "failed (exit N)", not a bare "failed", so an equality
+    # check would print the failure and then exit 0 -- reporting success for a
+    # run that did not complete.
+    if state.startswith("failed"):
         raise typer.Exit(1)
     return True
+
+
+def _local_dataset_in(resolved):
+    """The one local dataset file the resolved config names, or None.
+
+    The trainer accepts a dataset as a bare string or as the list-of-mappings
+    it normalises to -- `[{name: ...}]`, optionally with `data_files` -- and
+    loads any `name`/`data_files` that `os.path.exists` as a local file
+    (praisonai_train/train/llm/trainer.py:882). A remote run has to copy that
+    file, or the far side is handed a path that exists only on this machine.
+    Only the string form was covered before, so the canonical list form went
+    unshipped.
+
+    A HuggingFace id or a path already on the remote host is not a file here,
+    so it is left alone. Only the first local file is returned: the runner
+    ships a single positional dataset, which matches how a `--config` run is
+    launched.
+    """
+    entries = resolved.get("dataset")
+    if isinstance(entries, str):
+        entries = [entries]
+    elif not isinstance(entries, list):
+        return None
+
+    for entry in entries:
+        if isinstance(entry, str):
+            candidate = entry
+        elif isinstance(entry, dict):
+            # `data_files` is the explicit local file; `name` doubles as a path
+            # when it is one, exactly as the trainer treats it.
+            candidate = entry.get("data_files") or entry.get("name")
+            if isinstance(candidate, (list, tuple)):
+                candidate = candidate[0] if candidate else None
+        else:
+            continue
+        if isinstance(candidate, str) and Path(candidate).is_file():
+            return candidate
+    return None
 
 
 def _write_shipped_config(resolved):
@@ -370,11 +416,29 @@ def _resolve_config(config_path, overrides):
     return resolved
 
 
-def _print_resolved_config(config_path, overrides):
-    """Show the config the run would use: the file, then the flags on top."""
+def _print_resolved_config(config_path, overrides, remote_overrides=None):
+    """Show the config the run would use: the file, then the flags on top.
+
+    The remote block is resolved with the same precedence and validation as the
+    real dispatch, so the preview shows the host, interpreter, workdir and GPU
+    count the run would actually use -- and a bad remote setting is caught here
+    rather than after an hour of rented GPU.
+    """
     import yaml
 
+    from ..output.console import get_output_controller
+    from praisonai_train.remote import settings as remote_settings
+
     resolved = _resolve_config(config_path, overrides)
+
+    try:
+        block = remote_settings.resolve(resolved, remote_overrides or {})
+    except remote_settings.RemoteSettingsError as exc:
+        get_output_controller().print_error("Bad remote settings", remediation=str(exc))
+        raise typer.Exit(1) from exc
+    if block:
+        resolved["remote"] = remote_settings.redact(block)
+
     typer.echo(yaml.safe_dump(resolved, sort_keys=True, default_flow_style=False).rstrip())
     if overrides:
         typer.echo(f"\n# {len(overrides)} value(s) came from flags: "
