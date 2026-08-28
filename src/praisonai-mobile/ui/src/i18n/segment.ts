@@ -49,6 +49,12 @@ const CLOSERS = new Set([
   '"', "'", ")", "]", "}", "»", "”", "’", "」", "』", "）",
 ]);
 
+/** ASCII `. ! ?` glued to the next word is a decimal point or an abbreviation,
+ *  not a sentence end. A CJK 。 or Arabic ؟ glued to the next character IS a
+ *  boundary -- those scripts do not use a following space -- so the "glued means
+ *  not a boundary" rule is correct only for ASCII. */
+const ASCII_TERMINATORS = new Set([".", "!", "?"]);
+
 const segmenters = new Map<string, Intl.Segmenter | null>();
 
 function sentenceSegmenter(locale: string): Intl.Segmenter | null {
@@ -136,12 +142,21 @@ export function fallbackSentences(text: string): readonly string[] {
   const out: string[] = [];
   let start = 0;
   for (let i = 0; i < text.length; i += 1) {
-    if (!TERMINATORS.has(text.charAt(i))) continue;
+    const terminator = text.charAt(i);
+    if (!TERMINATORS.has(terminator)) continue;
     let end = i + 1;
     while (end < text.length && CLOSERS.has(text.charAt(end))) end += 1;
-    // A terminator glued to the next word is a decimal point or an
+    // An ASCII terminator glued to the next word is a decimal point or an
     // abbreviation, not a sentence end -- the one case the fallback can catch.
-    if (end < text.length && text.charAt(end).trim() !== "") continue;
+    // A CJK/Arabic terminator glued to the next character is a real boundary,
+    // because those scripts do not put a space after it.
+    if (
+      ASCII_TERMINATORS.has(terminator) &&
+      end < text.length &&
+      text.charAt(end).trim() !== ""
+    ) {
+      continue;
+    }
     while (end < text.length && text.charAt(end).trim() === "") end += 1;
     out.push(text.slice(start, end));
     start = end;

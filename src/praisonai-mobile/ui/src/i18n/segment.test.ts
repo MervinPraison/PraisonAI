@@ -95,6 +95,21 @@ test("the fallback splitter splits after a quoted full stop", () => {
   );
 });
 
+test("the fallback splitter splits unspaced CJK sentences", () => {
+  // The third failure the header names: "splitting mid-CJK". Japanese has no
+  // space after 。, so the ASCII "glued means not a boundary" rule wrongly
+  // fused the whole answer into one unbroken blob -- a screen reader then reads
+  // it as a single breath on exactly the host without Intl.Segmenter.
+  assert.deepEqual(
+    fallbackSentences("ファイルを読みます。次に"),
+    ["ファイルを読みます。", "次に"],
+  );
+  assert.deepEqual(
+    fallbackSentences("これはテストです。終わり。"),
+    ["これはテストです。", "終わり。"],
+  );
+});
+
 test("the fallback splitter keeps the unterminated tail", () => {
   // The one that loses data: dropping the tail means the in-progress end of a
   // streaming answer is never spoken, and it breaks the seam guarantee that
@@ -114,6 +129,7 @@ test("the fallback splitter recombines to exactly the input", () => {
     'He said "stop." Then left.',
     "No terminator at all",
     "Trailing space. ",
+    "ファイルを読みます。次に",
   ]) {
     assert.equal(fallbackSentences(text).join(""), text, `lost characters in ${JSON.stringify(text)}`);
   }
