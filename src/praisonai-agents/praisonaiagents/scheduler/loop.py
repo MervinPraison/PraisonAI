@@ -136,11 +136,20 @@ class ScheduleLoop:
 
         Args:
             poll_seconds: Seconds between polls; defaults to the loop's
-                ``tick_seconds``.
+                ``tick_seconds``. Must be > 0 — a non-positive value would make
+                ``_stop_event.wait`` return immediately and busy-spin the store.
             owner_id: Override the per-process claim identity (host:pid:uuid by
                 default).
+
+        Raises:
+            ValueError: if ``poll_seconds`` is not a positive number.
         """
         if poll_seconds is not None:
+            if poll_seconds <= 0:
+                raise ValueError(
+                    f"poll_seconds must be > 0 to avoid a busy loop, got "
+                    f"{poll_seconds!r}"
+                )
             self._tick = poll_seconds
         if owner_id is not None:
             self._owner_id = owner_id

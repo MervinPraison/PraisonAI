@@ -248,6 +248,34 @@ def schedule_start(
     raise typer.Exit(_run_schedule(args))
 
 
+def _default_agent_resolver():
+    """Return a resolver that lazily builds a single default Agent (cached).
+
+    Standalone ``schedule run`` has no gateway registry, so message jobs would
+    otherwise never resolve an agent. This builds one plain Agent on first use
+    and reuses it for every job — ``agent_id`` is ignored because there is no
+    registry to look names up in. Errors (e.g. missing LLM deps) surface as a
+    normal ``None`` resolution, which the executor records as a ``failed`` run
+    rather than crashing the poll loop.
+    """
+    cache = {}
+
+    def _resolve(agent_id):
+        if "agent" not in cache:
+            try:
+                from praisonaiagents import Agent
+
+                cache["agent"] = Agent(
+                    name="scheduler",
+                    instructions="You run scheduled jobs. Complete the task in the message.",
+                )
+            except Exception:
+                cache["agent"] = None
+        return cache["agent"]
+
+    return _resolve
+
+
 @app.command("run")
 def schedule_run(
     poll: float = typer.Option(15.0, "--poll", "-p", help="Seconds between store polls (default 15)"),
@@ -264,6 +292,9 @@ def schedule_run(
         praisonai schedule run
     """
     output = get_output_controller()
+    if poll <= 0:
+        output.print_error("--poll must be greater than 0 seconds.")
+        raise typer.Exit(1)
     try:
         from praisonaiagents.scheduler import get_default_store, ScheduleLoop
         from praisonai.integration.bridges.schedules_runner import _build_executor
@@ -272,7 +303,12 @@ def schedule_run(
         raise typer.Exit(4)
 
     store = get_default_store()
-    executor = _build_executor(store)
+    # A standalone poller has no gateway agent registry, so build the executor
+    # with a resolver that lazily constructs a default Agent. Without this the
+    # bridge's host resolver returns None and every message job (the primary
+    # advertised use, e.g. ``-m "morning brief"``) records "No agent found".
+    # ``command``/``backend`` jobs bypass the resolver and are unaffected.
+    executor = _build_executor(store, agent_resolver=_default_agent_resolver())
     if executor is None:
         output.print_error(
             "Schedule executor unavailable; cannot run the poller. "

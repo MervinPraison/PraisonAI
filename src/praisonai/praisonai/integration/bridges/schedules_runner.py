@@ -10,16 +10,23 @@ _loop = None
 _executor = None
 
 
-def _build_executor(store):
+def _build_executor(store, agent_resolver=None):
     """Construct a ``ScheduledAgentExecutor`` for host-app embedding.
 
-    The host embedding has no gateway agent registry, so ``agent_id`` cannot be
-    resolved to a live agent here — message jobs are surfaced by the executor as
-    a recorded ``failed`` run with a clear reason rather than crashing the tick,
-    while ``command`` jobs (which take no model turn) execute normally. Delivery
-    uses the standalone sender fallback (``delivery_handler=None``) so a job's
-    own delivery target still receives output with no live gateway. A default
-    :class:`RunPolicy` guards the run.
+    The host embedding has no gateway agent registry, so by default ``agent_id``
+    cannot be resolved to a live agent here — message jobs are surfaced by the
+    executor as a recorded ``failed`` run with a clear reason rather than
+    crashing the tick, while ``command`` jobs (which take no model turn) execute
+    normally. Delivery uses the standalone sender fallback
+    (``delivery_handler=None``) so a job's own delivery target still receives
+    output with no live gateway. A default :class:`RunPolicy` guards the run.
+
+    Args:
+        store: Canonical schedule store to bind the runner to.
+        agent_resolver: Optional ``(agent_id) -> Agent | None`` override. A
+            standalone poller (``praisonai schedule run``) passes a resolver that
+            builds a default Agent so message jobs actually execute; when omitted
+            the host-embedding fallback resolves to ``None`` (unchanged).
 
     Returns ``None`` when the executor cannot be constructed — the caller then
     does **not** start the poll loop, so due jobs are left genuinely due (never
@@ -40,16 +47,17 @@ def _build_executor(store):
     except ImportError as exc:  # pragma: no cover - wrapper policy optional
         log.debug("RunPolicy unavailable for host embedding: %s", exc)
 
-    def _resolve_agent(agent_id):
-        # No process-global agent registry exists in the host embedding; a
-        # message job's ``agent_id`` therefore resolves to nothing here. The
-        # executor records this as a ``failed`` run (auditable) instead of
-        # silently dropping it; ``command`` jobs never reach this resolver.
-        return None
+    if agent_resolver is None:
+        def agent_resolver(agent_id):
+            # No process-global agent registry exists in the host embedding; a
+            # message job's ``agent_id`` therefore resolves to nothing here. The
+            # executor records this as a ``failed`` run (auditable) instead of
+            # silently dropping it; ``command`` jobs never reach this resolver.
+            return None
 
     return ScheduledAgentExecutor(
         runner=ScheduleRunner(store),
-        agent_resolver=_resolve_agent,
+        agent_resolver=agent_resolver,
         run_policy=run_policy,
     )
 
