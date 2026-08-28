@@ -48,7 +48,15 @@ interface FakeNode {
 
 export interface FakeDom {
   readonly root: FakeNode;
-  readonly view: { dispatch(type: string, event: unknown): void };
+  /** Build an element, so a test does not have to reach through
+   *  `ownerDocument` (typed `unknown`, because the app only ever passes it
+   *  back to the fake). */
+  make(tag: string): FakeNode;
+  readonly view: {
+    addEventListener(type: string, cb: (e: unknown) => void): void;
+    removeEventListener(type: string, cb: (e: unknown) => void): void;
+    dispatch(type: string, event: unknown): void;
+  };
   /** Every element in document order, for finding things by tag or class. */
   all(): FakeNode[];
   find(pred: (n: FakeNode) => boolean): FakeNode | null;
@@ -195,6 +203,7 @@ export function createFakeDom(): FakeDom {
   return {
     root,
     view,
+    make,
     all,
     find: (pred) => all().find(pred) ?? null,
     click(el) {
