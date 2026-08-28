@@ -292,6 +292,13 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         nodes.nodes.clear();
         announcer = initialAnnouncer;
         transcript.textContent = ""; // safe now: this is no longer a live region
+        // The live regions too. Resetting `announcer` clears the state that
+        // decides what to SAY next; it does not empty the regions themselves,
+        // so the previous conversation's answer stayed in the accessibility
+        // tree of what the user believes is an empty chat. Not announced
+        // again -- but still there for anyone navigating the page.
+        polite.textContent = "";
+        assertive.textContent = "";
         return;
       }
       case "navigate":
