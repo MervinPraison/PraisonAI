@@ -395,9 +395,25 @@ test("a native safe-area payload carrying only the edges that moved is honoured"
 
   probe.emit("safe-area-changed", { bottom: 34 });
   assert.equal(shell.insets.bottom, 34, "a partial payload must be applied, not discarded");
+  // The omitted edges are the point of the case: `coerceInsets` REPLACES rather
+  // than merges, so an edge absent from the payload is authoritatively 0. Pinned
+  // explicitly, because otherwise this stays green even if a partial update
+  // silently kept -- or corrupted -- an edge it never mentioned.
+  assert.deepEqual(
+    shell.insets,
+    { top: 0, right: 0, bottom: 34, left: 0 },
+    "an edge absent from a partial payload is 0, not carried over",
+  );
 
   probe.emit("safe-area-changed", { top: 47 });
   assert.equal(shell.insets.top, 47);
+  // And the previous partial is gone, not accumulated: the second event is the
+  // authority now, so bottom is back to 0 exactly as top was before it.
+  assert.deepEqual(
+    shell.insets,
+    { top: 47, right: 0, bottom: 0, left: 0 },
+    "each partial payload replaces the last; edges do not accumulate",
+  );
 });
 
 test("a safe-area event with no edges at all falls back to the CSS snapshot", () => {

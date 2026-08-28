@@ -196,7 +196,23 @@ test("a titled chat row announces its title, and an untitled one says so", () =>
   // EMPTY accessible name. A nameless row reads as just "button" and cannot be
   // told apart from the one above it, which is what this function exists to
   // prevent -- the comment two lines above says so.
-  assert.equal(chatRowName(en, { kind: "chat", id: "c1", title: "Quarterly plan" } as never), "Quarterly plan");
-  assert.equal(chatRowName(en, { kind: "chat", id: "c1", title: "" } as never), en.untitled);
-  assert.notEqual(chatRowName(en, { kind: "chat", id: "c1", title: "" } as never), "", "a row must never be nameless");
+  //
+  // Driven through buildChatList, not a `{ title: "" } as never` literal: the
+  // view model is the only thing that produces the UNTITLED sentinel from a
+  // blank title, and a literal `title: ""` asserts a state production never
+  // emits -- the file's own docstring is that the name must reflect a state the
+  // wire actually produced.
+  const view = buildChatList(
+    [
+      { id: "c1", title: "Quarterly plan", updated: 0 },
+      { id: "c2", title: "   ", updated: 0 },
+    ],
+    [],
+    0,
+  );
+  const [titled, untitled] = view.rows;
+  assert.ok(titled?.kind === "chat" && untitled?.kind === "chat");
+  assert.equal(chatRowName(en, titled), "Quarterly plan");
+  assert.equal(chatRowName(en, untitled), en.untitled);
+  assert.notEqual(chatRowName(en, untitled).trim(), "", "a row must never be nameless");
 });
