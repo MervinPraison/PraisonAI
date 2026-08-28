@@ -515,4 +515,30 @@ export function describeShellContract(
     assert.equal(shell.insets.top, 0, "and the other edges must follow the same event");
   });
 
+  test(`${name}: unsubscribing TWICE does not remove a bystander`, async () => {
+    // Dropping the `if (at !== -1)` guard before `splice(at, 1)` survived. A
+    // double unsubscribe -- a re-render, React StrictMode double-invoking an
+    // effect -- splices at index -1, which removes the LAST element: another
+    // screen's back handler silently disappears.
+    //
+    // The second call must be a no-op, not a removal of whatever happens to be
+    // at the end of the stack.
+    const { shell, pressBack } = await make();
+    const order: string[] = [];
+    const stopA = shell.onBackGesture(() => {
+      order.push("A");
+      return false;
+    });
+    shell.onBackGesture(() => {
+      order.push("B");
+      return false;
+    });
+
+    stopA();
+    stopA(); // the double unsubscribe
+
+    pressBack();
+    assert.deepEqual(order, ["B"], "the bystander handler was removed by a repeated unsubscribe");
+  });
+
 }

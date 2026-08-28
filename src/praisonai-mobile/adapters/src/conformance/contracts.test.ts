@@ -1147,7 +1147,7 @@ test("a contract cannot quietly shrink", () => {
   assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
   assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
-  assert.ok(casesFor("shell") >= 36, `the shell contract shrank to ${casesFor("shell")} cases`);
+  assert.ok(casesFor("shell") >= 37, `the shell contract shrank to ${casesFor("shell")} cases`);
 
   // The break table needs a floor of its own. Deleting a row from
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
@@ -1164,6 +1164,41 @@ test("the contracts can PASS: an unbroken fixture is green", () => {
   // case above while proving nothing at all.
   const { status, output } = runAdapterFixture("none");
   assert.equal(status, 0, `an unbroken fixture failed:\n${output}`);
+});
+
+test("the tauri bridge subscribes to events for ANY target", () => {
+  // Nothing asserted the arguments handed to `internals.invoke`, so the
+  // `listen` payload's `target: { kind: "Any" }` could be changed to
+  // `{ kind: "Window" }` -- or removed entirely -- and stay green. On a device
+  // that is "the app stops receiving safe-area, keyboard, lifecycle and back
+  // events", with no error anywhere.
+  //
+  // The previous hardening covered `openExternal`'s call site and missed this
+  // one: same file, same commit, a different invoke.
+  const calls: { command: string; args: Record<string, unknown> }[] = [];
+  const internals = {
+    invoke: (command: string, args: Record<string, unknown>) => {
+      calls.push({ command, args });
+      return Promise.resolve(1);
+    },
+    transformCallback: (cb: unknown) => {
+      void cb;
+      return 7;
+    },
+  };
+  const bridge = createTauriBridge({ scope: { __TAURI_INTERNALS__: internals } } as never);
+
+  return bridge.listen("safe-area-changed", () => {}).then(() => {
+    const listen = calls.find((c) => c.command === "plugin:event|listen");
+    assert.ok(listen, "no listen call was made");
+    assert.deepEqual(
+      listen.args["target"],
+      { kind: "Any" },
+      "an event subscription scoped to one window misses the events the app needs",
+    );
+    assert.equal(listen.args["event"], "safe-area-changed");
+    assert.equal(listen.args["handler"], 7, "the transformed callback id must be forwarded");
+  });
 });
 
 test("the tauri bridge opens links in a NEW context, with the opener severed", () => {

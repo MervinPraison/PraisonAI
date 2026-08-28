@@ -501,3 +501,29 @@ test("reasoning accumulates across chunks", () => {
   s = apply(s, { type: "reasoning", msgId: "m1", text: "read the file." });
   assert.equal(s.reasoning, "First I will read the file.");
 });
+
+test("a tool_result is matched by callId, never by tool NAME", () => {
+  // `findIndex((t) => t.callId === event.callId)` -> `t.name === event.name`
+  // survived. With two concurrent calls to the same tool -- which is ordinary
+  // for `bash` or `read` -- the result for the second overwrites the FIRST
+  // one's row and appends a duplicate. The wrong card shows the other call's
+  // output, and one call is stuck "running" forever.
+  //
+  // Same class as the index-pairing defect the whole callId design exists to
+  // prevent, one layer down.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, { type: "tool_call", msgId: "m1", callId: "c1", name: "bash", args: { cmd: "one" } });
+  s = apply(s, { type: "tool_call", msgId: "m1", callId: "c2", name: "bash", args: { cmd: "two" } });
+  s = apply(s, {
+    type: "tool_result", msgId: "m1", callId: "c2", name: "bash", ok: false, output: "boom", seconds: 0.1,
+  });
+
+  assert.equal(s.tools.length, 2, "resolving one call must not add a third row");
+  const first = s.tools.find((t) => t.callId === "c1");
+  const second = s.tools.find((t) => t.callId === "c2");
+  assert.equal(first?.status, "running", "the unresolved call must stay unresolved");
+  assert.deepEqual(first?.args, { cmd: "one" }, "and keep its own arguments");
+  assert.equal(second?.status, "failed", "the resolved call takes the result");
+  assert.equal(second?.output, "boom");
+});

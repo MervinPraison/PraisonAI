@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { SIZE_BUDGET_BYTES, TARGETS } from "./bundle.mjs";
 import { importsOf, layerOf, targetOf, matchesAllowlist, ungovernedRootsIn, violations, sourceFilesUnder } from "./depgraph.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -323,4 +324,35 @@ test("the walk collects .mjs files as well as .ts", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("an ungoverned directory holding only .mjs is still reported", () => {
+  // The file-count walk inside `ungovernedRootsIn` had its own `.mjs` test,
+  // separate from the one in `sourceFilesUnder`. Dropping it makes a new
+  // all-.mjs top-level directory report ZERO files, so it is not flagged and
+  // passes ungoverned -- verbatim the failure boundaries.json's comment warns
+  // about, and `tools/` itself is entirely .mjs.
+  const root = tree({
+    "core/src/a.ts": "export const a = 1;",
+    "scripts/build.mjs": "export const b = 1;",
+  });
+  try {
+    assert.deepEqual(
+      ungovernedRootsIn(root, { governedRoots: ["core"], ungovernedRoots: [] }),
+      [{ name: "scripts", count: 1 }],
+      "an all-.mjs directory must be counted, not skipped",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the size budget and the webview targets are the values the gate claims", () => {
+  // `SIZE_BUDGET_BYTES` and `TARGETS` are the entire contract of the bundle
+  // gate, and both could be changed silently -- 400kB to 4MB, or the baseline
+  // moved from safari16/chrome108 to a browser no target device runs. A gate
+  // whose threshold can be edited without a failing test is a gate that can be
+  // turned off.
+  assert.equal(SIZE_BUDGET_BYTES, 400 * 1024, "the budget is what makes a dependency a decision");
+  assert.deepEqual(TARGETS, ["safari16", "chrome108"], "the WebView floor is the OS, not the current Chrome");
 });

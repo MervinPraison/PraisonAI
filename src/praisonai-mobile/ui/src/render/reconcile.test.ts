@@ -190,3 +190,45 @@ test("an unchanged error row still produces nothing", () => {
   const first = reconcile(emptyRender, [row]);
   assert.deepEqual(reconcile(first.next, [row]).ops, []);
 });
+
+test("an approval row repaints when it stops being actionable", () => {
+  // `signatureOf` dropping `row.actionable` survived. When a turn ends with an
+  // unanswered approval, `settle()` marks it resolved: `actionable` flips
+  // true -> false while `state.status` stays "pending". With actionable out of
+  // the signature nothing changes, so NO update op is emitted and the three
+  // buttons stay painted as live on a finished run.
+  //
+  // The user then taps Allow on a run that can no longer deliver it.
+  const base = {
+    kind: "approval" as const,
+    id: "approval:a1",
+    approvalId: "a1",
+    callId: "c1",
+    name: "bash",
+    args: {},
+    state: { status: "pending" as const },
+  };
+  const first = reconcile(emptyRender, [{ ...base, actionable: true }]);
+  const second = reconcile(first.next, [{ ...base, actionable: false }]);
+
+  assert.deepEqual(
+    second.ops.map((o) => o.kind),
+    ["update"],
+    "a row that stopped being actionable must repaint",
+  );
+});
+
+test("an unchanged approval row still produces nothing", () => {
+  const row = {
+    kind: "approval" as const,
+    id: "approval:a1",
+    approvalId: "a1",
+    callId: "c1",
+    name: "bash",
+    args: {},
+    state: { status: "pending" as const },
+    actionable: true,
+  };
+  const first = reconcile(emptyRender, [row]);
+  assert.deepEqual(reconcile(first.next, [row]).ops, []);
+});

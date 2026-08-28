@@ -7,7 +7,7 @@
  */
 import { mkdir, copyFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { bundle } from "./bundle.mjs";
+import { bundle, isShippable } from "./bundle.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
 const pkg = resolve(here, "..");
@@ -35,7 +35,7 @@ for (const problem of report.problems) {
 }
 console.log(`bundle: ${(report.bytes / 1024).toFixed(1)}kB of a 400kB budget, ${report.bare.length} external`);
 
-if (report.problems.length > 0) {
+if (!isShippable(report)) {
   console.error("\nThe webview bundle is not shippable. See above.");
   process.exit(1);
 }

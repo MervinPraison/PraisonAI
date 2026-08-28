@@ -187,3 +187,19 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
   console.log(`bundle: ${(report.bytes / 1024).toFixed(1)}kB, ${report.bare.length} external`);
   if (report.problems.length > 0) process.exit(1);
 }
+
+/**
+ * Whether a bundle report may ship.
+ *
+ * Exported so a test calls THIS rather than re-implementing the comparison --
+ * `problems.length > 0` -> `> 1` survived a mutation sweep, and a test that
+ * rewrote the predicate inline would have proved only that a predicate of that
+ * shape works, not that this file still contains it. That distinction is the
+ * one this package keeps being bitten by.
+ *
+ * ONE problem is enough. A bare external, a forbidden builtin, or a top-level
+ * process.env read each make the bundle unshippable on its own.
+ */
+export function isShippable(report) {
+  return report.problems.length === 0;
+}

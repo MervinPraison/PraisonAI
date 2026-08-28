@@ -1206,3 +1206,46 @@ test("a stream that dies on its OWN is still a transport error", async () => {
     "a genuine network failure must still offer retry",
   );
 });
+
+test("an accepted stop DETACHES the reader, so nothing more paints", async () => {
+  // `run.abort.abort()` deleted after a successful cancel survived. Stop
+  // reports success, the reader is never detached, and the stream keeps
+  // arriving and painting into a turn the user stopped -- so the answer goes
+  // on growing after the button said it had stopped.
+  const views: RunView[] = [];
+  let releaseNext: () => void = () => {};
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run(req: { runId: string }, signal: AbortSignal) {
+      yield { type: "start", msgId: "m1", runId: req.runId };
+      yield { type: "delta", msgId: "m1", text: "before stop" };
+      await new Promise<void>((resolve) => { releaseNext = resolve; });
+      // A well-behaved engine checks; the point of the abort is that a
+      // less careful one is stopped anyway by the reader detaching.
+      if (signal.aborted) return;
+      yield { type: "delta", msgId: "m1", text: " AFTER STOP" };
+    },
+    async decide() { return false; },
+    async cancel() { return true; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({ engine, time: createFakeTime(), onPublish: (v) => views.push(v) });
+  const sent = controller.send("go");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
+  assert.equal(await controller.stop(), true);
+  releaseNext();
+  await sent;
+
+  assert.equal(
+    views.at(-1)?.turn.text.includes("AFTER STOP"),
+    false,
+    "text arrived after the user stopped the run",
+  );
+});
