@@ -6716,7 +6716,23 @@ Answer:"""
         current_response = response_text
         
         while retry_count <= self.max_guardrail_retries:
-            success, result, error = self._validate_with_guardrail(current_response)
+            # A string/LLMGuardrail guardrail fires a *blocking* LLM call inside
+            # _validate_with_guardrail. Offload it to a thread so it does not
+            # stall the event loop (and every other concurrently-running task
+            # under asyncio.gather), mirroring async_memory_mixin's
+            # _run_memory_in_thread executor-offload pattern.
+            loop = asyncio.get_event_loop()
+            # Preserve contextvars (trace emission, session context) across the
+            # executor thread so a custom guardrail sees the same contextual
+            # state as the synchronous path, matching every other
+            # run_in_executor call site in the SDK.
+            from ..trace.context_events import copy_context_to_callable
+            success, result, error = await loop.run_in_executor(
+                None,
+                copy_context_to_callable(
+                    lambda: self._validate_with_guardrail(current_response)
+                ),
+            )
             
             if success:
                 logging.info(f"Agent {self.name}: Guardrail validation passed")
