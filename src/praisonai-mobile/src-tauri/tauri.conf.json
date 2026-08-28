@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PraisonAI",
+  "version": "0.1.0",
+  "identifier": "ai.praison.mobile",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": ".."
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PraisonAI"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "publisher": "Praison AI",
+    "copyright": "Copyright (c) Praison AI",
+    "shortDescription": "AI agents on your phone",
+    "longDescription": "PraisonAI runs AI agents on your phone. Chat with a model and give it tools.",
+    "iOS": {
+      "minimumSystemVersion": "16.0"
+    },
+    "android": {
+      "minSdkVersion": 26
+    }
+  }
+}

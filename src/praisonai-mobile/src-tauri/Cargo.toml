@@ -1,0 +1,48 @@
+[package]
+name = "praisonai-mobile"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "PraisonAI mobile shell."
+
+[lib]
+name = "praisonai_mobile_lib"
+path = "src/lib.rs"
+# All three matter, and each one is a different platform:
+#   staticlib -- iOS links the Rust into the Xcode app target.
+#   cdylib    -- Android loads it with System.loadLibrary via android_binding!.
+#   rlib      -- so src/main.rs, the desktop dev binary, can call run().
+# Dropping any one breaks exactly one platform, at link time rather than here.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "praisonai-mobile"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+[dev-dependencies]
+# The shell logic is tested without a Tauri app: emitting and falling back are
+# injected traits, so the arbitration is exercised on a laptop.
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = "debuginfo"
+# Deliberately NOT panic = "abort", unlike the desktop crate.
+#
+# tauri-macros' mobile_entry_point wraps the app in catch_unwind so a Rust
+# panic prints a message and aborts cleanly rather than unwinding across the
+# JNI/ObjC boundary, which is undefined behaviour. panic = "abort" turns that
+# into a bare SIGABRT with no message -- and on a phone, where there is no
+# console to attach, that is the difference between a crash you can read and
+# one you cannot.
