@@ -1010,6 +1010,13 @@ const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp
   { mode: "storage_namespaces_collide", expects: /namespaces are isolated/ },
   { mode: "time_every_fires_once", expects: /every\(\) repeats, rather than firing once/ },
   { mode: "time_clear_does_nothing", expects: /a cleared timer does not fire/ },
+  // The shell contract is the largest of the four and was the one this fixture
+  // did not register. A re-measure proved every assertion in it deletable, the
+  // whole security section removable, and the entire contract replaceable with
+  // `assert.ok(shell)` -- green every time.
+  { mode: "shell_opens_anything", expects: /a javascript: URL is refused/ },
+  { mode: "shell_back_in_registration_order", expects: /the most recently registered back handler gets first refusal/ },
+  { mode: "shell_listener_count_stuck", expects: /unsubscribing drops the live listener count/ },
 ];
 
 for (const { mode, expects } of ADAPTER_BREAKS) {
@@ -1046,6 +1053,15 @@ test("a contract cannot quietly shrink", () => {
   assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
   assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
+  assert.ok(casesFor("shell") >= 33, `the shell contract shrank to ${casesFor("shell")} cases`);
+
+  // The break table needs a floor of its own. Deleting a row from
+  // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
+  // signal is a smaller number that nothing reads. Guarding the guard.
+  assert.ok(
+    ADAPTER_BREAKS.length >= 9,
+    `the break table shrank to ${ADAPTER_BREAKS.length} modes`,
+  );
 });
 
 test("the contracts can PASS: an unbroken fixture is green", () => {
