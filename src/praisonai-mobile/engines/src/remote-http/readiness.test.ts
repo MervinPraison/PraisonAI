@@ -115,3 +115,24 @@ test("the_classifier_can_actually_refuse", () => {
   assert.equal(healthy.ready, true);
   assert.equal(broken.ready, false);
 });
+
+test("any status that is not exactly 200 is an http_status failure", () => {
+  // `probe.status !== 200` -> `> 200` survived: a sub-200 status (100, 101,
+  // 199) would fall through and be classified from its BODY, so a websocket
+  // upgrade or a "continue" reported `ready: true`. The engine would then be
+  // offered as usable and every request to it fail.
+  const body = JSON.stringify({ ok: true, version: PROTOCOL_VERSION });
+  for (const status of [100, 101, 199, 201, 204, 301, 404, 500, 503]) {
+    const verdict = classify(http(status, body));
+    assert.equal(verdict.ready, false, `HTTP ${status} must not read as ready`);
+    assert.equal(
+      verdict.ready === false ? verdict.reason : null,
+      "http_status",
+      `HTTP ${status} must be a status failure, not classified from its body`,
+    );
+  }
+});
+
+test("a 200 is still classified from its body, so the status test is not vacuous", () => {
+  assert.equal(classify(ok()).ready, true);
+});
