@@ -233,6 +233,10 @@ test("every no-Intl fallback differs from its formatted twin", () => {
   // The control for the whole block. If a future change made `memo()` succeed
   // for "en_US" -- or made the formatted path degrade -- these tests would
   // start passing while testing the wrong branch entirely.
+  //
+  // Number, count and date each have a formatted twin whose English output
+  // already differs from the ASCII fallback (grouping, k/M suffix, "Jan 1,
+  // 1970" vs ISO), so "en" is enough to discriminate the branch for them.
   const now = 1_700_000_000_000;
   const pairs: readonly [string, string][] = [
     [formatNumber("en", 1234.5), formatNumber(NO_INTL, 1234.5)],
@@ -242,5 +246,22 @@ test("every no-Intl fallback differs from its formatted twin", () => {
   for (const [formatted, fallback] of pairs) {
     assert.notEqual(formatted, fallback, `"${formatted}" -- this test is not reaching the fallback`);
   }
-  void now;
+
+  // Elapsed and relative are different: their ENGLISH formatted output is
+  // byte-identical to the ASCII fallback ("1h 02m", "10 minutes ago"), so an
+  // "en" twin cannot tell the fallback branch from a successful `memo()`. The
+  // discriminating twin has to be a locale whose Intl output genuinely differs
+  // -- de-DE writes a comma decimal and its own relative-time phrasing -- while
+  // the "en_US" fallback stays ASCII/English regardless of the requested tag.
+  const tenMinutesAgo = now - 10 * 60 * 1000;
+  const elapsedPairs: readonly [string, string][] = [
+    [formatElapsedLocalised("de-DE", en, 5.25), formatElapsedLocalised(NO_INTL, en, 5.25)],
+    [
+      formatRelativeLocalised("de-DE", en, tenMinutesAgo, now, null),
+      formatRelativeLocalised(NO_INTL, en, tenMinutesAgo, now, null),
+    ],
+  ];
+  for (const [formatted, fallback] of elapsedPairs) {
+    assert.notEqual(formatted, fallback, `"${formatted}" -- this test is not reaching the fallback`);
+  }
 });
