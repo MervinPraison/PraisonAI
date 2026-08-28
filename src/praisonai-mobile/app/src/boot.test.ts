@@ -20,6 +20,7 @@ import { SCRIPTS } from "../../testing/src/scripts.ts";
 import { MIN_ENGINE_PROTOCOL, PROTOCOL_VERSION } from "../../protocol/src/version.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { RunEvent } from "../../protocol/src/events.ts";
+import type { RunView } from "../../core/src/run/controller.ts";
 import type { SettingDef } from "../../core/src/settings/store.ts";
 
 const DEFS: readonly SettingDef[] = [
@@ -400,4 +401,56 @@ test("chosenStringOr distinguishes a chosen value from a defaulted one", () => {
 
   assert.equal(chosenStringOr(facade, "a", "fallback"), "chosen");
   assert.equal(chosenStringOr(facade, "b", "fallback"), "fallback", "a default is not a choice");
+});
+
+test("a refusal the ENGINE reports reaches the app's transcript", async () => {
+  // The composition test, not the unit test. The sink, the engine's callback
+  // and the controller's drain all existed and all worked in isolation --
+  // removing `dropSink` from createRunController here left the whole suite
+  // green, which is the same mechanism-connected-to-nothing this branch keeps
+  // finding. This test fails if the two ends are not joined.
+  const views: RunView[] = [];
+  const inner = createScriptedEngine({ script: SCRIPTS.happy });
+
+  const result = await createApp(deps({
+    onPublish: (v) => views.push(v),
+    engines: (_persistence, _settings, onIgnored) => {
+      const engine: AgentEnginePort = {
+        ...inner,
+        id: "scripted",
+        async *run(req, signal) {
+          for await (const event of inner.run(req, signal)) {
+            // A frame the decoder could not read, mid-stream.
+            if (event.type === "delta") onIgnored("missing_required_field", "tool_result");
+            yield event;
+          }
+        },
+      };
+      return [{ id: "scripted", create: () => engine }];
+    },
+  }));
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  await result.app.controller.send("hi");
+
+  const dropped = views.at(-1)?.turn.dropped ?? [];
+  assert.ok(
+    dropped.some((d) => d.reason === "missing_required_field"),
+    "the engine reported a refusal and the transcript never saw it",
+  );
+  await result.app.dispose();
+});
+
+test("a clean run through the same wiring drops nothing", async () => {
+  // The pair. Wiring that invented a dropped row would satisfy the test above
+  // and mark every healthy turn as damaged.
+  const views: RunView[] = [];
+  const result = await createApp(deps({ onPublish: (v) => views.push(v) }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  await result.app.controller.send("hi");
+  assert.deepEqual(views.at(-1)?.turn.dropped, []);
+  await result.app.dispose();
 });

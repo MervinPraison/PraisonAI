@@ -157,3 +157,73 @@ test("remote-http: an unreachable engine is a retryable transport failure, not a
   assert.equal(verdict.ready === false && verdict.reason, "transport");
   assert.equal(verdict.ready === false && verdict.retryable, true);
 });
+
+// ---- frames the decoder refuses ---------------------------------------------
+
+test("a malformed frame is reported, not silently dropped", async () => {
+  // This engine is the ONLY production caller of decodeEvent, and it did
+  // `if (isDecoded(outcome)) yield` -- discarding every rejection. So a
+  // `tool_result` frame missing its `ok` made the tool disappear and the turn
+  // rendered as a clean answer, while the reducer's Dropped type, the view
+  // model's dropped row and seven user-facing strings sat unreachable.
+  const http = createFakeHttp();
+  const refused: { reason: string; detail: string }[] = [];
+
+  http.on("/chat", () =>
+    sseResponse(
+      [
+        `event: start\ndata: ${JSON.stringify({ msg_id: "m1", run_id: "r1" })}\n\n`,
+        `event: delta\ndata: ${JSON.stringify({ msg_id: "m1", text: "hello" })}\n\n`,
+        // Refused: a tool_result with no `ok`. `ok` is the ONLY signal of tool
+        // success, so a frame without it cannot be interpreted at all.
+        `event: tool_result\ndata: ${JSON.stringify({ msg_id: "m1", call_id: "c1", name: "rm", output: "done" })}\n\n`,
+        `event: end\ndata: ${JSON.stringify({ msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 })}\n\n`,
+      ].join(""),
+    ),
+  );
+
+  const engine = createRemoteHttpEngine({
+    baseUrl: "http://engine.test",
+    http,
+    onIgnored: (reason, detail) => refused.push({ reason, detail }),
+  });
+
+  const events = [];
+  for await (const event of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    events.push(event);
+  }
+
+  assert.equal(
+    events.some((e) => e.type === "tool_result"),
+    false,
+    "an undecodable frame must not be yielded as if it were fine",
+  );
+  assert.equal(refused.length, 1, "the refusal must be reported to the caller");
+  assert.equal(refused[0]?.reason, "missing_required_field");
+  assert.equal(refused[0]?.detail, "tool_result.ok", "the detail must name the field, so a report is actionable");
+});
+
+test("a clean stream reports no refusals", async () => {
+  // The pair. An engine that reported a refusal per frame would satisfy the
+  // test above and mark every healthy turn as damaged.
+  const http = createFakeHttp();
+  const refused: unknown[] = [];
+  http.on("/chat", () => sseResponse(framesFor(SCRIPTS.happy)));
+
+  const engine = createRemoteHttpEngine({
+    baseUrl: "http://engine.test",
+    http,
+    onIgnored: (...args) => refused.push(args),
+  });
+
+  for await (const _ of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    // drain
+  }
+  assert.deepEqual(refused, []);
+});

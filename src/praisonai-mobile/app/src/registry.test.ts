@@ -19,7 +19,7 @@ import {
 import { createSettingsStore, facadeFor } from "../../core/src/settings/store.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
-import { createFakeHttp } from "../../testing/src/fake-http.ts";
+import { createFakeHttp, sseResponse } from "../../testing/src/fake-http.ts";
 import { createScriptedEngine } from "../../testing/src/scripted-engine.ts";
 import { SCRIPTS } from "../../testing/src/scripts.ts";
 
@@ -131,4 +131,74 @@ test("the secret ref is stable", async () => {
   // It is the keychain lookup. Changing it silently orphans every key already
   // stored on a device.
   assert.deepEqual(OPENAI_KEY, { slot: "openai", account: "default" });
+});
+
+// ---- the refusal callback has to actually reach the engine ------------------
+
+test("enginesFor hands the refusal callback to the engine it builds", async () => {
+  // Every other hop of this channel is pinned, and dropping the forward HERE
+  // still left the suite green: the boot test supplies its own engine factory,
+  // so it never exercises the real one. A callback the composition root
+  // creates and the registry quietly declines to pass on is the same
+  // mechanism-connected-to-nothing this channel exists to undo.
+  const { settings, persistence } = await build();
+  const http = createFakeHttp();
+  const refused: { reason: string; detail: string }[] = [];
+
+  http.on("/chat", () =>
+    sseResponse(
+      [
+        `event: start\ndata: ${JSON.stringify({ msg_id: "m1", run_id: "r1" })}\n\n`,
+        // No `ok`: undecodable, because ok is the only signal of tool success.
+        `event: tool_result\ndata: ${JSON.stringify({ msg_id: "m1", call_id: "c1", name: "rm", output: "done" })}\n\n`,
+        `event: end\ndata: ${JSON.stringify({ msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 })}\n\n`,
+      ].join(""),
+    ),
+  );
+
+  const choice = enginesFor({
+    settings,
+    http,
+    persistence,
+    onIgnored: (reason, detail) => refused.push({ reason, detail }),
+  }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  assert.ok(choice, "the remote engine should be offered");
+
+  const engine = await choice.create();
+  for await (const _ of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    // drain
+  }
+
+  assert.deepEqual(refused, [{ reason: "missing_required_field", detail: "tool_result.ok" }]);
+});
+
+test("a clean stream through the same engine reports no refusal", async () => {
+  // The pair: a registry that invented a refusal would satisfy the above.
+  const { settings, persistence } = await build();
+  const http = createFakeHttp();
+  const refused: unknown[] = [];
+  http.on("/chat", () =>
+    sseResponse(
+      [
+        `event: start\ndata: ${JSON.stringify({ msg_id: "m1", run_id: "r1" })}\n\n`,
+        `event: end\ndata: ${JSON.stringify({ msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 })}\n\n`,
+      ].join(""),
+    ),
+  );
+
+  const choice = enginesFor({
+    settings, http, persistence,
+    onIgnored: (...args) => refused.push(args),
+  }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  const engine = await choice!.create();
+  for await (const _ of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    // drain
+  }
+  assert.deepEqual(refused, []);
 });

@@ -13,6 +13,7 @@
  */
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
+import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
 import { clampNum } from "../../core/src/settings/store.ts";
 import { createRemoteHttpEngine } from "../../engines/src/remote-http/engine.ts";
@@ -117,6 +118,9 @@ export interface RegistryDeps {
    * store. Two engines, two owners of the write, one honest `userIndex`.
    */
   readonly persistence: RunPersistence;
+  /** Called for every frame an engine's decoder refuses. Supplied by the
+   *  composition root, which owns the transcript those refusals land on. */
+  readonly onIgnored?: (reason: IgnoredReason, detail: string) => void;
 }
 
 function stringSetting(settings: SettingsFacade, key: string, fallback: string): string {
@@ -141,6 +145,8 @@ export function enginesFor(deps: RegistryDeps): readonly EngineChoice[] {
           baseUrl: stringSetting(deps.settings, "baseUrl", "http://127.0.0.1:8765").replace(/\/+$/, ""),
           http: deps.http,
           id: ENGINE_REMOTE_HTTP,
+          // Refused frames go to the transcript instead of the floor.
+          ...(deps.onIgnored === undefined ? {} : { onIgnored: deps.onIgnored }),
         }),
     },
   ];

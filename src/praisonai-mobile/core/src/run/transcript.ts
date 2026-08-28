@@ -119,6 +119,22 @@ const drop = (state: TurnState, reason: Dropped["reason"], detail: string): Turn
 });
 
 /**
+ * Record a frame the DECODER refused, before it could ever become an event.
+ *
+ * `apply` can only record events it was given, so a frame that failed to decode
+ * had no way in -- which is why `Dropped.reason` admitted every IgnoredReason
+ * while no IgnoredReason could reach a transcript. A malformed `tool_result`
+ * made its tool vanish and the turn rendered as a clean answer.
+ */
+export function noteDropped(
+  state: TurnState,
+  reason: Dropped["reason"],
+  detail: string,
+): TurnState {
+  return drop(state, reason, detail);
+}
+
+/**
  * Apply one event.
  *
  * Returns the SAME object when an event changes nothing, so a caller can use

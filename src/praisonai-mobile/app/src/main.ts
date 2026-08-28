@@ -175,7 +175,8 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // them. This used to be a stub whose `get` returned undefined, captured by
     // the engine at boot and never replaced -- so the engine address the user
     // set was read, stored, and thrown away in favour of the hardcoded default.
-    engines: (persistence, settings) => enginesFor({ settings, http: platform.http, persistence }),
+    engines: (persistence, settings, onIgnored) =>
+      enginesFor({ settings, http: platform.http, persistence, onIgnored }),
     settingDefs: SETTING_DEFS,
     // The default when settings name none. createApp prefers the persisted
     // `engineId` over this; passing it as a literal was ignoring the setting.

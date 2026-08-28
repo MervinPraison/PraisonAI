@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 
 import { createRunController, type RunView } from "./controller.ts";
 import { createFakeTime } from "../../../testing/src/fake-time.ts";
+import { createDropSink } from "./drop-sink.ts";
 import { createScriptedEngine } from "../../../testing/src/scripted-engine.ts";
 import { SCRIPTS } from "../../../testing/src/scripts.ts";
 import { createFakeScheduler } from "../../../testing/src/fake-scheduler.ts";
@@ -322,4 +323,75 @@ test("the flush tick is armed at maxDelayMs, not at some other period", async ()
   const sent = controller.send("hi");
   assert.deepEqual(time.intervalMs, [16], "the tick must be armed at maxDelayMs");
   await sent;
+});
+
+// ---- a frame the decoder refused --------------------------------------------
+
+test("a frame the engine's decoder refused becomes a dropped row on the turn", async () => {
+  // remote-http did `if (isDecoded(outcome)) yield` and discarded the rest --
+  // and it is the ONLY production caller of decodeEvent. So a malformed
+  // `tool_result` frame made its tool vanish and the turn rendered as a clean
+  // answer, while the reducer's Dropped type, the view model's dropped row and
+  // seven user-facing strings all sat unreachable.
+  const views: RunView[] = [];
+  const sink = createDropSink();
+  const engine = createScriptedEngine({ id: "scripted", script: SCRIPTS.happy });
+
+  const controller = createRunController({
+    engine: {
+      ...engine,
+      async *run(req, signal) {
+        for await (const event of engine.run(req, signal)) {
+          // The engine refuses a frame partway through, as a real decoder does.
+          if (event.type === "delta") sink.note("missing_msg_id", "tool_result");
+          yield event;
+        }
+      },
+    },
+    time: createFakeTime(),
+    dropSink: sink,
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("hi");
+
+  const dropped = views.at(-1)?.turn.dropped ?? [];
+  assert.ok(dropped.length > 0, "the refused frame left no trace on the transcript");
+  assert.equal(dropped[0]?.reason, "missing_msg_id");
+  assert.equal(dropped[0]?.detail, "tool_result");
+});
+
+test("a refusal on the very last frame is still shown", async () => {
+  // The loop ends after the terminal event, so a refusal arriving beside it
+  // would never be drained by the per-event path alone.
+  const views: RunView[] = [];
+  const sink = createDropSink();
+  const engine = createScriptedEngine({ id: "scripted", script: SCRIPTS.happy });
+
+  const controller = createRunController({
+    engine: {
+      ...engine,
+      async *run(req, signal) {
+        for await (const event of engine.run(req, signal)) yield event;
+        sink.note("unknown_event", "trailing");
+      },
+    },
+    time: createFakeTime(),
+    dropSink: sink,
+    onPublish: (v) => views.push(v),
+  });
+
+  await controller.send("hi");
+  assert.deepEqual(views.at(-1)?.turn.dropped.at(-1), {
+    reason: "unknown_event",
+    detail: "trailing",
+  });
+});
+
+test("a clean run still drops nothing", async () => {
+  // The pair. A controller that invented a dropped row per event would satisfy
+  // both tests above and mark every healthy turn as damaged.
+  const h = harness(SCRIPTS.happy);
+  await h.controller.send("hi");
+  assert.deepEqual(h.last().turn.dropped, []);
 });

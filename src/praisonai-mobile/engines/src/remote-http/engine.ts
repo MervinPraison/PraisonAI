@@ -24,7 +24,7 @@ import type {
 import type { HttpPort } from "../../../core/src/ports/http.ts";
 import type { ApprovalChoice, RunEvent } from "../../../protocol/src/events.ts";
 import { PROTOCOL_VERSION } from "../../../protocol/src/version.ts";
-import { decodeEvent, isDecoded } from "../../../protocol/src/decode.ts";
+import { decodeEvent, isDecoded, type IgnoredReason } from "../../../protocol/src/decode.ts";
 import { createSseReader } from "../../../protocol/src/sse.ts";
 import { classify, type Readiness } from "./readiness.ts";
 
@@ -35,6 +35,9 @@ export interface RemoteHttpOptions {
   /** Sent as a bearer token when present. The desktop engine is unauthenticated
    *  on loopback; anything off-device must not be. */
   readonly token?: string;
+  /** Called for every frame the decoder REFUSED. Without it the refusal is
+   *  invisible: a truncated answer reported as a clean success. */
+  readonly onIgnored?: (reason: IgnoredReason, detail: string) => void;
   readonly id?: string;
 }
 
@@ -147,8 +150,19 @@ export function createRemoteHttpEngine(options: RemoteHttpOptions): AgentEngineP
           for (const frame of readFrames(decoder.decode(value, { stream: true }))) {
             // decodeEvent never throws. An unknown event is a recorded no-op,
             // which is what makes a newer engine safe to talk to.
+            //
+            // "Recorded" used to be aspirational: the ignored branch was
+            // dropped on the floor here, and this is the ONLY production
+            // caller of decodeEvent. So a malformed `tool_result` frame made
+            // its tool vanish and the turn rendered as a clean answer, while
+            // the reducer's Dropped type, the view model's dropped row and
+            // seven user-facing strings sat unreachable.
             const outcome = decodeEvent({ ...safeParse(frame.data), type: frame.event });
-            if (isDecoded(outcome)) yield outcome.event;
+            if (isDecoded(outcome)) {
+              yield outcome.event;
+            } else {
+              options.onIgnored?.(outcome.reason, outcome.detail);
+            }
           }
         }
       } finally {
