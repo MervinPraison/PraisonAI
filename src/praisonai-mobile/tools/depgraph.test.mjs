@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { importsOf, layerOf, targetOf, matchesAllowlist, ungovernedRootsIn, violations } from "./depgraph.mjs";
+import { importsOf, layerOf, targetOf, matchesAllowlist, ungovernedRootsIn, violations, sourceFilesUnder } from "./depgraph.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -272,4 +272,55 @@ test("the real boundaries.json accounts for every directory actually on disk", (
   // The one that will fail on somebody's future branch, which is the point.
   const real = JSON.parse(readFileSync(join(here, "boundaries.json"), "utf8"));
   assert.deepEqual(ungovernedRootsIn(join(here, ".."), real), []);
+});
+
+// ---- the checker must keep checking every kind of file it claims to --------
+
+test("a violation in a .mjs file is reported, not skipped", async () => {
+  // `entry.endsWith(".ts") || entry.endsWith(".mjs")` -> dropping the .mjs half
+  // survived: the checker silently stops walking every .mjs in the package and
+  // still prints "136 files checked, no violations". That is verbatim the
+  // failure boundaries.json's own comment warns about -- "a rule that stops
+  // covering new code while still reporting a clean pass is worse than no
+  // rule" -- and tools/ is entirely .mjs.
+  const root = tree({
+    "core/src/a.ts": "export const a = 1;",
+    "core/src/sneaky.mjs": 'import { invoke } from "@tauri-apps/api/core";\nexport const x = invoke;',
+  });
+  try {
+    const files = await importsOf(
+      [join(root, "core/src/a.ts"), join(root, "core/src/sneaky.mjs")],
+      root,
+    );
+    const found = violations(files, {
+      layers: { core: { path: "core/src", mayImport: [] } },
+      externals: { "@tauri-apps/api": ["adapters/src/tauri"] },
+      governedRoots: ["core"],
+    });
+    assert.ok(
+      found.some((v) => v.file.endsWith(".mjs")),
+      "a .mjs file that crosses a seam must be reported",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the walk collects .mjs files as well as .ts", () => {
+  // The narrower form, so the failure names the cause rather than a symptom.
+  const root = tree({
+    "core/src/a.ts": "export const a = 1;",
+    "core/src/b.mjs": "export const b = 2;",
+    "core/src/notes.md": "not source",
+  });
+  try {
+    const found = sourceFilesUnder(root, ["core"]).map((f) => f.slice(root.length + 1));
+    assert.deepEqual(
+      found.map((f) => f.split("/").pop()).sort(),
+      ["a.ts", "b.mjs"].sort(),
+      "the walk must pick up both extensions, and nothing else",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

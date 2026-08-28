@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 
 import { describeEngineContract, type ScenarioName } from "../conformance.ts";
 import { createRemoteHttpEngine, probeHealth } from "./engine.ts";
-import { createFakeHttp, sseResponse, jsonResponse } from "../../../testing/src/fake-http.ts";
+import { createFakeHttp, sseResponse, jsonResponse, streamOf } from "../../../testing/src/fake-http.ts";
 import { SCRIPTS } from "../../../testing/src/scripts.ts";
 import { encodeSseFrame } from "../../../protocol/src/encode.ts";
 import { PROTOCOL_VERSION } from "../../../protocol/src/version.ts";
@@ -295,4 +295,100 @@ test("both 401 and 403 are auth failures, so the UI offers credentials", async (
     const error = events.find((e) => e.type === "error");
     assert.equal(error?.kind, kind, `HTTP ${status} should be ${kind}`);
   }
+});
+
+// ---- the error paths, where a phone spends much of its life -----------------
+//
+// A package-wide sweep put `engines/` at 46.7% genuine mutation survival --
+// more than double the package average, and 4.5x `core/`. Six of its seven
+// survivors were on transport-failure or early-exit paths: the conformance
+// harness covers the happy path thoroughly and nothing covered these.
+
+test("a decision or cancel the engine did NOT accept is reported as refused", async () => {
+  // `response.status !== 200` -> `false` survived. Every non-200 -- 202, 401,
+  // 500 -- would report success, so the UI announces a stop that never
+  // happened and marks an approval sent that the engine never received. Both
+  // callers were written to trust this boolean.
+  for (const status of [202, 400, 401, 403, 500, 502]) {
+    const http = createFakeHttp();
+    http.on("/approve/a1", () => ({ status, headers: {}, body: streamOf(JSON.stringify({ ok: true })) }));
+    http.on("/cancel/r1", () => ({ status, headers: {}, body: streamOf(JSON.stringify({ ok: true })) }));
+    const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+    assert.equal(await engine.decide("a1", "allow"), false, `HTTP ${status} must not read as accepted`);
+    assert.equal(await engine.cancel("r1"), false, `HTTP ${status} must not read as cancelled`);
+  }
+});
+
+test("a 200 with an ok body is accepted, so the refusal test is not vacuous", async () => {
+  const http = createFakeHttp();
+  http.on("/approve/a1", () => ({ status: 200, headers: {}, body: streamOf(JSON.stringify({ ok: true })) }));
+  http.on("/cancel/r1", () => ({ status: 200, headers: {}, body: streamOf(JSON.stringify({ ok: true })) }));
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+  assert.equal(await engine.decide("a1", "allow"), true);
+  assert.equal(await engine.cancel("r1"), true);
+});
+
+test("leaving the stream early releases the socket", async () => {
+  // Dropping `await reader.cancel()` from the `finally` survived. On New chat
+  // or Stop the consumer breaks out of the loop, and without the cancel the
+  // engine keeps generating into a socket nobody drains -- and keeps billing.
+  let cancelled = false;
+  const http = createFakeHttp();
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `event: start\ndata: ${JSON.stringify({ msg_id: "m1", run_id: "r1" })}\n\n` +
+              `event: delta\ndata: ${JSON.stringify({ msg_id: "m1", text: "one" })}\n\n`,
+          ),
+        );
+        // never closed, so only an explicit cancel releases it
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+  }));
+
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+  for await (const event of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    if (event.type === "delta") break; // the consumer leaves early
+  }
+
+  assert.equal(cancelled, true, "the response stream must be released when the consumer stops reading");
+});
+
+test("the SSE event name decides the type, not a field inside the payload", async () => {
+  // `{ ...parsed.value, type: frame.event }` transposed survived. A frame whose
+  // data object happens to carry its own `type` would then be decoded as THAT
+  // type -- and a delta arriving as an ill-formed `error` is dropped silently,
+  // so text vanishes from the answer with no diagnostic.
+  const http = createFakeHttp();
+  http.on("/chat", () =>
+    sseResponse(
+      `event: start\ndata: ${JSON.stringify({ msg_id: "m1", run_id: "r1" })}\n\n` +
+        `event: delta\ndata: ${JSON.stringify({ msg_id: "m1", text: "kept", type: "error" })}\n\n` +
+        `event: end\ndata: ${JSON.stringify({ msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 })}\n\n`,
+    ),
+  );
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+  const events = [];
+  for await (const event of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    events.push(event);
+  }
+
+  const delta = events.find((e) => e.type === "delta");
+  assert.ok(delta, `the delta was lost: ${events.map((e) => e.type).join(", ")}`);
+  assert.equal(delta.type === "delta" ? delta.text : null, "kept");
 });
