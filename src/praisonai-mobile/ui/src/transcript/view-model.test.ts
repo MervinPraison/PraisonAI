@@ -46,8 +46,9 @@ const run = (...events: readonly RunEvent[]): TurnState =>
 const scripted = (name: keyof typeof SCRIPTS): TurnState =>
   (SCRIPTS[name] as readonly RunEvent[]).reduce<TurnState>(apply, initialTurn);
 
-/** One outstanding approval, NOT terminated: settle() clears approvals, so a
- *  script that reaches `end` has none left to render. */
+/** One outstanding approval, NOT terminated: while the turn is live the
+ *  approval is actionable. settle() keeps it but marks it resolved, so a turn
+ *  that reaches `end` renders it as history rather than a live prompt. */
 const pendingApproval = (): TurnState =>
   run(
     start,
@@ -214,6 +215,20 @@ test("an approval that has not been decided can be pressed", () => {
   const rows = approvalRowsOf(buildTranscript(pendingApproval()));
   assert.equal(rows[0]?.actionable, true);
   assert.equal(rows[0]?.state.status, "pending");
+});
+
+test("an approval kept from an ended turn is history, not a live prompt", () => {
+  // settle() KEEPS an unanswered approval and marks it resolved, but the
+  // decision table entry stays `pending`. Reading the table alone would leave
+  // the ended turn's buttons enabled -- letting a finished run submit and retry
+  // a decision it can no longer deliver. The row must be non-actionable even
+  // though its table entry still reads `pending`.
+  const ended = apply(pendingApproval(), endAt(0));
+  const table = add(emptyApprovals, { approvalId: "ap1", callId: "c1", name: "rm", args: {} });
+  const rows = approvalRowsOf(buildTranscript(ended, table));
+  assert.equal(rows.length, 1, "the approval is kept as history");
+  assert.equal(rows[0]?.state.status, "pending", "the decision table is still pending");
+  assert.equal(rows[0]?.actionable, false, "but the ended turn cannot act on it");
 });
 
 // -------------------------------------------------------------------- actions

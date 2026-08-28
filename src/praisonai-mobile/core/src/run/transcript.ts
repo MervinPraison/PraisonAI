@@ -29,6 +29,19 @@ export interface PendingApproval {
   readonly callId: string;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
+  /**
+   * True once the turn ended without this approval being answered.
+   *
+   * Resolved means not actionable -- the view renders it as history rather
+   * than as a live prompt -- but the row is KEPT, so an ended turn can still
+   * say what it asked for.
+   *
+   * Optional because absent IS the answer for every approval that has not been
+   * settled, which is all of them until a turn ends. Requiring `resolved:
+   * false` at each of the dozen construction sites would be noise carrying no
+   * information, and noise is where a real value gets mistyped unnoticed.
+   */
+  readonly resolved?: boolean;
 }
 
 export type Outcome =
@@ -265,8 +278,12 @@ function settle(state: TurnState, outcome: Outcome): TurnState {
     drafting: null,
     // A call with no result is `unresolved`, never `ok`. Silence is not success.
     tools: state.tools.map((t) => (t.status === "running" ? { ...t, status: "unresolved" } : t)),
-    // An approval nobody answered is no longer actionable once the turn is over.
-    approvals: [],
+    // KEPT, not emptied. An approval nobody answered stops being ACTIONABLE
+    // when the turn ends -- but it is still what the run asked for, and an
+    // ended turn that cannot say so has lost the most important thing on it:
+    // a transcript could never afterwards show "you were asked to allow
+    // `rm -rf /` and the turn ended first".
+    approvals: state.approvals.map((a) => (a.resolved ? a : { ...a, resolved: true })),
   };
 }
 

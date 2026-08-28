@@ -15,6 +15,7 @@
  * the UI showed the decision as delivered. Silence read as success.
  */
 import type { ApprovalChoice } from "../../../protocol/src/events.ts";
+import type { PendingApproval } from "./transcript.ts";
 
 export type DecisionState =
   /** Shown to the user, no decision made. */
@@ -29,11 +30,18 @@ export type DecisionState =
    */
   | { readonly status: "failed"; readonly choice: ApprovalChoice; readonly reason: string };
 
-export interface ApprovalEntry {
-  readonly approvalId: string;
-  readonly callId: string;
-  readonly name: string;
-  readonly args: Readonly<Record<string, unknown>>;
+/**
+ * A pending approval plus its decision -- literally that, rather than a second
+ * copy of the same four fields.
+ *
+ * They were declared separately, drifted into being identical, and forced the
+ * view model to join them by `approvalId` at render time. That join is exactly
+ * where index-pairing gets reintroduced, and pairing an approval by position is
+ * the defect the whole `approvalId` design exists to prevent -- server.py:342:
+ * it "silently authorises the wrong command" the moment two are outstanding.
+ * Removing the join removes the opportunity.
+ */
+export interface ApprovalEntry extends PendingApproval {
   readonly state: DecisionState;
 }
 
