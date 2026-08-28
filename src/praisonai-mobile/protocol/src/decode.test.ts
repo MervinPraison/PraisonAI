@@ -21,7 +21,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { decodeEvent, isIgnored, isDecoded } from "./decode.ts";
+import { decodeApprovalChoice, decodeEvent, isIgnored, isDecoded } from "./decode.ts";
 import { encodeEvent } from "./encode.ts";
 import { RUN_EVENT_NAMES, type RunEvent } from "./events.ts";
 
@@ -245,4 +245,175 @@ test("unknown wire fields are ignored so a newer engine can add them freely", ()
   });
   assert.ok(isDecoded(outcome));
   assert.deepEqual(outcome.event, { type: "delta", msgId: "m1", text: "hi" });
+});
+
+// ---- the end event's index arithmetic --------------------------------------
+//
+// A mutation sweep found 15 of 16 mutations in this file surviving. The tests
+// above cover the SHAPE of every event thoroughly; none of them ever passed
+// `versions` other than 1, `active` other than 0, an absent `assistant_index`,
+// or an empty-string id. Those are the fields that decide which message the UI
+// selects and which turn Fork and Delete act on.
+
+const endWith = (extra: Record<string, unknown>) =>
+  decodeEvent({ type: "end", msg_id: "m1", user_index: 4, ...extra });
+
+test("an absent assistant_index is the message AFTER the user's, never the user's own", () => {
+  // `: userIndex + 1` -> `: userIndex` survived. The assistant index would
+  // point at the user's own message, so anything selecting by it renders the
+  // prompt back as the answer.
+  const out = endWith({});
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "end" ? out.event.assistantIndex : null, 5);
+});
+
+test("an explicit assistant_index is used as sent, not recomputed", () => {
+  // The pair: always deriving would discard what the engine actually said.
+  const out = endWith({ assistant_index: 9 });
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "end" ? out.event.assistantIndex : null, 9);
+});
+
+test("a null user_index leaves the assistant index null rather than making one up", () => {
+  // null means "not on disk", which is what withholds Fork and Delete. `null +
+  // 1` would be 1 -- an index into a message list that was never written.
+  const out = decodeEvent({ type: "end", msg_id: "m1", user_index: null });
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "end" ? out.event.assistantIndex : "wrong", null);
+});
+
+test("versions is at least 1, whatever the wire said", () => {
+  // `Math.max(1, versions)` -> `versions` survived. A `versions: 0` reaching
+  // the UI means a message that exists in zero versions.
+  for (const [sent, want] of [[0, 1], [-3, 1], [1, 1], [4, 4]] as const) {
+    const out = endWith({ versions: sent, active: 0 });
+    assert.ok(isDecoded(out));
+    assert.equal(out.event.type === "end" ? out.event.versions : null, want, `versions: ${sent}`);
+  }
+});
+
+test("active is clamped INTO the range of versions that exist", () => {
+  // Both the floor and the ceiling survived, separately, plus an off-by-one on
+  // the ceiling. events.ts says an out-of-range index "selects nothing and the
+  // message renders blank" -- so this clamp is the only thing between a hostile
+  // or buggy engine and an empty answer bubble.
+  const cases = [
+    { versions: 3, active: 9, want: 2 },
+    { versions: 3, active: 2, want: 2 },
+    { versions: 3, active: -1, want: 0 },
+    { versions: 1, active: 5, want: 0 },
+    { versions: 0, active: 5, want: 0 },
+  ];
+  for (const c of cases) {
+    const out = endWith({ versions: c.versions, active: c.active });
+    assert.ok(isDecoded(out));
+    assert.equal(
+      out.event.type === "end" ? out.event.active : null,
+      c.want,
+      `versions=${c.versions} active=${c.active}`,
+    );
+  }
+});
+
+test("absent versions and active default to one version, cursor at zero", () => {
+  const out = endWith({});
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "end" ? out.event.versions : null, 1);
+  assert.equal(out.event.type === "end" ? out.event.active : null, 0);
+});
+
+test("an absent active selects the FIRST version, even when several exist", () => {
+  // With versions absent too, `?? 0` and `?? 1` are indistinguishable: the
+  // clamp pulls both to 0. It takes more than one version for the default to
+  // be observable, and then it decides which answer the user is shown --
+  // defaulting to 1 silently selects the second version of every message the
+  // engine did not give a cursor for.
+  //
+  // (The sibling mutation, `versions ?? 1` -> `?? 0`, IS equivalent: the
+  // Math.max(1, ...) below it maps both to the same output. Recorded here so
+  // nobody hunts it as a live survivor.)
+  const out = endWith({ versions: 3 });
+  assert.ok(isDecoded(out));
+  assert.equal(out.event.type === "end" ? out.event.versions : null, 3);
+  assert.equal(out.event.type === "end" ? out.event.active : null, 0);
+});
+
+// ---- the guards on identity and number-ness ---------------------------------
+
+test("an empty-string id is refused wherever an id is required", () => {
+  // Each `|| x === ""` could be deleted on its own and survive. An empty msgId
+  // is the worst of them: the event is ACCEPTED, and then every later event
+  // mismatches it and is dropped as wrong_msg_id -- a turn that silently
+  // produces nothing, reported as an engine that said nothing.
+  const cases: { raw: Record<string, unknown>; why: string }[] = [
+    { raw: { type: "delta", msg_id: "", text: "hi" }, why: "msg_id" },
+    { raw: { type: "", msg_id: "m1" }, why: "type" },
+    { raw: { type: "tool_call", msg_id: "m1", call_id: "", name: "ls" }, why: "call_id" },
+    {
+      raw: { type: "approval_request", msg_id: "m1", approval_id: "", call_id: "c1", name: "rm" },
+      why: "approval_id",
+    },
+  ];
+  for (const c of cases) {
+    assert.equal(isIgnored(decodeEvent(c.raw)), true, `an empty ${c.why} must be refused`);
+  }
+});
+
+test("NaN and Infinity are not numbers the wire may send", () => {
+  // `typeof v === "number" && Number.isFinite(v)` -> dropping the finite check
+  // survived. JSON cannot carry these, but decodeEvent takes `unknown` and is
+  // called with already-parsed objects, so a buggy engine adapter can.
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    const out = decodeEvent({ type: "end", msg_id: "m1", user_index: 0, versions: bad, active: 0 });
+    assert.ok(isDecoded(out));
+    assert.equal(
+      out.event.type === "end" ? out.event.versions : null,
+      1,
+      `${String(bad)} must fall back to the default, not propagate`,
+    );
+  }
+});
+
+test("a JSON array is not tool arguments", () => {
+  // `&& !Array.isArray(v)` survived. An array reaching `args` gives every
+  // consumer an object whose keys are "0", "1", ... -- and args are rendered
+  // to the user as the command they are approving.
+  const out = decodeEvent({ type: "tool_call", msg_id: "m1", call_id: "c1", name: "sh", args: [1, 2] });
+  assert.ok(isDecoded(out));
+  assert.deepEqual(out.event.type === "tool_call" ? out.event.args : null, {});
+});
+
+test("a key that is absent is not the same as a key set to undefined", () => {
+  // `!(key in o)` -> `o[key] === undefined` survived, collapsing exactly the
+  // distinction this file's own comment says it exists to prevent. Present-but-
+  // undefined is malformed and must be refused; absent means "derive it".
+  const absent = decodeEvent({ type: "end", msg_id: "m1", user_index: 3 });
+  assert.ok(isDecoded(absent));
+  assert.equal(absent.event.type === "end" ? absent.event.assistantIndex : null, 4, "absent derives");
+
+  const present = decodeEvent({
+    type: "end", msg_id: "m1", user_index: 3, assistant_index: undefined,
+  });
+  assert.ok(isDecoded(present));
+  assert.equal(
+    present.event.type === "end" ? present.event.assistantIndex : "wrong",
+    null,
+    "present-but-undefined is malformed, so it resolves to null -- not derived",
+  );
+});
+
+test("every approval choice the protocol defines is accepted", () => {
+  // `|| raw === "always"` survived. "always allow" would decode to null, so
+  // the button exists, is pressed, and nothing happens.
+  for (const choice of ["allow", "always", "deny"] as const) {
+    assert.equal(decodeApprovalChoice(choice), choice, `${choice} must be accepted`);
+  }
+});
+
+test("anything that is not a defined choice decodes to null, never a default", () => {
+  // The pair. Falling back to a value would authorise something the user did
+  // not pick -- and "allow" is the dangerous direction to guess.
+  for (const bad of ["maybe", "", "ALLOW", null, undefined, 1, {}, ["allow"]]) {
+    assert.equal(decodeApprovalChoice(bad), null, `${JSON.stringify(bad)} must not decode`);
+  }
 });

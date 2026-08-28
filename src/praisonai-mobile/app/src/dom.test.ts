@@ -16,6 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { applyOps, emptyNodes } from "./dom.ts";
+import { reconcile, emptyRender, type RenderState } from "../../ui/src/render/reconcile.ts";
 import type { Row } from "../../ui/src/transcript/view-model.ts";
 import { UNKNOWN } from "../../ui/src/format.ts";
 
@@ -30,6 +31,7 @@ function fakeDoc() {
       hidden: false,
       disabled: false,
       children: [] as any[],
+      parent: null as any,
       _text: "",
       _html: "",
       get textContent() { return this._text; },
@@ -37,9 +39,31 @@ function fakeDoc() {
       get innerHTML() { return this._html; },
       set innerHTML(v: string) { this._html = v; },
       classList: { toggle() {} },
-      append(...cs: any[]) { this.children.push(...cs); },
-      insertBefore(c: any) { this.children.push(c); },
-      remove() {},
+      append(...cs: any[]) {
+        for (const c of cs) { c.parent = this; this.children.push(c); }
+      },
+      // Real reference-node semantics. A fake that appends unconditionally
+      // cannot fail an ordering test -- it renders every order as append order,
+      // so the reconciler's move ops all look correct. `ref === null` appends;
+      // otherwise the node lands immediately before `ref`. The node is detached
+      // from its current position first, which is what makes a move a move
+      // rather than a duplicate.
+      insertBefore(c: any, ref: any) {
+        const had = this.children.indexOf(c);
+        if (had !== -1) this.children.splice(had, 1);
+        c.parent = this;
+        if (ref === null || ref === undefined) { this.children.push(c); return c; }
+        const at = this.children.indexOf(ref);
+        this.children.splice(at === -1 ? this.children.length : at, 0, c);
+        return c;
+      },
+      remove() {
+        const p = this.parent;
+        if (!p) return;
+        const at = p.children.indexOf(this);
+        if (at !== -1) p.children.splice(at, 1);
+        this.parent = null;
+      },
     };
     Object.defineProperty(el, "ownerDocument", { get: () => doc, configurable: true });
     created.push(el);
@@ -201,4 +225,119 @@ test("a measured duration renders its label", () => {
   const row = created.find((el) => el.dataset.rowId === "tool:c1");
   const meta = row?.children.find((c: any) => c.className === "tool-meta");
   assert.equal(meta?._text, "3.2s");
+});
+
+// ---- reconcile -> applyOps: the ops actually produce the target order -------
+//
+// `reconcile.test.ts` asserts op SHAPES and never applies them: it can say "a
+// move for c at index 0 was emitted" but not whether running the ops yields the
+// intended order. This layer is the only one allowed to import both halves, so
+// the round trip is closed HERE. The reconciler's coordinate-system bug --
+// modelling moves against `surviving` (previous ids minus removals) at the
+// target index (which counts rows inserted this pass) -- rendered [d,e,b,a,c]
+// for [a,b,c] -> [d,e,b,c,a]. Both sweeps below reproduced it before the fix
+// and are 0-wrong after; mutating the fake's insertBefore back to appending
+// makes them fail, so the fake is itself under test.
+
+/** A distinct text row per id, so the sweep only ever exercises ordering. */
+const idRow = (id: string): Row => ({ kind: "text", id, text: id, streaming: false });
+
+/** The DOM's row order, by the id stamped on each element. */
+const domOrder = (host: any): string[] =>
+  host.children.map((c: any) => c.dataset.rowId as string);
+
+/** Drive `previous -> next` through the real reconcile and the real applyOps. */
+function render(host: any, nodes: ReturnType<typeof emptyNodes>, prev: RenderState, ids: readonly string[]) {
+  const { ops, next } = reconcile(prev, ids.map(idRow));
+  applyOps(host, nodes, ops);
+  return next;
+}
+
+test("the smallest failing case renders the target order, not [d,e,b,a,c]", () => {
+  const { host } = fakeDoc();
+  const nodes = emptyNodes();
+  const first = render(host, nodes, emptyRender, ["a", "b", "c"]);
+  render(host, nodes, first, ["d", "e", "b", "c", "a"]);
+  assert.deepEqual(domOrder(host), ["d", "e", "b", "c", "a"]);
+});
+
+test("an insert before a reorder still lands every row where the target says", () => {
+  // The class of case the old model drifted on: an insert this pass shifts the
+  // target indices, and a move computed against a list that lacks the insert
+  // points at the wrong sibling.
+  const { host } = fakeDoc();
+  const nodes = emptyNodes();
+  const first = render(host, nodes, emptyRender, ["b", "c"]);
+  render(host, nodes, first, ["a", "c", "b"]);
+  assert.deepEqual(domOrder(host), ["a", "c", "b"]);
+});
+
+test("exhaustive: every prev/target over a small id set renders the target order", () => {
+  // The sweep the PR measured at 120/960 wrong before the fix. Enumerate every
+  // ordered subset (as `previous`) and every ordered subset (as `target`) over
+  // five ids, apply the REAL ops to the fake DOM, and assert the DOM equals the
+  // target exactly. An id present in target must end up present and in order;
+  // one dropped must be gone.
+  const universe = ["a", "b", "c", "d", "e"];
+  const subsets = (xs: string[]): string[][] => {
+    const out: string[][] = [];
+    const walk = (rest: string[], acc: string[]) => {
+      out.push(acc);
+      for (let i = 0; i < rest.length; i++) walk(rest.slice(i + 1), [...acc, rest[i]!]);
+    };
+    walk(xs, []);
+    return out;
+  };
+  // Orderings: for a set this small, test every permutation of each subset.
+  const permute = (xs: string[]): string[][] => {
+    if (xs.length <= 1) return [xs];
+    const out: string[][] = [];
+    for (let i = 0; i < xs.length; i++) {
+      const rest = [...xs.slice(0, i), ...xs.slice(i + 1)];
+      for (const p of permute(rest)) out.push([xs[i]!, ...p]);
+    }
+    return out;
+  };
+
+  const orderings = subsets(universe).flatMap(permute);
+  let checked = 0;
+  for (const prev of orderings) {
+    for (const target of orderings) {
+      const { host } = fakeDoc();
+      const nodes = emptyNodes();
+      const state = render(host, nodes, emptyRender, prev);
+      render(host, nodes, state, target);
+      assert.deepEqual(domOrder(host), target, `prev=[${prev}] target=[${target}]`);
+      checked++;
+    }
+  }
+  assert.ok(checked > 900, `swept ${checked} pairs`);
+});
+
+test("appending to a long list is one insert, and the row lands last", () => {
+  // The minimal-op guarantee, now proven at the DOM: a rebuilding reconciler
+  // that happened to produce the right order would emit far more than one op.
+  const { host } = fakeDoc();
+  const nodes = emptyNodes();
+  const ids = Array.from({ length: 200 }, (_, i) => `r${i}`);
+  const first = reconcile(emptyRender, ids.map(idRow));
+  applyOps(host, nodes, first.ops);
+
+  const grown = [...ids, "r200"];
+  const second = reconcile(first.next, grown.map(idRow));
+  applyOps(host, nodes, second.ops);
+
+  assert.equal(second.ops.length, 1, "appending is a single insert");
+  assert.equal(second.ops[0]?.kind, "insert");
+  assert.deepEqual(domOrder(host), grown);
+});
+
+test("an unchanged list touches the DOM zero times", () => {
+  const { host } = fakeDoc();
+  const nodes = emptyNodes();
+  const ids = ["a", "b", "c"];
+  const first = render(host, nodes, emptyRender, ids);
+  const second = reconcile(first, ids.map(idRow));
+  assert.deepEqual(second.ops, [], "a settled list must emit no ops");
+  assert.deepEqual(domOrder(host), ids);
 });

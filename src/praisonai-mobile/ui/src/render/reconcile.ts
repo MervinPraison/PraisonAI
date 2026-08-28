@@ -89,12 +89,20 @@ export function reconcile(previous: RenderState, rows: readonly Row[]): Diff {
     if (!nextIdSet.has(id)) ops.push({ kind: "remove", id });
   }
 
-  // The surviving rows, in their previous relative order. Anything whose
-  // position within THIS sequence changes genuinely moved; comparing against
-  // raw previous indices instead would report a move for every row after a
-  // single insertion.
-  const surviving = previous.ids.filter((id) => nextIdSet.has(id));
-  let survivorCursor = 0;
+  // The list as the DOM will actually look, updated as each op is emitted.
+  //
+  // This used to be `surviving` -- the previous ids minus removals -- with
+  // moves spliced into it at the TARGET index. Those are two different
+  // coordinate systems: the target index counts rows that were inserted this
+  // pass, and `surviving` contains none of them. Inserted rows were never
+  // added to it either, so the model drifted from the DOM as soon as one
+  // insert preceded a reorder, and the ops then described a list nobody had.
+  //
+  // Measured by applying the real ops through the real `applyOps` to a DOM:
+  // 120 of 960 exhaustive cases over 5 ids rendered the wrong order, and a
+  // fuzz over 8 ids put it at 0.8%. `reconcile.test.ts` asserted op SHAPES and
+  // never applied them, so nothing in the suite could see it.
+  const current = previous.ids.filter((id) => nextIdSet.has(id));
 
   rows.forEach((row, index) => {
     const signature = signatureOf(row);
@@ -102,6 +110,7 @@ export function reconcile(previous: RenderState, rows: readonly Row[]): Diff {
 
     if (!previousIds.has(row.id)) {
       ops.push({ kind: "insert", id: row.id, index, row });
+      current.splice(index, 0, row.id);
       return;
     }
 
@@ -109,13 +118,14 @@ export function reconcile(previous: RenderState, rows: readonly Row[]): Diff {
       ops.push({ kind: "update", id: row.id, row });
     }
 
-    if (surviving[survivorCursor] !== row.id) {
-      ops.push({ kind: "move", id: row.id, index });
-      const at = surviving.indexOf(row.id, survivorCursor);
-      if (at !== -1) surviving.splice(at, 1);
-      surviving.splice(index, 0, row.id);
-    }
-    survivorCursor++;
+    // Already where it belongs: emit nothing. This is what keeps an append
+    // from reporting a move for every row after it.
+    if (current[index] === row.id) return;
+
+    ops.push({ kind: "move", id: row.id, index });
+    const at = current.indexOf(row.id);
+    if (at !== -1) current.splice(at, 1);
+    current.splice(index, 0, row.id);
   });
 
   return { ops, next: { ids: nextIds, signatures: nextSignatures } };
