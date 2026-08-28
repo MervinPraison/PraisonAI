@@ -1439,6 +1439,8 @@ if(st.state==='ready'){
   // is the difference between a product and an error message: "No usable
   // Python" is true and useless to someone who has never installed one.
   status.textContent='setup needed'; status.className='s-boot';
+  // engineBlocked forced Chat above, so #thread is visible: a restored Train
+  // view can no longer bury the wizard firstRun() renders there.
   firstRun(st);
 }else{
   status.textContent='engine failed'; status.className='s-fail';
@@ -2327,6 +2329,11 @@ const METHOD_HINTS={
 let trainStream=null, trainCursor=-1, trainRunId=null, lossSeries=[], logLines=[];
 const MAX_LOG_LINES=600;   // the pane is a tail, not an archive; the log file has it all
 
+// A restored Train view hides #thread (body.training #thread{display:none}),
+// where the setup wizard and failure banner render. While the engine is not
+// ready, a requested Train view is forced to Chat so that UI stays visible;
+// the deliberate choice is still persisted, and the post-boot restore below
+// returns Train once the engine is up.
 function showView(name,{persist=true}={}){
   const requested=name;
   if(name==='train' && engineBlocked) name='chat';
