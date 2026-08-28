@@ -30,5 +30,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["protocol", "core", "engines", "adapters", "testing", "ui", "app"],
-  "exclude": ["node_modules", "dist", "shell-tauri"]
+  "exclude": ["node_modules", "dist", "src-tauri"]
 }
