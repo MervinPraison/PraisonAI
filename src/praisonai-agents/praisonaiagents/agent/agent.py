@@ -3658,10 +3658,16 @@ Summary:"""
 
         One of ``"completed"`` (task finished), ``"max_steps"`` (the unified
         step budget from ``ExecutionConfig.max_steps`` was reached and the run was
-        truncated) or ``"error"``. Lets CLI/CI callers branch on truncation
-        instead of parsing a magic string. Reads from whichever backend
-        (OpenAI-native or LiteLLM) executed the last turn.
+        truncated), a provider block/refusal/truncation
+        (``"content_filtered" | "refused" | "length_truncated"``) derived from the
+        LLM ``finish_reason``/refusal signal, or ``"error"``. Lets CLI/CI callers
+        branch on the terminal reason instead of parsing a magic string. Reads
+        from whichever backend (OpenAI-native or LiteLLM) executed the last turn.
         """
+        # OpenAI-native path records the finish-reason classification directly on
+        # the agent (see ``_extract_llm_response_content``); prefer it so a
+        # provider block/refusal isn't masked by a backend default of "completed".
+        own = getattr(self, '_last_stop_reason', None)
         # Read from the already-instantiated backends only. ``__openai_client``
         # is the raw (name-mangled) attribute, never the lazy ``_openai_client``
         # property, so this never triggers OpenAI client creation for
@@ -3671,8 +3677,10 @@ Summary:"""
             if backend is None:
                 continue
             reason = getattr(backend, '_last_stop_reason', None)
-            if reason:
+            if reason and reason != "completed":
                 return reason
+        if own:
+            return own
         return "completed"
 
     @property

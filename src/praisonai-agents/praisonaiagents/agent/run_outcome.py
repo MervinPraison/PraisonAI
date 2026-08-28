@@ -18,18 +18,36 @@ except ImportError:  # pragma: no cover - py<3.8 fallback
 
 if Literal is not None:
     TerminalReason = Literal[
-        "completed", "hard_timeout", "cancelled", "aborted", "failed"
+        "completed",
+        "hard_timeout",
+        "cancelled",
+        "aborted",
+        "failed",
+        "content_filtered",
+        "refused",
+        "length_truncated",
     ]
 else:  # pragma: no cover
     TerminalReason = str  # type: ignore
 
+# Provider-side terminal reasons derived from the LLM ``finish_reason``/refusal
+# signal. Additive and backward-compatible: absent/unknown finish reasons keep
+# the existing ``completed|failed|...`` semantics unchanged.
+PROVIDER_BLOCK_REASONS = ("content_filtered", "refused", "length_truncated")
+
 # Precedence: higher wins and is sticky (a hard timeout is not downgraded).
+# A specific provider block/refusal/truncation outranks a generic ``failed`` so
+# the actionable reason is not masked, but stays below cancellation/timeout,
+# which are host-level lifecycle signals.
 _REASON_PRECEDENCE = {
     "completed": 0,
     "failed": 1,
-    "aborted": 2,
-    "cancelled": 3,
-    "hard_timeout": 4,
+    "content_filtered": 2,
+    "refused": 2,
+    "length_truncated": 2,
+    "aborted": 3,
+    "cancelled": 4,
+    "hard_timeout": 5,
 }
 
 
@@ -93,3 +111,27 @@ class RunOutcome:
 def _name_matches(exc: BaseException, needles: tuple) -> bool:
     name = type(exc).__name__.lower()
     return any(n in name for n in needles)
+
+
+def classify_finish_reason(finish_reason, refusal=None):
+    """Map a provider ``finish_reason``/refusal signal to a terminal reason.
+
+    Returns one of ``content_filtered | refused | length_truncated`` when the
+    provider blocked/refused/truncated the turn, or ``None`` for a normal stop
+    (``None``/``"stop"``) or any unrecognised value — so unknown finish reasons
+    behave exactly as today. Additive and zero-cost on the success path.
+    """
+    if refusal:
+        return "refused"
+    if not finish_reason:
+        return None
+    fr = str(finish_reason).lower()
+    if fr in ("stop", "tool_calls", "function_call"):
+        return None
+    if "content_filter" in fr or fr == "content_filtered":
+        return "content_filtered"
+    if "refus" in fr:
+        return "refused"
+    if fr == "length" or "max_tokens" in fr or "truncat" in fr:
+        return "length_truncated"
+    return None

@@ -137,6 +137,65 @@ def test_report_run_failure_exits_nonzero_and_emits_status():
     assert remediation
 
 
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("content_filtered", "content_filtered"),
+        ("refused", "refused"),
+        ("length_truncated", "length_truncated"),
+        ("completed", None),
+        ("max_steps", None),
+        ("error", None),
+        (None, None),
+    ],
+)
+def test_run_block_reason_classification(reason, expected):
+    assert run_cmd._run_block_reason(_StopReasonAgent(reason)) == expected
+
+
+def test_run_block_reason_handles_missing_or_raising_agent():
+    assert run_cmd._run_block_reason(None) is None
+
+    class _Raising:
+        @property
+        def last_stop_reason(self):
+            raise RuntimeError("boom")
+
+    assert run_cmd._run_block_reason(_Raising()) is None
+
+
+@pytest.mark.parametrize(
+    "reason", ["content_filtered", "refused", "length_truncated"]
+)
+def test_report_run_blocked_exits_two_and_emits_reason_status(reason):
+    output = _RecordingOutput()
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._report_run_blocked(output, "partial text", reason)
+
+    # A provider block/refusal/truncation is an incomplete run (exit 2),
+    # distinct from a hard failure (exit 1) and a clean completion (exit 0).
+    assert exc.value.exit_code == 2
+
+    # Machine-readable status carries the *specific* reason for --output json.
+    assert output.results, "expected a result event"
+    _, result_data = output.results[-1]
+    assert result_data.get("status") == reason
+    assert result_data.get("result") == "partial text"
+
+    # Interactive users get a human-facing, actionable message.
+    assert output.warnings, "expected a human-facing block notice"
+
+
+def test_report_run_blocked_warns_only_in_non_json_mode():
+    output = _RecordingOutput()
+    output.is_json_mode = True
+    with pytest.raises(typer.Exit):
+        run_cmd._report_run_blocked(output, "", "refused")
+    _, result_data = output.results[-1]
+    assert result_data.get("status") == "refused"
+    assert not output.warnings, "JSON mode must not print a human warning"
+
+
 def test_actions_stream_reports_truncated_run_not_ok(monkeypatch):
     """A truncated run must emit ``run.result {ok: false}`` on the stream.
 

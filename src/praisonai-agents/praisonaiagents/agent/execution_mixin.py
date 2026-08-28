@@ -297,7 +297,28 @@ class ExecutionMixin:
             raise
         except Exception as exc:  # noqa: BLE001 - normalised into outcome
             return RunOutcome.from_exception(exc)
-        return RunOutcome.completed(output=str(result) if result is not None else None)
+        return self._outcome_for_result(result)
+
+    def _outcome_for_result(self, result):
+        """Map a normally-returned run result into a canonical RunOutcome.
+
+        A run that returned without raising is ``completed`` *unless* the core
+        recorded a provider block/refusal/truncation on ``last_stop_reason`` from
+        the LLM ``finish_reason``/refusal signal — in which case the specific,
+        actionable terminal reason (``content_filtered | refused |
+        length_truncated``) is surfaced instead of a silent empty ``completed``.
+        Any other stop reason (``completed``/``max_steps``/unknown) preserves the
+        existing ``completed`` semantics, so behaviour is unchanged on success.
+        """
+        from .run_outcome import RunOutcome, PROVIDER_BLOCK_REASONS
+        output = str(result) if result is not None else None
+        try:
+            reason = getattr(self, "last_stop_reason", None)
+        except Exception:
+            reason = None
+        if reason in PROVIDER_BLOCK_REASONS:
+            return RunOutcome(reason=reason, output=output)
+        return RunOutcome.completed(output=output)
 
     def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
         """Execute agent silently and return structured result.
@@ -383,7 +404,7 @@ class ExecutionMixin:
             result = executor()
         except BaseException as exc:  # noqa: BLE001 - normalised into outcome
             return RunOutcome.from_exception(exc)
-        return RunOutcome.completed(output=str(result) if result is not None else None)
+        return self._outcome_for_result(result)
 
     def _delegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
         """Delegate execution to external managed backend (e.g., ManagedAgentIntegration).
