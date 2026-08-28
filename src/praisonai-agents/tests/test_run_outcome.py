@@ -205,3 +205,33 @@ def test_astart_outcome_surfaces_refusal():
     )
     assert o.reason == "refused"
     assert o.succeeded is False
+
+
+def test_agent_last_stop_reason_prefers_own_block_over_stale_backend():
+    # Regression: an agent-owned provider block (OpenAI-native classification)
+    # must win over a stale backend reason like "max_steps"; otherwise the
+    # actionable "refused" is masked and _outcome_for_result reports success.
+    from praisonaiagents.agent.agent import Agent
+
+    agent = Agent(instructions="test", llm="gpt-4o-mini")
+    agent._last_stop_reason = "refused"
+
+    class _StaleBackend:
+        _last_stop_reason = "max_steps"
+
+    agent.llm_instance = _StaleBackend()
+    assert agent.last_stop_reason == "refused"
+
+
+def test_agent_last_stop_reason_backend_used_when_own_completed():
+    # When the agent recorded nothing specific, the backend reason still wins.
+    from praisonaiagents.agent.agent import Agent
+
+    agent = Agent(instructions="test", llm="gpt-4o-mini")
+    agent._last_stop_reason = "completed"
+
+    class _Backend:
+        _last_stop_reason = "max_steps"
+
+    agent.llm_instance = _Backend()
+    assert agent.last_stop_reason == "max_steps"

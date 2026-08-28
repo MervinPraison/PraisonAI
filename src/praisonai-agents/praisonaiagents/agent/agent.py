@@ -3751,6 +3751,11 @@ Summary:"""
         # the agent (see ``_extract_llm_response_content``); prefer it so a
         # provider block/refusal isn't masked by a backend default of "completed".
         own = getattr(self, '_last_stop_reason', None)
+        # Prefer a specific agent-owned provider block/refusal/truncation before
+        # any backend fallback so a stale backend reason (e.g. ``max_steps``)
+        # cannot mask the OpenAI-native classification recorded for this turn.
+        if own and own != "completed":
+            return own
         # Read from the already-instantiated backends only. ``__openai_client``
         # is the raw (name-mangled) attribute, never the lazy ``_openai_client``
         # property, so this never triggers OpenAI client creation for
