@@ -274,3 +274,189 @@ test("the conversation the user starts ON LAUNCH has a real chat id", async () =
   assert.equal(body.chat_id, "chat-launch");
   app?.dispose();
 });
+
+// ---- the chrome, driven ------------------------------------------------------
+//
+// `app/src/main.ts` measured 74% mutation survival -- the worst file in the
+// package. The five tests above each pin one previously-reported defect and
+// nothing around it. These cover the rest of what the chrome actually does.
+
+const held = (frames: readonly (readonly [string, unknown])[]) => ({
+  status: 200,
+  headers: { "content-type": "text/event-stream" },
+  body: new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(sse(frames)));
+      // deliberately never closed, so the turn stays live
+    },
+  }),
+});
+
+test("the Send button becomes Stop while a run is streaming", async () => {
+  // `phase === "streaming" ? "stop" : "send"` -> `"send"` survived. The Stop
+  // button never appears, so a run cannot be cancelled from the UI at all --
+  // it keeps generating and keeps billing.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () => held([["start", { msg_id: "m1", run_id: "r1" }], ["delta", { msg_id: "m1", text: "..." }]]));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const button = dom.find((n) => n.dataset["action"] === "send" || n.dataset["action"] === "stop");
+  assert.ok(button, "no send control");
+  assert.equal(button.dataset["action"], "send", "idle should offer Send");
+
+  submit(dom, "hello");
+  await settle();
+
+  const live = dom.find((n) => n.dataset["action"] === "stop" || n.dataset["action"] === "send");
+  assert.equal(live?.dataset["action"], "stop", "a streaming run must offer Stop");
+  app?.dispose();
+});
+
+test("the keyboard height and BOTH insets reach the layout", async () => {
+  // `keyboardHeightPx` -> 0 and `insets.top` -> `insets.bottom` both survived.
+  // The composer never lifts above the keyboard (you type behind it), and the
+  // top safe-area is read from the bottom, so content sits under the notch.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets: createFakeSecrets(),
+    http: createFakeHttp(), time: nodeTime(), kind: "web",
+  };
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  shell.setKeyboardHeight(300);
+  await settle(20);
+
+  const screen = dom.find((n) => n.className === "screen");
+  assert.ok(screen, "no screen element");
+  const props = (screen as unknown as { style: { props: Record<string, string> } }).style.props;
+  assert.equal(props["--keyboard-height"], "300px", "the keyboard height must reach the layout");
+  assert.equal(props["--inset-top"], `${PHONE_INSETS.top}px`, "the TOP inset must come from the top");
+  assert.notEqual(
+    props["--inset-top"],
+    `${PHONE_INSETS.bottom}px`,
+    "reading the top inset from the bottom puts content under the notch",
+  );
+  app?.dispose();
+});
+
+test("the layout keeps reacting after mount, not only on the first frame", async () => {
+  // Dropping the onInsetsChanged / onKeyboardHeightChanged subscriptions
+  // survived: the first frame is right and nothing after it is. Rotating the
+  // phone or raising the keyboard changes nothing.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets: createFakeSecrets(),
+    http: createFakeHttp(), time: nodeTime(), kind: "web",
+  };
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  const screen = dom.find((n) => n.className === "screen");
+  assert.ok(screen, "no screen element");
+  const props = (screen as unknown as { style: { props: Record<string, string> } }).style.props;
+
+  shell.setInsets({ top: 99, bottom: 12, left: 3, right: 4 });
+  await settle(20);
+  assert.equal(props["--inset-top"], "99px", "a rotation must reach the layout");
+  app?.dispose();
+});
+
+test("a multi-delta answer paints ONE text row, not one per publish", async () => {
+  // `render = diff.next` removed survived: the render state never advances, so
+  // every publish re-inserts every row. A three-delta answer renders as three
+  // separate paragraphs of the same growing text.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "one " }],
+        ["delta", { msg_id: "m1", text: "two " }],
+        ["delta", { msg_id: "m1", text: "three" }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "count");
+  await settle(120);
+
+  const textRows = dom.all().filter((n) => n.className.includes("row-text"));
+  assert.equal(textRows.length, 1, `one answer must be one row, got ${textRows.length}`);
+  assert.match(textRows[0]?.textContent ?? "", /one two three/);
+  app?.dispose();
+});
+
+test("New chat clears the previous conversation off the screen", async () => {
+  // `transcript.textContent = ""` removed survived.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "the first answer" }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "one");
+  await settle(120);
+  assert.match(dom.text(), /the first answer/);
+
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.equal(transcript?.children.length, 0, "New chat must clear the transcript");
+  assert.equal(
+    /the first answer/.test(dom.text()),
+    false,
+    "and the live regions, which still held the previous conversation's answer in the "
+      + "accessibility tree of what the user believes is an empty chat",
+  );
+  app?.dispose();
+});
+
+test("an empty or whitespace-only composer sends nothing", async () => {
+  // `input.value.trim()` -> `input.value`, and the `text === ""` guard
+  // neutered, both survived: whitespace starts a real turn against the engine.
+  const { dom, http, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "");
+  await settle();
+  submit(dom, "   \n  ");
+  await settle();
+
+  assert.deepEqual(
+    http.sent.filter((r) => r.url.includes("/chat")).map((r) => r.url),
+    [],
+    "nothing should have been sent",
+  );
+  app?.dispose();
+});
+
+test("a boot failure names what failed, alone on the screen, as an alert", async () => {
+  // Four independent survivors in the fatal screen: no `textContent = ""` (so
+  // it appends under the corpse of the UI), `role="alert"` -> `"status"` (so a
+  // screen reader does not interrupt), and the detail replaced by a generic
+  // message (so it no longer says WHAT failed).
+  const storage = createFakeStorage();
+  storage.failNext("SecurityError: the operation is insecure");
+  const { dom, platform } = harness({ storage });
+
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.equal(app, null);
+
+  const alert = dom.find((n) => n.getAttribute("role") === "alert");
+  assert.ok(alert, "the fatal screen must be an alert, or a screen reader never announces it");
+  assert.match(dom.text(), /SecurityError/, "it must name what actually failed");
+  assert.equal(
+    dom.find((n) => n.dataset["action"] === "send"),
+    null,
+    "the dead chrome must be gone, not merely covered",
+  );
+});
