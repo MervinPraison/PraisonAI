@@ -101,15 +101,17 @@ def mark_approved(
     tool_name: str,
     arguments: Optional[Dict] = None,
     agent_name: Optional[str] = None,
+    scope_id: Optional[str] = None,
 ) -> None:
-    get_approval_registry().mark_approved(tool_name, arguments, agent_name)
+    get_approval_registry().mark_approved(tool_name, arguments, agent_name, scope_id)
 
 def is_already_approved(
     tool_name: str,
     arguments: Optional[Dict] = None,
     agent_name: Optional[str] = None,
+    scope_id: Optional[str] = None,
 ) -> bool:
-    return get_approval_registry().is_already_approved(tool_name, arguments, agent_name)
+    return get_approval_registry().is_already_approved(tool_name, arguments, agent_name, scope_id)
 
 def is_yaml_approved(tool_name: str) -> bool:
     return get_approval_registry().is_yaml_approved(tool_name)

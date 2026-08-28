@@ -75,12 +75,15 @@ class ApprovalCallback:
         if self.approve_fn is not None:
             # Check if function is async
             if inspect.iscoroutinefunction(self.approve_fn):
-                # Run async function synchronously
-                loop = asyncio.new_event_loop()
-                try:
-                    result = loop.run_until_complete(self.approve_fn(plan))
-                finally:
-                    loop.close()
+                # Run async function synchronously through the package's shared
+                # safe bridge, which performs the running-loop check every other
+                # sync↔async bridge in the codebase does. Hand-rolling a new loop
+                # here still crashed with "Cannot run the event loop while another
+                # loop is running" whenever __call__ was reached from inside a
+                # running loop (e.g. a FastAPI async route), because CPython's
+                # running-loop flag is thread-global, not per-loop-instance.
+                from ..utils.async_bridge import run_coroutine_from_any_context
+                result = run_coroutine_from_any_context(self.approve_fn(plan))
             else:
                 result = self.approve_fn(plan)
                 

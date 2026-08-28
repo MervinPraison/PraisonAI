@@ -172,3 +172,55 @@ def test_async_framework_verdict_is_not_visible_to_the_model():
     agent = Agent(name="t", instructions="x", tools=[boom], tool_config=FAST)
     result = asyncio.run(agent.execute_tool_async("boom", {}))
     assert "_praison_retryable" not in str(result)
+
+
+def test_async_breaker_opens_after_raised_exceptions():
+    """A *raised* async tool exception is a breaker failure, matching the sync
+    path's ``breaker.call``. Five raised failures must open the breaker so the
+    sixth call short-circuits with ``circuit_open`` instead of hammering the
+    flaky tool again — the exception exit previously skipped the record block.
+    """
+    def flaky(x: str = "") -> str:
+        raise RuntimeError("upstream 503")
+
+    agent = Agent(name="t", instructions="x", tools=[flaky])
+
+    async def _drive():
+        results = []
+        for _ in range(6):
+            # Call the impl directly (no retry loop) so each raised failure is
+            # recorded exactly once against the breaker.
+            results.append(
+                await agent._execute_tool_async_impl("flaky", {}, None, None)
+            )
+        return results
+
+    results = asyncio.run(_drive())
+    # First five ran the tool and failed; the sixth is rejected by the breaker.
+    assert results[-1].get("circuit_open") is True
+    assert not any(r.get("circuit_open") for r in results[:5])
+
+
+def test_async_breaker_is_per_instance():
+    """One agent's open breaker must not trip a distinct agent's same-named
+    tool — the breaker key is instance-scoped (``tool_{id(self)}_{name}``)."""
+    def flaky(x: str = "") -> str:
+        raise RuntimeError("boom")
+
+    agent_a = Agent(name="a", instructions="x", tools=[flaky])
+    agent_b = Agent(name="b", instructions="x", tools=[flaky])
+
+    async def _open(agent):
+        for _ in range(5):
+            await agent._execute_tool_async_impl("flaky", {}, None, None)
+        # Agent A's breaker is now open.
+        return await agent._execute_tool_async_impl("flaky", {}, None, None)
+
+    a_result = asyncio.run(_open(agent_a))
+    assert a_result.get("circuit_open") is True
+
+    # Agent B, sharing the tool name, still runs its own tool (breaker closed).
+    b_first = asyncio.run(
+        agent_b._execute_tool_async_impl("flaky", {}, None, None)
+    )
+    assert not b_first.get("circuit_open")

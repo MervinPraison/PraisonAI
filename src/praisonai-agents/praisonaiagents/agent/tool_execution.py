@@ -1732,17 +1732,27 @@ class ToolExecutionMixin:
             # "Agent" for every unnamed agent), so a skill grant on one agent
             # can never unlock the tool for an unrelated agent in the process.
             auto_approve_scope = getattr(self, '_approval_scope_id', None)
+            # Pass the per-instance scope id as ``scope_id`` too, so the
+            # in-memory "this session" grant store is keyed per Agent instance
+            # rather than by the display name (every unnamed Agent() defaults to
+            # "Agent"). Without this, one worker's human-granted "[s] this
+            # session" approval silently unlocks the same tool for a distinct
+            # same-named worker. ``self.name`` remains the ``agent_name`` for the
+            # name-keyed lookups (per-agent backend, risk level, ask rules,
+            # durable "always" persistence).
             if is_async:
                 return get_approval_registry().approve_async(
                     getattr(self, 'name', None), tool_name, tool_args,
                     force=manager_forces_approval,
                     auto_approve_scope=auto_approve_scope,
+                    scope_id=auto_approve_scope,
                 )
             else:
                 return get_approval_registry().approve_sync(
                     getattr(self, 'name', None), tool_name, tool_args,
                     force=manager_forces_approval,
                     auto_approve_scope=auto_approve_scope,
+                    scope_id=auto_approve_scope,
                 )
 
     def _doom_loop_approved(self, function_name, arguments, verdict) -> bool:
@@ -1800,11 +1810,17 @@ class ToolExecutionMixin:
                     function_name, arguments
                 ),
             }
+            # Key the "this session" grant by the per-instance scope id so a
+            # doom-loop continue granted on one worker cannot silently authorise
+            # a same-named sibling worker, matching the per-instance scoping used
+            # for regular tool approvals above. ``self.name`` stays as agent_name
+            # for the name-keyed lookups.
             decision = registry.approve_sync(
                 getattr(self, "name", None),
                 DOOM_LOOP_TARGET,
                 request_args,
                 force=True,
+                scope_id=getattr(self, "_approval_scope_id", None),
             )
             return bool(getattr(decision, "approved", False))
         except Exception as e:  # noqa: BLE001 — fail closed to the block path
@@ -2111,7 +2127,8 @@ class ToolExecutionMixin:
 
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(
-            function_name, arguments, agent_name=getattr(self, "name", None)
+            function_name, arguments, agent_name=getattr(self, "name", None),
+            scope_id=getattr(self, "_approval_scope_id", None),
         )
         return None, arguments
 
@@ -2156,7 +2173,8 @@ class ToolExecutionMixin:
 
         from ..approval import get_approval_registry
         get_approval_registry().mark_approved(
-            function_name, arguments, agent_name=getattr(self, "name", None)
+            function_name, arguments, agent_name=getattr(self, "name", None),
+            scope_id=getattr(self, "_approval_scope_id", None),
         )
         return None, arguments
 
@@ -2300,6 +2318,83 @@ class ToolExecutionMixin:
             )
         except Exception:
             pass
+
+    def _get_tool_circuit_breaker(self, function_name):
+        """Return this agent's circuit breaker for *function_name*, or None.
+
+        Shared between the sync tool path (_execute_tool_with_circuit_breaker_impl)
+        and the async tool path (_execute_tool_async_impl) so both engage the
+        same per-agent breaker. Uses the identical instance-scoped key so one
+        agent's failing tool cannot trip another agent's same-named tool.
+        Returns None when the circuit_breaker module is unavailable.
+        """
+        try:
+            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
+        except ImportError:
+            return None
+        breaker_name = f"tool_{id(self)}_{function_name}"
+        config = CircuitBreakerConfig(
+            failure_threshold=5,
+            recovery_timeout=60.0,
+            timeout=30.0,
+            graceful_degradation=True,
+        )
+        breaker = get_circuit_breaker(breaker_name, config)
+        self._register_breaker_finalizer(breaker_name)
+        return breaker
+
+    def _circuit_breaker_open_result(self, function_name):
+        """Return the standard ``circuit_open`` error dict for *function_name*."""
+        return {
+            "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
+            "circuit_open": True,
+            "agent_name": getattr(self, "name", None),
+            "session_id": getattr(self, "_session_id", None),
+            "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
+        }
+
+    def _circuit_breaker_precheck(self, function_name):
+        """Short-circuit an OPEN breaker before running the tool body.
+
+        Mirrors the OPEN-state rejection logic of ``CircuitBreaker.call`` so the
+        async tool path gets the same protection as the sync path without needing
+        to funnel its async ``_invoke`` through the sync ``breaker.call``.
+
+        Returns a ``circuit_open`` error dict when the call must be rejected, or
+        None when the tool is allowed to run (and mutates the breaker into
+        HALF_OPEN when the recovery timeout has elapsed, exactly like ``call``).
+        """
+        breaker = self._get_tool_circuit_breaker(function_name)
+        if breaker is None:
+            return None
+        try:
+            from ..tools.circuit_breaker import CircuitState
+        except ImportError:
+            return None
+        with breaker._lock:
+            breaker._stats.total_requests += 1
+            if breaker._stats.state == CircuitState.OPEN:
+                if not breaker._should_attempt_reset():
+                    breaker._stats.rejected_requests += 1
+                    return self._circuit_breaker_open_result(function_name)
+                breaker._stats.state = CircuitState.HALF_OPEN
+                breaker._stats.success_count = 0
+        return None
+
+    def _circuit_breaker_record(self, function_name, is_success):
+        """Record a tool outcome against this agent's breaker.
+
+        Used by the async path after ``_invoke`` so repeated failures open the
+        breaker just as the sync path's ``breaker.call`` does. Treated as a
+        no-op when the breaker is unavailable.
+        """
+        breaker = self._get_tool_circuit_breaker(function_name)
+        if breaker is None:
+            return
+        if is_success:
+            breaker._on_success()
+        else:
+            breaker._on_failure()
 
     def _execute_tool_with_circuit_breaker_impl(self, function_name, arguments):
         """Execute tool with circuit breaker protection (internal implementation).

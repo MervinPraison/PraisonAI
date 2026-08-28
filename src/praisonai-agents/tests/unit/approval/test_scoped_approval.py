@@ -457,6 +457,43 @@ class TestRegistryScopeBridge:
         )
 
 
+class TestContextCacheScopeId:
+    """The in-context ``is_already_approved`` cache must be keyed per-instance
+    (``scope_id``) so a grant marked on one worker cannot pre-authorize a
+    distinct same-named worker sharing the execution context — the fast-path
+    checked *before* the per-instance session lookup.
+    """
+
+    def test_context_cache_isolated_by_scope_id(self):
+        from praisonaiagents.approval.registry import ApprovalRegistry
+
+        registry = ApprovalRegistry()
+        args = {"command": "git status"}
+
+        # Two workers share the display name "Agent" but have distinct scope ids.
+        registry.mark_approved("execute_command", args, "Agent", scope_id="inst-A")
+
+        # Same instance sees its own grant.
+        assert registry.is_already_approved(
+            "execute_command", args, "Agent", scope_id="inst-A"
+        )
+        # A distinct same-named instance must NOT inherit it.
+        assert not registry.is_already_approved(
+            "execute_command", args, "Agent", scope_id="inst-B"
+        )
+
+    def test_name_keyed_fallback_preserved(self):
+        # With no scope_id supplied, behaviour falls back to name-keyed caching
+        # (backward compatible).
+        from praisonaiagents.approval.registry import ApprovalRegistry
+
+        registry = ApprovalRegistry()
+        args = {"command": "git status"}
+        registry.mark_approved("execute_command", args, "worker")
+        assert registry.is_already_approved("execute_command", args, "worker")
+        assert not registry.is_already_approved("execute_command", args, "other")
+
+
 # ── @require_approval positional-argument scoping ───────────────────────────
 
 
