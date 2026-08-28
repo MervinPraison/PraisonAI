@@ -136,3 +136,57 @@ test("a long streaming turn costs one update per publish", () => {
   }
   assert.equal(total, 200, "one op per publish -- the first insert plus 199 updates");
 });
+
+// ---- signatures must cover every field the row renders ----------------------
+
+test("an error row repaints when only its recovery changes", () => {
+  // `${row.recovery}` could be dropped from the signature and survive. The
+  // comment two lines above it says exactly why it is there -- "the same
+  // message can offer a different action once the engine reports a different
+  // kind" -- and nothing checked. The row would keep a Retry button after the
+  // engine reclassified the failure as one retrying cannot fix.
+  const base = {
+    kind: "error" as const,
+    id: "err",
+    errorKind: "transport" as const,
+    message: "the connection dropped",
+    tone: "failure" as const,
+  };
+  const first = reconcile(emptyRender, [{ ...base, recovery: "retry" as const }]);
+  const second = reconcile(first.next, [{ ...base, recovery: "settings" as const }]);
+
+  assert.deepEqual(
+    second.ops.map((o) => o.kind),
+    ["update"],
+    "a changed recovery must repaint the row",
+  );
+});
+
+test("a dropped row repaints when the reasons change but the count does not", () => {
+  // `${row.reasons.join(",")}` could be dropped and survive. Two refusals for
+  // different reasons look identical to a count, so the row would keep naming
+  // the wrong failure.
+  const first = reconcile(emptyRender, [
+    { kind: "dropped" as const, id: "dropped", count: 2, reasons: ["unknown_event"] },
+  ]);
+  const second = reconcile(first.next, [
+    { kind: "dropped" as const, id: "dropped", count: 2, reasons: ["unparseable_json"] },
+  ]);
+
+  assert.deepEqual(second.ops.map((o) => o.kind), ["update"]);
+});
+
+test("an unchanged error row still produces nothing", () => {
+  // The pair for both of the above: a signature that changed every time would
+  // pass them and repaint on every frame.
+  const row = {
+    kind: "error" as const,
+    id: "err",
+    errorKind: "transport" as const,
+    message: "same",
+    tone: "failure" as const,
+    recovery: "retry" as const,
+  };
+  const first = reconcile(emptyRender, [row]);
+  assert.deepEqual(reconcile(first.next, [row]).ops, []);
+});

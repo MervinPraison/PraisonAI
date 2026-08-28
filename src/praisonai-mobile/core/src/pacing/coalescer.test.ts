@@ -172,3 +172,16 @@ test("a trickle that never stops still cannot outrun the budget", () => {
     `painted only after ${flushed?.length} tokens; the 16ms budget should have fired far sooner`,
   );
 });
+
+test("the byte cap flushes AT maxBytes, not one character later", () => {
+  // `pending.length >= maxBytes` -> `>` survived. Off by one on the constant
+  // the module's whole contract is written around, and no test ever landed
+  // exactly on the cap.
+  const exact = createCoalescer(8, 10_000);
+  assert.deepEqual(exact.push(text("1234567"), 0), [], "one short of the cap holds");
+  assert.deepEqual(
+    exact.push(text("8"), 0),
+    [{ kind: "text", text: "12345678" }],
+    "reaching the cap exactly must flush",
+  );
+});

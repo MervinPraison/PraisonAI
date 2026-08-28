@@ -23,7 +23,7 @@ import {
   type ToolRowView,
 } from "./view-model.ts";
 import { UNKNOWN, formatElapsed } from "../format.ts";
-import { apply, initialTurn, type TurnState } from "../../../core/src/run/transcript.ts";
+import { apply, initialTurn, noteDropped, type TurnState } from "../../../core/src/run/transcript.ts";
 import { add, choose, emptyApprovals } from "../../../core/src/run/approvals.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
 import { SCRIPTS } from "../../../testing/src/scripts.ts";
@@ -496,4 +496,33 @@ test("an approval with no table entry renders pending rather than borrowing one"
   );
   assert.equal(rows[0]?.state.status, "pending");
   assert.equal(rows[0]?.actionable, true);
+});
+
+// ---- the two numbers the dropped row and the actions actually report --------
+
+test("the dropped row reports how many were dropped, not just that some were", () => {
+  // `count: turn.dropped.length` -> `count: 1` survived. `reasons: []` was
+  // caught; the count was not. The whole reason this row carries a number is
+  // to distinguish one malformed frame from a stream that is mostly
+  // unparseable, and it always said "1".
+  let turn = run(start, delta("hi"));
+  turn = noteDropped(turn, "unknown_event", "a");
+  turn = noteDropped(turn, "unparseable_json", "b");
+  turn = noteDropped(turn, "unknown_event", "c");
+
+  const row = buildTranscript(turn).rows.find((r) => r.kind === "dropped");
+  assert.ok(row && row.kind === "dropped");
+  assert.equal(row.count, 3);
+  assert.deepEqual([...row.reasons].sort(), ["unknown_event", "unparseable_json"]);
+});
+
+test("Copy is not offered for a turn with nothing in it", () => {
+  // `copy: turn.text !== ""` -> `copy: true` survived. A Copy button on an
+  // empty answer copies an empty string and reports success -- an action that
+  // says it did something and did not.
+  const empty = run(start);
+  assert.equal(buildTranscript(empty).actions.copy, false);
+
+  const answered = run(start, delta("something"));
+  assert.equal(buildTranscript(answered).actions.copy, true);
 });
