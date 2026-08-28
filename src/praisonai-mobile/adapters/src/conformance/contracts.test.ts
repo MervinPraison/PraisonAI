@@ -1165,3 +1165,64 @@ test("the contracts can PASS: an unbroken fixture is green", () => {
   const { status, output } = runAdapterFixture("none");
   assert.equal(status, 0, `an unbroken fixture failed:\n${output}`);
 });
+
+test("the tauri bridge opens links in a NEW context, with the opener severed", () => {
+  // Three independent survivors in one line of webOpen:
+  //   drop `open(url)` but keep `return true` -- reports success having opened
+  //     nothing, so tapping a link does nothing and the app believes it worked;
+  //   `"_blank"` -> `"_self"` -- the link REPLACES the running app;
+  //   `"noopener,noreferrer"` -> `""` -- the opened page keeps a live
+  //     `window.opener` back into the app, and the referrer leaks.
+  const opened: { url: string; target: string; features: string }[] = [];
+  const scope = {
+    open(url: string, target: string, features: string) {
+      opened.push({ url, target, features });
+      return null;
+    },
+  };
+  const bridge = createTauriBridge({ scope });
+
+  return bridge.openExternal("https://ok.example").then((result) => {
+    assert.equal(opened.length, 1, "openExternal must actually open something");
+    assert.equal(opened[0]?.url, "https://ok.example");
+    assert.equal(opened[0]?.target, "_blank", "a link must not replace the running app");
+    assert.match(opened[0]?.features ?? "", /noopener/, "the opener must be severed");
+    assert.match(opened[0]?.features ?? "", /noreferrer/);
+    assert.equal(result, true);
+  });
+});
+
+test("openExternal reports FAILURE when there is nothing to open with", () => {
+  // The pair. Returning true unconditionally is the defect above; returning
+  // false unconditionally would make every real link look broken.
+  const bridge = createTauriBridge({ scope: {} });
+  return bridge.openExternal("https://ok.example").then((result) => {
+    assert.equal(result, false);
+  });
+});
+
+test("the web storage adapter namespaces its keys", () => {
+  // `PREFIX = "praisonai."` -> `""` survived. Keys become `chats.c1` on the
+  // shared origin: they collide with anything else stored there, and every
+  // existing install's data becomes unreachable at the new key. The port
+  // contract cannot see this -- it only checks read-back through the same
+  // adapter, which is self-consistent either way.
+  const written = new Map<string, string>();
+  const backing = {
+    getItem: (k: string) => written.get(k) ?? null,
+    setItem: (k: string, v: string) => void written.set(k, v),
+    removeItem: (k: string) => void written.delete(k),
+    key: (i: number) => [...written.keys()][i] ?? null,
+    clear: () => written.clear(),
+    get length() { return written.size; },
+  } as unknown as Storage;
+
+  return createWebStorage(backing)
+    .write({ namespace: "chats", id: "c1" }, "body")
+    .then(() => {
+      const keys = [...written.keys()];
+      assert.equal(keys.length, 1);
+      assert.match(keys[0] ?? "", /^praisonai\./, `the key was not namespaced: ${keys[0]}`);
+      assert.match(keys[0] ?? "", /chats/);
+    });
+});

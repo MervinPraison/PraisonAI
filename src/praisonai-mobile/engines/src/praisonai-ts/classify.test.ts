@@ -74,3 +74,13 @@ test("a 4xx is not transport, so Retry is not offered where it cannot help", () 
   assert.notEqual(classifyError({ status: 400 } as never), "transport");
   assert.notEqual(classifyError({ status: 422 } as never), "transport");
 });
+
+test("a 403 is an auth failure even when its message says nothing useful", () => {
+  // Dropping `status === 403` survived because the message-matching branch
+  // catches anything that literally contains "403" or "forbidden". A provider
+  // returning `{status: 403, message: "nope"}` then classifies as `internal`,
+  // and the user gets no route to their credentials -- which is the whole
+  // reason ErrorKind separates auth from everything else.
+  assert.equal(classifyError({ status: 403, message: "nope" } as never), "auth");
+  assert.equal(classifyError({ status: 401, message: "nope" } as never), "auth");
+});
