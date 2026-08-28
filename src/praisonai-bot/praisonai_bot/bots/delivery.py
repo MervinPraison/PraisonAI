@@ -9,6 +9,7 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -773,6 +774,13 @@ class DeliveryRouter:
                         platform,
                         channel_id,
                     )
+                    # Release the durable reservation (#4541): the key was
+                    # claimed ``inflight`` by ``_is_duplicate`` above, but no
+                    # send was attempted, so a later cycle (after the target
+                    # self-heals) must be able to re-claim it rather than being
+                    # suppressed for the full inflight lease. No-op without a
+                    # durable store.
+                    self._release_key(idempotency_key)
                     return False
             
             # Rate-limit the proactive path (issue #2578): a burst of
@@ -784,6 +792,13 @@ class DeliveryRouter:
             if limiter is not None:
                 try:
                     await limiter.acquire(channel_id)
+                except asyncio.CancelledError:
+                    # Cancellation while waiting on the limiter left no send
+                    # attempted (#4541): release the durable reservation so the
+                    # cancelled send stays retryable rather than dedup'd against
+                    # its own aborted attempt, then propagate the cancellation.
+                    self._release_key(idempotency_key)
+                    raise
                 except Exception:
                     logger.debug(
                         "DeliveryRouter: rate-limit acquire failed for %s:%s",
@@ -816,6 +831,15 @@ class DeliveryRouter:
                         f"{platform} adapter reported no delivery "
                         f"(send_message returned {result!r})"
                     )
+            except asyncio.CancelledError:
+                # Cancellation during the send left it in an unknown state
+                # (#4541): release the durable reservation so the send stays
+                # retryable rather than being deduplicated against its own
+                # aborted attempt, then propagate. ``CancelledError`` is a
+                # ``BaseException`` in 3.8+, so it bypasses ``except Exception``
+                # below and must be handled explicitly.
+                self._release_key(idempotency_key)
+                raise
             except Exception as send_err:
                 # A server-mandated Retry-After widens the limiter's lane so the
                 # next proactive sends hold off instead of re-tripping the 429.

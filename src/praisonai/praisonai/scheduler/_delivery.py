@@ -269,19 +269,26 @@ class SchedulerDelivery:
         double-post (or, post-send/pre-record, drop). Injecting the same durable
         :class:`~praisonai_bot.bots._idempotency.SqliteIdempotencyStore` the
         gateway uses gives every path one restart-safe, effectively-once
-        guarantee. The store lives at the shared ``~/.praisonai/state`` path so
-        gateway, lightweight and standalone ticks converge on one dedup ledger.
+        guarantee. The store lives under the same ``<home>/state`` path the
+        gateway uses so gateway, lightweight and standalone ticks on one home
+        converge on one dedup ledger. The home honours ``$PRAISONAI_HOME``
+        (falling back to ``~/.praisonai``) so two isolated deployments under one
+        OS account keep separate ledgers rather than cross-suppressing each
+        other's deterministic delivery keys.
 
         Best-effort: any failure (missing bot extra, unwritable state dir)
         returns ``None`` so the router falls back to its LRU and delivery still
         works — durability degrades, it never blocks.
         """
         try:
+            import os
             from pathlib import Path
 
             from praisonai_bot.bots._idempotency import build_idempotency_store
 
-            path = Path.home() / ".praisonai" / "state" / "delivery.db"
+            base = os.environ.get("PRAISONAI_HOME")
+            home = Path(base) if base else Path.home() / ".praisonai"
+            path = home / "state" / "delivery.db"
             return build_idempotency_store("sqlite", path=path)
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(

@@ -94,3 +94,83 @@ def test_no_store_falls_back_to_lru(tmp_path):
     assert asyncio.run(router.deliver("telegram:123", "hi", idempotency_key=key))
     assert asyncio.run(router.deliver("telegram:123", "hi", idempotency_key=key))
     assert sent == [("123", "hi")]  # second suppressed in-process
+
+
+class _AlwaysDeadTargets:
+    """Dead-target registry that reports every target dead, never reprobing."""
+
+    def is_dead(self, platform, channel_id):
+        return True
+
+    def should_reprobe(self, platform, channel_id):
+        return False
+
+
+def test_dead_target_releases_reservation(tmp_path):
+    # A send suppressed because the target is dead reserved the key up-front
+    # (#4541); it must release it so a later cycle — once the target
+    # self-heals — can re-claim it rather than being suppressed for the full
+    # inflight lease.
+    db = tmp_path / "delivery.db"
+    key = "sched:j1:telegram:123::abc"
+
+    store = SqliteIdempotencyStore(db)
+    router, sent = _make_router(store)
+    router._dead_targets = _AlwaysDeadTargets()
+    assert asyncio.run(
+        router.deliver("telegram:123", "hello", idempotency_key=key)
+    ) is False
+    assert sent == []
+
+    # The reservation was released: a fresh router over a now-live target
+    # (same durable store/db) delivers rather than being wrongly suppressed.
+    store2 = SqliteIdempotencyStore(db)
+    router_ok, sent_ok = _make_router(store2)
+    assert asyncio.run(
+        router_ok.deliver("telegram:123", "hello", idempotency_key=key)
+    ) is True
+    assert sent_ok == [("123", "hello")]
+
+
+def test_cancelled_send_releases_reservation(tmp_path):
+    # Cancellation during the send (a BaseException, not Exception) must still
+    # release the durable reservation so the cancelled send stays retryable
+    # (#4541).
+    db = tmp_path / "delivery.db"
+    key = "sched:j1:telegram:123::abc"
+
+    sent = []
+
+    class CancelBot:
+        async def send_message(self, channel_id, text):
+            raise asyncio.CancelledError()
+
+    class CancelBotOS:
+        def get_bot(self, platform):
+            return CancelBot()
+
+        def list_bots(self):
+            return ["telegram"]
+
+    store = SqliteIdempotencyStore(db)
+    router = DeliveryRouter(CancelBotOS(), idempotency_store=store)
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+    router.directory.set_home_channel("telegram", "123")
+
+    async def _run():
+        try:
+            await router.deliver("telegram:123", "hello", idempotency_key=key)
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(_run())
+
+    # The reservation was released despite the cancellation: a retry succeeds.
+    store2 = SqliteIdempotencyStore(db)
+    router_ok, sent_ok = _make_router(store2)
+    assert asyncio.run(
+        router_ok.deliver("telegram:123", "hello", idempotency_key=key)
+    ) is True
+    assert sent_ok == [("123", "hello")]
