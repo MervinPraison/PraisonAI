@@ -12,6 +12,9 @@
  * 8 of 16 mutations survived a 408-test suite.
  */
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 
 import { describeStorageContract } from "./storage-contract.ts";
@@ -960,4 +963,95 @@ test("zooming after construction does not report a phantom keyboard", async () =
   fake.setZoom(2);
   assert.equal(shell.keyboardHeightPx, 0);
   assert.deepEqual(seen, [0]);
+});
+
+// ---- (3) the contracts can FAIL --------------------------------------------
+//
+// The "the contract catches an adapter that ..." tests above build a broken
+// adapter and then RE-IMPLEMENT the contract's assertion inline. That proves
+// an assertion of that shape would catch the defect. It proves nothing about
+// whether the contract still contains it.
+//
+// Measured: deleting `assert.ok(fired >= 2)` from the time contract -- the one
+// assertion catching `setInterval` becoming `setTimeout`, which stops every
+// polling loop in the app after a single tick -- left the suite at 1035 pass,
+// 0 fail. Fourteen assertions across all four contracts could be deleted for
+// free, and removing a whole section merely reported one test fewer.
+//
+// These spawn the REAL contract against a deliberately broken adapter and
+// assert the matching case goes red BY NAME. The identical pattern already
+// existed in engines/src/contract-fixture.ts, written for the same reason; the
+// adapter contracts never got it.
+
+function adapterChildEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env["NODE_TEST_CONTEXT"];
+  return env;
+}
+
+function runAdapterFixture(mode: string): { status: number | null; output: string } {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // The reporter is FORCED: node 22 emits TAP when stdout is a pipe, node 24
+  // emits the spec reporter, and a test grepping for "not ok" would pass on
+  // one and fail on the other with identical code under it.
+  const run = spawnSync(
+    process.execPath,
+    ["--test-reporter=tap", join(here, "contract-fixture.ts"), mode],
+    { encoding: "utf8", timeout: 120_000, env: adapterChildEnv() },
+  );
+  return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
+}
+
+/** Each break mode, and the contract case that must go red because of it. */
+const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp }[] = [
+  { mode: "secrets_slot_only", expects: /two ACCOUNTS in one slot are two different secrets/ },
+  { mode: "secrets_empty_is_absent", expects: /an empty string is a stored value, not an absence/ },
+  { mode: "storage_missing_is_undefined", expects: /a missing key reads as null, never undefined/ },
+  { mode: "storage_namespaces_collide", expects: /namespaces are isolated/ },
+  { mode: "time_every_fires_once", expects: /every\(\) repeats, rather than firing once/ },
+  { mode: "time_clear_does_nothing", expects: /a cleared timer does not fire/ },
+];
+
+for (const { mode, expects } of ADAPTER_BREAKS) {
+  test(`the contracts can fail: "${mode}" reddens its own named case`, () => {
+    const { status, output } = runAdapterFixture(mode);
+    assert.notEqual(status, 0, `the fixture passed while broken as "${mode}"`);
+    const reddened = output
+      .split("\n")
+      .filter((line) => line.startsWith("not ok "))
+      .join("\n");
+    assert.match(reddened, expects, `"${mode}" did not fail the case it is supposed to`);
+  });
+}
+
+test("a contract cannot quietly shrink", () => {
+  // The remaining hole after the break modes above: they prove a case still
+  // WORKS, but a case with no break mode could simply be deleted and nothing
+  // would say so. Measured before this: removing an entire section of the time
+  // contract left the run reporting one test fewer and zero failures.
+  //
+  // The floor is counted from a REAL run rather than from the source text --
+  // this repo's rule is to assert on behaviour, and a regex over `test(` would
+  // be satisfied by a case that asserts nothing.
+  //
+  // Raise these numbers when you add cases. If one drops, a contract lost
+  // coverage, and that is exactly the event worth a red build.
+  const { status, output } = runAdapterFixture("none");
+  assert.equal(status, 0, `the unbroken fixture failed:\n${output}`);
+
+  const passed = output.split("\n").filter((line) => line.startsWith("ok "));
+  const casesFor = (prefix: string): number =>
+    passed.filter((line) => line.includes(`fixture ${prefix}:`)).length;
+
+  assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
+  assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
+  assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
+});
+
+test("the contracts can PASS: an unbroken fixture is green", () => {
+  // The control. Without it, a fixture that failed everything -- a syntax
+  // error, a missing import, a runner that cannot start -- would satisfy every
+  // case above while proving nothing at all.
+  const { status, output } = runAdapterFixture("none");
+  assert.equal(status, 0, `an unbroken fixture failed:\n${output}`);
 });
