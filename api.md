@@ -906,6 +906,7 @@ Methods:
 * <code title="cli">praisonai schedule remove <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule restart <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule resume <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule run <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule runs <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule schedule-callback <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule start <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
