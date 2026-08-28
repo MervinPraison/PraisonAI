@@ -142,24 +142,43 @@ audit trail: after the turn ends the transcript can never say "you allowed
 future author reintroduces index-pairing, which is the bug the whole
 `approvalId` design exists to prevent.
 
-### 4. There is no user-message side, and no stable identity for a live turn
+### 4. There is no user-message side, and no stable identity for a live turn — MECHANISM LANDED, NOT WIRED
 
 `TurnState` is assistant-only; `StoredChat.messages` has a different shape
 (`role`/`content`/`at`). `end.userIndex` is the only link and it is `null` until
 the turn ends, so a live turn cannot be keyed the same way before and after
-persistence. **This stitching is currently owned by no layer** — it needs to
-land in the composition root or in `core/`, deliberately, before two callers
-invent two different answers.
+persistence.
 
-### 5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback
+The join now has an owner: `core/src/chat/session.ts` implements
+`RunPersistence` and is where `end.userIndex` is produced by whatever really did
+the write. But it is **not yet wired into the run loop**: `createPraisonTsEngine`
+is the only engine that takes a `RunPersistence`, and it is constructed with one
+only in its tests — `boot.ts` builds the `session` and never hands it to an
+engine, and the `remote-http` engine has no persistence at all. So a completed
+turn is still not written to disk in production, and the live-turn identity the
+gap is about is still not stable end-to-end. Closing this needs the composition
+root to pass `session` as the praisonai-ts engine's persistence, and a persist
+step for `remote-http`.
+
+### 5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback — PROPERTY ADDED, SNAPSHOT NOT SEEDED
 
 First paint therefore has to assume height 0. Correct on a cold launch, wrong on
 a warm resume with a hardware or floating keyboard already up: one wrong frame,
 then a jump — the exact "web page in a box" tell the synchronous `insets`
-snapshot was introduced to avoid. A `readonly keyboardHeightPx: number` would
-apply the reasoning already written into that port to its sibling event.
+snapshot was introduced to avoid.
 
-### 6. `SettingsFacade` cannot enumerate or observe
+`ShellPort` now carries a synchronous `readonly keyboardHeightPx: number`, so a
+component can *read* the current height at mount instead of waiting for the first
+callback. But the value is not seeded the way `insets` is: both `createWebShell`
+and `createTauriShell` initialise `keyboardHeightPx = 0` and only correct it on a
+later `resize`/`keyboard-height` event, whereas `insets` is seeded synchronously
+from the mirrored CSS custom properties (`readInsets(source)` in the Tauri shell,
+before anything can paint). So a warm resume with the keyboard already up still
+reads 0 on the first frame and jumps — the exact behaviour this entry is about.
+Closing it needs each adapter to seed `keyboardHeightPx` from a synchronous
+source at construction, mirroring what `insets` already does.
+
+### ~~6. `SettingsFacade` cannot enumerate or observe~~ — CLOSED
 
 No `keys()`, no change notification, and `SettingDef[]` is not reachable from
 the facade — so a settings screen must hard-code the key list that already
@@ -168,3 +187,69 @@ exists as data, and re-render blindly after every `set()`.
 ### 7. `Dropped.reason` has no user-facing text
 
 The diagnostic row renders raw reason strings. Honest, but not readable.
+
+
+---
+
+# Why this file gets audited, not just appended to
+
+A re-audit of the gaps above found the first draft of this section had made the
+very error it warns about: it recorded three gaps as closed when only one (Gap
+6) was, and the other two had landed a mechanism without the wiring that would
+actually close them. That is not a filing problem, it is the same failure this
+package is built against, one level up: **a document asserting a state nobody
+re-checked** — including the check that a "closed" gap is closed *end-to-end*
+and not just given a type or a function nothing calls.
+
+It has a cost. A stale P0 list for `praisonai-ts` sent two agents to verify
+nine "blockers" that were every one of them already fixed — useful work, since
+it turned up three real bugs nobody had listed, but not the work it was
+supposed to be.
+
+So the rule for this file: **when a gap closes, close it here in the same
+commit that closes it — and a gap is closed only when it is wired end-to-end,
+not when the mechanism exists.** And when reading it, verify before believing.
+Every claim below is checkable in under a minute.
+
+## What closed, and what only half-closed
+
+The re-audit found one gap fully closed and two that landed a mechanism without
+finishing the wiring — recorded here as such rather than as closed, because a
+half-closed gap read as closed is exactly the stale claim this file exists to
+prevent.
+
+- **Gap 6 — CLOSED.** `defs()`, `subscribe()`, `setSecret()` and `clearSecret()`
+  on the facade (`core/src/settings/store.ts`). `subscribe` fires only after an
+  *accepted* write; notifying on a refused one makes a screen redraw a value the
+  user did not manage to change. A settings screen can now enumerate and observe
+  from the facade alone.
+- **Gap 4 — mechanism landed, not wired.** `core/src/chat/session.ts` implements
+  `RunPersistence` and owns the join between the assistant-only `TurnState` and
+  the two-sided `StoredChat`. But no engine is constructed with it in
+  production: `createPraisonTsEngine` is the only one that takes a
+  `RunPersistence` and gets one only in its tests, `boot.ts` never hands the
+  `session` to an engine, and `remote-http` has no persistence at all. The join
+  exists; the turn is still not recorded end-to-end.
+- **Gap 5 — property added, snapshot not seeded.** `ShellPort.keyboardHeightPx`
+  is readable synchronously, but both shell adapters initialise it to 0 and only
+  correct it on a later event, so — unlike `insets`, which is seeded from CSS
+  before first paint — a warm resume with the keyboard up still paints once at 0
+  and jumps.
+
+## Genuinely still open
+
+Gaps **2**, **3**, **4**, **5** and **7** above. None blocks shipping:
+
+- **2** is an audit-trail nicety — a settled approval cannot be shown after the
+  turn ends.
+- **3** is a duplicated four-field type, and worth closing because the join it
+  forces at render time is exactly where index-pairing gets reintroduced.
+- **4** has its join owner in place but is unwired in the composition root, so
+  turns are not yet persisted in production.
+- **5** has its synchronous property in place but no synchronous seed, so the
+  warm-resume keyboard jump it targets is not yet prevented.
+- **7** renders raw reason enums to a user.
+
+Also open, and larger than any of them: **route→view dispatch** (the view models
+exist and nothing mounts them) and the **Tauri Rust crate**. Neither is a gap in
+the sense this file records — they are unbuilt work, not defects.
