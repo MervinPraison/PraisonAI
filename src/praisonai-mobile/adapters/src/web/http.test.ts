@@ -94,3 +94,28 @@ test("response headers are flattened for the caller", () => {
       assert.equal(r.headers["content-type"], "application/json");
     });
 });
+
+test("the response status is reported as it was received", async () => {
+  // `status: response.status` -> `status: 200` survived. Every 401, 403, 429
+  // and 502 would be classified as success: the engine reads the status to
+  // decide `auth` vs `transport`, so the whole recovery distinction -- go to
+  // settings, or retry -- is fed a constant.
+  //
+  // The tests that DO cover that distinction drive the fake http, not this
+  // adapter, so the one place the real status is read was unguarded.
+  for (const status of [200, 204, 401, 403, 429, 500, 502]) {
+    const impl = (async () => ({
+      status,
+      headers: { forEach: (cb: (v: string, k: string) => void) => cb("application/json", "content-type") },
+      body: null,
+    })) as unknown as typeof fetch;
+
+    const response = await createWebHttp(impl).send({
+      url: "https://x.test",
+      method: "POST",
+      headers: {},
+      signal: new AbortController().signal,
+    });
+    assert.equal(response.status, status, `HTTP ${status} was reported as ${response.status}`);
+  }
+});

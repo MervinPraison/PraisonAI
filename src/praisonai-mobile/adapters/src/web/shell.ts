@@ -200,7 +200,11 @@ export function createWebShell(view: Window = window): WebShell {
       if (!isOpenableExternally(url)) {
         throw new TypeError(`refusing to open ${url.split(":")[0] ?? ""}: externally`);
       }
-      view.open(url, "_blank", "noopener,noreferrer");
+      // Forward the SAME form the allowlist validated. `isOpenableExternally`
+      // trims before reading the scheme, so handing the OS the padded input
+      // would open a string that was never checked in that form -- the
+      // scheme-confusion seam the contract now reads.
+      view.open(url.trim(), "_blank", "noopener,noreferrer");
     },
   };
 }

@@ -460,3 +460,76 @@ test("a boot failure names what failed, alone on the screen, as an alert", async
     "the dead chrome must be gone, not merely covered",
   );
 });
+
+test("the composer is emptied after a send, so a second tap is a second question", async () => {
+  // Deleting `input.value = ""` survived. The text stays in the box, and the
+  // next Send tap re-submits the SAME question -- the user double-sends and
+  // pays twice, with no way to tell from the screen that it happened.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "answer" }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "the only question");
+  await settle(120);
+
+  const box = dom.find((n) => n.tagName === "TEXTAREA");
+  assert.equal(box?.value, "", "the sent text must not still be in the composer");
+
+  // And the guard that follows from it: submitting again now sends nothing.
+  dom.find((n) => n.tagName === "FORM")?.dispatch("submit", { preventDefault: () => {} });
+  await settle();
+  assert.equal(
+    http.sent.filter((r) => r.url.includes("/chat")).length,
+    1,
+    "a second tap on an empty composer must not re-send the last question",
+  );
+  app?.dispose();
+});
+
+test("no chat id the app sends is ever the placeholder", async () => {
+  // `setChat(mintChatId())` -> `setChat("unassigned")` survived, because the
+  // existing test only asserts two ids DIFFER and the launch id is real. The
+  // placeholder is what `controller.ts` uses to mean "nobody has said which
+  // conversation this is"; shipping it to an engine that keys history by
+  // chat_id merges conversations.
+  const { dom, http, platform } = harness();
+  let n = 0;
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: `m${++n}`, run_id: `r${n}` }],
+        ["delta", { msg_id: `m${n}`, text: "answer" }],
+        ["end", { msg_id: `m${n}`, user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => `chat-${n}` });
+
+  submit(dom, "one");
+  await settle();
+  dom.click(dom.find((d) => d.dataset["action"] === "new-chat") as never);
+  await settle();
+  submit(dom, "two");
+  await settle();
+  dom.click(dom.find((d) => d.dataset["action"] === "new-chat") as never);
+  await settle();
+  submit(dom, "three");
+  await settle();
+
+  const ids = http.sent
+    .filter((r) => r.url.includes("/chat"))
+    .map((r) => (JSON.parse(String(r.body ?? "{}")) as { chat_id?: string }).chat_id);
+
+  assert.equal(ids.length, 3, `expected three turns, got ${ids.length}`);
+  assert.equal(ids.includes("unassigned"), false, `a turn was sent as the placeholder: ${ids.join(", ")}`);
+  assert.equal(new Set(ids).size, 3, `three conversations must have three ids: ${ids.join(", ")}`);
+  app?.dispose();
+});

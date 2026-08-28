@@ -224,6 +224,7 @@ function shellHarness(): ShellHarness {
       else window.setHidden(false);
     },
     listenerCount: () => shell.listenerCount(),
+    forwarded: () => window.opened,
   };
 }
 
