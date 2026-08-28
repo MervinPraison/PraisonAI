@@ -129,3 +129,46 @@ test("a clock that appears to go backwards does not suppress the flush forever",
   assert.equal(c.tick(900), null, "a backwards clock must not flush early");
   assert.equal(c.tick(1016)?.kind, "text", "and must not block the flush once time passes");
 });
+
+test("a continuing trickle still paints -- the budget starts at the first byte", () => {
+  // The test above pushes ONE token, which makes it blind to the mutation that
+  // matters: `if (pending === "") openedAt = nowMs` restarting the clock on
+  // EVERY push. With one token the two versions are identical.
+  //
+  // On a device tokens arrive continuously. If each one resets the budget,
+  // `waited` never reaches maxDelayMs and the time bound never fires -- text
+  // paints only when the byte cap is hit, which is precisely the stall this
+  // module exists to prevent. The file's own comment describes a trickle;
+  // it needs more than one drop to be one.
+  const c = createCoalescer(1024, 16); // a cap high enough that only time can flush
+
+  for (let t = 0; t < 5; t++) {
+    assert.deepEqual(c.push(text("a"), t), [], `token at t=${t} should buffer`);
+  }
+
+  const frame = c.tick(16);
+  assert.deepEqual(
+    frame,
+    { kind: "text", text: "aaaaa" },
+    "16ms after the FIRST byte the budget is spent, however many tokens arrived since",
+  );
+});
+
+test("a trickle that never stops still cannot outrun the budget", () => {
+  // The stronger form: tokens arriving on every millisecond, forever. If the
+  // budget restarts per token this never flushes at all until the byte cap.
+  const c = createCoalescer(1024, 16);
+  let flushed: string | null = null;
+
+  for (let t = 0; t <= 40 && flushed === null; t++) {
+    c.push(text("x"), t);
+    const frame = c.tick(t);
+    if (frame !== null && frame.kind === "text") flushed = frame.text;
+  }
+
+  assert.ok(flushed !== null, "a continuous trickle never painted -- the time bound never fired");
+  assert.ok(
+    (flushed?.length ?? 0) <= 20,
+    `painted only after ${flushed?.length} tokens; the 16ms budget should have fired far sooner`,
+  );
+});

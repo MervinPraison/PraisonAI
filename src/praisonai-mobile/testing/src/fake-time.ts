@@ -15,11 +15,19 @@ import { createFakeClock } from "./fake-clock.ts";
 import { createFakeScheduler, type FakeScheduler } from "./fake-scheduler.ts";
 
 export interface FakeTime extends TimePort {
-  /** Fire every registered interval callback once, as a real timer would.
-   *  Without this the coalescer's time bound cannot be exercised at all --
-   *  `every` was a no-op here, which is exactly why nothing noticed that the
-   *  controller never called it. */
+  /** Fire the registered interval callbacks whose period has ELAPSED on the
+   *  fake clock, as a real timer would.
+   *
+   *  Two rounds of this: `every` was first a no-op, which is why nothing
+   *  noticed the controller never called it. Then it ran every callback on
+   *  every tick regardless of the period, which is why nothing noticed that
+   *  the period itself was never checked -- rearming the coalescer's flush at
+   *  60s instead of maxDelayMs left the whole suite green while restoring the
+   *  one-lump answer the tick was added to fix. The period is load-bearing
+   *  now: advance the clock past it or the callback does not run. */
   tick(): void;
+  /** The periods every() was armed with, in registration order. */
+  readonly intervalMs: readonly number[];
   /** Advance the clock, so a tick can observe that maxDelayMs has elapsed. */
   advance(ms: number): void;
   /** Release one animation frame on every scheduler handed out so far. */
@@ -29,7 +37,7 @@ export interface FakeTime extends TimePort {
 
 export function createFakeTime(): FakeTime {
   const clock = createFakeClock();
-  const intervals = new Set<() => void>();
+  const intervals = new Set<{ ms: number; cb: () => void; lastRunMs: number }>();
   let offset = 0;
   const schedulers: FakeScheduler[] = [];
   return {
@@ -40,12 +48,24 @@ export function createFakeTime(): FakeTime {
       schedulers.push(scheduler);
       return scheduler;
     },
-    every(_ms, cb) {
-      intervals.add(cb);
-      return () => void intervals.delete(cb);
+    every(ms, cb) {
+      const entry = { ms, cb, lastRunMs: clock.nowMs() + offset };
+      intervals.add(entry);
+      return () => void intervals.delete(entry);
     },
     tick() {
-      for (const cb of [...intervals]) cb();
+      const now = clock.nowMs() + offset;
+      for (const entry of [...intervals]) {
+        // A real interval does not fire before its period is up. Firing
+        // regardless made the period unobservable, so any value passed to
+        // every() behaved identically to the correct one.
+        if (now - entry.lastRunMs < entry.ms) continue;
+        entry.lastRunMs = now;
+        entry.cb();
+      }
+    },
+    get intervalMs() {
+      return [...intervals].map((e) => e.ms);
     },
     advance(ms) {
       // Monotonic, like createFakeClock: nowMs is a monotonic TimePort, so a

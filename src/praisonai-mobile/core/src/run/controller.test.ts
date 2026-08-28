@@ -305,3 +305,21 @@ test("an approval the engine accepts is shown as sent", async () => {
   const entry = views[views.length - 1]?.approvals.entries.find((e) => e.approvalId === "a1");
   assert.equal(entry?.state.status, "sent");
 });
+
+test("the flush tick is armed at maxDelayMs, not at some other period", async () => {
+  // The fake's `every` discarded its period, so arming the coalescer's flush
+  // at 60_000 instead of maxDelayMs left the entire suite green -- while
+  // restoring the one-lump answer the streaming test above exists to prevent.
+  // A period nothing observes is a period nothing has to get right.
+  const time = createFakeTime();
+  const controller = createRunController({
+    engine: createScriptedEngine({ id: "scripted", script: SCRIPTS.happy }),
+    time,
+    maxDelayMs: 16,
+    onPublish: () => {},
+  });
+
+  const sent = controller.send("hi");
+  assert.deepEqual(time.intervalMs, [16], "the tick must be armed at maxDelayMs");
+  await sent;
+});

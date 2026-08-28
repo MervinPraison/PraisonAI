@@ -19,6 +19,7 @@ import { createFakeTime } from "../../testing/src/fake-time.ts";
 import { SCRIPTS } from "../../testing/src/scripts.ts";
 import { MIN_ENGINE_PROTOCOL, PROTOCOL_VERSION } from "../../protocol/src/version.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
+import type { RunEvent } from "../../protocol/src/events.ts";
 import type { SettingDef } from "../../core/src/settings/store.ts";
 
 const DEFS: readonly SettingDef[] = [
@@ -147,25 +148,74 @@ test("settings are loaded before the engine is built", async () => {
   if (result.ok) await result.app.dispose();
 });
 
-test("backgrounding stops the run", async () => {
+test("backgrounding stops a run that is actually in flight", async () => {
   // On iOS the app can be killed while suspended with no further callback, so
   // anything still in flight at this moment is simply lost.
+  //
+  // This test used to assert `stopped || true`, which is true for every value
+  // of `stopped` -- and `stopped` was in fact FALSE, because the test never
+  // started a run: `controller.stop()` returns early when nothing is live, so
+  // `cancel` was never reached. Deleting the whole lifecycle subscription from
+  // boot.ts passed. The run must genuinely be in flight for backgrounding to
+  // have anything to stop.
   const shell = createFakeShell();
-  let stopped = false;
+  let cancelled = false;
+  let releaseRun: () => void = () => {};
+  const held = new Promise<void>((resolve) => { releaseRun = resolve; });
+
   const inner = createScriptedEngine({ script: SCRIPTS.happy });
   const engine: AgentEnginePort = {
     ...inner,
     id: "scripted",
-    cancel: async () => { stopped = true; return true; },
+    async *run(req, signal) {
+      yield { type: "start", msgId: "m1", runId: req.runId } as RunEvent;
+      // Hold the turn open so there is a live run to cancel.
+      await held;
+      if (signal.aborted) return;
+      yield { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 } as RunEvent;
+    },
+    cancel: async () => { cancelled = true; releaseRun(); return true; },
   };
 
   const result = await createApp(deps({ shell, engines: () => [{ id: "scripted", create: () => engine }] }));
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
+  const sent = result.app.controller.send("hello");
+  // Let the run reach its first yield, so a run is genuinely live.
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
   shell.setLifecycle("background");
-  await Promise.resolve();
-  assert.equal(stopped || true, true); // stop() is called; cancel is its path
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
+  assert.equal(cancelled, true, "backgrounding must cancel the in-flight run");
+
+  releaseRun();
+  await sent;
+  await result.app.dispose();
+});
+
+test("a lifecycle phase that is not background does not stop the run", async () => {
+  // The pair. Without it, `if (phase === "background")` widened to `if (true)`
+  // passes -- and every foreground/resume notification would kill the turn the
+  // user is watching.
+  const shell = createFakeShell();
+  let cancelled = false;
+  const inner = createScriptedEngine({ script: SCRIPTS.happy });
+  const engine: AgentEnginePort = {
+    ...inner,
+    id: "scripted",
+    cancel: async () => { cancelled = true; return true; },
+  };
+
+  const result = await createApp(deps({ shell, engines: () => [{ id: "scripted", create: () => engine }] }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  shell.setLifecycle("active");
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(cancelled, false, "only backgrounding stops the run");
+
   await result.app.dispose();
 });
 

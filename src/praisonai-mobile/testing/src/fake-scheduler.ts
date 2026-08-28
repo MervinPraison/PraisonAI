@@ -19,6 +19,14 @@ export interface FakeScheduler extends Scheduler {
   fireTimer(): void;
   /** Is a timer currently armed? */
   readonly timerArmed: boolean;
+  /** The delay the armed timer was requested with, or null if none is armed.
+   *  The fake used to take `setTimer(cb)` and throw the delay away, so
+   *  `setTimer(reopen, 0)` was indistinguishable from the tuned constant and
+   *  the gate could be made to reopen on the next macrotask -- publish per
+   *  token, the exact thing the module exists to prevent -- with the suite
+   *  green. A fake that accepts fewer arguments than its port silently
+   *  excuses every caller from getting them right. */
+  readonly timerDelayMs: number | null;
   /** How many times a frame has been requested. */
   readonly frameRequests: number;
 }
@@ -26,6 +34,7 @@ export interface FakeScheduler extends Scheduler {
 export function createFakeScheduler(): FakeScheduler {
   let pendingFrame: (() => void) | null = null;
   let pendingTimer: (() => void) | null = null;
+  let timerDelayMs: number | null = null;
   let frameRequests = 0;
 
   return {
@@ -33,11 +42,13 @@ export function createFakeScheduler(): FakeScheduler {
       frameRequests += 1;
       pendingFrame = cb;
     },
-    setTimer(cb) {
+    setTimer(cb, ms) {
       pendingTimer = cb;
+      timerDelayMs = ms;
     },
     clearTimer() {
       pendingTimer = null;
+      timerDelayMs = null;
     },
     frame() {
       const cb = pendingFrame;
@@ -47,10 +58,14 @@ export function createFakeScheduler(): FakeScheduler {
     fireTimer() {
       const cb = pendingTimer;
       pendingTimer = null;
+      timerDelayMs = null;
       cb?.();
     },
     get timerArmed() {
       return pendingTimer !== null;
+    },
+    get timerDelayMs() {
+      return timerDelayMs;
     },
     get frameRequests() {
       return frameRequests;
