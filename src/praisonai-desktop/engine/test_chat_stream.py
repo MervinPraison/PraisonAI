@@ -312,5 +312,70 @@ class HistoryAcrossSessions(unittest.TestCase):
                         f"a blank turn was replayed: {agent.seen_history}")
 
 
+class FetchUrlDoesNotFollowRedirects(unittest.TestCase):
+    """The approval card names one URL; the fetch must not go elsewhere.
+
+    fetch_url gated on the approved URL, then let urllib follow any 3xx to any
+    host -- including this engine on loopback -- under that same approval. So a
+    page whose author controls a redirect could send the fetch to another
+    chat's transcript, /settings, or /logs, and the body landed back in the
+    model's context. The card was a lie about what happened.
+    """
+
+    def setUp(self):
+        # "never" lets the gate allow, so the test exercises the fetch itself.
+        server.save_settings({"approval_mode": "never"})
+
+    def _fetch_url_tool(self):
+        for tool in server._builtin_tools():
+            if getattr(tool, "__name__", "") == "fetch_url":
+                return tool
+        self.fail("fetch_url is no longer among the builtin tools")
+
+    def test_a_redirect_is_not_followed_to_a_url_the_user_never_approved(self):
+        secret = "SECRET-BODY"
+        from http.server import BaseHTTPRequestHandler
+
+        class SecretHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(secret.encode())
+
+            def log_message(self, *a):
+                pass
+
+        b_srv = ThreadingHTTPServer(("127.0.0.1", 0), SecretHandler)
+        b_port = b_srv.server_address[1]
+        threading.Thread(target=b_srv.serve_forever, daemon=True).start()
+        b_url = f"http://127.0.0.1:{b_port}/secret"
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", b_url)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        a_srv = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        a_port = a_srv.server_address[1]
+        threading.Thread(target=a_srv.serve_forever, daemon=True).start()
+        a_url = f"http://127.0.0.1:{a_port}/company-blog"
+
+        try:
+            result = self._fetch_url_tool()(a_url)
+        finally:
+            a_srv.shutdown()
+            a_srv.server_close()
+            b_srv.shutdown()
+            b_srv.server_close()
+
+        self.assertNotIn(
+            secret, result,
+            "a redirect carried the fetch to a URL the user never approved")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
