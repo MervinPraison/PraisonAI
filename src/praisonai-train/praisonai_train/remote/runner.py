@@ -327,12 +327,21 @@ class RemoteRunner:
             f"llm{dataset_arg} --config config.yaml"
         )
         # Record status so `status` can tell how it ended; write the pid so
-        # `stop` can signal the whole process group.
-        body = (
-            f"{exports}{cd} && "
+        # `stop` can signal the whole process group. `setsid`, where present,
+        # makes the recorded process a group leader (pgid == pid) in its own
+        # session, so its children -- dataloader workers, torchrun ranks -- are
+        # in one group `stop` can take down together. `setsid` is not on macOS,
+        # so fall back to plain `nohup`; `stop` resolves the real pgid on the
+        # host at kill time, so the group is signalled either way.
+        inner = (
             f"nohup sh -c '{train} > train.log 2>&1; "
             f"echo $? > status' >/dev/null 2>&1 & "
             f"echo $! > {shlex.quote(run.pid_path)}"
+        )
+        body = (
+            f"{exports}{cd} && "
+            f"if command -v setsid >/dev/null 2>&1; then setsid sh -c {shlex.quote(inner)}; "
+            f"else {inner}; fi"
         )
         return body
 
@@ -410,26 +419,60 @@ class RemoteRunner:
 
     # -- stop ------------------------------------------------------------- #
     def stop(self, run: RemoteRun) -> bool:
-        """Stop a run. Return True only if something was actually killed.
+        """Stop a run. Return True only if the run is actually gone.
 
-        Reporting success for a no-op would let a script believe it killed a
-        run that is still burning GPU hours, so a run that has already finished
-        (or was never there) returns False.
+        The recorded pid is the wrapper shell, not the trainer: its children
+        (dataloader workers, torchrun ranks) share its process group and each
+        hold the GPU. Signalling the pid alone leaves them running, reparented
+        to init. So we resolve the group on the host and signal ``-$pgid``,
+        then *re-probe the whole group* -- a wrapper can exit while a child
+        survives SIGTERM, so checking only the recorded pid would report
+        success while paid GPU work continues; reporting success for a ``kill``
+        that was merely issued would likewise let a UI label a live run
+        "cancelled".
+
+        Refuses to signal our own group (a defensive guard against a corrupt
+        pid file resolving to the ssh session's group), and raises if any
+        process in the group survives the signal rather than lying about it.
         """
         result = self.host.run(
-            f"if [ -f {shlex.quote(run.pid_path)} ]; then "
+            f"if [ ! -f {shlex.quote(run.pid_path)} ]; then echo not-running; "
+            f"else "
             f"  pid=$(cat {shlex.quote(run.pid_path)}); "
-            f"  if kill -0 $pid 2>/dev/null; then "
-            f"    kill -TERM $pid 2>/dev/null; echo stopped; "
-            f"  else echo not-running; fi; "
-            f"else echo not-running; fi"
+            f"  if ! kill -0 $pid 2>/dev/null; then echo not-running; "
+            f"  else "
+            f"    g=$(ps -o pgid= -p $pid 2>/dev/null | tr -d ' '); "
+            f"    if [ -z \"$g\" ]; then echo not-running; "
+            f"    elif [ \"$g\" = \"$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')\" ]; then "
+            f"      echo refused; "
+            f"    else "
+            f"      kill -TERM -\"$g\" 2>/dev/null; "
+            f"      sleep 2; "
+            f"      alive=$(ps -o pgid= -o pid= -A 2>/dev/null "
+            f"        | awk -v g=\"$g\" '$1==g{{print $2}}'); "
+            f"      if [ -n \"$alive\" ]; then echo still-running; "
+            f"      else echo stopped; fi; "
+            f"    fi; "
+            f"  fi; "
+            f"fi"
         )
         if not result.ok:
             raise RemoteError(
                 f"{run.host}: could not stop {run.run_id}: "
                 f"{(result.stderr or '').strip()}"
             )
-        return result.stdout.strip() == "stopped"
+        verdict = result.stdout.strip()
+        if verdict == "refused":
+            raise RemoteError(
+                f"{run.host}: refused to stop {run.run_id}: its pid resolves "
+                f"to this session's own process group"
+            )
+        if verdict == "still-running":
+            raise RemoteError(
+                f"{run.host}: {run.run_id} did not stop: the process is still "
+                f"running after SIGTERM"
+            )
+        return verdict == "stopped"
 
     # -- helpers ---------------------------------------------------------- #
     def _ship(self, local: Path, remote_abs: str) -> None:
