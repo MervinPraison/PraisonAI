@@ -28,7 +28,7 @@ import os
 import sqlite3
 import threading
 import time
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Any, List, Optional, Protocol, runtime_checkable
 
 from .._logging import get_logger
 from .event import Event, EventType
@@ -81,25 +81,47 @@ def _session_id_of(event: Event) -> str:
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
-    session_id TEXT NOT NULL,
-    seq        INTEGER NOT NULL,
-    ts         REAL NOT NULL,
-    type       TEXT NOT NULL,
-    event_id   TEXT,
-    source     TEXT,
-    data_json  TEXT,
+    session_id    TEXT NOT NULL,
+    seq           INTEGER NOT NULL,
+    ts            REAL NOT NULL,
+    type          TEXT NOT NULL,
+    event_id      TEXT,
+    source        TEXT,
+    data_json     TEXT,
+    metadata_json TEXT,
     PRIMARY KEY (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+CREATE TABLE IF NOT EXISTS event_seq (
+    session_id TEXT PRIMARY KEY,
+    last_seq   INTEGER NOT NULL
+);
 """
+
+_MIGRATIONS = (
+    "ALTER TABLE events ADD COLUMN metadata_json TEXT",
+)
+
+# Seed the per-session high-water-mark from any pre-existing event rows so a
+# database created before ``event_seq`` existed continues numbering above its
+# current MAX(seq) instead of colliding on the primary key.
+_SEED_HWM = (
+    "INSERT INTO event_seq (session_id, last_seq) "
+    "SELECT session_id, MAX(seq) FROM events "
+    "WHERE session_id NOT IN (SELECT session_id FROM event_seq) "
+    "GROUP BY session_id"
+)
 
 
 class SqliteEventLog(EventLogProtocol):
     """Durable, restart-safe lifecycle event log backed by SQLite.
 
     A durable sibling of :class:`~praisonaiagents.runs.sqlite_ledger.SQLiteRunLedger`.
-    One row per event ``(session_id, seq, ts, type, event_id, source, data_json)``,
-    append-only, WAL, bounded. Attach it to a bus with ``bus.attach_sink(log)``.
+    One row per event ``(session_id, seq, ts, type, event_id, source, data_json,
+    metadata_json)``, append-only, WAL, bounded. Per-session ``seq`` is allocated
+    from a persistent ``event_seq`` high-water-mark table so cursors stay
+    monotonic across restarts and full prunes. Attach it to a bus with
+    ``bus.attach_sink(log)``.
 
     Args:
         db_path: Path to the SQLite file. Defaults to
@@ -133,14 +155,32 @@ class SqliteEventLog(EventLogProtocol):
                 except sqlite3.OperationalError:  # pragma: no cover - defensive
                     pass
             self._conn.executescript(_SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Best-effort additive migrations for pre-existing databases."""
+        for stmt in _MIGRATIONS:
+            try:
+                self._conn.execute(stmt)
+            except sqlite3.OperationalError:
+                # Column already exists (fresh schema) — nothing to do.
+                pass
+        try:
+            self._conn.execute(_SEED_HWM)
+        except sqlite3.OperationalError:  # pragma: no cover - defensive
+            pass
 
     # ── public API (EventLogProtocol) ─────────────────────────────────
 
     def append(self, event: Event) -> None:
         """Durably record ``event``. Best-effort: never raises into caller.
 
-        A monotonic per-session ``seq`` is assigned atomically under the lock so
-        concurrent publishers on the same session never collide.
+        A monotonic per-session ``seq`` is assigned from a persistent
+        high-water-mark table (``event_seq``) inside a serialising
+        ``BEGIN IMMEDIATE`` transaction. This makes allocation atomic even when
+        two :class:`SqliteEventLog` instances share one database file, and keeps
+        the cursor monotonic across restarts *and* after a full prune (deleting
+        every row for a session never rewinds its counter).
         """
         try:
             session_id = _session_id_of(event)
@@ -148,29 +188,55 @@ class SqliteEventLog(EventLogProtocol):
                 data_json = json.dumps(event.data)
             except (TypeError, ValueError):
                 data_json = json.dumps(event.data, default=str)
+            metadata_json = self._dumps_or_none(event.metadata)
             with self._lock:
-                row = self._conn.execute(
-                    "SELECT COALESCE(MAX(seq), 0) AS m FROM events "
-                    "WHERE session_id = ?",
-                    (session_id,),
-                ).fetchone()
-                next_seq = int(row["m"]) + 1
-                self._conn.execute(
-                    "INSERT INTO events "
-                    "(session_id, seq, ts, type, event_id, source, data_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        session_id,
-                        next_seq,
-                        float(event.timestamp),
-                        event.type,
-                        event.id,
-                        event.source,
-                        data_json,
-                    ),
-                )
+                try:
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    row = self._conn.execute(
+                        "SELECT last_seq FROM event_seq WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchone()
+                    next_seq = (int(row["last_seq"]) if row else 0) + 1
+                    self._conn.execute(
+                        "INSERT INTO event_seq (session_id, last_seq) VALUES (?, ?) "
+                        "ON CONFLICT(session_id) DO UPDATE SET last_seq = excluded.last_seq",
+                        (session_id, next_seq),
+                    )
+                    self._conn.execute(
+                        "INSERT INTO events "
+                        "(session_id, seq, ts, type, event_id, source, "
+                        "data_json, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            session_id,
+                            next_seq,
+                            float(event.timestamp),
+                            event.type,
+                            event.id,
+                            event.source,
+                            data_json,
+                            metadata_json,
+                        ),
+                    )
+                    self._conn.execute("COMMIT")
+                except Exception:
+                    try:
+                        self._conn.execute("ROLLBACK")
+                    except Exception:  # pragma: no cover - defensive
+                        pass
+                    raise
         except Exception as exc:  # best-effort: never break the originating turn
             logger.debug("SqliteEventLog.append skipped: %s", exc)
+
+    @staticmethod
+    def _dumps_or_none(value: Any) -> Optional[str]:
+        """Serialise ``value`` to JSON, coercing non-native types; ``None`` if empty."""
+        if not value:
+            return None
+        try:
+            return json.dumps(value)
+        except (TypeError, ValueError):
+            return json.dumps(value, default=str)
 
     def query(
         self, session_id: str, after_seq: int = 0, limit: int = 500
@@ -236,11 +302,25 @@ class SqliteEventLog(EventLogProtocol):
             data = json.loads(row["data_json"]) if row["data_json"] else {}
         except (ValueError, TypeError):
             data = {}
+        # Restore caller-provided metadata, then overlay the durable cursor
+        # fields (seq, session_id) so correlation/diagnostic keys survive the
+        # round trip.
+        metadata: dict = {}
+        raw_meta = row["metadata_json"] if "metadata_json" in row.keys() else None
+        if raw_meta:
+            try:
+                loaded = json.loads(raw_meta)
+                if isinstance(loaded, dict):
+                    metadata.update(loaded)
+            except (ValueError, TypeError):
+                pass
+        metadata["seq"] = row["seq"]
+        metadata["session_id"] = row["session_id"]
         return Event(
             id=row["event_id"] or "",
             type=row["type"] or EventType.CUSTOM.value,
             data=data,
             timestamp=row["ts"],
             source=row["source"],
-            metadata={"seq": row["seq"], "session_id": row["session_id"]},
+            metadata=metadata,
         )

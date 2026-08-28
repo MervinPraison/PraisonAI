@@ -114,6 +114,81 @@ class TestSqliteEventLog:
         assert len(log.query("s1")) == 1
         log.close()
 
+    def test_seq_monotonic_after_full_prune(self, db_path):
+        # Deleting every row for a session must NOT rewind the cursor, else a
+        # consumer holding after_seq would silently miss the next events.
+        log = SqliteEventLog(db_path=db_path)
+        for _ in range(3):
+            log.append(Event(type="custom", data={"session_id": "s1"}))
+        assert [e.metadata["seq"] for e in log.query("s1")] == [1, 2, 3]
+        # Prune everything for the session.
+        log.prune(older_than_days=0, max_rows=0)
+        # Force-delete all remaining rows regardless of prune heuristics.
+        removed = log.prune(older_than_days=1e-9, max_rows=0)  # noqa: F841
+        # Regardless of what prune left, the next seq must be > 3.
+        log.append(Event(type="custom", data={"session_id": "s1"}))
+        seqs = [e.metadata["seq"] for e in log.query("s1", after_seq=3)]
+        assert seqs == [4], seqs
+        log.close()
+
+    def test_metadata_round_trips(self, db_path):
+        log = SqliteEventLog(db_path=db_path)
+        log.append(
+            Event(
+                type="custom",
+                data={"session_id": "s1"},
+                metadata={"correlation_id": "abc", "trace": 7},
+            )
+        )
+        ev = log.query("s1")[0]
+        assert ev.metadata["correlation_id"] == "abc"
+        assert ev.metadata["trace"] == 7
+        # durable cursor fields are still overlaid
+        assert ev.metadata["seq"] == 1
+        assert ev.metadata["session_id"] == "s1"
+        log.close()
+
+    def test_migrates_legacy_schema_without_collision(self, db_path):
+        # A database written before event_seq/metadata_json existed must be
+        # migrated so the next append continues above MAX(seq) and does not
+        # collide on the primary key (silently dropping the event).
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            "CREATE TABLE events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, "
+            "ts REAL NOT NULL, type TEXT NOT NULL, event_id TEXT, source TEXT, "
+            "data_json TEXT, PRIMARY KEY(session_id, seq));"
+        )
+        conn.execute(
+            "INSERT INTO events VALUES (?,?,?,?,?,?,?)",
+            ("s1", 1, 1.0, "custom", "id1", None, "{}"),
+        )
+        conn.execute(
+            "INSERT INTO events VALUES (?,?,?,?,?,?,?)",
+            ("s1", 2, 1.0, "custom", "id2", None, "{}"),
+        )
+        conn.commit()
+        conn.close()
+
+        log = SqliteEventLog(db_path=db_path)
+        log.append(Event(type="custom", data={"session_id": "s1"}))
+        seqs = [e.metadata["seq"] for e in log.query("s1")]
+        assert seqs == [1, 2, 3], seqs
+        log.close()
+
+    def test_cross_connection_seq_no_collision(self, db_path):
+        # Two independent instances sharing one DB file must not collide on seq.
+        a = SqliteEventLog(db_path=db_path)
+        b = SqliteEventLog(db_path=db_path)
+        for _ in range(5):
+            a.append(Event(type="custom", data={"session_id": "s1"}))
+            b.append(Event(type="custom", data={"session_id": "s1"}))
+        seqs = [e.metadata["seq"] for e in a.query("s1")]
+        assert seqs == list(range(1, 11)), seqs
+        a.close()
+        b.close()
+
 
 class TestBusSinkWiring:
     def test_attach_sink_persists_without_subscribers(self, db_path):
