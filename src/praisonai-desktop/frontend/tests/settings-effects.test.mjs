@@ -58,6 +58,11 @@ async function boot(cfg = {}, { confirmAnswer = true, sse = [], prefersReducedMo
     if (failSettingsWrite && (opts.method || 'GET') === 'POST' && u.includes('/settings')) {
       return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
     }
+    // The real engine persists the write and echoes the stored settings back;
+    // reconciliation reads that echo, so the stub must reflect what it was sent.
+    if ((opts.method || 'GET') === 'POST' && u.includes('/settings') && opts.body) {
+      try { Object.assign(settings, JSON.parse(opts.body)); } catch {}
+    }
     const body =
       u.includes('/settings') ? settings
       : u.includes('/chats/') ? { id: 'c1', title: 'Hi', messages: [] }
