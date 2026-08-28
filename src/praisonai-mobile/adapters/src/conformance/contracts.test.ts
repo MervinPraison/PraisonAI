@@ -1023,11 +1023,16 @@ for (const { mode, expects } of ADAPTER_BREAKS) {
   test(`the contracts can fail: "${mode}" reddens its own named case`, () => {
     const { status, output } = runAdapterFixture(mode);
     assert.notEqual(status, 0, `the fixture passed while broken as "${mode}"`);
-    const reddened = output
-      .split("\n")
-      .filter((line) => line.startsWith("not ok "))
-      .join("\n");
-    assert.match(reddened, expects, `"${mode}" did not fail the case it is supposed to`);
+
+    // The `not ok ` prefix is part of the PATTERN, not just of a filter applied
+    // before it. Filtering and then matching separately meant that neutering
+    // the filter let a PASSING line -- "ok 12 - a javascript: URL is refused"
+    // -- satisfy the assertion, so the meta-test went green precisely when the
+    // contract stopped catching anything. Requiring the prefix in the match
+    // itself means the line has to actually be a failure.
+    const failed = new RegExp(`^not ok .*${expects.source}`);
+    const matched = output.split("\n").some((line) => failed.test(line));
+    assert.ok(matched, `"${mode}" did not fail the case it is supposed to:\n${output}`);
   });
 }
 
@@ -1046,14 +1051,19 @@ test("a contract cannot quietly shrink", () => {
   const { status, output } = runAdapterFixture("none");
   assert.equal(status, 0, `the unbroken fixture failed:\n${output}`);
 
-  const passed = output.split("\n").filter((line) => line.startsWith("ok "));
+  // `# SKIP` and `# TODO` are reported as `ok` in TAP, so counting them lets a
+  // case be disabled rather than deleted and the floor never notices. Measured:
+  // changing `test(` to `test.skip(` on a security case kept the run green.
+  const passed = output
+    .split("\n")
+    .filter((line) => line.startsWith("ok ") && !/#\s*(SKIP|TODO)/i.test(line));
   const casesFor = (prefix: string): number =>
     passed.filter((line) => line.includes(`fixture ${prefix}:`)).length;
 
   assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
   assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
-  assert.ok(casesFor("shell") >= 33, `the shell contract shrank to ${casesFor("shell")} cases`);
+  assert.ok(casesFor("shell") >= 34, `the shell contract shrank to ${casesFor("shell")} cases`);
 
   // The break table needs a floor of its own. Deleting a row from
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
