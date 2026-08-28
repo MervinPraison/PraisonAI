@@ -101,9 +101,12 @@ class RemoteHost:
             # `cd ... && pwd` expands ~ using the host's own shell. `-m 700`
             # because the run directory holds the shipped config and any
             # dataset; a shared box's umask should not decide who can read them.
+            # `--` ends option parsing so a workdir like `-p` is treated as a
+            # path, not a flag; `~` is expanded by the shell before either
+            # command sees it, so the guard never breaks tilde expansion.
             expanded = self.run(
-                f"mkdir -p -m 700 {self.workdir} && "
-                f"cd {self.workdir} && pwd"
+                f"mkdir -p -m 700 -- {self.workdir} && "
+                f"cd -- {self.workdir} && pwd"
             )
             if not expanded.ok:
                 raise RemoteError(
