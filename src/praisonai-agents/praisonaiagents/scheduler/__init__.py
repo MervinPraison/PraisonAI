@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         GateResult,
         SchedulerProviderProtocol,
     )
+    from .incidents import Incident, IncidentTracker, error_signature, normalise_error
 
 _module_cache = {}
 
@@ -142,6 +143,14 @@ def __getattr__(name: str):
         _module_cache["SchedulerProviderProtocol"] = SchedulerProviderProtocol
         return _module_cache[name]
 
+    if name in ("Incident", "IncidentTracker", "error_signature", "normalise_error"):
+        from .incidents import Incident, IncidentTracker, error_signature, normalise_error
+        _module_cache["Incident"] = Incident
+        _module_cache["IncidentTracker"] = IncidentTracker
+        _module_cache["error_signature"] = error_signature
+        _module_cache["normalise_error"] = normalise_error
+        return _module_cache[name]
+
     if name in ("Blueprint", "BlueprintSlot", "BlueprintStoreProtocol"):
         from .blueprint_defs import Blueprint, BlueprintSlot, BlueprintStoreProtocol
         _module_cache["Blueprint"] = Blueprint
@@ -175,6 +184,10 @@ __all__ = [
     "JobStateStoreProtocol",
     "GateResult",
     "SchedulerProviderProtocol",
+    "Incident",
+    "IncidentTracker",
+    "error_signature",
+    "normalise_error",
     "Blueprint",
     "BlueprintSlot",
     "BlueprintStoreProtocol",
