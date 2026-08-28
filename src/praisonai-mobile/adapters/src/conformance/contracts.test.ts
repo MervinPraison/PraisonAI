@@ -16,16 +16,18 @@ import assert from "node:assert/strict";
 
 import { describeStorageContract } from "./storage-contract.ts";
 import { describeSecretsContract } from "./secrets-contract.ts";
+import { describeTimeContract } from "./time-contract.ts";
 import { describeShellContract, type ShellHarness } from "./shell-contract.ts";
 import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 import { createFakeShell, PHONE_INSETS } from "../../../testing/src/fake-shell.ts";
 import { createWebStorage } from "../web/storage.ts";
 import { createWebSecrets } from "../web/secrets.ts";
+import { createWebTime } from "../web/time.ts";
 import { createFakeSecrets } from "../../../testing/src/fake-secrets.ts";
+import { createFakeTime } from "../../../testing/src/fake-time.ts";
 import { createWebShell } from "../web/shell.ts";
 import { INSET_VARIABLES } from "../../../core/src/ports/shell.ts";
 import { createFakeWindow } from "../web/fake-window.ts";
-import { createWebTime } from "../web/time.ts";
 import { createTauriBridge, type TauriBridge } from "../tauri/bridge.ts";
 import {
   createTauriShell,
@@ -62,6 +64,36 @@ describeStorageContract("web storage", () => createWebStorage(memoryStorage()));
 // suite -- two accounts in one slot then share one credential.
 describeSecretsContract("fake secrets", () => createFakeSecrets());
 describeSecretsContract("web secrets", () => createWebSecrets());
+
+// The TimePort had no test file and no contract, and scored 3 of 3 surviving
+// in a mutation sweep -- the worst module in the package. Both implementations
+// run the same cases: the fake driven by its own clock, the web adapter on
+// real timers.
+describeTimeContract("fake time", () => createFakeTime(), async (time, ms) => {
+  const fake = time as ReturnType<typeof createFakeTime>;
+  fake.advance(ms);
+  fake.tick();
+  fake.releaseFrames();
+  // A fake timer fires when the test says so; a real one fires on its own.
+  for (const scheduler of fake.schedulers) {
+    if (scheduler.timerArmed) scheduler.fireTimer();
+  }
+  await Promise.resolve();
+});
+
+// The web adapter targets a browser, so the test supplies the one browser API
+// it needs. Without this `requestFrame` throws ReferenceError in Node and the
+// adapter cannot be contract-tested at all -- which is part of why it never
+// was.
+(globalThis as Record<string, unknown>)["requestAnimationFrame"] ??= (cb: () => void) =>
+  setTimeout(cb, 0);
+
+describeTimeContract(
+  "web time",
+  () => createWebTime(),
+  async (_time, ms) => { await new Promise((r) => setTimeout(r, ms + 10)); },
+  true,
+);
 
 // ---- the contract can fail ------------------------------------------------
 
