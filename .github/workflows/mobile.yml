@@ -95,3 +95,54 @@ jobs:
         # passing quietly -- a check that silently stops covering anything is
         # worse than no check.
         run: npm run check:upstream
+
+  shell:
+    name: rust shell (${{ matrix.os }})
+    # The Rust crate had 14 tests and no job running them -- the same failure
+    # this workflow's header says it was created to prevent, one language over.
+    #
+    # Both platforms, because the crate is cfg-heavy: the back-gesture fallback
+    # is #[cfg(target_os = "android")] / ios / not(mobile), and a cfg mistake
+    # compiles perfectly on whichever host you happened to try.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+    defaults:
+      run:
+        working-directory: src/praisonai-mobile/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/praisonai-mobile/src-tauri
+      - name: Install the Linux build dependencies
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+      # generate_context! expands frontendDist (../dist) at COMPILE time, and
+      # dist/ is gitignored -- absent on a fresh checkout. Without this the
+      # crate cannot compile and neither test nor clippy below ever runs.
+      - name: Build the webview (creates ../dist for generate_context!)
+        working-directory: src/praisonai-mobile
+        run: |
+          npm ci
+          npm run build
+      # The pure-logic tests: back-gesture arbitration, the lifecycle mapping,
+      # and the event-name contract. None of them needs a phone.
+      - name: Test
+        run: cargo test
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings

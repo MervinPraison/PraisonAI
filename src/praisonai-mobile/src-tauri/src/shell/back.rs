@@ -99,3 +99,9 @@ impl Gate {
 /// leave. Too long leaves a dead back button. Measure the real round trip on a
 /// cold device and set this to several times it.
 pub const ANSWER_TIMEOUT_MS: u64 = 400;
+
+/// Lowering this is a mistake with a specific consequence, so it fails the
+/// BUILD rather than a test: too short a timeout falls back while a slow
+/// handler is still deciding, which sends the app to the background for a back
+/// press the user's own UI was about to handle.
+const _: () = assert!(ANSWER_TIMEOUT_MS >= 250);

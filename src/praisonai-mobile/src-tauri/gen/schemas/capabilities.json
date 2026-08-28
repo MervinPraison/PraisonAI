@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"The main webview subscribes to the four shell events through Tauri's event registry, which is what plugin:event|listen needs. The back_gesture_result command is NOT listed: an app command registered via invoke_handler is always reachable and has no ACL entry to grant -- naming one that does not exist fails the build, which is how this file was broken.","local":true,"windows":["main"],"permissions":["core:event:default"]}}
