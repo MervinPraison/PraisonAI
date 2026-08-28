@@ -308,8 +308,17 @@ of them were one bad day away from mattering.
   rather than a second copy of the same four fields. The duplication forced the
   view model to join them by `approvalId` at render time, and **that join is
   where index-pairing gets reintroduced** — pairing an approval by position is
-  the defect the whole `approvalId` design exists to prevent. Removing the join
-  removes the opportunity.
+  the defect the whole `approvalId` design exists to prevent.
+
+  **Correction.** This entry used to end "Removing the join removes the
+  opportunity." The join was never removed — only the *type* duplication was.
+  `view-model.ts` still calls `findApproval(table, pending.approvalId)`, and
+  replacing that with `table.entries[0]` passed the entire suite, because every
+  test had exactly one approval in flight. With two outstanding, the second row
+  rendered the first's decision: an `rm -rf /` prompt shown as already-allowed,
+  against a decision nobody made. The join is correct and is now pinned by two
+  tests in both directions. The opportunity still exists; what changed is that
+  taking it now fails.
 
 - **Gap 7.** A dropped event said `wrong_msg_id` to a user, which tells them
   nothing. It now reads as a sentence *and* keeps the tag: translating the tag
@@ -321,5 +330,41 @@ of them were one bad day away from mattering.
 Each verified by reverting it: emptying the approvals again fails 2 tests,
 returning bare tags fails 3.
 
-**Every gap in this file is now closed.** What remains for praisonai-mobile is
-unbuilt work rather than defects: the Tauri Rust crate.
+**Every gap originally recorded in this file is closed.** That is a narrower
+claim than the one this line used to make, and the difference is the point: a
+later multi-agent validation pass found fourteen mutation survivors and three
+product defects that no test could reach, none of which were "gaps" in the
+sense this file was recording. A file that lists closed gaps is not evidence
+that nothing is wrong.
+
+Corrected since: this line used to say what remained was "the Tauri Rust
+crate". The crate exists — `src-tauri/src/{lib,commands,main}.rs`, the shell
+module and two test files — with a CI job that compiles it on Linux and macOS.
+It also used to omit **route→view dispatch**, which the body of this file lists
+as open and which is still open; dropping it from the closing line implied it
+had landed.
+
+What actually remains for praisonai-mobile, all of it unbuilt rather than
+broken:
+
+- **The platform half of the shell.** The Rust crate has the event names and
+  the pure decision functions; no iOS or Android code observes safe-area,
+  keyboard height or lifecycle yet, so none of the four events is ever emitted.
+- **Route→view dispatch.** `ui/src/screens.ts` and `app/src/mount.ts` are built
+  and tested, and `main.ts` imports neither. Tapping "Settings" pushes onto a
+  stack nothing reads.
+- **Every screen except the transcript.** Settings, chat list and about have
+  complete view models and no renderer.
+- **Tauri-native storage, secrets and HTTP.** Declared honestly at
+  `app/src/platform.ts`, including that WKWebView `localStorage` is evictable.
+- **The in-process praisonai-ts engine as a shipping option.** Its stated
+  blocker — bare `crypto` and `events` imports on the Agent graph — is fixed
+  upstream; the wiring here is not done.
+
+One known defect is deliberately still open: the remote-http engine discards
+decode rejections, so a malformed frame makes a tool vanish and the turn
+renders as a clean answer. The reducer's `Dropped` type, the view model's
+dropped row and seven user-facing strings are unreachable because of it.
+Fixing it needs a channel from the engine to the transcript that does not
+exist yet, and half-wiring one would be the same mechanism-connected-to-nothing
+this file keeps recording.
