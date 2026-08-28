@@ -206,3 +206,30 @@ test("persistenceFor propagates a failed write as null", () => {
     assert.equal(indices, null);
   });
 });
+
+test("every turn advances the chat's updated time", () => {
+  // `updated: at` -> `updated: base.updated` survived: the chat keeps the
+  // timestamp of its FIRST message forever. A list ordered by `updated` then
+  // sinks the conversation you are actively using to the bottom, while one you
+  // have not touched in a month sits at the top.
+  //
+  // Nothing saw it because no test read back what was written across TWO
+  // turns -- the same blind spot that let the persisted answer be duplicated.
+  const { session } = build();
+
+  return (async () => {
+    await session.record("first question", "first answer");
+    const afterOne = session.current();
+    assert.ok(afterOne !== null);
+
+    await session.record("second question", "second answer");
+    const afterTwo = session.current();
+    assert.ok(afterTwo !== null);
+
+    assert.ok(
+      afterTwo.updated > afterOne.updated,
+      `updated did not advance: ${afterOne.updated} -> ${afterTwo.updated}`,
+    );
+    assert.equal(afterTwo.messages.length, 4, "and both turns are still there");
+  })();
+});
