@@ -4721,6 +4721,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             from .tools_placement import ensure_tools_placed
             ensure_tools_placed(self)
 
+        # Input-side guardrail runs BEFORE begin_durable_run so a rejected prompt
+        # never opens (and therefore never finalizes) a durable run -- exact
+        # parity with chat()/achat(), which validate input before begin_durable_run
+        # and return early. Doing it here (not in _start_stream_impl) keeps a
+        # blocked stream from being recorded as a "succeeded" durable run.
+        if hasattr(self, '_validate_input_with_guardrail'):
+            _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            if not _in_ok:
+                logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
+                yield f"[Input blocked by guardrail: {_in_err}]"
+                return
+            prompt = _in_prompt
+
         durable_context = None
         durable_token = None
         try:
@@ -4762,6 +4775,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "applied to streamed responses (iter_stream / stream=True). "
                 "Use chat() for guardrail-validated output."
             )
+        # Input-side guardrail validation is performed by _start_stream (before
+        # begin_durable_run), so the prompt reaching this generator is already
+        # validated/transformed. Kept out of this impl so a blocked prompt never
+        # opens a durable run that would then finalize as "succeeded".
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
