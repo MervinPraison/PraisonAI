@@ -303,3 +303,44 @@ test("a dropped event changes no blocks", () => {
   const after = apply(s, { type: "delta", msgId: "wrong-msg", text: "no" } as RunEvent);
   assert.equal(after.blocks, before.blocks, "blocks must be the same array reference");
 });
+
+// ---- gap 2: an ended turn can still say what it asked for -------------------
+
+test("an unanswered approval survives the end of the turn, marked resolved", () => {
+  // It used to be deleted, so a finished transcript could never show "you were
+  // asked to allow `rm -rf /` and the turn ended first" -- which is precisely
+  // what a reader most wants to see afterwards.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "approval_request", msgId: M, approvalId: "ap1", callId: "c1", name: "rm", args: { path: "/" } },
+    { type: "cancelled", msgId: M, runId: "r1" },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.equal(s.approvals.length, 1, "the request must not be erased");
+  assert.equal(s.approvals[0]?.name, "rm");
+  assert.equal(s.approvals[0]?.resolved, true, "and it must not still read as live");
+});
+
+test("a live approval is NOT marked resolved", () => {
+  // The pair: marking everything resolved would satisfy the test above while
+  // making every real prompt unanswerable.
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "approval_request", msgId: M, approvalId: "ap1", callId: "c1", name: "rm", args: {} },
+  ] as RunEvent[]) s = apply(s, e);
+
+  assert.ok(!s.approvals[0]?.resolved, "an unfinished turn's approval is still live");
+});
+
+test("an approval survives an ERROR ending too, not just a cancellation", () => {
+  let s = initialTurn;
+  for (const e of [
+    { type: "start", msgId: M, runId: "r1" },
+    { type: "approval_request", msgId: M, approvalId: "ap1", callId: "c1", name: "curl", args: {} },
+    { type: "error", msgId: M, kind: "internal", message: "boom" },
+  ] as RunEvent[]) s = apply(s, e);
+  assert.equal(s.approvals.length, 1);
+  assert.equal(s.approvals[0]?.resolved, true);
+});

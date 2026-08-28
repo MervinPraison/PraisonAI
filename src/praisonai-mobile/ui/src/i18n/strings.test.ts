@@ -30,6 +30,7 @@ const SAMPLES: Readonly<Record<string, () => string>> = {
   durationHoursMinutes: () => en.durationHoursMinutes("1", "02"),
   draftingTool: () => en.draftingTool("bash"),
   droppedEvents: () => en.droppedEvents(2, ["wrong_msg_id"]),
+    droppedReason: () => en.droppedReason("wrong_msg_id"),
   toolStatus: () => en.toolStatus("unresolved"),
   toolRowName: () => en.toolRowName("failed", "search", "1.2s"),
   approvalQuestion: () => en.approvalQuestion("bash"),
@@ -161,4 +162,47 @@ test("an unmeasured duration is spoken as words, not as an em dash", () => {
   const unmeasured = en.toolRowName("ok", "search", null);
   assert.equal(unmeasured.includes(UNKNOWN), false);
   assert.ok(/unknown/i.test(unmeasured), unmeasured);
+});
+
+// ---- gap 7: a dropped event says what happened ------------------------------
+
+test("a dropped reason reads as a sentence, not a machine tag", () => {
+  // A user seeing `wrong_msg_id` learns nothing at all. This is the whole gap.
+  assert.match(en.droppedReason("wrong_msg_id"), /different message/);
+  assert.match(en.droppedReason("unparseable_json"), /not valid JSON/);
+});
+
+test("the machine tag is KEPT alongside the sentence", () => {
+  // Translating the tag away would make the one searchable string in the
+  // message unsearchable for whoever the user reports it to.
+  const text = en.droppedEvents(1, ["wrong_msg_id"]);
+  assert.match(text, /\[wrong_msg_id\]/, "the tag must survive");
+  assert.match(text, /different message/, "and so must the explanation");
+});
+
+test("an unknown reason passes through rather than becoming 'unknown'", () => {
+  // A newer engine can invent one, and the tag is still the thing worth
+  // reporting -- replacing it with a generic phrase destroys the only
+  // information in the message.
+  assert.equal(en.droppedReason("some_future_reason"), "some_future_reason");
+});
+
+test("no reasons means no trailing punctuation", () => {
+  // The pair for the formatting: a dangling ":" reads as a truncated message.
+  const text = en.droppedEvents(2, []);
+  assert.ok(!text.includes(":"), text);
+  assert.ok(!text.includes("["), text);
+});
+
+test("every reason the decoder can produce has a sentence", () => {
+  // The exhaustiveness that matters: a reason with no words falls back to its
+  // tag, which is safe but is the gap reappearing one enum member at a time.
+  const REASONS = [
+    "unparseable_json", "not_an_object", "missing_type", "unknown_event",
+    "missing_msg_id", "missing_required_field", "empty_text",
+    "before_start", "wrong_msg_id", "after_terminal",
+  ];
+  for (const reason of REASONS) {
+    assert.notEqual(en.droppedReason(reason), reason, `${reason} has no sentence`);
+  }
 });

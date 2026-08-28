@@ -128,13 +128,13 @@ paragraphs it ran between, and only the LAST text block streams (an earlier one
 was closed by the tool call after it, and a caret on it would claim two places
 are being written at once).
 
-### 2. `settle()` empties `approvals`, so an ended turn cannot show what was approved
+### ~~2. `settle()` empties `approvals`, so an ended turn cannot show what was approved~~ — CLOSED
 
 Right for actionability — a settled approval is not pressable — but wrong as an
 audit trail: after the turn ends the transcript can never say "you allowed
 `rm -rf /`". A `resolved: true` flag kept on the entry would give the UI both.
 
-### 3. `PendingApproval` and `ApprovalEntry` are the same four fields in two places
+### ~~3. `PendingApproval` and `ApprovalEntry` are the same four fields in two places~~ — CLOSED
 
 `transcript.ts` and `approvals.ts` each declare them, so the view model joins by
 `approvalId` at render time. Making `ApprovalEntry` literally
@@ -184,7 +184,7 @@ No `keys()`, no change notification, and `SettingDef[]` is not reachable from
 the facade — so a settings screen must hard-code the key list that already
 exists as data, and re-render blindly after every `set()`.
 
-### 7. `Dropped.reason` has no user-facing text
+### ~~7. `Dropped.reason` has no user-facing text~~ — CLOSED
 
 The diagnostic row renders raw reason strings. Honest, but not readable.
 
@@ -290,3 +290,36 @@ mistake: **a mechanism existing is not the same as a mechanism working.**
 
 Both are verified by a positive control: reverting either makes a named test
 fail.
+
+
+## Gaps 2, 3 and 7, closed
+
+The last three. None blocked shipping, which is exactly why they sat — and two
+of them were one bad day away from mattering.
+
+- **Gap 2.** `settle()` deleted the approvals, so a finished transcript could
+  never say *"you were asked to allow `rm -rf /` and the turn ended first"* —
+  the thing a reader most wants to see afterwards. They are kept now and marked
+  `resolved`, which means *not actionable* rather than *not recorded*. The pair
+  test matters here: marking everything resolved would satisfy the audit-trail
+  case while making every live prompt unanswerable.
+
+- **Gap 3.** `ApprovalEntry` is now literally `PendingApproval & { state }`
+  rather than a second copy of the same four fields. The duplication forced the
+  view model to join them by `approvalId` at render time, and **that join is
+  where index-pairing gets reintroduced** — pairing an approval by position is
+  the defect the whole `approvalId` design exists to prevent. Removing the join
+  removes the opportunity.
+
+- **Gap 7.** A dropped event said `wrong_msg_id` to a user, which tells them
+  nothing. It now reads as a sentence *and* keeps the tag: translating the tag
+  away would make the one searchable string in the message unsearchable for
+  whoever they report it to. An unknown tag passes through rather than becoming
+  "unknown reason", because a newer engine can invent one and the tag is still
+  the only information there.
+
+Each verified by reverting it: emptying the approvals again fails 2 tests,
+returning bare tags fails 3.
+
+**Every gap in this file is now closed.** What remains for praisonai-mobile is
+unbuilt work rather than defects: the Tauri Rust crate.
