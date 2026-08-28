@@ -18,16 +18,16 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 54 | 17262 |
+| ✅ Agent | 22 | 54 | 17350 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
-| ✅ Approval | 1 | 6 | 3025 |
+| ✅ Approval | 1 | 6 | 3071 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3747 |
 | ✅ Autonomy | 3 | 7 | 2790 |
-| ✅ Bots | 7 | 32 | 13616 |
+| ✅ Bots | 7 | 32 | 13622 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 37284 |
+| ✅ CLI | 5 | 122 | 37543 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
@@ -43,16 +43,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 83 | 30682 |
+| ✅ Gateway | 7 | 83 | 30706 |
 | ✅ Guardrails | 4 | 4 | 2228 |
 | ✅ Handoffs | 11 | 6 | 2626 |
 | ✅ Hooks | 2 | 9 | 4542 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 16 | 5009 |
+| ✅ Knowledge | 4 | 17 | 5226 |
 | ✅ LLM | 3 | 15 | 5390 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 62 | 14407 |
-| ✅ Memory | 6 | 18 | 7212 |
+| ✅ MCP | 1 | 62 | 14418 |
+| ✅ Memory | 6 | 18 | 7237 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -71,13 +71,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sandbox | 5 | 7 | 3556 |
 | ✅ Security | 1 | 3 | 3529 |
 | ✅ Sessions | 4 | 19 | 7644 |
-| ✅ Skills | 6 | 15 | 5650 |
+| ✅ Skills | 6 | 16 | 5903 |
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 144 | 43416 |
+| ✅ Tools | 12 | 144 | 43482 |
 | ✅ Tracing | 3 | 2 | 139 |
-| ✅ Vector Store | 1 | 12 | 1215 |
+| ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 9 | 2487 |
@@ -87,8 +87,8 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (42 docs, 6965 lines)
-- ℹ️ Documents (1 docs, 787 lines)
+- ℹ️ Database (42 docs, 6973 lines)
+- ℹ️ Documents (1 docs, 798 lines)
 
 ---
 
