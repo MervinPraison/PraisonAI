@@ -233,3 +233,26 @@ test("every turn advances the chat's updated time", () => {
     assert.equal(afterTwo.messages.length, 4, "and both turns are still there");
   })();
 });
+
+test("a title of exactly the maximum length is not truncated", () => {
+  // `points.length <= 60` -> `< 60` survived: a title of exactly 60 graphemes
+  // gets an ellipsis it does not need, and loses its last character to make
+  // room for it.
+  const { session } = build();
+  const exactly60 = "a".repeat(60);
+  return session.record(exactly60, "answer").then(() => {
+    const title = session.current()?.title ?? "";
+    assert.equal(title, exactly60, "a title at the limit must survive whole");
+    assert.equal(title.includes("…"), false);
+  });
+});
+
+test("a title one character over the maximum IS truncated", () => {
+  // The pair, so a function that never truncates cannot pass the test above.
+  const { session } = build();
+  return session.record("b".repeat(61), "answer").then(() => {
+    const title = session.current()?.title ?? "";
+    assert.ok(title.endsWith("…"), `expected an ellipsis, got ${JSON.stringify(title)}`);
+    assert.ok(title.length <= 60);
+  });
+});
