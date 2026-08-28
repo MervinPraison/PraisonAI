@@ -28,11 +28,47 @@ export interface SseFrame {
  */
 export function createSseReader(): (chunk: string) => readonly SseFrame[] {
   let buffer = "";
+  /** True when the previous chunk ended with `\r`, which was emitted as a
+   *  terminator on the assumption it stood alone.
+   *
+   *  Normalising each chunk in ISOLATION was wrong: a chunk ending in `\r`
+   *  became `\n`, and the next chunk's leading `\n` then completed a `\n\n`
+   *  that was never a frame boundary -- one frame became two malformed ones.
+   *  Measured end to end against the real engine over a CRLF stream: at the
+   *  repo's own 7-byte test chunk size half the answer vanished; at 1-3 bytes
+   *  the whole answer did and the turn reported "the engine produced no
+   *  output", blaming the model for a transport bug. CRLF is not exotic: the
+   *  spec permits it and any proxy may rewrite to it.
+   *
+   *  Holding the `\r` back instead would break the other legal ending -- a
+   *  lone-CR stream ends on `\r` with no chunk after it, so its last frame
+   *  would never complete. That was tried and it regressed CR-only streams
+   *  from working to silent. So the `\r` is emitted immediately and the
+   *  matching `\n`, if one follows, is swallowed here. */
+  let swallowLeadingLf = false;
 
   return (chunk: string): readonly SseFrame[] => {
     // Normalise line endings once, here, rather than in every field match. A
     // proxy is free to rewrite them and the spec permits either.
-    buffer += chunk.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    let text = chunk;
+    const swallowed = swallowLeadingLf && text.startsWith("\n");
+    if (swallowed) text = text.slice(1);
+    // A chunk that decodes to NOTHING must not touch the pending-CR state.
+    //
+    // Reading `"".endsWith("\r")` as false would drop the swallow flag, and a
+    // `\n` arriving in a LATER chunk would then survive as a false frame
+    // boundary -- splitting one CRLF frame into two malformed ones. The
+    // regression is only reachable with an empty chunk (or a bare `\n` chunk
+    // that the swallow consumed) landing between the `\r` and its `\n`, but a
+    // proxy chunking on the radio's whim produces exactly that.
+    //
+    // When there ARE characters, the trailing `\r` decides the flag as before.
+    // When there are none but we just swallowed the LF, the CRLF is complete,
+    // so the flag clears. When there are none and nothing was swallowed (a
+    // truly empty chunk), the flag is left as-is so the pending `\r` survives.
+    if (text.length > 0) swallowLeadingLf = text.endsWith("\r");
+    else if (swallowed) swallowLeadingLf = false;
+    buffer += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
     const frames: SseFrame[] = [];
 

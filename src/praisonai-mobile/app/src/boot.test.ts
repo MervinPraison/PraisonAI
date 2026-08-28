@@ -454,3 +454,15 @@ test("a clean run through the same wiring drops nothing", async () => {
   assert.deepEqual(views.at(-1)?.turn.dropped, []);
   await result.app.dispose();
 });
+
+test("an EMPTY persisted engineId falls back rather than failing the boot", () => {
+  // `typeof value === "string" && value !== ""` -> dropping the empty check
+  // survived. A settings UI can trivially persist "", which would then outrank
+  // the composition root's default and boot would die with `unknown_engine ''`
+  // -- a blank field bricking the app on next launch.
+  const facade = {
+    get: () => "",
+    isSet: () => true,
+  } as unknown as Parameters<typeof chosenStringOr>[0];
+  assert.equal(chosenStringOr(facade, "engineId", "remote-http"), "remote-http");
+});
