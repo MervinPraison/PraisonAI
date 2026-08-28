@@ -28,11 +28,32 @@ export interface SseFrame {
  */
 export function createSseReader(): (chunk: string) => readonly SseFrame[] {
   let buffer = "";
+  /** True when the previous chunk ended with `\r`, which was emitted as a
+   *  terminator on the assumption it stood alone.
+   *
+   *  Normalising each chunk in ISOLATION was wrong: a chunk ending in `\r`
+   *  became `\n`, and the next chunk's leading `\n` then completed a `\n\n`
+   *  that was never a frame boundary -- one frame became two malformed ones.
+   *  Measured end to end against the real engine over a CRLF stream: at the
+   *  repo's own 7-byte test chunk size half the answer vanished; at 1-3 bytes
+   *  the whole answer did and the turn reported "the engine produced no
+   *  output", blaming the model for a transport bug. CRLF is not exotic: the
+   *  spec permits it and any proxy may rewrite to it.
+   *
+   *  Holding the `\r` back instead would break the other legal ending -- a
+   *  lone-CR stream ends on `\r` with no chunk after it, so its last frame
+   *  would never complete. That was tried and it regressed CR-only streams
+   *  from working to silent. So the `\r` is emitted immediately and the
+   *  matching `\n`, if one follows, is swallowed here. */
+  let swallowLeadingLf = false;
 
   return (chunk: string): readonly SseFrame[] => {
     // Normalise line endings once, here, rather than in every field match. A
     // proxy is free to rewrite them and the spec permits either.
-    buffer += chunk.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    let text = chunk;
+    if (swallowLeadingLf && text.startsWith("\n")) text = text.slice(1);
+    swallowLeadingLf = text.endsWith("\r");
+    buffer += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
     const frames: SseFrame[] = [];
 

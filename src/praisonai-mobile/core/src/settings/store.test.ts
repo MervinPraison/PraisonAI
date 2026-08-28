@@ -317,3 +317,28 @@ test("plainOnly keeps a falsy value rather than dropping it", () => {
   assert.equal(plain.showReasoning, false);
   assert.equal(plain.temperature, 0);
 });
+
+test("a setting changed at RUNTIME is marked chosen, not just one loaded from disk", () => {
+  // `isSet` exists so a def's default cannot outrank a caller's explicit
+  // argument. Deleting `chosen.add(key)` from `set()` survived the whole
+  // suite: only the `load()` path was tested. So a setting the user changes in
+  // the app was never marked chosen, `chosenStringOr` ignored it, and the
+  // composition root's default won -- the precise defect `isSet` was added to
+  // prevent, reachable through the more common of the two paths.
+  const { store } = build();
+  assert.equal(store.isSet("model"), false, "a default is not a choice");
+  return store.set("model", "gpt-4o").then((ok) => {
+    assert.equal(ok, true);
+    assert.equal(store.isSet("model"), true, "an accepted write is a choice");
+  });
+});
+
+test("a REFUSED write does not mark the key as chosen", () => {
+  // The pair. Marking on refusal would let a rejected value outrank a caller's
+  // argument while not even being stored.
+  const { store } = build();
+  return store.set("temperature", "hot").then((ok) => {
+    assert.equal(ok, false);
+    assert.equal(store.isSet("temperature"), false);
+  });
+});

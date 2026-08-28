@@ -136,6 +136,23 @@ export function createRunController(deps: ControllerDeps): RunController {
     const abort = new AbortController();
     live = { runId, abort };
 
+    // The approval table is per TURN, not per app.
+    //
+    // It was initialised once with the controller and only ever appended to,
+    // so an engine that reuses an approvalId across runs -- and the id only
+    // has to be unique within a run for the protocol to hold -- had its new
+    // request shadowed by the previous turn's answered entry. Measured: turn
+    // 1's prompt for one command rendered `sent/allow` with dead buttons,
+    // against turn 0's command, because `addApproval` treats a duplicate id
+    // as "the engine repeating itself" -- which is correct inside a turn and
+    // wrong across two. The run then blocks until the engine times out while
+    // the UI reads as answered.
+    //
+    // That is precisely the wrong-command-authorised failure the whole
+    // approvalId design exists to prevent, arriving through the table's
+    // lifetime instead of through index pairing.
+    approvals = emptyApprovals;
+
     const coalescer = createCoalescer(maxBytes, maxDelayMs);
     const gate = createPublishGate(deps.time.createScheduler());
     let streamed = 0;
@@ -152,8 +169,24 @@ export function createRunController(deps: ControllerDeps): RunController {
     // deliberately for mobile, never bound either -- the coalescer upstream
     // was already withholding more than that.
     const stopTicking = deps.time.every(maxDelayMs, () => {
+      // Refusals drain on the tick as well as per decoded event. When EVERY
+      // frame is refused -- a proxy answering a stream with HTML, say --
+      // nothing is ever yielded, so the loop body never runs and the only
+      // remaining drain was the one in `finally`. Measured: 60 refused
+      // frames/s for a minute arrived as a single synchronous burst of 3,600
+      // appends, ~440ms of blocked main thread on a phone, at the exact moment
+      // the app is trying to paint the failure.
+      const drained = drainDrops(turn);
+      const hadDrops = drained !== turn;
+      turn = drained;
+
       const frame = coalescer.tick(deps.time.nowMs());
-      if (frame === null) return;
+      if (frame === null) {
+        // Nothing to paint from the coalescer, but refusals still need to
+        // reach the screen -- and to stop piling up in the sink.
+        if (hadDrops) publish();
+        return;
+      }
       applyFrame(frame);
       // Deliberately NOT gated. The gate skips intermediate paints when the
       // renderer cannot keep up; this frame exists precisely because nothing
@@ -247,6 +280,10 @@ export function createRunController(deps: ControllerDeps): RunController {
   return {
     setChat(next: string) {
       chatId = next;
+      // A different conversation cannot inherit the last one's prompts. The
+      // next turn would clear these anyway; this covers the window between
+      // switching chats and sending, where the UI renders whatever is here.
+      approvals = emptyApprovals;
     },
     chatId: () => chatId,
 
@@ -257,13 +294,41 @@ export function createRunController(deps: ControllerDeps): RunController {
     },
 
     async stop() {
-      if (live === null) return false;
-      const runId = live.runId;
+      // The RUN is captured, not just its id. `live.abort.abort()` used to
+      // re-read the closure variable AFTER awaiting the engine -- and
+      // `engine.cancel` is a real network call for remote-http, so the turn
+      // can settle inside that window. Two reachable outcomes when the user
+      // taps Stop just as the last token lands:
+      //
+      //   queue empty     -- `live` is null, and `live.abort` threw a
+      //                      TypeError. Both callers reach it through a
+      //                      floating `void`, so the crash handler turned the
+      //                      whole app into the crash screen. Tapping Stop at
+      //                      the wrong instant blanked the page.
+      //   queue non-empty -- `live` is the QUEUED FOLLOW-UP, already running.
+      //                      The engine was asked to cancel the finished run
+      //                      and the abort killed the new one, which then
+      //                      rendered "the engine produced no output" with a
+      //                      Retry button -- while stop() returned true and
+      //                      the UI announced success. Cancelling "whatever is
+      //                      live" rather than by id is the exact thing runId
+      //                      exists to prevent.
+      const run = live;
+      if (run === null) return false;
+
+      // Idempotent. Without this a second tap re-issues cancel for a run the
+      // engine has already cancelled, every honest engine answers false, and
+      // stopNotice announces "the engine did not accept the stop" for a stop
+      // that did happen -- inverting the defect that notice was added for.
+      // The background -> dispose path calls stop() twice by design.
+      if (run.abort.signal.aborted) return true;
+
       // Engine first, then the reader. The desktop found the ordering matters:
       // aborting the reader first can leave the engine generating into a socket
       // nobody is draining.
-      const stopped = await deps.engine.cancel(runId);
-      live.abort.abort();
+      const stopped = await deps.engine.cancel(run.runId);
+      // `run`, never `live`: by now `live` may be null or a different turn.
+      run.abort.abort();
       return stopped;
     },
 

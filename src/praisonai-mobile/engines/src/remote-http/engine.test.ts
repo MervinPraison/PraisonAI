@@ -273,3 +273,26 @@ test("each kind of unreadable frame reports its own reason and keeps the payload
     );
   }
 });
+
+test("both 401 and 403 are auth failures, so the UI offers credentials", async () => {
+  // `status === 401 || status === 403` -> dropping the 403 survived. A 403 is
+  // what an engine behind a proxy or with a scoped key actually returns, and
+  // classifying it `transport` makes the UI offer Retry forever instead of
+  // sending the user to settings. The kind is the whole reason the error
+  // carries one.
+  for (const [status, kind] of [[401, "auth"], [403, "auth"], [500, "transport"], [502, "transport"]] as const) {
+    const http = createFakeHttp();
+    http.on("/chat", () => ({ status, headers: {}, body: null }));
+    const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+    const events = [];
+    for await (const event of engine.run(
+      { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+    const error = events.find((e) => e.type === "error");
+    assert.equal(error?.kind, kind, `HTTP ${status} should be ${kind}`);
+  }
+});
