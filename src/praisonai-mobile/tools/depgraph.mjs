@@ -275,3 +275,36 @@ export function ungovernedRootsIn(root, config) {
   }
   return out;
 }
+
+/**
+ * Every source file under `roots`, relative to `base`.
+ *
+ * Extracted from check-boundaries.mjs so a test can call it. Dropping the
+ * `.mjs` half of the extension test survived the whole suite: the checker
+ * silently stops walking every .mjs in the package and still prints "no
+ * violations". That is verbatim what boundaries.json's own comment warns
+ * about -- "a rule that stops covering new code while still reporting a clean
+ * pass is worse than no rule" -- and tools/ is entirely .mjs.
+ *
+ * `.ts` AND `.mjs`, and nothing else: a .md or a .json under a governed root
+ * is not code and must not be parsed as any.
+ */
+export function sourceFilesUnder(base, roots) {
+  const out = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return; // a governed root that does not exist yet is not an error
+    }
+    for (const entry of entries) {
+      if (entry === "node_modules" || entry === "dist" || entry.startsWith(".")) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (entry.endsWith(".ts") || entry.endsWith(".mjs")) out.push(full);
+    }
+  };
+  for (const rootName of roots) walk(join(base, rootName));
+  return out;
+}

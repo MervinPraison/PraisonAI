@@ -11,7 +11,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
 
-import { importsOf, ungovernedRootsIn, violations } from "./depgraph.mjs";
+import { importsOf, sourceFilesUnder, ungovernedRootsIn, violations } from "./depgraph.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -19,42 +19,7 @@ const config = JSON.parse(readFileSync(join(here, "boundaries.json"), "utf8"));
 
 const norm = (p) => p.split(sep).join("/");
 
-/** Every .ts file under the governed roots. Fixtures are deliberately excluded:
- *  they violate the rule on purpose and are exercised by depgraph.test.mjs. */
-function sourceFiles() {
-  const out = [];
-  const walk = (dir) => {
-    let entries;
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return; // a governed root that does not exist yet is not an error
-    }
-    for (const entry of entries) {
-      if (entry === "node_modules" || entry === "dist" || entry.startsWith(".")) continue;
-      const full = join(dir, entry);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (entry.endsWith(".ts") || entry.endsWith(".mjs")) out.push(full);
-    }
-  };
-  for (const rootName of config.governedRoots) walk(join(root, rootName));
-  return out;
-}
-
-const ungoverned = ungovernedRootsIn(root, config);
-if (ungoverned.length > 0) {
-  for (const { name, count } of ungoverned) {
-    console.error(
-      `boundaries: [ungoverned-root] ${name}/ holds ${count} source file(s) that no layer rule covers.\n` +
-        `    Add "${name}" to governedRoots in tools/boundaries.json (with a matching entry in\n` +
-        `    "layers"), or to ungovernedRoots if it is deliberately exempt.`,
-    );
-  }
-  console.error(`\nboundaries: ${ungoverned.length} ungoverned top-level director(y|ies)`);
-  process.exit(1);
-}
-
-const files = sourceFiles();
+const files = sourceFilesUnder(root, config.governedRoots);
 
 if (files.length === 0) {
   // Not a pass. A checker that reports success over an empty set is the exact
