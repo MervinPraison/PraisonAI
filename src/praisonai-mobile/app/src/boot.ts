@@ -155,6 +155,17 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   const controller = createRunController({
     engine,
     time: deps.time,
+    // The conversation the user starts ON LAUNCH needs an id too. `chatId`
+    // defaults to the literal "unassigned", and `setChat` was only ever called
+    // by the New chat handler -- so the first conversation of every launch, on
+    // every device, went to the engine as "unassigned". controller.ts says in
+    // as many words that "an engine cannot tell two conversations apart if
+    // every turn claims the same id"; against an engine keying server-side
+    // history by chat_id, every user's first chat was one shared thread.
+    //
+    // The existing test asserted only that two chat ids DIFFER, and
+    // "unassigned" !== "chat-2" passes that.
+    chatId: deps.newChatId(),
     // The other end of the seam: what the engine refused becomes a dropped
     // row on the turn it belonged to.
     dropSink,

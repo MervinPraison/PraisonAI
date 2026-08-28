@@ -240,3 +240,37 @@ test("a storage failure at boot shows the crash screen, not a dead-looking app",
   assert.equal(app, null, "a boot failure must not return a working app");
   assert.notEqual(dom.text(), "", "and must not leave a blank or silently dead page");
 });
+
+test("the conversation the user starts ON LAUNCH has a real chat id", async () => {
+  // `chatId` defaults to the literal "unassigned", and `setChat` was only ever
+  // called by the New chat handler -- so the first conversation of every
+  // launch, on every device, went to the engine as "unassigned".
+  // controller.ts says in as many words that "an engine cannot tell two
+  // conversations apart if every turn claims the same id"; against an engine
+  // keying server-side history by chat_id, every user's first chat was one
+  // shared thread.
+  //
+  // The existing test asserted only that two chat ids DIFFER, and
+  // "unassigned" !== "chat-2" passes that.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "answer" }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "chat-launch" });
+
+  submit(dom, "the very first question");
+  await settle();
+
+  const body = JSON.parse(String(http.sent.find((r) => r.url.includes("/chat"))?.body ?? "{}")) as {
+    chat_id?: string;
+  };
+  assert.notEqual(body.chat_id, "unassigned", "the first chat of a launch must have a real id");
+  assert.equal(body.chat_id, "chat-launch");
+  app?.dispose();
+});
