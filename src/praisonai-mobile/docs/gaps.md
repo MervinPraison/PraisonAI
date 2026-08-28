@@ -142,7 +142,7 @@ audit trail: after the turn ends the transcript can never say "you allowed
 future author reintroduces index-pairing, which is the bug the whole
 `approvalId` design exists to prevent.
 
-### 4. There is no user-message side, and no stable identity for a live turn
+### ~~4. There is no user-message side, and no stable identity for a live turn~~ — CLOSED
 
 `TurnState` is assistant-only; `StoredChat.messages` has a different shape
 (`role`/`content`/`at`). `end.userIndex` is the only link and it is `null` until
@@ -151,7 +151,7 @@ persistence. **This stitching is currently owned by no layer** — it needs to
 land in the composition root or in `core/`, deliberately, before two callers
 invent two different answers.
 
-### 5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback
+### ~~5. `ShellPort` exposes `insets` synchronously but the keyboard only by callback~~ — CLOSED
 
 First paint therefore has to assume height 0. Correct on a cold launch, wrong on
 a warm resume with a hardware or floating keyboard already up: one wrong frame,
@@ -159,7 +159,7 @@ then a jump — the exact "web page in a box" tell the synchronous `insets`
 snapshot was introduced to avoid. A `readonly keyboardHeightPx: number` would
 apply the reasoning already written into that port to its sibling event.
 
-### 6. `SettingsFacade` cannot enumerate or observe
+### ~~6. `SettingsFacade` cannot enumerate or observe~~ — CLOSED
 
 No `keys()`, no change notification, and `SettingDef[]` is not reachable from
 the facade — so a settings screen must hard-code the key list that already
@@ -168,3 +168,49 @@ exists as data, and re-render blindly after every `set()`.
 ### 7. `Dropped.reason` has no user-facing text
 
 The diagnostic row renders raw reason strings. Honest, but not readable.
+
+
+---
+
+# Why this file gets audited, not just appended to
+
+Three gaps above were fixed and left recorded as open for long enough that a
+re-audit was needed to notice. That is not a filing problem, it is the same
+failure this package is built against, one level up: **a document asserting a
+state nobody re-checked.**
+
+It has a cost. A stale P0 list for `praisonai-ts` sent two agents to verify
+nine "blockers" that were every one of them already fixed — useful work, since
+it turned up three real bugs nobody had listed, but not the work it was
+supposed to be.
+
+So the rule for this file: **when a gap closes, close it here in the same
+commit that closes it.** And when reading it, verify before believing. Every
+claim below is checkable in under a minute.
+
+## What closed them
+
+- **Gap 4** — `core/src/chat/session.ts`. `createSession` owns the join between
+  the assistant-only `TurnState` and the two-sided `StoredChat`, and it is what
+  engines call to record a turn, so `end.userIndex` comes from whatever really
+  did the write.
+- **Gap 5** — `ShellPort.keyboardHeightPx`, a synchronous snapshot for the same
+  reason `insets` is one: a component mounting while the keyboard is already up
+  would otherwise lay out at 0, paint once wrong, and jump.
+- **Gap 6** — `defs()`, `subscribe()`, `setSecret()` and `clearSecret()` on the
+  facade. `subscribe` fires only after an *accepted* write; notifying on a
+  refused one makes a screen redraw a value the user did not manage to change.
+
+## Genuinely still open
+
+Gaps **2**, **3** and **7** above. None blocks shipping:
+
+- **2** is an audit-trail nicety — a settled approval cannot be shown after the
+  turn ends.
+- **3** is a duplicated four-field type, and worth closing because the join it
+  forces at render time is exactly where index-pairing gets reintroduced.
+- **7** renders raw reason enums to a user.
+
+Also open, and larger than any of them: **route→view dispatch** (the view models
+exist and nothing mounts them) and the **Tauri Rust crate**. Neither is a gap in
+the sense this file records — they are unbuilt work, not defects.
