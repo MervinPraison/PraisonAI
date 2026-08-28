@@ -159,7 +159,23 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   const nodes: RowNodes = emptyNodes();
   let announcer: AnnouncerState = initialAnnouncer;
 
+  // The run the user just abandoned by pressing New chat. `stop()` is a network
+  // call and the controller ALWAYS publishes the abandoned turn's terminal
+  // state after cancellation -- and, when the engine REFUSES the stop, keeps
+  // publishing its tokens. Both arrive AFTER the synchronous reset below has
+  // cleared `render`/`nodes`/`transcript`, so painting them reconciles the old
+  // conversation back into the fresh one the user is now looking at. Dropping
+  // any publish that still names the abandoned run keeps the new chat empty
+  // until its own first turn starts -- which carries a different runId.
+  let abandonedRunId: string | null = null;
+
   const publish = (view: RunView): void => {
+    // A late publish from the run New chat walked away from. Ignored entirely:
+    // painting it re-inserts the old conversation into the fresh one, which is
+    // the whole reason the screen was cleared. A refused stop keeps the old run
+    // alive, so this stays in force for every one of its tokens, not just the
+    // single terminal frame an accepted stop produces.
+    if (view.turn.runId !== null && view.turn.runId === abandonedRunId) return;
     const built = buildTranscript(view.turn, view.approvals);
     const diff = reconcile(render, built.rows);
     applyOps(transcript, nodes, diff.ops, strings);
@@ -280,6 +296,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // previous run streaming: the next token reconciled against an empty
         // render and re-inserted the old conversation's rows into what the
         // user believed was a fresh chat, where it then finished.
+        //
+        // `stop()` is a network call and cannot be awaited here without
+        // blocking the reset the user asked for; the controller then publishes
+        // the abandoned turn's terminal state -- and, on a REFUSED stop, its
+        // continuing tokens -- after this handler returns. Record that run's id
+        // so `publish` drops those late frames instead of painting them back
+        // into the empty chat. Read before `stop()`, which may null out `live`.
+        abandonedRunId = app.controller.view().turn.runId;
         void app.controller.stop();
         // And give the new conversation its own id. `setChat` was never called
         // anywhere in the app, so every request from every chat carried

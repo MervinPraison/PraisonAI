@@ -40,7 +40,7 @@ import { createFakeDom } from "../../testing/src/fake-dom.ts";
 import { createFakeShell, PHONE_INSETS } from "../../testing/src/fake-shell.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
-import { createFakeHttp, sseResponse } from "../../testing/src/fake-http.ts";
+import { createFakeHttp, jsonResponse, sseResponse } from "../../testing/src/fake-http.ts";
 import { mount } from "./main.ts";
 import type { Platform } from "./platform.ts";
 
@@ -186,6 +186,57 @@ test("New chat stops the run that is still streaming", async () => {
   assert.ok(
     cancels.length > 0,
     `New chat must stop the live run, not just clear the screen. Sent: ${http.sent.map((r) => r.url).join(", ")}`,
+  );
+  app?.dispose();
+});
+
+test("a refused stop on New chat does not paint the old run back into the fresh chat", async () => {
+  // `stop()` is a network call and is not awaited, and the controller ALWAYS
+  // publishes the abandoned turn after cancellation -- and, when the engine
+  // REFUSES the stop, keeps publishing its tokens. Those late publishes arrive
+  // after the synchronous reset has cleared the screen, so without a guard they
+  // reconcile the OLD conversation straight back into the fresh one the user is
+  // now looking at. This drives the refusal case specifically, where the old
+  // run stays alive and keeps producing frames.
+  const { dom, http, platform } = harness();
+  // A holder, not a bare `let`: the stream's `start` assigns the pump, and TS
+  // cannot see that a canned response was invoked, so a plain variable narrows
+  // back to null at the later call site.
+  const pump: { push: (chunk: string) => void } = { push: () => {} };
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        pump.push = (chunk) => controller.enqueue(enc.encode(chunk));
+        pump.push(sse([["start", { msg_id: "m1", run_id: "r1" }]]));
+        pump.push(sse([["delta", { msg_id: "m1", text: "OLD ANSWER" }]]));
+      },
+    }),
+  }));
+  // The engine refuses the cancel, so the old run is still live afterwards.
+  // remote-http reads `{ok: true}` for an accepted stop; anything else is a
+  // refusal, so an explicit `ok: false` keeps the abandoned run generating.
+  http.on("/cancel/r1", () => jsonResponse(200, { ok: false }));
+
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "one");
+  await settle();
+
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+
+  // The refused run keeps generating; a token that lands after New chat must
+  // NOT reappear on the freshly-cleared screen.
+  pump.push(sse([["delta", { msg_id: "m1", text: " MORE OLD" }]]));
+  await settle();
+
+  assert.doesNotMatch(
+    dom.text(),
+    /OLD ANSWER/,
+    "the abandoned run's transcript was painted back into the new chat",
   );
   app?.dispose();
 });
