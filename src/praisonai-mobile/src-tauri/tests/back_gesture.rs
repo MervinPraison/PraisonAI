@@ -4,7 +4,7 @@
 //! device, and two of them are the kind a user reports as "the back button is
 //! broken" with no way to say more.
 
-use praisonai_mobile_lib::shell::back::{Action, Gate, ANSWER_TIMEOUT_MS};
+use praisonai_mobile_lib::shell::back::{Action, Gate};
 
 #[test]
 fn a_press_asks_the_webview() {
@@ -90,9 +90,6 @@ fn a_stray_answer_with_no_press_is_ignored() {
     assert_eq!(gate.answered(false), Action::Ignore);
 }
 
-#[test]
-fn the_timeout_is_generous_rather_than_tight() {
-    // Too short falls back while a slow handler is still deciding, which exits
-    // an app the user did not ask to leave. That is the worse direction.
-    assert!(ANSWER_TIMEOUT_MS >= 250, "a tight timeout exits the app under load");
-}
+// The timeout floor is asserted at COMPILE time in shell::back -- clippy
+// correctly points out that asserting on a const inside a test proves nothing
+// at runtime, and a build failure is the stronger guard anyway.
