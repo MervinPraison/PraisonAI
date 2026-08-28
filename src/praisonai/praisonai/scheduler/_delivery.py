@@ -7,8 +7,10 @@ without standing up the full gateway. It reuses:
 - ``praisonaiagents.scheduler.DeliveryTarget`` — the core, serialisable target
   (parsed from a ``"telegram:123456"`` style token via ``DeliveryTarget.parse``).
 - ``praisonai_bot.bots.delivery.DeliveryRouter`` — symbolic-target resolution,
-  token-bucket rate limiting, in-process idempotency dedup and dead-target
-  skip/self-heal.
+  token-bucket rate limiting, durable (restart-safe) idempotency dedup and
+  dead-target skip/self-heal. The router is injected with the same durable
+  ``SqliteIdempotencyStore`` the gateway uses (issue #4541), so a job re-fired
+  after a crash/restart is deduplicated across processes — not just in-process.
 
 So a scheduled result is delivered with the same guarantees as the gateway's
 ``_deliver_scheduled_result``, but reachable from a few lines of Python / YAML /
@@ -61,9 +63,11 @@ class SchedulerDelivery:
     """Resolve a ``deliver`` token and send scheduled results to a channel.
 
     A single instance is built per scheduler and reused across runs so the
-    router's bounded idempotency LRU and per-platform rate limiters persist —
-    a re-fired job delivering the *same* result to the *same* target is
-    deduplicated in-process, exactly as on the gateway path.
+    router's per-platform rate limiters persist. Idempotency is now durable
+    (issue #4541): the router is injected with the same ``SqliteIdempotencyStore``
+    the gateway uses, so a re-fired job delivering the *same* result to the
+    *same* target is deduplicated across restarts — restart-safe, exactly as on
+    the gateway outbox path, not merely in-process.
 
     Args:
         deliver: The delivery token (e.g. ``"telegram:123456"``). An empty
@@ -256,6 +260,44 @@ class SchedulerDelivery:
         """Whether a concrete delivery target was configured."""
         return self._target is not None
 
+    @staticmethod
+    def _build_idempotency_store() -> Any:
+        """Build the durable idempotency store the router dedups against (#4541).
+
+        The lightweight path previously relied on the router's in-process LRU,
+        which is empty after a restart — so a job re-fired across a crash could
+        double-post (or, post-send/pre-record, drop). Injecting the same durable
+        :class:`~praisonai_bot.bots._idempotency.SqliteIdempotencyStore` the
+        gateway uses gives every path one restart-safe, effectively-once
+        guarantee. The store lives under the same ``<home>/state`` path the
+        gateway uses so gateway, lightweight and standalone ticks on one home
+        converge on one dedup ledger. The home honours ``$PRAISONAI_HOME``
+        (falling back to ``~/.praisonai``) so two isolated deployments under one
+        OS account keep separate ledgers rather than cross-suppressing each
+        other's deterministic delivery keys.
+
+        Best-effort: any failure (missing bot extra, unwritable state dir)
+        returns ``None`` so the router falls back to its LRU and delivery still
+        works — durability degrades, it never blocks.
+        """
+        try:
+            import os
+            from pathlib import Path
+
+            from praisonai_bot.bots._idempotency import build_idempotency_store
+
+            base = os.environ.get("PRAISONAI_HOME")
+            home = Path(base) if base else Path.home() / ".praisonai"
+            path = home / "state" / "delivery.db"
+            return build_idempotency_store("sqlite", path=path)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "Scheduler delivery: durable idempotency store unavailable "
+                "(%s); falling back to in-process dedup",
+                e,
+            )
+            return None
+
     def _ensure_router(self) -> bool:
         """Lazily build the platform bot + router. Returns True on success."""
         if self._router is not None:
@@ -315,7 +357,9 @@ class SchedulerDelivery:
         try:
             self._bot = Bot(channel, enable_supervision=False)
             botos = _SingleChannelBotOS({channel: self._bot})
-            self._router = DeliveryRouter(botos)
+            self._router = DeliveryRouter(
+                botos, idempotency_store=self._build_idempotency_store()
+            )
         except Exception as e:
             logger.warning(
                 "Scheduler delivery: failed to build router for '%s': %s",

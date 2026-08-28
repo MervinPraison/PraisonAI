@@ -9,6 +9,7 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -466,6 +467,7 @@ class DeliveryRouter:
         *,
         notify_on_undelivered: bool = False,
         undelivered_template: Optional[str] = None,
+        idempotency_store: Optional[Any] = None,
     ):
         self._botos = botos
         self.directory = ChannelDirectory()
@@ -493,6 +495,14 @@ class DeliveryRouter:
         # the durable dedup on the reply path.
         self._seen_keys: "OrderedDict[str, float]" = OrderedDict()
         self._seen_keys_max: int = 4096
+        # Optional durable idempotency store (issue #4541). When injected (any
+        # ``IdempotencyStoreProtocol``: ``reserve``/``record``/``release``), the
+        # proactive dedup becomes restart-safe on EVERY delivery path — the
+        # lightweight ``SchedulerDelivery`` and standalone tick now share the same
+        # crash-safe guarantee the gateway outbox already provides, instead of a
+        # per-process LRU that is empty after a restart. Unset ⇒ the bounded LRU
+        # above, so existing callers are entirely unaffected.
+        self._idempotency_store = idempotency_store
 
     def _rate_limiter_for(self, platform: str) -> Optional[Any]:
         """Return a rate limiter for ``platform``, reusing the adapter's own.
@@ -524,15 +534,34 @@ class DeliveryRouter:
         return limiter
 
     def _is_duplicate(self, idempotency_key: Optional[str]) -> bool:
-        """Report whether ``idempotency_key`` was already delivered this process.
+        """Report whether ``idempotency_key`` was already delivered.
 
-        Best-effort, bounded LRU dedup for the proactive path. Returns True when
-        the key maps to a prior *successful* send (suppress the re-send), False
-        for a fresh or absent key. The key is only recorded once delivery
-        succeeds (see :meth:`_remember_key`) so a failed send stays retryable.
+        When a durable store is injected (issue #4541) the check becomes a
+        crash-safe ``reserve``: a fresh key is claimed with a durable ``inflight``
+        row (survives restart), and a key that was already recorded or is in
+        flight fails the claim → reported as a duplicate, so a job re-fired after
+        a restart on the lightweight/standalone path is deduplicated exactly as
+        on the gateway outbox path. A failed send releases the reservation (see
+        :meth:`_release_key`) so it stays retryable. If the durable store raises,
+        we fall back to the in-process LRU below rather than block delivery.
+
+        Without a durable store this is the best-effort, bounded LRU dedup:
+        returns True when the key maps to a prior *successful* send (suppress the
+        re-send), recorded only on success by :meth:`_remember_key`.
         """
         if not idempotency_key:
             return False
+        if self._idempotency_store is not None:
+            try:
+                # ``reserve`` returns False when the key is already recorded or in
+                # flight → a duplicate. True means we just claimed it durably.
+                return not self._idempotency_store.reserve(idempotency_key)
+            except Exception:  # pragma: no cover - defensive: never block delivery
+                logger.debug(
+                    "DeliveryRouter: durable idempotency reserve failed; "
+                    "falling back to in-process dedup",
+                    exc_info=True,
+                )
         if idempotency_key in self._seen_keys:
             self._seen_keys.move_to_end(idempotency_key)
             return True
@@ -542,10 +571,38 @@ class DeliveryRouter:
         """Record a successfully delivered ``idempotency_key`` for future dedup."""
         if not idempotency_key:
             return
+        if self._idempotency_store is not None:
+            try:
+                self._idempotency_store.record(idempotency_key)
+                return
+            except Exception:  # pragma: no cover - defensive
+                logger.debug(
+                    "DeliveryRouter: durable idempotency record failed",
+                    exc_info=True,
+                )
         self._seen_keys[idempotency_key] = time.monotonic()
         self._seen_keys.move_to_end(idempotency_key)
         while len(self._seen_keys) > self._seen_keys_max:
             self._seen_keys.popitem(last=False)
+
+    def _release_key(self, idempotency_key: Optional[str]) -> None:
+        """Release a durable reservation after a failed send so it retries.
+
+        A no-op without a durable store: the LRU only records on success, so a
+        failed send never left a key to release. With a durable store the key
+        was claimed as ``inflight`` in :meth:`_is_duplicate`; releasing it on a
+        failed send lets the next tick re-attempt rather than being deduplicated
+        against its own crashed attempt.
+        """
+        if not idempotency_key or self._idempotency_store is None:
+            return
+        try:
+            self._idempotency_store.release(idempotency_key)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug(
+                "DeliveryRouter: durable idempotency release failed",
+                exc_info=True,
+            )
 
     def is_duplicate_key(self, idempotency_key: Optional[str]) -> bool:
         """Public dedup check for callers owning a multi-step send envelope.
@@ -562,7 +619,17 @@ class DeliveryRouter:
     def remember_key(self, idempotency_key: Optional[str]) -> None:
         """Public counterpart to :meth:`is_duplicate_key` for envelope callers."""
         self._remember_key(idempotency_key)
-    
+
+    def release_key(self, idempotency_key: Optional[str]) -> None:
+        """Release a durable reservation for a *failed* envelope send (#4541).
+
+        Envelope callers (:class:`BotOutboundMessenger`) that reserved a key via
+        :meth:`is_duplicate_key` must release it on failure — otherwise, with a
+        durable store, a crashed multi-step send would leave an ``inflight`` row
+        that deduplicates its own retry. A no-op without a durable store.
+        """
+        self._release_key(idempotency_key)
+
     def refresh_directory(self) -> None:
         """Refresh the channel directory from the registered bots.
         
@@ -707,6 +774,13 @@ class DeliveryRouter:
                         platform,
                         channel_id,
                     )
+                    # Release the durable reservation (#4541): the key was
+                    # claimed ``inflight`` by ``_is_duplicate`` above, but no
+                    # send was attempted, so a later cycle (after the target
+                    # self-heals) must be able to re-claim it rather than being
+                    # suppressed for the full inflight lease. No-op without a
+                    # durable store.
+                    self._release_key(idempotency_key)
                     return False
             
             # Rate-limit the proactive path (issue #2578): a burst of
@@ -718,6 +792,13 @@ class DeliveryRouter:
             if limiter is not None:
                 try:
                     await limiter.acquire(channel_id)
+                except asyncio.CancelledError:
+                    # Cancellation while waiting on the limiter left no send
+                    # attempted (#4541): release the durable reservation so the
+                    # cancelled send stays retryable rather than dedup'd against
+                    # its own aborted attempt, then propagate the cancellation.
+                    self._release_key(idempotency_key)
+                    raise
                 except Exception:
                     logger.debug(
                         "DeliveryRouter: rate-limit acquire failed for %s:%s",
@@ -750,6 +831,15 @@ class DeliveryRouter:
                         f"{platform} adapter reported no delivery "
                         f"(send_message returned {result!r})"
                     )
+            except asyncio.CancelledError:
+                # Cancellation during the send left it in an unknown state
+                # (#4541): release the durable reservation so the send stays
+                # retryable rather than being deduplicated against its own
+                # aborted attempt, then propagate. ``CancelledError`` is a
+                # ``BaseException`` in 3.8+, so it bypasses ``except Exception``
+                # below and must be handled explicitly.
+                self._release_key(idempotency_key)
+                raise
             except Exception as send_err:
                 # A server-mandated Retry-After widens the limiter's lane so the
                 # next proactive sends hold off instead of re-tripping the 429.
@@ -809,6 +899,12 @@ class DeliveryRouter:
                     await self._notify_undelivered(
                         platform, channel_id, text, send_err
                     )
+                # Release the durable reservation (#4541) so a failed send stays
+                # retryable: with a durable store the key was claimed ``inflight``
+                # in ``_is_duplicate``; without one this is a no-op (the LRU only
+                # records on success), so the transient/permanent retry semantics
+                # are unchanged.
+                self._release_key(idempotency_key)
                 raise
 
             # Success self-heals: any earlier dead flag is cleared so a recovered
