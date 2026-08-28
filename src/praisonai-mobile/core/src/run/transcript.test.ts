@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { apply, finish, initialTurn, isPersisted, type TurnState } from "./transcript.ts";
+import { apply, finish, initialTurn, isPersisted, type TurnState, noteDropped } from "./transcript.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
 
 const M = "m1";
@@ -19,6 +19,8 @@ const delta = (text: string): RunEvent => ({ type: "delta", msgId: M, text });
 /** Feed a sequence from the initial state. */
 const run = (...events: readonly RunEvent[]): TurnState =>
   events.reduce<TurnState>(apply, initialTurn);
+
+const END_M1 = { type: "end", msgId: "m1", userIndex: 0, assistantIndex: 1, versions: 1, active: 0 } as const;
 
 test("an event arriving before start is recorded as dropped and never applied", () => {
   const state = apply(initialTurn, delta("hello"));
@@ -183,9 +185,12 @@ test("a full turn accumulates text, reasoning and usage", () => {
   assert.deepEqual(state.dropped, [], "a clean stream drops nothing");
 });
 
-test("a start after a finished turn opens a fresh turn but keeps the drop record", () => {
-  // Regenerate reuses the same controller. The new turn must not inherit the
-  // old one's text, and must not lose the evidence that events were dropped.
+test("a start after a FINISHED turn opens a fresh turn and clears the drop record", () => {
+  // A completed turn OWNS its drops. Carrying them into the next `start`
+  // painted the previous turn's dropped-event warning onto a clean follow-up
+  // answer -- a success made to look like a defect, the mirror of the failure
+  // this whole package exists against. The old turn's transcript already
+  // recorded them; the new turn must not inherit them.
   const first = run(start, delta("old"), { type: "cancelled", msgId: M, runId: "r1" }, delta("late"));
   assert.equal(first.dropped.length, 1);
 
@@ -193,7 +198,21 @@ test("a start after a finished turn opens a fresh turn but keeps the drop record
   assert.equal(second.text, "");
   assert.equal(second.msgId, "m2");
   assert.equal(second.phase, "streaming");
-  assert.equal(second.dropped.length, 1, "the earlier drop must still be visible");
+  assert.deepEqual(second.dropped, [], "a finished turn's drops must not cross into the next turn");
+});
+
+test("a start after a BEFORE-start drop keeps it, because that drop belongs to this turn", () => {
+  // The pair. A frame the decoder refused before this run's own `start` was
+  // recorded while idle and belongs to the turn now opening -- clearing it
+  // would hide a real defect. Only an ALREADY-ENDED turn's drops are cleared.
+  const early = apply(initialTurn, delta("orphan")); // dropped: before_start, still idle
+  assert.equal(early.phase, "idle");
+  assert.equal(early.dropped.length, 1);
+
+  const opened = apply(early, start);
+  assert.equal(opened.phase, "streaming");
+  assert.equal(opened.dropped.length, 1, "a before-start drop must survive into its own turn");
+  assert.equal(opened.dropped[0]?.reason, "before_start");
 });
 
 // ---- render order ----------------------------------------------------------
@@ -343,4 +362,78 @@ test("an approval survives an ERROR ending too, not just a cancellation", () => 
   ] as RunEvent[]) s = apply(s, e);
   assert.equal(s.approvals.length, 1);
   assert.equal(s.approvals[0]?.resolved, true);
+});
+
+// ---- drops belong to the turn they happened on ------------------------------
+
+test("a clean turn after a damaged one reports nothing dropped", () => {
+  // `start` carried `state.dropped` -- the previous turn's ENTIRE list. So one
+  // refusal on turn 1 made every later turn report itself damaged for the
+  // lifetime of the app, and the count could never mean "this stream is 40%
+  // unparseable". Harmless while nothing could produce a decode rejection;
+  // user-visible the moment the refusal channel was wired.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = noteDropped(s, "unknown_event", "thinking_budget");
+  s = apply(s, END_M1);
+  assert.equal(s.dropped.length, 1, "the turn that dropped it must show it");
+
+  s = apply(s, { type: "start", msgId: "m2", runId: "r2" });
+  s = apply(s, { type: "delta", msgId: "m2", text: "clean" });
+  assert.deepEqual(s.dropped, [], "a clean turn must not inherit the last one's failures");
+});
+
+test("a drop between turns still reaches the turn that follows it", () => {
+  // The pair, and the reason `start` carried anything at all: a frame refused
+  // while nothing was streaming has no turn of its own, and dropping it on the
+  // floor loses the evidence entirely.
+  let s = initialTurn;
+  s = noteDropped(s, "unparseable_json", "<html>502</html>");
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  assert.deepEqual(s.dropped, [{ reason: "unparseable_json", detail: "<html>502</html>" }]);
+});
+
+test("a between-turns drop is carried ONCE, not to every later turn", () => {
+  // Carrying without clearing would reintroduce the leak one turn later.
+  let s = initialTurn;
+  s = noteDropped(s, "unparseable_json", "pre");
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, END_M1);
+  s = apply(s, { type: "start", msgId: "m2", runId: "r2" });
+  assert.deepEqual(s.dropped, []);
+});
+
+test("a drop DURING a turn does not leak into the carry", () => {
+  // If it did, the turn would show it and so would the next one.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = noteDropped(s, "unknown_event", "mid");
+  assert.deepEqual(s.carry, [], "a drop on a live turn belongs to that turn alone");
+});
+
+test("a decoder refusal AFTER a turn ended reaches the next turn, not the last one", () => {
+  // The case that separates the two ways of fixing the leak, and the reason
+  // this file needed both. Clearing on `phase === "ended"` also stops the
+  // leak -- and passes the between-turns test above, because that one starts
+  // from `idle`. It loses THIS: the previous turn has ended, so its whole list
+  // is discarded, and a frame the decoder refused in the gap goes with it.
+  //
+  // Such a refusal has no msgId at all -- that is often WHY it was refused --
+  // so it cannot be attributed backwards to the turn that just finished. It
+  // belongs to the turn about to open, and losing it quietly is the exact
+  // failure the refusal channel exists to undo.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, { type: "delta", msgId: "m1", text: "answered" });
+  s = apply(s, END_M1);
+  assert.equal(s.phase, "ended");
+
+  s = noteDropped(s, "unparseable_json", "<html>502 Bad Gateway</html>");
+  s = apply(s, { type: "start", msgId: "m2", runId: "r2" });
+
+  assert.deepEqual(
+    s.dropped,
+    [{ reason: "unparseable_json", detail: "<html>502 Bad Gateway</html>" }],
+    "a refusal in the gap between turns must not be discarded with the old turn",
+  );
 });

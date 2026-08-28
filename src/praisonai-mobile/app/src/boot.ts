@@ -28,6 +28,8 @@ import {
 import { createRunController, type RunController, type RunView } from "../../core/src/run/controller.ts";
 import { attachBackGesture, createRouter, type Router } from "../../ui/src/router.ts";
 import { selectEngine, type EngineChoice } from "./engines.ts";
+import { createDropSink } from "../../core/src/run/drop-sink.ts";
+import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 
 export interface AppDeps {
@@ -47,6 +49,7 @@ export interface AppDeps {
   readonly engines: (
     persistence: RunPersistence,
     settings: SettingsFacade,
+    onIgnored: (reason: IgnoredReason, detail: string) => void,
   ) => readonly EngineChoice[];
   readonly settingDefs: readonly SettingDef[];
   /** Which engine to start with when settings name none. The persisted
@@ -134,9 +137,15 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   // no effect whatsoever.
   const chosenEngineId = chosenStringOr(settings, "engineId", deps.engineId);
 
+  // The seam between "the engine refused a frame" and "the transcript shows a
+  // dropped event". The engine is built here and the controller below, so
+  // without something between them the refusal had nowhere to go -- which is
+  // exactly why remote-http discarded every one of them.
+  const dropSink = createDropSink();
+
   const selection = await selectEngine(
     chosenEngineId,
-    deps.engines(persistenceFor(session), settings),
+    deps.engines(persistenceFor(session), settings, dropSink.note),
   );
   if (!selection.ok) {
     return { ok: false, reason: selection.reason, detail: selection.detail };
@@ -146,6 +155,9 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
   const controller = createRunController({
     engine,
     time: deps.time,
+    // The other end of the seam: what the engine refused becomes a dropped
+    // row on the turn it belonged to.
+    dropSink,
     onPublish: deps.onPublish,
   });
   const router = createRouter({ name: "chats" });

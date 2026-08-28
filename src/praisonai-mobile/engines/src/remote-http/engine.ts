@@ -24,7 +24,7 @@ import type {
 import type { HttpPort } from "../../../core/src/ports/http.ts";
 import type { ApprovalChoice, RunEvent } from "../../../protocol/src/events.ts";
 import { PROTOCOL_VERSION } from "../../../protocol/src/version.ts";
-import { decodeEvent, isDecoded } from "../../../protocol/src/decode.ts";
+import { decodeEvent, isDecoded, type IgnoredReason } from "../../../protocol/src/decode.ts";
 import { createSseReader } from "../../../protocol/src/sse.ts";
 import { classify, type Readiness } from "./readiness.ts";
 
@@ -35,6 +35,9 @@ export interface RemoteHttpOptions {
   /** Sent as a bearer token when present. The desktop engine is unauthenticated
    *  on loopback; anything off-device must not be. */
   readonly token?: string;
+  /** Called for every frame the decoder REFUSED. Without it the refusal is
+   *  invisible: a truncated answer reported as a clean success. */
+  readonly onIgnored?: (reason: IgnoredReason, detail: string) => void;
   readonly id?: string;
 }
 
@@ -147,8 +150,24 @@ export function createRemoteHttpEngine(options: RemoteHttpOptions): AgentEngineP
           for (const frame of readFrames(decoder.decode(value, { stream: true }))) {
             // decodeEvent never throws. An unknown event is a recorded no-op,
             // which is what makes a newer engine safe to talk to.
-            const outcome = decodeEvent({ ...safeParse(frame.data), type: frame.event });
-            if (isDecoded(outcome)) yield outcome.event;
+            //
+            // "Recorded" used to be aspirational: the ignored branch was
+            // dropped on the floor here, and this is the ONLY production
+            // caller of decodeEvent. So a malformed `tool_result` frame made
+            // its tool vanish and the turn rendered as a clean answer, while
+            // the reducer's Dropped type, the view model's dropped row and
+            // seven user-facing strings sat unreachable.
+            const parsed = parseFrame(frame.data);
+            if (!parsed.ok) {
+              options.onIgnored?.(parsed.reason, parsed.detail);
+              continue;
+            }
+            const outcome = decodeEvent({ ...parsed.value, type: frame.event });
+            if (isDecoded(outcome)) {
+              yield outcome.event;
+            } else {
+              options.onIgnored?.(outcome.reason, outcome.detail);
+            }
           }
         }
       } finally {
@@ -174,15 +193,37 @@ export function createRemoteHttpEngine(options: RemoteHttpOptions): AgentEngineP
 
 /** A frame's data that is not JSON is not a reason to throw -- decodeEvent
  *  will report it as unparseable with a reason. */
-function safeParse(data: string): Record<string, unknown> {
+/**
+ * Parse an SSE frame body, keeping WHY it failed.
+ *
+ * This used to be `safeParse`, which returned `{}` for anything it could not
+ * read. Since the caller then spreads it and adds `type`, every wire failure
+ * reached the decoder as an object with only a type -- so five distinct
+ * failures (an HTML error page from a proxy, a truncated body from a cut
+ * connection, a JSON array, a bare string, `null`) all came back as
+ * `missing_msg_id`, and the payload was gone so `detail` could not recover it.
+ *
+ * That was survivable while rejections were discarded. They are user-visible
+ * prose now: a 502 page from a proxy told the user "an event arrived with no
+ * message it belongs to", pointing whoever they reported it to at an engine
+ * bug that does not exist. Two shipped strings -- "not valid JSON" and "a
+ * value where an event was expected" -- were unreachable for the same reason.
+ */
+type ParsedFrame =
+  | { readonly ok: true; readonly value: Record<string, unknown> }
+  | { readonly ok: false; readonly reason: IgnoredReason; readonly detail: string };
+
+function parseFrame(data: string): ParsedFrame {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    parsed = JSON.parse(data);
   } catch {
-    return {};
+    return { ok: false, reason: "unparseable_json", detail: data.slice(0, 120) };
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, reason: "not_an_object", detail: Array.isArray(parsed) ? "array" : typeof parsed };
+  }
+  return { ok: true, value: parsed as Record<string, unknown> };
 }
 
 /** Probe `/health` and classify it. Separate from the engine so a connection

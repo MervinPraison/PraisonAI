@@ -41,7 +41,8 @@ import {
   type PromptQueue,
   type QueuedPrompt,
 } from "./queue.ts";
-import { apply, finish, initialTurn, type TurnState } from "./transcript.ts";
+import { apply, finish, initialTurn, noteDropped, type TurnState } from "./transcript.ts";
+import type { DropSink } from "./drop-sink.ts";
 
 /** Everything a view needs, in one object. */
 export interface RunView {
@@ -63,6 +64,10 @@ export interface ControllerDeps {
   /** Bytes per frame and the delay ceiling. Defaults chosen for a phone. */
   readonly maxBytes?: number;
   readonly maxDelayMs?: number;
+  /** Where the engine leaves frames its decoder refused. Drained onto the
+   *  transcript as the turn runs, so a refused frame is visible as a dropped
+   *  event rather than as an answer that is quietly missing a tool. */
+  readonly dropSink?: DropSink;
 }
 
 export interface RunController {
@@ -105,6 +110,17 @@ export function createRunController(deps: ControllerDeps): RunController {
   const publish = (): void => {
     publishes += 1;
     deps.onPublish(view());
+  };
+
+  /** Move anything the decoder refused onto the transcript. Drained here
+   *  rather than published on its own, so a refusal paints with the frame it
+   *  arrived beside instead of forcing an extra publish. */
+  const drainDrops = (state: TurnState): TurnState => {
+    let next = state;
+    for (const d of deps.dropSink?.drain() ?? []) {
+      next = noteDropped(next, d.reason, d.detail);
+    }
+    return next;
   };
 
   /** Apply a coalesced frame's worth of work to the transcript. */
@@ -160,6 +176,7 @@ export function createRunController(deps: ControllerDeps): RunController {
         // The transcript is applied for EVERY event, always. Only the paint is
         // paced -- dropping an event to save a frame would lose content.
         turn = apply(turn, event);
+        turn = drainDrops(turn);
 
         if (event.type === "approval_request") {
           approvals = addApproval(approvals, {
@@ -203,6 +220,11 @@ export function createRunController(deps: ControllerDeps): RunController {
       stopTicking();
       live = null;
       coalescer.push({ kind: "end" }, deps.time.nowMs());
+      // A refusal can arrive beside the LAST frame, or while the stream was
+      // dying. Drained here rather than after the loop so it is reached on
+      // every path -- the first version of this sat at the end of the `catch`
+      // and therefore only ran when the turn had already failed.
+      turn = drainDrops(turn);
       turn = finish(turn);
       queue = markIdle(queue);
       // ALWAYS published, whatever the gate decided. The gate skips

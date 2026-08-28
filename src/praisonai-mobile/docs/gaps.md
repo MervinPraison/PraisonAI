@@ -344,6 +344,13 @@ It also used to omit **route→view dispatch**, which the body of this file list
 as open and which is still open; dropping it from the closing line implied it
 had landed.
 
+Four settings are declared and not yet consumed by anything: `model`,
+`temperature`, `showReasoning` and `showDiagnostics`. That is expected — they
+were written for the settings screen and the engine parameterisation that do
+not exist yet — but it is recorded here so nobody reads the registry and
+concludes they work. `showDiagnostics` is the one to watch: it claims to hide
+dropped events, which are currently rendered unconditionally.
+
 What actually remains for praisonai-mobile, all of it unbuilt rather than
 broken:
 
@@ -361,10 +368,22 @@ broken:
   blocker — bare `crypto` and `events` imports on the Agent graph — is fixed
   upstream; the wiring here is not done.
 
-One known defect is deliberately still open: the remote-http engine discards
-decode rejections, so a malformed frame makes a tool vanish and the turn
-renders as a clean answer. The reducer's `Dropped` type, the view model's
-dropped row and seven user-facing strings are unreachable because of it.
-Fixing it needs a channel from the engine to the transcript that does not
-exist yet, and half-wiring one would be the same mechanism-connected-to-nothing
-this file keeps recording.
+The decode-rejection defect recorded here is now closed. remote-http was the
+only production caller of `decodeEvent` and discarded every rejection, so a
+malformed frame made its tool vanish and the turn rendered as a clean answer.
+`core/src/run/drop-sink.ts` is the channel between the engine (built at
+composition) and the controller (built per app); refusals are drained onto the
+transcript per event and again in `finally`, so one arriving beside the last
+frame is still shown. Eight mutations, one per hop, each fails -- including
+the two that make it *wired* rather than merely present: removing the sink
+from `createRunController` and dropping the registry's forward both left the
+suite green until composition tests were added for each.
+
+One correction landed with it. `apply(start)` carried `dropped` across every
+new `start`, including one that followed a FINISHED turn -- so a refusal on
+turn 1 painted turn 2's clean answer as damaged, a success made to look like a
+defect (the same failure this channel exists against, inverted). A turn that
+already ended owns its drops; only a `before_start` drop, recorded while
+`idle`, belongs to the turn now opening. Fixed by clearing `dropped` on a
+`start` that replaces an ended turn, pinned at both hops: reverting it fails
+one reducer test and one controller test.
