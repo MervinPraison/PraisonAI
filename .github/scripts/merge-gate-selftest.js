@@ -310,4 +310,20 @@ assert('dispatch allowed when queue below cap', mg.mergeGateDispatchBlockedReaso
   pendingRuns: 2,
 }) == null);
 
+// Pending count excludes workflow_run auto-dispatch probes (PR #4534)
+assert('workflow_run probes excluded from pending count', mg.countSubstantiveMergeGateRuns([
+  { event: 'workflow_dispatch' },
+  { event: 'workflow_run' },
+  { event: 'workflow_run' },
+]) === 1);
+assert('all-probe runs count as zero pending', mg.countSubstantiveMergeGateRuns([
+  { event: 'workflow_run' },
+  { event: 'workflow_run' },
+]) === 0);
+assert('substantive dispatches still counted', mg.countSubstantiveMergeGateRuns([
+  { event: 'workflow_dispatch' },
+  { event: 'schedule' },
+]) === 2);
+assert('countSubstantiveMergeGateRuns null-safe', mg.countSubstantiveMergeGateRuns(null) === 0);
+
 process.exit(failed ? 1 : 0);

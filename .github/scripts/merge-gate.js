@@ -489,6 +489,12 @@ function mergeGateDispatchBlockedReason({ labels, pendingRuns, maxPending = MAX_
   return null;
 }
 
+// workflow_run probes (auto-dispatch) share concurrency and must not count
+// toward backpressure — they blocked dispatches for merge-ready PRs.
+function countSubstantiveMergeGateRuns(runs) {
+  return (runs || []).filter((r) => r && r.event !== 'workflow_run').length;
+}
+
 async function countPendingMergeGateRuns(github, owner, repo) {
   let pending = 0;
   for (const status of ['queued', 'in_progress']) {
@@ -500,7 +506,7 @@ async function countPendingMergeGateRuns(github, owner, repo) {
         status,
         per_page: 30,
       });
-      pending += (data.workflow_runs || []).length;
+      pending += countSubstantiveMergeGateRuns(data.workflow_runs);
     } catch {
       // Best-effort backpressure only.
     }
@@ -1094,6 +1100,7 @@ module.exports = {
   MERGE_GATE_ACTIVE_LABEL,
   MAX_PENDING_MERGE_GATE_RUNS,
   mergeGateDispatchBlockedReason,
+  countSubstantiveMergeGateRuns,
   countPendingMergeGateRuns,
   shouldSkipMergeGateDispatch,
 };
