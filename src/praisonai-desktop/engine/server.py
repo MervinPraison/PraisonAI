@@ -617,6 +617,11 @@ def _builtin_tools():
         if not _gate("fetch_url", {"url": url}):
             return "The user declined this tool call."
 
+        # The user approved *this* URL. A 3xx would fetch a different one --
+        # any host, any port, including this engine on loopback -- under the
+        # same approval, which makes the card a lie about what happens. Refuse
+        # the redirect and say so, so the model can ask for the new URL and
+        # get a second card rather than silently reaching an unapproved host.
         class _NoRedirect(_r.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 raise _e.HTTPError(req.full_url, code,

@@ -20,7 +20,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -313,68 +313,86 @@ class HistoryAcrossSessions(unittest.TestCase):
 
 
 class FetchUrlDoesNotFollowRedirects(unittest.TestCase):
-    """The approval card names one URL; the fetch must not go elsewhere.
+    """The approval card names one URL; the fetch must not reach another.
 
-    fetch_url gated on the approved URL, then let urllib follow any 3xx to any
-    host -- including this engine on loopback -- under that same approval. So a
-    page whose author controls a redirect could send the fetch to another
-    chat's transcript, /settings, or /logs, and the body landed back in the
-    model's context. The card was a lie about what happened.
+    urllib.request.urlopen follows 3xx by default, so a page the user approved
+    could 302 the fetch to any host or port -- including this engine on
+    loopback -- and its body would land back in the model's context under an
+    approval that never named it. This stands up two servers: A returns a 302
+    to B, B returns a secret. The gate is set to allow, and A's URL is
+    fetched. The secret from B must not come back.
     """
 
-    def setUp(self):
-        # "never" lets the gate allow, so the test exercises the fetch itself.
-        server.save_settings({"approval_mode": "never"})
-
-    def _fetch_url_tool(self):
+    def _fetch_url(self):
+        """The fetch_url closure out of _builtin_tools()."""
         for tool in server._builtin_tools():
             if getattr(tool, "__name__", "") == "fetch_url":
                 return tool
-        self.fail("fetch_url is no longer among the builtin tools")
+        self.fail("fetch_url is no longer a builtin tool")
 
-    def test_a_redirect_is_not_followed_to_a_url_the_user_never_approved(self):
-        secret = "SECRET-BODY"
-        from http.server import BaseHTTPRequestHandler
+    def setUp(self):
+        server._tool_queue().clear()
+        # approval_mode "never" makes the gate allow without a stream to ask on.
+        self._orig = server.load_settings
+        server.load_settings = lambda: dict(self._orig(), approval_mode="never")
 
-        class SecretHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(secret.encode())
+        secret = "SECRET-BODY-9c1f"
+        # A request reaching B is a breach on its own -- the fetch is a side
+        # effect (it can trigger actions, log the caller, exhaust rate limits)
+        # regardless of whether its body ever comes back. So the test records
+        # that B was contacted, not just that its body leaked.
+        b_hits = []
 
-            def log_message(self, *a):
+        class _Secret(BaseHTTPRequestHandler):
+            def log_message(self, *a):  # noqa: A003 - quiet
                 pass
 
-        b_srv = ThreadingHTTPServer(("127.0.0.1", 0), SecretHandler)
-        b_port = b_srv.server_address[1]
-        threading.Thread(target=b_srv.serve_forever, daemon=True).start()
-        b_url = f"http://127.0.0.1:{b_port}/secret"
+            def do_GET(inner):  # noqa: N805
+                b_hits.append(inner.path)
+                inner.send_response(200)
+                inner.send_header("Content-Length", str(len(secret)))
+                inner.end_headers()
+                inner.wfile.write(secret.encode())
 
-        class RedirectHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(302)
-                self.send_header("Location", b_url)
-                self.end_headers()
+        self.secret = secret
+        self.b_hits = b_hits
+        self.b = ThreadingHTTPServer(("127.0.0.1", 0), _Secret)
+        b_url = f"http://127.0.0.1:{self.b.server_address[1]}/leak"
 
-            def log_message(self, *a):
+        class _Redirect(BaseHTTPRequestHandler):
+            def log_message(self, *a):  # noqa: A003 - quiet
                 pass
 
-        a_srv = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
-        a_port = a_srv.server_address[1]
-        threading.Thread(target=a_srv.serve_forever, daemon=True).start()
-        a_url = f"http://127.0.0.1:{a_port}/company-blog"
+            def do_GET(inner):  # noqa: N805
+                inner.send_response(302)
+                inner.send_header("Location", b_url)
+                inner.send_header("Content-Length", "0")
+                inner.end_headers()
 
-        try:
-            result = self._fetch_url_tool()(a_url)
-        finally:
-            a_srv.shutdown()
-            a_srv.server_close()
-            b_srv.shutdown()
-            b_srv.server_close()
+        self.a = ThreadingHTTPServer(("127.0.0.1", 0), _Redirect)
+        self.a_url = f"http://127.0.0.1:{self.a.server_address[1]}/blog"
+        for srv in (self.a, self.b):
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-        self.assertNotIn(
-            secret, result,
-            "a redirect carried the fetch to a URL the user never approved")
+    def tearDown(self):
+        server.load_settings = self._orig
+        for srv in (self.a, self.b):
+            srv.shutdown()
+            srv.server_close()
+
+    def test_a_redirect_does_not_reach_the_unapproved_target(self):
+        result = self._fetch_url()(self.a_url)
+        self.assertNotIn(self.secret, result,
+                         "the approved URL redirected to an unapproved host "
+                         "and its body was returned anyway")
+        self.assertEqual(self.b_hits, [],
+                         "the unapproved redirect target was contacted at all")
+
+    def test_the_body_of_the_approved_url_still_comes_back(self):
+        # A page that does not redirect must still be fetched normally.
+        result = self._fetch_url()(f"http://127.0.0.1:{self.b.server_address[1]}/leak")
+        self.assertIn(self.secret, result,
+                      "a direct, approved fetch stopped working")
 
 
 if __name__ == "__main__":
