@@ -183,3 +183,18 @@ test("a long line still truncates to exactly the same text as before", () => {
   assert.equal(truncate(line, 10), line.slice(0, 9) + "…");
   assert.equal(truncate("👍🏽".repeat(500), 3), "👍🏽👍🏽…");
 });
+
+// ---- the boundaries between formats ----------------------------------------
+
+test("formatElapsed switches format AT the boundary, not one past it", () => {
+  // `seconds < 10` -> `<= 10` and `minutes < 60` -> `<= 60` both survived. The
+  // whole point of the thresholds is which side of them a value falls on, and
+  // no test placed a value exactly on one.
+  assert.equal(formatElapsed(9.94), "9.9s", "under ten keeps the decimal");
+  assert.equal(formatElapsed(10), "10s", "ten exactly is whole seconds");
+  assert.equal(formatElapsed(59), "59s");
+  assert.equal(formatElapsed(60), "1m 00s", "sixty seconds is a minute, not 60s");
+  assert.equal(formatElapsed(3599), "59m 59s");
+  assert.equal(formatElapsed(3600), "1h 00m", "sixty minutes is an hour, not 60m 00s");
+  assert.equal(formatElapsed(7260), "2h 01m");
+});
