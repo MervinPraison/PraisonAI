@@ -127,6 +127,11 @@ class BotOutboundMessenger:
             )
         except Exception as e:  # pragma: no cover — defensive
             logger.error("BotOutboundMessenger.send failed for %s: %s", target, e)
+            # Release the durable reservation this envelope claimed up-front
+            # (#4541) so a failed send stays retryable rather than being
+            # deduplicated against its own crashed attempt.
+            if idempotency_key:
+                self._router.release_key(idempotency_key)
             return DeliveryResult(
                 ok=False,
                 target=resolved,
@@ -135,6 +140,8 @@ class BotOutboundMessenger:
             )
 
         if not delivered:
+            if idempotency_key:
+                self._router.release_key(idempotency_key)
             return DeliveryResult(
                 ok=False,
                 target=resolved,
