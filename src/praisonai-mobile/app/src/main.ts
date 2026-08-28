@@ -45,6 +45,23 @@ function renderFatal(root: HTMLElement, message: string): void {
   root.append(box);
 }
 
+/**
+ * What to announce after a Stop, or null when there is nothing to say.
+ *
+ * Extracted so a test calls it: `mount` needs a whole fake SSE transport to
+ * drive, and the part that can actually be wrong is this decision. The house
+ * rule -- extract the expression rather than assert it appears in the source.
+ *
+ * The controller returns the engine's own answer, and both the scripted engine
+ * and the conformance contract go out of their way to keep that boolean
+ * honest. Discarding it here made a refused Stop look exactly like an accepted
+ * one, because the button label flips off `turn.phase`, which settles either
+ * way -- while the run kept generating and kept billing.
+ */
+export function stopNotice(stopped: boolean, strings: Strings): string | null {
+  return stopped ? null : strings.stopRefused;
+}
+
 export async function mount(deps: MountDeps): Promise<App | null> {
   const strings = deps.strings ?? en;
   const root = deps.root;
@@ -154,8 +171,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     shell: platform.shell,
     // The factory receives the session boot just built, so the engine that
     // records a turn and the repository the UI reads are the same store.
-    engines: (persistence) => enginesFor({ settings: facadeStub(), http: platform.http, persistence }),
+    // The REAL settings facade, handed back by createApp once it has loaded
+    // them. This used to be a stub whose `get` returned undefined, captured by
+    // the engine at boot and never replaced -- so the engine address the user
+    // set was read, stored, and thrown away in favour of the hardcoded default.
+    engines: (persistence, settings) => enginesFor({ settings, http: platform.http, persistence }),
     settingDefs: SETTING_DEFS,
+    // The default when settings name none. createApp prefers the persisted
+    // `engineId` over this; passing it as a literal was ignoring the setting.
     engineId: "remote-http",
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),
@@ -202,9 +225,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     switch (intent.kind) {
       case "send":
         return submit();
-      case "stop":
-        await app.controller.stop();
+      case "stop": {
+        const notice = stopNotice(await app.controller.stop(), strings);
+        if (notice !== null) assertive.textContent = notice;
         return;
+      }
       case "approve":
         await app.controller.decide(intent.approvalId, intent.choice);
         return;
@@ -243,21 +268,6 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   });
 
   return app;
-}
-
-/** A settings facade before settings exist, used only to build the engine
- *  list at boot. Replaced by the real one immediately after. */
-function facadeStub() {
-  return {
-    get: () => undefined,
-    set: async () => false,
-    defs: () => SETTING_DEFS,
-    subscribe: () => () => {},
-    hasSecret: async () => false,
-    setSecret: async () => {},
-    clearSecret: async () => {},
-    secretsAreHardwareBacked: false,
-  };
 }
 
 // Auto-mount when loaded as a page, never when imported by a test.

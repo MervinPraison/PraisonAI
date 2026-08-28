@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createApp, type AppDeps } from "./boot.ts";
+import { chosenStringOr, createApp, type AppDeps } from "./boot.ts";
 import { selectEngine, type EngineChoice } from "./engines.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
@@ -324,4 +324,80 @@ test("the engine list cannot be built before the session exists", () => {
   };
   factory({ record: async () => null });
   assert.deepEqual(built, ["has-persistence"]);
+});
+
+// ---- settings the user actually set ----------------------------------------
+
+test("the engine factory is handed the REAL settings, not a stub", async () => {
+  // main.ts used to build the engine list with a stub whose `get` returned
+  // undefined for everything, and the engine closed over it at boot. Nothing
+  // rebuilt it -- the comment claiming it was "replaced by the real one
+  // immediately after" was simply false. So the engine address a user set was
+  // loaded from disk at boot and then thrown away in favour of the hardcoded
+  // default, with no error anywhere.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "settings", id: "app" },
+    JSON.stringify({ baseUrl: "https://my-engine.example.com" }),
+  );
+
+  let seen: string | undefined;
+  const engine = engineWith({ id: "scripted" });
+  const result = await createApp(deps({
+    storage,
+    settingDefs: [...DEFS, { key: "baseUrl", default: "http://127.0.0.1:8765" }],
+    engines: (_persistence, settings) => {
+      seen = settings.get("baseUrl") as string;
+      return [{ id: "scripted", create: () => engine }];
+    },
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(seen, "https://my-engine.example.com", "the engine was built with the stub's undefined");
+  if (result.ok) await result.app.dispose();
+});
+
+test("a persisted engineId is preferred over the caller's default", async () => {
+  // `engineId` is a declared setting with a `choices` list, and selecting one
+  // had no effect whatsoever: main.ts passed the literal "remote-http".
+  const storage = createFakeStorage();
+  await storage.write({ namespace: "settings", id: "app" }, JSON.stringify({ engineId: "second" }));
+
+  const first = engineWith({ id: "scripted" });
+  const second = engineWith({ id: "second" });
+  const result = await createApp(deps({
+    storage,
+    settingDefs: [{ key: "engineId", default: "scripted" }],
+    engineId: "scripted", // the caller's default
+    engines: () => [
+      { id: "scripted", create: () => first },
+      { id: "second", create: () => second },
+    ],
+  }));
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.app.engine.id, "second", "the persisted choice must win");
+  await result.app.dispose();
+});
+
+test("a settings DEFAULT never overrides the caller's explicit engineId", async () => {
+  // The pair, and the one that matters. `get()` returns the def's default for
+  // a key nobody ever set, which reads exactly like a deliberate choice --
+  // so reading it without `isSet` lets a default nobody chose outrank the
+  // engine the composition root actually asked for.
+  const result = await createApp(deps({ engineId: "nope" }));
+  assert.equal(result.ok, false, "an unset default must not rescue an unknown id");
+  if (result.ok) return;
+  assert.equal(result.reason, "unknown_engine");
+});
+
+test("chosenStringOr distinguishes a chosen value from a defaulted one", () => {
+  const facade = {
+    get: (k: string) => (k === "a" ? "chosen" : "defaulted"),
+    isSet: (k: string) => k === "a",
+  } as unknown as Parameters<typeof chosenStringOr>[0];
+
+  assert.equal(chosenStringOr(facade, "a", "fallback"), "chosen");
+  assert.equal(chosenStringOr(facade, "b", "fallback"), "fallback", "a default is not a choice");
 });

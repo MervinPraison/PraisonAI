@@ -51,6 +51,7 @@ export type SettingsUnsubscribe = () => void;
 
 export interface SettingsStore {
   get(key: string): SettingValue | undefined;
+  isSet(key: string): boolean;
   /** The definitions, so a screen renders from data rather than a hard-coded
    *  list that drifts the first time a setting is added. */
   defs(): readonly SettingDef[];
@@ -67,6 +68,11 @@ export interface SettingsStore {
 /** What ui/ receives: presence, never the value. */
 export interface SettingsFacade {
   get(key: string): SettingValue | undefined;
+  /** True only when the value came from storage or an accepted `set` -- never
+   *  for a def's default. A caller weighing a setting against its own explicit
+   *  argument needs this: `get` returns the default for an untouched key, which
+   *  is indistinguishable from a deliberate choice. */
+  isSet(key: string): boolean;
   set(key: string, value: SettingValue): Promise<boolean>;
   defs(): readonly SettingDef[];
   subscribe(cb: () => void): SettingsUnsubscribe;
@@ -128,6 +134,15 @@ export function createSettingsStore(
 ): SettingsStore {
   const byKey = new Map(defs.map((d) => [d.key, d]));
   const values = new Map<string, SettingValue>(defs.map((d) => [d.key, d.default]));
+  /** Keys whose value came from storage or from an accepted `set`, as opposed
+   *  to the def's default.
+   *
+   *  `get` cannot express the difference: it returns the default for a key
+   *  nobody has ever touched, which reads identically to a deliberate choice.
+   *  That matters wherever a caller has its own instruction to weigh -- a
+   *  DEFAULT must never outrank an explicit argument, or a setting nobody set
+   *  silently overrides the thing that asked. */
+  const chosen = new Set<string>();
 
   const persist = async (): Promise<void> => {
     await storage.write(STORAGE_KEY, JSON.stringify(plainOnly(values, byKey)));
@@ -143,6 +158,10 @@ export function createSettingsStore(
   return {
     get(key) {
       return values.get(key);
+    },
+
+    isSet(key) {
+      return chosen.has(key);
     },
 
     defs: () => defs,
@@ -163,6 +182,7 @@ export function createSettingsStore(
       if (validated === null) return false;
 
       values.set(key, validated);
+      chosen.add(key);
       await persist();
       notify();
       return true;
@@ -190,7 +210,10 @@ export function createSettingsStore(
           continue;
         }
         const validated = def.validate === undefined ? value : def.validate(value);
-        if (validated !== null) values.set(key, validated);
+        if (validated !== null) {
+          values.set(key, validated);
+          chosen.add(key);
+        }
       }
     },
 
@@ -217,6 +240,7 @@ export function createSettingsStore(
 export function facadeFor(store: SettingsStore, secrets: SecretsPort): SettingsFacade {
   return {
     get: (key) => store.get(key),
+    isSet: (key) => store.isSet(key),
     set: (key, value) => store.set(key, value),
     defs: () => store.defs(),
     subscribe: (cb) => store.subscribe(cb),
