@@ -332,3 +332,129 @@ test('Stop discards the queue rather than silently starting the next turn', asyn
   assert.equal(doc.querySelectorAll('.qrow').length, 0,
     'stopping a turn left the queue armed, so the next prompt runs unasked');
 });
+
+// ---- deleting a conversation --------------------------------------------
+// A DELETE the engine could not perform (read-only or synced data dir) must
+// not blank the open transcript: doing so is how a conversation closed on
+// screen and reappeared in the sidebar on the next refresh.
+async function bootWithDelete(deleteOk) {
+  const calls = [];
+  const dom = new JSDOM(HTML, {
+    runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
+    beforeParse(w) {
+      w.__TAURI__ = { core: { invoke: async () => ({ state: 'ready', port: PORT }) } };
+      w.fetch = async (url, opts = {}) => {
+        const method = opts.method || 'GET';
+        calls.push(`${method} ${String(url).replace(`http://127.0.0.1:${PORT}`, '')}`);
+        const u = String(url);
+        if (method === 'DELETE') {
+          return { ok: deleteOk, status: deleteOk ? 200 : 500,
+                   json: async () => ({ ok: deleteOk }), text: async () => '' };
+        }
+        const body =
+          u.includes('/chats/') ? { id: 'c1', title: 'Hi', messages: [
+              { role: 'user', content: 'hi' },
+              { role: 'assistant', content: '**hello**' }] }
+          : u.includes('/chats')  ? { chats: [{ id: 'c1', title: 'Hi', updated: 1, count: 2, project: '' }] }
+          : { ok: true, model: 'gpt-4o-mini', theme: 'system' };
+        return { ok: true, status: 200, json: async () => body, text: async () => '' };
+      };
+      w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+      w.navigator.clipboard = { writeText: async () => {} };
+      w.confirm = () => true; w.prompt = () => ''; w.alert = () => {};
+      Object.defineProperty(w.HTMLElement.prototype, 'scrollIntoView', { value() {} });
+    },
+  });
+  const { window } = dom;
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    if (!window.document.getElementById('p').disabled) break;
+  }
+  // The confirm dialog is a custom overlay, not window.confirm; auto-accept it.
+  window.askConfirm = async () => true;
+  return { doc: window.document, window, calls };
+}
+
+test('a failed DELETE keeps the open transcript rather than blanking it', async () => {
+  const { doc, window } = await bootWithDelete(false);
+  await settle();
+  // Open the conversation so the transcript has children and is the active id.
+  click(doc.querySelector('#chats .chat'));
+  await settle();
+  assert.ok(doc.getElementById('turns').children.length > 0, 'transcript did not open');
+  const before = doc.getElementById('turns').children.length;
+  click(doc.querySelector('#chats .chat .x'));
+  await settle();
+  assert.equal(doc.getElementById('turns').children.length, before,
+    'a delete the engine refused still blanked the open transcript');
+});
+
+test('a successful DELETE clears the open transcript', async () => {
+  const { doc, window } = await bootWithDelete(true);
+  await settle();
+  click(doc.querySelector('#chats .chat'));
+  await settle();
+  assert.ok(doc.getElementById('turns').children.length > 0, 'transcript did not open');
+  click(doc.querySelector('#chats .chat .x'));
+  await settle();
+  assert.equal(doc.getElementById('turns').children.length, 0,
+    'a successful delete left the deleted conversation on screen');
+});
+
+// ---- Clear-all with a partial failure ------------------------------------
+// The open transcript must follow storage, not the batch result: if the active
+// conversation was deleted but another one failed, the transcript must still be
+// blanked -- otherwise it lingers on screen while gone on disk.
+async function bootWithClear(failIds) {
+  const calls = [];
+  const dom = new JSDOM(HTML, {
+    runScripts: 'dangerously', resources: 'usable', url: ORIGIN + '/',
+    beforeParse(w) {
+      w.__TAURI__ = { core: { invoke: async () => ({ state: 'ready', port: PORT }) } };
+      w.fetch = async (url, opts = {}) => {
+        const method = opts.method || 'GET';
+        const path = String(url).replace(`http://127.0.0.1:${PORT}`, '');
+        calls.push(`${method} ${path}`);
+        const u = String(url);
+        if (method === 'DELETE') {
+          const id = path.split('/').pop();
+          const ok = !failIds.includes(id);
+          return { ok, status: ok ? 200 : 500, json: async () => ({ ok }), text: async () => '' };
+        }
+        const body =
+          u.includes('/chats/') ? { id: u.split('/').pop(), title: 'Hi', messages: [
+              { role: 'user', content: 'hi' },
+              { role: 'assistant', content: '**hello**' }] }
+          : u.includes('/chats')  ? { chats: [
+              { id: 'c1', title: 'One', updated: 2, count: 2, project: '' },
+              { id: 'c2', title: 'Two', updated: 1, count: 2, project: '' }] }
+          : { ok: true, model: 'gpt-4o-mini', theme: 'system' };
+        return { ok: true, status: 200, json: async () => body, text: async () => '' };
+      };
+      w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+      w.navigator.clipboard = { writeText: async () => {} };
+      w.confirm = () => true; w.prompt = () => ''; w.alert = () => {};
+      Object.defineProperty(w.HTMLElement.prototype, 'scrollIntoView', { value() {} });
+    },
+  });
+  const { window } = dom;
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    if (!window.document.getElementById('p').disabled) break;
+  }
+  window.askConfirm = async () => true;
+  return { doc: window.document, window, calls };
+}
+
+test('clear-all blanks the active transcript even when another delete fails', async () => {
+  const { doc, window } = await bootWithClear(['c2']);
+  await settle();
+  // Open c1 so it is the active transcript; c2's delete will fail.
+  click(doc.querySelector('#chats .chat'));
+  await settle();
+  assert.ok(doc.getElementById('turns').children.length > 0, 'transcript did not open');
+  window.runAction({ action: 'clear' });
+  await settle();
+  assert.equal(doc.getElementById('turns').children.length, 0,
+    'the active conversation was deleted from storage but its transcript stayed on screen');
+});

@@ -1043,7 +1043,9 @@ async function refreshChats(){
         ev.stopPropagation();
         if(CFG.confirm_delete!==false && !await askConfirm(
              `Delete \u201c${c.title}\u201d? This cannot be undone.`)) return;
-        await fetch(`http://127.0.0.1:${PORT}/chats/${c.id}`,{method:'DELETE'});
+        const r=await fetch(`http://127.0.0.1:${PORT}/chats/${c.id}`,{method:'DELETE'})
+                  .catch(()=>null);
+        if(!r||!r.ok){ toast('Could not delete that conversation.'); return; }
         if(c.id===chatId){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
         refreshChats();
       };
@@ -1924,8 +1926,20 @@ async function runAction(def){
     closeOverlay();
   } else if(def.action==='clear'){
     const {chats}=await (await fetch('http://127.0.0.1:'+PORT+'/chats')).json();
-    for(const c of chats) await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id,{method:'DELETE'});
-    chatId=rid(); turns.innerHTML=''; syncEmpty(); refreshChats(); closeOverlay();
+    let failed=0, activeGone=false;
+    for(const c of chats){
+      const r=await fetch('http://127.0.0.1:'+PORT+'/chats/'+c.id,{method:'DELETE'})
+                .catch(()=>null);
+      if(!r||!r.ok) failed++;
+      else if(c.id===chatId) activeGone=true;
+    }
+    // The open transcript follows storage, not the batch result: if the active
+    // conversation was one of the deletes that succeeded, blank it even when a
+    // *different* one failed -- otherwise it lingers on screen while gone on disk.
+    if(activeGone){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
+    if(failed){ toast(`Could not delete ${failed} conversation(s).`); refreshChats(); closeOverlay(); return; }
+    if(!activeGone){ chatId=rid(); turns.innerHTML=''; syncEmpty(); }
+    refreshChats(); closeOverlay();
   } else if(def.action==='reveal'){
     const where=await actualDataFolder();
     await navigator.clipboard.writeText(where);

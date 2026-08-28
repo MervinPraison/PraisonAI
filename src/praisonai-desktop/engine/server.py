@@ -1606,8 +1606,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             _chat_path(self.path.rsplit("/", 1)[-1]).unlink(missing_ok=True)
-        except (OSError, ValueError):
-            pass
+        except ValueError as exc:
+            self._json({"ok": False, "error": str(exc)}, 400)
+            return
+        except OSError as exc:
+            # Reporting a delete that did not happen is how a conversation
+            # closed on screen and was back in the sidebar on reopen.
+            self._json({"ok": False, "error": str(exc)}, 500)
+            return
         self._json({"ok": True})
 
     def do_POST(self):
