@@ -189,3 +189,14 @@ test("every route has a title, so no screen's heading is blank", () => {
   for (const title of titles) assert.notEqual(title.trim(), "");
   assert.equal(new Set(titles).size, 4);
 });
+
+test("a titled chat row announces its title, and an untitled one says so", () => {
+  // `row.title === ""` -> `!== ""` survived, inverting both directions at once:
+  // a real title announced as "Untitled", and an untitled row announced as an
+  // EMPTY accessible name. A nameless row reads as just "button" and cannot be
+  // told apart from the one above it, which is what this function exists to
+  // prevent -- the comment two lines above says so.
+  assert.equal(chatRowName(en, { kind: "chat", id: "c1", title: "Quarterly plan" } as never), "Quarterly plan");
+  assert.equal(chatRowName(en, { kind: "chat", id: "c1", title: "" } as never), en.untitled);
+  assert.notEqual(chatRowName(en, { kind: "chat", id: "c1", title: "" } as never), "", "a row must never be nameless");
+});
