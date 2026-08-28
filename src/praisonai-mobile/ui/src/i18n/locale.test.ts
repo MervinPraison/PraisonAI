@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canonicalise, direction, isRtl, logicalInsets, resolveLocale } from "./locale.ts";
+import { canonicalise, direction, isRtl, logicalInsets, resolveLocale, directionFromTables } from "./locale.ts";
 
 test("a regional tag resolves to the base language rather than to nothing", () => {
   // THE BUG: `supported.includes("en-GB")` is false, so a British user gets the
@@ -80,4 +80,62 @@ test("physical insets map onto logical edges, and only swap for RTL", () => {
   // button's clearance on the wrong side of an Arabic screen.
   assert.deepEqual(logicalInsets("ltr", 12, 34), { startPx: 12, endPx: 34 });
   assert.deepEqual(logicalInsets("rtl", 12, 34), { startPx: 34, endPx: 12 });
+});
+
+// ---- the degraded host: no Intl.Locale.textInfo -----------------------------
+//
+// `direction()` is `directionFromIntl(tag) ?? directionFromTables(tag)`, and
+// the test host is a Node with full ICU where the first half always answers.
+// So the second half -- the branch that runs on an older Android WebView --
+// never ran under test, and a mutation sweep found five indistinguishable
+// mutations in it. These call it directly.
+
+test("the fallback tables lay out the RTL languages right to left", () => {
+  // Mutating the RTL_LANGUAGES membership test made Arabic, Hebrew, Farsi and
+  // Urdu render LTR on exactly the devices most likely to hit this path.
+  for (const tag of ["ar", "he", "fa", "ur", "ps", "sd"]) {
+    assert.equal(directionFromTables(tag), "rtl", `${tag} must be rtl`);
+  }
+});
+
+test("the fallback tables lay out everything else left to right", () => {
+  // The pair. A table that answered "rtl" for everything passes the test above
+  // and makes an English UI unusable, which locale.ts calls out as the
+  // asymmetry that decides the default.
+  for (const tag of ["en", "fr", "ja", "zh-Hans", "ru", "hi", "tr"]) {
+    assert.equal(directionFromTables(tag), "ltr", `${tag} must be ltr`);
+  }
+});
+
+test("a script subtag beats the language, in both directions", () => {
+  // `az` and `ku` are LTR languages written in an RTL script, and `ar` and `ks`
+  // are RTL languages written in an LTR one. Dropping the title-casing of the
+  // script subtag made the first pair render LTR; changing the four-letter
+  // length test made the second pair render RTL.
+  assert.equal(directionFromTables("az-Arab"), "rtl", "an RTL script wins over an LTR language");
+  assert.equal(directionFromTables("ku-Arab"), "rtl");
+  assert.equal(directionFromTables("ar-Latn"), "ltr", "an LTR script wins over an RTL language");
+  assert.equal(directionFromTables("ks-Deva"), "ltr");
+});
+
+test("the script subtag is matched case-insensitively", () => {
+  // A wire tag is not guaranteed to be canonically cased.
+  assert.equal(directionFromTables("az-arab"), "rtl");
+  assert.equal(directionFromTables("az-ARAB"), "rtl");
+});
+
+test("a region subtag is not mistaken for a script", () => {
+  // Regions are two letters or three digits; scripts are four letters. Reading
+  // a region as a script would decide direction from the wrong subtag.
+  assert.equal(directionFromTables("ar-EG"), "rtl", "a region must not override the language");
+  assert.equal(directionFromTables("en-US"), "ltr");
+  assert.equal(directionFromTables("ar-001"), "rtl");
+});
+
+test("the fallback never throws, whatever it is handed", () => {
+  // It is the total half of a total function: `direction()` promises to always
+  // answer, and this is what it falls back to.
+  for (const tag of ["", "-", "x", "en_US", "!!!", "a-b-c-d-e"]) {
+    assert.doesNotThrow(() => directionFromTables(tag), `threw on ${JSON.stringify(tag)}`);
+  }
 });
