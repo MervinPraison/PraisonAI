@@ -437,3 +437,24 @@ test("a decoder refusal AFTER a turn ended reaches the next turn, not the last o
     "a refusal in the gap between turns must not be discarded with the old turn",
   );
 });
+
+test("text after a tool call keeps the tool card between the two paragraphs", () => {
+  // `blocks.slice(0, -1)` -> `slice(0, -2)` survived: appending to the trailing
+  // text block dropped the block BEFORE it as well. Any answer that keeps
+  // talking after a tool call loses the tool row and its output entirely --
+  // the user sees two paragraphs and no evidence a tool ever ran.
+  let s = initialTurn;
+  s = apply(s, { type: "start", msgId: "m1", runId: "r1" });
+  s = apply(s, { type: "delta", msgId: "m1", text: "Let me check. " });
+  s = apply(s, { type: "tool_call", msgId: "m1", callId: "c1", name: "ls", args: {} });
+  s = apply(s, { type: "tool_result", msgId: "m1", callId: "c1", name: "ls", ok: true, output: "a.txt", seconds: 0.2 });
+  s = apply(s, { type: "delta", msgId: "m1", text: "There is " });
+  s = apply(s, { type: "delta", msgId: "m1", text: "one file." });
+
+  assert.deepEqual(
+    s.blocks.map((b) => b.kind),
+    ["text", "tool", "text"],
+    "the tool card must survive text arriving after it",
+  );
+  assert.equal(s.text, "Let me check. There is one file.");
+});

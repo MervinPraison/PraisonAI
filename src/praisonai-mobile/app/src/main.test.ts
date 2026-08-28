@@ -533,3 +533,24 @@ test("no chat id the app sends is ever the placeholder", async () => {
   assert.equal(new Set(ids).size, 3, `three conversations must have three ids: ${ids.join(", ")}`);
   app?.dispose();
 });
+
+test("the Send button's LABEL and its action agree", async () => {
+  // Transposing `? actionStop : actionSend` survived, because the line below
+  // sets `dataset.action` and is untouched: the button reads "Send" while the
+  // turn streams, and tapping it stops the run. Label and behaviour disagree,
+  // and nothing in the suite read the label.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () => held([["start", { msg_id: "m1", run_id: "r1" }], ["delta", { msg_id: "m1", text: "..." }]]));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const button = () => dom.find((n) => n.dataset["action"] === "send" || n.dataset["action"] === "stop");
+  assert.equal(button()?.textContent, en.actionSend, "idle must READ Send");
+
+  submit(dom, "hello");
+  await settle();
+
+  const live = button();
+  assert.equal(live?.dataset["action"], "stop");
+  assert.equal(live?.textContent, en.actionStop, "a streaming turn must READ Stop, not just behave as Stop");
+  app?.dispose();
+});

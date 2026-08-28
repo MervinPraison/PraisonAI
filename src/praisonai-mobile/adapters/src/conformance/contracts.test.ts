@@ -381,6 +381,64 @@ test("the tauri shell forwards the URL it validated, not the one it was given", 
   });
 });
 
+test("a native safe-area payload carrying only the edges that moved is honoured", () => {
+  // `coerceInsets`'s guard is "return null only if EVERY edge is absent"
+  // (`&&`). Flipping it to `||` -- require all four -- survived, because the
+  // shared contract can only emit a FULL SafeAreaInsets; the harness has no way
+  // to express a partial payload, so nothing could reach this branch.
+  //
+  // A native side that sends only what changed would have every event
+  // discarded, and the insets would stay at whatever the first CSS read gave
+  // them: the composer sits under the home indicator for the life of the app.
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, insetSource: cssSource({}) });
+
+  probe.emit("safe-area-changed", { bottom: 34 });
+  assert.equal(shell.insets.bottom, 34, "a partial payload must be applied, not discarded");
+
+  probe.emit("safe-area-changed", { top: 47 });
+  assert.equal(shell.insets.top, 47);
+});
+
+test("a safe-area event with no edges at all falls back to the CSS snapshot", () => {
+  // The pair, and the reason the guard exists: an empty or unrecognised
+  // payload means "re-read the CSS", not "every inset is zero". Returning
+  // zeroes instead slides the composer under the home indicator.
+  const probe = probeBridge();
+  const shell = createTauriShell({
+    bridge: probe.bridge,
+    insetSource: cssSource({ "--safe-area-inset-bottom": "34px" }),
+  });
+
+  probe.emit("safe-area-changed", {});
+  assert.equal(shell.insets.bottom, 34, "an empty payload must not zero the insets");
+});
+
+test("the tauri shell does not republish an unchanged safe-area payload", () => {
+  // Dropping `right` from `sameInsets` survived, and so did removing the whole
+  // comparison. This is a Tauri-only optimisation -- the fake and web shells
+  // republish -- so it belongs here rather than in the shared contract, which
+  // is why nothing covered it.
+  //
+  // Without the dedupe, every frame of a rotation relayouts. With `right`
+  // missing from it, a landscape notch appearing on the right is deduped away
+  // as "no change" and content sits under it.
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, insetSource: cssSource({}) });
+
+  probe.emit("safe-area-changed", { top: 47, right: 0, bottom: 34, left: 0 });
+  let published = 0;
+  const stop = shell.onInsetsChanged(() => void published++);
+
+  probe.emit("safe-area-changed", { top: 47, right: 0, bottom: 34, left: 0 });
+  assert.equal(published, 0, "an identical payload must not republish");
+
+  probe.emit("safe-area-changed", { top: 47, right: 44, bottom: 34, left: 0 });
+  assert.equal(published, 1, "a change on the right edge alone must publish");
+  assert.equal(shell.insets.right, 44);
+  stop();
+});
+
 describeShellContract("fake shell", fakeHarness);
 describeShellContract("tauri shell", tauriHarness);
 describeShellContract("web shell", webHarness);
@@ -1089,7 +1147,7 @@ test("a contract cannot quietly shrink", () => {
   assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
   assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
-  assert.ok(casesFor("shell") >= 35, `the shell contract shrank to ${casesFor("shell")} cases`);
+  assert.ok(casesFor("shell") >= 36, `the shell contract shrank to ${casesFor("shell")} cases`);
 
   // The break table needs a floor of its own. Deleting a row from
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only

@@ -499,4 +499,20 @@ export function describeShellContract(
     );
   });
 
+  test(`${name}: a safe-area event carrying only the edges that changed is honoured`, async () => {
+    // `coerceInsets` requiring EVERY edge (`&&` -> `||`) survived: a native
+    // payload with only the edge that moved is discarded whole, and the insets
+    // stay at their stale values -- the composer sits under the home indicator
+    // after a rotation. And dropping `right` from the dedupe survived too, so a
+    // landscape notch appearing on the right was deduped away as "no change".
+    const { shell, emitInsets } = await make();
+    emitInsets({ top: 47, right: 0, bottom: 34, left: 0 });
+    assert.equal(shell.insets.bottom, 34);
+
+    // Only the right edge moves -- rotating into a notch.
+    emitInsets({ top: 0, right: 44, bottom: 21, left: 47 });
+    assert.equal(shell.insets.right, 44, "an inset change on the right edge must not be deduped away");
+    assert.equal(shell.insets.top, 0, "and the other edges must follow the same event");
+  });
+
 }
