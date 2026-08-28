@@ -77,6 +77,12 @@ await writeFile(
 const HERE = resolve(import.meta.dirname, "..");
 
 let output = "";
+/** Did the compiler actually run? A checker that reports a clean pass because
+ *  it never executed is worse than no checker -- this file's own header says
+ *  so. With `npx` off PATH the throw was `spawn npx ENOENT`, whose message
+ *  contains no "parity.ts", so the drift filter below found nothing and the
+ *  run printed success. */
+let compilerRan = false;
 try {
   // Run from THIS package: it has typescript, and praisonai-ts's own
   // dependencies are neither needed nor installable (see the header).
@@ -85,8 +91,21 @@ try {
     "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler",
     file,
   ], { cwd: HERE });
+  compilerRan = true; // exit 0: tsc ran and found nothing to say
 } catch (error) {
-  output = error.stdout || error.message || "";
+  output = error.stdout || "";
+  // A tsc that genuinely ran and failed prints diagnostics. A spawn failure,
+  // a missing binary or a killed process prints none.
+  compilerRan = /error TS\d+/.test(output);
+  if (!compilerRan) {
+    await rm(dir, { recursive: true, force: true });
+    console.error(
+      "upstream-parity: FAILED -- the typechecker did not run, so NOTHING was checked.\n" +
+      `  ${error.message || "no diagnostics and a non-zero exit"}\n` +
+      "  This is not a pass. Fix the invocation rather than trusting the green.",
+    );
+    process.exit(1);
+  }
 }
 
 // Only errors AT the generated file are drift. An assignability failure always
