@@ -53,6 +53,12 @@ class SQLiteConversationStore(_SQLiteConversationStoreBase):
         self.table_prefix = table_prefix
         self._check_same_thread = check_same_thread
         self._local = threading.local()
+        # Track every thread-local connection so close() can drain them all.
+        # threading.local() is per-thread by definition, so without this the
+        # caller thread's close() would leak every other worker's connection
+        # (fd + SQLite memory arena) in a long-lived thread pool.
+        self._conns_lock = threading.Lock()
+        self._conns: list[sqlite3.Connection] = []
         
         if auto_create_tables:
             self._create_tables(self._get_conn())
@@ -60,12 +66,15 @@ class SQLiteConversationStore(_SQLiteConversationStoreBase):
     def _get_conn(self) -> sqlite3.Connection:
         """Get thread-local connection."""
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            self._local.conn = sqlite3.connect(
+            conn = sqlite3.connect(
                 self.path,
                 check_same_thread=self._check_same_thread
             )
-            self._local.conn.execute("PRAGMA foreign_keys = ON")
-            self._local.conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+            with self._conns_lock:
+                self._conns.append(conn)
         return self._local.conn
     
     @contextmanager
@@ -83,7 +92,30 @@ class SQLiteConversationStore(_SQLiteConversationStoreBase):
             raise
     
     def close(self) -> None:
-        """Close the store."""
-        if hasattr(self._local, "conn") and self._local.conn:
-            self._local.conn.close()
+        """Close the store, draining every thread's connection.
+
+        Closes all tracked connections (not just the caller thread's slot) so a
+        ``store.close()`` from the main thread does not leak the N-1 worker
+        connections opened across a thread pool.
+
+        When ``check_same_thread=True`` a connection created on another thread
+        cannot be closed from here — SQLite raises ``ProgrammingError``. Such a
+        connection is *kept* in the tracking list (not silently dropped) so it
+        stays reachable for a later ``close()`` from its owning thread instead
+        of leaking untracked. Connections that close cleanly are removed.
+        """
+        with self._conns_lock:
+            unclosed: list[sqlite3.Connection] = []
+            for conn in self._conns:
+                try:
+                    conn.close()
+                except sqlite3.ProgrammingError:
+                    # Thread-affine (check_same_thread=True) connection owned by
+                    # another thread — keep it tracked so its owner can close it.
+                    unclosed.append(conn)
+                except sqlite3.Error:
+                    pass
+            self._conns[:] = unclosed
+        # Best-effort clear of the caller's own thread-local slot.
+        if hasattr(self._local, "conn"):
             self._local.conn = None

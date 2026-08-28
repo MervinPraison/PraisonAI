@@ -534,7 +534,8 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before async retry after timeout...")
-                    await asyncio.sleep(wait_time)
+                    if await self._sleep_or_stop(wait_time):
+                        return
             except Exception as e:
                 last_exc = e
                 logger.error(f"Async agent execution failed on attempt {attempt + 1}: {e}")
@@ -542,7 +543,8 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before async retry...")
-                    await asyncio.sleep(wait_time)
+                    if await self._sleep_or_stop(wait_time):
+                        return
         
         async with self._stats_lock:
             self._failure_count += 1
@@ -553,7 +555,26 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             else RuntimeError(f"Failed after {max_retries} attempts")
         )
         await asyncio.to_thread(self._update_state_if_daemon)
-    
+
+    async def _sleep_or_stop(self, wait_time: float) -> bool:
+        """Interruptible retry backoff.
+
+        Mirrors the sync scheduler's ``self._stop_event.wait(wait_time)`` and
+        the scheduled-run sleep elsewhere in this file: waits ``wait_time``
+        seconds but returns immediately if ``stop()`` is called, so a graceful
+        shutdown is never held hostage for the full backoff ``cap``.
+
+        Returns ``True`` if stop() was requested during the wait.
+        """
+        if self._stop_event is None:
+            await asyncio.sleep(wait_time)
+            return False
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=wait_time)
+            return True  # event fired → stop requested
+        except asyncio.TimeoutError:
+            return False  # normal backoff completed
+
     async def execute_once(self) -> Any:
         """
         Execute agent immediately (one-time execution).
