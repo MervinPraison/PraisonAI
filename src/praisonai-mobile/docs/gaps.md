@@ -384,8 +384,16 @@ the mechanism that notices the renderer cannot keep up, and it never runs. And
 a module with its own tuned constants that never executes will read as load-
 bearing to the next person who changes pacing.
 
-Fix it by wiring the tick's publish through the gate, or delete the module and
-its constants. Do not leave it looking wired.
+Fix it by giving the gate a path it actually governs, or delete the module and
+its constants. NOT by gating the tick's publish -- that frame exists precisely
+because nothing has painted for `maxDelayMs`, so gating it reintroduces the
+answer stall the tick was added to prevent (`controller.ts` says as much at its
+call site). The gate already sits on the delta path
+(`if (frames.length > 0 && gate(streamed)) publish()`); it is unreachable only
+because the coalescer's flush tick drains the buffer first, so `push()` rarely
+yields a frame for the gate to weigh. Backpressure, if it is wanted, belongs
+there -- on the frames the coalescer does emit -- not on the tick that exists to
+break stalls. Do not leave it looking wired.
 
 Four settings are declared and not yet consumed by anything: `model`,
 `temperature`, `showReasoning` and `showDiagnostics`. That is expected — they
