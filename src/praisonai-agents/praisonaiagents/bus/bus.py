@@ -63,6 +63,9 @@ class EventBus:
         self._lock = threading.RLock()
         self._event_history: List[Event] = []
         self._max_history = 1000
+        # Durable sinks (e.g. SqliteEventLog). Opt-in: a bare Agent() attaches
+        # none, preserving the zero-overhead in-memory path.
+        self._sinks: List[Any] = []
     
     def subscribe(
         self,
@@ -169,8 +172,9 @@ class EventBus:
         Returns:
             The published Event object
         """
-        # Fast path: if no subscribers, return a minimal event without expensive operations
-        if not self._subscribers:
+        # Fast path: if no subscribers and no durable sinks, return a minimal
+        # event without expensive operations.
+        if not self._subscribers and not self._sinks:
             # Convert EventType enum to string
             type_str = event_type.value if isinstance(event_type, EventType) else event_type
             return Event(
@@ -203,6 +207,10 @@ class EventBus:
             The published event
         """
         logger.debug(f"Publishing event: {event.type}")
+        
+        # Durable persistence first (best-effort): a durable sink must receive
+        # the event even when there are no in-memory subscribers.
+        self._dispatch_to_sinks(event)
         
         # Fast path: if no subscribers, skip expensive work
         if not self._subscribers:
@@ -259,8 +267,9 @@ class EventBus:
         """
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
-        # Fast path: if no subscribers, return a minimal event without expensive operations
-        if not self._subscribers:
+        # Fast path: if no subscribers and no durable sinks, return a minimal
+        # event without expensive operations.
+        if not self._subscribers and not self._sinks:
             return Event(
                 type=type_str,
                 data=data or {},
@@ -276,6 +285,13 @@ class EventBus:
         )
         
         logger.debug(f"Publishing async event: {event.type}")
+        
+        # Durable persistence first (best-effort).
+        self._dispatch_to_sinks(event)
+        
+        # Fast path: if no subscribers, skip expensive work
+        if not self._subscribers:
+            return event
         
         # Store in history
         with self._lock:
@@ -337,6 +353,54 @@ class EventBus:
         """Remove all subscribers."""
         with self._lock:
             self._subscribers.clear()
+    
+    def attach_sink(self, sink: Any) -> None:
+        """Attach a durable sink that persists every published event.
+        
+        A sink is any object with an ``append(event)`` method (e.g.
+        :class:`~praisonaiagents.bus.event_log.SqliteEventLog`). Sinks receive
+        every event regardless of subscriber filters, and their failures are
+        swallowed so a full/slow log never breaks the originating turn.
+        
+        Args:
+            sink: Object exposing ``append(event: Event) -> None``.
+        """
+        with self._lock:
+            if sink not in self._sinks:
+                self._sinks.append(sink)
+    
+    def detach_sink(self, sink: Any) -> bool:
+        """Detach a previously attached sink.
+        
+        Args:
+            sink: The sink object to remove.
+        
+        Returns:
+            True if the sink was attached and removed, False otherwise.
+        """
+        with self._lock:
+            try:
+                self._sinks.remove(sink)
+                return True
+            except ValueError:
+                return False
+    
+    @property
+    def has_sinks(self) -> bool:
+        """Check if there are any durable sinks (lock-free for performance)."""
+        return bool(self._sinks)
+    
+    def _dispatch_to_sinks(self, event: Event) -> None:
+        """Best-effort durable persistence: never raises into the caller."""
+        if not self._sinks:
+            return
+        with self._lock:
+            sinks = list(self._sinks)
+        for sink in sinks:
+            try:
+                sink.append(event)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(f"Error in event sink: {e}")
     
     @property
     def subscriber_count(self) -> int:
