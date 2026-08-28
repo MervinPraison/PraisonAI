@@ -236,6 +236,79 @@ def test_stopping_something_already_finished_says_so(fake):
 
 
 # --------------------------------------------------------------------------- #
+# resolve_workdir must let the remote shell expand ~
+# --------------------------------------------------------------------------- #
+def test_resolve_workdir_expands_tilde_instead_of_creating_a_dir_named_tilde(
+        tmp_path, monkeypatch):
+    """A `~` workdir must be expanded by the shell, not created literally.
+
+    Quoting the workdir stopped `~` expanding, so `mkdir` made a directory
+    literally named `~` and every derived path landed there. Run the commands
+    locally through a real shell rooted at a fake HOME and assert the effect:
+    no directory named `~`, and the resolved path carries no `~`.
+    """
+    import subprocess as _sp
+
+    from praisonai_train.remote.runner import RemoteHost, _Completed
+
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class _LocalHost(RemoteHost):
+        def run(self, command, timeout=None):
+            proc = _sp.run(
+                ["sh", "-c", command], capture_output=True, text=True,
+                cwd=str(home), env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            )
+            return _Completed(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+    host = _LocalHost(alias="local", workdir="~/x")
+    resolved = host.resolve_workdir()
+
+    assert not (home / "~").exists(), "a directory literally named '~' was created"
+    assert "~" not in resolved, f"the resolved workdir still contains '~': {resolved!r}"
+    assert (home / "x").is_dir(), "the expanded workdir was not created"
+
+
+def test_resolve_workdir_rejects_a_shell_unsafe_workdir(tmp_path):
+    from praisonai_train.remote.runner import RemoteError, RemoteHost
+
+    host = RemoteHost(alias="local", workdir="~/x; rm -rf /")
+    with pytest.raises(RemoteError):
+        host.resolve_workdir()
+
+
+def test_resolve_workdir_treats_a_leading_hyphen_as_a_path_not_an_option(
+        tmp_path):
+    """A workdir starting with `-` must reach mkdir/cd as a path, not a flag.
+
+    `-rf` passes the character-class check, so without a `--` guard the remote
+    `mkdir`/`cd` would parse it as options and either fail or misbehave. Run the
+    commands through a real shell and assert the directory was created.
+    """
+    import subprocess as _sp
+
+    from praisonai_train.remote.runner import RemoteHost, _Completed
+
+    work = tmp_path / "work"
+    work.mkdir()
+
+    class _LocalHost(RemoteHost):
+        def run(self, command, timeout=None):
+            proc = _sp.run(
+                ["sh", "-c", command], capture_output=True, text=True,
+                cwd=str(work), env={"HOME": str(work), "PATH": "/usr/bin:/bin"},
+            )
+            return _Completed(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+    host = _LocalHost(alias="local", workdir="-rf")
+    resolved = host.resolve_workdir()
+
+    assert (work / "-rf").is_dir(), "a leading-hyphen workdir was not created"
+    assert resolved.endswith("-rf"), f"unexpected resolved workdir: {resolved!r}"
+
+
+# --------------------------------------------------------------------------- #
 # The module has to exist
 # --------------------------------------------------------------------------- #
 def test_the_real_runner_imports():
