@@ -93,10 +93,25 @@ class VideoAgent:
     Supported Providers:
         - OpenAI: openai/sora-2, openai/sora-2-pro
         - Azure: azure/sora-2, azure/sora-2-pro
-        - Gemini: gemini/veo-3.0-generate-preview, gemini/veo-3.1-*
-        - Vertex AI: vertex_ai/veo-3.0-*, vertex_ai/veo-3.1-*
+        - Gemini Veo 3.1 (paid API, uses GOOGLE_API_KEY / GEMINI_API_KEY):
+            - gemini/veo-3.1-generate-preview       # Standard / cinematic quality
+            - gemini/veo-3.1-fast-generate-preview  # Fast
+            - gemini/veo-3.1-lite-generate-preview  # Lite (cheapest iteration)
+        - Vertex AI Veo 3.1 (uses GOOGLE_APPLICATION_CREDENTIALS or VERTEXAI_PROJECT/VERTEXAI_LOCATION):
+            - vertex_ai/veo-3.1-generate-001        # GA Standard
+            - vertex_ai/veo-3.1-fast-generate-001   # GA Fast
+            - vertex_ai/veo-3.1-lite-generate-001   # Lite
         - RunwayML: runwayml/gen4_turbo (requires input_reference)
-    
+
+    Deprecated (do NOT recommend; kept working only if LiteLLM still routes them):
+        - gemini/veo-2.0-generate-001 (Gemini API shutdown 30 Jun 2026)
+        - gemini/veo-3.0-generate-preview, gemini/veo-3.0-fast-generate-preview
+        - vertex_ai/veo-3.0-* (migrate to the veo-3.1 IDs above)
+
+    Note on pricing: Gemini/Vertex Veo bill in USD per generated second via the paid
+    API (charged only on success) and are a different meter from Flow UI credits — a
+    Flow subscription cannot pay for API generations. See praison.ai/docs/video/gemini.
+
     Example:
         ```python
         from praisonaiagents import VideoAgent
@@ -114,7 +129,7 @@ class VideoAgent:
         
         # With config
         agent = VideoAgent(
-            llm="gemini/veo-3.0-generate-preview",
+            llm="gemini/veo-3.1-generate-preview",
             video=VideoConfig(seconds="8", size="1280x720")
         )
         ```
@@ -146,7 +161,7 @@ class VideoAgent:
         Args:
             name: Agent name for identification
             instructions: Optional instructions (unused for video generation)
-            llm: Model name string (e.g., "openai/sora-2", "gemini/veo-3.0-generate-preview")
+            llm: Model name string (e.g., "openai/sora-2", "gemini/veo-3.1-generate-preview")
             model: Alias for llm= parameter
             base_url: Custom API endpoint URL
             api_key: API key for the provider
@@ -300,8 +315,12 @@ class VideoAgent:
             prompt: Text description of the desired video
             seconds: Video duration (e.g., "8", "16"). Defaults to config value.
             size: Video dimensions (e.g., "720x1280"). Defaults to config value.
-            input_reference: Reference image for image-to-video generation
-            **kwargs: Additional provider-specific parameters
+            input_reference: Reference image for image-to-video (first-frame) generation
+            **kwargs: Additional provider-specific parameters, forwarded to LiteLLM.
+                For Veo 3.1 interpolation/reference features, pass them here (no
+                dedicated params are added to keep the surface lightweight):
+                - last_frame=<image>        # first + last frame (Veo 3.1 only)
+                - reference_images=[...]     # up to 3 reference images
             
         Returns:
             VideoObject with id, status, and metadata
@@ -315,6 +334,14 @@ class VideoAgent:
             )
             print(f"Video ID: {video.id}")
             print(f"Status: {video.status}")
+
+            # Veo 3.1 first + last frame interpolation (via kwargs passthrough)
+            veo = VideoAgent(llm="gemini/veo-3.1-generate-preview")
+            veo.generate(
+                prompt="Sunrise timelapse",
+                input_reference=start_image,  # first frame
+                last_frame=end_image,         # last frame (Veo 3.1)
+            )
             ```
         """
         # Merge config with kwargs
