@@ -689,5 +689,87 @@ class StreamProtocolVocabulary(unittest.TestCase):
         self.assertEqual(self._emitted_events(), self.EXPECTED)
 
 
+class LaunchAtLogin(unittest.TestCase):
+    """The toggle must persist what actually happened, not what was asked.
+
+    Registering a login item only works in the installed macOS .app bundle:
+    `set_launch_at_login` returns {"enabled": False} everywhere else -- every
+    Windows and Linux user, and any macOS user running from a checkout. The
+    handler used to save the *request* and merely attach the honest result to
+    the response, which nothing read. So the toggle rendered on, persisted, and
+    survived restarts while no login item existed anywhere.
+    """
+
+    def setUp(self):
+        import io
+
+        self.home = pathlib.Path(tempfile.mkdtemp(prefix="praison-launch-"))
+        self._data_dir = server.DATA_DIR
+        self._settings_path = server.SETTINGS_PATH
+        self._set = server.set_launch_at_login
+        server.DATA_DIR = self.home
+        server.SETTINGS_PATH = self.home / "settings.json"
+        self._io = io
+
+    def tearDown(self):
+        server.DATA_DIR = self._data_dir
+        server.SETTINGS_PATH = self._settings_path
+        server.set_launch_at_login = self._set
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _post_settings(self, patch):
+        """Drive the real /settings POST handler and return its JSON reply."""
+        body = json.dumps(patch).encode()
+
+        class FakeHandler(server.Handler):
+            def __init__(self):
+                self.path = "/settings"
+                self.headers = {"Content-Length": str(len(body))}
+                self.rfile = self._io_module.BytesIO(body)
+                self.wfile = self._io_module.BytesIO()
+
+            def send_response(self, *_a, **_k):
+                pass
+
+            def send_header(self, *_a, **_k):
+                pass
+
+            def end_headers(self):
+                pass
+
+        FakeHandler._io_module = self._io
+        handler = FakeHandler()
+        handler.do_POST()
+        raw = handler.wfile.getvalue()
+        return json.loads(raw) if raw else {}
+
+    def test_a_request_that_could_not_register_is_not_persisted_as_on(self):
+        # Stub the platform action to the answer every non-bundle host gives.
+        server.set_launch_at_login = lambda on: {
+            "ok": False, "enabled": False,
+            "message": "Only available in the installed app."}
+
+        reply = self._post_settings({"launch_at_login": True})
+
+        self.assertFalse(reply.get("launch_at_login"),
+                         "the toggle reported on though nothing was registered")
+        self.assertEqual(
+            reply.get("launch_at_login_result", {}).get("message"),
+            "Only available in the installed app.",
+            "the response dropped the explanation for why it did not stick")
+        self.assertFalse(
+            server.load_settings().get("launch_at_login"),
+            "the un-registered login item survived to the next launch")
+
+    def test_a_request_that_registered_is_persisted_as_on(self):
+        server.set_launch_at_login = lambda on: {"ok": True, "enabled": bool(on)}
+
+        reply = self._post_settings({"launch_at_login": True})
+
+        self.assertTrue(reply.get("launch_at_login"))
+        self.assertTrue(server.load_settings().get("launch_at_login"),
+                        "a real registration did not persist")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
