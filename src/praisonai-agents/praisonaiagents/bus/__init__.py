@@ -41,6 +41,8 @@ __all__ = [
     "Subscriber",
     "get_default_bus",
     "set_default_bus",
+    "EventLogProtocol",
+    "SqliteEventLog",
 ]
 
 _LAZY_IMPORTS = {
@@ -50,6 +52,8 @@ _LAZY_IMPORTS = {
     "Subscriber": ("praisonaiagents.bus.bus", "Subscriber"),
     "get_default_bus": ("praisonaiagents.bus.bus", "get_default_bus"),
     "set_default_bus": ("praisonaiagents.bus.bus", "set_default_bus"),
+    "EventLogProtocol": ("praisonaiagents.bus.event_log", "EventLogProtocol"),
+    "SqliteEventLog": ("praisonaiagents.bus.event_log", "SqliteEventLog"),
 }
 
 __getattr__ = create_lazy_getattr(_LAZY_IMPORTS, __name__)
