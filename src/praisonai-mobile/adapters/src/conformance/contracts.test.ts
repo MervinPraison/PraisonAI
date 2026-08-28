@@ -898,3 +898,26 @@ test("the web shell reports 0 when no keyboard is up", async () => {
   const fake = createFakeWindow();
   assert.equal(createWebShell(fake.window).keyboardHeightPx, 0);
 });
+
+test("a page opened pinch-zoomed is not mistaken for a keyboard at construction", async () => {
+  // Pinch-zoom shrinks the visual viewport exactly as a keyboard does, so the
+  // bare `innerHeight - viewport.height` seed would report a phantom keyboard
+  // on the first frame and push the composer up. `scale > 1` is what separates
+  // zoom from a keyboard. Reverting the guard makes this fail with a positive
+  // height.
+  const fake = createFakeWindow();
+  fake.setZoom(2);                       // zoomed BEFORE the shell is constructed
+  assert.equal(createWebShell(fake.window).keyboardHeightPx, 0);
+});
+
+test("zooming after construction does not report a phantom keyboard", async () => {
+  // The live path reads through the same function, so the guard holds for every
+  // frame and not just the first one.
+  const fake = createFakeWindow();
+  const shell = createWebShell(fake.window);
+  const seen: number[] = [];
+  shell.onKeyboardHeightChanged((px) => void seen.push(px));
+  fake.setZoom(2);
+  assert.equal(shell.keyboardHeightPx, 0);
+  assert.deepEqual(seen, [0]);
+});

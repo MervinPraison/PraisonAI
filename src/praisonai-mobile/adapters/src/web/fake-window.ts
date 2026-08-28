@@ -17,6 +17,10 @@ export interface FakeWindow {
   setInsets(insets: { top: number; right: number; bottom: number; left: number }): void;
   /** Shrink the visual viewport as a software keyboard does, and fire it. */
   setKeyboardHeight(px: number): void;
+  /** Pinch-zoom: raise `scale` and shrink the visual viewport as the browser
+   *  does, then fire it. A `scale` above 1 is what tells the shell this is zoom
+   *  and not a keyboard. */
+  setZoom(scale: number): void;
   setHidden(hidden: boolean): void;
   /** Fire `blur` / `focus`, the browser's inactive / active. */
   setFocused(focused: boolean): void;
@@ -36,6 +40,7 @@ export function createFakeWindow(): FakeWindow {
   let pushed = 0;
   const INNER_HEIGHT = 800;
   let viewportHeight = INNER_HEIGHT;
+  let scale = 1;
 
   const on = (map: Map<string, Set<(e?: unknown) => void>>) =>
     (type: string, cb: (e?: unknown) => void) => {
@@ -62,6 +67,9 @@ export function createFakeWindow(): FakeWindow {
       return {
         get height() {
           return viewportHeight;
+        },
+        get scale() {
+          return scale;
         },
         offsetTop: 0,
         addEventListener: on(vpListeners),
@@ -94,6 +102,13 @@ export function createFakeWindow(): FakeWindow {
     },
     setKeyboardHeight(px) {
       viewportHeight = INNER_HEIGHT - px;
+      fire(vpListeners, "resize");
+    },
+    setZoom(next) {
+      // Zooming in shrinks the visual viewport just as a keyboard does -- the
+      // difference the shell relies on is that `scale` rises above 1.
+      scale = next;
+      viewportHeight = INNER_HEIGHT / next;
       fire(vpListeners, "resize");
     },
     setHidden(next) {

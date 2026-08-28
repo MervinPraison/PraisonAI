@@ -271,6 +271,17 @@ mistake: **a mechanism existing is not the same as a mechanism working.**
   longer a way to obtain the engine list without being handed the thing engines
   write through. Enforced by the type, not by a comment.
 
+  SCOPE, stated so it is not read later as an oversight: only the in-process
+  `praisonai-ts` engine writes through this session. `remote-http` deliberately
+  does not, because the desktop server it talks to is the owner of that write
+  and the only thing that can report authoritative indices for its own store
+  (registry.ts). A reviewer flagged that a turn answered by the default remote
+  engine therefore leaves the *local* mobile session empty; that is true and
+  intended -- local mirroring of a server-owned transcript is a separate feature
+  (it needs a read-back from the server on connect), not part of closing this
+  wiring gap. What this gap was about -- the in-process engine's turn never
+  reaching disk -- is now closed and asserted end to end.
+
 - **Gap 5 was "PROPERTY ADDED, SNAPSHOT NOT SEEDED".** `keyboardHeightPx` was
   declared `= 0` and only ever updated by an event, so a component mounting
   while the keyboard was already up laid out at 0 for one frame and then
