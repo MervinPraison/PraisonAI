@@ -1638,18 +1638,39 @@ Your Goal: {self.goal}"""
             return None
         return self.fallback_models[fallback_index]
 
+    def _build_fallback_dispatcher(self, model):
+        """Build a throwaway dispatcher bound to a fallback ``model``.
+
+        The async fallback path passes the result to
+        ``_execute_unified_achat_completion(..., _dispatcher=...)`` for a single
+        retry so it NEVER mutates the shared ``self.llm`` /
+        ``self._unified_dispatcher``. Concurrent async turns on the same Agent
+        therefore keep dispatching on the original model with correct cost /
+        observability attribution — closing the ordinary-turn fallback race.
+        Returns ``None`` for custom-LLM agents (the custom client owns its own
+        model), which keeps that path on the shared dispatcher as before.
+        """
+        from ..llm import create_llm_dispatcher
+        if self._using_custom_llm and hasattr(self, 'llm_instance'):
+            return None
+        if not hasattr(self, '_openai_client') or self._openai_client is None:
+            from ..llm import get_openai_client
+            self._openai_client = get_openai_client(api_key=getattr(self, 'api_key', None))
+        return create_llm_dispatcher(openai_client=self._openai_client, model=model)
+
     def _get_model_fallback_lock(self):
         """Lazily create the per-instance lock guarding model-fallback swaps.
 
-        Agent-level fallback temporarily overrides ``self.llm`` /
-        ``self._unified_dispatcher`` on the shared instance for a single retry.
-        On a shared Agent serving concurrent turns, that mutate/restore window
-        (which spans a real ``await`` on the async path) would let another turn
-        read the wrong model. Serialising only the fallback window with this
-        dual (sync/async) lock closes that window while leaving normal,
-        non-fallback turns fully concurrent (they never acquire this lock).
-        Created on demand so no extra state is added for agents without
-        ``fallback_models``.
+        Async fallback now runs against a per-call throwaway dispatcher
+        (``_build_fallback_dispatcher``), so it does not mutate shared state and
+        ordinary async turns can never observe the fallback model. The sync
+        fallback path still recurses through the full ``_chat_completion``
+        wrapper (which reads ``self.llm`` for BEFORE_LLM hook attribution and
+        budget), so it temporarily overrides ``self.llm`` /
+        ``self._unified_dispatcher`` for a single retry. This dual (sync/async)
+        lock serialises that mutate/restore window; normal, non-fallback turns
+        never acquire it and stay fully concurrent. Created on demand so no
+        extra state is added for agents without ``fallback_models``.
         """
         lock = getattr(self, '_model_fallback_lock', None)
         if lock is None:
@@ -2296,37 +2317,28 @@ Your Goal: {self.goal}"""
                 if classification.backoff_seconds and classification.backoff_seconds > 0:
                     await asyncio.sleep(classification.backoff_seconds)
                 
-                # Temporarily override the model and clear dispatcher cache for
-                # this call. Hold the fallback lock across the mutate/restore +
-                # the awaited completion so a concurrent turn on a shared Agent
-                # can never read the wrong model while this turn is suspended.
-                # The lock is released before recursing into the async error
-                # handler (which re-enters this branch) so the non-reentrant
-                # asyncio.Lock can't deadlock; only fallback turns contend.
-                _retry_error = None
-                async with self._get_model_fallback_lock().async_lock():
-                    original_llm = self.llm
-                    original_dispatcher = getattr(self, '_unified_dispatcher', None)
-                    try:
-                        self.llm = next_model
-                        self._unified_dispatcher = None  # Force recreation with new model
-                        return await self._execute_unified_achat_completion(
-                            messages, temperature, tools, stream,
-                            reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events
-                        )
-                    except Exception as retry_error:
-                        _retry_error = retry_error
-                    finally:
-                        self.llm = original_llm
-                        self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
-                # Handle the retry failure outside the fallback lock so the
-                # recursive error handler can acquire it for the next model.
-                return await self._handle_async_llm_error(
-                    _retry_error, messages, temperature, tools, stream,
-                    reasoning_steps, task_name, task_description, task_id, response_format,
-                    stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
-                )
+                # Run this single retry against a throwaway dispatcher bound to
+                # the fallback model, passed per-call. This never mutates the
+                # shared self.llm / self._unified_dispatcher, so a concurrent
+                # async turn on this shared Agent keeps dispatching on the
+                # original model (correct cost / observability attribution) even
+                # while this turn is suspended on the await — no lock needed on
+                # the async path. Custom-LLM agents get None here and fall back
+                # to the shared dispatcher, matching prior behaviour.
+                _fallback_dispatcher = self._build_fallback_dispatcher(next_model)
+                try:
+                    return await self._execute_unified_achat_completion(
+                        messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events,
+                        _dispatcher=_fallback_dispatcher,
+                    )
+                except Exception as retry_error:
+                    return await self._handle_async_llm_error(
+                        retry_error, messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                    )
             else:
                 logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                 # Continue to error handling without retry
@@ -2534,29 +2546,43 @@ Your Goal: {self.goal}"""
         response_format=None,
         stream_callback=None,
         emit_events=True,
+        _dispatcher=None,
     ):
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
         
         This method provides a unified async dispatch for all LLM providers using
         composition for safety and maintainability.
+
+        ``_dispatcher`` lets the model-fallback path run a single retry against a
+        caller-supplied throwaway dispatcher WITHOUT mutating the shared
+        ``self.llm`` / ``self._unified_dispatcher``, so concurrent async turns on
+        the same Agent never observe another turn's fallback model.
         """
         from ..llm import create_llm_dispatcher
         
-        # Get or create unified dispatcher
-        if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
-            # Provider selection based on existing agent configuration
-            if self._using_custom_llm and hasattr(self, 'llm_instance'):
-                dispatcher = create_llm_dispatcher(llm_instance=self.llm_instance)
+        # Resolve the dispatcher for THIS call. A caller-supplied dispatcher
+        # (async model fallback) is used as-is and never cached onto the
+        # instance, so the shared cached dispatcher is left intact for
+        # concurrent turns.
+        dispatcher = _dispatcher
+        if dispatcher is None:
+            # Get or create the shared cached dispatcher
+            if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
+                # Provider selection based on existing agent configuration
+                if self._using_custom_llm and hasattr(self, 'llm_instance'):
+                    dispatcher = create_llm_dispatcher(llm_instance=self.llm_instance)
+                else:
+                    # Initialize OpenAI client if not present
+                    if not hasattr(self, '_openai_client') or self._openai_client is None:
+                        from ..llm import get_openai_client
+                        self._openai_client = get_openai_client(api_key=getattr(self, 'api_key', None))
+                    dispatcher = create_llm_dispatcher(openai_client=self._openai_client, model=self.llm)
+
+                # Cache the dispatcher
+                self._unified_dispatcher = dispatcher
             else:
-                # Initialize OpenAI client if not present
-                if not hasattr(self, '_openai_client') or self._openai_client is None:
-                    from ..llm import get_openai_client
-                    self._openai_client = get_openai_client(api_key=getattr(self, 'api_key', None))
-                dispatcher = create_llm_dispatcher(openai_client=self._openai_client, model=self.llm)
-            
-            # Cache the dispatcher
-            self._unified_dispatcher = dispatcher
+                dispatcher = self._unified_dispatcher
 
         # Pre-call budget guard (parity with sync _chat_completion). Bots and
         # other async callers route through here, not _chat_completion.
@@ -2612,7 +2638,7 @@ Your Goal: {self.goal}"""
         try:
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
-            final_response = await self._unified_dispatcher.achat_completion(
+            final_response = await dispatcher.achat_completion(
                 messages=messages,
                 tools=tools,
                 tool_choice=getattr(self, 'tool_choice', None),
