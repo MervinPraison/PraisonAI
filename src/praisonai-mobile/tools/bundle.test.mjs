@@ -241,3 +241,21 @@ test("a single fatal problem makes a bundle unshippable", () => {
   assert.equal(isShippable({ problems: ["one fatal problem"] }), false, "one problem is enough");
   assert.equal(isShippable({ problems: ["a", "b"] }), false);
 });
+
+test("a relative import that is external is not reported as a bare module", () => {
+  // Dropping `imported.path.startsWith(".")` survived. A relative path marked
+  // external then enters the bare map under the name "./chunk", and the gate
+  // starts reporting a module that does not exist -- or, worse, one whose
+  // first path segment collides with a forbidden builtin name.
+  const bare = classifyBareImports({
+    inputs: {
+      "app/src/main.ts": {
+        imports: [
+          { path: "./chunk.js", external: true, kind: "import-statement" },
+          { path: "node:crypto", external: true, kind: "import-statement" },
+        ],
+      },
+    },
+  });
+  assert.deepEqual([...bare.keys()], ["crypto"], "only the bare specifier is bare");
+});

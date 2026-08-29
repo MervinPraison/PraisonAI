@@ -356,3 +356,50 @@ test("the size budget and the webview targets are the values the gate claims", (
   assert.equal(SIZE_BUDGET_BYTES, 400 * 1024, "the budget is what makes a dependency a decision");
   assert.deepEqual(TARGETS, ["safari16", "chrome108"], "the WebView floor is the OS, not the current Chrome");
 });
+
+// ---- the allowlist glob is part of the gate, not a convenience -------------
+
+test("a single * does not cross a directory boundary", () => {
+  // `[^/]*` -> `.*` survived. `ui/*.ts` would then match `ui/sub/a.ts`, so
+  // every allowlist entry silently widens to cover subdirectories it was
+  // written to exclude -- and an allowlist that is broader than written is a
+  // rule that stopped applying.
+  assert.equal(matchesAllowlist("ui/*.ts", "ui/a.ts"), true);
+  assert.equal(matchesAllowlist("ui/*.ts", "ui/sub/a.ts"), false, "a single * must not cross /");
+  assert.equal(matchesAllowlist("ui/**/*.ts", "ui/sub/a.ts"), true, "** is the one that crosses");
+});
+
+test("a package named by a GLOB key is still constrained", () => {
+  // `externalAllowed` dropping `matchesAllowlist(name, pkg)` survived: a glob
+  // key like `@tauri-apps/plugin-*` stops matching, so the package falls
+  // through to "no rule" and is allowed from anywhere. The plugin imports the
+  // Tauri seam exists to contain become invisible.
+  const config = {
+    layers: { ui: { path: "ui/src", mayImport: [] }, adapters: { path: "adapters/src", mayImport: [] } },
+    externals: { "@tauri-apps/plugin-*": ["adapters/src/tauri"] },
+    governedRoots: ["ui", "adapters"],
+  };
+  const found = violations(
+    new Map([["ui/src/z.ts", ["@tauri-apps/plugin-haptics"]]]),
+    config,
+  );
+  assert.ok(
+    found.some((v) => v.specifier === "@tauri-apps/plugin-haptics"),
+    "a plugin imported from ui/ must be a violation",
+  );
+});
+
+test("the same package IS allowed from the path its rule names", () => {
+  // The pair: a rule that refused everywhere would pass the test above and
+  // make the real adapter unbuildable.
+  const config = {
+    layers: { adapters: { path: "adapters/src", mayImport: [] } },
+    externals: { "@tauri-apps/plugin-*": ["adapters/src/tauri"] },
+    governedRoots: ["adapters"],
+  };
+  const found = violations(
+    new Map([["adapters/src/tauri/haptics.ts", ["@tauri-apps/plugin-haptics"]]]),
+    config,
+  );
+  assert.deepEqual(found, []);
+});
