@@ -394,3 +394,82 @@ test("no public route can put a secret into the persisted file", () => {
     assert.match(written, /gpt-4o-mini/, "ordinary settings are still persisted");
   })();
 });
+
+// ---- what load() does with a file it did not write --------------------------
+//
+// A mutation audit found four survivors in this file. The store is the one
+// thing that reads a file a user can hand-edit, so every branch below is a
+// real input, not a hypothetical one.
+
+const KEY = { namespace: "settings" as const, id: "app" };
+
+/** Put a raw settings file on disk, bypassing the store's own writer. */
+async function plant(storage: ReturnType<typeof createFakeStorage>, raw: unknown): Promise<void> {
+  await storage.write(KEY, JSON.stringify(raw));
+}
+
+test("a non-scalar value in the file is refused, not stored", async () => {
+  // Dropping the typeof guard survived. A hand-edited file containing an
+  // object loads it straight into the store, and the settings screen renders
+  // the row as "[object Object]".
+  const { storage, secrets } = build();
+  await plant(storage, { model: { evil: 1 } });
+  const store = createSettingsStore(DEFS, storage, secrets);
+  await store.load();
+
+  assert.equal(store.get("model"), "gpt-4o-mini", "the default must survive a junk value");
+  assert.equal(store.isSet("model"), false, "and it must not count as the user's choice");
+});
+
+test("a value the validator rejects falls back to the default", async () => {
+  // `if (validated !== null)` -> unconditional survived: `temperature: "abc"`
+  // loads as null, and isSet then reports null as a deliberate choice.
+  const { storage, secrets } = build();
+  await plant(storage, { temperature: "abc" });
+  const store = createSettingsStore(DEFS, storage, secrets);
+  await store.load();
+
+  assert.equal(store.get("temperature"), 0.7, "a rejected value must not land in the store");
+  assert.equal(store.isSet("temperature"), false);
+});
+
+test("a value the validator ACCEPTS is kept -- the pair", async () => {
+  // Without this, a load() that stored nothing at all would pass both above.
+  const { storage, secrets } = build();
+  await plant(storage, { temperature: 1.5, model: "gpt-4o" });
+  const store = createSettingsStore(DEFS, storage, secrets);
+  await store.load();
+
+  assert.equal(store.get("temperature"), 1.5);
+  assert.equal(store.get("model"), "gpt-4o");
+  assert.equal(store.isSet("temperature"), true);
+});
+
+test("clearing a secret wakes the screen, exactly as storing one does", async () => {
+  // `clearSecret`'s notify() could be removed with a green suite -- only
+  // `setSecret`'s was tested. The user taps Clear, the key is gone, and the row
+  // still reads "configured" until something else forces a redraw.
+  const { store } = build();
+  const ref = { slot: "openai" as const, account: "default" };
+  await store.setSecret(ref, "sk-live-abc");
+
+  let woke = 0;
+  store.subscribe(() => { woke += 1; });
+  await store.clearSecret(ref);
+
+  assert.equal(woke, 1, "clearing a secret must notify subscribers");
+  assert.equal(await store.hasSecret(ref), false, "and it must actually be gone");
+});
+
+test("the facade reports isSet from the store, not a constant", async () => {
+  // `isSet: (key) => store.isSet(key)` -> `() => true` survived. Every setting
+  // then reports as deliberately chosen, so a def's default outranks the
+  // composition root's explicit argument in chosenStringOr -- the exact
+  // override isSet exists to prevent.
+  const { store, secrets } = build();
+  const facade = facadeFor(store, secrets);
+
+  assert.equal(facade.isSet("model"), false, "an untouched setting is not set");
+  await store.set("model", "gpt-4o");
+  assert.equal(facade.isSet("model"), true, "and a written one is");
+});

@@ -33,3 +33,17 @@ test("the refusal is about position, not about the word", () => {
   assert.equal(isOpenableExternally("https://ok.example/path?next=https://other"), true);
   assert.equal(isOpenableExternally("mailto:a@b?subject=https://x"), true);
 });
+
+test("a scheme the model typed in capitals is still openable", () => {
+  // Dropping `.toLowerCase()` survived. A model writes `HTTPS://example.com`
+  // or `Mailto:a@b` -- both entirely legal per RFC 3986, which says schemes are
+  // case-insensitive -- and the user taps the link and nothing happens.
+  // It fails closed, so this is a dead link rather than a hole; a dead link
+  // with no error is still the app appearing broken.
+  assert.equal(isOpenableExternally("HTTPS://example.com"), true);
+  assert.equal(isOpenableExternally("Mailto:a@b"), true);
+  assert.equal(isOpenableExternally("TEL:+15551234"), true);
+  // And the case-folding must not open anything new.
+  assert.equal(isOpenableExternally("JAVASCRIPT:alert(1)"), false);
+  assert.equal(isOpenableExternally("FILE:///etc/passwd"), false);
+});

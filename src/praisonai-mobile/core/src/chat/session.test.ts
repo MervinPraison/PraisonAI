@@ -256,3 +256,26 @@ test("a title one character over the maximum IS truncated", () => {
     assert.ok(title.length <= 60);
   });
 });
+
+test("a title is cut on a code POINT boundary, never mid-emoji", () => {
+  // `[...line]` -> `line.split("")` survived. A long first message containing
+  // an astral character gets sliced through a surrogate pair, and the chat
+  // list row ends in a replacement character forever.
+  const emoji = "👍".repeat(80); // 80 code points, 160 code units
+  const title = titleFrom(emoji);
+
+  assert.ok(title.endsWith("…"), "a long title is elided");
+  assert.equal([...title].length, 60, "59 code points plus the ellipsis");
+  assert.ok(!title.includes("�"), "no replacement character");
+  assert.deepEqual(
+    [...title.slice(0, -1)],
+    [...emoji].slice(0, 59),
+    "every kept code point must be whole",
+  );
+});
+
+test("a title at exactly the limit is not elided -- the pair", () => {
+  // Without this, a titleFrom that always elided would pass above.
+  const sixty = "a".repeat(60);
+  assert.equal(titleFrom(sixty), sixty);
+});

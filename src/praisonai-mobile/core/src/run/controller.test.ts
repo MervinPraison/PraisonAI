@@ -20,6 +20,7 @@ import { createFakeScheduler } from "../../../testing/src/fake-scheduler.ts";
 import { createFakeClock } from "../../../testing/src/fake-clock.ts";
 import type { TimePort } from "../ports/time.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
+import type { AgentEnginePort, RunRequest } from "../ports/agent-engine.ts";
 
 
 function harness(script: readonly RunEvent[]) {
@@ -1247,5 +1248,113 @@ test("an accepted stop DETACHES the reader, so nothing more paints", async () =>
     views.at(-1)?.turn.text.includes("AFTER STOP"),
     false,
     "text arrived after the user stopped the run",
+  );
+});
+
+// ---- what the controller actually hands the engine --------------------------
+//
+// A mutation audit found four survivors here, all of the same shape: the
+// controller builds a RunRequest and calls cancel(), and no test had ever
+// asserted what was IN either. Every field could be dropped, falsified or
+// swapped for another of the same type and the whole core suite stayed green.
+
+/** A scripted engine that records the request and the cancel argument. */
+function recording(script: readonly RunEvent[]) {
+  const inner = createScriptedEngine({ id: "scripted", script });
+  const requests: RunRequest[] = [];
+  const cancelled: string[] = [];
+  const engine: AgentEnginePort = {
+    ...inner,
+    run(req, signal) {
+      requests.push(req);
+      return inner.run(req, signal);
+    },
+    async cancel(runId) {
+      cancelled.push(runId);
+      return inner.cancel(runId);
+    },
+  };
+  return { engine, requests, cancelled };
+}
+
+test("Stop cancels the RUN, not the chat", async () => {
+  // `engine.cancel(run.runId)` -> `cancel(chatId)` survived: the engine is
+  // asked to cancel an id it has never seen, returns false, and the user's
+  // Stop does nothing while the model keeps generating and billing. Nothing
+  // asserted WHICH id reached cancel.
+  const many: RunEvent[] = [{ type: "start", msgId: "m", runId: "r" }];
+  for (let i = 0; i < 400; i++) many.push({ type: "delta", msgId: "m", text: "x" });
+  const r = recording(many);
+  const time = createFakeTime();
+  const controller = createRunController({
+    engine: r.engine,
+    time,
+    chatId: "chat-abc",
+    onPublish: () => {},
+  });
+
+  const running = controller.send("go");
+  await controller.stop();
+  await running;
+
+  assert.equal(r.cancelled.length, 1, "stop must reach the engine exactly once");
+  assert.equal(
+    r.cancelled[0],
+    r.requests[0]?.runId,
+    "cancel must be given the runId the engine was started with",
+  );
+  assert.notEqual(r.cancelled[0], "chat-abc", "the chat id is not a run id");
+});
+
+test("an attachment the user picked reaches the engine", async () => {
+  // Dropping `attachments: prompt.attachments` survived. The user attaches a
+  // photo, taps Send, and the model answers as though there were no image --
+  // with no error anywhere to explain why.
+  const r = recording(SCRIPTS.happy);
+  const controller = createRunController({
+    engine: r.engine,
+    time: createFakeTime(),
+    onPublish: () => {},
+  });
+
+  await controller.send("what is in this picture?", [
+    { name: "shot.png", mime: "image/png", data: "aGk=" },
+  ]);
+
+  assert.equal(r.requests.length, 1);
+  assert.equal(r.requests[0]?.attachments.length, 1, "the attachment must survive the trip");
+  assert.equal(r.requests[0]?.attachments[0]?.name, "shot.png");
+  assert.equal(r.requests[0]?.prompt, "what is in this picture?");
+});
+
+test("tools are requested, not silently disabled", async () => {
+  // `tools: true` -> `false` survived. Every tool is off: the model replies
+  // "I can't run commands" and no tool card ever appears, on an engine that
+  // declares tool support.
+  const r = recording(SCRIPTS.happy);
+  const controller = createRunController({
+    engine: r.engine,
+    time: createFakeTime(),
+    onPublish: () => {},
+  });
+  await controller.send("run ls");
+
+  assert.equal(r.requests[0]?.tools, true, "the controller must ask for tools");
+});
+
+test("a finished turn leaves no timer running", async () => {
+  // Removing `stopTicking()` survived. Every turn leaks a live 16ms interval
+  // that never stops -- after a twenty-message conversation the phone is
+  // running twenty of them forever.
+  const time = createFakeTime();
+  const engine = createScriptedEngine({ id: "scripted", script: SCRIPTS.happy });
+  const controller = createRunController({ engine, time, onPublish: () => {} });
+
+  await controller.send("hi");
+
+  assert.deepEqual(
+    time.intervalMs,
+    [],
+    `a turn that ended must stop its ticker; live intervals: ${JSON.stringify(time.intervalMs)}`,
   );
 });

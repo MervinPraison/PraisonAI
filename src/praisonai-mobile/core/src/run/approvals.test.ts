@@ -225,3 +225,29 @@ test("acknowledging records the choice the user actually made", () => {
     );
   }
 });
+
+test("a decision the engine already CONFIRMED cannot be un-confirmed by a late failure", () => {
+  // `reject`'s `entry.state.status !== "sending"` guard could be dropped with a
+  // green suite. A late or duplicated failure then flips a settled approval
+  // back to an actionable prompt: the user already allowed `rm -rf /`, the
+  // engine already ran it, and the app asks again with live buttons.
+  // `acknowledge`'s identical guard was tested; `reject`'s was not.
+  const settled = acknowledge(choose(two(), "ap1", "allow"), "ap1");
+  assert.equal(find(settled, "ap1")?.state.status, "sent");
+
+  const late = reject(settled, "ap1", "connection reset");
+
+  assert.equal(find(late, "ap1")?.state.status, "sent", "a sent decision stays sent");
+  assert.equal(isActionable(find(late, "ap1")!), false, "and must not become tappable again");
+});
+
+test("a decision still in flight CAN fail -- the pair", () => {
+  // Without this, a `reject` that refused every transition would pass above and
+  // leave a genuinely failed decision looking as though it had been delivered.
+  const sending = choose(two(), "ap2", "deny");
+  assert.equal(find(sending, "ap2")?.state.status, "sending");
+
+  const failed = reject(sending, "ap2", "connection reset");
+  assert.equal(find(failed, "ap2")?.state.status, "failed");
+  assert.equal(isActionable(find(failed, "ap2")!), true, "the user must be able to answer again");
+});
