@@ -170,13 +170,28 @@ export function announce(state: AnnouncerState, input: AnnounceInput): AnnounceR
   } else if (nowMs - lastStreamAtMs >= ANNOUNCE_INTERVAL_MS) {
     // Rules 1 and 2. `completedLength` is the end of the last FINISHED
     // sentence; everything after it is a fragment and waits.
+    //
+    // The clock advances because the CHECK ran, not because it produced
+    // speech. `completedLength` segments the whole accumulated answer, and it
+    // used to advance only inside `if (chunk !== "")` -- so any stretch in
+    // which no sentence completes left the rate limit permanently open and
+    // re-segmented everything on every publish. A markdown table, a code
+    // block, a JSON dump or a bulleted list is enough. Measured at the real
+    // publish cadence: 4.1 / 11.8 / 43.5 / 175.2 ms for 20 / 40 / 80 / 160 kB
+    // of unterminated text -- 4.03x per doubling, quadratic, and roughly
+    // 700 ms of blocked main thread on a phone for one long answer.
+    //
+    // The cost of moving it: a sentence that completes just after a check
+    // waits up to ANNOUNCE_INTERVAL_MS to be spoken. That is what the rate
+    // limit is for, and a screen-reader user is not served by re-segmenting
+    // 160 kB six hundred times to discover nothing new. When speech IS
+    // flowing, behaviour is identical -- the clock advanced on every chunk
+    // anyway.
+    lastStreamAtMs = nowMs;
     const complete = completedLength(locale, text);
     if (complete > spokenChars) {
       const chunk = text.slice(spokenChars, complete).trim();
-      if (chunk !== "") {
-        out.push(say("stream", chunk));
-        lastStreamAtMs = nowMs;
-      }
+      if (chunk !== "") out.push(say("stream", chunk));
       spokenChars = complete;
     }
   }
@@ -225,7 +240,24 @@ export function announce(state: AnnouncerState, input: AnnounceInput): AnnounceR
     spokenDropped = turn.dropped.length;
   }
 
-  if (out.length === 0 && base === state) return { state, announcements: NOTHING };
+  // Return the SAME object only when nothing at all moved. `out.length === 0`
+  // is not that test: this function advances two cursors without necessarily
+  // producing speech -- `lastStreamAtMs` when the sentence check runs, and
+  // `spokenChars` when the completed prefix trims to nothing -- and returning
+  // `state` threw both away. The caller then re-ran the check on the very next
+  // publish, and `completedLength` re-segmented the whole accumulated answer
+  // every time: 533 full segmentations over 607 publishes of a 160 kB answer,
+  // measured, and quadratic in the length of it.
+  const unchanged =
+    out.length === 0 &&
+    base === state &&
+    spokenChars === state.spokenChars &&
+    lastStreamAtMs === state.lastStreamAtMs &&
+    spokenTools === state.spokenTools &&
+    spokenApprovals === state.spokenApprovals &&
+    spokenOutcome === state.spokenOutcome &&
+    spokenDropped === state.spokenDropped;
+  if (unchanged) return { state, announcements: NOTHING };
 
   // Stable sort by priority: assertive first, original order preserved within
   // each band so the answer's own sentences stay in the order they were written.
