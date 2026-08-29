@@ -2,6 +2,11 @@
  * A counting proxy over `node:assert/strict`, so an assertion cannot vanish
  * from a contract without the run noticing.
  *
+ * A byte-for-byte twin of `adapters/src/conformance/assert-ledger.ts`. The two
+ * are deliberately separate files: `engines` may not import `adapters` and the
+ * layer rule is right to say so, and neither belongs in `core`, which ships.
+ * The fixture pattern one directory over is duplicated for the same reason.
+ *
  * WHY THIS EXISTS. `contract-fixture.ts` proves a contract still CONTAINS the
  * assertion that catches a given defect: it registers a deliberately broken
  * adapter and asserts the matching case fails by name. That works, and it
@@ -10,20 +15,23 @@
  * case is still free to be deleted, because the case keeps failing on the one
  * before it.
  *
- * Measured, by deleting each single-line assertion in the four adapter
- * contracts one at a time and running the whole adapters suite: 62 of 73 could
- * be removed with a fully green run. Thirteen break modes were protecting
- * eleven assertions. The contracts are shared code that every adapter is
- * judged against, and the failure mode is silent -- the run reports one test
- * fewer and nothing else -- so the gap is worth closing with a mechanism
- * rather than with sixty more break modes.
+ * Measured, by deleting each single-line assertion in this contract one
+ * at a time and running the whole engines suite: 30 of 32 could be removed
+ * with a fully green run. Five break modes were protecting two assertions.
+ * (The four adapter contracts measured 62 of 73 on the same method.) A
+ * contract is shared code that every engine is judged against, and the failure
+ * mode is silent -- the run reports one test fewer and nothing else -- so the
+ * gap is worth closing with a mechanism rather than with thirty more break
+ * modes.
  *
- * HOW. Each `describeXContract` call takes its own ledger and uses it in place
- * of the bare `assert`. The contract's last registered case asserts the exact
- * number of assertions the earlier cases made. Delete one and the count is
- * short; the case fails and names the file. Add one and the count is over, and
- * the constant has to be updated deliberately -- which is the point, since
- * that is where you would notice you had also meant to give it a break mode.
+ * HOW. `describeEngineContract` takes its own ledger and uses it in place of the
+ * bare `assert`, and EACH case ends by asserting the exact number of
+ * assertions it made. Per case rather than one total, because a harness
+ * declares which scenarios it cannot support and skips them, so no single
+ * total is right for every engine. Delete an assertion and its case's count is
+ * short and the case fails by name. Add one and the count is over, and the
+ * constant has to be updated deliberately -- which is the point, since that is
+ * where you would notice the new assertion also wants a break mode.
  *
  * The count is EXACT rather than a floor. A floor lets an assertion be
  * replaced by a weaker one at the same arity, which is the same hollowing
@@ -33,13 +41,7 @@
  * it is still there and still ran. `contract-fixture.ts` remains the thing
  * that proves the assertion has teeth; the two are complementary and neither
  * subsumes the other. `assert-ledger.test.ts` covers this file itself, which
- * is now load-bearing for every count in all four contracts -- removing the
- * `apply` trap's counter survived a full suite run before it existed, because
- * no contract happens to use a bare `assert(x)`.
- *
- * A byte-for-byte twin of `engines/src/assert-ledger.ts` apart from these
- * notes: `adapters` may not import `engines` and the layer rule is right to
- * say so, and neither belongs in `core`, which ships.
+ * is now load-bearing for every count in the contract.
  */
 import assert from "node:assert/strict";
 
