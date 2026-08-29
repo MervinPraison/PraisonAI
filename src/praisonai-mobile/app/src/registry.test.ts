@@ -216,3 +216,26 @@ test("a clean stream through the same engine reports no refusal", async () => {
   }
   assert.deepEqual(refused, []);
 });
+
+test("every setting's default satisfies its own validator", () => {
+  // `default: 0.7` -> `default: 7` survived. `validate` runs on `set` and on
+  // `load` -- never on the shipped default -- so an out-of-range default is
+  // used verbatim on a fresh install and nothing anywhere complains.
+  //
+  // Asserted for every def rather than the one that was broken, because the
+  // next one to drift will be a different key.
+  for (const def of SETTING_DEFS) {
+    if (def.validate === undefined) continue;
+    const validated = def.validate(def.default);
+    assert.notEqual(
+      validated,
+      null,
+      `${def.key}: the shipped default ${JSON.stringify(def.default)} is refused by its own validator`,
+    );
+    assert.deepEqual(
+      validated,
+      def.default,
+      `${def.key}: the shipped default is changed by its own validator, so it is out of range`,
+    );
+  }
+});

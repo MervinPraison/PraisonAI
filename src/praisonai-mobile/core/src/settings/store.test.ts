@@ -361,3 +361,34 @@ test("a subscriber that unsubscribes another during notify does not silence it",
     assert.deepEqual(fired, ["A", "B"], "B was skipped because the set was mutated while iterating");
   });
 });
+
+test("persist() writes through plainOnly, so no secret can reach storage", () => {
+  // `plainOnly(values, byKey)` -> `Object.fromEntries(values)` survived.
+  // `plainOnly` is the ONLY thing keeping API keys out of localStorage, and
+  // deleting the call was invisible: every existing test either never put a
+  // secret in the map, or checked the guard function directly rather than the
+  // write that uses it.
+  //
+  // This asserts on what the StoragePort actually received, with a secret
+  // forced into the map the way a future write path might.
+  const { storage, secrets, store } = build();
+  return (async () => {
+    await store.setSecret({ slot: "openai", account: "default" }, "sk-live-must-not-leak");
+    await store.set("model", "gpt-4o");
+
+    // And the harder case: a secret sitting in the values map, which `set`
+    // refuses to create but `load` or a future caller could.
+    await storage.write(
+      { namespace: "settings", id: "app" },
+      JSON.stringify({ model: "gpt-4o", apiKey: "sk-also-must-not-leak" }),
+    );
+    const reloaded = createSettingsStore(DEFS, storage, secrets);
+    await reloaded.load();
+    await reloaded.set("model", "gpt-4o-mini");
+
+    const written = (await storage.read({ namespace: "settings", id: "app" })) ?? "";
+    assert.equal(written.includes("sk-live-must-not-leak"), false, "a stored secret reached plain storage");
+    assert.equal(written.includes("sk-also-must-not-leak"), false, "an adopted secret reached plain storage");
+    assert.match(written, /gpt-4o-mini/, "and ordinary settings are still persisted");
+  })();
+});

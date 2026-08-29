@@ -341,3 +341,45 @@ test("an unchanged list touches the DOM zero times", () => {
   assert.deepEqual(second.ops, [], "a settled list must emit no ops");
   assert.deepEqual(domOrder(host), ids);
 });
+
+test("each approval button carries its OWN choice", () => {
+  // `b.dataset["choice"] = choice` -> `= "allow"` survived: all three buttons
+  // send `allow`, so Deny becomes Allow at the DOM. Every layer above this is
+  // careful to route a decision by approvalId; the last hop decides WHAT the
+  // decision is, and nothing read it.
+  const { host } = fakeDoc();
+  applyOps(host, emptyNodes(), [
+    {
+      kind: "insert",
+      id: "approval:a1",
+      index: 0,
+      row: {
+        kind: "approval",
+        id: "approval:a1",
+        approvalId: "a1",
+        callId: "c1",
+        name: "rm",
+        args: { path: "/" },
+        state: { status: "pending" },
+        actionable: true,
+      } as never,
+    },
+  ]);
+
+  const buttons: any[] = [];
+  const walk = (node: any): void => {
+    if (String(node.tagName).toUpperCase() === "BUTTON" && node.dataset.choice !== undefined) buttons.push(node);
+    for (const child of node.children) walk(child);
+  };
+  walk(host);
+
+  assert.equal(buttons.length, 3, `expected three choices, got ${buttons.length}`);
+  assert.deepEqual(
+    buttons.map((b: any) => b.dataset.choice).sort(),
+    ["allow", "always", "deny"],
+    "the three buttons must offer three different decisions",
+  );
+  for (const b of buttons) {
+    assert.equal(b.dataset.approvalId, "a1", "and each must address its own approval");
+  }
+});
