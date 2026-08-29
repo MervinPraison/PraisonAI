@@ -40,7 +40,7 @@ import { createFakeDom } from "../../testing/src/fake-dom.ts";
 import { createFakeShell, PHONE_INSETS } from "../../testing/src/fake-shell.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
-import { createFakeHttp, sseResponse } from "../../testing/src/fake-http.ts";
+import { createFakeHttp, sseResponse, streamOf } from "../../testing/src/fake-http.ts";
 import { mount } from "./main.ts";
 import type { Platform } from "./platform.ts";
 
@@ -552,5 +552,41 @@ test("the Send button's LABEL and its action agree", async () => {
   const live = button();
   assert.equal(live?.dataset["action"], "stop");
   assert.equal(live?.textContent, en.actionStop, "a streaming turn must READ Stop, not just behave as Stop");
+  app?.dispose();
+});
+
+test("an approval row shows the decision after the user answers it", async () => {
+  // `buildTranscript(view.turn, view.approvals)` -> dropping the second
+  // argument survived. The approval TABLE is where the decision lifecycle
+  // lives; without it the row is built from the turn alone and stays `pending`
+  // forever, so the user taps Deny and the card never acknowledges it.
+  const { dom, http, platform } = harness();
+  http.on("/approve/a1", () => ({ status: 200, headers: {}, body: streamOf(JSON.stringify({ ok: true })) }));
+  http.on("/chat", () =>
+    held([
+      ["start", { msg_id: "m1", run_id: "r1" }],
+      ["tool_call", { msg_id: "m1", call_id: "c1", name: "rm", args: { path: "/" } }],
+      ["approval_request", { msg_id: "m1", approval_id: "a1", call_id: "c1", name: "rm", args: { path: "/" } }],
+    ]),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "do it");
+  await settle(120);
+
+  const row = () => dom.find((n) => n.className.includes("row-approval"));
+  assert.ok(row(), "the approval row should be on screen");
+  assert.equal(row()?.dataset["state"], "pending");
+
+  const deny = dom.find((n) => n.dataset["choice"] === "deny");
+  assert.ok(deny, "no Deny button");
+  dom.click(deny);
+  await settle(120);
+
+  assert.notEqual(
+    row()?.dataset["state"],
+    "pending",
+    "the row must acknowledge the decision, not stay pending forever",
+  );
   app?.dispose();
 });

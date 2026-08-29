@@ -205,3 +205,23 @@ test("acknowledge still promotes a decision that IS in flight", () => {
   table = choose(table, "ap1", "allow");
   assert.equal(find(acknowledge(table, "ap1"), "ap1")?.state.status, "sent");
 });
+
+test("acknowledging records the choice the user actually made", () => {
+  // `choice: entry.state.choice` -> `choice: "allow"` survived. An
+  // acknowledged DENY is then recorded as an allow: the row the user reads
+  // back says they permitted the thing they refused, and `outstanding` and the
+  // audit trail agree with it.
+  for (const choice of ["allow", "always", "deny"] as const) {
+    let table = add(emptyApprovals, { approvalId: "ap1", callId: "c1", name: "rm", args: {} });
+    table = choose(table, "ap1", choice);
+    table = acknowledge(table, "ap1");
+
+    const state = find(table, "ap1")?.state;
+    assert.equal(state?.status, "sent");
+    assert.equal(
+      state?.status === "sent" ? state.choice : null,
+      choice,
+      `an acknowledged ${choice} must be recorded as ${choice}`,
+    );
+  }
+});

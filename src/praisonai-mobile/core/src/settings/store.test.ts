@@ -361,3 +361,36 @@ test("a subscriber that unsubscribes another during notify does not silence it",
     assert.deepEqual(fired, ["A", "B"], "B was skipped because the set was mutated while iterating");
   });
 });
+
+test("no public route can put a secret into the persisted file", () => {
+  // A sweep reported `plainOnly(values, byKey)` -> `Object.fromEntries(values)`
+  // as "every secret is written to plain storage". Checked: it is NOT. No
+  // public route can get a secret into the values map -- `set` refuses a
+  // secret-flagged key and `load` drops one -- so the two forms are equivalent
+  // through the public API, and the mutation survives this test too.
+  //
+  // `plainOnly` is defence in depth for the day a new write path forgets the
+  // rule, which is why it is tested directly rather than through here. This
+  // test asserts the OTHER half: that no route currently exists. If one is
+  // ever added, this fails before the guard has to catch it.
+  const { storage, secrets, store } = build();
+  return (async () => {
+    assert.equal(await store.set("apiKey", "sk-refused"), false, "set must refuse a secret key");
+    await store.setSecret({ slot: "openai", account: "default" }, "sk-live-must-not-leak");
+    await store.set("model", "gpt-4o");
+
+    await storage.write(
+      { namespace: "settings", id: "app" },
+      JSON.stringify({ model: "gpt-4o", apiKey: "sk-from-disk" }),
+    );
+    const reloaded = createSettingsStore(DEFS, storage, secrets);
+    await reloaded.load();
+    assert.notEqual(reloaded.get("apiKey"), "sk-from-disk", "load must not adopt a secret from disk");
+    await reloaded.set("model", "gpt-4o-mini");
+
+    const written = (await storage.read({ namespace: "settings", id: "app" })) ?? "";
+    assert.equal(written.includes("sk-live-must-not-leak"), false);
+    assert.equal(written.includes("sk-from-disk"), false);
+    assert.match(written, /gpt-4o-mini/, "ordinary settings are still persisted");
+  })();
+});
