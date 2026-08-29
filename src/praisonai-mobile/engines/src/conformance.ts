@@ -18,7 +18,8 @@
  * audit ran 16 mutations against a 408-test suite and 8 survived.
  */
 import test from "node:test";
-import assert from "node:assert/strict";
+import rawAssert from "node:assert/strict";
+import { ledger, type Ledger } from "./assert-ledger.ts";
 
 import type { AgentEnginePort, RunRequest } from "../../core/src/ports/agent-engine.ts";
 import { apply, finish, initialTurn, type TurnState } from "../../core/src/run/transcript.ts";
@@ -86,20 +87,30 @@ async function drive(
  */
 export function describeEngineContract(harness: EngineHarness): void {
   const name = harness.name;
+  const counting = ledger();
+  const assert: Ledger["assert"] = counting.assert;
+  const made = counting.made;
+  const LEDGER =
+    `${name}: this case did not make the assertions it is supposed to make. ` +
+    `See engines/src/assert-ledger.ts -- 30 of 32 assertions in this contract ` +
+    `were deletable with a green run before the counts were pinned.`;
   const skip = (scenario: ScenarioName): string | null =>
     harness.unsupported?.[scenario] ?? null;
 
   // ---- handshake ---------------------------------------------------------
 
   test(`${name}: an adapter reports a protocol version before any turn is started`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     assert.equal(typeof engine.protocolVersion, "number");
     assert.equal(engine.protocolVersion, PROTOCOL_VERSION);
     assert.equal(checkProtocol(engine.protocolVersion).ok, true);
     await engine.dispose();
+    rawAssert.equal(made() - made0, 3, LEDGER);
   });
 
   test(`${name}: an engine declares a stable id`, async () => {
+    const made0 = made();
     const a = await harness.create("happy");
     const b = await harness.create("happy");
     assert.equal(typeof a.id, "string");
@@ -107,11 +118,13 @@ export function describeEngineContract(harness: EngineHarness): void {
     assert.equal(a.id, b.id, "the id must not vary between instances");
     await a.dispose();
     await b.dispose();
+    rawAssert.equal(made() - made0, 3, LEDGER);
   });
 
   // ---- lifecycle and ordering -------------------------------------------
 
   test(`${name}: a run emits start first and exactly one terminal event last`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     const { events } = await drive(engine);
     assert.ok(events.length >= 2, "a run must emit at least start and a terminal event");
@@ -121,32 +134,39 @@ export function describeEngineContract(harness: EngineHarness): void {
     assert.equal(terminals.length, 1, `expected one terminal event, got ${terminals.length}`);
     assert.ok(isTerminal(events[events.length - 1] as RunEvent), "the last event must be terminal");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 4, LEDGER);
   });
 
   test(`${name}: every event in a run carries the same msgId`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     const { events } = await drive(engine);
     const ids = new Set(events.map((e) => e.msgId));
     assert.equal(ids.size, 1, `expected one msgId, got ${[...ids].join(", ")}`);
     assert.notEqual([...ids][0], "", "msgId must not be empty");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   test(`${name}: a conforming run drops nothing`, async () => {
+    const made0 = made();
     // The control that stops "emit garbage" from passing the suite: if the
     // reducer refused any event, it would be recorded here.
     const engine = await harness.create("happy");
     const { state } = await drive(engine);
     assert.deepEqual(state.dropped, [], `a clean run dropped: ${JSON.stringify(state.dropped)}`);
     await engine.dispose();
+    rawAssert.equal(made() - made0, 1, LEDGER);
   });
 
   test(`${name}: a happy run produces text and ends persisted`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     const { state } = await drive(engine);
     assert.notEqual(state.text, "", "a happy run must produce text");
     assert.equal(state.outcome?.type, "end");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   // ---- emptiness ---------------------------------------------------------
@@ -154,11 +174,13 @@ export function describeEngineContract(harness: EngineHarness): void {
   test(`${name}: an empty stream is an error, not an empty answer`, async () => {
     const why = skip("empty");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("empty");
     const { state } = await drive(engine);
     assert.equal(state.outcome?.type, "error");
     assert.equal(state.outcome?.type === "error" && state.outcome.kind, "empty");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   // ---- tools -------------------------------------------------------------
@@ -166,16 +188,19 @@ export function describeEngineContract(harness: EngineHarness): void {
   test(`${name}: a successful tool call resolves to ok`, async () => {
     const why = skip("tool_ok");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("tool_ok");
     const { state } = await drive(engine);
     assert.ok(state.tools.length >= 1, "expected at least one tool row");
     assert.equal(state.tools[0]?.status, "ok");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   test(`${name}: a failed tool is reported failed and never inferred from its output`, async () => {
     const why = skip("tool_failed");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("tool_failed");
     const { state } = await drive(engine);
     assert.ok(state.tools.length >= 1, "expected at least one tool row");
@@ -185,18 +210,22 @@ export function describeEngineContract(harness: EngineHarness): void {
       "a tool that failed must not read as successful because its output looks plausible",
     );
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   test(`${name}: a tool call with no result is unresolved at the end, not successful`, async () => {
     const why = skip("tool_unresolved");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("tool_unresolved");
     const { state } = await drive(engine);
     assert.equal(state.tools[0]?.status, "unresolved");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 1, LEDGER);
   });
 
   test(`${name}: an engine that declares no tool support never emits a tool event`, async () => {
+    const made0 = made();
     // The negative direction. Without it a capability flag is documentation
     // rather than a contract.
     const engine = await harness.create("happy");
@@ -209,6 +238,10 @@ export function describeEngineContract(harness: EngineHarness): void {
       );
     }
     await engine.dispose();
+    // Nothing to assert when the engine DOES support tools -- the case exists
+    // for the other branch. The count says so rather than leaving a case that
+    // silently checks nothing for most harnesses.
+    rawAssert.equal(made() - made0, engine.capabilities.tools ? 0 : 1, LEDGER);
   });
 
   // ---- approvals ---------------------------------------------------------
@@ -216,6 +249,7 @@ export function describeEngineContract(harness: EngineHarness): void {
   test(`${name}: an approval decision is routed by approvalId, not by the pending row`, async () => {
     const why = skip("two_approvals");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("two_approvals");
     const controller = new AbortController();
 
@@ -236,11 +270,13 @@ export function describeEngineContract(harness: EngineHarness): void {
       "a decision already made must not be reported as made again",
     );
     await engine.dispose();
+    rawAssert.equal(made() - made0, 3, LEDGER);
   });
 
   test(`${name}: deciding an unknown approval returns false rather than reporting success`, async () => {
     const why = skip("approval");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("approval");
     assert.equal(
       await engine.decide("no-such-approval", "allow"),
@@ -248,9 +284,11 @@ export function describeEngineContract(harness: EngineHarness): void {
       "reporting success for an unknown id is a lie the UI cannot detect",
     );
     await engine.dispose();
+    rawAssert.equal(made() - made0, 1, LEDGER);
   });
 
   test(`${name}: an engine that declares no approval support never emits an approval_request`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     if (!engine.capabilities.approvals) {
       const { events } = await drive(engine);
@@ -261,30 +299,37 @@ export function describeEngineContract(harness: EngineHarness): void {
       );
     }
     await engine.dispose();
+    // Same shape as the tools capability case above.
+    rawAssert.equal(made() - made0, engine.capabilities.approvals ? 0 : 1, LEDGER);
   });
 
   // ---- cancellation ------------------------------------------------------
 
   test(`${name}: cancelling a run that is not live returns false`, async () => {
+    const made0 = made();
     // server.py:392 -- "the button would confirm a cancellation that never
     // happened".
     const engine = await harness.create("happy");
     assert.equal(await engine.cancel("no-such-run"), false);
     await engine.dispose();
+    rawAssert.equal(made() - made0, 1, LEDGER);
   });
 
   test(`${name}: a cancelled turn emits no end and no usage`, async () => {
     const why = skip("cancelled");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("cancelled");
     const { events, state } = await drive(engine);
     assert.equal(state.outcome?.type, "cancelled");
     assert.equal(events.some((e) => e.type === "end"), false, "a cancelled turn must not also end");
     assert.equal(events.some((e) => e.type === "usage"), false, "a cancelled turn is not persisted");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 3, LEDGER);
   });
 
   test(`${name}: aborting the signal stops the stream`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     if (!engine.capabilities.cancellation) {
       await engine.dispose();
@@ -310,6 +355,7 @@ export function describeEngineContract(harness: EngineHarness): void {
     // terminates is its business; that it stops is the contract.
     assert.ok(seen.length < 50, `abort did not stop the stream: ${seen.length} events`);
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   // ---- error taxonomy ----------------------------------------------------
@@ -317,36 +363,46 @@ export function describeEngineContract(harness: EngineHarness): void {
   test(`${name}: an auth failure is kind auth so the ui can offer settings`, async () => {
     const why = skip("auth_error");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("auth_error");
     const { state } = await drive(engine);
     assert.equal(state.outcome?.type, "error");
     assert.equal(state.outcome?.type === "error" && state.outcome.kind, "auth");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 2, LEDGER);
   });
 
   test(`${name}: a rate limit is distinct from an internal error`, async () => {
     const why = skip("rate_limit_error");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("rate_limit_error");
     const { state } = await drive(engine);
     assert.equal(state.outcome?.type === "error" && state.outcome.kind, "rate_limit");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 1, LEDGER);
   });
 
   test(`${name}: an error carries a message that is never the empty string`, async () => {
     const why = skip("auth_error");
     if (why !== null) return void console.log(`  skipped: ${why}`);
+    const made0 = made();
     const engine = await harness.create("auth_error");
     const { state } = await drive(engine);
     assert.notEqual(state.outcome?.type === "error" && state.outcome.message, "");
     await engine.dispose();
+    rawAssert.equal(made() - made0, 1, LEDGER);
   });
 
   // ---- hygiene -----------------------------------------------------------
 
   test(`${name}: dispose is idempotent`, async () => {
+    const made0 = made();
     const engine = await harness.create("happy");
     await engine.dispose();
     await engine.dispose();
+    // Deliberately zero: this case passes by NOT throwing, so there is nothing
+    // to count. Pinned anyway, so adding an assertion here is a decision.
+    rawAssert.equal(made() - made0, 0, LEDGER);
   });
 }
