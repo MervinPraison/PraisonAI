@@ -3186,9 +3186,21 @@ Your Goal: {self.goal}
         return self.__chat_history_state
     
     def _append_to_chat_history(self, message: dict):
-        """Thread-safe append to chat history using proper locking."""
+        """Thread-safe append to chat history using proper locking.
+
+        Also records the appended message into the current turn's per-turn
+        ownership tracker (when one is active) so a failing turn's rollback
+        removes only its own messages by identity and never a concurrent
+        turn's. This is the append path every real chat()/achat() turn uses,
+        so without recording here _rollback_chat_history_to would always take
+        the unsafe positional-delete branch.
+        """
+        from .memory_mixin import _active_turn_owned
         with self._history_lock.lock():
             self._history_lock.value.append(message)
+            owned = _active_turn_owned.get()
+            if owned is not None:
+                owned.append(message)
     
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""

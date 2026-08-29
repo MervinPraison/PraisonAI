@@ -10,6 +10,7 @@ that never raises.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -181,3 +182,96 @@ def test_emit_never_breaks_on_bad_stream_callback():
         fallback_index=0,
         stream_callback=boom,
     )
+
+
+def test_build_fallback_dispatcher_does_not_touch_shared_state(monkeypatch):
+    """The async fallback dispatcher is a throwaway bound to the fallback model
+    and must never be written onto the shared ``self._unified_dispatcher`` or
+    change ``self.llm`` — that is what keeps a concurrent turn on the original
+    model with correct attribution.
+    """
+    from praisonaiagents import Agent
+    from praisonaiagents import llm as _llm
+
+    agent = Agent(name="t", instructions="x", llm="gpt-4o-mini",
+                  fallback_models=["gpt-4o"])
+    # Avoid needing a real OpenAI client/key: stub the openai client + factory.
+    agent._Agent__openai_client = object()  # backing field of the lazy property
+    built = []
+    monkeypatch.setattr(
+        _llm, "create_llm_dispatcher",
+        lambda **kw: built.append(kw) or SimpleNamespace(model=kw.get("model")),
+    )
+    # Prime the shared dispatcher so we can assert it is left untouched.
+    sentinel = object()
+    agent._unified_dispatcher = sentinel
+
+    disp = agent._build_fallback_dispatcher("gpt-4o")
+
+    assert disp is not None
+    assert disp is not sentinel                 # a distinct, throwaway dispatcher
+    assert disp.model == "gpt-4o"               # bound to the fallback model
+    assert agent._unified_dispatcher is sentinel  # shared cache untouched
+    assert agent.llm == "gpt-4o-mini"             # shared model untouched
+
+
+def test_async_fallback_passes_override_and_leaves_shared_state(monkeypatch):
+    """The async fallback branch must run the retry against a throwaway
+    dispatcher passed via ``_dispatcher=`` and must NOT mutate the shared
+    ``self.llm`` / ``self._unified_dispatcher``, so a concurrent turn on the
+    same Agent never observes the fallback model.
+
+    Regression for the shared-Agent async fallback race (PR #4593 review).
+    Exercises the fallback branch directly with a stubbed classifier so no real
+    backoff/network is involved.
+    """
+    from praisonaiagents import Agent
+    from praisonaiagents import llm as _llm
+    from praisonaiagents.llm import error_classifier as _ec
+
+    agent = Agent(name="t", instructions="x", llm="gpt-4o-mini",
+                  fallback_models=["gpt-4o"])
+    original_dispatcher = object()
+    agent._unified_dispatcher = original_dispatcher
+    # Avoid needing a real OpenAI client/key when the fallback dispatcher builds.
+    agent._Agent__openai_client = object()
+    monkeypatch.setattr(
+        _llm, "create_llm_dispatcher",
+        lambda **kw: SimpleNamespace(model=kw.get("model")),
+    )
+
+    # Force the classifier to request a model fallback with zero backoff.
+    classification = SimpleNamespace(
+        should_compress_context=False,
+        should_rotate_credential=False,
+        should_fallback_model=True,
+        is_retryable=False,
+        backoff_seconds=0,
+        error_category="rate_limit",
+        user_message="fallback",
+    )
+    monkeypatch.setattr(_ec, "classify_llm_error", lambda *a, **k: classification)
+
+    async def _noop_emit(*a, **k):
+        return None
+    agent._aemit_model_fallback = _noop_emit  # type: ignore[assignment]
+
+    used = []
+
+    async def fake_execute(*args, _dispatcher=None, **kwargs):
+        used.append(_dispatcher)
+        return "ok-from-fallback"
+
+    agent._execute_unified_achat_completion = fake_execute  # type: ignore[assignment]
+
+    result = asyncio.run(agent._handle_async_llm_error(
+        RuntimeError("rate limit exceeded"),
+        [{"role": "user", "content": "hi"}], None, None, True,
+        False, None, None, None, None, None, True, 0, 0,
+    ))
+
+    assert result == "ok-from-fallback"
+    assert used and used[0] is not None          # retry ran on throwaway dispatcher
+    assert used[0] is not original_dispatcher
+    assert agent.llm == "gpt-4o-mini"            # shared model untouched
+    assert agent._unified_dispatcher is original_dispatcher  # shared cache untouched
