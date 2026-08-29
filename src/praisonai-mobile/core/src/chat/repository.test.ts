@@ -210,7 +210,7 @@ test("an id that vanishes between listing and reading is not called corrupt", ()
 
 test("a chat whose messages field is not an array loads as empty, not as itself", async () => {
   // `Array.isArray(chat.messages) ? chat.messages : []` -> `chat.messages`
-  // survived. With `messages: "hi"` the string is spread as four one-character
+  // survived. With `messages: "hi"` the string is spread as two one-character
   // messages: the transcript shows junk, and the indices `end` reports point
   // past the real messages, so Fork and Delete then address the wrong ones.
   const storage = createFakeStorage();
