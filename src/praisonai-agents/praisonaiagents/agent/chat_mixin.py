@@ -1638,6 +1638,26 @@ Your Goal: {self.goal}"""
             return None
         return self.fallback_models[fallback_index]
 
+    def _get_model_fallback_lock(self):
+        """Lazily create the per-instance lock guarding model-fallback swaps.
+
+        Agent-level fallback temporarily overrides ``self.llm`` /
+        ``self._unified_dispatcher`` on the shared instance for a single retry.
+        On a shared Agent serving concurrent turns, that mutate/restore window
+        (which spans a real ``await`` on the async path) would let another turn
+        read the wrong model. Serialising only the fallback window with this
+        dual (sync/async) lock closes that window while leaving normal,
+        non-fallback turns fully concurrent (they never acquire this lock).
+        Created on demand so no extra state is added for agents without
+        ``fallback_models``.
+        """
+        lock = getattr(self, '_model_fallback_lock', None)
+        if lock is None:
+            from .async_safety import DualLock
+            lock = DualLock()
+            self._model_fallback_lock = lock
+        return lock
+
     def _emit_model_fallback(self, from_model, to_model, reason_category, fallback_index,
                              stream_callback=None):
         """Surface a mid-turn model fallback as an observable state transition.
@@ -2094,22 +2114,26 @@ Your Goal: {self.goal}"""
                     if classification.backoff_seconds and classification.backoff_seconds > 0:
                         time.sleep(classification.backoff_seconds)
                     
-                    # Temporarily override the model and clear dispatcher cache for this call
-                    original_llm = self.llm
-                    original_dispatcher = getattr(self, '_unified_dispatcher', None)
-                    try:
-                        self.llm = next_model
-                        self._unified_dispatcher = None  # Force recreation with new model
-                        return self._chat_completion(
-                            messages, temperature, tools, stream,
-                            reasoning_steps, task_name, task_description, task_id, response_format,
-                            _retry_depth=_retry_depth + 1,
-                            _fallback_index=_fallback_index + 1,
-                            cancel_token=cancel_token
-                        )
-                    finally:
-                        self.llm = original_llm
-                        self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                    # Temporarily override the model and clear dispatcher cache
+                    # for this call. Serialise the mutate/restore window so a
+                    # concurrent turn on a shared Agent can't observe the wrong
+                    # model; only fallback turns contend on this lock.
+                    with self._get_model_fallback_lock().sync():
+                        original_llm = self.llm
+                        original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                        try:
+                            self.llm = next_model
+                            self._unified_dispatcher = None  # Force recreation with new model
+                            return self._chat_completion(
+                                messages, temperature, tools, stream,
+                                reasoning_steps, task_name, task_description, task_id, response_format,
+                                _retry_depth=_retry_depth + 1,
+                                _fallback_index=_fallback_index + 1,
+                                cancel_token=cancel_token
+                            )
+                        finally:
+                            self.llm = original_llm
+                            self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
                 else:
                     logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                     # Continue to error handling without retry
@@ -2272,26 +2296,37 @@ Your Goal: {self.goal}"""
                 if classification.backoff_seconds and classification.backoff_seconds > 0:
                     await asyncio.sleep(classification.backoff_seconds)
                 
-                # Temporarily override the model and clear dispatcher cache for this call
-                original_llm = self.llm
-                original_dispatcher = getattr(self, '_unified_dispatcher', None)
-                try:
-                    self.llm = next_model
-                    self._unified_dispatcher = None  # Force recreation with new model
-                    return await self._execute_unified_achat_completion(
-                        messages, temperature, tools, stream,
-                        reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events
-                    )
-                except Exception as retry_error:
-                    return await self._handle_async_llm_error(
-                        retry_error, messages, temperature, tools, stream,
-                        reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
-                    )
-                finally:
-                    self.llm = original_llm
-                    self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                # Temporarily override the model and clear dispatcher cache for
+                # this call. Hold the fallback lock across the mutate/restore +
+                # the awaited completion so a concurrent turn on a shared Agent
+                # can never read the wrong model while this turn is suspended.
+                # The lock is released before recursing into the async error
+                # handler (which re-enters this branch) so the non-reentrant
+                # asyncio.Lock can't deadlock; only fallback turns contend.
+                _retry_error = None
+                async with self._get_model_fallback_lock().async_lock():
+                    original_llm = self.llm
+                    original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                    try:
+                        self.llm = next_model
+                        self._unified_dispatcher = None  # Force recreation with new model
+                        return await self._execute_unified_achat_completion(
+                            messages, temperature, tools, stream,
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            stream_callback, emit_events
+                        )
+                    except Exception as retry_error:
+                        _retry_error = retry_error
+                    finally:
+                        self.llm = original_llm
+                        self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                # Handle the retry failure outside the fallback lock so the
+                # recursive error handler can acquire it for the next model.
+                return await self._handle_async_llm_error(
+                    _retry_error, messages, temperature, tools, stream,
+                    reasoning_steps, task_name, task_description, task_id, response_format,
+                    stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                )
             else:
                 logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                 # Continue to error handling without retry

@@ -162,7 +162,7 @@ class MemoryMixin:
         """
         owned = _active_turn_owned.get()
         with self._history_lock:
-            if owned:
+            if owned is not None:
                 owned_ids = {id(m) for m in owned}
                 self.chat_history[:] = [
                     m for m in self.chat_history if id(m) not in owned_ids
