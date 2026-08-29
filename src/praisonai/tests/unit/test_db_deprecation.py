@@ -139,6 +139,41 @@ class TestDeprecationWarnings:
             assert len(deprecation_warnings) >= 1
 
 
+class TestTopLevelAliasDeprecation:
+    """Top-level ``from praisonai import DB`` aliases must route through
+    ``praisonai.db`` so the deprecation warning fires — not resolve
+    ``db.adapter`` directly (which would silently bypass the warning).
+    """
+
+    @pytest.mark.parametrize("alias", ["DB", "PraisonAIDB", "PraisonDB"])
+    def test_top_level_alias_warns(self, alias):
+        """``from praisonai import <alias>`` emits DeprecationWarning."""
+        import importlib
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            praisonai = importlib.import_module("praisonai")
+            getattr(praisonai, alias)
+
+            deprecation_warnings = [
+                x for x in w
+                if issubclass(x.category, DeprecationWarning)
+            ]
+            assert len(deprecation_warnings) >= 1, (
+                f"'from praisonai import {alias}' bypassed the deprecation "
+                f"warning — it must route through praisonai.db"
+            )
+
+    @pytest.mark.parametrize("alias", ["DB", "PraisonAIDB", "PraisonDB"])
+    def test_top_level_alias_identity_preserved(self, alias):
+        """Top-level alias resolves to the same class as praisonai.db."""
+        import importlib
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            praisonai = importlib.import_module("praisonai")
+            db_mod = importlib.import_module("praisonai.db")
+            assert getattr(praisonai, alias) is getattr(db_mod, alias)
+
+
 class TestBackwardsCompatibility:
     """Test that old imports still work (just with warnings)."""
     

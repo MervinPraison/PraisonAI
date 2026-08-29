@@ -197,8 +197,13 @@ def __getattr__(name):
         from .integrations.local_agent import LocalAgentConfig
         return LocalAgentConfig
     elif name in ('DB', 'PraisonAIDB', 'PraisonDB'):
-        from .db.adapter import DB
-        return DB
+        # Route through ``praisonai.db`` (not ``db.adapter`` directly) so the
+        # deprecation warning defined on the ``praisonai.db`` import path fires
+        # consistently. ``db`` classes are deprecated in favour of the ``db(...)``
+        # factory; ``from praisonai import DB`` must warn just like
+        # ``from praisonai.db import DB``.
+        from . import db as _db
+        return getattr(_db, name)
     # Note: n8n is available via direct import: from praisonai.n8n import YAMLToN8nConverter
     # Lazy loading from main package causes recursion, so use direct import for now
     
