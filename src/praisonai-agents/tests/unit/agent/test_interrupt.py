@@ -118,6 +118,77 @@ class TestInterruptController:
             assert not controller.is_set()
             assert controller.reason is None
 
+    def test_event_cleared_after_interrupted_turn_ends(self):
+        """A stale interrupt must not carry into the next turn's tools.
+
+        Regression: the ``event`` (exposed to running tool bodies) previously
+        stayed set after an interrupted turn, so a reused controller aborted
+        subprocesses launched by the NEXT turn. Ending the interrupted turn now
+        clears the underlying flag so a fresh turn starts uninterrupted.
+        """
+        controller = InterruptController()
+
+        turn = controller._begin_turn()
+        controller.request("user_stop")
+        assert controller.event.is_set()
+        assert controller._turn_is_cancelled(turn)
+
+        # The interrupted turn ends without an explicit clear().
+        controller._end_turn(turn)
+        assert not controller.event.is_set()
+        assert controller.reason is None
+
+        # A brand-new turn must NOT be seen as cancelled.
+        next_turn = controller._begin_turn()
+        assert not controller.event.is_set()
+        assert not controller._turn_is_cancelled(next_turn)
+        controller._end_turn(next_turn)
+
+    def test_event_stays_set_while_another_turn_still_cancelled(self):
+        """Ending one cancelled turn must not release a still-cancelled sibling."""
+        controller = InterruptController()
+        t1 = controller._begin_turn()
+        t2 = controller._begin_turn()
+        controller.request("user_stop")  # cancels both active turns
+
+        controller._end_turn(t1)
+        # t2 is still cancelled, so the shared event must remain set.
+        assert controller.event.is_set()
+        assert controller._turn_is_cancelled(t2)
+
+        controller._end_turn(t2)
+        assert not controller.event.is_set()
+
+    def test_event_is_optional_capability_protocol(self):
+        """The base protocol stays event-free; the cancellable one requires it."""
+        from praisonaiagents.agent.interrupt import (
+            CancellableInterruptControllerProtocol,
+        )
+
+        controller = InterruptController()
+        assert isinstance(controller, CancellableInterruptControllerProtocol)
+
+        class MinimalController:
+            def request(self, reason="user"):
+                pass
+
+            def clear(self):
+                pass
+
+            def is_set(self):
+                return False
+
+            @property
+            def reason(self):
+                return None
+
+            def check(self):
+                pass
+
+        # A controller without ``event`` is NOT cancellable-capable but must not
+        # raise — the runtime probes via getattr(..., 'event', None).
+        assert not isinstance(MinimalController(), CancellableInterruptControllerProtocol)
+
 
 class TestLLMLoopCancellation:
     """The litellm tool loop (llm/llm.py) must honour the InterruptController.
