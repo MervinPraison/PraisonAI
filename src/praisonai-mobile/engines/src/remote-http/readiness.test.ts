@@ -37,10 +37,47 @@ test("http_200_with_ok_false_is_not_ready", () => {
 test("a_missing_ok_field_is_not_read_as_healthy", () => {
   // Absent must never be mistaken for present. `body.ok !== true` rather than
   // `body.ok === false`, so `{}` and `{ok: "yes"}` are both refused.
-  for (const body of [{}, { version: PROTOCOL_VERSION }, { ok: "yes" }, { ok: 1 }, { ok: null }]) {
+  //
+  // Every body here carries a VALID version, and the reason is asserted rather
+  // than just `ready === false`. The first version of this test did neither,
+  // and `body.ok !== true` -> `!body.ok` survived it: `{ok: "yes"}` and
+  // `{ok: 1}` are truthy, so they fell through to the version check and were
+  // refused as `version_mismatch` instead. The assertion held for the wrong
+  // reason, which is the same as not holding.
+  const truthyButNotTrue = [
+    { ok: "yes" }, { ok: 1 }, { ok: "false" }, { ok: {} }, { ok: [] }, { ok: "true" },
+  ];
+  for (const partial of truthyButNotTrue) {
+    const body = { ...partial, version: PROTOCOL_VERSION };
     const verdict = classify(http(200, JSON.stringify(body)));
     assert.equal(verdict.ready, false, `${JSON.stringify(body)} must not be ready`);
+    assert.equal(
+      verdict.ready === false && verdict.reason,
+      "unhealthy",
+      `${JSON.stringify(body)} must be refused as UNHEALTHY, not for some later reason`,
+    );
   }
+  // And the falsy-or-absent ones, which the mutant does still catch.
+  for (const partial of [{}, { ok: null }, { ok: false }, { ok: 0 }]) {
+    const body = { ...partial, version: PROTOCOL_VERSION };
+    const verdict = classify(http(200, JSON.stringify(body)));
+    assert.equal(verdict.ready === false && verdict.reason, "unhealthy", JSON.stringify(body));
+  }
+});
+
+test("an_unhealthy_engine_is_worth_retrying", () => {
+  // `retryable: true` -> `false` survived. An engine still binding its socket
+  // is declared permanently dead, so a connection manager stops polling and
+  // the user never gets a working engine without restarting the app.
+  const verdict = classify(http(200, JSON.stringify({ ok: false, version: PROTOCOL_VERSION })));
+  assert.equal(verdict.ready === false && verdict.retryable, true);
+});
+
+test("a_healthy_engine_IS_ready_-_the_pair", () => {
+  // Without this, a classify() that refused everything would satisfy every
+  // negative case above.
+  const verdict = classify(http(200, JSON.stringify({ ok: true, version: PROTOCOL_VERSION })));
+  assert.equal(verdict.ready, true);
 });
 
 test("a_transport_failure_is_retryable_because_the_engine_may_still_be_binding", () => {

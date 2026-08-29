@@ -14,6 +14,13 @@ const cases: ReadonlyArray<readonly [string, unknown, string]> = [
   ["openai bad key", new Error("401 Incorrect API key provided: sk-***"), "auth"],
   ["openai missing key", new Error("No API key provided"), "auth"],
   ["anthropic auth", new Error("authentication_error: invalid x-api-key"), "auth"],
+  // The line above does NOT hold the `authentication` alternative: it also
+  // matches `invalid[ _-]?x?-?api[ _-]?key`, so deleting `authentication`
+  // from the regex survived it. These match that alternative and nothing
+  // else -- the exact regression the source comment records as fixed.
+  ["anthropic auth, no key phrase", new Error("authentication_error"), "auth"],
+  ["authentication, spelled out", new Error("Authentication Error"), "auth"],
+  ["authentication failed", new Error("Authentication failed for the request"), "auth"],
   ["forbidden", new Error("403 Forbidden"), "auth"],
   ["openai rate limit", new Error("429 Rate limit reached for gpt-4o"), "rate_limit"],
   ["quota", new Error("You exceeded your current quota"), "rate_limit"],

@@ -484,3 +484,47 @@ test("a cancel with an awkward run id is encoded too", () => {
     assert.ok(url.includes("run%2F9"), `the run id was not encoded: ${url}`);
   });
 });
+
+test("a 200 whose body does not say ok:true is reported as refused", async () => {
+  // `["ok"] === true` -> `!== false` survived. The status test above covers
+  // non-200 only, so every one of these read as SUCCEEDED: the UI announces
+  // the run stopped while it keeps streaming, and marks an approval sent that
+  // the engine never got. The source comment calls this "a lie the UI cannot
+  // detect", and nothing detected it.
+  const bodies = ["{}", '{"ok":null}', '{"ok":0}', '{"ok":"true"}', '{"error":"unknown run id"}', "[]", "null"];
+  for (const body of bodies) {
+    const http = createFakeHttp();
+    http.on("/approve/a1", () => ({ status: 200, headers: {}, body: streamOf(body) }));
+    http.on("/cancel/r1", () => ({ status: 200, headers: {}, body: streamOf(body) }));
+    const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+    assert.equal(await engine.decide("a1", "allow"), false, `${body} must not read as accepted`);
+    assert.equal(await engine.cancel("r1"), false, `${body} must not read as cancelled`);
+  }
+});
+
+test("a cancel whose transport THREW is reported as refused", async () => {
+  // The `catch` returning true survived. A dropped connection on the way to
+  // /cancel would report a successful stop: the Stop button confirms a
+  // cancellation that never happened, which is the one outcome the port's own
+  // contract singles out as worse than reporting failure.
+  const http = createFakeHttp();
+  http.on("/cancel/r1", () => { throw new Error("ECONNRESET"); });
+  http.on("/approve/a1", () => { throw new Error("ECONNRESET"); });
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+  assert.equal(await engine.cancel("r1"), false);
+  assert.equal(await engine.decide("a1", "allow"), false);
+});
+
+test("a 200 with ok:true IS accepted -- the pair", async () => {
+  // Without this, an implementation refusing everything would satisfy all
+  // three negative cases above and break every Stop and every approval.
+  const http = createFakeHttp();
+  http.on("/approve/a1", () => ({ status: 200, headers: {}, body: streamOf('{"ok":true}') }));
+  http.on("/cancel/r1", () => ({ status: 200, headers: {}, body: streamOf('{"ok":true}') }));
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+  assert.equal(await engine.decide("a1", "allow"), true);
+  assert.equal(await engine.cancel("r1"), true);
+});

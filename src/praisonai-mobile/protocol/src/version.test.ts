@@ -97,3 +97,40 @@ test("no declared feature is newer than the version this client speaks", () => {
     );
   }
 });
+
+test("an engine that cannot state its version reports ABSENT, not zero", () => {
+  // `engine: null` -> `engine: 0` survived. The file's own rule is that a
+  // missing field must never be mistaken for a present one; `0` is a present
+  // number. It reaches the user as "unreadable: engine=0 expected=2", which
+  // reads as an engine that answered rather than one that did not.
+  for (const bad of [undefined, null, "2", 2.5, 0, -1, {}, Number.NaN]) {
+    const compat = checkProtocol(bad);
+    assert.equal(compat.ok, false, `${JSON.stringify(bad ?? null)} is not a version`);
+    assert.equal(compat.ok === false && compat.engine, null, "absent must read as null");
+    assert.equal(
+      compat.ok === false && compat.expected,
+      PROTOCOL_VERSION,
+      "and it must still say what we require -- that is the actionable half",
+    );
+  }
+});
+
+test("a refusal states the version WE expect, not the one we got", () => {
+  // `expected: PROTOCOL_VERSION` -> `expected: engine` survived. A too_old
+  // refusal then reads "too_old: engine=1 expected=1" -- self-contradictory,
+  // and this string is the one thing a user copies into a bug report.
+  const compat = checkProtocol(1);
+  assert.equal(compat.ok, false);
+  assert.equal(compat.ok === false && compat.reason, "too_old");
+  assert.equal(compat.ok === false && compat.engine, 1, "what the engine said");
+  assert.equal(
+    compat.ok === false && compat.expected,
+    PROTOCOL_VERSION,
+    "what we require -- and it must differ from what we got",
+  );
+  assert.notEqual(
+    compat.ok === false && compat.expected,
+    compat.ok === false && compat.engine,
+    "a refusal that says expected === actual explains nothing",
+  );
+});

@@ -1367,3 +1367,31 @@ test("an unhollowed fixture run is green", () => {
   const run = runAdapterFixture("none");
   assert.equal(run.status, 0, `the untouched fixture must be green:\n${run.output}`);
 });
+
+test("a HALF-present Tauri global is treated as absent", () => {
+  // `||` -> `&&` survived. A global carrying only one of the two functions is
+  // a Tauri version this bridge does not speak; reading it as present makes
+  // `isPresent()` say native, and then `transformCallback` throws inside
+  // `listen`, is caught, and every shell subscription silently returns a
+  // no-op. The source comment says "Both, not either" -- nothing enforced it.
+  const onlyInvoke = createTauriBridge({ scope: { __TAURI_INTERNALS__: { invoke: () => {} } } });
+  assert.equal(onlyInvoke.isPresent(), false, "invoke without transformCallback is not Tauri");
+
+  const onlyTransform = createTauriBridge({
+    scope: { __TAURI_INTERNALS__: { transformCallback: () => {} } },
+  });
+  assert.equal(onlyTransform.isPresent(), false, "transformCallback without invoke is not Tauri");
+
+  const neither = createTauriBridge({ scope: { __TAURI_INTERNALS__: {} } });
+  assert.equal(neither.isPresent(), false);
+});
+
+test("a FULLY present Tauri global is treated as present -- the pair", () => {
+  // Without this, an isPresent() that always said false would pass every
+  // negative case here and in the two tests above, and the app would never
+  // use the native shell on a device.
+  const both = createTauriBridge({
+    scope: { __TAURI_INTERNALS__: { invoke: () => {}, transformCallback: () => {} } },
+  });
+  assert.equal(both.isPresent(), true);
+});
