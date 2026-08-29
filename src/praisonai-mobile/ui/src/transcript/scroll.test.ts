@@ -140,3 +140,22 @@ test("jump to latest re-engages following even though no scroll event said so", 
   assert.equal(jumped.action.kind, "scrollTo");
   assert.equal(shouldShowJumpToLatest(jumped.state), false);
 });
+
+test("iOS rubber-banding past the bottom still counts as being at the bottom", () => {
+  // The inner `Math.max(0, scrollTop)` survived. iOS legitimately reports a
+  // NEGATIVE scrollTop while the user overscrolls, and without the clamp the
+  // distance from the bottom comes out positive -- so follow-the-stream
+  // switches itself off mid-answer on every rubber-band, which is the exact
+  // behaviour this module exists to prevent.
+  const metrics = { scrollTop: -50, scrollHeight: 1000, clientHeight: 1000 };
+  assert.equal(distanceFromBottom(metrics), 0, "an overscroll is not a scroll away from the bottom");
+  assert.equal(isAtBottom(metrics), true);
+});
+
+test("a real scroll away from the bottom is still reported", () => {
+  // The pair: clamping everything to zero would make the transcript follow the
+  // stream even while the user is reading further up, yanking them back down.
+  const metrics = { scrollTop: 0, scrollHeight: 2000, clientHeight: 1000 };
+  assert.equal(distanceFromBottom(metrics), 1000);
+  assert.equal(isAtBottom(metrics), false);
+});

@@ -215,3 +215,18 @@ test("a draft is counted in logical lines, never below one", () => {
   assert.equal(lineCountOf("a\nb\nc"), 3);
   assert.equal(lineCountOf("trailing\n"), 2);
 });
+
+test("Alt+Enter inserts a newline under enter-sends, like Shift+Enter", () => {
+  // Dropping `|| event.altKey` survived. On a tablet with a hardware keyboard
+  // -- the only configuration where enter-sends is chosen -- Alt+Enter would
+  // SEND a half-written message instead of breaking the line. The comment
+  // beside it calls Alt the muscle memory on some layouts; nothing checked it.
+  assert.equal(keyAction({ key: "Enter", shiftKey: false, altKey: true } as never, "enter-sends"), "newline");
+  assert.equal(keyAction({ key: "Enter", shiftKey: true, altKey: false } as never, "enter-sends"), "newline");
+});
+
+test("a bare Enter still sends under enter-sends", () => {
+  // The pair: treating every Enter as a newline would make the policy do
+  // nothing at all.
+  assert.equal(keyAction({ key: "Enter", shiftKey: false, altKey: false } as never, "enter-sends"), "send");
+});
