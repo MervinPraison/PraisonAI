@@ -11,7 +11,12 @@
  * which case each one fails.
  */
 import test from "node:test";
-import assert from "node:assert/strict";
+import rawAssert from "node:assert/strict";
+import { ledger, type Ledger } from "./assert-ledger.ts";
+
+/** How many assertions the cases below make in one run. Deleting one makes
+ *  the count short and the last case fail by name. */
+const EXPECTED_ASSERTIONS = 15;
 
 import type { StoragePort } from "../../../core/src/ports/storage.ts";
 
@@ -19,6 +24,16 @@ export function describeStorageContract(
   name: string,
   make: () => StoragePort | Promise<StoragePort>,
 ): void {
+  // Every assertion below is counted, and the last case in this contract
+  // asserts the total. See ./assert-ledger.ts: the break-mode fixture can
+  // only protect the first assertion in each case, and 62 of 73 were
+  // measured deletable with a green run.
+  // Declared with an explicit type rather than destructured: `assert` carries
+  // `asserts` signatures, and TS2775 refuses those through a binding pattern.
+  const counting = ledger();
+  const assert: Ledger["assert"] = counting.assert;
+  const made = counting.made;
+
   test(`${name}: a missing key reads as null, never undefined`, async () => {
     // The distinction matters to every `??` in a caller. `undefined` and `null`
     // behave the same for `??` but differently for `===`, and a repository that
@@ -113,5 +128,21 @@ export function describeStorageContract(
     const storage = await make();
     await storage.write({ namespace: "settings", id: "empty" }, "");
     assert.equal(await storage.read({ namespace: "settings", id: "empty" }), "");
+  });
+
+  // Registered last, so every case above has already run by the time it does.
+  // Not a style check: the fixture in ./contract-fixture.ts can only protect
+  // the FIRST assertion in each case, so without this an assertion can be
+  // deleted and the run just reports one test fewer. See ./assert-ledger.ts.
+  test(`${name}: this contract made every assertion it is supposed to make`, () => {
+    const actual = made();
+    rawAssert.equal(
+      actual,
+      EXPECTED_ASSERTIONS,
+      `${name}: this contract ran ${actual} assertions, not ${EXPECTED_ASSERTIONS}. ` +
+        `If you deliberately added or removed one, update the constant in ` +
+        `${'storage-contract.ts'} -- and consider whether the new assertion also needs a break ` +
+        `mode in contract-fixture.ts, which is what proves it has teeth.`,
+    );
   });
 }

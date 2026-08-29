@@ -24,7 +24,14 @@
  * elapsed milliseconds is a contract that goes red on a loaded CI box.
  */
 import test from "node:test";
-import assert from "node:assert/strict";
+import rawAssert from "node:assert/strict";
+import { ledger, type Ledger } from "./assert-ledger.ts";
+
+/** How many assertions the cases below make in one run. Deleting one makes
+ *  the count short and the last case fail by name. The real-clock branch adds
+ *  two, so the expected total depends on which kind of adapter is running. */
+const EXPECTED_ASSERTIONS = 8;
+const REAL_CLOCK_ASSERTIONS = 2;
 
 import type { TimePort } from "../../../core/src/ports/time.ts";
 
@@ -38,6 +45,16 @@ export function describeTimeContract(
   /** True for an adapter on real time, where nowMs and epochMs must differ. */
   realClock = false,
 ): void {
+  // Every assertion below is counted, and the last case in this contract
+  // asserts the total. See ./assert-ledger.ts: the break-mode fixture can
+  // only protect the first assertion in each case, and 62 of 73 were
+  // measured deletable with a green run.
+  // Declared with an explicit type rather than destructured: `assert` carries
+  // `asserts` signatures, and TS2775 refuses those through a binding pattern.
+  const counting = ledger();
+  const assert: Ledger["assert"] = counting.assert;
+  const made = counting.made;
+
   test(`${name}: nowMs is monotonic`, async () => {
     // It is the clock the coalescer measures its delay budget against. A clock
     // that can go backwards makes the budget either never expire or expire
@@ -136,6 +153,23 @@ export function describeTimeContract(
     await advance(time, 40);
     assert.equal(aFired, false, "the cleared scheduler fired");
     assert.equal(bFired, true, "clearing one scheduler cleared another");
+  });
+
+  // Registered last, so every case above has already run by the time it does.
+  // Not a style check: the fixture in ./contract-fixture.ts can only protect
+  // the FIRST assertion in each case, so without this an assertion can be
+  // deleted and the run just reports one test fewer. See ./assert-ledger.ts.
+  test(`${name}: this contract made every assertion it is supposed to make`, () => {
+    const actual = made();
+    const expected = EXPECTED_ASSERTIONS + (realClock ? REAL_CLOCK_ASSERTIONS : 0);
+    rawAssert.equal(
+      actual,
+      expected,
+      `${name}: this contract ran ${actual} assertions, not ${expected}. ` +
+        `If you deliberately added or removed one, update the constant in ` +
+        `${'time-contract.ts'} -- and consider whether the new assertion also needs a break ` +
+        `mode in contract-fixture.ts, which is what proves it has teeth.`,
+    );
   });
 }
 
