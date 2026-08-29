@@ -590,3 +590,61 @@ test("an approval row shows the decision after the user answers it", async () =>
   );
   app?.dispose();
 });
+
+// ---- the accessibility wiring, which nothing had asserted -------------------
+//
+// A mutation audit found that `polite`'s aria-live was pinned and `assertive`'s
+// was not, that the transcript's NOT being a live region -- the catastrophe its
+// own comment describes -- was undefended, and that the composer's label could
+// go back to the regression the code comment records as fixed.
+
+test("the two live regions have the politeness each one is for", async () => {
+  // `assertive.setAttribute("aria-live", "assertive")` was removable, and
+  // could also be flipped to "polite". The assertive region carries approval
+  // prompts and errors: an approval BLOCKS the run, so waiting politely for
+  // the queue to drain is waiting for something that will not happen until
+  // the user answers. Only `polite`'s attribute had a test.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const regions = dom.all().filter((n) => n.getAttribute("aria-live") !== null);
+  assert.deepEqual(
+    regions.map((n) => n.getAttribute("aria-live")).sort(),
+    ["assertive", "polite"],
+    "exactly one polite region and one assertive one",
+  );
+  for (const region of regions) {
+    assert.ok(region.className.includes("sr-only"), "a live region is not visible");
+  }
+  app?.dispose();
+});
+
+test("the transcript is NOT a live region", async () => {
+  // Nothing asserted this, and the consequence is written out in main.ts: the
+  // transcript is mutated on every publish, so aria-live here makes the reader
+  // restart on each token batch and no sentence is ever finished. A one-line
+  // addition away, and undetectable.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const log = dom.find((n) => n.getAttribute("role") === "log");
+  assert.ok(log, "the transcript is a log");
+  assert.equal(log.getAttribute("aria-live"), null, "and must never also be a live region");
+  assert.equal(log.getAttribute("aria-label"), en.appName, "it must still be named");
+  app?.dispose();
+});
+
+test("the message field is labelled as the field, not as the button beside it", async () => {
+  // `input.setAttribute("aria-label", strings.composerLabel)` was removable
+  // and could be given the Send button's name -- which is the exact regression
+  // the line's own comment records: the composer announced as "Send, edit
+  // text".
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const box = dom.find((n) => n.tagName === "TEXTAREA");
+  assert.ok(box);
+  assert.equal(box.getAttribute("aria-label"), en.composerLabel);
+  assert.notEqual(box.getAttribute("aria-label"), en.actionSend, "not the button's name");
+  app?.dispose();
+});

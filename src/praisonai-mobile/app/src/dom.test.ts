@@ -38,7 +38,22 @@ function fakeDoc() {
       set textContent(v: string) { this._text = v; this.children = []; },
       get innerHTML() { return this._html; },
       set innerHTML(v: string) { this._html = v; },
-      classList: { toggle() {} },
+      // A real classList. The previous `toggle() {}` was a fake that lied: it
+      // accepted every call and recorded nothing, so `classList.toggle(
+      // "streaming", row.streaming)` could be deleted outright and no test
+      // could tell. Backed by `className` so the two agree, as they do in a
+      // browser.
+      classList: {
+        toggle(name: string, on?: boolean) {
+          const set = new Set(el.className.split(" ").filter((c: string) => c !== ""));
+          const want = on ?? !set.has(name);
+          if (want) set.add(name); else set.delete(name);
+          el.className = [...set].join(" ");
+        },
+        contains(name: string) {
+          return el.className.split(" ").includes(name);
+        },
+      },
       append(...cs: any[]) {
         for (const c of cs) { c.parent = this; this.children.push(c); }
       },
@@ -382,4 +397,147 @@ test("each approval button carries its OWN choice", () => {
   for (const b of buttons) {
     assert.equal(b.dataset.approvalId, "a1", "and each must address its own approval");
   }
+});
+
+// ---- what a row actually SAYS ----------------------------------------------
+//
+// A mutation audit found nine survivors in this file. Every one of them is the
+// same shape: the tests reached rows by `dataset`, never by what a person
+// reads, so every visible string and every class name could be dropped or
+// swapped with a green suite.
+
+const auditToolRow = (over: Partial<Extract<Row, { kind: "tool" }>> = {}): Row => ({
+  kind: "tool",
+  id: "tool:c1",
+  callId: "c1",
+  name: "bash",
+  args: {},
+  status: "ok",
+  tone: "success",
+  output: "total 4\ndrwxr-xr-x",
+  preview: "total 4",
+  seconds: 1.2,
+  durationLabel: "1.2s",
+  durationKnown: true,
+  ...over,
+});
+
+const approvalRow = (over: Partial<Extract<Row, { kind: "approval" }>> = {}): Row => ({
+  kind: "approval",
+  id: "approval:ap1",
+  approvalId: "ap1",
+  callId: "c1",
+  name: "rm",
+  args: { path: "/" },
+  state: { status: "pending" },
+  actionable: true,
+  ...over,
+});
+
+const paintOne = (row: Row) => {
+  const { host } = fakeDoc();
+  applyOps(host, emptyNodes(), [{ kind: "insert", id: row.id, index: 0, row }]);
+  return host.children[0] as any;
+};
+
+const descend = (node: any, out: any[] = []): any[] => {
+  out.push(node);
+  for (const c of node.children ?? []) descend(c, out);
+  return out;
+};
+
+test("each approval button says what it does", () => {
+  // `b.textContent = strings.approvalChoice(choice)` was removable. All three
+  // buttons then read the same -- blank -- and the user taps the one they
+  // believe is Deny and sends `allow`. Every existing test found its button by
+  // `dataset["choice"]`, which the mutation leaves perfectly intact.
+  const el = paintOne(approvalRow());
+  const buttons = descend(el).filter((n) => String(n.tagName).toLowerCase() === "button");
+
+  assert.equal(buttons.length, 3);
+  assert.deepEqual(
+    buttons.map((b) => b.textContent),
+    ["Allow", "Always allow", "Deny"],
+    "the label a user reads must match the choice the button sends",
+  );
+  // And each label must sit on the button that sends that choice.
+  for (const b of buttons) {
+    assert.equal(
+      b.textContent,
+      { allow: "Allow", always: "Always allow", deny: "Deny" }[b.dataset["choice"] as string],
+      `the "${b.textContent}" button sends "${b.dataset["choice"]}"`,
+    );
+  }
+});
+
+test("an approval names the command it is asking about", () => {
+  // `q.textContent = strings.approvalQuestion(row.name)` was removable: the
+  // user is asked to authorise a command the prompt does not identify.
+  const el = paintOne(approvalRow({ name: "rm" }));
+  const text = descend(el).map((n) => n.textContent).join(" ");
+  assert.ok(text.includes("rm"), `the prompt must name the tool; got: ${text}`);
+});
+
+test("a tool row shows the tool's name and its output preview", () => {
+  // Two survivors: `name.textContent = row.name` (rows showed the call id) and
+  // the whole `if (row.preview !== "")` block (no tool output ever painted).
+  const el = paintOne(auditToolRow());
+  const all = descend(el);
+  const name = all.find((n) => n.className === "tool-name");
+  const out = all.find((n) => n.className === "tool-output");
+
+  assert.equal(name?.textContent, "bash", "the tool's NAME, not its call id");
+  assert.equal(out?.textContent, "total 4", "the preview must be painted");
+});
+
+test("a tool row shows the PREVIEW, not the whole output", () => {
+  // `out.textContent = row.preview` -> `row.output` survived: a 40kB tool
+  // result floods the row instead of the truncated first line.
+  const el = paintOne(auditToolRow({ output: "line one\nline two", preview: "line one" }));
+  const out = descend(el).find((n) => n.className === "tool-output");
+  assert.equal(out?.textContent, "line one");
+});
+
+test("a tool row with no output paints no output element -- the pair", () => {
+  const el = paintOne(auditToolRow({ output: "", preview: "" }));
+  assert.equal(descend(el).find((n) => n.className === "tool-output"), undefined);
+});
+
+test("every row carries the class its stylesheet selects on", () => {
+  // ``el.className = `row row-${row.kind}` `` was removable. Every
+  // `.row-tool` / `.row-approval` / `.row-error` rule in app.css then stops
+  // matching and the transcript renders as undifferentiated grey boxes --
+  // which no assertion about textContent can see.
+  for (const row of [
+    auditToolRow(),
+    approvalRow(),
+    { kind: "text", id: "t0", text: "hi", streaming: false } as Row,
+    { kind: "notice", id: "n0", text: "Stopped", tone: "warning" } as Row,
+  ]) {
+    const el = paintOne(row);
+    assert.ok(
+      String(el.className).split(" ").includes(`row-${row.kind}`),
+      `a ${row.kind} row must carry row-${row.kind}; got "${el.className}"`,
+    );
+    assert.ok(String(el.className).split(" ").includes("row"), "and the base class");
+  }
+});
+
+test("only the streaming row carries the streaming class", () => {
+  // `classList.toggle("streaming", row.streaming)` was removable -- and could
+  // not have been caught before, because this file's fake document had a
+  // `classList.toggle() {}` that accepted every call and recorded nothing.
+  const live = paintOne({ kind: "text", id: "t0", text: "half", streaming: true } as Row);
+  const done = paintOne({ kind: "text", id: "t1", text: "whole", streaming: false } as Row);
+
+  assert.ok(String(live.className).split(" ").includes("streaming"), "the live row has the caret");
+  assert.ok(!String(done.className).split(" ").includes("streaming"), "a finished row does not");
+});
+
+test("a notice shows its text and its tone", () => {
+  // Both lines were removable: the Stopped notice rendered the literal word
+  // "warning", or nothing at all.
+  const el = paintOne({ kind: "notice", id: "n0", text: "Stopped", tone: "warning" } as Row);
+  assert.equal(el.textContent, "Stopped");
+  assert.equal(el.dataset["tone"], "warning");
 });
