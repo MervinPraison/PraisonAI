@@ -362,33 +362,35 @@ test("a subscriber that unsubscribes another during notify does not silence it",
   });
 });
 
-test("persist() writes through plainOnly, so no secret can reach storage", () => {
-  // `plainOnly(values, byKey)` -> `Object.fromEntries(values)` survived.
-  // `plainOnly` is the ONLY thing keeping API keys out of localStorage, and
-  // deleting the call was invisible: every existing test either never put a
-  // secret in the map, or checked the guard function directly rather than the
-  // write that uses it.
+test("no public route can put a secret into the persisted file", () => {
+  // A sweep reported `plainOnly(values, byKey)` -> `Object.fromEntries(values)`
+  // as "every secret is written to plain storage". Checked: it is NOT. No
+  // public route can get a secret into the values map -- `set` refuses a
+  // secret-flagged key and `load` drops one -- so the two forms are equivalent
+  // through the public API, and the mutation survives this test too.
   //
-  // This asserts on what the StoragePort actually received, with a secret
-  // forced into the map the way a future write path might.
+  // `plainOnly` is defence in depth for the day a new write path forgets the
+  // rule, which is why it is tested directly rather than through here. This
+  // test asserts the OTHER half: that no route currently exists. If one is
+  // ever added, this fails before the guard has to catch it.
   const { storage, secrets, store } = build();
   return (async () => {
+    assert.equal(await store.set("apiKey", "sk-refused"), false, "set must refuse a secret key");
     await store.setSecret({ slot: "openai", account: "default" }, "sk-live-must-not-leak");
     await store.set("model", "gpt-4o");
 
-    // And the harder case: a secret sitting in the values map, which `set`
-    // refuses to create but `load` or a future caller could.
     await storage.write(
       { namespace: "settings", id: "app" },
-      JSON.stringify({ model: "gpt-4o", apiKey: "sk-also-must-not-leak" }),
+      JSON.stringify({ model: "gpt-4o", apiKey: "sk-from-disk" }),
     );
     const reloaded = createSettingsStore(DEFS, storage, secrets);
     await reloaded.load();
+    assert.notEqual(reloaded.get("apiKey"), "sk-from-disk", "load must not adopt a secret from disk");
     await reloaded.set("model", "gpt-4o-mini");
 
     const written = (await storage.read({ namespace: "settings", id: "app" })) ?? "";
-    assert.equal(written.includes("sk-live-must-not-leak"), false, "a stored secret reached plain storage");
-    assert.equal(written.includes("sk-also-must-not-leak"), false, "an adopted secret reached plain storage");
-    assert.match(written, /gpt-4o-mini/, "and ordinary settings are still persisted");
+    assert.equal(written.includes("sk-live-must-not-leak"), false);
+    assert.equal(written.includes("sk-from-disk"), false);
+    assert.match(written, /gpt-4o-mini/, "ordinary settings are still persisted");
   })();
 });
