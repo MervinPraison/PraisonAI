@@ -63,8 +63,17 @@ test('the Windows release fails if its embedded version drifts', () => {
   assert.match(gate, /FileVersion/, 'the release does not verify FileVersion');
   assert.match(gate, /\$version\.ProductVersion\s+-ne\s+\$expected/,
                'ProductVersion is not compared with the release version');
-  assert.match(gate, /\$version\.FileVersion\s+-ne\s+\$numeric/,
-               'FileVersion is not compared with the numeric release version');
+  // FileVersion is compared by component, not as a string.
+  //
+  // This assertion used to require `$version.FileVersion -ne $numeric`, where
+  // $numeric was the tag plus a literal ".0" -- so it pinned the very bug that
+  // blocked the v4.7.4 Windows build: a binary correctly stamped 4.7.4 was
+  // rejected for not reading "4.7.4.0". A test that requires the broken
+  // comparison stops anyone fixing it, which is worse than no test.
+  assert.match(gate, /\[version\]\$version\.FileVersion|\$got\s*=\s*\[version\]/,
+               'FileVersion is not parsed as a version before comparison');
+  assert.ok(!/\+\s*'\.0'/.test(gate),
+            'the gate still appends ".0" and compares the string literally');
   assert.ok(start > workflow.indexOf('cargo tauri build'), 'the binary is checked before it exists');
   assert.ok(start < workflow.indexOf('gh release upload'), 'the binary is checked after upload');
 });
@@ -301,4 +310,26 @@ test('the macOS overlay does not drop the bundle configuration', () => {
     assert.ok(overlay.bundle.macOS?.signingIdentity,
               'the overlay defines bundle but omits signingIdentity, which replaces it away');
   }
+});
+
+test('the Windows version gate compares components, not the literal string', () => {
+  // It appended ".0" and compared literally, so a binary correctly stamped
+  // 4.7.4 was rejected against "4.7.4.0" and the v4.7.4 release shipped with
+  // no Windows installer -- the one platform it was cut to fix. The stamping
+  // was right; the check was not.
+  const runnable = workflow
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const gate = runnable.slice(runnable.indexOf('must carry the release version'),
+                              runnable.indexOf('must carry a valid signature'));
+  assert.ok(gate, 'the Windows version gate is gone');
+  assert.ok(!/\+ '\.0'/.test(gate),
+            'the gate still appends ".0" and compares the string literally');
+  assert.match(gate, /\$got\.Major|\[version\]/,
+               'the gate does not compare version components');
+  // The half that was always right must stay: a binary stamped 0.1.0 is the
+  // bug this gate exists for.
+  assert.match(gate, /ProductVersion/,
+               'the gate no longer checks ProductVersion');
 });

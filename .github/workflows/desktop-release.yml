@@ -140,13 +140,32 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           $expected = $env:RELEASE_TAG -replace '^v', ''
-          $numeric = ($expected -split '[-+]')[0] + '.0'
-          $version = (Get-Item "target/${{ matrix.target }}/release/praisonai-desktop.exe").VersionInfo
+          $core = ($expected -split '[-+]')[0]
+          $exe = "target/${{ matrix.target }}/release/praisonai-desktop.exe"
+          $version = (Get-Item $exe).VersionInfo
+          Write-Host "ProductVersion=$($version.ProductVersion) FileVersion=$($version.FileVersion)"
+
           if ($version.ProductVersion -ne $expected) {
             throw "ProductVersion $($version.ProductVersion) does not match $expected"
           }
-          if ($version.FileVersion -ne $numeric) {
-            throw "FileVersion $($version.FileVersion) does not match $numeric"
+
+          # Compare the three components that carry meaning, not the string.
+          #
+          # This gate blocked the v4.7.4 Windows build with
+          #   FileVersion 4.7.4 does not match 4.7.4.0
+          # It appended ".0" and compared literally, but Windows reports what
+          # was stamped -- three parts here. The stamping was correct and the
+          # check was not, so the release shipped with no Windows installer at
+          # all: the one platform it was cut to fix.
+          #
+          # [version] normalises a missing fourth component to -1, so both
+          # "4.7.4" and "4.7.4.0" compare equal on major.minor.build.
+          $got = [version]$version.FileVersion
+          $want = [version]$core
+          if ($got.Major -ne $want.Major -or
+              $got.Minor -ne $want.Minor -or
+              $got.Build -ne $want.Build) {
+            throw "FileVersion $($version.FileVersion) does not match $core"
           }
 
       - name: The macOS bundle must carry a valid signature
