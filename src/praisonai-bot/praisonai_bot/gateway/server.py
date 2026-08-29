@@ -2249,7 +2249,22 @@ class WebSocketGateway:
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
+            # Issue #4603: ``serve()`` returns through here on every graceful
+            # termination — the SIGINT/SIGTERM handler only flips
+            # ``should_exit`` and uvicorn unwinds, so ``stop()`` is not
+            # guaranteed to run. Stamp the clean-exit marker here (after
+            # cancelling the sampler so it cannot re-stamp ``running``) so a
+            # normal shutdown is not misreported as an unclean/OOM death on the
+            # next boot. ``mark_exited`` is pid-owned and idempotent, so a later
+            # explicit ``stop()`` is harmless.
             await self._cancel_ledger_heartbeat()
+            if self._lifecycle_ledger is not None:
+                try:
+                    self._lifecycle_ledger.mark_exited()
+                except Exception:
+                    logger.debug(
+                        "Failed to mark clean exit in lifecycle ledger (serve)"
+                    )
 
     async def _cancel_liveness_task(self) -> None:
         """Stop the connection-liveness heartbeat/reaper task (idempotent)."""
@@ -5566,7 +5581,20 @@ class WebSocketGateway:
         try:
             pressure = self._compute_pressure()
             if pressure is not None:
-                result["pressure"] = pressure.to_dict()
+                # Issue #4603: the lifecycle ledger may already have populated
+                # ``result["pressure"]`` with a coarse ``{"memory", "disk"}``
+                # block. Merge the saturation/back-pressure fields in rather
+                # than replacing it, so enabling both features surfaces the OS
+                # resource pressure *and* the admission/backlog signals on one
+                # ``pressure`` object instead of one silently clobbering the
+                # other. Saturation keys ("admission_*", "outbox_*", …) are
+                # disjoint from the ledger's, so the merge is non-destructive.
+                existing = result.get("pressure")
+                merged = pressure.to_dict()
+                if isinstance(existing, dict):
+                    for key, value in existing.items():
+                        merged.setdefault(key, value)
+                result["pressure"] = merged
         except Exception:
             pass
 

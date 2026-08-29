@@ -9,6 +9,7 @@ sentinel-backed restart store.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -126,3 +127,66 @@ def test_corrupt_sentinel_is_tolerated(tmp_path):
     # A corrupt prior file reads as "no record" -> unknown, never raises.
     rec = ledger.record_boot()
     assert rec.exit_kind == "unknown"
+
+
+# ── server integration: the two P1s (graceful clean-exit + pressure merge) ──
+
+
+def _make_gateway_with_ledger(tmp_path):
+    """A bare WebSocketGateway with only a lifecycle ledger wired (no server)."""
+    from praisonai_bot.gateway import WebSocketGateway
+
+    gw = WebSocketGateway()
+    gw._lifecycle_ledger = LifecycleLedger(str(tmp_path / "lifecycle.json"))
+    return gw
+
+
+def test_graceful_serve_teardown_marks_clean_exit(tmp_path):
+    """Issue #4603 P1: ``serve()`` returning (the SIGTERM path, which only flips
+    ``should_exit`` and never calls ``stop()``) must still stamp a clean exit so
+    the next boot does not misreport a graceful shutdown as unclean/OOM."""
+    path = str(tmp_path / "lifecycle.json")
+    gw = _make_gateway_with_ledger(tmp_path)
+    gw._lifecycle_ledger.path = path
+    gw._lifecycle_ledger.record_boot()
+
+    # Simulate ``serve()``'s finally block running on graceful shutdown.
+    asyncio.run(gw._cancel_ledger_heartbeat())
+    gw._lifecycle_ledger.mark_exited()
+
+    data = json.loads((tmp_path / "lifecycle.json").read_text())
+    assert data["phase"] == "exited"
+    assert data["exit_kind"] == "clean"
+
+    # A fresh process now sees a *clean* prior exit, not an unclean one.
+    ledger2 = LifecycleLedger(path)
+    assert ledger2.record_boot().exit_kind == "clean"
+
+
+def test_health_merges_ledger_and_saturation_pressure(tmp_path):
+    """Issue #4603 P1: when both the lifecycle ledger and the saturation
+    back-pressure machinery are enabled, ``/health`` must surface *both* the
+    memory/disk block and the admission/backlog block on one ``pressure``
+    object — neither may silently clobber the other."""
+    from praisonaiagents.gateway import HealthPressure
+
+    gw = _make_gateway_with_ledger(tmp_path)
+    gw._is_running = True
+    # Force a known ledger pressure block and a known saturation snapshot.
+    gw._lifecycle_ledger.pressure = lambda: {"memory": "ok", "disk": "ok"}
+    gw._lifecycle_ledger.last_exit = lambda: {
+        "last_exit": "clean", "suspected_oom": False,
+    }
+    gw._compute_pressure = lambda: HealthPressure(
+        admission_in_flight=2, outbox_pending=5, pressure="elevated"
+    )
+
+    result = gw.health()
+    pressure = result["pressure"]
+    # Ledger's OS resource keys survive...
+    assert pressure["memory"] == "ok"
+    assert pressure["disk"] == "ok"
+    # ...alongside the saturation keys.
+    assert pressure["admission_in_flight"] == 2
+    assert pressure["outbox_pending"] == 5
+    assert pressure["pressure"] == "elevated"
