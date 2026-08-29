@@ -588,5 +588,17 @@ test("an approval row shows the decision after the user answers it", async () =>
     "pending",
     "the row must acknowledge the decision, not stay pending forever",
   );
+
+  // Leaving `pending` is not enough: every accepted choice does that, so the
+  // test stays green even if the wiring submits `allow` for a tapped Deny --
+  // the exact bug this file exists to catch. Read the request boundary and
+  // assert the decision that was SENT is the one the user made.
+  const submitted = http.sent.find((r) => r.url.endsWith("/approve/a1") && r.method === "POST");
+  assert.ok(submitted, "the Deny tap must reach the approval endpoint");
+  assert.deepEqual(
+    JSON.parse(submitted.body ?? "{}"),
+    { choice: "deny" },
+    "the choice sent must be the one tapped, not allow/always",
+  );
   app?.dispose();
 });
