@@ -10,7 +10,11 @@ import { dirname, join, resolve } from "node:path";
 import { bundle, isShippable } from "./bundle.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
-const pkg = resolve(here, "..");
+// Overridable so a test can drive the real script against a package whose
+// bundle is deliberately unshippable. Removing the `process.exit(1)` below
+// survived: the errors are printed and the build "succeeds", shipping a
+// dist/ that dies on load.
+const pkg = resolve(process.argv[2] ?? here + "/..");
 const dist = join(pkg, "dist");
 
 await rm(dist, { recursive: true, force: true });

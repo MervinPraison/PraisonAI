@@ -39,7 +39,16 @@ const run = promisify(execFile);
 
 const UPSTREAM = resolve(import.meta.dirname, "../../praisonai-ts");
 const AGENT_SRC = join(UPSTREAM, "src/agent/simple.ts");
-const AGENT_API = resolve(import.meta.dirname, "../engines/src/praisonai-ts/agent-api.ts");
+/** The structural interface the real Agent must satisfy.
+ *
+ *  Overridable so the CLI can be driven against a deliberately-incompatible
+ *  interface in a test. Two mutations survived here -- `process.exitCode = 1`
+ *  becoming 0, so drift is PRINTED and the job passes anyway, and `--strict`
+ *  being dropped, so null-safety drift stops being detected. Neither is
+ *  observable without being able to provoke real drift. */
+const AGENT_API =
+  process.env["PARITY_AGENT_API"] ??
+  resolve(import.meta.dirname, "../engines/src/praisonai-ts/agent-api.ts");
 
 const exists = async (p) => {
   try {

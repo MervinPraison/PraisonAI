@@ -13,6 +13,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,4 +51,51 @@ test("the checker still passes when it CAN run", () => {
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   assert.equal(result.status, 0, `the real check should pass on a clean tree:\n${output}`);
   assert.match(output, /still satisfies PraisonAgent/);
+});
+
+test("real drift makes the checker EXIT non-zero, not merely print", () => {
+  // `process.exitCode = 1` -> `= 0` survived: the drift is printed in full and
+  // the job passes anyway. The message is not the gate; the exit code is, and
+  // CI reads only the latter.
+  const dir = mkdtempSync(join(tmpdir(), "parity-drift-"));
+  const api = join(dir, "agent-api.ts");
+  // A member the real Agent does not have, so the assignment cannot typecheck.
+  writeFileSync(api, "export interface PraisonAgent { __definitelyNotOnAgent: number; }\n");
+  try {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      timeout: 300_000,
+      env: { ...process.env, PARITY_AGENT_API: api },
+    });
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+    assert.notEqual(result.status, 0, `drift was reported and then passed:\n${output}`);
+    assert.doesNotMatch(output, /still satisfies PraisonAgent/, "it must not also claim success");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the parity typecheck runs in STRICT mode", () => {
+  // Dropping `--strict` survived: null-safety drift stops being detected, so
+  // an upstream member becoming nullable no longer fails the gate. Provoked
+  // with an interface that only differs under strictNullChecks.
+  const dir = mkdtempSync(join(tmpdir(), "parity-strict-"));
+  const api = join(dir, "agent-api.ts");
+  writeFileSync(
+    api,
+    // `lastStopReason` is nullable upstream; requiring it non-null only fails
+    // when strictNullChecks is on.
+    "export interface PraisonAgent { lastStopReason: string; }\n",
+  );
+  try {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      timeout: 300_000,
+      env: { ...process.env, PARITY_AGENT_API: api },
+    });
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+    assert.notEqual(result.status, 0, `strict-only drift went undetected:\n${output}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
