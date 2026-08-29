@@ -31,7 +31,12 @@ class InterruptControllerProtocol(Protocol):
     def reason(self) -> Optional[str]:
         """Get interrupt reason if set."""
         ...
-    
+
+    @property
+    def event(self) -> "threading.Event":
+        """Get the underlying cancellation Event for in-tool observation."""
+        ...
+
     def check(self) -> None:
         """Check for interrupt and raise if set."""
         ...
@@ -125,6 +130,16 @@ class InterruptController:
         """
         with self._lock:
             return self._reason
+
+    @property
+    def event(self) -> threading.Event:
+        """Expose the underlying cancellation Event.
+
+        Lets a running tool body observe the interrupt cooperatively (e.g. wait
+        on it with a timeout, or poll ``is_set()``) so an in-flight subprocess/
+        request can be aborted rather than left running until its own timeout.
+        """
+        return self._flag
 
     def check(self) -> None:
         """Check for cancellation and raise if requested.

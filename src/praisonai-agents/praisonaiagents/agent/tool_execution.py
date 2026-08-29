@@ -469,6 +469,12 @@ class ToolExecutionMixin:
         state_metadata = {'agent_name': self.name}
         if idempotency_key:
             state_metadata['idempotency_key'] = idempotency_key
+        # Thread the interrupt controller's cancellation Event into the tool
+        # context so a running tool body can observe it and abort promptly
+        # (e.g. shell tool killing its subprocess group). A tool that ignores
+        # this behaves exactly as before.
+        _controller = getattr(self, 'interrupt_controller', None)
+        cancel_event = getattr(_controller, 'event', None) if _controller is not None else None
         state = AgentState(
             agent_id=self.name,
             run_id=getattr(self, '_current_run_id', 'unknown'),
@@ -477,6 +483,7 @@ class ToolExecutionMixin:
             memory=getattr(self, '_memory_instance', None),
             learn_manager=getattr(getattr(self, '_memory_instance', None), 'learn', None),
             metadata=state_metadata,
+            cancel_event=cancel_event,
         )
         
         # Route through user-supplied tool middleware (Agent(hooks=[...])) when
@@ -496,6 +503,7 @@ class ToolExecutionMixin:
                 session_id=getattr(self, '_session_id', None) or 'default',
                 tool_name=function_name,
                 metadata={"tool_call_id": tool_call_id},
+                cancel_event=cancel_event,
             ),
         )
 

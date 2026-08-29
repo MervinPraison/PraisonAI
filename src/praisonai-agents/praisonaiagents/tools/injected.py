@@ -63,7 +63,8 @@ class AgentState:
     learn_manager: Optional[Any] = None
     previous_tool_results: List[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    cancel_event: Optional[Any] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for Injected[dict] usage."""
         return {
@@ -74,6 +75,7 @@ class AgentState:
             'last_agent_message': self.last_agent_message,
             'previous_tool_results': self.previous_tool_results,
             'metadata': self.metadata,
+            'cancel_event': self.cancel_event,
         }
 
 

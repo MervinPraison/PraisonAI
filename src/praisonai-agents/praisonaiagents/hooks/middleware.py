@@ -46,6 +46,7 @@ class InvocationContext:
     tool_name: Optional[str] = None
     model_name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    cancel_event: Optional[Any] = None
 
 
 @dataclass
