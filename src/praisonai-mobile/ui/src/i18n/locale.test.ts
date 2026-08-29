@@ -191,3 +191,71 @@ test("the fallback tables agree with Intl across a corpus of real tags", (t) => 
   }
   assert.deepEqual(disagreements, [], "the fallback tables have drifted from Intl");
 });
+
+test("an EXTENSION subtag is not mistaken for a script", () => {
+  // A LIVE BUG, not a mutant. `ar-EG-u-nu-latn` -- an Arabic phone whose
+  // locale carries a Unicode numbering-system extension, which is what a real
+  // device reports -- was read as script "Latn" and laid out LEFT TO RIGHT.
+  // The old loop scanned every subtag for a four-letter one; `latn` inside
+  // `-u-nu-latn` is four letters. Per BCP 47 a script sits immediately after
+  // the language and nowhere else, and everything from the first singleton
+  // subtag onward is an extension.
+  //
+  // Invisible on any host with `Intl.Locale.textInfo`, because `direction()`
+  // answers from ICU first -- and this table is only consulted where ICU is
+  // ABSENT, which is exactly the older WebView it exists for.
+  assert.equal(directionFromTables("ar-EG-u-nu-latn"), "rtl");
+  assert.equal(directionFromTables("fa-IR-u-nu-latn"), "rtl");
+  assert.equal(directionFromTables("ur-PK-u-nu-latn"), "rtl");
+  assert.equal(directionFromTables("ar-u-nu-latn"), "rtl");
+  // Transform and private-use extensions are the same shape.
+  assert.equal(directionFromTables("he-IL-t-en-latn"), "rtl");
+  assert.equal(directionFromTables("ar-x-latn"), "rtl");
+  // And the extension must not flip an LTR locale either way.
+  assert.equal(directionFromTables("en-US-u-nu-arab"), "ltr");
+  // A real script subtag still wins, extension or not.
+  assert.equal(directionFromTables("az-Arab-IR-u-nu-latn"), "rtl");
+  assert.equal(directionFromTables("ar-Latn-EG-u-nu-arab"), "ltr");
+});
+
+test("the fallback tables agree with ICU on every tag ICU can answer", () => {
+  // The drift check, widened to the tags that carry extensions. A previous
+  // comparison over plain tags found thirteen disagreements; this one found
+  // `-u-nu-latn`. Comparing is the durable form -- the table cannot be
+  // enumerated correctly by hand, and this fails the day it drifts again.
+  const bases = [
+    "ar", "ar-EG", "ar-SA", "he", "he-IL", "fa", "fa-IR", "ur", "ur-PK", "ps",
+    "sd", "dv", "ckb", "ug", "yi", "arc", "nqo", "syr", "pnb", "ks",
+    "en", "en-US", "fr", "de", "ja", "zh-Hans", "ru", "hi", "tr", "ta", "ko",
+  ];
+  const suffixes = ["", "-u-nu-latn", "-u-ca-gregory", "-u-nu-arab", "-x-priv"];
+
+  const drift: string[] = [];
+  let compared = 0;
+  for (const base of bases) {
+    for (const suffix of suffixes) {
+      const tag = `${base}${suffix}`;
+      let icu: string | undefined;
+      try {
+        const loc = new Intl.Locale(tag) as {
+          getTextInfo?: () => { direction: string };
+          textInfo?: { direction: string };
+        };
+        icu = loc.getTextInfo?.().direction ?? loc.textInfo?.direction;
+      } catch {
+        icu = undefined;
+      }
+      if (icu === undefined) continue; // ICU cannot answer; nothing to compare
+      compared += 1;
+      const tables = directionFromTables(tag);
+      if (tables !== icu) drift.push(`${tag}: tables=${tables} icu=${icu}`);
+    }
+  }
+  // A drift test on a host where ICU answers NOTHING passes while comparing
+  // nothing, which is the exact false green this file's history is made of.
+  assert.ok(
+    compared >= bases.length,
+    `the comparison was vacuous: ICU answered ${compared} of ${bases.length * suffixes.length}`,
+  );
+  assert.deepEqual(drift, [], `the fallback disagrees with ICU:\n${drift.join("\n")}`);
+});
