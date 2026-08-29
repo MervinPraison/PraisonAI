@@ -127,6 +127,12 @@ from .protocols import (
     FatalConfigError,
     classify_exit_reason,
     RestartLoopGuard,
+    # Durable process-lifecycle record + unclean/OOM classification (Issue #4603)
+    LifecycleRecord,
+    classify_unclean_exit,
+    RestartStoreProtocol,
+    PersistentRestartLoopGuard,
+    classify_resource_pressure,
     # Fleet-level crash-loop breaker for channel supervision (Issue #3840)
     FleetSupervisionPolicy,
     # Protocol version negotiation
@@ -407,6 +413,12 @@ __all__ = [
     "FatalConfigError",
     "classify_exit_reason",
     "RestartLoopGuard",
+    # Durable process-lifecycle record + unclean/OOM classification (Issue #4603)
+    "LifecycleRecord",
+    "classify_unclean_exit",
+    "RestartStoreProtocol",
+    "PersistentRestartLoopGuard",
+    "classify_resource_pressure",
     # Fleet-level crash-loop breaker for channel supervision (Issue #3840)
     "FleetSupervisionPolicy",
     # Protocol version negotiation
