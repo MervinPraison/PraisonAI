@@ -202,3 +202,58 @@ test("an id that vanishes between listing and reading is not called corrupt", ()
     assert.deepEqual(await repo.listUnreadable(), [], "absent is not the same as corrupt");
   })();
 });
+
+// ---- a chat file the app did not write --------------------------------------
+//
+// `load` coerces every field because the file is on a user's disk and can be
+// anything. Two of those coercions could be deleted with a green suite.
+
+test("a chat whose messages field is not an array loads as empty, not as itself", async () => {
+  // `Array.isArray(chat.messages) ? chat.messages : []` -> `chat.messages`
+  // survived. With `messages: "hi"` the string is spread as two one-character
+  // messages: the transcript shows junk, and the indices `end` reports point
+  // past the real messages, so Fork and Delete then address the wrong ones.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "chats", id: "c1" },
+    JSON.stringify({ schemaVersion: SCHEMA_VERSION, chat: { id: "c1", messages: "hi" } }),
+  );
+
+  const loaded = await createChatRepository(storage).load("c1");
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(loaded.ok && loaded.chat.messages, [], "a non-array must not become messages");
+});
+
+test("a chat with no title shows as Untitled, not as nothing", async () => {
+  // Dropping the string check survived: the chat list renders a blank,
+  // unidentifiable row that the user cannot tell from any other blank row.
+  const storage = createFakeStorage();
+  await storage.write(
+    { namespace: "chats", id: "c2" },
+    JSON.stringify({ schemaVersion: SCHEMA_VERSION, chat: { id: "c2", messages: [] } }),
+  );
+
+  const loaded = await createChatRepository(storage).load("c2");
+  assert.equal(loaded.ok && loaded.chat.title, "Untitled");
+});
+
+test("a well-formed chat keeps its own title and messages -- the pair", async () => {
+  // Without this, coercing everything to a constant would pass both above.
+  const storage = createFakeStorage();
+  const chat: StoredChat = {
+    id: "c3",
+    title: "Deploying the thing",
+    updated: 42,
+    messages: [{ role: "user", content: "hi", at: 1 }],
+    engineId: "remote-http",
+  };
+  await storage.write(
+    { namespace: "chats", id: "c3" },
+    JSON.stringify({ schemaVersion: SCHEMA_VERSION, chat }),
+  );
+
+  const loaded = await createChatRepository(storage).load("c3");
+  assert.equal(loaded.ok && loaded.chat.title, "Deploying the thing");
+  assert.equal(loaded.ok && loaded.chat.messages.length, 1);
+  assert.equal(loaded.ok && loaded.chat.updated, 42);
+});
