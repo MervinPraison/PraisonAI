@@ -17,6 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -234,4 +235,48 @@ test("the contract can PASS: an unbroken fixture succeeds under the same runner"
   // nothing whatsoever.
   const { status, output } = runFixture("none");
   assert.equal(status, 0, `a conforming engine must pass the same runner:\n${output}`);
+});
+
+
+// ---- the ledger defends itself ---------------------------------------------
+//
+// The per-case assertion counts closed a hole the break modes structurally
+// cannot: a break mode protects only the FIRST assertion to trip in its case,
+// and 30 of the 32 assertions in this contract were measured deletable with a
+// fully green run -- five break modes guarding two assertions. That makes each
+// `rawAssert.equal(made() - made0, N, LEDGER)` the new thing worth deleting.
+//
+// So: delete a real assertion from the real contract and require the fixture
+// run to go red ON THE LEDGER. The file is edited in place and restored in a
+// finally, with a byte-for-byte check that it was -- a copy elsewhere would
+// break the contract's relative imports, and a "failure" that is really a
+// module that never loaded proves nothing.
+
+test("the engine contract's assertion ledger notices a deleted assertion", () => {
+  const file = join(dirname(fileURLToPath(import.meta.url)), "conformance.ts");
+  const original = readFileSync(file, "utf8");
+  const lines = original.split("\n");
+  const at = lines.findIndex((l) => /^\s+assert\.[a-zA-Z]+\(.*\);\s*$/.test(l));
+  assert.notEqual(at, -1, "the contract must contain a single-line assertion to remove");
+  const removed = (lines[at] ?? "").trim();
+  lines.splice(at, 1);
+
+  let run: { status: number | null; output: string };
+  try {
+    writeFileSync(file, lines.join("\n"));
+    run = runFixture("none");
+  } finally {
+    writeFileSync(file, original);
+  }
+  assert.equal(readFileSync(file, "utf8"), original, "the contract must be restored byte for byte");
+  assert.notEqual(
+    run.status,
+    0,
+    `removing \`${removed}\` from the engine contract left the run green:\n${run.output}`,
+  );
+  assert.match(
+    run.output,
+    /did not make the assertions it is supposed to make/,
+    `it must fail on the LEDGER, not incidentally:\n${run.output}`,
+  );
 });
