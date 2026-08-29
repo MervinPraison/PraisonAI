@@ -459,3 +459,28 @@ test("a base URL with several trailing slashes still builds one clean path", () 
     assert.equal(http.sent[0]?.url, "http://engine.test/chat");
   })();
 });
+
+test("an approval id with URL-significant characters is encoded, not pasted", () => {
+  // `encodeURIComponent(approvalId)` dropped survived. An id containing `/`,
+  // `#` or `?` -- and an approvalId is opaque, so nothing forbids them --
+  // posts the decision to a DIFFERENT path. The engine never sees it and the
+  // run stays blocked until its timeout, with the UI showing the decision as
+  // sent.
+  const http = createFakeHttp();
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+
+  return engine.decide("ap/1?x=2#f", "allow").then(() => {
+    const url = http.sent.find((r) => r.url.includes("/approve"))?.url ?? "";
+    assert.ok(url.includes("ap%2F1%3Fx%3D2%23f"), `the id was not encoded: ${url}`);
+    assert.equal(url.includes("ap/1?"), false, "an unencoded id changes the path and the query");
+  });
+});
+
+test("a cancel with an awkward run id is encoded too", () => {
+  const http = createFakeHttp();
+  const engine = createRemoteHttpEngine({ baseUrl: "http://engine.test", http });
+  return engine.cancel("run/9").then(() => {
+    const url = http.sent.find((r) => r.url.includes("/cancel"))?.url ?? "";
+    assert.ok(url.includes("run%2F9"), `the run id was not encoded: ${url}`);
+  });
+});
