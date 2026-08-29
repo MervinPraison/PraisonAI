@@ -17,6 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -186,8 +187,10 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function runFixture(mode: string): { status: number | null; output: string } {
-  const here = dirname(fileURLToPath(import.meta.url));
+function runFixture(
+  mode: string,
+  fixture = join(dirname(fileURLToPath(import.meta.url)), "contract-fixture.ts"),
+): { status: number | null; output: string } {
   // The reporter is FORCED. Node's default differs by version -- 22 emits TAP
   // when stdout is a pipe, 24 emits the spec reporter -- so a test that greps
   // for "not ok" passes on one and fails on the other while the code under
@@ -195,7 +198,7 @@ function runFixture(mode: string): { status: number | null; output: string } {
   // mistake as depending on an incidental default anywhere else.
   const run = spawnSync(
     process.execPath,
-    ["--test-reporter=tap", join(here, "contract-fixture.ts"), mode],
+    ["--test-reporter=tap", fixture, mode],
     {
       encoding: "utf8",
       timeout: 120_000,
@@ -234,4 +237,70 @@ test("the contract can PASS: an unbroken fixture succeeds under the same runner"
   // nothing whatsoever.
   const { status, output } = runFixture("none");
   assert.equal(status, 0, `a conforming engine must pass the same runner:\n${output}`);
+});
+
+
+// ---- the ledger defends itself ---------------------------------------------
+//
+// The per-case assertion counts closed a hole the break modes structurally
+// cannot: a break mode protects only the FIRST assertion to trip in its case,
+// and 30 of the 32 assertions in this contract were measured deletable with a
+// fully green run -- five break modes guarding two assertions. That makes each
+// `rawAssert.equal(made() - made0, N, LEDGER)` the new thing worth deleting.
+//
+// So: delete a real assertion from the real contract and require the fixture
+// run to go red ON THE LEDGER.
+//
+// The mutated copy is written to a UNIQUE temp file BESIDE the contract, never
+// over it. Editing `conformance.ts` in place would race: `node --test` runs
+// each test file in its own process, and `praisonai-ts/conformance.test.ts`
+// and `remote-http/engine.test.ts` import this same source concurrently -- a
+// sibling process loading it during the mutation window would see the deleted
+// assertion and fail its own ledger counts. A sibling temp file in the SAME
+// directory keeps the contract's relative imports (`../../core`, `./…`)
+// resolving, so a "failure" is the ledger tripping and not a module that never
+// loaded. Both temp files are removed in a finally.
+
+test("the engine contract's assertion ledger notices a deleted assertion", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const original = readFileSync(join(here, "conformance.ts"), "utf8");
+  const lines = original.split("\n");
+  const at = lines.findIndex((l) => /^\s+assert\.[a-zA-Z]+\(.*\);\s*$/.test(l));
+  assert.notEqual(at, -1, "the contract must contain a single-line assertion to remove");
+  const removed = (lines[at] ?? "").trim();
+  lines.splice(at, 1);
+
+  const tag = `probe-${process.pid}-${Date.now()}`;
+  const contractCopy = join(here, `conformance.${tag}.ts`);
+  const fixtureCopy = join(here, `contract-fixture.${tag}.ts`);
+  const fixtureSrc = readFileSync(join(here, "contract-fixture.ts"), "utf8").replace(
+    './conformance.ts"',
+    `./conformance.${tag}.ts"`,
+  );
+  assert.match(fixtureSrc, new RegExp(`./conformance\\.${tag}\\.ts`), "the probe fixture must import the mutated copy");
+
+  let run: { status: number | null; output: string };
+  try {
+    writeFileSync(contractCopy, lines.join("\n"));
+    writeFileSync(fixtureCopy, fixtureSrc);
+    run = runFixture("none", fixtureCopy);
+  } finally {
+    rmSync(contractCopy, { force: true });
+    rmSync(fixtureCopy, { force: true });
+  }
+  assert.equal(
+    readFileSync(join(here, "conformance.ts"), "utf8"),
+    original,
+    "the real contract must be left untouched",
+  );
+  assert.notEqual(
+    run.status,
+    0,
+    `removing \`${removed}\` from the engine contract left the run green:\n${run.output}`,
+  );
+  assert.match(
+    run.output,
+    /did not make the assertions it is supposed to make/,
+    `it must fail on the LEDGER, not incidentally:\n${run.output}`,
+  );
 });
