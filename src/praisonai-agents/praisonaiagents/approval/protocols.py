@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 
 def _new_approval_id() -> str:
@@ -38,6 +38,14 @@ class ApprovalRequest:
                      backend may bind resolution to these reviewers so that in a
                      multi-operator deployment a request addressed to one
                      operator cannot be resolved by another.
+        liveness:    Optional zero-arg predicate returning ``True`` while the
+                     originating turn is still the current one. ``None``
+                     (default) is a no-op — the request is treated as always
+                     live, preserving today's behaviour. A backend may consult
+                     this at the resolution/execution boundary to drop a
+                     resolution that arrives after the turn was superseded or
+                     stopped (fail-closed), so a stale approval never fires a
+                     tool or delivers a reply for an abandoned turn.
     """
 
     tool_name: str
@@ -48,6 +56,7 @@ class ApprovalRequest:
     context: Dict[str, Any] = field(default_factory=dict)
     approval_id: str = field(default_factory=_new_approval_id)
     authorized_reviewers: Optional[List[str]] = None
+    liveness: Optional[Callable[[], bool]] = None
 
 
 @dataclass
