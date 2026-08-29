@@ -13,6 +13,7 @@
  */
 import test from "node:test";
 import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
@@ -1297,4 +1298,72 @@ test("a back gesture the app DECLINES does not touch history", () => {
   fake.popstate();
   assert.equal(fake.pushed, before, "an unconsumed back must be allowed to navigate away");
   stop();
+});
+
+// ---- the ledger defends itself ---------------------------------------------
+//
+// The counting ledger closes the hole the break modes structurally cannot: a
+// break mode protects only the FIRST assertion to trip in its case, and 62 of
+// the 73 assertions across the four contracts were measured deletable with a
+// fully green run. But that makes the ledger's own `rawAssert.equal(actual,
+// expected)` the new single point of failure -- delete that one line and all
+// 73 are free again.
+//
+// So: delete a real assertion from a real contract, and require the run to go
+// red ON THE LEDGER. Same argument contract-fixture.ts makes, aimed one level
+// up.
+//
+// The contract file is edited in place and restored in a `finally`, rather
+// than copied to a probe module. Two alternatives were tried and rejected: a
+// temp tree breaks the contracts' relative `../../../core` imports, so a
+// "failure" would prove only that the file did not load; and a dynamic
+// `import()` of a probe module needs top-level await, which the boundary
+// scanner's esbuild pass (iife) refuses -- and loosening a gate to make a test
+// of a gate work is the wrong direction. Nothing but this file and the spawned
+// fixture imports a contract, and both have already resolved theirs by the
+// time this runs.
+
+const LEDGERED = ["secrets", "storage", "time", "shell"] as const;
+
+/** The contract source with its first single-line assertion removed. */
+function hollowed(source: string): { text: string; removed: string } {
+  const lines = source.split("\n");
+  const at = lines.findIndex((l) => /^\s+assert\.[a-zA-Z]+\(.*\);\s*$/.test(l));
+  assert.notEqual(at, -1, "the contract must contain a single-line assertion to remove");
+  const removed = lines[at] ?? "";
+  lines.splice(at, 1);
+  return { text: lines.join("\n"), removed };
+}
+
+for (const which of LEDGERED) {
+  test(`the ${which} contract's assertion ledger notices a deleted assertion`, () => {
+    const file = join(dirname(fileURLToPath(import.meta.url)), `${which}-contract.ts`);
+    const original = readFileSync(file, "utf8");
+    const { text, removed } = hollowed(original);
+    let run: { status: number | null; output: string };
+    try {
+      writeFileSync(file, text);
+      run = runAdapterFixture("none");
+    } finally {
+      writeFileSync(file, original);
+    }
+    assert.equal(readFileSync(file, "utf8"), original, "the contract must be restored byte for byte");
+    assert.notEqual(
+      run.status,
+      0,
+      `removing \`${removed.trim()}\` from the ${which} contract left the run green:\n${run.output}`,
+    );
+    assert.match(
+      run.output,
+      /made every assertion it is supposed to make/,
+      `it must fail on the LEDGER, not incidentally:\n${run.output}`,
+    );
+  });
+}
+
+test("an unhollowed fixture run is green", () => {
+  // The pair. A fixture that failed regardless would pass all four above and
+  // prove nothing; `none` is the mode in which every contract must pass.
+  const run = runAdapterFixture("none");
+  assert.equal(run.status, 0, `the untouched fixture must be green:\n${run.output}`);
 });
