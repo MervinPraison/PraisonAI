@@ -79,6 +79,9 @@ function storage(): StoragePort {
   return {
     async read(ref) {
       const found = files.get(key(ref));
+      // The defect: `||` instead of `??`, so a deliberately-blank value reads
+      // back as "not configured" on every read.
+      if (mode === "storage_empty_is_absent" && found === "") return null;
       if (found !== undefined) return found;
       return mode === "storage_missing_is_undefined" ? (undefined as never) : null;
     },
@@ -130,6 +133,12 @@ function time(): TimePort {
       };
     },
     every(ms, cb) {
+      if (mode === "time_unsubscribe_does_nothing") {
+        // The defect: the interval leaks for the app's lifetime, and nothing
+        // the caller does can stop it.
+        const handle = setInterval(cb, ms);
+        return () => {};
+      }
       if (mode === "time_every_fires_once") {
         // The defect: every polling loop in the app fires once and stops.
         const handle = setTimeout(cb, ms);
@@ -163,7 +172,12 @@ function shellHarness(): ShellHarness {
 
   const shell = {
     ...real,
-    get insets() { return real.insets; },
+    get insets() {
+      // The defect: a negative inset reaching the layout, which lifts content
+      // off the wrong edge.
+      if (mode === "shell_negative_insets") return { top: -5, right: 0, bottom: -5, left: 0 };
+      return real.insets;
+    },
     get keyboardHeightPx() { return real.keyboardHeightPx; },
     onInsetsChanged: real.onInsetsChanged.bind(real),
     onKeyboardHeightChanged: real.onKeyboardHeightChanged.bind(real),
@@ -172,6 +186,12 @@ function shellHarness(): ShellHarness {
     share: real.share.bind(real),
 
     async openExternal(url: string): Promise<void> {
+      // The defect: a case-SENSITIVE allowlist. `JAVASCRIPT:` then slips past
+      // a guard that refuses `javascript:`, which is the oldest trick there is.
+      if (mode === "shell_scheme_case_sensitive" && /^[A-Z]/.test(url.trim())) {
+        window.window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
       // The defect: opening whatever it is handed. `javascript:`, `data:` and
       // `file:` all reach the OS.
       if (mode === "shell_opens_anything") {

@@ -1101,6 +1101,14 @@ const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp
   { mode: "shell_opens_anything", expects: /a javascript: URL is refused/ },
   { mode: "shell_back_in_registration_order", expects: /the most recently registered back handler gets first refusal/ },
   { mode: "shell_listener_count_stuck", expects: /unsubscribing drops the live listener count/ },
+  // The count floor catches a DELETED case; it cannot catch a case that still
+  // exists and asserts nothing. A sweep found seven assertions that could be
+  // hollowed out with a green build. One break mode per hollowable case is
+  // what closes that, because a mode reddens the case BY NAME.
+  { mode: "storage_empty_is_absent", expects: /an empty string is a value, not an absence/ },
+  { mode: "time_unsubscribe_does_nothing", expects: /the unsubscribe actually stops it/ },
+  { mode: "shell_scheme_case_sensitive", expects: /an uppercase JAVASCRIPT: URL is refused/ },
+  { mode: "shell_negative_insets", expects: /no inset is negative/ },
 ];
 
 for (const { mode, expects } of ADAPTER_BREAKS) {
@@ -1153,7 +1161,7 @@ test("a contract cannot quietly shrink", () => {
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
   // signal is a smaller number that nothing reads. Guarding the guard.
   assert.ok(
-    ADAPTER_BREAKS.length >= 9,
+    ADAPTER_BREAKS.length >= 13,
     `the break table shrank to ${ADAPTER_BREAKS.length} modes`,
   );
 });

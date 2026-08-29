@@ -296,6 +296,16 @@ export function describeEngineContract(harness: EngineHarness): void {
       seen.push(event);
       if (seen.length === 1) controller.abort();
     }
+    // Asserted against the FULL script rather than an arbitrary ceiling. The
+    // bound here used to be `seen.length < 50`, and every scenario is five
+    // events or fewer -- so an engine that ignored the signal entirely and ran
+    // to completion satisfied it. A cap only larger than any real run cannot
+    // tell stopping from finishing.
+    const whole = await drive(await harness.create("happy"));
+    assert.ok(
+      seen.length < whole.events.length,
+      `aborting after the first event must stop the stream: saw ${seen.length} of ${whole.events.length}`,
+    );
     // The engine must stop rather than run to completion. Exactly how it
     // terminates is its business; that it stops is the contract.
     assert.ok(seen.length < 50, `abort did not stop the stream: ${seen.length} events`);

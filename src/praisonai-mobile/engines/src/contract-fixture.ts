@@ -29,7 +29,8 @@ export type BreakMode =
   | "start_only"
   | "tool_failure_as_ok"
   | "empty_is_fine"
-  | "decide_always_true";
+  | "decide_always_true"
+  | "abort_ignored";
 
 const M = "m1";
 const mode = (process.argv[2] ?? "none") as BreakMode;
@@ -76,7 +77,12 @@ function engineFor(scenario: ScenarioName): AgentEnginePort {
     },
     async *run(_req, signal) {
       for (const event of script) {
-        if (signal.aborted) return;
+        // THE BREAK for abort_ignored: the signal is never consulted, so a
+        // cancelled run streams to completion. The contract's own case for
+        // this asserted only `seen.length < 50`, and the happy script is five
+        // events -- so simply ENDING satisfied it. A break mode is what makes
+        // that case mean something.
+        if (mode !== "abort_ignored" && signal.aborted) return;
         yield event;
       }
     },
