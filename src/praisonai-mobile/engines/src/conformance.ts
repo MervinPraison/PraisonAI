@@ -333,6 +333,10 @@ export function describeEngineContract(harness: EngineHarness): void {
     const engine = await harness.create("happy");
     if (!engine.capabilities.cancellation) {
       await engine.dispose();
+      // Nothing to assert when the engine cannot be aborted -- the case exists
+      // for the other branch. Pinned to zero like the tools/approvals capability
+      // cases, so this branch stays inside the ledger rather than escaping it.
+      rawAssert.equal(made() - made0, 0, LEDGER);
       return;
     }
     const controller = new AbortController();

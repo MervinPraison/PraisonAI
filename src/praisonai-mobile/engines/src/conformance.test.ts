@@ -17,7 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -187,16 +187,16 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function runFixture(mode: string): { status: number | null; output: string } {
-  const here = dirname(fileURLToPath(import.meta.url));
-  // The reporter is FORCED. Node's default differs by version -- 22 emits TAP
-  // when stdout is a pipe, 24 emits the spec reporter -- so a test that greps
-  // for "not ok" passes on one and fails on the other while the code under
-  // test is identical. Depending on an incidental output format is the same
-  // mistake as depending on an incidental default anywhere else.
+/** Spawn a specific fixture file. The reporter is FORCED: node's default
+ *  differs by version -- 22 emits TAP when stdout is a pipe, 24 emits the spec
+ *  reporter -- so a test that greps for "not ok" passes on one and fails on the
+ *  other while the code under test is identical. Depending on an incidental
+ *  output format is the same mistake as depending on an incidental default
+ *  anywhere else. */
+function runFixtureFile(file: string, mode: string): { status: number | null; output: string } {
   const run = spawnSync(
     process.execPath,
-    ["--test-reporter=tap", join(here, "contract-fixture.ts"), mode],
+    ["--test-reporter=tap", file, mode],
     {
       encoding: "utf8",
       timeout: 120_000,
@@ -204,6 +204,11 @@ function runFixture(mode: string): { status: number | null; output: string } {
     },
   );
   return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
+}
+
+function runFixture(mode: string): { status: number | null; output: string } {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return runFixtureFile(join(here, "contract-fixture.ts"), mode);
 }
 
 /** Each break mode, and the contract case that must go red because of it. */
@@ -247,28 +252,52 @@ test("the contract can PASS: an unbroken fixture succeeds under the same runner"
 // `rawAssert.equal(made() - made0, N, LEDGER)` the new thing worth deleting.
 //
 // So: delete a real assertion from the real contract and require the fixture
-// run to go red ON THE LEDGER. The file is edited in place and restored in a
-// finally, with a byte-for-byte check that it was -- a copy elsewhere would
-// break the contract's relative imports, and a "failure" that is really a
-// module that never loaded proves nothing.
+// run to go red ON THE LEDGER.
+//
+// The mutated contract is written to a SIBLING temp file rather than over
+// conformance.ts in place. `node --test` runs the engine test files as
+// parallel processes, and two of them import conformance.ts -- so rewriting it,
+// even inside a try/finally, gives a sibling worker a window in which it can
+// load a weakened or half-written module and fail nondeterministically. A
+// sibling in the SAME directory keeps the contract's relative imports
+// (`./assert-ledger.ts`, `../../core/...`) resolving identically, so a
+// "failure" here is the ledger tripping and not a module that never loaded --
+// and a matching temp fixture imports the copy so the real fixture is
+// untouched too. Both temp files are removed in a finally.
 
 test("the engine contract's assertion ledger notices a deleted assertion", () => {
-  const file = join(dirname(fileURLToPath(import.meta.url)), "conformance.ts");
-  const original = readFileSync(file, "utf8");
+  const here = dirname(fileURLToPath(import.meta.url));
+  const original = readFileSync(join(here, "conformance.ts"), "utf8");
   const lines = original.split("\n");
   const at = lines.findIndex((l) => /^\s+assert\.[a-zA-Z]+\(.*\);\s*$/.test(l));
   assert.notEqual(at, -1, "the contract must contain a single-line assertion to remove");
   const removed = (lines[at] ?? "").trim();
   lines.splice(at, 1);
 
+  // Unique per run so parallel invocations cannot collide on the same path.
+  const tag = `ledger-probe-${process.pid}-${Date.now()}`;
+  const contractCopy = join(here, `conformance.${tag}.ts`);
+  const fixtureCopy = join(here, `contract-fixture.${tag}.ts`);
+  const fixtureSrc = readFileSync(join(here, "contract-fixture.ts"), "utf8").replace(
+    /(["'])\.\/conformance\.ts\1/,
+    `"./conformance.${tag}.ts"`,
+  );
+  assert.match(fixtureSrc, new RegExp(`conformance\\.${tag}\\.ts`), "the fixture must import the copy");
+
   let run: { status: number | null; output: string };
   try {
-    writeFileSync(file, lines.join("\n"));
-    run = runFixture("none");
+    writeFileSync(contractCopy, lines.join("\n"));
+    writeFileSync(fixtureCopy, fixtureSrc);
+    run = runFixtureFile(fixtureCopy, "none");
   } finally {
-    writeFileSync(file, original);
+    rmSync(contractCopy, { force: true });
+    rmSync(fixtureCopy, { force: true });
   }
-  assert.equal(readFileSync(file, "utf8"), original, "the contract must be restored byte for byte");
+  assert.equal(
+    readFileSync(join(here, "conformance.ts"), "utf8"),
+    original,
+    "the real contract must be left untouched",
+  );
   assert.notEqual(
     run.status,
     0,
