@@ -33,6 +33,12 @@ class _StreamDrainTimeout(Exception):
     process.
     """
 
+
+class _CommandCancelled(Exception):
+    """Raised when a cooperative cancellation signal fires while the child
+    process is still running, so the caller kills the process group and reports
+    an ``interrupted`` outcome instead of waiting for the timeout."""
+
 class ShellTools:
     """Tools for executing shell commands safely."""
     
@@ -125,11 +131,17 @@ class ShellTools:
                 text=True
             )
             
+            # Observe the agent's cooperative cancellation signal (when running
+            # inside an agent tool call) so an interrupt (/stop, Ctrl-C) aborts
+            # this subprocess promptly instead of waiting for the timeout. When
+            # run standalone the event is None and behaviour is unchanged.
+            cancel_event = self._current_cancel_event()
+
             try:
                 # Read stdout/stderr incrementally so a progress channel (when
                 # active) can surface output live while the command runs. Falls
                 # back to fully-buffered behaviour when no sink is listening.
-                stdout, stderr = self._communicate_streaming(process, timeout)
+                stdout, stderr = self._communicate_streaming(process, timeout, cancel_event)
 
                 # Handle over-budget output. Rather than permanently discarding
                 # the middle (often where the real error lives), spill the full
@@ -154,6 +166,20 @@ class ShellTools:
                     result['stderr_artifact'] = stderr_path
                 return result
             
+            except _CommandCancelled:
+                # A cooperative interrupt (/stop, Ctrl-C) fired while the child
+                # was still running. Kill the whole process group so descendants
+                # do not keep mutating state, then report an interrupted outcome.
+                self._kill_process_tree(process)
+                return {
+                    'stdout': '',
+                    'stderr': 'Command interrupted by user',
+                    'exit_code': -1,
+                    'success': False,
+                    'interrupted': True,
+                    'execution_time': time.time() - start_time
+                }
+
             except _StreamDrainTimeout:
                 # The direct child already exited; only an inherited pipe kept a
                 # reader blocked. Report a timeout but do NOT kill — the direct
@@ -169,20 +195,7 @@ class ShellTools:
 
             except subprocess.TimeoutExpired:
                 # Kill process on timeout
-                try:
-                    import psutil
-                    parent = psutil.Process(process.pid)
-                    children = parent.children(recursive=True)
-                    for child in children:
-                        child.kill()
-                    parent.kill()
-                except ImportError:
-                    # Fallback: kill without psutil
-                    process.kill()
-                except psutil.NoSuchProcess:
-                    # Process already gone — nothing to kill.
-                    pass
-                
+                self._kill_process_tree(process)
                 return {
                     'stdout': '',
                     'stderr': f'Command timed out after {timeout} seconds',
@@ -202,7 +215,48 @@ class ShellTools:
                 'execution_time': 0
             }
     
-    def _communicate_streaming(self, process, timeout):
+    def _current_cancel_event(self):
+        """Return the agent's cooperative cancellation Event, if any.
+
+        Sourced from the injected AgentState set by the agent tool-execution
+        loop. Returns ``None`` when the tool runs outside an agent (standalone),
+        keeping behaviour and imports lazy with zero overhead.
+        """
+        try:
+            from .injected import get_current_state
+            state = get_current_state()
+        except Exception:
+            return None
+        if state is None:
+            return None
+        return getattr(state, 'cancel_event', None)
+
+    def _kill_process_tree(self, process):
+        """Kill a child process and its descendants (best-effort).
+
+        Uses psutil to reach the whole tree when available, falling back to
+        ``process.kill()`` otherwise. Safe to call if the process already exited.
+        """
+        try:
+            import psutil
+            parent = psutil.Process(process.pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            parent.kill()
+        except ImportError:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        except psutil.NoSuchProcess:
+            # Process already gone — nothing to kill.
+            pass
+
+    def _communicate_streaming(self, process, timeout, cancel_event=None):
         """Read stdout/stderr line-buffered, emitting live progress.
 
         Reads both streams concurrently in background threads so a line on
@@ -273,16 +327,38 @@ class ShellTools:
         t_err.start()
 
         deadline = None if timeout is None else time.monotonic() + timeout
-        try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            # The direct child is still running. Disable any further emission and
-            # re-raise TimeoutExpired so the caller's timeout path KILLS the
-            # process before returning — a recorded read error must not short-
-            # circuit that cleanup (otherwise the still-running child leaks with
-            # its pipes open).
-            stop_emitting.set()
-            raise
+        if cancel_event is None:
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # The direct child is still running. Disable any further emission
+                # and re-raise TimeoutExpired so the caller's timeout path KILLS
+                # the process before returning — a recorded read error must not
+                # short-circuit that cleanup (otherwise the still-running child
+                # leaks with its pipes open).
+                stop_emitting.set()
+                raise
+        else:
+            # Poll in short slices so a cooperative interrupt aborts the child
+            # promptly (within the poll interval) rather than only on timeout.
+            _POLL = 0.1
+            while True:
+                if cancel_event.is_set():
+                    stop_emitting.set()
+                    raise _CommandCancelled()
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        stop_emitting.set()
+                        raise subprocess.TimeoutExpired(process.args, timeout)
+                    wait_slice = min(_POLL, remaining)
+                else:
+                    wait_slice = _POLL
+                try:
+                    process.wait(timeout=wait_slice)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
 
         # Wait for the readers to drain the pipe buffers before returning,
         # preserving subprocess.communicate()'s "all captured output" semantics.

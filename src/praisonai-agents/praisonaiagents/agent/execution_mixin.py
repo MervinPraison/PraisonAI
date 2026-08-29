@@ -1800,17 +1800,42 @@ Write the complete compiled report:"""
                         call_arguments = dict(arguments)
                         call_arguments["idempotency_key"] = durable_key
 
+                # Establish the injection context (Injected[T] params, including
+                # the cooperative cancel_event) around dispatch so the async path
+                # matches the sync execute_tool path. Without this, a long-running
+                # tool (e.g. shell) executed via achat()/astart() never observes an
+                # interrupt and runs until its own timeout. Built lazily and reused
+                # for both the coroutine and executor branches.
+                from ..tools.injected import with_injection_context
+                _inject_state = None
+                if hasattr(self, "_build_agent_state"):
+                    try:
+                        _inject_state = self._build_agent_state()
+                    except Exception:
+                        _inject_state = None
+
                 async def _invoke():
                     # Set the tool-progress channel BEFORE dispatch so the sink
                     # propagates into the executor thread via contextvars, mirroring
                     # the sync execute_tool path.
                     if inspect.iscoroutinefunction(call_target):
                         logging.debug(f"Executing async function: {function_name}")
+                        if _inject_state is not None:
+                            with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
+                                return await call_target(**call_arguments)
                         with tool_progress_channel(_progress_sink):
                             return await call_target(**call_arguments)
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
+                    # copy_context_to_callable snapshots the CURRENT context (incl.
+                    # the injection contextvar) into the executor thread, so setting
+                    # it here propagates cancel_event to the sync tool body too.
+                    if _inject_state is not None:
+                        with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
+                            return await loop.run_in_executor(
+                                None, copy_context_to_callable(lambda: call_target(**call_arguments))
+                            )
                     with tool_progress_channel(_progress_sink):
                         return await loop.run_in_executor(
                             None, copy_context_to_callable(lambda: call_target(**call_arguments))

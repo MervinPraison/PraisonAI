@@ -436,6 +436,50 @@ class ToolExecutionMixin:
             logging.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
             return arguments
 
+    def _current_cancel_event(self):
+        """Return a cancellation Event a running tool body can observe, or None.
+
+        Sourced from the agent's ``interrupt_controller`` when present. The event
+        is only meaningful while a cancellation is actually in effect for the
+        current turn — the controller clears its underlying flag once an
+        interrupted turn ends (see ``InterruptController._end_turn``), so a stale
+        request from a previous turn does not abort newly started tool bodies.
+        A controller without an ``event`` member yields ``None`` (fully optional).
+        """
+        controller = getattr(self, 'interrupt_controller', None)
+        if controller is None:
+            return None
+        return getattr(controller, 'event', None)
+
+    def _build_agent_state(self):
+        """Construct the AgentState injected into tools for the current call.
+
+        Shared by the sync (``execute_tool``) and async
+        (``_execute_tool_async_impl``) paths so both establish an identical
+        injection context — including the cooperative ``cancel_event`` — avoiding
+        drift where one path silently omits injected state.
+        """
+        from ..tools.injected import AgentState
+        try:
+            from .durable import get_durable_idempotency_key
+
+            idempotency_key = get_durable_idempotency_key()
+        except ImportError:
+            idempotency_key = None
+        state_metadata = {'agent_name': self.name}
+        if idempotency_key:
+            state_metadata['idempotency_key'] = idempotency_key
+        return AgentState(
+            agent_id=self.name,
+            run_id=getattr(self, '_current_run_id', 'unknown'),
+            session_id=getattr(self, '_session_id', None) or 'default',
+            last_user_message=self.chat_history[-1].get('content') if self.chat_history else None,
+            memory=getattr(self, '_memory_instance', None),
+            learn_manager=getattr(getattr(self, '_memory_instance', None), 'learn', None),
+            metadata=state_metadata,
+            cancel_event=self._current_cancel_event(),
+        )
+
     def execute_tool(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
         """
         Execute a tool dynamically based on the function name and arguments.
@@ -459,25 +503,8 @@ class ToolExecutionMixin:
         # Do NOT call it here to avoid duplicate output
         
         # Set up injection context for tools with Injected parameters
-        from ..tools.injected import AgentState
-        try:
-            from .durable import get_durable_idempotency_key
-
-            idempotency_key = get_durable_idempotency_key()
-        except ImportError:
-            idempotency_key = None
-        state_metadata = {'agent_name': self.name}
-        if idempotency_key:
-            state_metadata['idempotency_key'] = idempotency_key
-        state = AgentState(
-            agent_id=self.name,
-            run_id=getattr(self, '_current_run_id', 'unknown'),
-            session_id=getattr(self, '_session_id', None) or 'default',
-            last_user_message=self.chat_history[-1].get('content') if self.chat_history else None,
-            memory=getattr(self, '_memory_instance', None),
-            learn_manager=getattr(getattr(self, '_memory_instance', None), 'learn', None),
-            metadata=state_metadata,
-        )
+        state = self._build_agent_state()
+        cancel_event = state.cancel_event
         
         # Route through user-supplied tool middleware (Agent(hooks=[...])) when
         # present. Zero overhead when no hooks: the fast path calls straight
@@ -496,6 +523,7 @@ class ToolExecutionMixin:
                 session_id=getattr(self, '_session_id', None) or 'default',
                 tool_name=function_name,
                 metadata={"tool_call_id": tool_call_id},
+                cancel_event=cancel_event,
             ),
         )
 

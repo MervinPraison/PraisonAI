@@ -6,14 +6,26 @@ operations. Follows protocol-driven design with zero overhead when not used.
 """
 
 import threading
-from typing import Optional, Protocol, Set
+from typing import Optional, Protocol, Set, runtime_checkable
 from dataclasses import dataclass, field
 
-__all__ = ["InterruptControllerProtocol", "InterruptController"]
+__all__ = [
+    "InterruptControllerProtocol",
+    "CancellableInterruptControllerProtocol",
+    "InterruptController",
+]
 
 
 class InterruptControllerProtocol(Protocol):
-    """Protocol for interrupt controller extension point."""
+    """Protocol for interrupt controller extension point.
+
+    ``event`` is intentionally NOT part of this base contract: exposing the
+    underlying cancellation Event is an OPTIONAL capability. Existing third-party
+    controllers that only implement request/clear/is_set/reason/check remain
+    valid; the runtime probes for ``event`` via ``getattr(..., 'event', None)``.
+    Controllers that want in-tool cooperative abort can implement
+    :class:`CancellableInterruptControllerProtocol`.
+    """
     
     def request(self, reason: str = "user") -> None:
         """Request cancellation with optional reason."""
@@ -31,9 +43,24 @@ class InterruptControllerProtocol(Protocol):
     def reason(self) -> Optional[str]:
         """Get interrupt reason if set."""
         ...
-    
+
     def check(self) -> None:
         """Check for interrupt and raise if set."""
+        ...
+
+
+@runtime_checkable
+class CancellableInterruptControllerProtocol(InterruptControllerProtocol, Protocol):
+    """Optional extension: controllers that expose the cancellation Event.
+
+    A running tool body can wait on / poll this Event to abort promptly instead
+    of running until its own timeout. Implementing it is entirely optional and
+    fully backward compatible with :class:`InterruptControllerProtocol`.
+    """
+
+    @property
+    def event(self) -> "threading.Event":
+        """Get the underlying cancellation Event for in-tool observation."""
         ...
 
 
@@ -95,10 +122,19 @@ class InterruptController:
             return turn_id in self._cancelled_turns
 
     def _end_turn(self, turn_id: int) -> None:
-        """Unregister a turn so its request cannot affect a future turn."""
+        """Unregister a turn so its request cannot affect a future turn.
+
+        Also clears the underlying Event once no turn still needs it (no active
+        or still-cancelled turns and no pending request). The Event is exposed to
+        running tool bodies via :attr:`event`; leaving it set after an interrupted
+        turn would make a reused controller abort tools launched by the NEXT turn.
+        """
         with self._lock:
             self._active_turns.discard(turn_id)
             self._cancelled_turns.discard(turn_id)
+            if not self._active_turns and not self._cancelled_turns and not self._pending_turn_cancel:
+                self._flag.clear()
+                self._reason = None
 
     def clear(self) -> None:
         """Clear the cancellation request."""
@@ -125,6 +161,16 @@ class InterruptController:
         """
         with self._lock:
             return self._reason
+
+    @property
+    def event(self) -> threading.Event:
+        """Expose the underlying cancellation Event.
+
+        Lets a running tool body observe the interrupt cooperatively (e.g. wait
+        on it with a timeout, or poll ``is_set()``) so an in-flight subprocess/
+        request can be aborted rather than left running until its own timeout.
+        """
+        return self._flag
 
     def check(self) -> None:
         """Check for cancellation and raise if requested.
