@@ -2,14 +2,60 @@
 # PERFORMANCE OPTIMIZED: Removed all LangChain imports
 # Uses direct OpenAI SDK for fast startup (~600ms vs ~3200ms with langchain_openai)
 import os
+import hashlib
 import logging
+import threading
+from collections import OrderedDict
 from urllib.parse import urlparse
 import importlib.util
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
+
+# Process-wide cache of resolved SDK clients keyed by
+# ``(model, base_url, api_key_fingerprint)`` so agents in the same crew — and
+# across runs in a long-lived ``praisonai serve`` worker — share one client and
+# its httpx connection pool / TLS context instead of allocating a fresh one per
+# agent build. Bounded LRU.
+#
+# NOTE: an evicted client is deliberately NOT ``close()``d. Framework adapters
+# (see ``framework_adapters/base.py``) hand the client straight to CrewAI/etc.,
+# which retain it as the agent's ``llm`` for the whole run. Closing on eviction
+# would shut a transport still in use once a long-lived worker resolves more
+# than ``_CLIENT_CACHE_MAX`` distinct model/endpoint/credential combinations
+# (Greptile P1). We simply drop our reference; the client's httpx pool is
+# released by GC once the last external holder goes away.
+_CLIENT_CACHE: "OrderedDict[tuple, Any]" = OrderedDict()
+_CLIENT_CACHE_LOCK = threading.Lock()
+_CLIENT_CACHE_MAX = 64
+
+
+def _client_cache_key(model, api_key, base_url):
+    """Fingerprint the credentials so raw keys never sit in the cache key."""
+    fingerprint = ""
+    if api_key:
+        h = hashlib.blake2b(digest_size=12)
+        h.update(api_key.encode())
+        fingerprint = h.hexdigest()
+    return (model, base_url or "", fingerprint)
+
+
+def _close_client(client):
+    """Best-effort close of an SDK client that was never handed to a caller.
+
+    Only used for the race-loser client in :meth:`PraisonAIModel.get_model`
+    (a duplicate built concurrently and immediately discarded). Evicted cache
+    entries are NOT closed — see the ``_CLIENT_CACHE`` note above.
+    """
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Failed to close evicted SDK client", exc_info=True)
 
 # Provider prefixes handled directly by the built-in ladder in this module.
 # Any prefix NOT in this set is delegated to praisonai.llm.registry so that
@@ -196,6 +242,7 @@ class PraisonAIModel:
         """
         # Extension point: honour user-registered providers (llm.registry) before
         # the built-in ladder so custom providers (e.g. "bedrock/...") take effect.
+        # Registered providers own their own client lifecycle, so never cache them.
         registered = self._resolve_registered_provider()
         if registered is not None:
             get_client = getattr(registered, "get_client", None)
@@ -203,6 +250,32 @@ class PraisonAIModel:
                 return get_client()
             return registered
 
+        key = _client_cache_key(self.model, self.api_key, self.base_url)
+        with _CLIENT_CACHE_LOCK:
+            client = _CLIENT_CACHE.get(key)
+            if client is not None:
+                _CLIENT_CACHE.move_to_end(key)
+                return client
+
+        client = self._build_client()
+
+        with _CLIENT_CACHE_LOCK:
+            existing = _CLIENT_CACHE.get(key)
+            if existing is not None:
+                # Another thread won the race; discard our client and reuse theirs.
+                _CLIENT_CACHE.move_to_end(key)
+                _close_client(client)
+                return existing
+            _CLIENT_CACHE[key] = client
+            _CLIENT_CACHE.move_to_end(key)
+            while len(_CLIENT_CACHE) > _CLIENT_CACHE_MAX:
+                # Drop the LRU reference only; do NOT close it. An active agent
+                # may still hold this exact client as its llm (Greptile P1).
+                _CLIENT_CACHE.popitem(last=False)
+        return client
+
+    def _build_client(self):
+        """Construct a fresh native SDK client for this model's provider."""
         if self.model.startswith("google/"):
             if GOOGLE_GENAI_AVAILABLE:
                 genai = _get_google_genai()
