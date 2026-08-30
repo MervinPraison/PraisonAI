@@ -19,7 +19,15 @@ LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 # ``(model, base_url, api_key_fingerprint)`` so agents in the same crew — and
 # across runs in a long-lived ``praisonai serve`` worker — share one client and
 # its httpx connection pool / TLS context instead of allocating a fresh one per
-# agent build. Bounded LRU; stale entries are closed on eviction.
+# agent build. Bounded LRU.
+#
+# NOTE: an evicted client is deliberately NOT ``close()``d. Framework adapters
+# (see ``framework_adapters/base.py``) hand the client straight to CrewAI/etc.,
+# which retain it as the agent's ``llm`` for the whole run. Closing on eviction
+# would shut a transport still in use once a long-lived worker resolves more
+# than ``_CLIENT_CACHE_MAX`` distinct model/endpoint/credential combinations
+# (Greptile P1). We simply drop our reference; the client's httpx pool is
+# released by GC once the last external holder goes away.
 _CLIENT_CACHE: "OrderedDict[tuple, Any]" = OrderedDict()
 _CLIENT_CACHE_LOCK = threading.Lock()
 _CLIENT_CACHE_MAX = 64
@@ -36,7 +44,12 @@ def _client_cache_key(model, api_key, base_url):
 
 
 def _close_client(client):
-    """Best-effort close of an evicted SDK client to release its httpx pool."""
+    """Best-effort close of an SDK client that was never handed to a caller.
+
+    Only used for the race-loser client in :meth:`PraisonAIModel.get_model`
+    (a duplicate built concurrently and immediately discarded). Evicted cache
+    entries are NOT closed — see the ``_CLIENT_CACHE`` note above.
+    """
     close = getattr(client, "close", None)
     if callable(close):
         try:
@@ -256,8 +269,9 @@ class PraisonAIModel:
             _CLIENT_CACHE[key] = client
             _CLIENT_CACHE.move_to_end(key)
             while len(_CLIENT_CACHE) > _CLIENT_CACHE_MAX:
-                _stale_key, stale = _CLIENT_CACHE.popitem(last=False)
-                _close_client(stale)
+                # Drop the LRU reference only; do NOT close it. An active agent
+                # may still hold this exact client as its llm (Greptile P1).
+                _CLIENT_CACHE.popitem(last=False)
         return client
 
     def _build_client(self):
