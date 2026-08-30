@@ -9,8 +9,9 @@ for maintainability.
 import os
 import inspect
 import logging
+import threading
 import contextvars
-from typing import Optional
+from typing import Optional, Dict
 
 # Per-turn ownership of appended chat-history messages. Each chat()/achat() turn
 # runs in its own thread (sync) or task (async); both get an isolated copy of
@@ -20,6 +21,38 @@ from typing import Optional
 _active_turn_owned: "contextvars.ContextVar[Optional[list]]" = contextvars.ContextVar(
     "praisonai_active_turn_owned", default=None
 )
+
+# Registry of the ownership lists of every currently in-flight chat()/achat()
+# turn, keyed by id() of the list. A turn registers its list in
+# _begin_turn_tracking and removes it in _end_turn_tracking. ephemeral() reads
+# this at exit so a message a *concurrent live turn* appended is preserved even
+# when that append did not flow through the ephemeral tracker (e.g. the turn
+# ran on another thread that never entered this block's context). Guarded by
+# _live_turns_lock because turns on different threads mutate it concurrently.
+_live_turn_owners: "Dict[int, list]" = {}
+_live_turns_lock = threading.Lock()
+
+
+def _register_live_turn(owned: list) -> None:
+    with _live_turns_lock:
+        _live_turn_owners[id(owned)] = owned
+
+
+def _unregister_live_turn(owned: Optional[list]) -> None:
+    if owned is None:
+        return
+    with _live_turns_lock:
+        _live_turn_owners.pop(id(owned), None)
+
+
+def _live_turn_message_ids() -> set:
+    """ids of every message any currently in-flight turn has appended so far."""
+    with _live_turns_lock:
+        owners = list(_live_turn_owners.values())
+    ids = set()
+    for owned in owners:
+        ids.update(id(m) for m in owned)
+    return ids
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -121,11 +154,18 @@ class MemoryMixin:
         runs in its own thread (sync ``chat``) or task (async ``achat``), so the
         context var copy is isolated per turn. Safe to call unconditionally; when
         a turn opts in, its rollback removes only its own messages by identity.
+
+        The list is also registered in the process-wide live-turn registry so a
+        concurrent ``ephemeral()`` block on another thread can preserve messages
+        this in-flight turn appends (see ``_live_turn_message_ids``).
         """
-        return _active_turn_owned.set([])
+        owned: list = []
+        _register_live_turn(owned)
+        return _active_turn_owned.set(owned)
 
     def _end_turn_tracking(self, token):
         """Stop recording for the current turn and drop its ownership list."""
+        _unregister_live_turn(_active_turn_owned.get())
         try:
             _active_turn_owned.reset(token)
         except (ValueError, LookupError):
@@ -136,8 +176,10 @@ class MemoryMixin:
 
         Used at the start of an async turn (whose control flow has no single
         wrapping ``finally``) so a stale list from a completed turn on the same
-        task cannot accumulate messages from unrelated turns.
+        task cannot accumulate messages from unrelated turns. Also unregisters
+        that stale list from the live-turn registry so it cannot linger there.
         """
+        _unregister_live_turn(_active_turn_owned.get())
         _active_turn_owned.set(None)
 
     def _rollback_chat_history_to(self, rollback_length):
@@ -299,21 +341,31 @@ class MemoryMixin:
                 response = agent.chat("[IMAGE] Analyze this")
                 # After block, history is restored - image NOT persisted
         """
-        # Snapshot the exact message objects present before the block by
-        # identity. On exit remove only messages that were NOT in the snapshot,
-        # i.e. only the ephemeral ones. A blind ``chat_history = saved_history``
-        # would also erase any message a concurrent chat()/achat() turn on the
-        # same shared Agent appended during the block; an id-based diff (the
-        # same discipline _rollback_chat_history_to uses) preserves them.
+        # Restore by identity, not by a blind ``chat_history = saved_history``.
+        # A message a concurrent chat()/achat() turn on the same shared Agent
+        # commits during the block must survive; only the ephemeral additions go.
+        #
+        # A message is KEPT on exit when it is either:
+        #   * present in the pre-block snapshot (it predates the block), or
+        #   * owned by a chat()/achat() turn that is still in flight (a live
+        #     concurrent turn appended it - preserving it is the fix for the
+        #     history-loss race).
+        # Everything else that appeared during the block is an ephemeral addition
+        # and is removed. This also drops direct ``chat_history.append`` writes
+        # made inside the block, which carry no turn ownership. Nested blocks
+        # compose: the inner block removes its own additions first, and the outer
+        # block's snapshot still holds everything that predates it.
         with self._history_lock:
             snapshot_ids = {id(m) for m in self.chat_history}
 
         try:
             yield
         finally:
+            live_ids = _live_turn_message_ids()
+            keep_ids = snapshot_ids | live_ids
             with self._history_lock:
                 self.chat_history[:] = [
-                    m for m in self.chat_history if id(m) in snapshot_ids
+                    m for m in self.chat_history if id(m) in keep_ids
                 ]
 
     def _init_db_session(self):
