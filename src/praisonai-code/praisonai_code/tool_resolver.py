@@ -1265,36 +1265,83 @@ class ToolResolver:
 
 
 # Context-local resolver for multi-project safety
+import contextlib
 import contextvars
+from collections import OrderedDict
+from typing import Iterator
 
 _resolver_var: contextvars.ContextVar[Optional[ToolResolver]] = contextvars.ContextVar(
     "tool_resolver", default=None,
 )
 
+# CWD-anchored cache for the *unscoped* default. Keyed by the resolved
+# ``tools.py`` path (which encodes the current working directory), so a caller in
+# ``/tenants/A`` and one in ``/tenants/B`` get distinct resolvers instead of the
+# first caller pinning its CWD into the root context for the whole process.
+_UNSCOPED_CACHE: "OrderedDict[str, ToolResolver]" = OrderedDict()
+_UNSCOPED_LOCK = threading.Lock()
+_UNSCOPED_MAX = 32
+
+
 def _get_default_resolver() -> ToolResolver:
-    """Per-context resolver. Falls back to a fresh ToolResolver per context,
-    so changing CWD between agents / requests is honoured.
-    
-    Each context (agent/task/request) gets its own resolver anchored to the
-    working directory at the time of first use in that context. This prevents
-    the singleton bug where the first caller locks in their CWD for the entire process.
-    
-    For test isolation or multi-project CLIs, create explicit resolver
-    instances instead of using this cached default.
+    """Return the scoped resolver, else a CWD-anchored resolver for THIS caller.
+
+    Never writes to ``_resolver_var``: ``ContextVar.set()`` from an outermost
+    context leaks into the root context and is inherited by every task/thread
+    that lacks its own value, which would pin the first caller's CWD
+    process-wide (the exact singleton bug this indirection was meant to avoid).
+
+    Callers who want a fixed binding for the duration of a request/task open an
+    explicit scope with :func:`scoped_resolver`.
+
+    For test isolation or multi-project CLIs, create explicit ``ToolResolver``
+    instances instead of relying on this default.
     """
-    resolver = _resolver_var.get()
-    if resolver is None:
+    scoped = _resolver_var.get()
+    if scoped is not None:
+        return scoped
+
+    key = str(Path("tools.py").resolve())
+    with _UNSCOPED_LOCK:
+        cached = _UNSCOPED_CACHE.get(key)
+        if cached is not None:
+            _UNSCOPED_CACHE.move_to_end(key)
+            return cached
         resolver = ToolResolver()
-        _resolver_var.set(resolver)
-    return resolver
+        _UNSCOPED_CACHE[key] = resolver
+        _UNSCOPED_CACHE.move_to_end(key)
+        while len(_UNSCOPED_CACHE) > _UNSCOPED_MAX:
+            _UNSCOPED_CACHE.popitem(last=False)
+        return resolver
+
+
+@contextlib.contextmanager
+def scoped_resolver(resolver: ToolResolver) -> Iterator[ToolResolver]:
+    """Bind ``resolver`` for the duration of the ``with`` block.
+
+    Server request handlers, ``RunContext``, and per-tenant middleware wrap their
+    work with this so tool resolution honours the caller's CWD/project without
+    leaking into sibling contexts::
+
+        with scoped_resolver(ToolResolver()):
+            ...
+    """
+    token = _resolver_var.set(resolver)
+    try:
+        yield resolver
+    finally:
+        _resolver_var.reset(token)
+
 
 def reset_default_resolver() -> None:
     """Explicit invalidation hook for daemons / IDE plugins switching projects.
-    
-    Call this when changing working directories or switching between projects
-    to ensure the next tool resolution uses the new CWD.
+
+    Clears any scoped binding in the current context and drops the CWD-anchored
+    default cache so the next resolution rebuilds against the current CWD.
     """
     _resolver_var.set(None)
+    with _UNSCOPED_LOCK:
+        _UNSCOPED_CACHE.clear()
 
 
 # Convenience functions that use cached default resolver for performance

@@ -16,9 +16,17 @@ import inspect
 import time
 import logging
 import threading
+import weakref
+import concurrent.futures
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Tracks fire-and-forget store writes submitted from a running event loop so a
+# shutting-down worker can flush in-flight persistence before exit. A WeakSet
+# lets completed futures be garbage-collected without manual bookkeeping.
+_BG_WRITES: "weakref.WeakSet[concurrent.futures.Future]" = weakref.WeakSet()
+_BG_WRITES_LOCK = threading.Lock()
 
 
 class PraisonAIDB:
@@ -833,16 +841,65 @@ class PraisonAIDB:
 
     @staticmethod
     def _call_store(store, sync_name, async_name, *args, **kwargs):
-        """Call a store from a sync hook without creating per-call event loops."""
+        """Call a store from a sync hook without ever blocking or losing a write.
+
+        A sync hook can be reached from a plain sync caller *or* from inside a
+        running event loop (several async chat paths still route through the
+        sync ``_persist_message``). When the resolved store method returns a
+        coroutine we must handle both:
+
+        - No running loop: block on the shared bridge via ``run_sync``.
+        - Running loop: submitting-then-blocking would park the loop (the
+          pathology ``run_sync_or_offload`` forbids), and the old behaviour
+          discarded the coroutine entirely — silently dropping every message,
+          reply and tool result. Instead we submit the write to the shared
+          bridge as tracked fire-and-forget. Store writes are uuid-keyed and
+          idempotent per message, so completing them slightly later is safe by
+          construction and strictly better than losing them.
+        """
         fn = PraisonAIDB._store_callable(store, sync_name, async_name)
         if fn is None:
             return None
         result = fn(*args, **kwargs)
-        if inspect.isawaitable(result):
-            from .._async_bridge import run_sync_or_offload
+        if not inspect.isawaitable(result):
+            return result
 
-            return run_sync_or_offload(result)
-        return result
+        from .._async_bridge import current_bridge, run_sync
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return run_sync(result)
+
+        bridge = current_bridge()
+        fut = bridge.submit(result)
+        with _BG_WRITES_LOCK:
+            _BG_WRITES.add(fut)
+
+        def _on_done(f, name=sync_name):
+            try:
+                f.result()
+            except Exception:
+                logger.warning("Deferred store %s failed", name, exc_info=True)
+
+        fut.add_done_callback(_on_done)
+        return None
+
+    @staticmethod
+    def flush_pending_writes(timeout: Optional[float] = 5.0) -> None:
+        """Give in-flight fire-and-forget store writes a chance to complete.
+
+        Called from :meth:`close`/:meth:`aclose` so a shutting-down worker does
+        not exit mid-write. Best-effort: never raises on a slow/failed write.
+        """
+        with _BG_WRITES_LOCK:
+            pending = [f for f in _BG_WRITES if not f.done()]
+        if not pending:
+            return
+        try:
+            concurrent.futures.wait(pending, timeout=timeout)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("flush_pending_writes wait interrupted", exc_info=True)
 
     @staticmethod
     async def _dispatch_async(store, sync_name, async_name, *args, **kwargs):
@@ -1149,6 +1206,11 @@ class PraisonAIDB:
         loop) so init/close can never race and leave a half-closed adapter that
         reports ``_initialized`` while its stores are shut.
         """
+        # Flush any fire-and-forget writes submitted from a running loop before
+        # tearing stores down, so a shutting-down worker does not drop in-flight
+        # persistence. Runs off the event loop to avoid blocking it.
+        await asyncio.to_thread(self.flush_pending_writes)
+
         if self._ainit_lock is None:
             self._ainit_lock = asyncio.Lock()
 
@@ -1209,6 +1271,9 @@ class PraisonAIDB:
         reused ``with db: ...`` block) triggers a clean re-initialisation via
         ``_init_stores()`` instead of dispatching to a closed store.
         """
+        # Flush fire-and-forget writes submitted from a running loop before
+        # tearing stores down so shutdown does not drop in-flight persistence.
+        self.flush_pending_writes()
         with self._init_lock:
             stores = (
                 self._conversation_store,
