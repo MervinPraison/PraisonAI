@@ -455,6 +455,11 @@ class HookRunner:
         exit_code: int
     ) -> HookResult:
         """Parse command output into HookResult."""
+        # Whether the process exited with a code we understand. Any other code
+        # (127 command-not-found, 126 not-executable, etc.) means the hook could
+        # not render a trustworthy verdict, so JSON stdout must not override it.
+        expected_exit = exit_code in (EXIT_CODE_SUCCESS, EXIT_CODE_BLOCKING_ERROR)
+
         # Try to parse JSON from stdout
         if stdout.strip():
             try:
@@ -464,8 +469,22 @@ class HookRunner:
                 if isinstance(data, str):
                     data = json.loads(data)
                 
+                decision = data.get("decision", "allow")
+                # Fail closed: valid JSON with an ``allow`` decision must not
+                # bypass an unexpected exit code. A gating hook (BEFORE_TOOL)
+                # that prints allow-JSON but then crashes (e.g. exit 127) has
+                # not actually approved the call, so deny instead of allowing.
+                if decision == "allow" and not expected_exit:
+                    return HookResult(
+                        decision="deny",
+                        reason=(
+                            f"Hook exited with unexpected code {exit_code} "
+                            f"after emitting an allow decision: "
+                            f"{stderr.strip() or 'no stderr'}"
+                        )
+                    )
                 return HookResult(
-                    decision=data.get("decision", "allow"),
+                    decision=decision,
                     reason=data.get("reason"),
                     modified_input=data.get("modified_input"),
                     additional_context=data.get("additional_context"),
