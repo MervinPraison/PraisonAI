@@ -721,7 +721,31 @@ class TestCommandHooks:
         assert len(results) == 1
         assert results[0].exit_code == 2
         assert results[0].output.decision == "deny"
-    
+
+    def test_parse_output_allow_json_unexpected_exit_denies(self):
+        """Fail closed: allow-JSON must not bypass an unexpected exit code."""
+        runner = HookRunner(HookRegistry(), cwd="/tmp")
+        result = runner._parse_command_output(
+            '{"decision": "allow"}', "not found", 127
+        )
+        assert result.decision == "deny"
+        assert "127" in result.reason
+
+    def test_parse_output_allow_json_clean_exit_allows(self):
+        """Allow-JSON with a clean exit still allows."""
+        runner = HookRunner(HookRegistry(), cwd="/tmp")
+        result = runner._parse_command_output('{"decision": "allow"}', "", 0)
+        assert result.decision == "allow"
+
+    def test_parse_output_deny_json_unexpected_exit_keeps_reason(self):
+        """Explicit deny-JSON is respected even on an unexpected exit code."""
+        runner = HookRunner(HookRegistry(), cwd="/tmp")
+        result = runner._parse_command_output(
+            '{"decision": "deny", "reason": "policy"}', "", 127
+        )
+        assert result.decision == "deny"
+        assert result.reason == "policy"
+
     @pytest.mark.asyncio
     async def test_command_hook_timeout(self):
         """Test command hook timeout."""

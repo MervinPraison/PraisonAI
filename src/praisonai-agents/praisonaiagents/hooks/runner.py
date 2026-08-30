@@ -354,13 +354,18 @@ class HookRunner:
         """Execute a function hook."""
         if hook.func is None:
             duration = (time.time() - start_time) * 1000
+            # Fail closed: a hook with no callable cannot produce a verdict, so a
+            # gating event (BEFORE_TOOL) must block rather than silently allow.
+            # Without an ``output`` here ``is_blocked`` returned False and the tool
+            # ran — the same fail-open the exception/timeout paths already fix.
             return HookExecutionResult(
                 hook_id=hook.id,
                 hook_name=hook.name or "unknown",
                 event=event,
                 success=False,
                 error="Hook function is None",
-                duration_ms=duration
+                duration_ms=duration,
+                output=HookResult(decision="deny", reason=f"Hook '{hook.name}' has no callable")
             )
         
         timeout = hook.timeout or self._default_timeout
@@ -450,6 +455,11 @@ class HookRunner:
         exit_code: int
     ) -> HookResult:
         """Parse command output into HookResult."""
+        # Whether the process exited with a code we understand. Any other code
+        # (127 command-not-found, 126 not-executable, etc.) means the hook could
+        # not render a trustworthy verdict, so JSON stdout must not override it.
+        expected_exit = exit_code in (EXIT_CODE_SUCCESS, EXIT_CODE_BLOCKING_ERROR)
+
         # Try to parse JSON from stdout
         if stdout.strip():
             try:
@@ -459,8 +469,22 @@ class HookRunner:
                 if isinstance(data, str):
                     data = json.loads(data)
                 
+                decision = data.get("decision", "allow")
+                # Fail closed: valid JSON with an ``allow`` decision must not
+                # bypass an unexpected exit code. A gating hook (BEFORE_TOOL)
+                # that prints allow-JSON but then crashes (e.g. exit 127) has
+                # not actually approved the call, so deny instead of allowing.
+                if decision == "allow" and not expected_exit:
+                    return HookResult(
+                        decision="deny",
+                        reason=(
+                            f"Hook exited with unexpected code {exit_code} "
+                            f"after emitting an allow decision: "
+                            f"{stderr.strip() or 'no stderr'}"
+                        )
+                    )
                 return HookResult(
-                    decision=data.get("decision", "allow"),
+                    decision=decision,
                     reason=data.get("reason"),
                     modified_input=data.get("modified_input"),
                     additional_context=data.get("additional_context"),
@@ -481,9 +505,19 @@ class HookRunner:
                 reason=stderr.strip() or stdout.strip() or "Blocked by hook"
             )
         else:
+            # Fail closed: any *unexpected* exit code (e.g. 127 command-not-found,
+            # 126 not-executable, or any other non-zero, non-blocking code) means
+            # the hook could not render a verdict. Treating that as ``allow`` would
+            # silently bypass a gating hook (BEFORE_TOOL). Deny so the gate matches
+            # the fail-closed posture of the exception/timeout paths and
+            # GuardrailChain. Emitting a real HookResult (decision + reason) also
+            # keeps ``get_blocking_reason`` informative for the audit trail.
             return HookResult(
-                decision="allow",
-                additional_context=f"Warning: {stderr.strip() or stdout.strip()}"
+                decision="deny",
+                reason=(
+                    f"Hook exited with unexpected code {exit_code}: "
+                    f"{stderr.strip() or stdout.strip() or 'no output'}"
+                )
             )
     
     @staticmethod
