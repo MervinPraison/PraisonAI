@@ -3536,8 +3536,13 @@ class AgentTeam(SpawnAnnounceProtocol):
         This method is safe to call from sync contexts only.
         """
         with self._spawn_lock:
-            # Create unique IDs
+            # Create unique IDs. agent_id keys self._spawned_agents, so retry on
+            # the (rare) truncated-UUID collision rather than silently clobbering
+            # an existing spawn record - the same guard the endpoint-path
+            # generator uses.
             agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
+            while agent_id in self._spawned_agents:
+                agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
             task_id = f"task_{str(uuid.uuid4())[:8]}"
             
             # Ensure event bus is initialized
@@ -3740,8 +3745,13 @@ class AgentTeam(SpawnAnnounceProtocol):
             self._async_spawn_lock = asyncio.Lock()
         
         async with self._async_spawn_lock:
-            # Create unique IDs
+            # Create unique IDs. agent_id keys self._spawned_agents, so retry on
+            # the (rare) truncated-UUID collision rather than silently clobbering
+            # an existing spawn record - the same guard the endpoint-path
+            # generator uses.
             agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
+            while agent_id in self._spawned_agents:
+                agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
             task_id = f"task_{str(uuid.uuid4())[:8]}"
             
             # Ensure event bus is initialized

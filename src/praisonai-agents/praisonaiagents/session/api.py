@@ -85,7 +85,19 @@ class Session:
             timeout: HTTP timeout for remote agent calls (default: 30 seconds)
             session_ttl: Time-to-live in seconds after which session expires
         """
-        self.session_id = session_id or str(uuid.uuid4())[:8]
+        # An explicit session_id is adopted as-is (needed to resume a prior
+        # session). An auto-generated one uses 16 hex chars / 64 bits (vs the
+        # old 8 chars / 32 bits, which hit a 50% birthday collision at ~77k IDs)
+        # and, since its directory is a security boundary between sessions, is
+        # regenerated if a directory already exists for it - mirroring the
+        # retry-on-collision loop the endpoint-path generator already uses.
+        if session_id is not None:
+            self.session_id = session_id
+        else:
+            self.session_id = uuid.uuid4().hex[:16]
+            if agent_url is None:
+                while self._get_session_dir().exists():
+                    self.session_id = uuid.uuid4().hex[:16]
         self.user_id = user_id or "default_user"
         self.agent_url = agent_url
         self.timeout = timeout

@@ -200,9 +200,12 @@ class MemoryMixin:
         Also resets _auto_save_last_index to prevent silent message loss
         when auto_save is enabled.
         """
-        self.chat_history = []
-        # Reset auto-save index to prevent stale index causing message loss
-        self._auto_save_last_index = 0
+        # Hold the same lock every other history mutator takes so a concurrent
+        # _add_to_chat_history append can't land on the list object we discard.
+        with self._history_lock:
+            self.chat_history = []
+            # Reset auto-save index to prevent stale index causing message loss
+            self._auto_save_last_index = 0
 
     def prune_history(self, keep_last: int = 5) -> int:
         """
@@ -296,16 +299,22 @@ class MemoryMixin:
                 response = agent.chat("[IMAGE] Analyze this")
                 # After block, history is restored - image NOT persisted
         """
-        # Save current history state
+        # Snapshot the exact message objects present before the block by
+        # identity. On exit remove only messages that were NOT in the snapshot,
+        # i.e. only the ephemeral ones. A blind ``chat_history = saved_history``
+        # would also erase any message a concurrent chat()/achat() turn on the
+        # same shared Agent appended during the block; an id-based diff (the
+        # same discipline _rollback_chat_history_to uses) preserves them.
         with self._history_lock:
-            saved_history = self.chat_history.copy()
-        
+            snapshot_ids = {id(m) for m in self.chat_history}
+
         try:
             yield
         finally:
-            # Restore history to pre-block state
             with self._history_lock:
-                self.chat_history = saved_history
+                self.chat_history[:] = [
+                    m for m in self.chat_history if id(m) in snapshot_ids
+                ]
 
     def _init_db_session(self):
         """Initialize DB session if db adapter is provided (lazy, first chat only)."""
