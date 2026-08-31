@@ -1121,6 +1121,16 @@ class WebSocketGateway:
         self._drain_marker_task: Optional[asyncio.Task] = None
         self._lifecycle_drain_timeout: Optional[float] = None
 
+        # Issue #4603: durable, boot-scoped process-lifecycle ledger. Detects an
+        # unclean/OOM death of the *previous* process (which runs no signal
+        # handler, so forensics never fire), surfaces memory/disk pressure on
+        # ``/health``, and backs a restart-loop breaker that survives the very
+        # restart it guards. Off unless a ``lifecycle.ledger``/``health`` block
+        # enables it, so always-on gateways are unchanged.
+        self._lifecycle_ledger: Optional[Any] = None
+        self._ledger_heartbeat_task: Optional[asyncio.Task] = None
+        self._ledger_heartbeat_interval: float = 15.0
+
     @property
     def is_running(self) -> bool:
         return self._is_running
@@ -2163,13 +2173,34 @@ class WebSocketGateway:
         if self._session_store:
             await self._start_session_cleanup()
 
-        # Issue #3379: re-drive any turn that was in-flight when a previous
-        # process restarted, and proactively notify the originating channel.
-        # Mirrors the durable approval rehydrate above; a no-op without a store.
-        try:
-            await self._resume_interrupted_turns()
-        except Exception:
-            logger.exception("Failed to resume interrupted turns on boot")
+        # Issue #4603: record this boot in the durable lifecycle ledger before
+        # anything else. This reads the prior sentinel, classifies whether the
+        # previous process exited cleanly (an unclean/OOM death runs no signal
+        # handler, so this is the only place it becomes visible), and restamps
+        # ``phase="running"``. No-op when the ledger is unconfigured.
+        if self._lifecycle_ledger is not None:
+            try:
+                self._lifecycle_ledger.record_boot()
+            except Exception:
+                logger.exception("Failed to record boot in lifecycle ledger")
+
+        # Issue #4603: if the persistent restart-loop breaker has already
+        # tripped across prior boots, skip the boot-time auto-resume re-drive
+        # (which is what keeps crashing the process) while still serving fresh
+        # inbound — instead of the supervisor respawning into the same crash.
+        if self._auto_resume_suspended():
+            logger.error(
+                "Persistent restart-loop breaker tripped; suspending boot-time "
+                "auto-resume of interrupted turns (still serving fresh inbound)"
+            )
+        else:
+            # Issue #3379: re-drive any turn that was in-flight when a previous
+            # process restarted, and proactively notify the originating channel.
+            # Mirrors the durable approval rehydrate above; a no-op without a store.
+            try:
+                await self._resume_interrupted_turns()
+            except Exception:
+                logger.exception("Failed to resume interrupted turns on boot")
 
         # Issue #3881: drive recovery from the durable run ledger too. The
         # session-blob scan above is heuristic; the ledger is the source of
@@ -2197,6 +2228,15 @@ class WebSocketGateway:
             self._liveness_task = asyncio.create_task(
                 self._liveness_loop(), name="gateway-liveness"
             )
+
+        # Issue #4603: fold a cheap ``/proc``+cgroup memory sample into the
+        # durable lifecycle sentinel on a slow cadence, so a later signal-less
+        # OOM/SIGKILL leaves the last memory reading behind for the next boot to
+        # flag ``suspected_oom``. No-op when the ledger is unconfigured.
+        if self._lifecycle_ledger is not None and self._ledger_heartbeat_task is None:
+            self._ledger_heartbeat_task = asyncio.create_task(
+                self._ledger_heartbeat_loop(), name="gateway-lifecycle-ledger"
+            )
         try:
             await self._server.serve()
         except Exception as e:
@@ -2209,6 +2249,22 @@ class WebSocketGateway:
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
+            # Issue #4603: ``serve()`` returns through here on every graceful
+            # termination — the SIGINT/SIGTERM handler only flips
+            # ``should_exit`` and uvicorn unwinds, so ``stop()`` is not
+            # guaranteed to run. Stamp the clean-exit marker here (after
+            # cancelling the sampler so it cannot re-stamp ``running``) so a
+            # normal shutdown is not misreported as an unclean/OOM death on the
+            # next boot. ``mark_exited`` is pid-owned and idempotent, so a later
+            # explicit ``stop()`` is harmless.
+            await self._cancel_ledger_heartbeat()
+            if self._lifecycle_ledger is not None:
+                try:
+                    self._lifecycle_ledger.mark_exited()
+                except Exception:
+                    logger.debug(
+                        "Failed to mark clean exit in lifecycle ledger (serve)"
+                    )
 
     async def _cancel_liveness_task(self) -> None:
         """Stop the connection-liveness heartbeat/reaper task (idempotent)."""
@@ -2222,6 +2278,95 @@ class WebSocketGateway:
                 pass
             except Exception:
                 logger.debug("Liveness task exited with error on cancel")
+
+    async def _cancel_ledger_heartbeat(self) -> None:
+        """Stop the lifecycle-ledger memory-sample heartbeat (idempotent)."""
+        task = self._ledger_heartbeat_task
+        self._ledger_heartbeat_task = None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Lifecycle-ledger heartbeat exited with error")
+
+    async def _ledger_heartbeat_loop(self) -> None:
+        """Periodically fold a memory sample into the durable lifecycle sentinel.
+
+        Best-effort and cheap (<1ms of ``/proc``+cgroup I/O per tick). Runs only
+        while the ledger is configured; any error is swallowed so it never
+        crashes the gateway it is meant to make observable.
+        """
+        ledger = self._lifecycle_ledger
+        if ledger is None:
+            return
+        interval = self._ledger_heartbeat_interval
+        while self._is_running:
+            try:
+                await asyncio.sleep(interval)
+                ledger.sample_memory()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("Lifecycle-ledger sample failed", exc_info=True)
+
+    def _auto_resume_suspended(self) -> bool:
+        """Whether the persistent restart-loop breaker has tripped this boot.
+
+        Only meaningful for a :class:`PersistentRestartLoopGuard` whose events
+        survive process boots. When there are interrupted turns to re-drive, a
+        boot is restart-worthy: record it and, once ``max_restarts`` such boots
+        fall within the window, report tripped so the caller skips the poison
+        re-drive that keeps crashing the process. Returns ``False`` for the
+        in-memory guard (which cannot see prior boots) and when unconfigured.
+        """
+        guard = self._restart_loop_guard
+        if guard is None:
+            return False
+        # Only the persistent guard carries cross-boot state; the in-memory one
+        # is rebuilt fresh each boot and must not gate the resume path.
+        if not hasattr(guard, "_store"):
+            return False
+        # Nothing to re-drive ⇒ this boot is not restart-interrupted; don't
+        # count it against the breaker and let it re-arm on a clean boot.
+        if not self._has_interrupted_turns():
+            try:
+                guard.reset()
+            except Exception:
+                pass
+            return False
+        try:
+            return guard.record(now=time.time())
+        except Exception:
+            return False
+
+    def _has_interrupted_turns(self) -> bool:
+        """Best-effort check for a persisted in-flight turn left by a restart."""
+        store = self._session_store
+        if not store:
+            return False
+        lister = getattr(store, "list_sessions", None)
+        if not callable(lister):
+            return False
+        try:
+            try:
+                summaries = lister(limit=1_000_000)
+            except TypeError:
+                summaries = lister()
+        except Exception:
+            return False
+        for summary in summaries or []:
+            sid = summary.get("session_id") if isinstance(summary, dict) else summary
+            if not sid:
+                continue
+            data = self._load_persisted_session_data(sid)
+            if not data:
+                continue
+            if bool(data.get("is_executing")) or bool(data.get("pending_inbox")):
+                return True
+        return False
 
     # ── Event-loop liveness watchdog (Issue #3410) ──
 
@@ -2382,6 +2527,58 @@ class WebSocketGateway:
             except (ImportError, ValueError) as e:
                 logger.warning("Invalid restart_loop_guard config; disabling: %s", e)
                 self._restart_loop_guard = None
+
+        # Issue #4603: durable process-lifecycle ledger. Enabled via
+        # ``lifecycle.ledger.enabled`` (or implicitly when
+        # ``restart_loop_guard.persist`` is set) so an unclean/OOM prior death
+        # is detected at boot, pressure is surfaced on ``/health``, and — when
+        # ``restart_loop_guard.persist`` is truthy — the crash-loop breaker
+        # persists across boots and covers the auto-resume path. Off by default.
+        ledger_cfg = lifecycle_cfg.get("ledger")
+        if not isinstance(ledger_cfg, dict):
+            ledger_cfg = {}
+        persist_guard = isinstance(rlg, dict) and _as_bool(rlg.get("persist"))
+        ledger_enabled = _as_bool(ledger_cfg.get("enabled")) or persist_guard
+        if ledger_enabled:
+            try:
+                from .lifecycle_ledger import (
+                    LifecycleLedger,
+                    build_persistent_restart_guard,
+                    default_sentinel_path,
+                )
+
+                health_cfg = lifecycle_cfg.get("health")
+                if not isinstance(health_cfg, dict):
+                    health_cfg = {}
+                path = ledger_cfg.get("path") or default_sentinel_path()
+                self._lifecycle_ledger = LifecycleLedger(
+                    str(path),
+                    memory_budget_fraction=float(
+                        health_cfg.get("memory_budget_fraction", 0.9)
+                    ),
+                    disk_min_free_mb=float(
+                        health_cfg.get("disk_min_free_mb", 512.0)
+                    ),
+                )
+                # When persistence is requested, upgrade the in-memory guard to
+                # one whose events survive the restart it guards and share the
+                # ledger's sentinel file.
+                if persist_guard:
+                    rlg = rlg if isinstance(rlg, dict) else {}
+                    self._restart_loop_guard = build_persistent_restart_guard(
+                        self._lifecycle_ledger,
+                        max_restarts=int(rlg.get("max_restarts", 3)),
+                        window_seconds=float(
+                            rlg.get("window_seconds", 3600.0)
+                        ),
+                    )
+                logger.info(
+                    "Gateway lifecycle ledger enabled (path=%s, persist_guard=%s)",
+                    path, persist_guard,
+                )
+            except (ImportError, ValueError, OSError) as e:
+                logger.warning("Invalid lifecycle ledger config; disabling: %s", e)
+                self._lifecycle_ledger = None
 
     def _merge_lifecycle_overrides(
         self,
@@ -2790,6 +2987,18 @@ class WebSocketGateway:
 
         # Issue #2798/#3911: stop the connection-liveness heartbeat/reaper.
         await self._cancel_liveness_task()
+
+        # Issue #4603: this is the graceful-stop path, so stamp a clean exit in
+        # the durable lifecycle sentinel before we go. Only the process that
+        # wrote the boot marker can do so (ownership-checked in the ledger), so
+        # a later unclean death of *another* boot is never masked. Cancel the
+        # sampler first so it cannot re-stamp ``phase="running"`` after this.
+        await self._cancel_ledger_heartbeat()
+        if self._lifecycle_ledger is not None:
+            try:
+                self._lifecycle_ledger.mark_exited()
+            except Exception:
+                logger.debug("Failed to mark clean exit in lifecycle ledger")
 
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
@@ -5247,12 +5456,58 @@ class WebSocketGateway:
         # whether scale-to-zero is armed / the gateway is dormant / an external
         # drain watcher is active — without scraping logs. Only included when a
         # lifecycle feature is configured, so always-on gateways are unchanged.
+        lifecycle_block: Dict[str, Any] = {}
         if self._idle_policy is not None or self._drain_marker_policy is not None:
-            result["lifecycle"] = {
+            lifecycle_block.update({
                 "scale_to_zero": self._idle_policy is not None,
                 "dormant": self._is_dormant,
                 "drain_marker_watch": self._drain_marker_policy is not None,
-            }
+            })
+
+        # Issue #4603: surface the durable process-lifecycle record — whether the
+        # *previous* process exited uncleanly (OOM/SIGKILL, which runs no signal
+        # handler), any suspected OOM, the cross-boot restart count, and whether
+        # boot-time auto-resume is suspended by the persistent breaker — plus a
+        # coarse, redaction-safe memory/disk pressure block. Only included when
+        # the ledger is configured, computed defensively so health() never raises.
+        ledger = self._lifecycle_ledger
+        if ledger is not None:
+            try:
+                lifecycle_block.update(ledger.last_exit())
+            except Exception:
+                pass
+            guard = self._restart_loop_guard
+            if guard is not None and hasattr(guard, "_store"):
+                try:
+                    lifecycle_block["restarts_last_hour"] = len(
+                        [t for t in getattr(guard, "_events", [])
+                         if t >= time.time() - 3600.0]
+                    )
+                    lifecycle_block["auto_resume_suspended"] = bool(
+                        guard.tripped(time.time())
+                    )
+                except Exception:
+                    pass
+            try:
+                pressure = ledger.pressure()
+                result["pressure"] = pressure
+                # Mark the surface degraded on *critical* memory/disk so a
+                # gateway being OOM-killed between kills does not report plain
+                # healthy. ``unknown`` is surfaced verbatim in the pressure
+                # block (never asserted healthy) but does not flip status, so a
+                # host with no cgroup limit to measure keeps today's behaviour.
+                if self._is_running and any(
+                    pressure.get(k) == "critical" for k in ("memory", "disk")
+                ):
+                    result["status"] = "degraded"
+            except Exception:
+                pass
+            # An unclean prior exit also degrades the status surface.
+            if lifecycle_block.get("last_exit") == "unclean" and self._is_running:
+                result["status"] = "degraded"
+
+        if lifecycle_block:
+            result["lifecycle"] = lifecycle_block
 
         # Issue #3410: surface opt-in event-loop watchdog state so an operator
         # can confirm the liveness backstop is armed. Only included when
@@ -5326,7 +5581,20 @@ class WebSocketGateway:
         try:
             pressure = self._compute_pressure()
             if pressure is not None:
-                result["pressure"] = pressure.to_dict()
+                # Issue #4603: the lifecycle ledger may already have populated
+                # ``result["pressure"]`` with a coarse ``{"memory", "disk"}``
+                # block. Merge the saturation/back-pressure fields in rather
+                # than replacing it, so enabling both features surfaces the OS
+                # resource pressure *and* the admission/backlog signals on one
+                # ``pressure`` object instead of one silently clobbering the
+                # other. Saturation keys ("admission_*", "outbox_*", …) are
+                # disjoint from the ledger's, so the merge is non-destructive.
+                existing = result.get("pressure")
+                merged = pressure.to_dict()
+                if isinstance(existing, dict):
+                    for key, value in existing.items():
+                        merged.setdefault(key, value)
+                result["pressure"] = merged
         except Exception:
             pass
 

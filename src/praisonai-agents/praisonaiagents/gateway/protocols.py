@@ -4803,6 +4803,308 @@ class RestartLoopGuard:
         self._events = []
 
 
+# ---------------------------------------------------------------------------
+# Process-lifecycle record + unclean/OOM classification (Issue #4603)
+#
+# ``RestartLoopGuard`` above tracks the *rate* of restart-worthy boots in
+# memory, and ``classify_exit_reason`` maps a caught exception to an exit code.
+# Neither survives a ``SIGKILL``/OOM-kill — no in-process hook runs for those —
+# so a hosted gateway cannot tell on its next boot that its previous process
+# died uncleanly. These three pure primitives close that gap: a small durable
+# lifecycle *record* the runtime restamps on boot/shutdown, a pure predicate
+# that classifies "was the last exit clean?", and a restart-loop guard whose
+# events load from / flush to an injected durable store so the breaker survives
+# the very death it guards. All I/O — the ``/proc``/cgroup sampling and the
+# durable sentinel — lives in the ``praisonai-bot`` runtime; core stays
+# protocol + pure default policy, symmetric with the block above.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LifecycleRecord:
+    """Durable, boot-scoped snapshot of the gateway process's lifecycle.
+
+    Written by the runtime at boot (``phase="running"``) and on a graceful stop
+    (``phase="exited"``), with a memory sample folded in by the heartbeat. On
+    the *next* boot the runtime reads the prior record and runs
+    :func:`classify_unclean_exit`: a record still marked ``running`` means the
+    previous process never reached its graceful-stop path — an unclean exit,
+    and (given a high last memory sample) a suspected OOM-kill.
+
+    Pure and JSON-round-trippable so both the durable store and the health
+    surface share one shape; the wrapper owns persistence.
+
+    Attributes:
+        phase: ``"running"`` | ``"draining"`` | ``"exited"`` — the last phase
+            the process recorded for itself.
+        exit_kind: ``"clean"`` | ``"unclean"`` | ``"unknown"`` — set by
+            :func:`classify_unclean_exit` on the *next* boot (never
+            ``"unknown"``-treated-as-healthy downstream).
+        suspected_oom: ``True`` when an unclean exit coincided with a high last
+            memory sample (memory pressure at death).
+        last_mem_fraction: Last sampled memory-budget fraction in ``[0, 1]``, or
+            ``None`` when the platform could not report it.
+        restart_events: Persisted monotonic-independent wall-clock timestamps of
+            restart-worthy boots, for :class:`PersistentRestartLoopGuard`.
+    """
+
+    phase: Literal["running", "draining", "exited"] = "running"
+    exit_kind: Literal["clean", "unclean", "unknown"] = "unknown"
+    suspected_oom: bool = False
+    last_mem_fraction: Optional[float] = None
+    restart_events: List[float] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serializable dict for the durable sentinel."""
+        return {
+            "phase": self.phase,
+            "exit_kind": self.exit_kind,
+            "suspected_oom": self.suspected_oom,
+            "last_mem_fraction": self.last_mem_fraction,
+            "restart_events": list(self.restart_events),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Mapping[str, Any]]) -> "LifecycleRecord":
+        """Rebuild from a persisted dict, tolerating partial/legacy shapes."""
+        if not isinstance(data, Mapping):
+            return cls()
+
+        phase = data.get("phase")
+        if phase not in ("running", "draining", "exited"):
+            phase = "running"
+        exit_kind = data.get("exit_kind")
+        if exit_kind not in ("clean", "unclean", "unknown"):
+            exit_kind = "unknown"
+
+        frac = data.get("last_mem_fraction")
+        try:
+            frac_val: Optional[float] = None if frac is None else float(frac)
+        except (TypeError, ValueError):
+            frac_val = None
+
+        raw_events = data.get("restart_events") or []
+        events: List[float] = []
+        if isinstance(raw_events, (list, tuple)):
+            for item in raw_events:
+                try:
+                    events.append(float(item))
+                except (TypeError, ValueError):
+                    continue
+
+        return cls(
+            phase=phase,  # type: ignore[arg-type]
+            exit_kind=exit_kind,  # type: ignore[arg-type]
+            suspected_oom=bool(data.get("suspected_oom", False)),
+            last_mem_fraction=frac_val,
+            restart_events=events,
+        )
+
+
+def classify_unclean_exit(
+    prev: Optional[LifecycleRecord],
+    *,
+    oom_fraction: float = 0.9,
+) -> LifecycleRecord:
+    """Classify the previous boot's exit and return a fresh boot record (pure).
+
+    Given the record persisted by the *previous* process, decide whether that
+    process exited cleanly and stamp a new ``phase="running"`` record for *this*
+    boot. Side-effect free so it is provable in isolation, mirroring
+    :func:`classify_exit_reason`.
+
+    Rules:
+
+    * No prior record ⇒ first boot / fresh store: ``exit_kind="unknown"`` (the
+      caller must never treat ``"unknown"`` as healthy, but there is nothing to
+      resume).
+    * Prior ``phase == "exited"`` ⇒ the previous process reached its graceful
+      stop: ``exit_kind="clean"``.
+    * Prior ``phase in ("running", "draining")`` ⇒ the previous process died
+      before recording a clean exit (SIGKILL/OOM/segfault/orchestrator kill):
+      ``exit_kind="unclean"``, and ``suspected_oom`` when its last memory sample
+      was at/above ``oom_fraction`` of the budget.
+
+    The returned record carries forward the prior ``restart_events`` so the
+    persistent restart-loop guard sees the full cross-boot history.
+
+    Args:
+        prev: The previous process's persisted :class:`LifecycleRecord`, or
+            ``None`` on a fresh store.
+        oom_fraction: Memory-budget fraction at/above which an unclean exit is
+            flagged as a suspected OOM-kill.
+
+    Returns:
+        A fresh ``phase="running"`` :class:`LifecycleRecord` for this boot.
+    """
+    carried = list(prev.restart_events) if prev is not None else []
+    if prev is None:
+        return LifecycleRecord(
+            phase="running", exit_kind="unknown", restart_events=carried
+        )
+    if prev.phase == "exited":
+        return LifecycleRecord(
+            phase="running", exit_kind="clean", restart_events=carried
+        )
+    # Still "running"/"draining" in the prior record ⇒ never reached graceful stop.
+    frac = prev.last_mem_fraction
+    suspected_oom = frac is not None and frac >= oom_fraction
+    return LifecycleRecord(
+        phase="running",
+        exit_kind="unclean",
+        suspected_oom=suspected_oom,
+        last_mem_fraction=frac,
+        restart_events=carried,
+    )
+
+
+@runtime_checkable
+class RestartStoreProtocol(Protocol):
+    """Durable-store contract for cross-boot restart timestamps (Issue #4603).
+
+    The pure decision (:class:`PersistentRestartLoopGuard`) lives in core; the
+    wrapper injects a concrete store that reads/writes the timestamps to a small
+    sentinel file. Both methods are best-effort: an implementation that cannot
+    reach its backing store returns ``[]`` from :meth:`load_events` and silently
+    drops :meth:`save_events`, so the breaker degrades to in-memory behaviour
+    rather than crashing the gateway it protects.
+    """
+
+    def load_events(self) -> List[float]:
+        """Return the persisted restart timestamps (``[]`` when unavailable)."""
+        ...
+
+    def save_events(self, events: List[float]) -> None:
+        """Persist the restart timestamps (best-effort, never raises)."""
+        ...
+
+
+class PersistentRestartLoopGuard(RestartLoopGuard):
+    """A :class:`RestartLoopGuard` whose events survive a process restart.
+
+    The in-memory guard is reconstructed fresh on every boot, so a persisted
+    turn that hard-crashes the *whole* process (OOM, segfault) can drive an
+    infinite ``supervisor → boot → auto-resume → crash`` loop the breaker never
+    sees. This subclass loads its event history from an injected
+    :class:`RestartStoreProtocol` at construction and flushes back on every
+    mutation, so the breaker observes the true cross-boot restart rate and can
+    trip on a crash cycle *slower* than a single in-process window.
+
+    The window defaults to one hour (vs. the in-process 60s) because a
+    cross-boot crash loop is paced by process (re)start latency, not by an
+    in-loop retry. Pure decision preserved: all persistence is delegated to the
+    injected store, so the trip logic remains provable in isolation.
+
+    Example::
+
+        guard = PersistentRestartLoopGuard(store, max_restarts=3,
+                                           window_seconds=3600)
+        if guard.record(now=time.time()):
+            # too many restart-interrupted boots — stop auto-resuming the turn
+            ...
+    """
+
+    def __init__(
+        self,
+        store: RestartStoreProtocol,
+        *,
+        max_restarts: int = 3,
+        window_seconds: float = 3600.0,
+    ):
+        super().__init__(max_restarts=max_restarts, window_seconds=window_seconds)
+        self._store = store
+        try:
+            loaded = store.load_events()
+        except Exception:
+            loaded = []
+        if loaded:
+            self._events = [float(t) for t in loaded]
+
+    def _flush(self) -> None:
+        try:
+            self._store.save_events(list(self._events))
+        except Exception:
+            pass
+
+    def record(self, now: float) -> bool:
+        """Record a restart at wall-clock ``now`` and flush to the store.
+
+        Unlike the base class this expects a *wall-clock* timestamp
+        (``time.time()``), because a monotonic clock resets across process
+        boots and would make persisted events meaningless.
+        """
+        tripped = super().record(now)
+        self._flush()
+        return tripped
+
+    def reset(self) -> None:
+        """Clear the history in memory *and* in the durable store."""
+        super().reset()
+        self._flush()
+
+
+def classify_resource_pressure(
+    *,
+    mem_fraction: Optional[float] = None,
+    disk_free_mb: Optional[float] = None,
+    mem_elevated: float = 0.75,
+    mem_critical: float = 0.9,
+    disk_min_free_mb: float = 512.0,
+) -> Dict[str, str]:
+    """Classify coarse memory + disk pressure for the health surface (pure).
+
+    A tiny, redaction-safe classifier that folds the wrapper's ``/proc``/cgroup
+    memory-budget fraction and free-disk sample into a closed ``ok`` /
+    ``elevated`` / ``critical`` / ``unknown`` vocabulary. Lives in core so the
+    SDK and the bot classify identically; the wrapper owns the sampling.
+
+    ``unknown`` is returned when a signal is missing and — per the issue — must
+    never be treated as healthy by callers (it is deliberately *not* ``ok``).
+
+    Args:
+        mem_fraction: Anonymous-RSS / memory-budget fraction in ``[0, ∞)``, or
+            ``None`` when the platform has no cgroup limit to report against.
+        disk_free_mb: Free disk headroom in MiB for the gateway's state dir, or
+            ``None`` when it could not be sampled.
+        mem_elevated: Fraction at/above which memory is ``"elevated"``.
+        mem_critical: Fraction at/above which memory is ``"critical"``.
+        disk_min_free_mb: Free-MiB floor below which disk is ``"critical"``;
+            ``"elevated"`` below twice that.
+
+    Returns:
+        ``{"memory": <level>, "disk": <level>}`` with values drawn from the
+        closed vocabulary above.
+    """
+
+    def _mem(frac: Optional[float]) -> str:
+        if frac is None:
+            return "unknown"
+        try:
+            f = float(frac)
+        except (TypeError, ValueError):
+            return "unknown"
+        if f >= mem_critical:
+            return "critical"
+        if f >= mem_elevated:
+            return "elevated"
+        return "ok"
+
+    def _disk(free_mb: Optional[float]) -> str:
+        if free_mb is None:
+            return "unknown"
+        try:
+            mb = float(free_mb)
+        except (TypeError, ValueError):
+            return "unknown"
+        if mb < disk_min_free_mb:
+            return "critical"
+        if mb < disk_min_free_mb * 2:
+            return "elevated"
+        return "ok"
+
+    return {"memory": _mem(mem_fraction), "disk": _disk(disk_free_mb)}
+
+
 class FleetSupervisionPolicy:
     """Pure fleet-level crash-loop breaker for channel supervision (Issue #3840).
 
