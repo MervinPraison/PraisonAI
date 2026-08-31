@@ -8,6 +8,7 @@ import contextlib
 import threading
 import concurrent.futures
 import random
+import re
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from collections import OrderedDict
 import inspect
@@ -32,6 +33,18 @@ from ..goal.loop import GoalLoopMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
+
+_COMPLETION_NEGATION_RE = re.compile(
+    r'\b(?:not|never|no longer|hardly|barely|isn\'t|aren\'t|wasn\'t|weren\'t|hasn\'t|haven\'t|hadn\'t|won\'t|wouldn\'t|can\'t|couldn\'t|shouldn\'t|don\'t|doesn\'t|didn\'t)\b'
+    r'.{0,20}'
+)
+_COMPLETION_PATTERNS = (
+    (re.compile(r'\btask\s+completed?\b'), False),
+    (re.compile(r'\bcompleted\s+successfully\b'), False),
+    (re.compile(r'\ball\s+done\b'), False),
+    (re.compile(r'\bdone\b'), True),
+    (re.compile(r'\bfinished\b'), True),
+)
 
 # ============================================================================
 # Performance: Lazy imports for heavy dependencies
@@ -4191,21 +4204,7 @@ Summary:"""
         Returns:
             True if a completion signal is detected
         """
-        import re
         response_lower = response_text.lower()
-        # Negation patterns that should NOT be treated as completion
-        _NEGATION_RE = re.compile(
-            r'\b(?:not|never|no longer|hardly|barely|isn\'t|aren\'t|wasn\'t|weren\'t|hasn\'t|haven\'t|hadn\'t|won\'t|wouldn\'t|can\'t|couldn\'t|shouldn\'t|don\'t|doesn\'t|didn\'t)\b'
-            r'.{0,20}'   # up to 20 chars between negation and keyword
-        )
-        # Word-boundary patterns to avoid substring false positives
-        _COMPLETION_PATTERNS = [
-            (re.compile(r'\btask\s+completed?\b'), False),         # no negation check needed
-            (re.compile(r'\bcompleted\s+successfully\b'), False),
-            (re.compile(r'\ball\s+done\b'), False),
-            (re.compile(r'\bdone\b'), True),          # 'done' needs negation check
-            (re.compile(r'\bfinished\b'), True),      # 'finished' needs negation check
-        ]
         for pattern, needs_negation_check in _COMPLETION_PATTERNS:
             match = pattern.search(response_lower)
             if match:
@@ -4213,7 +4212,7 @@ Summary:"""
                     # Check if a negation word precedes the match within 30 chars
                     start = max(0, match.start() - 30)
                     prefix = response_lower[start:match.start()]
-                    if _NEGATION_RE.search(prefix):
+                    if _COMPLETION_NEGATION_RE.search(prefix):
                         continue  # Skip — negated completion
                     # Also check "not X yet" pattern
                     end = min(len(response_lower), match.end() + 10)

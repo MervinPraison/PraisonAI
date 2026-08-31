@@ -24,6 +24,25 @@ from unittest.mock import patch, AsyncMock
 class TestCompletionDetection:
     """Tests that completion detection uses word boundaries, not substrings."""
 
+    def test_completion_patterns_are_compiled_once(self, monkeypatch):
+        """Completion checks should reuse patterns compiled at module import."""
+        import re
+        from praisonaiagents.agent.agent import Agent
+
+        compile_calls = 0
+        original_compile = re.compile
+
+        def counting_compile(*args, **kwargs):
+            nonlocal compile_calls
+            compile_calls += 1
+            return original_compile(*args, **kwargs)
+
+        monkeypatch.setattr(re, "compile", counting_compile)
+
+        assert Agent._is_completion_signal("Task completed.") is True
+        assert Agent._is_completion_signal("Still working.") is False
+        assert compile_calls == 0
+
     def _make_agent(self):
         """Create a minimal autonomy-enabled agent."""
         from praisonaiagents import Agent
