@@ -99,3 +99,53 @@ test("the parity typecheck runs in STRICT mode", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("with no praisonai-ts beside it, the checker SKIPS and exits clean", () => {
+  // A standalone clone has no sibling checkout. Three mutations survived here:
+  // dropping `process.exit(0)` so the run carries on without the file it is
+  // meant to check, and flipping `exists` so a missing path reads as present.
+  // Either way the job fails for a reason that has nothing to do with drift,
+  // and whoever sees it goes looking for an API change that never happened.
+  const empty = mkdtempSync(join(tmpdir(), "parity-absent-"));
+  const result = spawnSync(process.execPath, [script], {
+    encoding: "utf8",
+    env: { ...process.env, PARITY_UPSTREAM: join(empty, "praisonai-ts") },
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+  assert.equal(result.status, 0, `a missing sibling must not fail the build:\n${output}`);
+  assert.match(output, /SKIPPED/, "and it must say it skipped rather than passing silently");
+  assert.doesNotMatch(
+    output,
+    /still satisfies PraisonAgent/,
+    "a skip is not a pass -- it must not claim the check ran",
+  );
+});
+
+test("with praisonai-ts present, it does NOT skip -- the pair", () => {
+  // Without this, an `exists` that always answered false would satisfy the
+  // test above and skip on every machine, including CI, forever.
+  const result = spawnSync(process.execPath, [script], { encoding: "utf8" });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  assert.doesNotMatch(output, /SKIPPED/, `the monorepo has the sibling:\n${output}`);
+  assert.equal(result.status, 0, output);
+});
+
+test("a drift failure NAMES what drifted, not just that something did", () => {
+  // `console.error` of the drift lines was removable with a green suite: the
+  // job goes red and prints nothing about which member changed, so the next
+  // person has a failing gate and no way to act on it. The exit code is the
+  // gate; the message is what makes it fixable.
+  const dir = mkdtempSync(join(tmpdir(), "parity-named-"));
+  const api = join(dir, "agent-api.ts");
+  writeFileSync(api, "export interface PraisonAgent { __aMemberUpstreamDoesNotHave: number; }\n");
+  const result = spawnSync(process.execPath, [script], {
+    encoding: "utf8",
+    env: { ...process.env, PARITY_AGENT_API: api },
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+  assert.notEqual(result.status, 0, `drift must fail:\n${output}`);
+  assert.match(output, /__aMemberUpstreamDoesNotHave/, `it must name the member:\n${output}`);
+  assert.match(output, /parity\.ts/, "and where the mismatch was reported");
+});

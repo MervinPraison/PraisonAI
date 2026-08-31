@@ -222,6 +222,39 @@ test("refused events are announced at the end, and NOT during the stream", () =>
   const ended = apply(midStream, end);
   const second = tick(first.state, ended, 10_000);
   assert.equal(second.announcements.some((a) => a.reason === "dropped"), true);
+
+  // And exactly ONCE. Dropping `spokenDropped = turn.dropped.length` survived
+  // the whole suite: the cursor never advances, so every later publish of the
+  // same finished turn re-announces the same decoder gap. A screen-reader user
+  // hears "1 event could not be read" on a loop, and it is assertive, so it
+  // interrupts whatever else was being read each time.
+  const third = tick(second.state, ended, 20_000);
+  assert.equal(
+    third.announcements.some((a) => a.reason === "dropped"),
+    false,
+    "a gap already announced must not be announced again",
+  );
+  const fourth = tick(third.state, ended, 30_000);
+  assert.equal(fourth.announcements.some((a) => a.reason === "dropped"), false);
+});
+
+test("a SECOND refused event after the first was announced is announced too", () => {
+  // The pair. A cursor that simply latched "already said something" would pass
+  // the test above and then stay silent about every later gap in the same turn
+  // -- so the count is what advances, not a flag.
+  const one = run(start, delta("Working. "), { type: "delta", msgId: "other", text: "stray" });
+  const endedOnce = apply(one, end);
+  const said = tick(initialAnnouncer, endedOnce, 0);
+  assert.equal(said.announcements.some((a) => a.reason === "dropped"), true);
+
+  const endedTwice = apply(endedOnce, { type: "delta", msgId: "other", text: "stray again" });
+  assert.equal(endedTwice.dropped.length, 2, "the reducer recorded a second gap");
+  const again = tick(said.state, endedTwice, 10_000);
+  assert.equal(
+    again.announcements.some((a) => a.reason === "dropped"),
+    true,
+    "a new gap must still be reported",
+  );
 });
 
 test("a new turn starts the cursor over instead of skipping the answer", () => {
