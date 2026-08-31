@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import logging
@@ -232,6 +233,22 @@ from ..errors import BudgetExceededError
 
 # Import retry configuration
 from .retry_utils import RetryBackoffConfig
+
+# Completion-signal detection patterns (compiled once at import — see
+# Agent._is_completion_signal). Negation patterns that should NOT be treated
+# as completion.
+_COMPLETION_NEGATION_RE = re.compile(
+    r'\b(?:not|never|no longer|hardly|barely|isn\'t|aren\'t|wasn\'t|weren\'t|hasn\'t|haven\'t|hadn\'t|won\'t|wouldn\'t|can\'t|couldn\'t|shouldn\'t|don\'t|doesn\'t|didn\'t)\b'
+    r'.{0,20}'   # up to 20 chars between negation and keyword
+)
+# Word-boundary patterns to avoid substring false positives
+_COMPLETION_PATTERNS = (
+    (re.compile(r'\btask\s+completed?\b'), False),         # no negation check needed
+    (re.compile(r'\bcompleted\s+successfully\b'), False),
+    (re.compile(r'\ball\s+done\b'), False),
+    (re.compile(r'\bdone\b'), True),          # 'done' needs negation check
+    (re.compile(r'\bfinished\b'), True),      # 'finished' needs negation check
+)
 
 class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
