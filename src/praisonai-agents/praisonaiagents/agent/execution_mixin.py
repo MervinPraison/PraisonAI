@@ -802,21 +802,31 @@ Write the complete compiled report:"""
         Args:
             new_model: The new model name to switch to (e.g., "gpt-4o", "claude-3-sonnet")
         """
-        # Store the new model name
-        self.llm = new_model
-        
-        # Recreate the LLM instance with the new model
-        try:
-            from ..llm.llm import LLM
-            self._llm_instance = LLM(
-                model=new_model,
-                base_url=self._openai_base_url,
-                api_key=self._openai_api_key,
-            )
-            self._using_custom_llm = True
-        except ImportError:
-            # If LLM class not available, just update the model string
-            pass
+        # Serialise against an in-flight sync model fallback (which also swaps
+        # self.llm / self._unified_dispatcher) so the two can't interleave.
+        with self._get_model_fallback_lock().sync():
+            # Store the new model name
+            self.llm = new_model
+
+            # Drop any cached dispatcher bound to the old model so the next
+            # chat()/achat() rebuilds against new_model. Without this, the
+            # OpenAI path keeps dispatching on the old model even though
+            # self.llm now reads the new name (mirrors _apply_default_llm).
+            if getattr(self, '_unified_dispatcher', None) is not None:
+                self._unified_dispatcher = None
+
+            # Recreate the LLM instance with the new model
+            try:
+                from ..llm.llm import LLM
+                self._llm_instance = LLM(
+                    model=new_model,
+                    base_url=self._openai_base_url,
+                    api_key=self._openai_api_key,
+                )
+                self._using_custom_llm = True
+            except ImportError:
+                # If LLM class not available, just update the model string
+                pass
 
     def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
         """Start the agent interactively with verbose output.
