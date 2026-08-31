@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -26,6 +26,32 @@ test("a shippable app builds, and dist carries the page and the stylesheet", () 
   for (const f of ["index.html", "app.css", "app.js"]) {
     assert.ok(existsSync(join(dir, "dist", f)), `dist/${f} must exist`);
   }
+});
+
+test("a stale file from a previous build does not survive into dist", () => {
+  // `await rm(dist, ...)` was removable with a green suite, because every test
+  // built into a fresh temp directory where dist did not exist yet. On a real
+  // machine dist DOES exist -- that is the whole point of a build directory --
+  // so a renamed or deleted asset stays in the shipped output forever, and the
+  // page keeps loading a file nobody can find in the source any more.
+  const dir = fixture("export const hi: string = 'hi';\ndocument.title = hi;\n");
+  mkdirSync(join(dir, "dist"), { recursive: true });
+  writeFileSync(join(dir, "dist/left-over.js"), "// from a build two versions ago\n");
+  writeFileSync(join(dir, "dist/app.css"), "/* a stale stylesheet */\n");
+
+  const r = build(dir);
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+
+  assert.equal(
+    existsSync(join(dir, "dist/left-over.js")),
+    false,
+    "a file the build no longer produces must not be shipped",
+  );
+  assert.match(
+    readFileSync(join(dir, "dist/app.css"), "utf8"),
+    /color: red/,
+    "and a file it DOES produce must be the fresh one, not the stale one",
+  );
 });
 
 test("an unshippable bundle FAILS the build, it does not merely print", () => {

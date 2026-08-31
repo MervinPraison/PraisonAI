@@ -37,7 +37,15 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-const UPSTREAM = resolve(import.meta.dirname, "../../praisonai-ts");
+/** Where the sibling checkout lives.
+ *
+ *  Overridable for the same reason AGENT_API is: the SKIP path -- a standalone
+ *  clone with no praisonai-ts beside it -- had no test, and three mutations
+ *  survived in it. Dropping `process.exit(0)` makes the checker carry on
+ *  without the file it is meant to check; making `exists` answer true for a
+ *  missing path does the same from the other end. Either way a standalone
+ *  clone's CI fails for a reason that has nothing to do with drift. */
+const UPSTREAM = process.env["PARITY_UPSTREAM"] ?? resolve(import.meta.dirname, "../../praisonai-ts");
 const AGENT_SRC = join(UPSTREAM, "src/agent/simple.ts");
 /** The structural interface the real Agent must satisfy.
  *
