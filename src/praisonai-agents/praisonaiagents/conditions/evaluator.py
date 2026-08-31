@@ -272,7 +272,15 @@ def evaluate_condition(
             return True
         if substituted.strip().lower() == 'false':
             return False
-        
+
+        # A comparison operator survived every format-specific check above,
+        # so the comparison it was meant to drive never matched (e.g. a
+        # missing or non-numeric operand) rather than this being a plain
+        # flag value. Fail safe per this function's own contract instead of
+        # treating the leftover operator text as a truthy string.
+        if re.search(r'>=|<=|==|!=|>|<', condition):
+            return False
+
         # Non-empty string is truthy
         return bool(substituted.strip())
         
