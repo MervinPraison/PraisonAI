@@ -591,7 +591,7 @@ Return empty arrays if nothing is found for a category."""
                 
                 for improvement in extracted.get("improvements", []):
                     if improvement and "improvements" in self._stores:
-                        self.capture_improvement(improvement, source="auto_extraction")
+                        self.capture_improvement(improvement, area="auto_extraction")
                         stored["improvements"] += 1
             
             return {
