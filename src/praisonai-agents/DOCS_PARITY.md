@@ -18,41 +18,41 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 55 | 17522 |
+| ✅ Agent | 22 | 56 | 17703 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
-| ✅ Approval | 1 | 7 | 3481 |
+| ✅ Approval | 1 | 7 | 3503 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3747 |
 | ✅ Autonomy | 3 | 7 | 2790 |
-| ✅ Bots | 7 | 32 | 13622 |
+| ✅ Bots | 7 | 33 | 13830 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 122 | 37626 |
+| ✅ CLI | 5 | 122 | 37698 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1347 |
 | ✅ Configuration | 3 | 8 | 3292 |
-| ✅ Context Management | 16 | 36 | 14071 |
+| ✅ Context Management | 16 | 36 | 14073 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
-| ✅ Evaluation | 1 | 7 | 2920 |
+| ✅ Evaluation | 1 | 7 | 2924 |
 | ✅ Events | 1 | 2 | 767 |
 | ✅ Execution | 3 | 4 | 1606 |
 | ✅ Failover | 2 | 1 | 452 |
 | ✅ Files | 2 | 7 | 2275 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 83 | 30723 |
-| ✅ Guardrails | 4 | 4 | 2253 |
+| ✅ Gateway | 7 | 83 | 30845 |
+| ✅ Guardrails | 4 | 4 | 2288 |
 | ✅ Handoffs | 11 | 6 | 2626 |
-| ✅ Hooks | 2 | 9 | 4542 |
+| ✅ Hooks | 2 | 9 | 4632 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 17 | 5226 |
 | ✅ LLM | 3 | 15 | 5395 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 62 | 14418 |
-| ✅ Memory | 6 | 18 | 7237 |
+| ✅ MCP | 1 | 62 | 14434 |
+| ✅ Memory | 6 | 18 | 7245 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -71,23 +71,23 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sandbox | 5 | 7 | 3556 |
 | ✅ Security | 1 | 3 | 3529 |
 | ✅ Sessions | 4 | 19 | 7644 |
-| ✅ Skills | 6 | 16 | 5903 |
+| ✅ Skills | 6 | 16 | 5911 |
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
-| ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 145 | 43981 |
+| ✅ Templates | 1 | 8 | 1667 |
+| ✅ Tools | 12 | 145 | 44025 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 9 | 2487 |
-| ✅ Workflows | 5 | 18 | 7406 |
+| ✅ Workflows | 5 | 18 | 7410 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (43 docs, 7248 lines)
+- ℹ️ Database (43 docs, 7269 lines)
 - ℹ️ Documents (1 docs, 798 lines)
 
 ---
