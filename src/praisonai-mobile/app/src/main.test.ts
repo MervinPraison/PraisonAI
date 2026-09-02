@@ -971,6 +971,31 @@ test("a turn sent AFTER reopening a chat lands below the history, not above it",
   app?.dispose();
 });
 
+test("a storage failure while the chat list loads stays LOCAL, not fatal", async () => {
+  // The list load was a floating `void (async ...)()` with no rejection
+  // handler. A StoragePort rejection -- SecurityError, QuotaExceeded -- reached
+  // the global crash handler and replaced the WHOLE app with the fatal screen,
+  // instead of showing a local error the user can back out of.
+  const { dom, storage, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null, "the app must boot before the list is even asked for");
+
+  storage.failNext("SecurityError: the operation is insecure");
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+
+  // The chat screen and its composer must still be reachable: this was a local
+  // failure, not a boot failure.
+  assert.ok(dom.find((n) => n.tagName === "TEXTAREA"), `the app must survive a list failure:\n${dom.text()}`);
+  // And nothing must have escalated to the fatal "could not start" screen.
+  assert.equal(
+    /could not start/.test(dom.text()),
+    false,
+    "a failed chat list must not become the app-wide crash screen",
+  );
+  app?.dispose();
+});
+
 test("the composer field mirrors the composer view model", async () => {
   // The raw <textarea> is backed by composer.ts now: typing updates the draft
   // and enables Send, an empty field disables it. Draft persistence, the
