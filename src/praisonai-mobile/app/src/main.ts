@@ -19,23 +19,12 @@ import { enginesFor, OPENAI_KEY, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
+import { emptyRender, reconcile, type RenderState } from "../../ui/src/render/reconcile.ts";
+import { buildTranscript } from "../../ui/src/transcript/view-model.ts";
 import type { RunView } from "../../core/src/run/controller.ts";
-// The UI layer's single import site. Reaching it through the barrel rather than
-// by deep path is what puts ui/src/index.ts on the real import graph -- until
-// this file did so, the barrel had no importer and the module the whole layer
-// documents as its outward surface was never loaded by the application.
-import {
-  announce,
-  buildTranscript,
-  emptyRender,
-  en,
-  initialAnnouncer,
-  reconcile,
-  type AnnouncerState,
-  type RenderState,
-  type Route,
-  type Strings,
-} from "../../ui/src/index.ts";
+import type { Route } from "../../ui/src/router.ts";
+import { en, type Strings } from "../../ui/src/i18n/strings.ts";
+import { announce, initialAnnouncer, type AnnouncerState } from "../../ui/src/a11y/announce.ts";
 import type { EngineChoice } from "./engines.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import { createPraisonTsEngine, type RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
@@ -83,7 +72,24 @@ async function createInProcessEngine(
       // untypecheckable upstream sources and esbuild bundle their import-time-
       // fatal builtins. This keeps both graphs clean and the engine offerable.
       const specifier = ["..", "..", "..", "praisonai-ts", "src", "agent", "simple.ts"].join("/");
-      const mod = (await import(specifier)) as { Agent: PraisonAgentModule };
+      // The import can REJECT: this specifier resolves at run time, and where
+      // praisonai-ts is not on disk (the shipping webview bundles only dist/,
+      // #4437) the module is simply absent. Left unwrapped, that rejection is
+      // an opaque "cannot find module" from deep inside the engine's run loop.
+      // Re-thrown as a plain Error, engine.ts turns it into a recoverable
+      // `error` event through its existing catch -- the named, on-screen
+      // failure engines.ts argues for, not a crash. This does NOT let the
+      // engine into the shipping picker (registry.ts keeps it out of
+      // engineId.choices); it makes the one path that offers it honest.
+      let mod: { Agent: PraisonAgentModule };
+      try {
+        mod = (await import(specifier)) as { Agent: PraisonAgentModule };
+      } catch (cause) {
+        throw new Error(
+          "the in-process engine is unavailable in this build: praisonai-ts could not be loaded",
+          { cause },
+        );
+      }
       return new mod.Agent({
         instructions: "You are a helpful assistant.",
         llm: settingString("model", "gpt-4o-mini"),
