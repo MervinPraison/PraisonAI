@@ -35,7 +35,7 @@ import {
   type FocusTarget,
   type Navigation,
 } from "../../ui/src/a11y/focus.ts";
-import { buildSettings } from "../../ui/src/settings/view-model.ts";
+import { buildSettings, validateInput, type ValueRow } from "../../ui/src/settings/view-model.ts";
 import { buildChatList } from "../../ui/src/chats/list-view-model.ts";
 import type { ChatSummary, StoredMessage } from "../../core/src/chat/repository.ts";
 import { createBundle } from "../../ui/src/i18n/bundle.ts";
@@ -64,7 +64,7 @@ import type { EngineChoice } from "./engines.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import { createPraisonTsEngine, type RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 import type { PraisonAgent } from "../../engines/src/praisonai-ts/agent-api.ts";
-import type { SettingsFacade } from "../../core/src/settings/store.ts";
+import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 
@@ -235,11 +235,69 @@ function screenHeading(doc: Document, route: Route, strings: Strings): HTMLEleme
 }
 
 /**
+ * The editable control for one value row, wired to `facade.set`.
+ *
+ * A `choice` renders a `<select>`, everything else a `<textarea>`-free
+ * `<input>`. The change is validated through the SAME pure `validateInput`
+ * the view model exports -- parse, then the def's own `validate` -- so a value
+ * the store would refuse is refused HERE, at the field, rather than accepted
+ * into the UI and silently dropped by `set`. On accept it persists; on refuse
+ * the field is reset to the last stored value so the screen never shows a value
+ * that is not actually stored.
+ *
+ * This is the recovery path the remote-http default depends on: a phone reaches
+ * no `127.0.0.1:8765`, and until now `baseUrl` could be READ on the settings
+ * screen but not CHANGED -- `facade.set` and `validateInput` had no caller, so
+ * a first launch that could not reach the engine had no way to point it at one.
+ */
+function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings: SettingsFacade): HTMLElement {
+  const stored = (): string => String(settings.get(def.key) ?? def.default);
+
+  // A refused write must not leave the field showing a value the store rejected.
+  const commit = async (raw: string): Promise<void> => {
+    const validated = validateInput(def, raw);
+    if (validated === null || !(await settings.set(def.key, validated))) {
+      if (control.tagName === "SELECT" || control.tagName === "INPUT") control.value = stored();
+    }
+  };
+
+  let control: HTMLElement & { value: string };
+  if (row.control === "choice" && row.choices !== null) {
+    const select = doc.createElement("select") as HTMLElement & { value: string };
+    for (const choice of row.choices) {
+      const option = doc.createElement("option") as HTMLElement & { value: string };
+      option.value = String(choice);
+      option.textContent = String(choice);
+      select.append(option);
+    }
+    select.value = stored();
+    select.addEventListener("change", () => void commit(select.value));
+    control = select;
+  } else {
+    const input = doc.createElement("input") as HTMLElement & { value: string; type: string };
+    input.type = row.control === "number" ? "number" : "text";
+    input.value = stored();
+    // `change`, not `input`: persist when the field is committed (blur/Enter),
+    // not on every keystroke, so a half-typed address is never stored and
+    // `set` is not called on each character.
+    input.addEventListener("change", () => void commit(input.value));
+    control = input;
+  }
+  control.className = "setting-value setting-input";
+  control.setAttribute("aria-label", row.label);
+  return control;
+}
+
+/**
  * The settings screen, built from the live registry via `buildSettings`.
  *
  * Data-driven, so a setting added to the registry appears here without a code
  * change -- the whole reason settings/view-model.ts renders from `facade.defs()`
- * rather than a hard-coded list.
+ * rather than a hard-coded list. `value` rows are EDITABLE: a phone has no
+ * engine to reach at `127.0.0.1:8765`, and the only recovery for the remote
+ * default is to change `baseUrl` here -- which was impossible while every row
+ * rendered as a read-only `<span>`. Secret rows stay presence-only (the facade
+ * has no getter for a secret, by design).
  */
 export function buildSettingsScreen(
   doc: Document,
@@ -249,6 +307,8 @@ export function buildSettingsScreen(
   const section = doc.createElement("section");
   section.className = "screen screen-settings";
   section.append(screenHeading(doc, { name: "settings" }, strings));
+
+  const defByKey = new Map(settings.defs().map((def) => [def.key, def]));
 
   const view = buildSettings(settings);
   for (const warning of view.warnings) {
@@ -270,10 +330,16 @@ export function buildSettingsScreen(
       const label = doc.createElement("span");
       label.className = "setting-label";
       label.textContent = row.label;
-      const value = doc.createElement("span");
-      value.className = "setting-value";
-      value.textContent = row.kind === "secret" ? row.presence : String(row.value);
-      el.append(label, value);
+      el.append(label);
+      const def = row.kind === "value" ? defByKey.get(row.key) : undefined;
+      if (row.kind === "value" && def !== undefined) {
+        el.append(settingControl(doc, def, row, settings));
+      } else {
+        const value = doc.createElement("span");
+        value.className = "setting-value";
+        value.textContent = row.kind === "secret" ? row.presence : String(row.value);
+        el.append(value);
+      }
       section.append(el);
     }
   }
