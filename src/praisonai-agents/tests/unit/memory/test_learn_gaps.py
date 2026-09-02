@@ -171,7 +171,7 @@ class TestProcessConversation:
         manager = LearnManager()
         result = manager.process_conversation([])
         
-        assert result == {"persona": [], "insights": [], "patterns": [], "stored": {}}
+        assert result == {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}}
 
     def test_process_conversation_signature(self):
         """process_conversation should have correct signature."""
