@@ -1125,15 +1125,39 @@ class EditTools:
             # src_path is the source path for a move (None otherwise), so the
             # commit phase can remove the origin after writing the destination.
             planned = []
+            # Track output paths produced within this transaction so two
+            # operations cannot silently target the same destination (the
+            # later commit would clobber the earlier result while reporting
+            # success). Each op validates against the *initial* filesystem, so
+            # this cross-op guard is what prevents intra-patch conflicts.
+            produced = {}
+            consumed = {}  # paths removed by a move/delete within this patch
+
+            def _claim_output(path, display):
+                prior = produced.get(path)
+                if prior is not None:
+                    return (f"Error: Conflicting operations target the same path "
+                           f"'{display}' (also produced by '{prior}')")
+                produced[path] = display
+                return None
+
             for op in ops:
                 if op["op"] == "move":
                     src_path = self._validate_path(op["src"])
                     dst_path = self._validate_path(op["dst"])
+                    if src_path == dst_path:
+                        return (f"Error: Cannot move '{op['src']}' to '{op['dst']}': "
+                               f"source and destination are the same path")
                     if not os.path.exists(src_path):
                         return f"Error: Cannot move '{op['src']}': file not found"
-                    if os.path.exists(dst_path):
+                    # The destination must be free both on disk and within this
+                    # transaction (unless a prior op in this patch removed it).
+                    if os.path.exists(dst_path) and dst_path not in consumed:
                         return (f"Error: Cannot move '{op['src']}' to '{op['dst']}': "
                                f"destination already exists")
+                    conflict = _claim_output(dst_path, f"{op['src']} -> {op['dst']}")
+                    if conflict:
+                        return conflict
                     # Read in binary to preserve BOM/CRLF like update does.
                     with open(src_path, 'rb') as f:
                         raw_bytes = f.read()
@@ -1141,9 +1165,9 @@ class EditTools:
                         original, bom = self._decode_with_bom(raw_bytes)
                     except ValueError as e:
                         return f"Error: Cannot move '{op['src']}': {e}"
+                    original_hash = self._compute_content_hash(original)
                     # Automatic staleness guard on the source, mirroring update.
                     if not force:
-                        original_hash = self._compute_content_hash(original)
                         recorded = _file_locks.get_read_hash(src_path)
                         if recorded is not None and recorded != original_hash:
                             return (f"Error: Cannot move '{op['src']}': file changed "
@@ -1171,13 +1195,19 @@ class EditTools:
                                     self._render_diff(original, updated, display),
                                     self._compute_content_hash(on_disk_form),
                                     src_path))
+                    # The source path is now free for a later op in this patch.
+                    consumed[src_path] = display
+                    produced.pop(src_path, None)
                     continue
 
                 safe_path = self._validate_path(op["path"])
 
                 if op["op"] == "add":
-                    if os.path.exists(safe_path):
+                    if os.path.exists(safe_path) and safe_path not in consumed:
                         return f"Error: Cannot add '{op['path']}': file already exists"
+                    conflict = _claim_output(safe_path, op["path"])
+                    if conflict:
+                        return conflict
                     encoded = op["content"].encode('utf-8')
                     planned.append(("add", safe_path, op["path"], encoded,
                                     self._render_diff("", op["content"], op["path"]),
@@ -1202,10 +1232,15 @@ class EditTools:
                                        f"since it was read - re-read before editing "
                                        f"(or pass force=True to override).")
                     planned.append(("delete", safe_path, op["path"], None, "", None, None))
+                    consumed[safe_path] = op["path"]
+                    produced.pop(safe_path, None)
 
                 elif op["op"] == "update":
                     if not os.path.exists(safe_path):
                         return f"Error: Cannot update '{op['path']}': file not found"
+                    conflict = _claim_output(safe_path, op["path"])
+                    if conflict:
+                        return conflict
                     # Read in binary to preserve BOM/CRLF like edit_file does.
                     with open(safe_path, 'rb') as f:
                         raw_bytes = f.read()
@@ -1254,10 +1289,23 @@ class EditTools:
             messages = []
             applied = []  # rollback log: (action, *paths)
             tmp_suffix = ".praison_patch_tmp"
+
+            def _free_temp_path(base: str) -> str:
+                """Return a staging path derived from ``base`` that does not
+                collide with an existing file, so move/write staging never
+                truncates or later deletes an unrelated user file that happens
+                to sit at the default ``<path>.praison_patch_tmp`` name."""
+                candidate = base + tmp_suffix
+                counter = 0
+                while os.path.lexists(candidate):
+                    counter += 1
+                    candidate = f"{base}{tmp_suffix}.{counter}"
+                return candidate
+
             try:
                 for kind, safe_path, display, encoded, diff, content_hash, src_path in planned:
                     if kind == "delete":
-                        backup = safe_path + tmp_suffix
+                        backup = _free_temp_path(safe_path)
                         os.replace(safe_path, backup)
                         applied.append(("delete", safe_path, backup))
                         self._file_cache.pop(safe_path, None)
@@ -1270,8 +1318,8 @@ class EditTools:
                         # validated destination; the destination is known not
                         # to exist (checked in phase 1).
                         os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
-                        tmp_path = safe_path + tmp_suffix
-                        src_backup = src_path + tmp_suffix
+                        tmp_path = _free_temp_path(safe_path)
+                        src_backup = _free_temp_path(src_path)
                         try:
                             with open(tmp_path, 'wb') as f:
                                 f.write(encoded)
@@ -1292,7 +1340,12 @@ class EditTools:
                                 except OSError:
                                     pass
                             raise
-                        applied.append(("move", safe_path, src_path, src_backup))
+                        # Capture the source's recorded read-hash before we
+                        # clear it, so a later rollback can restore it and keep
+                        # the staleness guard armed on the restored source.
+                        prev_src_hash = _file_locks.get_read_hash(src_path)
+                        applied.append(("move", safe_path, src_path, src_backup,
+                                        prev_src_hash))
                         self._file_cache.pop(src_path, None)
                         _file_locks.clear_read_hash(src_path)
                         self._file_cache[safe_path] = content_hash
@@ -1304,9 +1357,9 @@ class EditTools:
                         messages.append(f"Renamed {display}\n{diff}{diagnostics}")
                     else:
                         os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
-                        tmp_path = safe_path + tmp_suffix
+                        tmp_path = _free_temp_path(safe_path)
                         existed = os.path.exists(safe_path)
-                        backup = safe_path + ".praison_patch_bak" if existed else None
+                        backup = _free_temp_path(safe_path + ".praison_patch_bak") if existed else None
                         try:
                             with open(tmp_path, 'wb') as f:
                                 f.write(encoded)
@@ -1349,12 +1402,20 @@ class EditTools:
                             elif os.path.exists(target):
                                 os.remove(target)
                         elif action == "move":
-                            # entry = ("move", dst, src, src_backup): drop the
-                            # freshly-written destination and restore the source.
+                            # entry = ("move", dst, src, src_backup, prev_src_hash):
+                            # drop the freshly-written destination, restore the
+                            # source, and re-arm its staleness guard so a later
+                            # edit still detects external modifications.
                             src, src_backup = entry[2], entry[3]
+                            prev_src_hash = entry[4] if len(entry) > 4 else None
                             if os.path.exists(target):
                                 os.remove(target)
                             os.replace(src_backup, src)
+                            _file_locks.clear_read_hash(target)
+                            self._file_cache.pop(target, None)
+                            if prev_src_hash is not None:
+                                _file_locks.record_read_hash(src, prev_src_hash)
+                                self._file_cache[src] = prev_src_hash
                     except OSError:
                         logger.error("Rollback failed for %s", target)
                 raise
