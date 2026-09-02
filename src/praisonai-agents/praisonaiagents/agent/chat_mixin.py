@@ -4917,7 +4917,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Use the new streaming generator from LLM class
                     response_content = ""
-                    stream_history = self.chat_history
+                    system_prompt_for_stream = self._build_system_prompt(
+                        tool_param,
+                        memory_prefetch_context=memory_prefetch_context,
+                    )
+                    # Apply context management (auto-compaction) to the history
+                    # that is actually sent, the same way the non-streaming
+                    # custom-LLM path does. Without this a configured
+                    # ContextManager -- auto-enabled whenever tools are present
+                    # -- is silently skipped on stream=True (Issue #4714).
+                    # Zero overhead when context=False.
+                    stream_history, _stream_context_result = self._apply_context_management(
+                        messages=self.chat_history,
+                        system_prompt=system_prompt_for_stream,
+                        tools=tool_param,
+                    )
                     durable_context = self._get_durable_run_context()
                     if durable_context is not None:
                         stream_history = durable_context.restore_messages(
@@ -4925,10 +4939,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
-                        system_prompt=self._build_system_prompt(
-                            tool_param,
-                            memory_prefetch_context=memory_prefetch_context,
-                        ),
+                        system_prompt=system_prompt_for_stream,
                         chat_history=stream_history,
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
@@ -5005,6 +5016,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
+                
+                # Apply context management before the LLM call (auto-compaction),
+                # exactly as the non-streaming OpenAI path does. Without this a
+                # configured ContextManager -- auto-enabled whenever tools are
+                # present -- is silently skipped on stream=True and the full
+                # history is sent (Issue #4714). Zero overhead when context=False.
+                system_prompt_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
+                messages, _stream_context_result = self._apply_context_management(
+                    messages=messages,
+                    system_prompt=system_prompt_content,
+                    tools=tool_param,
+                )
                 
                 try:
                     # Check if OpenAI client is available
