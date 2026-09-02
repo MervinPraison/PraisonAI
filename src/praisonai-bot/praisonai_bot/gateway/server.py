@@ -7518,6 +7518,33 @@ class WebSocketGateway:
         elif hasattr(bot, "_identity_resolver"):
             bot._identity_resolver = resolver
 
+    def _build_turn_lock_map(self) -> Any:
+        """Build the gateway's per-turn lock backend from config (Issue #4655).
+
+        Honours ``gateway.turn_lock.backend``: the default ``"local"`` returns a
+        plain in-process ``LockMap`` (today's behaviour, byte-for-byte), while
+        ``"redis"`` returns a ``RedisTurnLock`` reusing the push ``RedisConfig``
+        so turns serialise cluster-wide across replicas. Construction fails open
+        (local fallback + a degraded record) so an outage never wedges startup.
+        """
+        cfg = getattr(self, "config", None)
+        turn_lock = getattr(cfg, "turn_lock", None)
+        push = getattr(cfg, "push", None)
+        redis_config = getattr(push, "redis", None)
+        try:
+            from ..bots._redis_turn_lock import build_turn_lock
+
+            return build_turn_lock(
+                turn_lock,
+                redis_config,
+                degraded_registry=getattr(self, "_degraded_registry", None),
+            )
+        except Exception as e:  # pragma: no cover - defensive: never block startup
+            logger.warning("Failed to build turn lock backend: %s", e)
+            from .._lockmap import LockMap
+
+            return LockMap()
+
     def _stamp_turn_lock_map(self, bot: Any) -> None:
         """Share one per-turn ``LockMap`` with a channel bot (Issue #3232).
 
@@ -7538,12 +7565,19 @@ class WebSocketGateway:
         ``start_channels`` and ``_start_single_channel`` (hot-reload) so a
         restarted channel keeps sharing the same lock map.
         """
-        if getattr(self, "_identity_resolver", None) is None:
+        # A local backend only unifies distinct channels onto one session when an
+        # identity resolver is configured (Issue #3232), so without a resolver it
+        # stays a no-op and each channel keeps its own map (today's behaviour). A
+        # distributed (``redis``) backend, however, must serialise across replicas
+        # of even a *single* channel, so it is wired unconditionally (Issue #4655).
+        cfg = getattr(self, "config", None)
+        turn_lock_cfg = getattr(cfg, "turn_lock", None)
+        distributed = bool(getattr(turn_lock_cfg, "enabled", False))
+        if getattr(self, "_identity_resolver", None) is None and not distributed:
             return
         lock_map = getattr(self, "_turn_lock_map", None)
         if lock_map is None:
-            from .._lockmap import LockMap
-            lock_map = LockMap()
+            lock_map = self._build_turn_lock_map()
             self._turn_lock_map = lock_map
         sess = (
             getattr(bot, "_session", None)

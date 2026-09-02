@@ -117,6 +117,9 @@ class BotOS:
         admission_policy: Optional[Any] = None,
         max_rss_mb: float = 0.0,
         reliability: Optional[str] = None,
+        turn_lock: Optional[Any] = None,
+        redis_config: Optional[Any] = None,
+        degraded_registry: Optional[Any] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
@@ -192,17 +195,27 @@ class BotOS:
         # W1: shared identity resolver applied to every managed bot —
         # gives cross-platform unified-user sessions out of the box.
         self._identity_resolver = identity_resolver
-        # Issue #3232: a single per-turn ``LockMap`` shared across every managed
-        # bot's session manager. Because each ``BotSessionManager`` keys its lock
-        # on the *resolved* session id (unified user id under an identity
+        # Issue #3232: a single per-turn lock shared across every managed bot's
+        # session manager. Because each ``BotSessionManager`` keys its lock on
+        # the *resolved* session id (unified user id under an identity
         # resolver), sharing one map means two adapters that resolve to the same
         # unified session hold the *same* lock and their turns run serially — no
         # interleaved read-modify-write on one persisted transcript. Wired only
         # when a resolver is configured (the sole case where distinct adapters
         # unify to one session), so single-adapter behaviour is untouched.
-        from .._lockmap import LockMap
+        #
+        # Issue #4655: honour ``gateway.turn_lock.backend``. With the default
+        # ``"local"`` backend this stays a plain in-process ``LockMap`` (today's
+        # behaviour, byte-for-byte). With ``"redis"`` it becomes a
+        # ``RedisTurnLock`` so turns serialise cluster-wide across replicas
+        # rather than the config being silently inert.
+        self._turn_lock_config = turn_lock
+        self._degraded_registry = degraded_registry
+        from ._redis_turn_lock import build_turn_lock
 
-        self._turn_lock_map = LockMap()
+        self._turn_lock_map = build_turn_lock(
+            turn_lock, redis_config, degraded_registry=degraded_registry
+        )
         self._tasks: List[asyncio.Task] = []
         
         # Initialize delivery router for proactive outbound messaging
@@ -1067,7 +1080,13 @@ class BotOS:
             getattr(bot, "_identity_resolver", None) is not None
             for bot in self._bots.values()
         )
-        if not has_resolver:
+        # Issue #4655: a distributed backend must serialise turns cluster-wide
+        # even for a single adapter (two *replicas* of one adapter still resolve
+        # to the same session). Wire it unconditionally in that case; the local
+        # backend keeps the resolver-only gate so single-adapter behaviour is
+        # unchanged.
+        distributed = bool(getattr(self._turn_lock_config, "enabled", False))
+        if not has_resolver and not distributed:
             return
         for platform, bot in self._bots.items():
             try:

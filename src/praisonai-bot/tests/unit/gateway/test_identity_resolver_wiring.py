@@ -222,6 +222,27 @@ def test_turn_lock_stamp_is_noop_without_resolver():
     assert getattr(gateway, "_turn_lock_map", None) is None
 
 
+def test_turn_lock_stamp_wires_redis_backend_without_resolver():
+    """Issue #4655: ``turn_lock.backend='redis'`` is wired even with no resolver.
+
+    Previously the gateway built a process-local ``LockMap`` and only stamped it
+    when a resolver was configured, so ``backend='redis'`` was silently inert and
+    replicas of a single channel ran concurrent turns on one session.
+    """
+    from praisonaiagents.gateway import TurnLockConfig
+
+    gateway = _gateway_with_agent()
+    assert gateway._identity_resolver is None
+    # Force a redis backend but with no reachable Redis -> build_turn_lock fails
+    # open to a LockMap while recording a degraded entry; the important part is
+    # that the map IS stamped onto the session (the wiring path is reached).
+    gateway.config.turn_lock = TurnLockConfig(backend="redis")
+    bot = _FakeBot()
+    gateway._stamp_turn_lock_map(bot)
+    assert getattr(gateway, "_turn_lock_map", None) is not None
+    assert bot._session._locks is gateway._turn_lock_map
+
+
 def test_turn_lock_stamp_shares_one_map_with_session():
     """A configured resolver stamps the gateway's shared LockMap onto the session."""
     resolver = _StubResolver()
