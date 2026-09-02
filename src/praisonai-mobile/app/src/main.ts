@@ -19,12 +19,23 @@ import { enginesFor, OPENAI_KEY, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
-import { emptyRender, reconcile, type RenderState } from "../../ui/src/render/reconcile.ts";
-import { buildTranscript } from "../../ui/src/transcript/view-model.ts";
 import type { RunView } from "../../core/src/run/controller.ts";
-import type { Route } from "../../ui/src/router.ts";
-import { en, type Strings } from "../../ui/src/i18n/strings.ts";
-import { announce, initialAnnouncer, type AnnouncerState } from "../../ui/src/a11y/announce.ts";
+// The UI layer's single import site. Reaching it through the barrel rather than
+// by deep path is what puts ui/src/index.ts on the real import graph -- until
+// this file did so, the barrel had no importer and the module the whole layer
+// documents as its outward surface was never loaded by the application.
+import {
+  announce,
+  buildTranscript,
+  emptyRender,
+  en,
+  initialAnnouncer,
+  reconcile,
+  type AnnouncerState,
+  type RenderState,
+  type Route,
+  type Strings,
+} from "../../ui/src/index.ts";
 
 export interface MountDeps {
   readonly root: HTMLElement;
