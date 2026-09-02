@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, SETTING_DEFS } from "./registry.ts";
+import { enginesFor, ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -121,6 +121,27 @@ export function appEngines(deps: {
     onIgnored: deps.onIgnored,
     createInProcess: (persistence) => createInProcessEngine(persistence, deps.settings),
   });
+}
+
+/**
+ * The engine to start with when settings name none, chosen by platform.
+ *
+ * On a DEVICE the old default -- `remote-http` at `http://127.0.0.1:8765` -- is
+ * nothing to reach: there is no desktop engine on the phone, so a fresh install
+ * opened to a "not answering" warning and no way to fix it, because Settings is
+ * unreachable (#4635). And a cleartext localhost address is refused outright by
+ * iOS ATS and by Android since API 28. The in-process `praisonai-ts` engine
+ * needs no remote and no cleartext, so it is the honest default on native.
+ *
+ * The desktop/dev default stays `remote-http`: that is where a local engine
+ * actually runs, and the persisted `engineId` still wins over either (see
+ * `chosenStringOr` in boot.ts), so this only decides the very first launch.
+ *
+ * Extracted and exported so a test calls it rather than asserting the ternary
+ * appears in `mount` -- the house rule this package keeps by.
+ */
+export function defaultEngineIdFor(kind: Platform["kind"]): string {
+  return kind === "tauri" ? ENGINE_PRAISONAI_TS : ENGINE_REMOTE_HTTP;
 }
 
 export interface MountDeps {
@@ -316,9 +337,12 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     engines: (persistence, settings, onIgnored) =>
       appEngines({ settings, http: platform.http, persistence, onIgnored }),
     settingDefs: SETTING_DEFS,
-    // The default when settings name none. createApp prefers the persisted
-    // `engineId` over this; passing it as a literal was ignoring the setting.
-    engineId: "remote-http",
+    // The default when settings name none, chosen by platform: the in-process
+    // engine on a device (a phone has no `127.0.0.1:8765` to reach, and a
+    // cleartext localhost address is refused by iOS ATS and Android), the
+    // remote engine on desktop/dev where one actually runs. createApp prefers
+    // the persisted `engineId` over this, so it only decides the first launch.
+    engineId: defaultEngineIdFor(platform.kind),
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),
     newChatId: mintChatId,

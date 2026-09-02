@@ -7,8 +7,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { stopNotice } from "./main.ts";
+import { defaultEngineIdFor, stopNotice } from "./main.ts";
 import { en } from "../../ui/src/i18n/strings.ts";
+
+test("a device defaults to the in-process engine, not a localhost remote", () => {
+  // The old default -- `remote-http` at `http://127.0.0.1:8765` -- is nothing a
+  // phone can reach, so a fresh install opened to a "not answering" warning
+  // with no way to fix it (Settings is unreachable, #4635), and the cleartext
+  // localhost address is refused outright by iOS ATS and Android. The
+  // in-process engine needs neither a remote nor cleartext.
+  assert.equal(defaultEngineIdFor("tauri"), ENGINE_PRAISONAI_TS);
+});
+
+test("desktop/web keeps the remote engine as the default -- the pair", () => {
+  // Where a local engine actually runs, `remote-http` is right; flipping every
+  // platform to in-process would strand the desktop/dev flow the remote engine
+  // exists for.
+  assert.equal(defaultEngineIdFor("web"), ENGINE_REMOTE_HTTP);
+});
 
 test("a stop the engine REFUSED is announced", () => {
   // Discarding the controller's boolean made a refused Stop indistinguishable
