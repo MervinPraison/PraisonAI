@@ -19,7 +19,19 @@ from praisonaiagents.gateway import GatewayConfig, ApiConfig
 from praisonai_bot.gateway.api_endpoints import GatewayApiEndpoints, _extract_text
 
 
+class _FakeMetrics:
+    input_tokens = 11
+    output_tokens = 7
+
+
+class _FakeLLM:
+    last_token_metrics = _FakeMetrics()
+
+
 class _FakeAgent:
+    def __init__(self):
+        self._llm_instance = _FakeLLM()
+
     async def achat(self, content):
         return f"echo:{content}"
 
@@ -47,8 +59,13 @@ class _FakeGateway:
         return _FakeSession()
 
     @staticmethod
-    async def _dispatch_agent_turn(agent, content):
-        return await agent.achat(content)
+    async def _dispatch_agent_turn(agent, content, on_complete=None):
+        result = await agent.achat(content)
+        # Mirror the real gateway: snapshot per-turn state in the same context
+        # that produced the result, before returning to the caller.
+        if on_complete is not None:
+            on_complete(agent)
+        return result
 
 
 class _FakeReq:
@@ -130,6 +147,260 @@ def test_openai_chat_dispatches_to_registered_agent():
     data = _body(resp)
     assert data["object"] == "chat.completion"
     assert data["choices"][0]["message"]["content"] == "echo:hi"
+
+
+def test_openai_chat_reports_real_usage():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {"model": "assistant", "messages": [{"role": "user", "content": "hi"}]}
+            )
+        )
+    )
+    usage = _body(resp)["usage"]
+    assert usage["prompt_tokens"] == 11
+    assert usage["completion_tokens"] == 7
+    assert usage["total_tokens"] == 18
+
+
+def test_openai_chat_usage_zero_when_no_metrics():
+    class _NoMetricsAgent:
+        async def achat(self, content):
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _NoMetricsAgent()
+
+    ep = GatewayApiEndpoints(_Gw())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {"model": "assistant", "messages": [{"role": "user", "content": "hi"}]}
+            )
+        )
+    )
+    usage = _body(resp)["usage"]
+    assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+
+def _collect_sse(resp):
+    async def _run():
+        chunks = []
+        async for part in resp.body_iterator:
+            chunks.append(part if isinstance(part, str) else part.decode())
+        return chunks
+
+    return asyncio.run(_run())
+
+
+def test_openai_chat_stream_emits_usage_chunk_when_opted_in():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    usage_payloads = [
+        json.loads(p[len("data: "):])
+        for p in parts
+        if p.startswith("data: ") and '"usage"' in p
+    ]
+    assert usage_payloads, "expected a usage-bearing chunk"
+    usage = usage_payloads[-1]["usage"]
+    assert usage["prompt_tokens"] == 11
+    assert usage["completion_tokens"] == 7
+    assert usage["total_tokens"] == 18
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_openai_chat_stream_omits_usage_by_default():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    assert not any('"usage"' in p for p in parts)
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_dispatch_binds_usage_snapshot_to_its_turn():
+    # ``_dispatch`` must return the token usage snapshotted atomically with the
+    # turn result. A later overwrite of the shared, mutable ``last_token_metrics``
+    # (as a concurrent turn on the same Agent would do) must not change the
+    # already-returned snapshot.
+    class _MutableMetrics:
+        def __init__(self, i, o):
+            self.input_tokens = i
+            self.output_tokens = o
+
+    class _SharedLLM:
+        def __init__(self):
+            self.last_token_metrics = _MutableMetrics(11, 7)
+
+    class _SharedAgent:
+        def __init__(self):
+            self._llm_instance = _SharedLLM()
+
+        async def achat(self, content):
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SharedAgent()
+
+    gw = _Gw()
+    ep = GatewayApiEndpoints(gw)
+    reply, usage = asyncio.run(
+        ep._dispatch(_FakeSession(), gw._agent, "hi")
+    )
+    # Mutate the shared metric AFTER dispatch returned its snapshot.
+    gw._agent._llm_instance.last_token_metrics = _MutableMetrics(999, 999)
+    assert reply == "echo:hi"
+    assert usage == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
+def test_stream_usage_snapshot_survives_concurrent_overwrite():
+    # The SSE generator yields (suspends) several frames after the turn before
+    # emitting the usage chunk. While suspended, a concurrent turn on the same
+    # shared Agent can overwrite ``last_token_metrics``. The streamed usage must
+    # still reflect THIS turn (snapshotted at dispatch), not the overwrite.
+    class _MutableMetrics:
+        def __init__(self, i, o):
+            self.input_tokens = i
+            self.output_tokens = o
+
+    class _SharedLLM:
+        def __init__(self):
+            self.last_token_metrics = _MutableMetrics(11, 7)
+
+    class _SharedAgent:
+        def __init__(self):
+            self._llm_instance = _SharedLLM()
+
+        async def achat(self, content):
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SharedAgent()
+
+    gw = _Gw()
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+
+    async def _drain_with_overwrite():
+        parts = []
+        async for part in resp.body_iterator:
+            text = part if isinstance(part, str) else part.decode()
+            parts.append(text)
+            # Once the assistant content frame has streamed (i.e. the turn has
+            # already completed and been snapshotted), simulate a *concurrent*
+            # turn overwriting the shared, mutable metric before the usage frame.
+            if '"content"' in text:
+                gw._agent._llm_instance.last_token_metrics = _MutableMetrics(
+                    999, 999
+                )
+        return parts
+
+    parts = asyncio.run(_drain_with_overwrite())
+    usage_payloads = [
+        json.loads(p[len("data: "):])
+        for p in parts
+        if p.startswith("data: ") and '"usage"' in p
+    ]
+    assert usage_payloads, "expected a usage-bearing chunk"
+    usage = usage_payloads[-1]["usage"]
+    # Snapshotted at dispatch -> original counts, not the mid-stream overwrite.
+    assert usage == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
+def test_sync_agent_usage_snapshot_captured_before_thread_returns():
+    # Greptile/Qodo P1 (sync fallback): a sync-only agent's ``chat`` runs in a
+    # worker THREAD. A bare read AFTER the executor ``await`` resolves is NOT
+    # atomic with the turn — the "no intervening await" guarantee only orders
+    # event-loop coroutines, not worker threads — so a concurrent turn can
+    # overwrite the shared, mutable ``last_token_metrics`` in the window between
+    # the turn's ``chat`` returning and the handler reading it. The real
+    # gateway's ``_dispatch_agent_turn`` must therefore snapshot INSIDE the
+    # worker thread, before it returns, via ``on_complete``. We assert exactly
+    # that ordering against the real server method.
+    from praisonai_bot.gateway.server import WebSocketGateway
+
+    events: list = []
+
+    class _Metrics:
+        input_tokens = 11
+        output_tokens = 7
+
+    class _LLM:
+        last_token_metrics = _Metrics()
+
+    class _SyncAgent:
+        # No ``arun``/``achat`` -> forces the sync ``chat`` executor path.
+        _llm_instance = _LLM()
+
+        def chat(self, content):
+            events.append("chat_returned")
+            return f"echo:{content}"
+
+    def _capture(a):
+        # Records that the snapshot ran, and its ordering vs ``chat`` return.
+        events.append("snapshot")
+
+    reply = asyncio.run(
+        WebSocketGateway._dispatch_agent_turn(
+            _SyncAgent(), "hi", on_complete=_capture
+        )
+    )
+    assert reply == "echo:hi"
+    # The snapshot must fire in the SAME worker-thread context, immediately
+    # after ``chat`` returns and before the future resolves back on the loop —
+    # so ``chat_returned`` is immediately followed by ``snapshot`` with no gap
+    # a concurrent turn could exploit.
+    assert events == ["chat_returned", "snapshot"]
+
+
+def test_openai_responses_reports_usage():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "ping"}))
+    )
+    usage = _body(resp)["usage"]
+    assert usage["input_tokens"] == 11
+    assert usage["output_tokens"] == 7
+    assert usage["total_tokens"] == 18
 
 
 def test_openai_chat_no_agents_returns_503():

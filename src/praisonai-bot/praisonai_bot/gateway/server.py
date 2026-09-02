@@ -3511,7 +3511,7 @@ class WebSocketGateway:
 
     @staticmethod
     async def _dispatch_agent_turn(
-        agent: Any, content: str, interrupt: Any = None
+        agent: Any, content: str, interrupt: Any = None, on_complete: Any = None
     ) -> Any:
         """Execute a single agent turn.
 
@@ -3530,12 +3530,31 @@ class WebSocketGateway:
         controller would let one session's abort/timeout interrupt another. A
         legacy fallback stamps ``agent.interrupt_controller`` only for agents
         whose entry point does not accept ``cancel_token``.
+
+        Issue #4656: ``on_complete(agent)`` — when supplied — is invoked
+        **synchronously in the same execution context that produced the turn's
+        result, before that context is handed back to the loop**. For a
+        sync-only agent this runs *inside the worker thread* right after
+        ``agent.chat`` returns, so per-turn state the agent stores on shared,
+        mutable attributes (e.g. ``llm.last_token_metrics``) is snapshotted for
+        *this* turn before any concurrent turn — on another worker thread or a
+        later event-loop tick — can overwrite it. This closes the cross-request
+        usage-misattribution race for the sync ``chat`` fallback (Greptile/Qodo
+        P1). The callback must be non-blocking and must not raise; its return
+        value is ignored.
         """
         _kw = {"cancel_token": interrupt} if interrupt is not None else {}
 
+        def _snapshot() -> None:
+            if on_complete is not None:
+                try:
+                    on_complete(agent)
+                except Exception:
+                    pass
+
         async def _call_async(fn: Any) -> Any:
             try:
-                return await fn(content, **_kw)
+                result = await fn(content, **_kw)
             except TypeError:
                 if not _kw:
                     raise
@@ -3543,7 +3562,11 @@ class WebSocketGateway:
                 # attribute for this turn (best-effort, non-isolated).
                 if hasattr(agent, "interrupt_controller"):
                     agent.interrupt_controller = interrupt
-                return await fn(content)
+                result = await fn(content)
+            # No ``await`` between the turn completing and the snapshot: the
+            # single-threaded loop cannot run another turn in between.
+            _snapshot()
+            return result
 
         for _name in ("arun", "achat"):
             _fn = getattr(agent, _name, None)
@@ -3554,13 +3577,18 @@ class WebSocketGateway:
 
         def _call_sync() -> Any:
             try:
-                return agent.chat(content, **_kw)
+                result = agent.chat(content, **_kw)
             except TypeError:
                 if not _kw:
                     raise
                 if hasattr(agent, "interrupt_controller"):
                     agent.interrupt_controller = interrupt
-                return agent.chat(content)
+                result = agent.chat(content)
+            # Snapshot in *this* worker thread, immediately after the turn
+            # produced its result, before the thread returns to the pool and a
+            # concurrent turn can overwrite the agent's shared metrics.
+            _snapshot()
+            return result
 
         return await loop.run_in_executor(None, _call_sync)
 

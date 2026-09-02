@@ -110,19 +110,83 @@ class GatewayApiEndpoints:
         aid = agents[0]
         return aid, self._gw.get_agent(aid)
 
-    async def _dispatch(self, session: Any, agent: Any, content: str) -> str:
-        """Run one agent turn through the same admission gate as chat users."""
+    async def _dispatch(self, session: Any, agent: Any, content: str) -> tuple:
+        """Run one agent turn through the same admission gate as chat users.
+
+        Returns ``(reply, usage)`` where ``usage`` is a snapshot of the agent's
+        per-turn token metrics captured **in the same execution context that
+        produced the turn's result**.
+
+        One ``Agent`` instance can serve overlapping turns for several sessions.
+        The SDK stores per-turn counts on a *shared, mutable*
+        ``llm.last_token_metrics`` reference that each turn overwrites, so any
+        read that is not bound to the completing turn's own context can report a
+        different concurrent request's counts. The native async path runs on the
+        single event loop (no cross-turn interleaving without an ``await``), but
+        the sync ``chat`` fallback runs in a worker **thread**, so a bare read
+        after the ``await`` could still observe another thread's overwrite
+        (Greptile/Qodo P1). We therefore hand ``_dispatch_agent_turn`` an
+        ``on_complete`` callback that snapshots the metrics *inside that same
+        context* — the worker thread for sync agents, the loop tick for async —
+        before it can be clobbered.
+        """
+        holder: dict = {}
+
+        def _capture(a: Any) -> None:
+            holder["usage"] = self._usage_for(a)
+
         gate = getattr(self._gw, "_admission_gate", None)
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
                 async with gate.admit(session_id=session.session_id):
-                    result = await self._gw._dispatch_agent_turn(agent, content)
+                    result = await self._gw._dispatch_agent_turn(
+                        agent, content, on_complete=_capture
+                    )
             except AdmissionRejected as rej:
-                return str(rej.message)
+                return str(rej.message), self._zero_usage()
         else:
-            result = await self._gw._dispatch_agent_turn(agent, content)
-        return "" if result is None else str(result)
+            result = await self._gw._dispatch_agent_turn(
+                agent, content, on_complete=_capture
+            )
+        usage = holder.get("usage") or self._zero_usage()
+        return ("" if result is None else str(result)), usage
+
+    @staticmethod
+    def _zero_usage() -> dict:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    @staticmethod
+    def _usage_for(agent: Any) -> dict:
+        """Snapshot the agent's last-turn token metrics as an OpenAI ``usage`` block.
+
+        The core SDK records true per-turn counts on the LLM instance
+        (``last_token_metrics`` with ``input_tokens``/``output_tokens``). We read
+        them straight off the boundary so cost-accounting clients get real
+        figures instead of the previous hardcoded zeros. When metrics are
+        unavailable (e.g. a custom agent that does not expose an LLM instance)
+        we fall back to zeros so the response stays spec-shaped.
+
+        Call sites MUST invoke this immediately after the dispatched turn
+        completes with no intervening ``await`` (see ``_dispatch``); the value
+        is read into plain ints here so the returned dict is an immutable
+        snapshot that a later concurrent turn cannot mutate.
+        """
+        zero = GatewayApiEndpoints._zero_usage()
+        # Read the already-created LLM instance without forcing lazy creation.
+        llm = getattr(agent, "_llm_instance", None) or getattr(
+            agent, "llm_instance", None
+        )
+        metrics = getattr(llm, "last_token_metrics", None) if llm else None
+        if metrics is None:
+            return zero
+        prompt = int(getattr(metrics, "input_tokens", 0) or 0)
+        completion = int(getattr(metrics, "output_tokens", 0) or 0)
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+        }
 
     def _session_for(self, agent_id: str, key: str) -> Any:
         """Get or create a stable session keyed by the API caller."""
@@ -210,9 +274,15 @@ class GatewayApiEndpoints:
         completion_id = "chatcmpl-" + uuid.uuid4().hex
 
         if stream:
-            return self._sse_chat(agent_id, agent, session, content, completion_id)
+            opts = body.get("stream_options")
+            include_usage = bool(
+                isinstance(opts, dict) and opts.get("include_usage")
+            )
+            return self._sse_chat(
+                agent_id, agent, session, content, completion_id, include_usage
+            )
 
-        reply = await self._dispatch(session, agent, content)
+        reply, usage = await self._dispatch(session, agent, content)
         return JSONResponse(
             {
                 "id": completion_id,
@@ -226,15 +296,13 @@ class GatewayApiEndpoints:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                },
+                "usage": usage,
             }
         )
 
-    def _sse_chat(self, agent_id, agent, session, content, completion_id):
+    def _sse_chat(
+        self, agent_id, agent, session, content, completion_id, include_usage=False
+    ):
         """Emit a spec-shaped SSE chat-completion stream.
 
         The frames are correctly ``chat.completion.chunk`` shaped and terminate
@@ -245,6 +313,11 @@ class GatewayApiEndpoints:
         is deliberately out of scope here to avoid a hot-path regression. Latency
         to first *content* therefore matches non-streaming; response correctness
         and client compatibility are unaffected.
+
+        When the client sets ``stream_options.include_usage`` (the OpenAI
+        opt-in for streamed usage), a final ``usage``-only chunk carrying the
+        real per-turn token counts is emitted before ``[DONE]``, matching the
+        OpenAI streaming contract.
         """
         from starlette.responses import StreamingResponse
 
@@ -261,7 +334,7 @@ class GatewayApiEndpoints:
             }
             yield f"data: {json.dumps(first)}\n\n"
 
-            reply = await self._dispatch(session, agent, content)
+            reply, usage = await self._dispatch(session, agent, content)
             chunk = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
@@ -281,6 +354,18 @@ class GatewayApiEndpoints:
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             }
             yield f"data: {json.dumps(final)}\n\n"
+
+            if include_usage:
+                usage_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": agent_id,
+                    "choices": [],
+                    "usage": usage,
+                }
+                yield f"data: {json.dumps(usage_chunk)}\n\n"
+
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
@@ -310,7 +395,7 @@ class GatewayApiEndpoints:
         raw = body.get("input", "")
         content = raw if isinstance(raw, str) else _extract_text(raw)
         session = self._session_for(agent_id, self._caller_key(request))
-        reply = await self._dispatch(session, agent, content)
+        reply, usage = await self._dispatch(session, agent, content)
 
         return JSONResponse(
             {
@@ -328,6 +413,11 @@ class GatewayApiEndpoints:
                     }
                 ],
                 "output_text": reply,
+                "usage": {
+                    "input_tokens": usage["prompt_tokens"],
+                    "output_tokens": usage["completion_tokens"],
+                    "total_tokens": usage["total_tokens"],
+                },
             }
         )
 
@@ -403,7 +493,7 @@ class GatewayApiEndpoints:
                 return err(-32602, f"Unknown agent/tool: {name}")
             content = str(arguments.get("message", ""))
             session = self._session_for(agent_id, self._caller_key(request))
-            reply = await self._dispatch(session, agent, content)
+            reply, _usage = await self._dispatch(session, agent, content)
             return ok(
                 {
                     "content": [{"type": "text", "text": reply}],
