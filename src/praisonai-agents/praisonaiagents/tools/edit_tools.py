@@ -969,9 +969,16 @@ class EditTools:
 
             *** Delete File: path/to/file
 
-        ``Update File`` may contain multiple ``@@`` hunks.  Returns a list of
-        dicts: ``{"op", "path", ...}``.  Raises ``ValueError`` on malformed
-        input.
+            *** Move File: old/path -> new/path
+            @@                      (optional hunks; rename + edit in one op)
+            <old block>
+            ===
+            <new block>
+
+        ``Update File`` and ``Move File`` may contain multiple ``@@`` hunks.
+        Returns a list of dicts: ``{"op", "path", ...}`` (a move carries
+        ``{"op": "move", "src", "dst", "hunks"}``).  Raises ``ValueError`` on
+        malformed input.
         """
         lines = patch.splitlines()
         ops = []
@@ -983,7 +990,8 @@ class EditTools:
         def _header(line):
             for op, prefix in (("add", "*** Add File:"),
                                ("update", "*** Update File:"),
-                               ("delete", "*** Delete File:")):
+                               ("delete", "*** Delete File:"),
+                               ("move", "*** Move File:")):
                 if line.strip().startswith(prefix):
                     return op, line.split(":", 1)[1].strip()
             return None, None
@@ -991,6 +999,26 @@ class EditTools:
         def _is_boundary(line):
             """A line that terminates a body/hunk: a header or a sentinel."""
             return _header(line)[0] is not None or line.strip() in _SENTINELS
+
+        def _parse_hunks(idx):
+            """Consume ``@@`` hunks starting at ``idx``; return (hunks, idx)."""
+            hunks = []
+            while idx < n and not _is_boundary(lines[idx]):
+                if lines[idx].strip().startswith("@@"):
+                    idx += 1
+                    old_block, new_block = [], []
+                    in_new = False
+                    while idx < n and not lines[idx].strip().startswith("@@") and not _is_boundary(lines[idx]):
+                        if lines[idx].strip() == "===":
+                            in_new = True
+                            idx += 1
+                            continue
+                        (new_block if in_new else old_block).append(lines[idx])
+                        idx += 1
+                    hunks.append(("\n".join(old_block), "\n".join(new_block)))
+                else:
+                    idx += 1
+            return hunks, idx
 
         while i < n:
             line = lines[i]
@@ -1010,35 +1038,37 @@ class EditTools:
                     i += 1
                 ops.append({"op": "add", "path": path, "content": "\n".join(body)})
             elif op == "update":
-                hunks = []
-                while i < n and not _is_boundary(lines[i]):
-                    if lines[i].strip().startswith("@@"):
-                        i += 1
-                        old_block, new_block = [], []
-                        in_new = False
-                        while i < n and not lines[i].strip().startswith("@@") and not _is_boundary(lines[i]):
-                            if lines[i].strip() == "===":
-                                in_new = True
-                                i += 1
-                                continue
-                            (new_block if in_new else old_block).append(lines[i])
-                            i += 1
-                        hunks.append(("\n".join(old_block), "\n".join(new_block)))
-                    else:
-                        i += 1
+                hunks, i = _parse_hunks(i)
                 ops.append({"op": "update", "path": path, "hunks": hunks})
+            elif op == "move":
+                # Payload is "<old> -> <new>"; the separator is a literal
+                # " -> " so paths containing "->" without surrounding spaces
+                # are unaffected.
+                if "->" not in path:
+                    raise ValueError(
+                        f"Malformed Move File header (expected '<old> -> <new>'): {path!r}")
+                src, dst = path.split("->", 1)
+                src, dst = src.strip(), dst.strip()
+                if not src or not dst:
+                    raise ValueError(
+                        f"Malformed Move File header (empty source or destination): {path!r}")
+                hunks, i = _parse_hunks(i)
+                ops.append({"op": "move", "src": src, "dst": dst, "hunks": hunks})
         return ops
 
     @require_approval(risk_level="high")
     def apply_patch(self, patch: str, force: bool = False) -> str:
         """Apply a structured multi-file patch atomically.
 
-        The patch may Add, Update, and Delete multiple files in a single
-        call.  All operations are validated first; only if every operation
-        is valid are the changes committed to disk.  The commit phase stages
-        writes/deletes and rolls them back if any step fails, so on any error
-        the filesystem is left in its original state.  BOM and CRLF line
-        endings are preserved on Update, matching ``edit_file``.
+        The patch may Add, Update, Delete, and Move/rename multiple files in a
+        single call.  A ``*** Move File: <old> -> <new>`` operation renames a
+        file (optionally applying ``@@`` hunks so it is renamed *and* edited in
+        one atomic step) without re-transmitting the whole body.  All
+        operations are validated first; only if every operation is valid are
+        the changes committed to disk.  The commit phase stages
+        writes/deletes/moves and rolls them back if any step fails, so on any
+        error the filesystem is left in its original state.  BOM and CRLF line
+        endings are preserved on Update and Move, matching ``edit_file``.
 
         Every affected path is locked for the duration of validate+commit, so
         a concurrent edit/write to any of those files serialises rather than
@@ -1066,8 +1096,16 @@ class EditTools:
             # Acquire per-path locks for every affected file up front, in a
             # stable (sorted) order to avoid deadlock when two patches share
             # files.  Held across validate+commit so no concurrent edit/write
-            # can interleave with this atomic patch.
-            lock_paths = sorted({self._validate_path(op["path"]) for op in ops})
+            # can interleave with this atomic patch.  A move locks both its
+            # source and destination so the rename is race-safe on both ends.
+            affected = set()
+            for op in ops:
+                if op["op"] == "move":
+                    affected.add(self._validate_path(op["src"]))
+                    affected.add(self._validate_path(op["dst"]))
+                else:
+                    affected.add(self._validate_path(op["path"]))
+            lock_paths = sorted(affected)
             with contextlib.ExitStack() as stack:
                 for lp in lock_paths:
                     stack.enter_context(_file_locks.get_lock(lp))
@@ -1083,18 +1121,97 @@ class EditTools:
         try:
             # Phase 1: validate every operation and compute new content.
             # Each planned entry: (kind, safe_path, display, encoded_bytes,
-            # diff, content_hash). encoded_bytes is None for deletes.
+            # diff, content_hash, src_path). encoded_bytes is None for deletes;
+            # src_path is the source path for a move (None otherwise), so the
+            # commit phase can remove the origin after writing the destination.
             planned = []
+            # Track output paths produced within this transaction so two
+            # operations cannot silently target the same destination (the
+            # later commit would clobber the earlier result while reporting
+            # success). Each op validates against the *initial* filesystem, so
+            # this cross-op guard is what prevents intra-patch conflicts.
+            produced = {}
+            consumed = {}  # paths removed by a move/delete within this patch
+
+            def _claim_output(path, display):
+                prior = produced.get(path)
+                if prior is not None:
+                    return (f"Error: Conflicting operations target the same path "
+                           f"'{display}' (also produced by '{prior}')")
+                produced[path] = display
+                return None
+
             for op in ops:
+                if op["op"] == "move":
+                    src_path = self._validate_path(op["src"])
+                    dst_path = self._validate_path(op["dst"])
+                    if src_path == dst_path:
+                        return (f"Error: Cannot move '{op['src']}' to '{op['dst']}': "
+                               f"source and destination are the same path")
+                    if not os.path.exists(src_path):
+                        return f"Error: Cannot move '{op['src']}': file not found"
+                    # The destination must be free both on disk and within this
+                    # transaction (unless a prior op in this patch removed it).
+                    if os.path.exists(dst_path) and dst_path not in consumed:
+                        return (f"Error: Cannot move '{op['src']}' to '{op['dst']}': "
+                               f"destination already exists")
+                    conflict = _claim_output(dst_path, f"{op['src']} -> {op['dst']}")
+                    if conflict:
+                        return conflict
+                    # Read in binary to preserve BOM/CRLF like update does.
+                    with open(src_path, 'rb') as f:
+                        raw_bytes = f.read()
+                    try:
+                        original, bom = self._decode_with_bom(raw_bytes)
+                    except ValueError as e:
+                        return f"Error: Cannot move '{op['src']}': {e}"
+                    original_hash = self._compute_content_hash(original)
+                    # Automatic staleness guard on the source, mirroring update.
+                    if not force:
+                        recorded = _file_locks.get_read_hash(src_path)
+                        if recorded is not None and recorded != original_hash:
+                            return (f"Error: Cannot move '{op['src']}': file changed "
+                                   f"since it was read - re-read before editing "
+                                   f"(or pass force=True to override).")
+                    line_ending = self._detect_line_ending(original)
+                    updated = original
+                    for old_block, new_block in op["hunks"]:
+                        if not old_block:
+                            return f"Error: Empty hunk in move for '{op['src']}'"
+                        spans = self._find_spans(updated, old_block)
+                        if not spans:
+                            preview = old_block[:50] + ("..." if len(old_block) > 50 else "")
+                            return (f"Error: Hunk not found in '{op['src']}': '{preview}'")
+                        if len(spans) > 1:
+                            preview = old_block[:30] + ("..." if len(old_block) > 30 else "")
+                            return (f"Error: Ambiguous hunk in '{op['src']}': '{preview}' "
+                                   f"matches {len(spans)} locations")
+                        start, end = spans[0]
+                        updated = updated[:start] + new_block + updated[end:]
+                    encoded = self._encode_preserving(updated, line_ending, bom)
+                    on_disk_form = encoded[len(bom):].decode('utf-8')
+                    display = f"{op['src']} -> {op['dst']}"
+                    planned.append(("move", dst_path, display, encoded,
+                                    self._render_diff(original, updated, display),
+                                    self._compute_content_hash(on_disk_form),
+                                    src_path))
+                    # The source path is now free for a later op in this patch.
+                    consumed[src_path] = display
+                    produced.pop(src_path, None)
+                    continue
+
                 safe_path = self._validate_path(op["path"])
 
                 if op["op"] == "add":
-                    if os.path.exists(safe_path):
+                    if os.path.exists(safe_path) and safe_path not in consumed:
                         return f"Error: Cannot add '{op['path']}': file already exists"
+                    conflict = _claim_output(safe_path, op["path"])
+                    if conflict:
+                        return conflict
                     encoded = op["content"].encode('utf-8')
                     planned.append(("add", safe_path, op["path"], encoded,
                                     self._render_diff("", op["content"], op["path"]),
-                                    self._compute_content_hash(op["content"])))
+                                    self._compute_content_hash(op["content"]), None))
 
                 elif op["op"] == "delete":
                     if not os.path.exists(safe_path):
@@ -1114,11 +1231,16 @@ class EditTools:
                                 return (f"Error: Cannot delete '{op['path']}': file changed "
                                        f"since it was read - re-read before editing "
                                        f"(or pass force=True to override).")
-                    planned.append(("delete", safe_path, op["path"], None, "", None))
+                    planned.append(("delete", safe_path, op["path"], None, "", None, None))
+                    consumed[safe_path] = op["path"]
+                    produced.pop(safe_path, None)
 
                 elif op["op"] == "update":
                     if not os.path.exists(safe_path):
                         return f"Error: Cannot update '{op['path']}': file not found"
+                    conflict = _claim_output(safe_path, op["path"])
+                    if conflict:
+                        return conflict
                     # Read in binary to preserve BOM/CRLF like edit_file does.
                     with open(safe_path, 'rb') as f:
                         raw_bytes = f.read()
@@ -1157,7 +1279,7 @@ class EditTools:
                     on_disk_form = encoded[len(bom):].decode('utf-8')
                     planned.append(("update", safe_path, op["path"], encoded,
                                     self._render_diff(original, updated, op["path"]),
-                                    self._compute_content_hash(on_disk_form)))
+                                    self._compute_content_hash(on_disk_form), None))
 
             # Phase 2: commit all operations atomically.  Writes are staged to
             # temp files in the same directory and swapped in with os.replace;
@@ -1167,20 +1289,77 @@ class EditTools:
             messages = []
             applied = []  # rollback log: (action, *paths)
             tmp_suffix = ".praison_patch_tmp"
+
+            def _free_temp_path(base: str) -> str:
+                """Return a staging path derived from ``base`` that does not
+                collide with an existing file, so move/write staging never
+                truncates or later deletes an unrelated user file that happens
+                to sit at the default ``<path>.praison_patch_tmp`` name."""
+                candidate = base + tmp_suffix
+                counter = 0
+                while os.path.lexists(candidate):
+                    counter += 1
+                    candidate = f"{base}{tmp_suffix}.{counter}"
+                return candidate
+
             try:
-                for kind, safe_path, display, encoded, diff, content_hash in planned:
+                for kind, safe_path, display, encoded, diff, content_hash, src_path in planned:
                     if kind == "delete":
-                        backup = safe_path + tmp_suffix
+                        backup = _free_temp_path(safe_path)
                         os.replace(safe_path, backup)
                         applied.append(("delete", safe_path, backup))
                         self._file_cache.pop(safe_path, None)
                         _file_locks.clear_read_hash(safe_path)
                         messages.append(f"Deleted {display}")
+                    elif kind == "move":
+                        # Write the (optionally edited) content to the
+                        # destination, then rename the source aside so a
+                        # failure can restore it.  ``safe_path`` is the
+                        # validated destination; the destination is known not
+                        # to exist (checked in phase 1).
+                        os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
+                        tmp_path = _free_temp_path(safe_path)
+                        src_backup = _free_temp_path(src_path)
+                        try:
+                            with open(tmp_path, 'wb') as f:
+                                f.write(encoded)
+                            os.replace(tmp_path, safe_path)
+                            os.replace(src_path, src_backup)
+                        except Exception:
+                            if os.path.exists(tmp_path):
+                                try:
+                                    os.remove(tmp_path)
+                                except OSError:
+                                    pass
+                            # If the destination was already written but the
+                            # source rename failed, drop the destination so the
+                            # partial move is not left behind.
+                            if os.path.exists(safe_path):
+                                try:
+                                    os.remove(safe_path)
+                                except OSError:
+                                    pass
+                            raise
+                        # Capture the source's recorded read-hash before we
+                        # clear it, so a later rollback can restore it and keep
+                        # the staleness guard armed on the restored source.
+                        prev_src_hash = _file_locks.get_read_hash(src_path)
+                        applied.append(("move", safe_path, src_path, src_backup,
+                                        prev_src_hash))
+                        self._file_cache.pop(src_path, None)
+                        _file_locks.clear_read_hash(src_path)
+                        self._file_cache[safe_path] = content_hash
+                        _file_locks.record_read_hash(safe_path, content_hash)
+                        if self._post_edit_format != "off":
+                            if self._apply_post_edit_format(safe_path):
+                                self._refresh_hash_after_format(safe_path)
+                        diagnostics = self._run_diagnostics(safe_path, display)
+                        messages.append(f"Renamed {display}\n{diff}{diagnostics}")
                     else:
                         os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
-                        tmp_path = safe_path + tmp_suffix
+                        tmp_path = _free_temp_path(safe_path)
                         existed = os.path.exists(safe_path)
-                        backup = safe_path + ".praison_patch_bak" if existed else None
+                        backup = _free_temp_path(safe_path + ".praison_patch_bak") if existed else None
                         try:
                             with open(tmp_path, 'wb') as f:
                                 f.write(encoded)
@@ -1222,13 +1401,31 @@ class EditTools:
                                 os.replace(backup, target)
                             elif os.path.exists(target):
                                 os.remove(target)
+                        elif action == "move":
+                            # entry = ("move", dst, src, src_backup, prev_src_hash):
+                            # drop the freshly-written destination, restore the
+                            # source, and re-arm its staleness guard so a later
+                            # edit still detects external modifications.
+                            src, src_backup = entry[2], entry[3]
+                            prev_src_hash = entry[4] if len(entry) > 4 else None
+                            if os.path.exists(target):
+                                os.remove(target)
+                            os.replace(src_backup, src)
+                            _file_locks.clear_read_hash(target)
+                            self._file_cache.pop(target, None)
+                            if prev_src_hash is not None:
+                                _file_locks.record_read_hash(src, prev_src_hash)
+                                self._file_cache[src] = prev_src_hash
                     except OSError:
                         logger.error("Rollback failed for %s", target)
                 raise
 
-            # Success: discard delete backups and write backups.
+            # Success: discard delete/write backups and move source backups.
             for entry in applied:
-                action, backup = entry[0], entry[2]
+                if entry[0] == "move":
+                    backup = entry[3]
+                else:
+                    backup = entry[2]
                 if backup is not None and os.path.exists(backup):
                     try:
                         os.remove(backup)
@@ -1377,12 +1574,14 @@ def edit_file(filepath: str, old_string: str, new_string: str,
 
 @require_approval(risk_level="high")
 def apply_patch(patch: str, force: bool = False) -> str:
-    """Apply a structured multi-file patch atomically (Add/Update/Delete).
+    """Apply a structured multi-file patch atomically (Add/Update/Delete/Move).
 
     Args:
         patch: Structured patch text with ``*** Add File:``,
-            ``*** Update File:`` and ``*** Delete File:`` sections.
-        force: Bypass the automatic staleness guard on Update operations.
+            ``*** Update File:``, ``*** Delete File:`` and
+            ``*** Move File: <old> -> <new>`` sections. A Move may carry
+            optional ``@@`` hunks to rename and edit a file in one operation.
+        force: Bypass the automatic staleness guard on Update/Move operations.
 
     Returns:
         Combined success message with diffs or an error description.

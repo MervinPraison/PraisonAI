@@ -341,6 +341,207 @@ class TestApplyPatch:
         assert _read(b) == "original b\n"
 
 
+class TestMoveFile:
+    def test_move_renames_preserving_content(self, tools, tmp_path):
+        src = tmp_path / "old.py"
+        dst = tmp_path / "new.py"
+        _write(src, "print('hi')\n")
+        patch = f"*** Move File: {src} -> {dst}\n"
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        assert "Renamed" in result
+        assert not os.path.exists(src)
+        assert _read(dst) == "print('hi')\n"
+
+    def test_move_missing_source_fails(self, tools, tmp_path):
+        src = tmp_path / "nope.py"
+        dst = tmp_path / "new.py"
+        patch = f"*** Move File: {src} -> {dst}\n"
+        result = tools.apply_patch(patch)
+        assert "not found" in result
+        assert not os.path.exists(dst)
+
+    def test_move_existing_destination_fails(self, tools, tmp_path):
+        src = tmp_path / "old.py"
+        dst = tmp_path / "new.py"
+        _write(src, "a\n")
+        _write(dst, "b\n")
+        patch = f"*** Move File: {src} -> {dst}\n"
+        result = tools.apply_patch(patch)
+        assert "destination already exists" in result
+        # Both endpoints untouched.
+        assert _read(src) == "a\n"
+        assert _read(dst) == "b\n"
+
+    def test_move_with_hunks_renames_and_edits(self, tools, tmp_path):
+        src = tmp_path / "foo.py"
+        dst = tmp_path / "bar.py"
+        _write(src, "def foo():\n    return 1\n")
+        patch = (
+            f"*** Move File: {src} -> {dst}\n"
+            "@@\n"
+            "    return 1\n"
+            "===\n"
+            "    return 2\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        assert not os.path.exists(src)
+        assert "return 2" in _read(dst)
+
+    def test_move_preserves_crlf_and_bom(self, tools, tmp_path):
+        src = tmp_path / "crlf.py"
+        dst = tmp_path / "crlf_new.py"
+        with open(src, "wb") as f:
+            f.write(b"\xef\xbb\xbfdef foo():\r\n    return 1\r\n")
+        patch = (
+            f"*** Move File: {src} -> {dst}\n"
+            "@@\n"
+            "    return 1\n"
+            "===\n"
+            "    return 2\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        assert not os.path.exists(src)
+        with open(dst, "rb") as f:
+            data = f.read()
+        assert data.startswith(b"\xef\xbb\xbf")  # BOM preserved
+        assert b"\r\n" in data  # CRLF preserved
+        assert b"return 2" in data
+
+    def test_move_atomic_rollback_on_later_failure(self, tools, tmp_path):
+        # A move committed before a failing update must be rolled back.
+        src = tmp_path / "old.py"
+        dst = tmp_path / "new.py"
+        missing = tmp_path / "missing.py"  # update fails -> whole patch aborts
+        _write(src, "content\n")
+        patch = (
+            f"*** Move File: {src} -> {dst}\n"
+            f"*** Update File: {missing}\n"
+            "@@\n"
+            "x\n"
+            "===\n"
+            "y\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Error" in result
+        # Source restored, destination not left behind.
+        assert _read(src) == "content\n"
+        assert not os.path.exists(dst)
+
+    def test_move_malformed_header_fails(self, tools, tmp_path):
+        src = tmp_path / "old.py"
+        _write(src, "x\n")
+        patch = f"*** Move File: {src}\n"  # no ' -> <new>'
+        result = tools.apply_patch(patch)
+        assert "Invalid patch" in result
+
+    def test_move_stale_source_aborts(self, tools, tmp_path):
+        src = tmp_path / "old.py"
+        dst = tmp_path / "new.py"
+        _write(src, "v1\n")
+        tools.read_file(str(src))  # record read hash
+        _write(src, "v2\n")  # external change
+        patch = f"*** Move File: {src} -> {dst}\n"
+        result = tools.apply_patch(patch)
+        assert "changed" in result
+        assert os.path.exists(src)
+        assert not os.path.exists(dst)
+        # force bypasses the guard.
+        assert "Success" in tools.apply_patch(patch, force=True)
+        assert not os.path.exists(src)
+
+    def test_move_does_not_clobber_sibling_staging_file(self, tools, tmp_path):
+        # A pre-existing file at the default '.praison_patch_tmp' staging name
+        # for the destination must not be truncated or deleted by the move.
+        src = tmp_path / "old.py"
+        dst = tmp_path / "new.py"
+        _write(src, "moved\n")
+        sibling = tmp_path / "new.py.praison_patch_tmp"
+        _write(sibling, "PRECIOUS\n")
+        src_sibling = tmp_path / "old.py.praison_patch_tmp"
+        _write(src_sibling, "ALSO_PRECIOUS\n")
+        patch = f"*** Move File: {src} -> {dst}\n"
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        assert _read(dst) == "moved\n"
+        # The unrelated sibling files survive untouched.
+        assert _read(sibling) == "PRECIOUS\n"
+        assert _read(src_sibling) == "ALSO_PRECIOUS\n"
+
+    def test_two_moves_to_same_destination_conflict(self, tools, tmp_path):
+        # Two operations producing the same destination must be rejected up
+        # front instead of one silently clobbering the other.
+        a = tmp_path / "a.py"
+        b = tmp_path / "b.py"
+        dst = tmp_path / "out.py"
+        _write(a, "AAA\n")
+        _write(b, "BBB\n")
+        patch = (
+            f"*** Move File: {a} -> {dst}\n"
+            f"*** Move File: {b} -> {dst}\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Conflicting operations" in result
+        # Nothing committed: both sources intact, destination absent.
+        assert _read(a) == "AAA\n"
+        assert _read(b) == "BBB\n"
+        assert not os.path.exists(dst)
+
+    def test_move_then_add_same_destination_conflict(self, tools, tmp_path):
+        src = tmp_path / "src.py"
+        dst = tmp_path / "dst.py"
+        _write(src, "S\n")
+        patch = (
+            f"*** Move File: {src} -> {dst}\n"
+            f"*** Add File: {dst}\n"
+            "added\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Conflicting operations" in result
+        assert _read(src) == "S\n"
+        assert not os.path.exists(dst)
+
+    def test_move_into_freed_source_path_allowed(self, tools, tmp_path):
+        # Moving A->B then B-content isn't relevant; but a move that frees a
+        # path lets a later add reuse it within the same patch.
+        a = tmp_path / "a.py"
+        b = tmp_path / "b.py"
+        _write(a, "A\n")
+        patch = (
+            f"*** Move File: {a} -> {b}\n"
+            f"*** Add File: {a}\n"
+            "fresh\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        assert _read(b) == "A\n"
+        assert _read(a) == "fresh"
+
+    def test_move_rollback_rearms_source_staleness_guard(self, tools, tmp_path):
+        # After a move is rolled back, a later edit of the restored source must
+        # still detect an external change (staleness guard re-armed).
+        src = tmp_path / "old.py"
+        dst = tmp_path / "new.py"
+        missing = tmp_path / "missing.py"
+        _write(src, "v1\n")
+        tools.read_file(str(src))  # record read hash for staleness guard
+        patch = (
+            f"*** Move File: {src} -> {dst}\n"
+            f"*** Update File: {missing}\n"
+            "@@\nx\n===\ny\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Error" in result
+        assert _read(src) == "v1\n"
+        assert not os.path.exists(dst)
+        # Simulate an external modification of the restored source.
+        _write(src, "v2\n")
+        stale = tools.edit_file(str(src), "v2", "v3")
+        assert "changed since it was read" in stale
+
+
 class TestPostEditDiagnostics:
     """Post-edit diagnostics feedback for the built-in editor."""
 
