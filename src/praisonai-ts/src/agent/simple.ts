@@ -641,7 +641,13 @@ export class Agent {
     for (const toolCall of toolCalls) {
       const { id, function: { name, arguments: argsString } } = toolCall;
       await Logger.debug(`Processing tool call: ${name}`, { arguments: argsString });
-      
+
+      // Every tool_result must have a preceding tool_call sharing the same
+      // callId, or a consumer pairing events by callId gets an orphan result.
+      // This flag lets the catch below emit a paired tool_call for paths that
+      // fail before the normal emission point (e.g. malformed argsString).
+      let toolCallEmitted = false;
+
       try {
         // Cancellation reaches the side-effecting boundary: if the caller
         // aborts after the model returned tool calls, stop before invoking the
@@ -652,9 +658,21 @@ export class Agent {
           throw (signal as any).reason ?? new Error('The operation was aborted');
         }
 
-        // Parse arguments
-        const args = JSON.parse(argsString);
-        
+        // Parse arguments. JSON.parse can yield null, an array, or a scalar;
+        // AgentEvent.args is Record<string, unknown>, so reject anything that
+        // is not a plain object before emitting the event or invoking the tool.
+        const parsedArgs: unknown = JSON.parse(argsString);
+        if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+          throw new Error(`Invalid arguments for tool ${name}: expected a JSON object`);
+        }
+        const args = parsedArgs as Record<string, unknown>;
+
+        // Announced BEFORE the function-existence check and approval gate, so
+        // that a denied or unregistered call still has a matching tool_call to
+        // pair its tool_result with, and a view can show a call in progress.
+        onEvent?.({ type: 'tool_call', callId: id, name, args });
+        toolCallEmitted = true;
+
         // Check if function exists
         if (!this.toolFunctions[name]) {
           throw new Error(`Function ${name} not registered`);
@@ -679,10 +697,6 @@ export class Agent {
             continue;
           }
         }
-
-        // Announced BEFORE it runs, so a view can show a call in progress
-        // rather than materialising a finished row out of nowhere.
-        onEvent?.({ type: 'tool_call', callId: id, name, args });
 
         // Call the function - registered wrappers handle positional mapping
         const result = await this.toolFunctions[name](args);
@@ -718,6 +732,12 @@ export class Agent {
         await Logger.error(`Error executing tool ${name}:`, error);
         const failure = `Error: ${error.message || 'Unknown error'}`;
         results.push({ role: 'tool', tool_call_id: id, name, content: failure });
+        // A failure before the normal emission point (malformed/non-object
+        // argsString) would otherwise leave this tool_result orphaned. Emit a
+        // paired tool_call first — args are empty because none could be parsed.
+        if (!toolCallEmitted) {
+          onEvent?.({ type: 'tool_call', callId: id, name, args: {} });
+        }
         // The case the whole `ok` field exists for: a tool that failed WITH a
         // message is byte-identical to one that succeeded with a message, so
         // success can never be inferred from a non-empty output.

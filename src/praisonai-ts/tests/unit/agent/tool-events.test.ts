@@ -140,6 +140,62 @@ describe('tool activity is announced, not inferred', () => {
     expect(kinds).toContain('finish');
   });
 
+  it('a DENIED call still emits tool_call before its ok:false tool_result', async () => {
+    // The approval gate emits a tool_result for a denial. Without a preceding
+    // tool_call sharing the callId, a consumer pairing by callId gets an orphan.
+    install(twoRounds());
+    const probe = (q: string) => `ok ${q}`;
+    const agent = new Agent({
+      instructions: 'x', llm: 'gpt-4o-mini', stream: true, verbose: false,
+      tools: [probe],
+    });
+    (agent as any).approvalManager = { requestApproval: async () => false };
+
+    const events = await collect(agent);
+    const kinds = events.map((e) => e.type);
+    expect(kinds.indexOf('tool_call')).toBeLessThan(kinds.indexOf('tool_result'));
+    const call = events.find((e) => e.type === 'tool_call')!;
+    const result = events.find((e) => e.type === 'tool_result')!;
+    expect(call.type === 'tool_call' && call.callId).toBe(result.type === 'tool_result' && result.callId);
+    expect(result.type === 'tool_result' && result.ok).toBe(false);
+  });
+
+  it('MALFORMED JSON args still emit tool_call before the ok:false tool_result', async () => {
+    // JSON.parse throws before the normal emission point; the catch must still
+    // pair a tool_call so the failing result is not orphaned.
+    install(twoRounds('{not valid json'));
+    const probe = (q: string) => `ok ${q}`;
+    const agent = new Agent({
+      instructions: 'x', llm: 'gpt-4o-mini', stream: true, verbose: false,
+      tools: [probe],
+    });
+    const events = await collect(agent);
+    const kinds = events.map((e) => e.type);
+    expect(kinds.indexOf('tool_call')).toBeLessThan(kinds.indexOf('tool_result'));
+    const call = events.find((e) => e.type === 'tool_call')!;
+    const result = events.find((e) => e.type === 'tool_result')!;
+    expect(call.type === 'tool_call' && call.callId).toBe(result.type === 'tool_result' && result.callId);
+    expect(result.type === 'tool_result' && result.ok).toBe(false);
+  });
+
+  it('NON-OBJECT args (a JSON array) are rejected before invocation', async () => {
+    // JSON.parse succeeds but yields an array, which violates
+    // AgentEvent.args: Record<string, unknown>. The guard rejects it, and the
+    // failing result is still paired with a tool_call.
+    install(twoRounds('[1,2,3]'));
+    const probe = jest.fn((q: string) => `ok ${q}`);
+    const agent = new Agent({
+      instructions: 'x', llm: 'gpt-4o-mini', stream: true, verbose: false,
+      tools: [probe],
+    });
+    const events = await collect(agent);
+    const kinds = events.map((e) => e.type);
+    expect(kinds.indexOf('tool_call')).toBeLessThan(kinds.indexOf('tool_result'));
+    const result = events.find((e) => e.type === 'tool_result')!;
+    expect(result.type === 'tool_result' && result.ok).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
   it('stream() still yields only text, unaffected by the wider union', async () => {
     // Backward compatibility, asserted rather than assumed: stream() filters on
     // type === "text", so a new variant must not leak into it as a stray chunk.
