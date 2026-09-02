@@ -215,7 +215,7 @@ export const OBSERVABILITY_TOOLS: Record<ObservabilityToolName, ObservabilityToo
   },
   arize: {
     name: 'arize',
-    package: 'arize-phoenix',
+    package: '@arizeai/openinference-core',
     envKey: 'ARIZE_API_KEY',
     description: 'Arize AX (Phoenix)',
     features: { traces: true, spans: true, events: true, errors: true, metrics: true, export: true },
