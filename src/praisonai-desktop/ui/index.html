@@ -1048,13 +1048,32 @@ async function refreshChats(){
   if(!PORT) return;
   try{
     const {chats}=await (await fetch(`http://127.0.0.1:${PORT}/chats`)).json();
+    // Standing instructions per project, so the label can show one is set and
+    // clicking it edits it. A failure here must not blank the sidebar.
+    let projInstr={};
+    try{ projInstr=(await (await fetch(`http://127.0.0.1:${PORT}/projects`)).json()).instructions||{}; }catch{}
     chatsEl.innerHTML='';
     const groups={};
     for(const c of chats){ (groups[c.project||'']??=[]).push(c); }
     const order=Object.keys(groups).sort((a,b)=>a===''?1:b===''?-1:a.localeCompare(b));
     for(const g of order){
       if(g){ const lbl=document.createElement('div'); lbl.className='sectlbl';
-             lbl.style.padding='.7rem .75rem .2rem'; lbl.textContent=g;
+             lbl.style.padding='.7rem .75rem .2rem'; lbl.style.cursor='pointer';
+             lbl.textContent=g+(projInstr[g]?' \u2699':'');
+             lbl.title='Edit project instructions';
+             lbl.tabIndex=0; lbl.setAttribute('role','button');
+             const editInstr=async()=>{
+               const text=await askText(
+                 `Instructions for project \u201c${g}\u201d (prepended to every chat here):`,
+                 projInstr[g]||'');
+               if(text===null) return;
+               await fetch('http://127.0.0.1:'+PORT+'/projects',{method:'POST',
+                 headers:{'content-type':'application/json'},
+                 body:JSON.stringify({project:g,instructions:text})});
+               refreshChats();
+             };
+             lbl.onclick=editInstr;
+             lbl.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); editInstr(); } };
              chatsEl.appendChild(lbl); }
       for(const c of groups[g]){
       const d=document.createElement('div');

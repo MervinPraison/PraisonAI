@@ -664,6 +664,39 @@ def save_mcp(servers: list) -> None:
     tmp = MCP_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps({"servers": servers}, indent=1))
     _replace_with_retry(tmp, MCP_PATH)
+
+
+PROJECTS_PATH = DATA_DIR / "projects.json"
+
+
+def load_projects() -> dict:
+    """Per-project settings, keyed by the project name a chat is filed under.
+
+    Only `instructions` today: a string prepended to every turn in the
+    project, so a chat in "Alpha" inherits Alpha's standing directions the
+    way Claude's Projects do. The name is the same string `/project/<id>`
+    writes onto a chat, so nothing else needs to change to link the two.
+    """
+    try:
+        stored = json.loads(PROJECTS_PATH.read_text())
+        return stored if isinstance(stored, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_projects(projects: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = PROJECTS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(projects, indent=1))
+    _replace_with_retry(tmp, PROJECTS_PATH)
+
+
+def project_instructions(name: str) -> str:
+    """The standing instructions for a project, or "" when it has none."""
+    if not name:
+        return ""
+    entry = load_projects().get(name) or {}
+    return str(entry.get("instructions", "")) if isinstance(entry, dict) else ""
 # Mirrors frontend/dist/settings-registry.js. The registry is the source of
 # truth for the UI; this is the storage contract, and load_settings() drops
 # unknown keys and defaults missing ones so a hand-edited or older file can
@@ -1552,9 +1585,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(redacted(cfg))
             return
         if self.path == "/projects":
-            names = sorted({(load_chat(c["id"]).get("project") or "")
-                            for c in list_chats()} - {""})
-            self._json({"projects": names})
+            # Names come from the chats filed under them; instructions come from
+            # the project store. A project keeps its instructions even after its
+            # last chat leaves, so the two lists are unioned, not intersected.
+            stored = load_projects()
+            names = sorted(({(load_chat(c["id"]).get("project") or "")
+                             for c in list_chats()} | set(stored)) - {""})
+            self._json({"projects": names,
+                        "instructions": {n: project_instructions(n)
+                                         for n in names}})
             return
         if self.path == "/mcp":
             self._json({"servers": load_mcp()})
@@ -1818,6 +1857,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "cannot fork"}, 404)
             return
 
+        if self.path == "/projects":
+            # Standing instructions for a project, edited from the sidebar and
+            # prepended to every turn of its chats. Blank clears the entry so a
+            # project with nothing to say leaves no stale file behind.
+            body = self._body()
+            name = str(body.get("project", ""))[:80].strip()
+            if not name:
+                self._json({"ok": False, "error": "project name required"}, 400)
+                return
+            text = str(body.get("instructions", ""))[:20_000].strip()
+            projects = load_projects()
+            if text:
+                projects[name] = {"instructions": text}
+            else:
+                projects.pop(name, None)
+            save_projects(projects)
+            self._json({"ok": True, "project": name, "instructions": text})
+            return
+
         if self.path.startswith("/project/"):
             cid = self.path.rsplit("/", 1)[-1]
             name = self._body().get("project", "")
@@ -1888,6 +1946,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400)
             return
 
+        # A chat filed under a project inherits that project's standing
+        # instructions. They ride in front of this turn only -- `prompt` stays
+        # clean, so the transcript and the auto-title show what the user typed,
+        # not the project preamble, and a chat that later leaves the project
+        # keeps a history free of it. The agent is cached per session and shared
+        # across chats with different projects, so this is done per turn rather
+        # than baked into the agent's own instructions.
+        turn_prompt = prompt
+        try:
+            proj = load_chat(chat_id).get("project") or ""
+        except Exception:  # noqa: BLE001 - a missing chat simply has no project
+            proj = ""
+        proj_text = project_instructions(proj)
+        if proj_text:
+            turn_prompt = f"{proj_text}\n\n{prompt}"
+
         self.send_response(200)
         self._cors()
         self.send_header("Content-Type", "text/event-stream")
@@ -1956,7 +2030,7 @@ class Handler(BaseHTTPRequestHandler):
                                          "seconds": ev["seconds"]})
                 return shown
 
-            for chunk in agent.start(prompt, stream=True,
+            for chunk in agent.start(turn_prompt, stream=True,
                                      **_llm_overrides(load_settings())):
                 # Counted here too. This call drains the queue, so discarding
                 # its result meant the tally further down always read zero
