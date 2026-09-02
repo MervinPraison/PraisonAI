@@ -101,5 +101,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      # The generator imports pyyaml. The first run of this job failed in 8s
+      # with `No module named 'yaml'` -- the push job above installs it and
+      # this one did not.
+      - run: pip install pyyaml
       - name: Is the committed tracker what the source produces?
         run: python3 src/praisonai/scripts/generate_parity_tracker.py --check
