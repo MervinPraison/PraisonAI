@@ -253,3 +253,24 @@ class TestIdentityCanonicalization:
             GatewayRuntimeSeams(identity_canonicalizer=canon)
         )
         assert mgr._storage_key("jid-A") == "person-1"
+
+    def test_whatsapp_bot_wires_canonicalizer_into_session_manager(self):
+        # Issue #4661 production wiring: a constructed WhatsAppBot must hand its
+        # learned LID<->phone canonicalizer to its own session manager so the
+        # Cloud API path (which forwards the raw sender id to ``chat()``)
+        # collapses a JID/LID change to one stable session instead of forking.
+        pytest.importorskip("aiohttp")
+        from praisonai_bot.bots.whatsapp import WhatsAppBot
+
+        bot = WhatsAppBot(token="t", phone_number_id="p")
+        mgr = bot._session_mgr
+        # The bot's own canonicalizer is the session manager's canonicalizer.
+        assert mgr._identity_canonicalizer is bot._identity_canonicalizer
+
+        # A learned LID->phone pairing collapses both raw forms to one key,
+        # exercised purely through the session manager's keying path (the same
+        # path the Cloud API handler drives via ``_session_mgr.chat``).
+        lid = "111@lid"
+        phone_jid = "222@s.whatsapp.net"
+        bot._identity_canonicalizer.learn(lid, phone_jid)
+        assert mgr._storage_key(lid) == mgr._storage_key(phone_jid)

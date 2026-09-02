@@ -238,6 +238,18 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # "<phone>@s.whatsapp.net"; canonicalize toward the phone form so
         # session/memory/pairing and the DM allowlist all key on one identity.
         self._identity_canonicalizer = WhatsAppIdentityCanonicalizer()
+        # Issue #4661: consume the identity-canonicalization seam in production.
+        # Wire this same learned LID<->phone canonicalizer into the session
+        # manager so ``_storage_key`` collapses a JID<->LID id change to one
+        # stable session for *both* transports. The web path also canonicalizes
+        # ``sender_jid`` before ``chat()`` (a no-op double-apply — canonicalize
+        # is idempotent), but the Cloud API path forwards the raw sender id, so
+        # without this the Cloud path would still fork history/memory/run-state.
+        setattr(
+            self._session_mgr,
+            "_identity_canonicalizer",
+            self._identity_canonicalizer,
+        )
 
         # Audio capabilities — inbound speech-to-text (Issue #2721).
         self._stt_enabled: bool = False
