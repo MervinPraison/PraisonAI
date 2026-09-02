@@ -48,6 +48,13 @@ export function createFakeWindow(): FakeWindow {
       set.add(cb);
       map.set(type, set);
     };
+  /** The other half of `on`. A real `visualViewport` has it, and this fake did
+   *  not -- so a listener could be added and never removed, and any adapter
+   *  that unsubscribes threw here instead of being exercised. */
+  const off = (map: Map<string, Set<(e?: unknown) => void>>) =>
+    (type: string, cb: (e?: unknown) => void) => {
+      map.get(type)?.delete(cb);
+    };
   const fire = (map: Map<string, Set<(e?: unknown) => void>>, type: string) => {
     for (const cb of [...(map.get(type) ?? [])]) cb();
   };
@@ -73,6 +80,7 @@ export function createFakeWindow(): FakeWindow {
         },
         offsetTop: 0,
         addEventListener: on(vpListeners),
+        removeEventListener: off(vpListeners),
       };
     },
     document: {

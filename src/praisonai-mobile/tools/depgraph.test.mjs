@@ -354,7 +354,18 @@ test("the size budget and the webview targets are the values the gate claims", (
   // whose threshold can be edited without a failing test is a gate that can be
   // turned off.
   assert.equal(SIZE_BUDGET_BYTES, 400 * 1024, "the budget is what makes a dependency a decision");
-  assert.deepEqual(TARGETS, ["safari16", "chrome108"], "the WebView floor is the OS, not the current Chrome");
+  // The Chrome floor is DERIVED from `minSdkVersion`, not restated here. This
+  // line said `chrome108` while tauri.conf.json declared `minSdkVersion: 26`
+  // -- Android 8.0, WebView ~Chrome 58 -- so the two numbers disagreed and a
+  // literal in this test was what made the disagreement look deliberate.
+  // `bundle-target.test.mjs` holds the relationship; this holds the shape.
+  assert.equal(TARGETS.length, 2, "one floor per platform");
+  assert.equal(TARGETS.find((t) => t.startsWith("safari")), "safari16", "iOS 16 is the declared minimum");
+  assert.match(
+    TARGETS.find((t) => t.startsWith("chrome")) ?? "",
+    /^chrome\d+$/,
+    "the WebView floor is the OS, not the current Chrome",
+  );
 });
 
 // ---- the allowlist glob is part of the gate, not a convenience -------------

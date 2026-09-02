@@ -44,6 +44,11 @@ import type {
   Unsubscribe,
 } from "../../../core/src/ports/shell.ts";
 import { createTauriBridge, type TauriBridge } from "./bridge.ts";
+// The keyboard reading is identical on both platforms and already reasoned
+// through in the web shell (pinch-zoom vs a real keyboard, overscroll, the
+// offsetTop term). Importing it keeps one implementation rather than a copy
+// that drifts.
+import { readKeyboardHeight } from "../web/shell.ts";
 
 /**
  * A ShellPort plus one observable.
@@ -217,6 +222,9 @@ export interface TauriShellDeps {
   readonly bridge?: TauriBridge;
   /** Defaults to the DOM, or to nothing when there is no DOM. */
   readonly insetSource?: InsetSource;
+  /** The window whose `visualViewport` reports the keyboard. Defaults to the
+   *  real one; injected in tests so the path runs without a phone. */
+  readonly view?: Window;
 }
 
 export function createTauriShell(deps: TauriShellDeps = {}): TauriShell {
@@ -228,7 +236,24 @@ export function createTauriShell(deps: TauriShellDeps = {}): TauriShell {
 
   const insetSubs = new Set<(insets: SafeAreaInsets) => void>();
   const keyboardSubs = new Set<(heightPx: number) => void>();
-  let keyboardHeightPx = 0;
+
+  // Seeded and driven from `visualViewport`, exactly as the web shell does.
+  //
+  // This was a hard `0` whose only writer was the native `keyboard-height`
+  // event -- and nothing emits that event: `src-tauri/src/lib.rs`'s
+  // `on_window_event` is an empty closure, left unwired until the mobile
+  // targets are initialised. So on a device `--keyboard-height` stayed 0
+  // forever, and because `app.css` pins `#root` to `position: fixed; inset: 0`
+  // the layout viewport does not shrink either. The composer sat underneath
+  // the keyboard the instant anyone tapped it -- the first thing anyone does.
+  //
+  // WKWebView and Android WebView both implement `visualViewport`, so the web
+  // shell's reading works here and needs no native code. The native event
+  // stays wired below and overrides this the moment it starts arriving: it is
+  // the better source, but it must not be the ONLY source while it does not
+  // exist.
+  const view = deps.view ?? (globalThis as { window?: Window }).window;
+  let keyboardHeightPx = view === undefined ? 0 : readKeyboardHeight(view);
   const lifecycleSubs = new Set<(phase: LifecyclePhase) => void>();
   // An ARRAY, not a Set: back handlers are a stack and the most recently
   // registered gets first refusal. A Set has no defined order, so a modal
@@ -302,8 +327,34 @@ export function createTauriShell(deps: TauriShellDeps = {}): TauriShell {
     publishInsets(coerceInsets(payload) ?? readInsets(source));
   });
 
+  // The web path, live. `visualViewport` fires `resize` and `scroll` as the
+  // keyboard animates, which is what makes the composer track it rather than
+  // jump once at the end. Removed the moment a native height arrives, so the
+  // two sources never fight -- native is authoritative where it exists.
+  let viewportOff: Unsubscribe | null = null;
+  if (view?.visualViewport !== undefined && view.visualViewport !== null) {
+    const viewport = view.visualViewport;
+    const onViewport = (): void => {
+      const height = readKeyboardHeight(view);
+      if (height === keyboardHeightPx) return;
+      keyboardHeightPx = height;
+      for (const cb of keyboardSubs) cb(height);
+    };
+    viewport.addEventListener("resize", onViewport);
+    viewport.addEventListener("scroll", onViewport);
+    viewportOff = () => {
+      viewport.removeEventListener("resize", onViewport);
+      viewport.removeEventListener("scroll", onViewport);
+    };
+  }
+
   attach(EVENTS.keyboard, (payload) => {
     const height = coerceKeyboardHeight(payload);
+    // A native height has arrived, so stop reading the viewport: the native
+    // source fires through the transition and the viewport one only at its
+    // ends, and two writers would race on every keyboard animation.
+    viewportOff?.();
+    viewportOff = null;
     // Snapshot before notifying, per the port's ordering rule.
     keyboardHeightPx = height;
     // Unconditional. Fires through the transition, not just at its end, and

@@ -1395,3 +1395,51 @@ test("a FULLY present Tauri global is treated as present -- the pair", () => {
   });
   assert.equal(both.isPresent(), true);
 });
+
+// ---- the keyboard, on the shell that actually runs on a phone ---------------
+
+test("the TAURI shell reports the keyboard height, without any native event", async () => {
+  // `keyboardHeightPx` was a hard 0 whose only writer was the native
+  // `keyboard-height` event -- and nothing emits it: src-tauri/src/lib.rs's
+  // `on_window_event` is an empty closure, left unwired until the mobile
+  // targets are initialised. On a device --keyboard-height stayed 0 forever,
+  // and app.css pins #root to `position: fixed; inset: 0` so the layout
+  // viewport does not shrink either. The composer sat under the keyboard the
+  // moment anyone tapped it -- the first thing anyone does with the app.
+  //
+  // The WEB shell had this right all along. Nothing compared the two.
+  const window = createFakeWindow();
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, view: window.window });
+  await Promise.resolve();
+
+  assert.equal(shell.keyboardHeightPx, 0, "no keyboard to begin with");
+
+  const heights: number[] = [];
+  shell.onKeyboardHeightChanged((px) => heights.push(px));
+  window.setKeyboardHeight(320);
+
+  assert.equal(shell.keyboardHeightPx, 320, "the shell must see the keyboard open");
+  assert.deepEqual(heights, [320], "and tell its subscribers exactly once");
+
+  window.setKeyboardHeight(0);
+  assert.equal(shell.keyboardHeightPx, 0, "and see it close");
+  assert.deepEqual(heights, [320, 0]);
+});
+
+test("a native keyboard height takes over from the viewport reading", async () => {
+  // The native event fires THROUGH the transition; the viewport only at its
+  // ends. Native wins where it exists -- but two live writers would race on
+  // every keyboard animation, so the viewport listener is dropped once a
+  // native height arrives.
+  const window = createFakeWindow();
+  const probe = probeBridge();
+  const shell = createTauriShell({ bridge: probe.bridge, view: window.window });
+  await Promise.resolve();
+
+  probe.emit("keyboard-height", 291);
+  assert.equal(shell.keyboardHeightPx, 291, "native is authoritative");
+
+  window.setKeyboardHeight(320);
+  assert.equal(shell.keyboardHeightPx, 291, "the viewport must not fight the native source");
+});

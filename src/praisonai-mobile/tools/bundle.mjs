@@ -21,6 +21,22 @@ import * as esbuild from "esbuild";
 import { readFile } from "node:fs/promises";
 
 /** Node builtins that must never survive into a webview bundle. */
+/** esbuild's own metafile markers, which are not packages. */
+const RUNTIME_MARKERS = new Set(["<runtime>"]);
+
+/** Every Node builtin, not only the forbidden ones. A builtin is already
+ *  classified as fatal-or-lazy above; this list exists so the unresolved check
+ *  does not report one twice under a different heading. */
+const NODE_BUILTINS = [
+  "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
+  "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
+  "events", "fs", "http", "http2", "https", "inspector", "module", "net",
+  "os", "path", "perf_hooks", "process", "punycode", "querystring",
+  "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls",
+  "trace_events", "tty", "url", "util", "v8", "vm", "wasi", "worker_threads",
+  "zlib",
+];
+
 export const FORBIDDEN_BUILTINS = [
   "assert", "buffer", "child_process", "cluster", "crypto", "dgram", "dns",
   "events", "fs", "http", "http2", "https", "module", "net", "os", "path",
@@ -37,7 +53,30 @@ export const FORBIDDEN_BUILTINS = [
  * Play, but a device kept offline keeps whatever it shipped with -- so the
  * floor there is the OS too, not the current Chrome.
  */
-export const TARGETS = ["safari16", "chrome108"];
+/**
+ * The oldest engines the bundle must PARSE on, derived from the platform
+ * minimums the app declares -- not chosen independently of them.
+ *
+ * `chrome108` was set here while `tauri.conf.json` declared
+ * `minSdkVersion: 26` (Android 8.0, WebView ~Chrome 58). The output contains
+ * optional chaining, nullish coalescing and logical assignment -- all
+ * post-Chrome-58 -- and `index.html` loads it as `<script type="module">`, so
+ * on such a device the module body never evaluates. `installCrashHandler` is
+ * imported by that same module, so it never installs either: a blank white
+ * screen with no error surface and no telemetry.
+ *
+ * Android's WebView updates through Play, so most devices are far newer. The
+ * ones that are not -- AOSP builds, Play-less devices, anything kept offline --
+ * are exactly the population this floor exists to protect, which is what the
+ * comment above already said before the two numbers drifted apart.
+ *
+ * Lowering the floor cost 5.2kB of a 400kB budget, measured.
+ *
+ * `bundle-target.test.mjs` asserts these stay derived from the declared
+ * minimums, because nothing linked the two numbers and they silently diverged.
+ */
+export const ANDROID_WEBVIEW_FLOOR = { 26: "chrome58", 30: "chrome87", 33: "chrome108" };
+export const TARGETS = ["safari16", "chrome58"];
 
 /** Bytes. Deliberately tight: this is a text UI, and the budget is what makes
  *  a dependency a decision rather than an accident. */
@@ -146,6 +185,23 @@ export async function bundle({ entry, outfile, minify = true, write = true }) {
   const forbidden = forbiddenAmong(bare);
   const fatal = forbidden.filter((p) => classified.get(p) === "static");
   const lazy = forbidden.filter((p) => classified.get(p) === "dynamic");
+  // A bare import that is NOT a Node builtin and still left the build as an
+  // external is one esbuild could not resolve -- the package is not installed.
+  //
+  // A webview has no module resolver. `import "openai"` in the shipped file is
+  // a hard failure at import time, before any code runs, with the same blank
+  // screen as a Node builtin -- and until now the gate said `shippable: true`
+  // for it, because `problems` was built only from forbidden BUILTINS, top
+  // level process.env, and size.
+  //
+  // Measured: bundling praisonai-ts's webview entry through this gate reported
+  // 80.5kB, 0 problems and `shippable: true` while silently leaving out
+  // openai, ai, @ai-sdk/cohere, @ai-sdk/google, @ai-sdk/openai,
+  // @ai-sdk/provider-utils, chalk, ora, boxen, figlet and cli-table3. That
+  // bundle loads on a laptop with node_modules beside it and dies on a phone.
+  const unresolved = bare.filter(
+    (name) => !RUNTIME_MARKERS.has(name) && !NODE_BUILTINS.includes(name.split("/")[0]),
+  );
   const processReads = topLevelProcessReads(code);
   const bytes = Buffer.byteLength(code, "utf8");
 
@@ -164,13 +220,21 @@ export async function bundle({ entry, outfile, minify = true, write = true }) {
       `\n    A webview has no process. Route these through a guarded accessor.`,
     );
   }
+  if (unresolved.length > 0) {
+    problems.push(
+      `bare imports the build could not resolve: ${unresolved.join(", ")}.\n` +
+      `    A webview has no module resolver, so these fail at IMPORT time and the\n` +
+      `    screen stays blank -- exactly like a static Node builtin. Add them as\n` +
+      `    dependencies so they are bundled, or stop importing them.`,
+    );
+  }
   if (bytes > SIZE_BUDGET_BYTES) {
     problems.push(
       `bundle is ${(bytes / 1024).toFixed(1)}kB, over the ${(SIZE_BUDGET_BYTES / 1024).toFixed(0)}kB budget.`,
     );
   }
 
-  return { bytes, bare, forbidden, fatal, lazy, processReads, problems, metafile: result.metafile, code };
+  return { bytes, bare, forbidden, fatal, lazy, unresolved, processReads, problems, metafile: result.metafile, code };
 }
 
 /** CLI. Guarded so importing this module for tests does not run a build. */
