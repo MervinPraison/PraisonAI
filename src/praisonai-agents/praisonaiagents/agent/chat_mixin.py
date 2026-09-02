@@ -4861,7 +4861,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             original_verbose = self.verbose
             self.verbose = False
             memory_prefetch_context = self._prefetch_memory(prompt)
-            
+
+            # Ephemeral attachments (images / data URIs) are turned into a
+            # multimodal prompt here so streaming turns reach vision models too,
+            # matching chat()/achat(). Only the text is stored in history.
+            attachments = kwargs.get('attachments')
+            if attachments:
+                prompt = self._build_multimodal_prompt(prompt, attachments)
+
             # For custom LLM path, use the new get_response_stream generator
             if self._using_custom_llm:
                 # Handle knowledge search
