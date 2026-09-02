@@ -5787,10 +5787,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Set the current agent name for token tracking."""
         self.current_agent_name = agent_name
 
+    def _resolve_openai_compatible_model(self) -> str:
+        """Route a bare model name through the OpenAI-compatible client.
+
+        When a custom ``base_url`` is set but the model has no ``provider/``
+        prefix (e.g. ``deepseek-v4-flash`` against an OpenAI-compatible host),
+        LiteLLM cannot infer a provider and raises "LLM Provider NOT provided".
+        Prefixing ``openai/`` makes LiteLLM use its OpenAI Chat Completions
+        client against the supplied ``base_url``. Anthropic/Gemini/Ollama models
+        are left untouched so their native adapters still apply.
+        """
+        model = self.model
+        if not self.base_url or not isinstance(model, str) or "/" in model:
+            return model
+        if self._detect_provider() != "openai":
+            return model
+        return f"openai/{model}"
+
     def _build_completion_params(self, **override_params) -> Dict[str, Any]:
         """Build parameters for litellm completion calls with all necessary config"""
         params = {
-            "model": self.model,
+            "model": self._resolve_openai_compatible_model(),
         }
         
         # Add optional parameters if they exist
@@ -6102,7 +6119,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
           - tools → ``tools`` (Responses API uses same function schema)
           - temperature, max_tokens, etc. → direct pass-through
         """
-        params: Dict[str, Any] = {"model": self.model}
+        params: Dict[str, Any] = {"model": self._resolve_openai_compatible_model()}
 
         # ── Extract system instructions ─────────────────────────────────
         instructions = None
