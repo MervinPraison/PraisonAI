@@ -15,7 +15,7 @@ import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
-import { createRemoteHttpEngine } from "../../engines/src/remote-http/engine.ts";
+import { createRemoteHttpEngine, probeHealth } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
 import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 
@@ -116,17 +116,24 @@ function stringSetting(settings: SettingsFacade, key: string, fallback: string):
  * is not here, which is the honest message in that case.
  */
 export function enginesFor(deps: RegistryDeps): readonly EngineChoice[] {
+  const baseUrl = stringSetting(deps.settings, "baseUrl", "http://127.0.0.1:8765").replace(/\/+$/, "");
   const choices: EngineChoice[] = [
     {
       id: ENGINE_REMOTE_HTTP,
       create: () =>
         createRemoteHttpEngine({
-          baseUrl: stringSetting(deps.settings, "baseUrl", "http://127.0.0.1:8765").replace(/\/+$/, ""),
+          baseUrl,
           http: deps.http,
           id: ENGINE_REMOTE_HTTP,
           // Refused frames go to the transcript instead of the floor.
           ...(deps.onIgnored === undefined ? {} : { onIgnored: deps.onIgnored }),
         }),
+      // The check the whole readiness module exists for. A 200 with
+      // `{"ok": false}` is the engine saying it is NOT ready, so trusting the
+      // status alone routes a chat into a broken engine and reports the
+      // nonsense back as a model failure. Run at selection, before the engine
+      // is offered -- the in-process engine has no remote and supplies none.
+      probe: () => probeHealth(deps.http, baseUrl),
     },
   ];
 

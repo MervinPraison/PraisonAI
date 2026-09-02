@@ -19,6 +19,7 @@ import { SCRIPTS } from "../../../testing/src/scripts.ts";
 import { encodeSseFrame } from "../../../protocol/src/encode.ts";
 import { PROTOCOL_VERSION } from "../../../protocol/src/version.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
+import type { HttpPort } from "../../../core/src/ports/http.ts";
 
 const BASE = "http://engine.test:8000";
 
@@ -156,6 +157,55 @@ test("remote-http: an unreachable engine is a retryable transport failure, not a
   assert.equal(verdict.ready, false);
   assert.equal(verdict.ready === false && verdict.reason, "transport");
   assert.equal(verdict.ready === false && verdict.retryable, true);
+});
+
+test("remote-http: a probe whose endpoint never answers gives up on the deadline, retryably", async () => {
+  // The probe runs BEFORE the app mounts. An endpoint that accepts the socket
+  // but never sends the response -- a still-binding engine, a black-hole proxy
+  // -- must not pin boot forever: the bounded deadline aborts it and classifies
+  // the timeout as retryable transport, exactly the case worth polling.
+  let aborted = false;
+  const hanging: HttpPort = {
+    sendsFromNative: false,
+    send: (request) =>
+      new Promise((_resolve, reject) => {
+        request.signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      }),
+  };
+  const verdict = await probeHealth(hanging, BASE, undefined, 10);
+  assert.equal(aborted, true, "the deadline must abort the stalled request");
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.ready === false && verdict.reason, "transport");
+  assert.equal(verdict.ready === false && verdict.retryable, true);
+});
+
+test("remote-http: a probe whose body never ends gives up on the deadline", async () => {
+  // The other stall: headers arrive but the /health body never closes. The
+  // reader shares the request signal, so the same deadline unblocks it.
+  let bodyAborted = false;
+  const hangingBody: HttpPort = {
+    sendsFromNative: false,
+    send: async (request) => ({
+      status: 200,
+      headers: {},
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok"'));
+          request.signal.addEventListener("abort", () => {
+            bodyAborted = true;
+            controller.error(new Error("aborted"));
+          });
+        },
+      }),
+    }),
+  };
+  const verdict = await probeHealth(hangingBody, BASE, undefined, 10);
+  assert.equal(bodyAborted, true, "the deadline must abort the stalled body read");
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.ready === false && verdict.reason, "transport");
 });
 
 // ---- frames the decoder refuses ---------------------------------------------
