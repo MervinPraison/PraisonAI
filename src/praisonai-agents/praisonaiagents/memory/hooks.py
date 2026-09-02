@@ -4,6 +4,15 @@ Cascade Hooks System for PraisonAI Agents.
 Provides event hooks similar to Windsurf's Cascade Hooks,
 allowing custom actions before/after agent operations.
 
+.. note::
+   ``HooksManager`` is a **standalone, opt-in utility**: it is NOT auto-wired
+   into the agent/tool execution pipeline. You must construct it and call
+   :meth:`HooksManager.execute` yourself at the point where you want a hook to
+   run (e.g. in a custom tool or wrapper). For hooks that fire automatically
+   around agent tool/LLM calls, use the live ``praisonaiagents.hooks`` package
+   (``HookEvent.BEFORE_TOOL``/``BEFORE_LLM`` via ``HookRunner``, passed to an
+   ``Agent`` through its ``hooks`` argument) instead.
+
 Features:
 - Pre/post hooks for read, write, command, prompt operations
 - JSON configuration (.praisonai/hooks.json)
@@ -86,6 +95,12 @@ class HooksManager:
     
     Hooks are configured in .praisonai/hooks.json and can execute
     scripts before/after agent operations.
+    
+    This is a standalone, opt-in utility. It does not automatically
+    intercept agent file/command/prompt operations; the caller must
+    invoke :meth:`execute` at the desired point. For hooks that fire
+    automatically around agent tool/LLM calls, use the
+    ``praisonaiagents.hooks`` package instead.
     
     Example:
         ```python
