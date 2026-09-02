@@ -65,7 +65,8 @@ class TestSuiteConversion:
         assert case["expected_output"] == "30 days, unused, receipt required"
         assert case["graders"] == ["answer_correct"]
         assert case["metadata"]["tier"] == "gold"
-        assert case["metadata"]["timeout_seconds"] == 15.0
+        assert case["timeout_seconds"] == 15.0
+        assert "timeout_seconds" not in case["metadata"]
 
     def test_from_evalport_shape(self):
         suite = to_evalport(self._pkg())
@@ -108,6 +109,37 @@ class TestSuiteConversion:
         case = to_evalport(pkg)["cases"][0]
         assert "expected_output" not in case
         assert "graders" not in case
+
+    def test_metadata_timeout_key_does_not_corrupt_native_timeout(self):
+        """A user ``metadata['timeout_seconds']`` must not clobber the native one."""
+        pkg = EvalPackage(
+            name="p",
+            cases=[
+                EvalCase(
+                    name="c",
+                    input="x",
+                    metadata={"timeout_seconds": 999},
+                    timeout_seconds=15.0,
+                )
+            ],
+        )
+        case = to_evalport(pkg)["cases"][0]
+        assert case["timeout_seconds"] == 15.0
+        assert case["metadata"]["timeout_seconds"] == 999
+
+        round_tripped = from_evalport(to_evalport(pkg)).cases[0]
+        assert round_tripped.timeout_seconds == 15.0
+        assert round_tripped.metadata["timeout_seconds"] == 999
+
+    def test_external_suite_metadata_timeout_fallback(self):
+        """External suites that only put timeout in metadata still import it."""
+        external = {
+            "name": "hub",
+            "cases": [{"id": "c1", "input": "hi", "metadata": {"timeout_seconds": 45}}],
+        }
+        case = from_evalport(external).cases[0]
+        assert case.timeout_seconds == 45
+        assert case.metadata["timeout_seconds"] == 45
 
 
 class TestResultSetConversion:

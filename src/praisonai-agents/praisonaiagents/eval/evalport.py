@@ -35,7 +35,12 @@ EVALPORT_SPEC_VERSION = "1.0"
 
 
 def _case_to_evalport(case: EvalCase) -> Dict[str, Any]:
-    """Map an ``EvalCase`` to an EvalPort test-case dict."""
+    """Map an ``EvalCase`` to an EvalPort test-case dict.
+
+    The native ``timeout_seconds`` is emitted as a dedicated top-level field so
+    it never collides with a user-supplied ``metadata["timeout_seconds"]`` key,
+    keeping round trips lossless for both.
+    """
     item: Dict[str, Any] = {
         "id": case.name,
         "input": case.input,
@@ -44,18 +49,26 @@ def _case_to_evalport(case: EvalCase) -> Dict[str, Any]:
         item["expected_output"] = case.expected
     if case.criteria:
         item["graders"] = list(case.criteria)
-    metadata = dict(case.metadata or {})
     if case.timeout_seconds is not None:
-        metadata.setdefault("timeout_seconds", case.timeout_seconds)
+        item["timeout_seconds"] = case.timeout_seconds
+    metadata = dict(case.metadata or {})
     if metadata:
         item["metadata"] = metadata
     return item
 
 
 def _case_from_evalport(item: Dict[str, Any]) -> EvalCase:
-    """Map an EvalPort test-case dict to an ``EvalCase``."""
+    """Map an EvalPort test-case dict to an ``EvalCase``.
+
+    Prefers the dedicated top-level ``timeout_seconds`` field; falls back to a
+    ``metadata["timeout_seconds"]`` value for suites emitted by other tools,
+    without mutating the caller's metadata.
+    """
     metadata = dict(item.get("metadata") or {})
-    timeout = metadata.pop("timeout_seconds", 30.0)
+    if "timeout_seconds" in item:
+        timeout = item["timeout_seconds"]
+    else:
+        timeout = metadata.get("timeout_seconds", 30.0)
     return EvalCase(
         name=item.get("id") or item.get("name") or "case",
         input=item.get("input", ""),
