@@ -4450,6 +4450,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 )
                             messages.append(tool_message)
 
+                            # Fire the tool_call display callback so streaming UIs
+                            # see tool activity, matching the non-stream get_response
+                            # path. Without this the streaming branch stayed silent.
+                            try:
+                                _result_str = str(tool_result.result) if tool_result.result is not None else None
+                                _get_display_functions()['execute_sync_callback'](
+                                    'tool_call',
+                                    message=f"Calling function: {tool_result.function_name}",
+                                    tool_name=tool_result.function_name,
+                                    tool_input=tool_result.arguments,
+                                    tool_output=_result_str[:200] if _result_str else None,
+                                    success=tool_result.error is None,
+                                )
+                            except Exception as callback_error:
+                                logging.debug(f"tool_call callback failed: {callback_error}")
+
                         # Report any unparseable tool-call arguments so the
                         # model can re-emit them (never dispatched with {}).
                         for _err_msg in parse_error_messages:
