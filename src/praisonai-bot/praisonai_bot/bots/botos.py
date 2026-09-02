@@ -119,6 +119,7 @@ class BotOS:
         reliability: Optional[str] = None,
         turn_lock: Optional[Any] = None,
         redis_config: Optional[Any] = None,
+        degraded_registry: Optional[Any] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
@@ -209,9 +210,12 @@ class BotOS:
         # ``RedisTurnLock`` so turns serialise cluster-wide across replicas
         # rather than the config being silently inert.
         self._turn_lock_config = turn_lock
+        self._degraded_registry = degraded_registry
         from ._redis_turn_lock import build_turn_lock
 
-        self._turn_lock_map = build_turn_lock(turn_lock, redis_config)
+        self._turn_lock_map = build_turn_lock(
+            turn_lock, redis_config, degraded_registry=degraded_registry
+        )
         self._tasks: List[asyncio.Task] = []
         
         # Initialize delivery router for proactive outbound messaging

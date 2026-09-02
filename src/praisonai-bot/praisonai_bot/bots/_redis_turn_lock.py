@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import uuid
 from typing import Any, Optional
 
@@ -53,37 +52,68 @@ class _RedisLease:
         self._token = uuid.uuid4().hex
         self._local_lock: Optional[asyncio.Lock] = None
         self._have_remote = False
+        self._renew_task: Optional[asyncio.Task] = None
 
     async def __aenter__(self) -> "_RedisLease":
         # Always hold the in-process lock too: it serialises same-process
         # waiters cheaply and is the fail-open fallback when Redis is down.
         self._local_lock = self._lock._local.get(self._local_key)
         await self._local_lock.acquire()
+        # Any failure or cancellation after this point (e.g. BotOS.stop cancels
+        # in-flight bot tasks during the drain window) must release the local
+        # lock — otherwise the held asyncio.Lock is never evicted and every later
+        # turn for this session blocks forever in-process.
+        try:
+            ttl_ms = max(1, int(self._lock._ttl * 1000))
+            poll = self._lock._poll_interval
+            while True:
+                try:
+                    ok = await self._lock._client.set(
+                        self._redis_key, self._token, nx=True, px=ttl_ms
+                    )
+                except Exception as e:  # Redis outage -> fail open on local lock.
+                    self._lock._mark_degraded(str(e))
+                    self._have_remote = False
+                    return self
+                if ok:
+                    self._lock._clear_degraded()
+                    self._have_remote = True
+                    # Renew the lease while the turn runs so a turn longer than
+                    # ``ttl`` never lets another replica claim the same session.
+                    self._renew_task = asyncio.ensure_future(self._renew_loop())
+                    return self
+                # Held by another replica; poll until its lease frees or expires
+                # (the holder's ``px`` TTL guarantees this loop is bounded).
+                await asyncio.sleep(poll)
+        except BaseException:
+            if self._local_lock.locked():
+                self._local_lock.release()
+            raise
+
+    async def _renew_loop(self) -> None:
+        """Extend our lease at ~ttl/3 so a long turn keeps the session (owner-checked)."""
+        interval = max(self._lock._poll_interval, self._lock._ttl / 3.0)
         ttl_ms = max(1, int(self._lock._ttl * 1000))
-        poll = self._lock._poll_interval
-        deadline = time.monotonic() + self._lock._ttl
-        while True:
-            try:
-                ok = await self._lock._client.set(
-                    self._redis_key, self._token, nx=True, px=ttl_ms
-                )
-            except Exception as e:  # Redis outage -> fail open on local lock.
-                self._lock._mark_degraded(str(e))
-                self._have_remote = False
-                return self
-            if ok:
-                self._lock._clear_degraded()
-                self._have_remote = True
-                return self
-            # Held by another replica; wait for it to free or expire.
-            if time.monotonic() >= deadline:
-                # The current holder's lease should have expired by now; loop
-                # again to claim it rather than block a turn indefinitely.
-                deadline = time.monotonic() + self._lock._ttl
-            await asyncio.sleep(poll)
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    await self._lock._renew_remote(
+                        self._redis_key, self._token, ttl_ms
+                    )
+                except Exception as e:  # pragma: no cover - best-effort renewal
+                    logger.debug("Failed to renew redis turn lease: %s", e)
+        except asyncio.CancelledError:  # pragma: no cover - normal teardown
+            pass
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         try:
+            if self._renew_task is not None:
+                self._renew_task.cancel()
+                try:
+                    await self._renew_task
+                except (asyncio.CancelledError, Exception):  # pragma: no cover
+                    pass
             if self._have_remote:
                 try:
                     await self._lock._release_remote(self._redis_key, self._token)
@@ -109,6 +139,13 @@ class RedisTurnLock:
     _RELEASE_LUA = (
         "if redis.call('get', KEYS[1]) == ARGV[1] then "
         "return redis.call('del', KEYS[1]) else return 0 end"
+    )
+
+    # Lua: extend the TTL only if the value still equals our owner token, so a
+    # lease another replica reclaimed after expiry is never extended.
+    _RENEW_LUA = (
+        "if redis.call('get', KEYS[1]) == ARGV[1] then "
+        "return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end"
     )
 
     def __init__(
@@ -155,6 +192,17 @@ class RedisTurnLock:
             current = await self._client.get(redis_key)
             if current == token:
                 await self._client.delete(redis_key)
+
+    async def _renew_remote(self, redis_key: str, token: str, ttl_ms: int) -> None:
+        """Owner-checked lease extension (compare-and-PEXPIRE)."""
+        try:
+            await self._client.eval(self._RENEW_LUA, 1, redis_key, token, ttl_ms)
+        except Exception:
+            # Fallback for clients without eval: renew only if still ours.
+            current = await self._client.get(redis_key)
+            if current == token:
+                # Re-claim (SET without NX) preserving the owner token + TTL.
+                await self._client.set(redis_key, token, px=ttl_ms)
 
     def _mark_degraded(self, reason: str) -> None:
         """Record a degraded turn-lock capability (Issue #4655 fail-open)."""

@@ -14,6 +14,7 @@ wrapper-side ``RedisTurnLock`` / ``build_turn_lock`` with an in-memory fake Redi
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -23,31 +24,64 @@ from praisonaiagents.gateway import TurnLockConfig
 
 
 class FakeRedis:
-    """Minimal async Redis supporting SET NX PX, GET, DEL and EVAL (compare-del).
+    """Minimal async Redis supporting SET NX PX, GET, DEL, PEXPIRE and EVAL.
 
-    Shared by multiple ``RedisTurnLock`` instances to model separate replicas
-    talking to one Redis.
+    Models per-key TTL expiry (``px``) so a lease that is never renewed becomes
+    reclaimable, and shared by multiple ``RedisTurnLock`` instances to model
+    separate replicas talking to one Redis.
     """
 
     def __init__(self) -> None:
         self.store: dict = {}
+        self._expiry: dict = {}
+        self.eval_calls: list = []
+
+    def _expire_if_stale(self, key):
+        exp = self._expiry.get(key)
+        if exp is not None and time.monotonic() >= exp:
+            self.store.pop(key, None)
+            self._expiry.pop(key, None)
 
     async def set(self, key, value, nx=False, px=None):
+        self._expire_if_stale(key)
         if nx and key in self.store:
             return None
         self.store[key] = value
+        if px is not None:
+            self._expiry[key] = time.monotonic() + (px / 1000.0)
+        else:
+            self._expiry.pop(key, None)
         return True
 
     async def get(self, key):
+        self._expire_if_stale(key)
         return self.store.get(key)
 
     async def delete(self, key):
         self.store.pop(key, None)
+        self._expiry.pop(key, None)
         return 1
 
-    async def eval(self, script, numkeys, key, arg):
+    async def pexpire(self, key, px):
+        self._expire_if_stale(key)
+        if key not in self.store:
+            return 0
+        self._expiry[key] = time.monotonic() + (px / 1000.0)
+        return 1
+
+    async def eval(self, script, numkeys, key, *args):
+        self.eval_calls.append((script, key, args))
+        self._expire_if_stale(key)
+        arg = args[0]
+        if "pexpire" in script:
+            if self.store.get(key) == arg:
+                self._expiry[key] = time.monotonic() + (int(args[1]) / 1000.0)
+                return 1
+            return 0
+        # compare-and-del
         if self.store.get(key) == arg:
             self.store.pop(key, None)
+            self._expiry.pop(key, None)
             return 1
         return 0
 
@@ -122,8 +156,50 @@ async def test_redis_turn_lock_release_is_compare_and_del():
 
 
 @pytest.mark.asyncio
-async def test_redis_turn_lock_fails_open_on_outage():
-    """A Redis outage must not wedge a turn: acquire the local lock and mark degraded."""
+async def test_redis_turn_lock_release_leaves_other_owner_key():
+    """Release is owner-checked: a lease reclaimed by another replica survives."""
+    redis = FakeRedis()
+    lock = RedisTurnLock(redis, ttl=5.0, poll_interval=0.01)
+    async with lock.get("k"):
+        # Simulate another replica reclaiming the expired lease mid-turn.
+        (redis_key,) = list(redis.store)
+        redis.store[redis_key] = "other-owner-token"
+    # Our compare-and-del must NOT delete a key we no longer own.
+    assert redis.store.get(redis_key) == "other-owner-token"
+    # And the release went through the atomic EVAL path.
+    assert redis.eval_calls
+
+
+@pytest.mark.asyncio
+async def test_redis_turn_lock_renews_lease_during_long_turn():
+    """A turn longer than ttl keeps the lease via owner-checked renewal."""
+    redis = FakeRedis()
+    lock = RedisTurnLock(redis, ttl=0.06, poll_interval=0.01)
+    async with lock.get("k"):
+        (redis_key,) = list(redis.store)
+        first = redis.store[redis_key]
+        # Run well past ttl; without renewal the key would expire and vanish.
+        await asyncio.sleep(0.2)
+        assert redis.store.get(redis_key) == first  # still ours
+
+
+@pytest.mark.asyncio
+async def test_redis_turn_lock_reclaims_expired_lease():
+    """An unrenewed, expired lease becomes reclaimable (no permanent wedge)."""
+    redis = FakeRedis()
+    a = RedisTurnLock(redis, ttl=0.05, poll_interval=0.01)
+    # Manually plant an expiring lease from a "crashed" holder.
+    redis_key = a._redis_key("k")
+    await redis.set(redis_key, "dead-holder", nx=True, px=50)
+    b = RedisTurnLock(redis, ttl=5.0, poll_interval=0.01)
+    # b must be able to acquire once the dead holder's lease expires.
+    async with b.get("k"):
+        assert redis.store.get(redis_key) != "dead-holder"
+
+
+@pytest.mark.asyncio
+async def test_redis_turn_lock_fails_open_and_serialises_on_outage():
+    """A Redis outage must not wedge a turn and must still serialise in-process."""
     marks = []
 
     class Reg:
@@ -134,6 +210,19 @@ async def test_redis_turn_lock_fails_open_on_outage():
             pass
 
     lock = RedisTurnLock(BoomRedis(), ttl=5.0, poll_interval=0.01, degraded_registry=Reg())
-    async with lock.get("k"):
-        pass  # must not raise, must not hang
+
+    events = []
+
+    async def worker(label):
+        async with lock.get("k"):
+            events.append(f"{label}-enter")
+            await asyncio.sleep(0.03)
+            events.append(f"{label}-exit")
+
+    await asyncio.gather(worker("A"), worker("B"))
+
+    # Even with Redis down, the local lock serialises the two turns.
+    assert events[0].endswith("enter")
+    assert events[1].endswith("exit")
+    assert events[0].split("-")[0] != events[2].split("-")[0]
     assert marks  # degradation surfaced
