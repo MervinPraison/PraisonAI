@@ -41,8 +41,40 @@ import { createFakeShell, PHONE_INSETS } from "../../testing/src/fake-shell.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
 import { createFakeHttp, sseResponse, streamOf } from "../../testing/src/fake-http.ts";
-import { mount } from "./main.ts";
+import { appEngines, mount } from "./main.ts";
+import { ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
+import { createSettingsStore, facadeFor, type SettingsFacade } from "../../core/src/settings/store.ts";
 import type { Platform } from "./platform.ts";
+
+test("the real composition root offers the in-process engine", async () => {
+  // The package's headline capability -- running the agent loop in-process is
+  // the reason praisonai-mobile exists -- and nothing asserted `main.ts` offers
+  // it. `enginesFor` only pushes it when `createInProcess` is supplied, and the
+  // composition root did not supply one, so the whole of engines/praisonai-ts/
+  // was unreachable from the application while its own suite stayed green
+  // (every test that exercises it constructs it directly).
+  const secrets = createFakeSecrets();
+  const store = createSettingsStore(SETTING_DEFS, createFakeStorage(), secrets);
+  await store.load();
+  const settings: SettingsFacade = facadeFor(store, secrets);
+  const persistence = {
+    async record() {
+      return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+  };
+
+  const ids = appEngines({
+    settings,
+    http: createFakeHttp(),
+    persistence,
+    onIgnored: () => {},
+  }).map((c) => c.id);
+
+  assert.ok(ids.includes(ENGINE_PRAISONAI_TS), `only ${ids.join(", ")} on offer`);
+  // And the remote engine is still offered and first, so the default keeps
+  // working with nothing configured.
+  assert.equal(ids[0], ENGINE_REMOTE_HTTP, "the remote engine must stay the default");
+});
 
 const nodeTime = () => ({
   nowMs: () => performance.now(),
