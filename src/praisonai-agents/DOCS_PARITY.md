@@ -33,7 +33,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Code Execution | 2 | 14 | 4855 |
 | ✅ Conditions | 1 | 3 | 1347 |
 | ✅ Configuration | 3 | 8 | 3292 |
-| ✅ Context Management | 16 | 36 | 14073 |
+| ✅ Context Management | 16 | 36 | 14090 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Planning | 6 | 7 | 1825 |
 | ✅ Plugins | 8 | 5 | 3120 |
 | ✅ Prompts | 2 | 9 | 2011 |
-| ✅ Providers | 1 | 56 | 7895 |
+| ✅ Providers | 1 | 57 | 8197 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3118 |
 | ✅ Realtime | 2 | 5 | 668 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (43 docs, 7279 lines)
+- ℹ️ Database (43 docs, 7293 lines)
 - ℹ️ Documents (1 docs, 798 lines)
 
 ---
