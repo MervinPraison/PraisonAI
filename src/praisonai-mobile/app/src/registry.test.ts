@@ -8,11 +8,14 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import {
+  CONSUMED_SETTING_KEYS,
   ENGINE_PRAISONAI_TS,
   ENGINE_REMOTE_HTTP,
-  OPENAI_KEY,
   SETTING_DEFS,
   enginesFor,
 } from "./registry.ts";
@@ -121,30 +124,78 @@ test("the default engine is one that works with nothing configured", async () =>
   assert.equal(def?.default, ENGINE_REMOTE_HTTP);
 });
 
-test("the api key is the only secret, and it is secret", async () => {
+// The files that actually read a setting in the shipping composition. A key is
+// "consumed" only if it appears here as a literal passed to the store -- not
+// merely because someone listed it. `boot.ts` reads `engineId`
+// (`chosenStringOr(settings, "engineId", ...)`); `registry.ts` reads `baseUrl`
+// (`stringSetting(deps.settings, "baseUrl", ...)`). Test files are excluded on
+// purpose: a fixture that reads a key does not make the app read it.
+const CONSUMER_SOURCES = ["boot.ts", "registry.ts"] as const;
+
+/** True when `key` is passed as a string literal to a settings read in any
+ *  shipping consumer source -- i.e. the app genuinely reads it, not just
+ *  declares it. Derived from the source so a key added to a declaration
+ *  without a real reader cannot pass. */
+function keyIsReadInSource(key: string): boolean {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // A read is `settings.get("key")`, `settings.isSet("key")`, or the same key
+  // handed to one of the string helpers as their `key` argument. Matching the
+  // quoted literal against these call shapes is what ties "declared" to "read".
+  const reads = [
+    new RegExp(`\\.(?:get|isSet)\\(\\s*["']${key}["']`),
+    new RegExp(`(?:stringSetting|chosenStringOr)\\([^)]*["']${key}["']`),
+  ];
+  return CONSUMER_SOURCES.some((file) => {
+    const source = readFileSync(join(here, file), "utf8");
+    return reads.some((re) => re.test(source));
+  });
+}
+
+test("every key in CONSUMED_SETTING_KEYS is actually read by the shipping source", () => {
+  // The half Qodo flagged: comparing SETTING_DEFS to a hand-maintained twin
+  // list lets an inert key pass by being added to both. This pins the list to
+  // reality -- a key here that no consumer reads fails, so CONSUMED_SETTING_KEYS
+  // cannot be padded to smuggle an unread setting past the check below.
+  for (const key of CONSUMED_SETTING_KEYS) {
+    assert.ok(
+      keyIsReadInSource(key),
+      `${key} is listed as consumed but no shipping source reads it`,
+    );
+  }
+});
+
+test("every declared setting is one the app actually reads", async () => {
+  // A setting nobody reads is a control that does nothing when a user moves it
+  // -- a promise the UI makes and the app does not keep (issue #4636). Five
+  // were declared ahead of consumers that do not exist: `model`,
+  // `temperature`, `showReasoning`, `showDiagnostics` and `apiKey`. They are
+  // removed rather than half-wired. Each declared key must appear in a real
+  // read in shipping source -- so re-adding an inert one, or declaring a new
+  // setting without also wiring a consumer, fails here even if the author also
+  // adds it to CONSUMED_SETTING_KEYS.
+  for (const def of SETTING_DEFS) {
+    assert.ok(
+      keyIsReadInSource(def.key),
+      `${def.key} is declared but no shipping source reads it`,
+    );
+  }
+  // And the authored list stays honest against the declarations: no consumed
+  // key without a def, no def missing from the list.
+  assert.deepEqual(
+    SETTING_DEFS.map((d) => d.key).sort(),
+    [...CONSUMED_SETTING_KEYS].sort(),
+  );
+});
+
+test("there are no secret settings, so no secret is declared and never written", async () => {
+  // `apiKey` was the sharp one: `setSecret` is the only way in and nothing
+  // outside tests called it, so a configured key could never be written -- and
+  // even if it were, `enginesFor` never passed a `token`, so the Authorization
+  // header was never sent. A secret nobody can write and nothing reads is worse
+  // than absent. The store's secret machinery stays (contract-tested); it is
+  // the *declaration* that has no consumer.
   const secrets = SETTING_DEFS.filter((d) => d.secret === true).map((d) => d.key);
-  assert.deepEqual(secrets, ["apiKey"]);
-});
-
-test("the api key cannot be written through the ordinary path", async () => {
-  // The guarantee, asserted against the REAL registry rather than a fixture --
-  // a def that forgot `secret: true` would put a live key in a plain file.
-  const { store, storage } = await build();
-  assert.equal(await store.set("apiKey", "sk-live-leak"), false);
-  const written = await storage.read({ namespace: "settings", id: "app" });
-  assert.equal(written === null || !written.includes("sk-live-leak"), true);
-});
-
-test("temperature is clamped rather than accepted blindly", async () => {
-  const { store } = await build();
-  await store.set("temperature", 99);
-  assert.equal(store.get("temperature"), 2);
-});
-
-test("the secret ref is stable", async () => {
-  // It is the keychain lookup. Changing it silently orphans every key already
-  // stored on a device.
-  assert.deepEqual(OPENAI_KEY, { slot: "openai", account: "default" });
+  assert.deepEqual(secrets, []);
 });
 
 // ---- the refusal callback has to actually reach the engine ------------------
