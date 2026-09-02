@@ -2585,86 +2585,15 @@ class ToolExecutionMixin:
             return policy_result  # Error dict
         _, arguments = policy_result
 
-        # Special handling for MCP tools
-        # Check if tools is an MCP instance with the requested function name
-        MCP = None
-        try:
-            from ..mcp.mcp import MCP
-        except ImportError:
-            pass  # MCP not available
-        
-        # Normalize MCP transport/timeout failures (returned as bare "Error: ..."
-        # strings by MCPClient.call_tool) into the same {"error": ...} dict shape
-        # used by native tools, so they participate in retry, doom-loop detection
-        # and circuit-breaking instead of looking like a successful string result.
-        #
-        # IMPORTANT: a successful MCP tool may legitimately return text that
-        # begins with "Error: " (e.g. a linter/grep/echo tool). To avoid
-        # misclassifying valid output as a failure, we only convert MCP's own
-        # unambiguous internally-generated failure signatures, not any string
-        # that merely starts with the "Error: " prefix.
-        def _normalize_mcp_result(res):
-            if not isinstance(res, str) or not res.startswith("Error: "):
-                return res
-            message = res[len("Error: "):]
-            # MCP-internal timeout messages are unambiguous:
-            #   "MCP tool call timed out after Ns"
-            #   "MCP initialization timed out after Ns"
-            is_mcp_timeout = (
-                message.startswith("MCP tool call timed out after")
-                or message.startswith("MCP initialization timed out after")
-            )
-            if is_mcp_timeout:
-                return {"error": message, "timeout": True}
-            return res
-
-        # Helper function to execute MCP tool
-        def _execute_mcp_tool(mcp_instance, func_name, args):
-            """Execute a tool from an MCP instance."""
-            # Handle SSE MCP client
-            if hasattr(mcp_instance, 'is_sse') and mcp_instance.is_sse:
-                if hasattr(mcp_instance, 'sse_client'):
-                    for tool in mcp_instance.sse_client.tools:
-                        if tool.name == func_name:
-                            logging.debug(f"Found matching SSE MCP tool: {func_name}")
-                            return True, tool(**args)
-            # Handle HTTP Stream MCP client
-            if hasattr(mcp_instance, 'is_http_stream') and mcp_instance.is_http_stream:
-                if hasattr(mcp_instance, 'http_stream_client'):
-                    for tool in mcp_instance.http_stream_client.tools:
-                        if tool.name == func_name:
-                            logging.debug(f"Found matching HTTP Stream MCP tool: {func_name}")
-                            return True, tool(**args)
-            # Handle WebSocket MCP client
-            if hasattr(mcp_instance, 'is_websocket') and mcp_instance.is_websocket:
-                if hasattr(mcp_instance, 'websocket_client'):
-                    for tool in mcp_instance.websocket_client.tools:
-                        if tool.name == func_name:
-                            logging.debug(f"Found matching WebSocket MCP tool: {func_name}")
-                            return True, tool(**args)
-            # Handle stdio MCP client
-            if hasattr(mcp_instance, 'runner'):
-                for mcp_tool in mcp_instance.runner.tools:
-                    if hasattr(mcp_tool, 'name') and mcp_tool.name == func_name:
-                        logging.debug(f"Found matching MCP tool: {func_name}")
-                        return True, mcp_instance.runner.call_tool(func_name, args)
-            return False, None
-        
-        # Check if tools is a single MCP instance
-        if MCP is not None and isinstance(self.tools, MCP):
-            logging.debug(f"Looking for MCP tool {function_name}")
-            found, result = _execute_mcp_tool(self.tools, function_name, arguments)
-            if found:
-                return _normalize_mcp_result(result)
-        
-        # Check if tools is a list that may contain MCP instances
-        if isinstance(self.tools, (list, tuple)):
-            for tool in self.tools:
-                if MCP is not None and isinstance(tool, MCP):
-                    logging.debug(f"Looking for MCP tool {function_name} in MCP instance")
-                    found, result = _execute_mcp_tool(tool, function_name, arguments)
-                    if found:
-                        return _normalize_mcp_result(result)
+        # Resolve MCP-backed tools via the shared helper (also used by the async
+        # path) so chat()/achat() behave identically for MCP tool calls. MCP
+        # transport/timeout failures are normalized (via the shared
+        # _normalize_mcp_result) into a native {"error": ..., "timeout": True}
+        # dict so they participate in retry/doom-loop/circuit handling instead of
+        # looking like a successful string result.
+        found, result = self._resolve_mcp_tool_result(function_name, arguments)
+        if found:
+            return self._normalize_mcp_result(result)
 
         # Try to find the function in the agent's tools list first
         func = None
@@ -2698,21 +2627,10 @@ class ToolExecutionMixin:
         if func is None:
             # Tool not found in declared tools or registry — do not fall back to
             # globals() or __main__ as that allows undeclared callables to execute.
-            # Cheap, deterministic self-repair: the model often emits a name that
-            # only differs by case/separator (e.g. 'WebSearch' -> 'web_search').
-            # Build a normalised index of the agent's active tools and re-match.
-            def _norm(n):
-                return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
-
-            normalised = {}
-            for name, tool in self._iter_active_named_tools():
-                normalised.setdefault(_norm(name), []).append((name, tool))
-            match = normalised.get(_norm(function_name))
-            if match and len(match) == 1:
-                matched_name, func = match[0]
-                logging.debug(
-                    f"Self-repaired tool name {function_name!r} -> {matched_name!r}"
-                )
+            # Cheap, deterministic self-repair via the shared helper (also used by
+            # the async path): the model often emits a name that only differs by
+            # case/separator (e.g. 'WebSearch' -> 'web_search').
+            func = self._self_repair_tool_name(function_name)
 
         if func:
             bind_target = func
@@ -2742,6 +2660,16 @@ class ToolExecutionMixin:
                     scoped["idempotency_key"] = durable_key
                     return scoped
 
+                # Any of the callables below (BaseTool.run, LangChain .run,
+                # CrewAI ._run, or a plain function) may be `async def`. On this
+                # sync tool-calling path we must await it, otherwise a bare
+                # un-awaited coroutine is handed to the model as the tool result
+                # and the tool body never runs (silent data loss).
+                def _resolve_result(value):
+                    if inspect.iscoroutine(value):
+                        return self._run_async_in_sync_context(value)
+                    return value
+
                 # BaseTool instances (plugin system) - call run() method
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
@@ -2749,7 +2677,7 @@ class ToolExecutionMixin:
                     keyed_arguments = _with_durable_key(func.run, arguments)
                     casted_arguments = self._cast_arguments(func.run, keyed_arguments)
                     bind_arguments = casted_arguments
-                    return func.run(**casted_arguments)
+                    return _resolve_result(func.run(**casted_arguments))
                 
                 # Langchain: If it's a class with run but not _run, instantiate and call run
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
@@ -2761,7 +2689,7 @@ class ToolExecutionMixin:
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance.run, run_params)
                     bind_arguments = casted_params
-                    return instance.run(**casted_params)
+                    return _resolve_result(instance.run(**casted_params))
 
                 # CrewAI: If it's a class with an _run method, instantiate and call _run
                 elif inspect.isclass(func) and hasattr(func, '_run'):
@@ -2773,7 +2701,7 @@ class ToolExecutionMixin:
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance._run, run_params)
                     bind_arguments = casted_params
-                    return instance._run(**casted_params)
+                    return _resolve_result(instance._run(**casted_params))
 
                 # Otherwise treat as regular function
                 elif callable(func):
@@ -2781,7 +2709,7 @@ class ToolExecutionMixin:
                     keyed_arguments = _with_durable_key(func, arguments)
                     casted_arguments = self._cast_arguments(func, keyed_arguments)
                     bind_arguments = casted_arguments
-                    return func(**casted_arguments)
+                    return _resolve_result(func(**casted_arguments))
             except Exception as e:
                 error_msg = str(e)
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
@@ -2931,6 +2859,103 @@ class ToolExecutionMixin:
         """Names of the agent's currently active tools, for corrective feedback."""
         names = [name for name, _tool in self._iter_active_named_tools()]
         return sorted(set(names))
+
+    @staticmethod
+    def _normalize_mcp_result(res):
+        """Normalize MCP transport/timeout failures into a native error dict.
+
+        ``MCPClient.call_tool`` surfaces transport/timeout failures as bare
+        ``"Error: ..."`` strings. Converting MCP's own unambiguous
+        internally-generated timeout signatures into ``{"error": ..., "timeout":
+        True}`` lets them participate in retry, doom-loop detection and circuit
+        breaking instead of looking like a successful string result. Shared by
+        the sync (``_execute_tool_impl``) and async (``_execute_tool_async_impl``)
+        paths so achat()/chat() classify an MCP timeout identically.
+
+        A successful MCP tool may legitimately return text starting with
+        ``"Error: "`` (e.g. a linter/grep/echo tool), so only MCP's own
+        unambiguous timeout messages are converted, never any string that merely
+        starts with the prefix.
+        """
+        if not isinstance(res, str) or not res.startswith("Error: "):
+            return res
+        message = res[len("Error: "):]
+        is_mcp_timeout = (
+            message.startswith("MCP tool call timed out after")
+            or message.startswith("MCP initialization timed out after")
+        )
+        if is_mcp_timeout:
+            return {"error": message, "timeout": True}
+        return res
+
+    def _resolve_mcp_tool_result(self, function_name, arguments):
+        """Resolve an MCP-backed tool and return ``(found, result)``.
+
+        Shared by the sync (``_execute_tool_impl``) and async
+        (``_execute_tool_async_impl``) paths so an MCP tool call behaves
+        identically regardless of chat()/achat(). Returns ``(False, None)``
+        when no MCP tool matches. The ``result`` may be awaitable (the async
+        caller awaits it); the sync caller normalizes/returns it directly.
+        """
+        MCP = None
+        try:
+            from ..mcp.mcp import MCP
+        except ImportError:
+            return False, None
+
+        def _execute_mcp_tool(mcp_instance, func_name, args):
+            if hasattr(mcp_instance, 'is_sse') and mcp_instance.is_sse:
+                if hasattr(mcp_instance, 'sse_client'):
+                    for tool in mcp_instance.sse_client.tools:
+                        if tool.name == func_name:
+                            return True, tool(**args)
+            if hasattr(mcp_instance, 'is_http_stream') and mcp_instance.is_http_stream:
+                if hasattr(mcp_instance, 'http_stream_client'):
+                    for tool in mcp_instance.http_stream_client.tools:
+                        if tool.name == func_name:
+                            return True, tool(**args)
+            if hasattr(mcp_instance, 'is_websocket') and mcp_instance.is_websocket:
+                if hasattr(mcp_instance, 'websocket_client'):
+                    for tool in mcp_instance.websocket_client.tools:
+                        if tool.name == func_name:
+                            return True, tool(**args)
+            if hasattr(mcp_instance, 'runner'):
+                for mcp_tool in mcp_instance.runner.tools:
+                    if hasattr(mcp_tool, 'name') and mcp_tool.name == func_name:
+                        return True, mcp_instance.runner.call_tool(func_name, args)
+            return False, None
+
+        if isinstance(self.tools, MCP):
+            found, result = _execute_mcp_tool(self.tools, function_name, arguments)
+            if found:
+                return True, result
+        if isinstance(self.tools, (list, tuple)):
+            for tool in self.tools:
+                if isinstance(tool, MCP):
+                    found, result = _execute_mcp_tool(tool, function_name, arguments)
+                    if found:
+                        return True, result
+        return False, None
+
+    def _self_repair_tool_name(self, function_name):
+        """Case/separator-insensitive re-match of a hallucinated tool name.
+
+        Returns the matched tool object when exactly one active tool normalizes
+        to the same key (e.g. 'WebSearch' -> 'web_search'), else ``None``.
+        Shared by the sync and async tool-resolution paths.
+        """
+        def _norm(n):
+            return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
+
+        normalised = {}
+        for name, tool in self._iter_active_named_tools():
+            normalised.setdefault(_norm(name), []).append((name, tool))
+        match = normalised.get(_norm(function_name))
+        if match and len(match) == 1:
+            matched_name, tool = match[0]
+            logging.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
+            return tool
+        return None
 
     def _resolve_callable_signature_target(self, func):
         """Return the callable whose signature describes ``func``'s arguments."""

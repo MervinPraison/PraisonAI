@@ -53,6 +53,11 @@ class HookRegistry:
         }
         self._enabled = enabled
         self._global_timeout = 60.0
+        # Guard mutation/iteration of the per-event hook lists. The default
+        # registry is a cross-agent process-wide singleton, so a plugin
+        # (un)registering a hook on one thread can race a get_hooks() iteration
+        # on another. RLock keeps re-entrant calls (register -> register_*) safe.
+        self._lock = threading.RLock()
     
     @property
     def enabled(self) -> bool:
@@ -74,7 +79,8 @@ class HookRegistry:
         Returns:
             The hook ID
         """
-        self._hooks[hook.event].append(hook)
+        with self._lock:
+            self._hooks[hook.event].append(hook)
         logger.debug(f"Registered hook '{hook.name}' for event '{hook.event.value}'")
         return hook.id
     
@@ -214,12 +220,13 @@ class HookRegistry:
         Returns:
             True if found and removed, False otherwise
         """
-        for event in HookEvent:
-            for i, hook in enumerate(self._hooks[event]):
-                if hook.id == hook_id:
-                    self._hooks[event].pop(i)
-                    logger.debug(f"Unregistered hook '{hook_id}'")
-                    return True
+        with self._lock:
+            for event in HookEvent:
+                for i, hook in enumerate(self._hooks[event]):
+                    if hook.id == hook_id:
+                        self._hooks[event].pop(i)
+                        logger.debug(f"Unregistered hook '{hook_id}'")
+                        return True
         return False
     
     def get_hooks(
@@ -240,7 +247,11 @@ class HookRegistry:
         if not self._enabled:
             return []
         
-        hooks = self._hooks.get(event, [])
+        # Snapshot under the lock so callers never iterate the live, mutable
+        # list (a concurrent unregister()/clear() could otherwise raise
+        # "list changed size during iteration" or skip/duplicate a hook).
+        with self._lock:
+            hooks = list(self._hooks.get(event, []))
         
         if target is None:
             return [h for h in hooks if h.enabled]
@@ -258,11 +269,12 @@ class HookRegistry:
         Args:
             event: Optional event to clear hooks for
         """
-        if event is None:
-            for e in HookEvent:
-                self._hooks[e] = []
-        else:
-            self._hooks[event] = []
+        with self._lock:
+            if event is None:
+                for e in HookEvent:
+                    self._hooks[e] = []
+            else:
+                self._hooks[event] = []
     
     def list_hooks(self) -> Dict[str, List[Dict]]:
         """
@@ -290,20 +302,22 @@ class HookRegistry:
     
     def enable_hook(self, hook_id: str) -> bool:
         """Enable a specific hook."""
-        for event in HookEvent:
-            for hook in self._hooks[event]:
-                if hook.id == hook_id:
-                    hook.enabled = True
-                    return True
+        with self._lock:
+            for event in HookEvent:
+                for hook in self._hooks[event]:
+                    if hook.id == hook_id:
+                        hook.enabled = True
+                        return True
         return False
     
     def disable_hook(self, hook_id: str) -> bool:
         """Disable a specific hook."""
-        for event in HookEvent:
-            for hook in self._hooks[event]:
-                if hook.id == hook_id:
-                    hook.enabled = False
-                    return True
+        with self._lock:
+            for event in HookEvent:
+                for hook in self._hooks[event]:
+                    if hook.id == hook_id:
+                        hook.enabled = False
+                        return True
         return False
     
     def set_global_timeout(self, timeout: float):

@@ -1712,6 +1712,27 @@ Write the complete compiled report:"""
                     return policy_result  # Error dict
                 _, arguments = policy_result
 
+            # MCP tools first — parity with the sync path (_execute_tool_impl).
+            # Without this an MCP-backed tool call hard-fails via achat()/astart().
+            # Only consult MCP when searching the agent's own tools (no override),
+            # matching the sync path which resolves MCP against self.tools.
+            if tools_override is None:
+                resolve_mcp = getattr(self, "_resolve_mcp_tool_result", None)
+                if resolve_mcp is not None:
+                    found, mcp_result = resolve_mcp(function_name, arguments)
+                    if found:
+                        if inspect.isawaitable(mcp_result):
+                            mcp_result = await mcp_result
+                        # Normalize MCP transport/timeout failures into a native
+                        # error dict — parity with the sync path so an async MCP
+                        # timeout classifies as a retryable failure instead of
+                        # being handed to the model as a bare "Error: ..." string
+                        # that looks like a successful result.
+                        normalize_mcp = getattr(self, "_normalize_mcp_result", None)
+                        if normalize_mcp is not None:
+                            mcp_result = normalize_mcp(mcp_result)
+                        return mcp_result
+
             # Try to find the function in the override tools list first, then agent's tools list.
             # Resolve by BaseTool/FunctionTool ``.name`` (instances like BrowserBaseTool or
             # aliased decorated tools), plain callable ``__name__``, or class name so async
@@ -1730,8 +1751,36 @@ Write the complete compiled report:"""
                    (inspect.isclass(tool) and tool.__name__ == function_name):
                     func = tool
                     break
-            
+
+            # Name self-repair — parity with the sync path. A slightly hallucinated
+            # tool name (e.g. 'WebSearch' for 'web_search') is re-matched instead of
+            # hard-failing. Only over the agent's own active tools (no override).
+            if func is None and tools_override is None:
+                repair = getattr(self, "_self_repair_tool_name", None)
+                if repair is not None:
+                    func = repair(function_name)
+
             if func is None:
+                # Corrective, model-readable message with the available tools and a
+                # closest-match hint, mirroring the sync path so the model can retry.
+                available = None
+                if hasattr(self, "_available_active_tool_names"):
+                    try:
+                        available = self._available_active_tool_names()
+                    except Exception:
+                        available = None
+                if available is not None:
+                    suggestion = None
+                    try:
+                        import difflib
+                        near = difflib.get_close_matches(function_name, available, n=1, cutoff=0.5)
+                        suggestion = near[0] if near else None
+                    except Exception:
+                        pass
+                    hint = f" Did you mean '{suggestion}'?" if suggestion else ""
+                    error_msg = f"Tool '{function_name}' not found.{hint} Available tools: {available}"
+                    logging.error(error_msg)
+                    return {"error": error_msg, "available_tools": available}
                 logging.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
 
