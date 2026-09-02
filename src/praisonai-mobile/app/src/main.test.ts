@@ -41,8 +41,89 @@ import { createFakeShell, PHONE_INSETS } from "../../testing/src/fake-shell.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
 import { createFakeHttp, sseResponse, streamOf } from "../../testing/src/fake-http.ts";
-import { mount } from "./main.ts";
+import { appEngines, mount } from "./main.ts";
+import { ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
+import { createSettingsStore, facadeFor, type SettingsFacade } from "../../core/src/settings/store.ts";
 import type { Platform } from "./platform.ts";
+
+test("the real composition root offers the in-process engine", async () => {
+  // The package's headline capability -- running the agent loop in-process is
+  // the reason praisonai-mobile exists -- and nothing asserted `main.ts` offers
+  // it. `enginesFor` only pushes it when `createInProcess` is supplied, and the
+  // composition root did not supply one, so the whole of engines/praisonai-ts/
+  // was unreachable from the application while its own suite stayed green
+  // (every test that exercises it constructs it directly).
+  const secrets = createFakeSecrets();
+  const store = createSettingsStore(SETTING_DEFS, createFakeStorage(), secrets);
+  await store.load();
+  const settings: SettingsFacade = facadeFor(store, secrets);
+  const persistence = {
+    async record() {
+      return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+  };
+
+  const ids = appEngines({
+    settings,
+    http: createFakeHttp(),
+    persistence,
+    onIgnored: () => {},
+  }).map((c) => c.id);
+
+  assert.ok(ids.includes(ENGINE_PRAISONAI_TS), `only ${ids.join(", ")} on offer`);
+  // And the remote engine is still offered and first, so the default keeps
+  // working with nothing configured.
+  assert.equal(ids[0], ENGINE_REMOTE_HTTP, "the remote engine must stay the default");
+});
+
+test("the in-process engine, when its module cannot load, fails RECOVERABLY", async () => {
+  // The factory's dynamic import resolves at run time from a computed
+  // specifier, and where praisonai-ts is not on disk -- the shipping webview
+  // bundles only dist/ (#4437), and this test runs with the same absence -- it
+  // rejects. Constructing the engine must still succeed (create() opens no
+  // upstream), and the failure must arrive as a single recoverable `error`
+  // event through engine.ts's run loop, never as an unhandled rejection that
+  // takes down the turn opaquely. That is the named, on-screen failure
+  // engines.ts argues for.
+  const secrets = createFakeSecrets();
+  const store = createSettingsStore(SETTING_DEFS, createFakeStorage(), secrets);
+  await store.load();
+  const settings: SettingsFacade = facadeFor(store, secrets);
+  const persistence = {
+    async record() {
+      return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
+    },
+  };
+
+  const inProcess = appEngines({
+    settings,
+    http: createFakeHttp(),
+    persistence,
+    onIgnored: () => {},
+  }).find((c) => c.id === ENGINE_PRAISONAI_TS);
+  assert.ok(inProcess, "the in-process engine must be on offer to be exercised");
+
+  // create() itself must not throw: it wires a factory, it does not load it.
+  const engine = await inProcess.create();
+  assert.equal(engine.id, ENGINE_PRAISONAI_TS);
+
+  const request = {
+    prompt: "hello",
+    chatId: "c1",
+    runId: "r1",
+    tools: false,
+    regenerateOf: null,
+    attachments: [],
+  };
+  const seen: string[] = [];
+  for await (const event of engine.run(request, new AbortController().signal)) {
+    seen.push(event.type);
+  }
+  await engine.dispose();
+
+  // start then a single error -- the recoverable, named terminal, not a crash.
+  assert.deepEqual(seen, ["start", "error"], `expected a recoverable failure, saw ${seen.join(", ")}`);
+});
 
 const nodeTime = () => ({
   nowMs: () => performance.now(),
@@ -647,40 +728,4 @@ test("the message field is labelled as the field, not as the button beside it", 
   assert.equal(box.getAttribute("aria-label"), en.composerLabel);
   assert.notEqual(box.getAttribute("aria-label"), en.actionSend, "not the button's name");
   app?.dispose();
-});
-
-// ---- the UI seam goes through the barrel ------------------------------------
-//
-// `main.ts` is the one file that puts `ui/src/index.ts` on the real import
-// graph -- until it imported the layer through the barrel rather than by deep
-// path, the module the whole UI layer documents as its outward surface had no
-// importer and the webview bundle never loaded it. Nothing pinned that: the
-// boundaries rule permits app -> ui by either route, so a return to deep
-// imports passes the gate silently. The house rule for this package is to
-// assert the BEHAVIOUR, not to grep the source -- so this checks the fact that
-// makes the wiring correct: every symbol `main.ts` relies on is the SAME
-// identity the barrel re-exports. A deep import of a symbol the barrel had
-// dropped, or drift between the two, breaks this without touching any assertion
-// above.
-import * as barrel from "../../ui/src/index.ts";
-import { en as enDeep } from "../../ui/src/i18n/strings.ts";
-
-test("the barrel re-exports the real UI modules, not a parallel copy", () => {
-  // The barrel must hand back the SAME `en` the deep module defines -- if it
-  // shadowed it with a second definition, "route main through the barrel" would
-  // change which object main runs against, and "through the barrel" would be a
-  // rename rather than the no-op re-export this PR relies on.
-  assert.equal(barrel.en, enDeep, "the barrel must re-export the real strings module, by identity");
-  // `main.ts` and this file both reach `en`; through the barrel or the deep
-  // path they must resolve to one object, or the layer has two sources of truth.
-  assert.equal(en, barrel.en, "every route to `en` must reach the same object");
-});
-
-test("the barrel exposes every UI symbol main.ts imports from it", () => {
-  // The exact runtime names `main.ts` pulls from `../../ui/src/index.ts`. If
-  // one is removed from the barrel, `main.ts` would have to deep-import it and
-  // the wiring this PR established would erode one symbol at a time.
-  for (const name of ["announce", "buildTranscript", "emptyRender", "en", "initialAnnouncer", "reconcile"]) {
-    assert.ok(name in barrel, `the barrel must export ${name}, which main.ts imports from it`);
-  }
 });

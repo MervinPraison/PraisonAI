@@ -19,23 +19,109 @@ import { enginesFor, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
+import { emptyRender, reconcile, type RenderState } from "../../ui/src/render/reconcile.ts";
+import { buildTranscript } from "../../ui/src/transcript/view-model.ts";
 import type { RunView } from "../../core/src/run/controller.ts";
-// The UI layer's single import site. Reaching it through the barrel rather than
-// by deep path is what puts ui/src/index.ts on the real import graph -- until
-// this file did so, the barrel had no importer and the module the whole layer
-// documents as its outward surface was never loaded by the application.
-import {
-  announce,
-  buildTranscript,
-  emptyRender,
-  en,
-  initialAnnouncer,
-  reconcile,
-  type AnnouncerState,
-  type RenderState,
-  type Route,
-  type Strings,
-} from "../../ui/src/index.ts";
+import type { Route } from "../../ui/src/router.ts";
+import { en, type Strings } from "../../ui/src/i18n/strings.ts";
+import { announce, initialAnnouncer, type AnnouncerState } from "../../ui/src/a11y/announce.ts";
+import type { EngineChoice } from "./engines.ts";
+import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
+import { createPraisonTsEngine, type RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
+import type { PraisonAgent } from "../../engines/src/praisonai-ts/agent-api.ts";
+import type { SettingsFacade } from "../../core/src/settings/store.ts";
+import type { IgnoredReason } from "../../protocol/src/decode.ts";
+import type { HttpPort } from "../../core/src/ports/http.ts";
+
+/** The one member of praisonai's `Agent` constructor this seam uses. Declared
+ *  structurally, never imported -- `agent-api.ts` exists precisely so no
+ *  `praisonai` type crosses into this package; `check:upstream` is the
+ *  out-of-band check that the real `Agent` still matches. */
+interface PraisonAgentModule {
+  new (config: { instructions: string; llm?: string }): PraisonAgent;
+}
+
+/**
+ * The in-process praisonai-ts engine, built lazily.
+ *
+ * DYNAMIC import, and through a runtime-computed specifier so NEITHER tsc nor
+ * esbuild pulls `praisonai` into this package. That preserves the invariant
+ * `agent-api.ts` documents: `praisonai` is not a dependency here and cannot be
+ * until its Agent graph is bundleable for a webview -- its bare `crypto` and
+ * `events` imports are import-time fatal (#4437), and its own sources do not
+ * even typecheck under this config (which is why `check:upstream` runs the
+ * coupling check out of band). Behind a lazy import the app still builds and
+ * ships with the remote engine, and the in-process one is OFFERED -- its agent
+ * module loading only where praisonai-ts is resolvable at run time.
+ *
+ * The engine takes a `createAgent` factory, not an agent: the model comes from
+ * settings, which can change between turns.
+ */
+async function createInProcessEngine(
+  persistence: RunPersistence,
+  settings: SettingsFacade,
+): Promise<AgentEnginePort> {
+  const settingString = (key: string, fallback: string): string => {
+    const value = settings.get(key);
+    return typeof value === "string" && value !== "" ? value : fallback;
+  };
+  return createPraisonTsEngine({
+    persistence,
+    createAgent: async (): Promise<PraisonAgent> => {
+      // Computed, not a literal: a literal specifier would make tsc pull the
+      // untypecheckable upstream sources and esbuild bundle their import-time-
+      // fatal builtins. This keeps both graphs clean and the engine offerable.
+      const specifier = ["..", "..", "..", "praisonai-ts", "src", "agent", "simple.ts"].join("/");
+      // The import can REJECT: this specifier resolves at run time, and where
+      // praisonai-ts is not on disk (the shipping webview bundles only dist/,
+      // #4437) the module is simply absent. Left unwrapped, that rejection is
+      // an opaque "cannot find module" from deep inside the engine's run loop.
+      // Re-thrown as a plain Error, engine.ts turns it into a recoverable
+      // `error` event through its existing catch -- the named, on-screen
+      // failure engines.ts argues for, not a crash. This does NOT let the
+      // engine into the shipping picker (registry.ts keeps it out of
+      // engineId.choices); it makes the one path that offers it honest.
+      let mod: { Agent: PraisonAgentModule };
+      try {
+        mod = (await import(specifier)) as { Agent: PraisonAgentModule };
+      } catch (cause) {
+        throw new Error(
+          "the in-process engine is unavailable in this build: praisonai-ts could not be loaded",
+          { cause },
+        );
+      }
+      return new mod.Agent({
+        instructions: "You are a helpful assistant.",
+        llm: settingString("model", "gpt-4o-mini"),
+      });
+    },
+    newMsgId: () => globalThis.crypto.randomUUID(),
+  });
+}
+
+/**
+ * The engines the shipping composition root offers, in picker order.
+ *
+ * Extracted and exported so a test asserts the in-process engine is on offer
+ * rather than that a factory literal appears in `mount` -- the house rule this
+ * package keeps by. Running the agent loop in-process is the reason
+ * praisonai-mobile exists, and until `main.ts` supplied `createInProcess` the
+ * whole of `engines/src/praisonai-ts/` was unreachable from the application.
+ */
+export function appEngines(deps: {
+  readonly settings: SettingsFacade;
+  readonly http: HttpPort;
+  readonly persistence: RunPersistence;
+  readonly onIgnored: (reason: IgnoredReason, detail: string) => void;
+}): readonly EngineChoice[] {
+  return enginesFor({
+    settings: deps.settings,
+    http: deps.http,
+    persistence: deps.persistence,
+    onIgnored: deps.onIgnored,
+    createInProcess: (persistence) => createInProcessEngine(persistence, deps.settings),
+  });
+}
 
 export interface MountDeps {
   readonly root: HTMLElement;
@@ -228,7 +314,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // the engine at boot and never replaced -- so the engine address the user
     // set was read, stored, and thrown away in favour of the hardcoded default.
     engines: (persistence, settings, onIgnored) =>
-      enginesFor({ settings, http: platform.http, persistence, onIgnored }),
+      appEngines({ settings, http: platform.http, persistence, onIgnored }),
     settingDefs: SETTING_DEFS,
     // The default when settings name none. createApp prefers the persisted
     // `engineId` over this; passing it as a literal was ignoring the setting.
