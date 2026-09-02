@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { MemoryObservabilityAdapter, setObservabilityAdapter, getObservabilityAdapter } from '../../../src/observability';
+import { MemoryObservabilityAdapter, setObservabilityAdapter, getObservabilityAdapter, OBSERVABILITY_TOOLS } from '../../../src/observability';
 
 describe('Observability', () => {
   let adapter: MemoryObservabilityAdapter;
@@ -90,6 +90,12 @@ describe('Observability', () => {
         
         expect(adapter.getAllTraces().length).toBe(0);
       });
+    });
+  });
+
+  describe('Tool Metadata', () => {
+    it('should expose the correct npm package name for Arize', () => {
+      expect(OBSERVABILITY_TOOLS.arize.package).toBe('@arizeai/openinference-core');
     });
   });
 
