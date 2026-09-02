@@ -10,7 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -288,6 +288,34 @@ test("an unresolvable import fails the gate, with the package named", async () =
   );
   assert.match(report.problems.join("\n"), /could not resolve/);
   assert.match(report.problems.join("\n"), /a-package-that-is-not-installed/, "and named in the message");
+});
+
+test("a bare import that IS installed is not reported unresolvable", async () => {
+  // The correction. The first version of this check asked "did it stay
+  // external?" -- which is true of every bare import, because the plugin
+  // externalises them all on purpose so builtins surface in the metafile. So
+  // it flagged installed, resolvable packages, and only passed because the
+  // shipped bundle happens to have no bare imports at all.
+  //
+  // `esbuild` is a real dependency of this package, so it is the honest probe:
+  // resolvable from here, and nothing to do with Node builtins.
+  // The probe lives INSIDE the package, because resolution is relative to the
+  // entry: a temp-directory entry has no node_modules above it, so everything
+  // would look missing and the test would pass for the wrong reason. The real
+  // app entry is inside the package too.
+  const entry = join(import.meta.dirname, ".resolvable-probe.ts");
+  writeFileSync(entry, 'import * as e from "esbuild";\nexport const x = e;\n');
+  try {
+    const report = await bundle({
+      entry,
+      outfile: join(mkdtempSync(join(tmpdir(), "installed-")), "o.js"),
+      write: false,
+    });
+    assert.deepEqual(report.unresolved, [], "an installed package resolves");
+    assert.equal(isShippable(report), true, report.problems.join("\n"));
+  } finally {
+    rmSync(entry, { force: true });
+  }
 });
 
 test("a LAZY Node builtin is still allowed -- the pair", async () => {

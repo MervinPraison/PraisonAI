@@ -19,6 +19,8 @@
  */
 import * as esbuild from "esbuild";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 
 /** Node builtins that must never survive into a webview bundle. */
 /** esbuild's own metafile markers, which are not packages. */
@@ -199,9 +201,32 @@ export async function bundle({ entry, outfile, minify = true, write = true }) {
   // openai, ai, @ai-sdk/cohere, @ai-sdk/google, @ai-sdk/openai,
   // @ai-sdk/provider-utils, chalk, ora, boxen, figlet and cli-table3. That
   // bundle loads on a laptop with node_modules beside it and dies on a phone.
-  const unresolved = bare.filter(
-    (name) => !RUNTIME_MARKERS.has(name) && !NODE_BUILTINS.includes(name.split("/")[0]),
-  );
+  //
+  // CORRECTED. The first version of this asked "did it stay external?", which
+  // is true of EVERY bare import here -- the plugin below externalises them all
+  // on purpose, so builtins surface in the metafile instead of being shimmed.
+  // So it flagged installed, perfectly resolvable packages as unresolvable, and
+  // only passed because the shipped bundle happens to have no bare imports at
+  // all. Confirmed against a real install: `praisonai/mobile` resolves to
+  // node_modules/praisonai/dist/mobile.js and was reported unresolved anyway.
+  //
+  // The question that actually matters is whether the specifier can be
+  // RESOLVED from the entry, so it is asked directly.
+  const resolver = createRequire(resolve(entry));
+  const unresolved = bare.filter((name) => {
+    if (RUNTIME_MARKERS.has(name)) return false;
+    // Redundant in practice and kept for intent: `createRequire` resolves
+    // builtins too, so removing this line changes nothing (verified). A
+    // builtin is already classified as fatal-or-lazy above and must not be
+    // reported twice under a different heading -- that is what this says.
+    if (NODE_BUILTINS.includes(name.split("/")[0])) return false;
+    try {
+      resolver.resolve(name);
+      return false;
+    } catch {
+      return true;
+    }
+  });
   const processReads = topLevelProcessReads(code);
   const bytes = Buffer.byteLength(code, "utf8");
 
