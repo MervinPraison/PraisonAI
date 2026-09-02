@@ -5296,7 +5296,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._rollback_chat_history_to(chat_history_length)
                     logging.error(f"OpenAI streaming error: {e}")
                     # Fall back to simulated streaming
-                    response = self.chat(prompt, **kwargs)
+                    response = self._stream_fallback_chat(prompt, kwargs, e)
                     if response:
                         words = str(response).split()
                         chunk_size = max(1, len(words) // 20)
@@ -5316,11 +5316,76 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             # Restore verbose mode on any error
             self.verbose = original_verbose
+            if getattr(e, '_praisonai_stream_fallback_exhausted', False):
+                # The inner fallback already ran chat() and it failed too.
+                # Running it a second time would only bury the streaming
+                # error one level deeper; surface the chained failure as-is.
+                raise
             # Graceful fallback to non-streaming if streaming fails
             logging.warning(f"Streaming failed, falling back to regular response: {e}")
-            response = self.chat(prompt, **kwargs)
+            response = self._stream_fallback_chat(prompt, kwargs, e)
             if response:
                 yield response
+
+    def _stream_fallback_chat(self, prompt: str, kwargs: Dict[str, Any], streaming_error: BaseException) -> Optional[str]:
+        """Run the non-streaming ``chat()`` after a streaming attempt failed.
+
+        ``start(stream=True)`` hands ``_start_stream_impl`` the caller's raw
+        kwargs with ``stream=True`` already set. Forwarding them to ``chat()``
+        unchanged broke the fallback in two ways (#4719): ``stream=True``
+        reached the sync adapter, which refuses to stream; and any sampling
+        knob ``chat()`` does not declare (``max_tokens``, ``top_p``...) raised
+        ``TypeError`` before a request was made. The desktop passes
+        ``max_tokens`` on every turn, so its fallback never worked.
+
+        This builds the call from the subset of kwargs ``chat()`` actually
+        accepts (introspected, so subclass overrides are honoured), forces
+        ``stream=False``, and -- if the fallback fails as well -- raises that
+        failure chained ``from`` the original streaming exception so the real
+        cause is not lost.
+        """
+        import inspect
+
+        try:
+            parameters = inspect.signature(self.chat).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_var_kwargs = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+        )
+        accepted = {
+            name for name, p in parameters.items()
+            if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        }
+        accepted.discard('prompt')
+
+        fallback_kwargs = {
+            key: value for key, value in kwargs.items()
+            if accepts_var_kwargs or key in accepted
+        }
+        dropped = sorted(set(kwargs) - set(fallback_kwargs))
+        if dropped:
+            logging.debug(
+                f"Streaming fallback: dropping kwargs chat() does not accept: {dropped}"
+            )
+        # The fallback is, by definition, the non-streaming path.
+        if accepts_var_kwargs or 'stream' in accepted:
+            fallback_kwargs['stream'] = False
+        else:
+            fallback_kwargs.pop('stream', None)
+
+        try:
+            return self.chat(prompt, **fallback_kwargs)
+        except Exception as fallback_error:
+            logging.error(
+                f"Streaming failed ({streaming_error!r}) and the non-streaming "
+                f"fallback also failed ({fallback_error!r})"
+            )
+            try:
+                fallback_error._praisonai_stream_fallback_exhausted = True
+            except Exception:
+                pass
+            raise fallback_error from streaming_error
 
     def _create_llm_summarize_function(self):
         """
