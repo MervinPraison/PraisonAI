@@ -10,8 +10,10 @@ allowing custom actions before/after agent operations.
    :meth:`HooksManager.execute` yourself at the point where you want a hook to
    run (e.g. in a custom tool or wrapper). For hooks that fire automatically
    around agent tool/LLM calls, use the live ``praisonaiagents.hooks`` package
-   (``HookEvent.BEFORE_TOOL``/``BEFORE_LLM`` via ``HookRunner``, passed to an
-   ``Agent`` through its ``hooks`` argument) instead.
+   instead: register handlers on a ``HookRegistry`` (e.g. via
+   ``@registry.on(HookEvent.BEFORE_TOOL)``) and pass that registry to the
+   ``Agent`` through its ``hooks`` argument (the ``Agent`` builds the
+   ``HookRunner`` internally).
 
 Features:
 - Pre/post hooks for read, write, command, prompt operations
