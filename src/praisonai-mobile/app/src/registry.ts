@@ -116,7 +116,24 @@ function stringSetting(settings: SettingsFacade, key: string, fallback: string):
  * is not here, which is the honest message in that case.
  */
 export function enginesFor(deps: RegistryDeps): readonly EngineChoice[] {
-  const baseUrl = stringSetting(deps.settings, "baseUrl", "http://127.0.0.1:8765").replace(/\/+$/, "");
+  /**
+   * The engine address, read at the moment it is USED.
+   *
+   * This was a `const` read once, here, and both the engine and the probe
+   * closed over the string. The app builds its engine exactly once, at boot
+   * (boot.ts), and holds it for the session -- so a phone that could not reach
+   * `127.0.0.1:8765` kept sending there no matter what was typed into
+   * Settings. The value persisted, the screen agreed, and only a relaunch
+   * changed anything: a recovery path that requires force-quitting the app.
+   *
+   * Rebuilding the engine on the change was the alternative, and it is a much
+   * larger one: `createRunController` takes the engine at construction and
+   * there is no seam to swap it, so following the setting that way means
+   * rebuilding the controller mid-session and dropping whatever turn is in
+   * flight. A resolver costs one call per request and no signature above it.
+   */
+  const baseUrl = (): string =>
+    stringSetting(deps.settings, "baseUrl", "http://127.0.0.1:8765").replace(/\/+$/, "");
   const choices: EngineChoice[] = [
     {
       id: ENGINE_REMOTE_HTTP,
@@ -133,7 +150,10 @@ export function enginesFor(deps: RegistryDeps): readonly EngineChoice[] {
       // status alone routes a chat into a broken engine and reports the
       // nonsense back as a model failure. Run at selection, before the engine
       // is offered -- the in-process engine has no remote and supplies none.
-      probe: () => probeHealth(deps.http, baseUrl),
+      // Called, not captured: the probe is what produces the "not answering"
+      // warning the user is trying to clear, so probing the address they just
+      // replaced reports a failure about a machine nobody is talking to.
+      probe: () => probeHealth(deps.http, baseUrl()),
     },
   ];
 

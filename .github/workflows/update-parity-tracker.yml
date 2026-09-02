@@ -9,15 +9,25 @@ on:
     paths:
       - 'src/praisonai-agents/praisonaiagents/**/*.py'
       - 'src/praisonai-ts/src/**/*.ts'
+      # The crate lives at src/praisonai-rust/praisonai/src -- the old
+      # 'src/praisonai-rust/src/**' path does not exist, so a Rust change
+      # never triggered either tracker and the Rust numbers only ever
+      # refreshed incidentally, on an unrelated push.
       - 'src/praisonai-rust/praisonai/src/**/*.rs'
-      - 'src/praisonai/praisonai/_dev/parity/**'
-      - 'src/praisonai/praisonai/cli/features/**'
+      # The generator's own code and the wrapper features it counts. Change
+      # either and nothing regenerated until an unrelated push landed.
+      - 'src/praisonai/praisonai/_dev/parity/**/*.py'
+      - 'src/praisonai/praisonai/cli/features/**/*.py'
       - '.github/workflows/update-parity-tracker.yml'
 permissions:
   contents: write
 
 jobs:
   update-parity-tracker:
+    # Push only. On a PR the parity-gate.yml `names` job CHECKS instead --
+    # committing a regenerated tracker onto a contributor's branch is not this
+    # workflow's business, and would fail on a fork besides.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:

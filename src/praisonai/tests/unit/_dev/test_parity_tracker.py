@@ -699,7 +699,14 @@ _LAZY_IMPORTS = {
         from praisonai._dev.parity.generator import ParityTrackerGenerator
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            generator = ParityTrackerGenerator(make_repo(Path(tmpdir)))
+            # A non-empty surface: the generator now refuses a source it read
+            # nothing from, because "0 exports" was indistinguishable from
+            # "no gaps".
+            generator = ParityTrackerGenerator(make_repo(
+                Path(tmpdir),
+                py_init=py_init_with('Agent'),
+                ts_index='export { Agent } from "./agent";\n',
+            ))
             assert generator.write_typescript() == 0
             assert generator.ts_output.exists()
             with open(generator.ts_output) as f:
@@ -778,7 +785,12 @@ class TestGenerateParityTracker:
         from praisonai._dev.parity.generator import generate_parity_tracker
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = generate_parity_tracker(repo_root=make_repo(Path(tmpdir)), stdout=True)
+            # A non-empty surface: the generator now refuses a source it read
+            # nothing from, because "0 exports" was indistinguishable from
+            # "no gaps".
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index='export { Agent } from "./agent";\n')
+            result = generate_parity_tracker(repo_root=root, stdout=True)
 
             assert result == 0
             captured = capsys.readouterr()
@@ -789,7 +801,11 @@ class TestGenerateParityTracker:
         from praisonai._dev.parity.generator import generate_parity_tracker
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = make_repo(Path(tmpdir))
+            # A non-empty surface: the generator now refuses a source it read
+            # nothing from, because "0 exports" was indistinguishable from
+            # "no gaps".
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index='export { Agent } from "./agent";\n')
             generate_parity_tracker(repo_root=root, target='ts')
             assert generate_parity_tracker(repo_root=root, target='ts', check=True) == 0
 
@@ -816,9 +832,14 @@ class TestGenerateParityTracker:
         from praisonai._dev.parity.generator import generate_parity_tracker
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'))
+            # Non-empty on both sides so the generator produces a baseline
+            # (an empty source is now refused before drift can be checked).
+            root = make_repo(Path(tmpdir), py_init=py_init_with('Agent'),
+                             ts_index="export { Agent } from './agent';")
             generate_parity_tracker(repo_root=root, target='ts')
-            (root / "src" / "praisonai-ts" / "src" / "index.ts").write_text("export { Agent } from './agent';")
+            # Mutate the TypeScript surface: the committed tracker is now stale.
+            (root / "src" / "praisonai-ts" / "src" / "index.ts").write_text(
+                "export { Agent, Tool } from './agent';")
             assert generate_parity_tracker(repo_root=root, target='ts', check=True) == 1
 
 
@@ -870,3 +891,58 @@ class TestRealExtraction:
         assert tracker['summary']['typescriptFeatures'] > 10
         assert tracker['summary']['gapCount'] >= 0
         assert not Path(tracker['pythonCoreSDK']['path']).is_absolute()
+
+
+class TestExtractorFailureIsNotParity:
+    """A source the extractor could not read must fail, not report zero gaps.
+
+    Both extractors swallow their errors and return an empty result, and every
+    downstream number is a set difference -- so a missing or unparseable source
+    produced a plausible tracker instead of an error. Measured before the fix:
+    an unparseable ``__init__.py`` yielded ``{'pythonCoreFeatures': 0,
+    'gapCount': 0}`` and exit 0, and CI would have committed that as "no gaps".
+    """
+
+    def _tree(self, tmpdir, init_source, index_source):
+        pkg = Path(tmpdir) / "src" / "praisonai-agents" / "praisonaiagents"
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text(init_source)
+        ts = Path(tmpdir) / "src" / "praisonai-ts" / "src"
+        ts.mkdir(parents=True)
+        (ts / "index.ts").write_text(index_source)
+        return Path(tmpdir)
+
+    def test_unparseable_python_source_raises_instead_of_reporting_no_gaps(self):
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = self._tree(tmpdir, "def broken(\n", 'export { Agent } from "./agent";\n')
+            with pytest.raises(RuntimeError, match="0 exports"):
+                ParityTrackerGenerator(root).generate()
+
+    def test_unreadable_typescript_source_raises_too(self):
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = self._tree(
+                tmpdir,
+                '_LAZY_IMPORTS = {"Agent": ("praisonaiagents.agent", "Agent")}\n__all__ = ["Agent"]\n',
+                "",  # present but exporting nothing
+            )
+            with pytest.raises(RuntimeError, match="TypeScript"):
+                ParityTrackerGenerator(root).generate()
+
+    def test_a_readable_source_still_generates__the_pair(self):
+        # Without this, a generator that raised unconditionally would satisfy
+        # both tests above and never produce a tracker again.
+        from praisonai._dev.parity.generator import ParityTrackerGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = self._tree(
+                tmpdir,
+                '_LAZY_IMPORTS = {"Agent": ("praisonaiagents.agent", "Agent")}\n__all__ = ["Agent"]\n',
+                'export { Agent } from "./agent";\n',
+            )
+            tracker = ParityTrackerGenerator(root).generate()
+            assert tracker["summary"]["pythonCoreFeatures"] == 1
+            assert tracker["summary"]["gapCount"] == 0

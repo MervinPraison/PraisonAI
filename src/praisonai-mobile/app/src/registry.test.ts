@@ -336,3 +336,78 @@ test("every setting's default satisfies its own validator", () => {
     );
   }
 });
+
+// ---- the address the user CORRECTS has to be the address that is used -------
+//
+// `enginesFor` read `baseUrl` once, at construction, and both the engine and
+// the health probe closed over that string. The app builds its engine exactly
+// once, at boot, so a phone that could not reach `127.0.0.1:8765` kept sending
+// there for the whole session no matter what was typed into Settings -- the
+// setting persisted, the screen agreed, and only a relaunch changed anything.
+// A recovery path that requires force-quitting the app is not a recovery path.
+
+const A_RUN = {
+  prompt: "hello",
+  chatId: "c1",
+  runId: "r1",
+  tools: false,
+  regenerateOf: null,
+  attachments: [],
+};
+
+/** Run a turn to exhaustion, discarding the events. What is under test is the
+ *  URL the transport was pointed at, not what came back. */
+async function drain(engine: { run: (r: typeof A_RUN, s: AbortSignal) => AsyncIterable<unknown> }): Promise<void> {
+  for await (const _event of engine.run(A_RUN, new AbortController().signal)) {
+    // discarded on purpose
+  }
+}
+
+test("a turn goes to the address the user set AFTER the engine was built", async () => {
+  const { store, settings, persistence } = await build();
+  const http = createFakeHttp();
+  http.on("/chat", () => sseResponse(""));
+
+  // Built first, exactly as boot.ts does: the engine exists before the user
+  // ever reaches Settings.
+  const engine = await enginesFor({ settings, http, persistence })[0]!.create();
+  await store.set("baseUrl", "http://10.0.0.7:9000");
+  await drain(engine as never);
+
+  assert.equal(
+    http.sent.at(-1)?.url,
+    "http://10.0.0.7:9000/chat",
+    "the corrected address must take effect without a relaunch",
+  );
+  await engine.dispose();
+});
+
+test("an untouched setting still reaches the address the engine was built with", async () => {
+  // The pair. Reading the setting late must not mean reading it wrongly: with
+  // nothing changed, the default is still where a turn goes.
+  const { settings, persistence } = await build();
+  const http = createFakeHttp();
+  http.on("/chat", () => sseResponse(""));
+
+  const engine = await enginesFor({ settings, http, persistence })[0]!.create();
+  await drain(engine as never);
+
+  assert.equal(http.sent.at(-1)?.url, "http://127.0.0.1:8765/chat");
+  await engine.dispose();
+});
+
+test("a corrected address is re-read by the health probe too", async () => {
+  // The probe is what decides whether the engine is offered at all, and what
+  // produces the "not answering" warning the user is trying to clear. Probing
+  // the OLD address after the address was fixed reports a failure about a
+  // machine nobody is talking to any more.
+  const { store, settings, persistence } = await build();
+  const http = createFakeHttp();
+  http.on("/health", () => jsonResponse(200, { ok: true, version: PROTOCOL_VERSION }));
+
+  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  await store.set("baseUrl", "http://10.0.0.7:9000/");
+  await choice!.probe!();
+
+  assert.equal(http.sent.at(-1)?.url, "http://10.0.0.7:9000/health");
+});

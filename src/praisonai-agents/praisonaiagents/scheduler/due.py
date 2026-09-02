@@ -79,11 +79,17 @@ def is_due(
         try:
             target = datetime.fromisoformat(sched.at)
             if target.tzinfo is None:
-                target = target.replace(
-                    tzinfo=resolve_schedule_timezone(
-                        sched.tz or default_timezone
-                    )
-                )
+                # A naive ``at`` reflects the user's wall clock (they typed it
+                # from local time), so interpret it in the schedule's timezone:
+                # the explicit tz / PRAISONAI_SCHEDULE_TIMEZONE when set,
+                # otherwise the local zone rather than UTC — a naive string in a
+                # non-UTC zone would otherwise fire an hour (or more) off.
+                tz = sched.tz or default_timezone
+                if tz or os.environ.get("PRAISONAI_SCHEDULE_TIMEZONE"):
+                    tzinfo = resolve_schedule_timezone(tz)
+                else:
+                    tzinfo = datetime.now().astimezone().tzinfo
+                target = target.replace(tzinfo=tzinfo)
             # Evaluate against the caller-supplied ``now`` (not wall-clock) so
             # one-shot jobs are deterministic and consistent with every/cron.
             return now >= target.timestamp()

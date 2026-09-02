@@ -6,7 +6,11 @@ on:
     paths:
       - 'src/praisonai-agents/praisonaiagents/**/*.py'
       - 'src/praisonai-ts/src/**/*.ts'
-      - 'src/praisonai-rust/src/**/*.rs'
+      # The crate lives at src/praisonai-rust/praisonai/src -- the old
+      # 'src/praisonai-rust/src/**' path does not exist, so a Rust change
+      # never triggered either tracker and the Rust numbers only ever
+      # refreshed incidentally, on an unrelated push.
+      - 'src/praisonai-rust/praisonai/src/**/*.rs'
       - 'src/praisonai/praisonai/_dev/parity/**/*.py'
       - '.github/workflows/update-docs-parity.yml'
   workflow_dispatch:  # Allow manual trigger
