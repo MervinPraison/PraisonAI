@@ -184,3 +184,101 @@ class TestScheduleToolImportPaths:
     def test_import_scheduler_runner(self):
         from praisonaiagents.scheduler import ScheduleRunner
         assert ScheduleRunner is not None
+
+
+class TestNaturalLanguageSchedule:
+    """Natural-language clock-time / day-of-week schedule expressions."""
+
+    def test_bare_clock_time_is_one_shot(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("at 9am")
+        assert s.kind == "at"
+        assert s.at is not None and "09:00" in s.at
+
+    def test_clock_time_with_minutes_pm(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("at 9:30pm")
+        assert s.kind == "at"
+        assert "21:30" in s.at
+
+    def test_every_day_at_clock_time(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("every day at 9am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 9 * * *"
+
+    def test_daily_at_clock_time(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("daily at 9am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 9 * * *"
+
+    def test_weekdays_at_clock_time(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("weekdays at 9am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 9 * * 1-5"
+
+    def test_weekends_at_clock_time(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("weekends at 10:30am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "30 10 * * 0,6"
+
+    def test_every_single_weekday(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("every monday 9am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 9 * * 1"
+
+    def test_multiple_days_comma_list(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("every mon,wed,fri at 9am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 9 * * 1,3,5"
+
+    def test_24h_clock(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("every day at 17:00")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 17 * * *"
+
+    def test_legacy_forms_unchanged(self):
+        from praisonaiagents.scheduler import parse_schedule
+        assert parse_schedule("hourly").kind == "every"
+        assert parse_schedule("*/30m").kind == "every"
+        assert parse_schedule("cron:0 7 * * *").kind == "cron"
+        assert parse_schedule("in 20 minutes").kind == "at"
+
+    def test_invalid_still_raises(self):
+        import pytest
+        from praisonaiagents.scheduler import parse_schedule
+        for bad in ("gibberish", "at bananas", "every florp"):
+            with pytest.raises(ValueError):
+                parse_schedule(bad)
+
+    def test_one_shot_clock_time_honors_timezone(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from praisonaiagents.scheduler import parse_schedule
+
+        s = parse_schedule("at 9am", tz="America/New_York")
+        assert s.kind == "at"
+        target = datetime.fromisoformat(s.at)
+        # The clock time denotes 09:00 local (New York), not 09:00 UTC.
+        assert target.tzinfo is not None
+        local = target.astimezone(ZoneInfo("America/New_York"))
+        assert (local.hour, local.minute) == (9, 0)
+
+    def test_one_shot_clock_time_is_due_at_local_hour(self):
+        from datetime import datetime
+        from praisonaiagents.scheduler import parse_schedule
+        from praisonaiagents.scheduler.due import is_due
+        from praisonaiagents.scheduler.models import ScheduleJob
+
+        s = parse_schedule("at 9am", tz="America/New_York")
+        target = datetime.fromisoformat(s.at)
+        job = ScheduleJob(name="j1", schedule=s, message="p")
+        # Just before the target: not due. At/after target: due.
+        assert is_due(job, target.timestamp() - 1) is False
+        assert is_due(job, target.timestamp()) is True
