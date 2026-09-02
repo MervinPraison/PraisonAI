@@ -816,3 +816,205 @@ test("a PERMANENT refusal still stops the app, with a name", async () => {
   assert.match(dom.text(), /could not start/, dom.text());
   assert.match(dom.text(), /too_old|engine=1|protocol/, "and it must name the reason");
 });
+
+// ---- the modules the barrel used to gate (issue #4635) ----------------------
+//
+// Nine view models had 128 tests and zero non-test importers: settings, the
+// chat list, follow-the-stream, locale/direction and the composer were all
+// maintained, tested and unreachable from `main.ts`. These drive the real
+// `mount()` and assert each is now wired.
+
+test("tapping Settings paints the settings screen", async () => {
+  // The acceptance test named in the issue. `router.subscribe` had no non-test
+  // caller, so pushing the settings route rendered nothing: the tap painted a
+  // blank and the next back gesture was consumed instead of exiting.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+
+  assert.ok(
+    dom.find((n) => n.className.includes("screen-settings")),
+    `Settings painted nothing:\n${dom.text()}`,
+  );
+  // And the chat screen is hidden, not left underneath.
+  const chat = dom.find((n) => n.className === "screen");
+  assert.equal(chat?.hidden, true, "the chat screen must be hidden while settings shows");
+  app?.dispose();
+});
+
+test("a route change MOVES focus to the new heading, and Back restores it", async () => {
+  // focus.ts computes where focus belongs on every route change and the app
+  // used to throw the answer away -- it read the target only to decide whether
+  // to announce, always as a "push", and never called `focus()`. So a
+  // keyboard or screen-reader user who opened Settings was left focused on the
+  // button they tapped (now on a hidden screen) or dropped to <body>, and Back
+  // never returned them to where they were.
+  // The fake shell is built directly, so `pressBack()` (a test-only driver, not
+  // part of ShellPort) is reachable to drive the OS back gesture.
+  const shell = createFakeShell(PHONE_INSETS);
+  const dom = createFakeDom();
+  const platform: Platform = {
+    shell, storage: createFakeStorage(), secrets: createFakeSecrets(),
+    http: createFakeHttp(), time: nodeTime(), kind: "web",
+  };
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  const toSettings = dom.find((n) => n.dataset["route"] === "settings");
+  assert.ok(toSettings, "no settings button");
+  dom.click(toSettings as never);
+  await settle();
+
+  // Focus is on the settings screen's heading, not on the hidden chat screen.
+  const focused = dom.activeElement();
+  assert.equal(
+    focused?.dataset["focusId"],
+    "heading:settings",
+    `a route change must move focus to the new heading, landed on: ${
+      focused?.dataset["focusId"] ?? "<nothing>"
+    }`,
+  );
+
+  // Back pops the route -- and restores focus to the control that opened it,
+  // so the user lands where they were rather than at the top of the chat.
+  shell.pressBack();
+  await settle();
+  assert.equal(
+    dom.activeElement(),
+    toSettings,
+    "Back must restore focus to the control that opened the screen",
+  );
+  app?.dispose();
+});
+
+test("the chat list is painted from the session, and a chat reopens", async () => {
+  // `session.list()` had no app caller and the chat list no way to be reached,
+  // so a conversation, once left, could never be reopened. The chats route must
+  // render the stored chats -- from the SESSION, the thing that had no reader --
+  // and tapping one must reopen it.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  // Store a conversation through the session directly. Persistence on a real
+  // turn is the in-process engine's job; the remote harness never records, so
+  // seed the session the list reads from. This is the object `list()` returns.
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+
+  const list = dom.find((n) => n.className.includes("screen-chats"));
+  assert.ok(list, `the chat list painted nothing:\n${dom.text()}`);
+  const row = dom.find((n) => n.dataset["action"] === "open-chat");
+  assert.ok(row, `a stored conversation must be an openable row:\n${dom.text()}`);
+
+  // And opening it returns to the chat screen carrying that conversation.
+  dom.click(row as never);
+  await settle();
+  const chat = dom.find((n) => n.className === "screen");
+  assert.equal(chat?.hidden, false, "opening a chat must show the chat screen");
+  assert.match(dom.text(), /Paris/, "the reopened conversation must be painted");
+  app?.dispose();
+});
+
+test("a turn sent AFTER reopening a chat lands below the history, not above it", async () => {
+  // The reopened messages were appended as untracked <p> nodes while `render`
+  // was reset to empty, so the next turn reconciled from nothing and
+  // `applyOps` inserted its rows at index 0 -- ABOVE the restored history. The
+  // newest answer rendered above the older conversation, and the history sat
+  // outside `render` where no later reconcile could touch it. Painting the
+  // history THROUGH the reconciler keeps both turns in one coordinate system.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "the newest answer" }],
+        ["end", { msg_id: "m1", user_index: 2, assistant_index: 3, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "open-chat") as never);
+  await settle();
+
+  submit(dom, "and its population?");
+  await settle(120);
+
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.ok(transcript, "no transcript");
+  const text = (transcript.children as { textContent: string }[]).map((c) => c.textContent).join(" | ");
+
+  // The restored history must survive the next turn -- it must not be wiped by
+  // a reconcile that never knew it existed.
+  assert.match(text, /capital of France/, `the user's original question was lost:\n${text}`);
+  assert.match(text, /Paris/, `the reopened answer was lost:\n${text}`);
+  assert.match(text, /the newest answer/, `the new turn did not render:\n${text}`);
+
+  // And order: the newest answer is LAST, below the history it followed.
+  const question = text.indexOf("capital of France");
+  const answer = text.indexOf("Paris");
+  const newest = text.indexOf("the newest answer");
+  assert.ok(
+    question < newest && answer < newest,
+    `the newest turn must render below the history, got order:\n${text}`,
+  );
+  app?.dispose();
+});
+
+test("the composer field mirrors the composer view model", async () => {
+  // The raw <textarea> is backed by composer.ts now: typing updates the draft
+  // and enables Send, an empty field disables it. Draft persistence, the
+  // Enter policy and autosize all live in that one state.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const box = dom.find((n) => n.tagName === "TEXTAREA") as never;
+  const send = () => dom.find((n) => n.dataset["action"] === "send") as never;
+  assert.equal((send() as { disabled: boolean }).disabled, true, "Send is disabled on an empty draft");
+
+  (box as { value: string }).value = "a question";
+  (box as { dispatch(t: string, e: unknown): void }).dispatch("input", {});
+  assert.equal((send() as { disabled: boolean }).disabled, false, "typing must enable Send");
+  app?.dispose();
+});
+
+test("the locale and direction are detected, not hardcoded to en", async () => {
+  // main.ts:173 passed `locale: "en"` as a literal, so every RTL user got an
+  // LTR layout and the #4607 direction fix was unreachable. An Arabic device
+  // must lay out right-to-left.
+  const { dom, platform } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform,
+    now: () => 1,
+    newChatId: () => "c1",
+    locales: ["ar-EG"],
+  });
+
+  assert.equal(dom.root.getAttribute("dir"), "rtl", "an Arabic locale must lay out RTL");
+  app?.dispose();
+});
+
+test("an English device still lays out left-to-right -- the pair", async () => {
+  const { dom, platform } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform,
+    now: () => 1,
+    newChatId: () => "c1",
+    locales: ["en-GB"],
+  });
+
+  assert.equal(dom.root.getAttribute("dir"), "ltr");
+  app?.dispose();
+});
