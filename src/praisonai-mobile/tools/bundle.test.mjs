@@ -21,7 +21,10 @@ import {
   unresolvedBareImports,
   classifyBareImports,
   FORBIDDEN_BUILTINS,
-  SIZE_BUDGET_BYTES, isShippable } from "./bundle.mjs";
+  SHELL_BUDGET_BYTES,
+  LAZY_BUDGET_BYTES,
+  isShippable,
+} from "./bundle.mjs";
 
 /** Write a throwaway package and bundle it. */
 async function fixture(files) {
@@ -35,6 +38,9 @@ async function fixture(files) {
     dir,
     run: (entry = "main.js") =>
       bundle({ entry: join(dir, entry), outfile: join(dir, "out.js"), minify: false }),
+    // The split form, which is what ships: `outdir` turns on chunking.
+    runSplit: (entry = "main.js") =>
+      bundle({ entry: join(dir, entry), outdir: join(dir, "out"), minify: false }),
   };
 }
 
@@ -132,23 +138,73 @@ test("a property named env on another object is not a process read", () => {
   assert.deepEqual(topLevelProcessReads("const x = config.process.env;\n"), []);
 });
 
-// ---- the size budget -------------------------------------------------------
+// ---- the size budgets ------------------------------------------------------
+//
+// Two of them, and the tests are shaped to prove they are two: a chunk that
+// is over one and under the other must pass or fail according to WHICH graph
+// it sits in, never according to its size alone.
 
-test("a bundle over budget fails the build", async () => {
-  // Generated, not committed: a real 400kB fixture in the repo would itself be
-  // the thing the budget exists to prevent.
-  const filler = `export const blob = "${"x".repeat(SIZE_BUDGET_BYTES + 1024)}";\n`;
-  const { run } = await fixture({ "main.js": filler });
+/** Generated, not committed: a real 400kB fixture in the repo would itself be
+ *  the thing the budget exists to prevent. */
+const blob = (bytes) => `export const blob = "${"x".repeat(bytes)}";\n`;
+
+test("a bundle over the shell budget fails the build", async () => {
+  const { run } = await fixture({ "main.js": blob(SHELL_BUDGET_BYTES + 1024) });
   const report = await run();
-  assert.ok(report.bytes > SIZE_BUDGET_BYTES);
-  assert.ok(report.problems.some((p) => /budget/.test(p)));
+  assert.ok(report.shellBytes > SHELL_BUDGET_BYTES);
+  assert.ok(report.problems.some((p) => /shell budget/.test(p)), report.problems.join("\n"));
 });
 
 test("a small bundle is within budget", async () => {
   const { run } = await fixture({ "main.js": "export const a = 1;\n" });
   const report = await run();
-  assert.ok(report.bytes < SIZE_BUDGET_BYTES);
+  assert.ok(report.shellBytes < SHELL_BUDGET_BYTES);
   assert.deepEqual(report.problems, []);
+});
+
+test("a chunk behind an import() is charged to the LAZY budget, not the shell", async () => {
+  // Over the shell budget, under the lazy one, reached only through import():
+  // this must PASS. It is the whole point of splitting -- the engine is far
+  // larger than the shell is allowed to be, and that is fine because nobody
+  // pays for it before first paint. One budget could not say this.
+  const { runSplit } = await fixture({
+    "main.js": "export const load = () => import('./big.js');\n",
+    "big.js": blob(SHELL_BUDGET_BYTES + 100 * 1024),
+  });
+  const report = await runSplit();
+  assert.ok(report.shellBytes < SHELL_BUDGET_BYTES, `shell is ${report.shellBytes}`);
+  assert.ok(report.lazyBytes > SHELL_BUDGET_BYTES, "the lazy side really is over the shell budget");
+  assert.ok(report.lazyBytes < LAZY_BUDGET_BYTES);
+  assert.deepEqual(report.problems, [], report.problems.join("\n"));
+});
+
+test("the same chunk imported STATICALLY lands in the shell and fails", async () => {
+  // The pair, and the regression splitting is most likely to suffer: someone
+  // turns an `import()` into an `import`, every byte moves to first paint, and
+  // the only visible symptom is a slower cold start. The gate is the symptom.
+  const { runSplit } = await fixture({
+    "main.js": "import { blob } from './big.js';\nexport const n = blob.length;\n",
+    "big.js": blob(SHELL_BUDGET_BYTES + 100 * 1024),
+  });
+  const report = await runSplit();
+  assert.ok(report.shellBytes > SHELL_BUDGET_BYTES);
+  assert.equal(report.lazyBytes, 0, "nothing is lazy when nothing is behind an import()");
+  assert.ok(report.problems.some((p) => /shell budget/.test(p)), report.problems.join("\n"));
+});
+
+test("lazy chunks over the LAZY allowance fail the build", async () => {
+  // Lazy is deferred, not free: whoever picks the engine pays for all of it.
+  // So it has a ceiling of its own, and this is the test that says the ceiling
+  // exists -- as opposed to "lazy bytes are simply not counted".
+  const { runSplit } = await fixture({
+    "main.js": "export const load = () => import('./huge.js');\n",
+    "huge.js": blob(LAZY_BUDGET_BYTES + 1024),
+  });
+  const report = await runSplit();
+  assert.ok(report.shellBytes < SHELL_BUDGET_BYTES, "the shell is still tiny");
+  assert.ok(report.lazyBytes > LAZY_BUDGET_BYTES);
+  assert.ok(report.problems.some((p) => /lazy budget/.test(p)), report.problems.join("\n"));
+  assert.ok(!report.problems.some((p) => /shell budget/.test(p)), "and it is the LAZY budget that named it");
 });
 
 // ---- the helpers ------------------------------------------------------------
@@ -263,9 +319,9 @@ test("a relative import that is external is not reported as a bare module", () =
 
 test("the shipping bundle resolves everything it imports", async () => {
   // The positive control, and the one that would actually catch a regression:
-  // the real app entry, through the real gate.
-  const out = join(mkdtempSync(join(tmpdir(), "ship-")), "app.js");
-  const report = await bundle({ entry: "app/src/main.ts", outfile: out, write: false });
+  // the real app entry, through the real gate, in the real split shape.
+  const outdir = mkdtempSync(join(tmpdir(), "ship-"));
+  const report = await bundle({ entry: "app/src/main.ts", outdir, write: false });
 
   assert.deepEqual(report.unresolved, [], `the shipped bundle must resolve everything: ${report.unresolved}`);
   assert.equal(isShippable(report), true, report.problems.join("\n"));
@@ -297,14 +353,20 @@ test("a bare import that IS installed is not reported unresolvable", async () =>
   // it flagged installed, resolvable packages, and only passed because the
   // shipped bundle happens to have no bare imports at all.
   //
-  // `esbuild` is a real dependency of this package, so it is the honest probe:
-  // resolvable from here, and nothing to do with Node builtins.
+  // The probe is `@ai-sdk/provider`: on praisonai/mobile's graph, 6kB, and
+  // browser-clean, so the gate's other checks stay out of the way. It used to
+  // be `esbuild`, which is now BUNDLED rather than left external -- and
+  // bundling esbuild's Node-only lib drags in `fs`, `child_process` and an
+  // optional `pnpapi`, so the probe failed the gate for reasons that had
+  // nothing to do with resolution. The declared deps all drag in zod's 426kB,
+  // which trips the shell budget instead: same wrong reason, other side.
+  //
   // The probe lives INSIDE the package, because resolution is relative to the
   // entry: a temp-directory entry has no node_modules above it, so everything
   // would look missing and the test would pass for the wrong reason. The real
   // app entry is inside the package too.
   const entry = join(import.meta.dirname, ".resolvable-probe.ts");
-  writeFileSync(entry, 'import * as e from "esbuild";\nexport const x = e;\n');
+  writeFileSync(entry, 'import * as p from "@ai-sdk/provider";\nexport const x = p;\n');
   try {
     const report = await bundle({
       entry,
@@ -330,4 +392,49 @@ test("a LAZY Node builtin is still allowed -- the pair", async () => {
 
   assert.deepEqual(report.unresolved, [], "a builtin is classified as a builtin, not as unresolved");
   assert.deepEqual(report.fatal, [], "and a dynamic one is not fatal");
+});
+
+// ---- the CLI-only externals ------------------------------------------------
+
+test("a CLI-only package imported STATICALLY fails the gate", async () => {
+  // chalk, boxen, ora, cli-table3 and figlet are left external on purpose,
+  // and an external reached by a static import is import-time fatal -- the
+  // same blank screen as a builtin, with neither of the checks above able to
+  // see it: it is not a builtin, and on the build machine it resolves.
+  //
+  // Inside the package, for the same reason as the resolvable probe: chalk
+  // has to actually resolve for this to be about the static/dynamic line.
+  const entry = join(import.meta.dirname, ".cli-static-probe.ts");
+  writeFileSync(entry, 'import chalk from "chalk";\nexport const x = chalk;\n');
+  try {
+    const report = await bundle({
+      entry,
+      outfile: join(mkdtempSync(join(tmpdir(), "cli-")), "o.js"),
+      write: false,
+    });
+    assert.deepEqual(report.cliStatic, ["chalk"]);
+    assert.equal(isShippable(report), false, "a static external must not ship");
+    assert.match(report.problems.join("\n"), /CLI-only[^\n]*STATICALLY[^\n]*chalk/);
+  } finally {
+    rmSync(entry, { force: true });
+  }
+});
+
+test("a CLI-only package behind an import() is allowed -- the pair", async () => {
+  // This is how praisonai's pretty-logger reaches them, and why they can be
+  // external at all: a rejected dynamic import on a path a phone never takes.
+  const entry = join(import.meta.dirname, ".cli-dynamic-probe.ts");
+  writeFileSync(entry, 'export const pretty = async () => import("chalk");\n');
+  try {
+    const report = await bundle({
+      entry,
+      outfile: join(mkdtempSync(join(tmpdir(), "cli-")), "o.js"),
+      write: false,
+    });
+    assert.ok(report.bare.includes("chalk"), "it is still external, and still visible");
+    assert.deepEqual(report.cliStatic, []);
+    assert.equal(isShippable(report), true, report.problems.join("\n"));
+  } finally {
+    rmSync(entry, { force: true });
+  }
 });

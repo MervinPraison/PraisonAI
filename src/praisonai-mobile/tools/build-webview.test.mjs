@@ -64,3 +64,24 @@ test("an unshippable bundle FAILS the build, it does not merely print", () => {
   assert.notEqual(r.status, 0, `an unshippable bundle was reported and then shipped:\n${out}`);
   assert.match(out, /crypto/, "and it must say which module made it unshippable");
 });
+
+test("a chunk behind an import() is written beside app.js, where the page can reach it", () => {
+  // Splitting emits `import("./chunk-XXXX.js")` inside app.js, and a browser
+  // resolves that against app.js's own URL. index.html sits in the same
+  // directory and loads `./app.js`, so "beside app.js" is "beside the page".
+  // A build that put the chunks anywhere else -- an outdir of their own, say
+  // -- would pass every gate and 404 on the first lazy feature.
+  const dir = fixture("export const load = () => import('./lazy.ts');\ndocument.title = 'x';\n");
+  writeFileSync(join(dir, "app/src/lazy.ts"), "export const lazy: string = 'lazy'.repeat(10);\n");
+
+  const r = build(dir);
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+
+  const app = readFileSync(join(dir, "dist/app.js"), "utf8");
+  const refs = [...app.matchAll(/import\("\.\/(chunk-[A-Z0-9]+\.js)"\)/g)].map((m) => m[1]);
+  assert.ok(refs.length > 0, "the lazy module must have become a chunk, referenced relatively");
+  for (const ref of refs) {
+    assert.ok(existsSync(join(dir, "dist", ref)), `${ref} must be written beside app.js`);
+  }
+  assert.ok(existsSync(join(dir, "dist/index.html")), "and the page is in that same directory");
+});

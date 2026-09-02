@@ -13,17 +13,14 @@ import { en } from "../../ui/src/i18n/strings.ts";
 test("every platform's first-launch default is the remote engine, for now", () => {
   // Tempting to default a device to the in-process engine -- a phone cannot
   // reach `http://127.0.0.1:8765` and the cleartext localhost address is
-  // refused by iOS ATS and Android -- but the in-process engine's module is
-  // ABSENT from the shipping webview: build-webview.mjs bundles only
-  // `main.ts` into `dist/app.js`, and the engine reaches praisonai-ts through a
-  // runtime-computed import left outside that bundle (#4437). So defaulting a
-  // device to it would swap the "not answering" warning (which names Settings
-  // as the fix) for a first prompt that fails "unavailable in this build" with
-  // no recovery -- the very brick registry.ts keeps the engine out of the
-  // picker to avoid. Until #4437 ships praisonai-ts inside the webview, remote
-  // is the honest default. `Platform["kind"]` also cannot tell desktop Tauri
-  // (`cargo tauri dev`) from a phone, so a `kind === "tauri"` default would
-  // strand the desktop/dev flow too.
+  // refused by iOS ATS and Android -- and since the split its module does
+  // ship, as a lazy chunk beside app.js. But registry.ts still keeps it out of
+  // the shipping picker, and a first-launch default that the picker does not
+  // offer is a first prompt landing on something Settings cannot show or
+  // change. Until the picker admits the engine, remote is the honest default.
+  // `Platform["kind"]` also cannot tell desktop Tauri (`cargo tauri dev`) from
+  // a phone, so a `kind === "tauri"` default would strand the desktop/dev flow
+  // too.
   assert.equal(defaultEngineIdFor("tauri"), ENGINE_REMOTE_HTTP);
   assert.equal(defaultEngineIdFor("web"), ENGINE_REMOTE_HTTP);
 });
@@ -95,15 +92,17 @@ test("the real composition root offers the in-process engine", async () => {
   assert.equal(ids[0], ENGINE_REMOTE_HTTP, "the remote engine must stay the default");
 });
 
-test("the in-process engine, when its module cannot load, fails RECOVERABLY", async () => {
-  // The factory's dynamic import resolves at run time from a computed
-  // specifier, and where praisonai-ts is not on disk -- the shipping webview
-  // bundles only dist/ (#4437), and this test runs with the same absence -- it
-  // rejects. Constructing the engine must still succeed (create() opens no
-  // upstream), and the failure must arrive as a single recoverable `error`
-  // event through engine.ts's run loop, never as an unhandled rejection that
-  // takes down the turn opaquely. That is the named, on-screen failure
-  // engines.ts argues for.
+test("the in-process engine, when its chunk cannot load, fails RECOVERABLY", async () => {
+  // The engine reaches praisonai through a lazily-fetched chunk, and a fetch
+  // can fail: a flaky connection, a build that left the engine out, a hashed
+  // file the page no longer matches. This used to be exercised by the module's
+  // ABSENCE from disk; with praisonai installed the real loader succeeds here
+  // (and would go to the network), so the failing loader is INJECTED, through
+  // the seam appEngines exposes for exactly this. Constructing the engine must
+  // still succeed (create() opens no upstream), and the failure must arrive as
+  // a single recoverable `error` event through engine.ts's run loop, never as
+  // an unhandled rejection that takes down the turn opaquely. That is the
+  // named, on-screen failure engines.ts argues for.
   const secrets = createFakeSecrets();
   const store = createSettingsStore(SETTING_DEFS, createFakeStorage(), secrets);
   await store.load();
@@ -119,6 +118,9 @@ test("the in-process engine, when its module cannot load, fails RECOVERABLY", as
     http: createFakeHttp(),
     persistence,
     onIgnored: () => {},
+    loadAgent: async () => {
+      throw new Error("chunk-XXXXXXXX.js: failed to fetch");
+    },
   }).find((c) => c.id === ENGINE_PRAISONAI_TS);
   assert.ok(inProcess, "the in-process engine must be on offer to be exercised");
 

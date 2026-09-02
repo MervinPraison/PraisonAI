@@ -75,12 +75,14 @@ export interface RegistryDeps {
   /**
    * Builds the in-process engine.
    *
-   * Injected rather than imported, because `praisonai` is not a dependency of
-   * this package and cannot be until it is bundleable for a webview -- issue
-   * #4437: `crypto` and `events` are static imports on its Agent graph, so the
-   * bundle dies at import time before any code runs. Keeping it an injection
-   * means the app builds and runs today with the remote engine, and gains the
-   * in-process one by passing a factory rather than by a refactor.
+   * Injected rather than imported, because tools/boundaries.json lets only
+   * engines/src/praisonai-ts name `praisonai` -- that seam is what makes the
+   * framework swappable, and this file sits above it. The injection is also
+   * what let the app build and run with the remote engine while the in-process
+   * one could not be bundled for a webview at all (#4437: `crypto` and
+   * `events` were static imports on its Agent graph). Now `praisonai/mobile`
+   * ships as a lazy chunk and main.ts supplies the factory; the injection
+   * stays because the boundary does.
    */
   readonly createInProcess?: (persistence: RunPersistence) => AgentEnginePort | Promise<AgentEnginePort>;
   /**

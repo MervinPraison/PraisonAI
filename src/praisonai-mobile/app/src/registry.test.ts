@@ -45,8 +45,10 @@ test("the remote engine is always offered, because it needs nothing injected", a
 });
 
 test("the in-process engine is omitted when no factory is supplied", async () => {
-  // A picker listing a choice that cannot work is a support ticket. praisonai
-  // is not a dependency yet -- issue #4437 -- so offering it would be a lie.
+  // A picker listing a choice that cannot work is a support ticket. The
+  // factory is how main.ts supplies the engine (RegistryDeps says why it is
+  // injected); without one there is nothing behind the id, so offering it
+  // would be a lie.
   const { settings, http, persistence } = await build();
   assert.equal(enginesFor({ settings, http, persistence }).some((c) => c.id === ENGINE_PRAISONAI_TS), false);
 });

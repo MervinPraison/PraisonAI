@@ -7,7 +7,7 @@
  */
 import { mkdir, copyFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { bundle, isShippable } from "./bundle.mjs";
+import { bundle, isShippable, SHELL_BUDGET_BYTES, LAZY_BUDGET_BYTES } from "./bundle.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
 // Overridable so a test can drive the real script against a package whose
@@ -26,9 +26,12 @@ await mkdir(dist, { recursive: true });
 await copyFile(join(pkg, "app/index.html"), join(dist, "index.html"));
 await copyFile(join(pkg, "app/app.css"), join(dist, "app.css"));
 
+// `outdir`, not `outfile`: esbuild's `splitting` needs a directory to put the
+// shared and lazily-loaded chunks in. `entryNames` pins the entry to app.js so
+// index.html's `<script type="module" src="./app.js">` keeps working unchanged.
 const report = await bundle({
   entry: join(pkg, "app/src/main.ts"),
-  outfile: join(dist, "app.js"),
+  outdir: dist,
 });
 
 for (const name of report.lazy) {
@@ -37,7 +40,16 @@ for (const name of report.lazy) {
 for (const problem of report.problems) {
   console.error(`  ✖ ${problem}`);
 }
-console.log(`bundle: ${(report.bytes / 1024).toFixed(1)}kB of a 400kB budget, ${report.bare.length} external`);
+for (const chunk of report.chunks) {
+  const when = report.eager.has(chunk.name) ? "eager" : "lazy ";
+  console.log(`  ${when} ${chunk.name.padEnd(22)} ${(chunk.bytes / 1024).toFixed(1)}kB`);
+}
+console.log(
+  `bundle: shell ${(report.shellBytes / 1024).toFixed(1)}kB of a ` +
+  `${(SHELL_BUDGET_BYTES / 1024).toFixed(0)}kB budget, lazy ` +
+  `${(report.lazyBytes / 1024).toFixed(1)}kB of a ${(LAZY_BUDGET_BYTES / 1024).toFixed(0)}kB budget, ` +
+  `${report.chunks.length} chunks, ${report.bare.length} external`,
+);
 
 if (!isShippable(report)) {
   console.error("\nThe webview bundle is not shippable. See above.");
