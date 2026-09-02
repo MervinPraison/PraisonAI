@@ -27,8 +27,8 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `Handoff.__init__` | 7 | 1 | 1 | 3 | 0 | 2 | 2 | 4 | 11 / 16 |
 | `LLM.__init__` | 25 | 2 | 2 | 1 | 0 | 20 | 0 | 20 | 0 / 5 |
 | `Session.__init__` | 7 | 1 | 4 | 2 | 0 | 0 | 2 | 2 | 2 / 9 |
-| `tool()` | 11 | 2 | 0 | 1 | 0 | 8 | 3 | 10 | 2 / 5 |
-| **Total (10 surfaces)** | 196 | 23 | 8 | 14 | 2 | 149 | 18 | 166 | 35 / 83 |
+| `tool()` | 11 | 2 | 0 | 1 | 0 | 8 | 3 | 11 | 2 / 5 |
+| **Total (10 surfaces)** | 196 | 23 | 8 | 14 | 2 | 149 | 18 | 167 | 35 / 83 |
 
 ## Surfaces
 
@@ -321,13 +321,13 @@ TS-only members: `parent`?, `db`?
 
 - Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:235`
 - TypeScript: `src/praisonai-ts/src/tools/decorator.ts:16` (ctor `src/praisonai-ts/src/tools/decorator.ts:48`)
-- Counts: 11 python params: 2 exact, 0 camelCase, 1 alias, 0 flattened, 8 missing; 3 mismatches; 10 waived; 2 TS-only of 5
+- Counts: 11 python params: 2 exact, 0 camelCase, 1 alias, 0 flattened, 8 missing; 3 mismatches; 11 waived; 2 TS-only of 5
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `func` | positional | null | `Optional[Callable]` | alias | `execute` | *required* | `(params: TParams, context?: ToolContext) => Promise<TResult> \| TResult` | required mismatch (waived) |
 | `name` | keyword | null | `Optional[str]` | exact | `name` | *required* | `string` | required mismatch (waived) |
-| `description` | keyword | null | `Optional[str]` | exact | `description` | ``Function ${config.name}`` | `string` | default mismatch |
+| `description` | keyword | null | `Optional[str]` | exact | `description` | ``Function ${config.name}`` | `string` | default mismatch (waived) |
 | `version` | keyword | "1.0.0" | `str` | missing |  |  |  | MISSING (waived) |
 | `availability` | keyword | null | `Optional[Callable[[], tuple[bool, str]]]` | missing |  |  |  | MISSING (waived) |
 | `dynamic_schema_overrides` | keyword | null | `Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]` | missing |  |  |  | MISSING (waived) |
@@ -501,6 +501,7 @@ TS-only members: `parameters`?, `category`?
 | `Task.__init__.when` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().approval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().availability` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
+| `tool().description` | TS derives a default description from the tool name; Python leaves it None and infers from the docstring | praisonai-ts |  |  |
 | `tool().dynamic_schema_overrides` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().func` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |

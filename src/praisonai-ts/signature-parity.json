@@ -4391,7 +4391,7 @@
         "params": 11,
         "ts_only": 2,
         "ts_total": 5,
-        "waived": 10
+        "waived": 11
       },
       "params": [
         {
@@ -4475,7 +4475,7 @@
           "ts_name": "description",
           "type_class": "string",
           "type_text": "Optional[str]",
-          "waived": null,
+          "waived": "tool().description",
           "warnings": []
         },
         {
@@ -4673,7 +4673,7 @@
     "surfaces": 10,
     "ts_only": 35,
     "ts_total": 83,
-    "waived": 166
+    "waived": 167
   },
   "waivers": [
     {
@@ -5781,6 +5781,13 @@
       "key": "tool().availability",
       "owner": "praisonai-ts",
       "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().description",
+      "owner": "praisonai-ts",
+      "reason": "TS derives a default description from the tool name; Python leaves it None and infers from the docstring"
     },
     {
       "expires": null,

@@ -480,6 +480,9 @@ waivers:
   tool().availability:
     owner: praisonai-ts
     reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().description:
+    owner: praisonai-ts
+    reason: 'TS derives a default description from the tool name; Python leaves it None and infers from the docstring'
   tool().dynamic_schema_overrides:
     owner: praisonai-ts
     reason: 'baseline 2026-09-02: not yet ported to TypeScript'
