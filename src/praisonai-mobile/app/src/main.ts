@@ -20,7 +20,7 @@ import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
 import { emptyRender, reconcile, type RenderState } from "../../ui/src/render/reconcile.ts";
-import { buildTranscript } from "../../ui/src/transcript/view-model.ts";
+import { buildTranscript, type Row } from "../../ui/src/transcript/view-model.ts";
 import type { RunView } from "../../core/src/run/controller.ts";
 import type { Route } from "../../ui/src/router.ts";
 import { en, type Strings } from "../../ui/src/i18n/strings.ts";
@@ -28,10 +28,16 @@ import { announce, initialAnnouncer, type AnnouncerState } from "../../ui/src/a1
 import { createScreens } from "./mount.ts";
 import { transition, screenFor, type ScreenId } from "../../ui/src/screens.ts";
 import { routeTitle, chatRowName } from "../../ui/src/a11y/names.ts";
-import { focusForRoute, headingId, screenAnnouncement } from "../../ui/src/a11y/focus.ts";
+import {
+  focusForRoute,
+  headingId,
+  screenAnnouncement,
+  type FocusTarget,
+  type Navigation,
+} from "../../ui/src/a11y/focus.ts";
 import { buildSettings } from "../../ui/src/settings/view-model.ts";
 import { buildChatList } from "../../ui/src/chats/list-view-model.ts";
-import type { ChatSummary } from "../../core/src/chat/repository.ts";
+import type { ChatSummary, StoredMessage } from "../../core/src/chat/repository.ts";
 import { createBundle } from "../../ui/src/i18n/bundle.ts";
 import { resolveLocale, logicalInsets } from "../../ui/src/i18n/locale.ts";
 import { geometryOf, initialLayout, withInsets, withKeyboard } from "../../ui/src/layout/insets.ts";
@@ -320,6 +326,28 @@ export function stopNotice(stopped: boolean, strings: Strings): string | null {
   return stopped ? null : strings.stopRefused;
 }
 
+/**
+ * A reopened conversation's stored messages, as reconciler rows.
+ *
+ * Built as real `Row`s -- not raw `<p>` nodes -- so the transcript that history
+ * paints into is the SAME render state the next turn's stream appends to. The
+ * defect this replaces reset `render` to empty and appended untracked nodes, so
+ * the next turn reconciled from nothing and inserted its rows above the history.
+ *
+ * Ids carry a `history:` prefix and the message index, so they are stable
+ * (a re-open paints the same rows, not duplicates) and cannot collide with a
+ * live turn's `text:N` ids -- a collision would make the first streamed
+ * paragraph update a history row in place instead of appending after it.
+ */
+export function historyRows(messages: readonly StoredMessage[]): readonly Row[] {
+  return messages.map((message, index) => ({
+    kind: "text",
+    id: `history:${index}:${message.role}`,
+    text: message.content,
+    streaming: false,
+  }));
+}
+
 /** `createApp`, with a thrown failure turned into the same typed result the
  *  anticipated failures already produce. */
 async function bootOrFail(
@@ -449,6 +477,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   const nodes: RowNodes = emptyNodes();
   let announcer: AnnouncerState = initialAnnouncer;
 
+  // A reopened conversation's stored messages, as reconciler rows. The
+  // controller only ever publishes the CURRENT turn -- it resets to
+  // `initialTurn` on each run -- so history is not in the RunView. It is held
+  // here and PREPENDED to every reconcile, so a follow-up turn's rows land
+  // below it and a reconcile never emits `remove` for history it did not know
+  // about. Empty for a fresh chat; cleared on New chat.
+  let history: readonly Row[] = [];
+
   // ---- composer state (draft, key policy, autosize) ----------------------
   // The composer is data now, not just a <textarea>: a draft that survives a
   // trip to settings, an Enter-vs-Shift-Enter policy, and a clamped height. The
@@ -474,7 +510,12 @@ export async function mount(deps: MountDeps): Promise<App | null> {
 
   const publish = (view: RunView): void => {
     const built = buildTranscript(view.turn, view.approvals);
-    const diff = reconcile(render, built.rows);
+    // History first, then the live turn. `history` is empty for a fresh chat,
+    // so this is a no-op there; for a reopened chat it keeps the restored
+    // conversation ABOVE the turn now streaming and inside the render state, so
+    // the diff updates the live rows without removing the history.
+    const rows = history.length === 0 ? built.rows : [...history, ...built.rows];
+    const diff = reconcile(render, rows);
     applyOps(transcript, nodes, diff.ops, strings);
     render = diff.next;
 
@@ -641,25 +682,92 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   // live and retains it rather than trying to build a second one.
   screens.nodes.set("chat", screen);
 
+  // The element by its `data-focus-id`, searched under root. There is no
+  // `querySelector` in the seam a test drives, and there does not need to be:
+  // the set of focusable ids is tiny (a heading per live screen), so a walk is
+  // both correct and cheap.
+  const byFocusId = (id: string): HTMLElement | null => {
+    if (id === "") return null;
+    const stack: HTMLElement[] = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (node === undefined) break;
+      if (node.dataset["focusId"] === id) return node;
+      for (const child of node.children) {
+        if (child instanceof HTMLElement) stack.push(child);
+      }
+    }
+    return null;
+  };
+
+  // Whatever the renderer must return to when a Back gesture pops a screen. A
+  // pop restores focus to the control that opened the screen -- the chat row,
+  // the settings button -- so the user lands where they were, not at the top of
+  // a list they have to scroll down again.
+  let restoreFocus: HTMLElement | null = null;
+
+  // The three lines focus.ts deliberately does NOT do -- move focus, save it,
+  // restore it -- because they are the only part it cannot unit test. Doing
+  // less than this leaves the decision computed and discarded, which is the
+  // very "focus falls to <body>" bug the whole module exists to prevent.
+  const applyFocus = (target: FocusTarget): void => {
+    switch (target.kind) {
+      case "none":
+        return;
+      case "element": {
+        byFocusId(target.id)?.focus();
+        return;
+      }
+      case "restore": {
+        // The saved element may be gone -- popping back after deleting the chat
+        // you were viewing means the row you came from no longer exists -- so
+        // fall back to the destination's heading rather than focusing nothing.
+        const saved = restoreFocus;
+        if (saved !== null && saved.isConnected) saved.focus();
+        else byFocusId(target.fallbackId)?.focus();
+        restoreFocus = null;
+        return;
+      }
+    }
+  };
+
   let currentRoute: Route | null = null;
-  const showRoute = (route: Route): void => {
+  const showRoute = (route: Route, nav: Navigation): void => {
     const change = transition(currentRoute, route, screens.live());
     if (!change.noop) screens.apply(change);
+    const focus = focusForRoute(currentRoute, route, nav);
     // Announce the screen change, so a route change is never silent to a
     // screen reader even when focus lands somewhere with a short name.
-    const focus = focusForRoute(currentRoute, route, "push");
     if (focus.kind === "element" && focus.id !== "") {
       assertive.textContent = screenAnnouncement(strings, route);
     }
+    // Then actually move focus. Computing the target and never applying it left
+    // focus on the screen the user just left, or on <body> once that screen was
+    // hidden -- exactly the failure focus.ts's ids exist to fix.
+    applyFocus(focus);
     currentRoute = route;
   };
   // The router's root is `chats`, but the app opens on the chat screen; align
   // the two so the first back gesture behaves and `screenFor` agrees.
   currentRoute = { name: "chat", chatId: "" };
   screen.hidden = false;
+  // The previous stack depth, to tell a push from a pop: a shorter stack is a
+  // Back, a longer one a forward navigation. The replace below seeds it at 1.
+  let previousDepth = 1;
   app.router.subscribe((stack) => {
     const top = stack[stack.length - 1];
-    if (top !== undefined) showRoute(top);
+    if (top === undefined) return;
+    const nav: Navigation =
+      stack.length < previousDepth ? "pop" : stack.length > previousDepth ? "push" : "replace";
+    // Save the control the user is leaving from BEFORE the DOM changes, so a
+    // later pop can return to it. Only on a push -- a pop consumes the saved
+    // target, and a replace is not a place to come back to.
+    if (nav === "push") {
+      const active = doc.activeElement;
+      restoreFocus = active instanceof HTMLElement ? active : null;
+    }
+    previousDepth = stack.length;
+    showRoute(top, nav);
   });
   // Replace the router's `chats` root with the chat the app actually opens on,
   // so pushing `chats` later is a real navigation and not swallowed as a push
@@ -707,6 +815,8 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // the same id".
         app.controller.setChat(mintChatId());
         app.session.reset();
+        // A fresh chat has no history to keep above the next turn.
+        history = [];
         render = emptyRender;
         nodes.nodes.clear();
         announcer = initialAnnouncer;
@@ -736,16 +846,21 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         transcript.textContent = "";
         polite.textContent = "";
         assertive.textContent = "";
-        // Paint the stored messages, then return to the chat screen.
+        // Paint the stored messages THROUGH the reconciler, not as raw nodes.
+        //
+        // Appending untracked `<p>` elements and resetting `render` to empty was
+        // a defect: the next turn reconciled from an empty render state and
+        // `applyOps` inserted its rows at index 0 -- ABOVE the history -- while
+        // the manually appended messages stayed outside `render`/`nodes` and
+        // could never be updated. The newest turn rendered above the older
+        // conversation. Holding the history as real `Row`s and prepending it in
+        // `publish` keeps it in the same coordinate system the stream appends to
+        // AND makes it survive the next turn's reconcile.
         const chat = app.session.current();
-        if (chat !== null) {
-          for (const message of chat.messages) {
-            const row = doc.createElement("p");
-            row.className = `row row-text row-${message.role}`;
-            row.textContent = message.content;
-            transcript.append(row);
-          }
-        }
+        history = chat === null ? [] : historyRows(chat.messages);
+        const seeded = reconcile(render, history);
+        applyOps(transcript, nodes, seeded.ops, strings);
+        render = seeded.next;
         app.router.push({ name: "chat", chatId: intent.chatId });
         return;
       }
