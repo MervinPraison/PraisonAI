@@ -212,3 +212,71 @@ class TestKanbanGitTimeout:
 
         assert seen["cmd"][0] == "git"
         assert seen["timeout"] is not None and seen["timeout"] > 0
+
+
+class TestDescendantTermination:
+    """A grandchild must not outlive the kill, nor hold the caller open.
+
+    subprocess.run's own timeout path kills only the direct child: on POSIX it
+    then wait()s (orphaning the grandchild), and on Windows it communicate()s
+    with no timeout, which blocks until the grandchild releases the inherited
+    pipe. Both are why run_guarded kills the whole process group.
+    """
+
+    def test_returns_promptly_despite_a_surviving_descendant(self):
+        import time
+
+        script = (
+            "import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+            "time.sleep(60)"
+        )
+        started = time.monotonic()
+        result = run_guarded([sys.executable, "-c", script], timeout=1.0)
+        elapsed = time.monotonic() - started
+
+        assert result.returncode == TIMEOUT_RETURNCODE
+        # Generous bound: the point is that it does not wait out the 60s
+        # sleeps, on any platform.
+        assert elapsed < 20, f"took {elapsed:.1f}s; descendant blocked the reap"
+
+    def test_grandchild_is_actually_killed(self, tmp_path):
+        marker = tmp_path / "grandchild-survived.txt"
+        grandchild = (
+            f"import time; time.sleep(4); "
+            f"open({str(marker)!r}, 'w').write('alive')"
+        )
+        script = (
+            "import subprocess, sys, time; "
+            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+            "time.sleep(60)"
+        )
+        result = run_guarded([sys.executable, "-c", script], timeout=1.0)
+        assert result.returncode == TIMEOUT_RETURNCODE
+
+        # Outlive the grandchild's sleep. If the group kill worked it never
+        # gets to write; if only the direct child died, the marker appears.
+        import time
+
+        time.sleep(6)
+        assert not marker.exists(), "grandchild survived the group kill"
+
+
+class TestCheck:
+    def test_check_raises_on_nonzero(self):
+        with pytest.raises(subprocess.CalledProcessError):
+            run_guarded([sys.executable, "-c", "import sys; sys.exit(2)"], check=True)
+
+    def test_check_is_off_by_default(self):
+        result = run_guarded([sys.executable, "-c", "import sys; sys.exit(2)"])
+        assert result.returncode == 2
+
+    def test_timeout_returns_even_with_check(self):
+        # A timeout is reported as a value, never an exception, so callers
+        # branching on returncode keep working.
+        result = run_guarded(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            timeout=0.4,
+            check=True,
+        )
+        assert result.returncode == TIMEOUT_RETURNCODE

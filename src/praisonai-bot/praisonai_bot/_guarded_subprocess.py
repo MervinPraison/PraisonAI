@@ -5,10 +5,25 @@ them. ``subprocess.run`` without ``timeout=`` blocks forever if the child
 waits on stdin -- a git credential prompt, an ``index.lock`` contention, a
 confirmation prompt -- and the whole gateway stops serving.
 
-This module provides :func:`run_guarded`, a drop-in replacement that always
-bounds the call and, when it does fire, hands the caller a *diagnosis* rather
-than a bare timeout. Knowing that a command died waiting on a confirmation
-prompt is actionable; knowing only that 120 seconds elapsed is not.
+``subprocess.run(timeout=...)`` alone is not enough, because it only kills
+the *direct* child:
+
+* On POSIX its timeout path calls ``kill()`` then ``wait()``. The call
+  returns, but any grandchild the command spawned is orphaned and keeps
+  running.
+* On Windows it calls ``kill()`` then ``communicate()`` with **no timeout**.
+  A surviving grandchild that inherited the captured stdout/stderr pipe holds
+  it open, so that ``communicate()`` blocks until the grandchild exits --
+  reintroducing exactly the indefinite hang this module exists to prevent.
+
+That is not hypothetical for the calls here: ``git`` routinely spawns
+credential helpers and transport processes, and a stuck credential helper is
+the motivating failure.
+
+:func:`run_guarded` therefore runs the command in its own process group (or
+Windows process group), kills the whole group on timeout, and then reaps
+with a *bounded* second wait so a stubborn descendant can never block the
+caller.
 
 Note on semantics: this is a total-runtime cap, not an inactivity timer. A
 command that streams output steadily for longer than the cap is still killed.
@@ -17,11 +32,15 @@ Callers with legitimately long work should pass an explicit ``timeout``.
 
 from __future__ import annotations
 
+import logging
 import os
+import signal
 import subprocess
 from typing import Mapping, Optional, Sequence
 
-__all__ = ["run_guarded", "DEFAULT_TIMEOUT", "diagnose"]
+__all__ = ["run_guarded", "DEFAULT_TIMEOUT", "TIMEOUT_RETURNCODE", "diagnose"]
+
+logger = logging.getLogger(__name__)
 
 #: Total seconds a guarded command may run before it is killed.
 #: Override per call, or globally via ``PRAISONAI_SUBPROCESS_TIMEOUT``.
@@ -30,6 +49,11 @@ DEFAULT_TIMEOUT = 120.0
 #: Returncode reported for a killed command. 124 is the conventional exit
 #: status used by coreutils ``timeout``.
 TIMEOUT_RETURNCODE = 124
+
+#: Seconds allowed for the post-kill reap. Bounded on purpose: if a
+#: descendant somehow survives the group kill and still holds the pipe, we
+#: abandon the output rather than block the caller.
+REAP_TIMEOUT = 5.0
 
 _ENV_TIMEOUT = "PRAISONAI_SUBPROCESS_TIMEOUT"
 
@@ -104,6 +128,65 @@ def _non_interactive_env(env: Optional[Mapping[str, str]]) -> dict:
     return resolved
 
 
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Terminate the command *and everything it spawned*.
+
+    Killing only the direct child leaves grandchildren holding the inherited
+    stdout/stderr pipe, which is what turns a bounded call back into a hang.
+    """
+    if os.name == "nt":
+        try:
+            # /T walks the tree, /F forces. Bounded so the cleanup itself
+            # cannot become the new hang.
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=REAP_TIMEOUT,
+            )
+        except Exception:  # pragma: no cover - Windows-only path
+            _kill_direct(proc)
+        return
+
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        # Already gone, or we could not resolve the group; fall back.
+        _kill_direct(proc)
+
+
+def _kill_direct(proc: subprocess.Popen) -> None:
+    """Last-resort kill of the direct child only."""
+    try:
+        proc.kill()
+    except Exception:  # pragma: no cover - process already reaped
+        pass
+
+
+def _reap(proc: subprocess.Popen) -> tuple[str, str]:
+    """Collect whatever output is available without blocking indefinitely."""
+    try:
+        return proc.communicate(timeout=REAP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        # A descendant survived the group kill and still holds the pipe.
+        # Abandon the output rather than block the caller -- returning late
+        # is the failure mode this module exists to prevent.
+        logger.warning(
+            "Guarded command %s left a descendant holding its output pipe; "
+            "abandoning captured output after %.0fs.",
+            proc.args,
+            REAP_TIMEOUT,
+        )
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except Exception:  # pragma: no cover - best effort
+                pass
+        return "", ""
+    except Exception:  # pragma: no cover - defensive
+        return "", ""
+
+
 def run_guarded(
     cmd: Sequence[str],
     *,
@@ -111,15 +194,19 @@ def run_guarded(
     cwd: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,
     interactive: bool = False,
+    check: bool = False,
+    text: bool = True,
+    capture_output: bool = True,
     **kwargs,
 ) -> subprocess.CompletedProcess:
     """Run ``cmd`` with a bounded runtime, never raising on timeout.
 
     Behaves like ``subprocess.run(..., capture_output=True, text=True)``. On
-    timeout the child is killed and a :class:`subprocess.CompletedProcess` is
-    returned with returncode :data:`TIMEOUT_RETURNCODE` and a diagnosis
-    appended to stderr, so existing ``returncode == 0`` checks keep working
-    instead of having to grow a new exception path.
+    timeout the whole process group is killed and a
+    :class:`subprocess.CompletedProcess` is returned with returncode
+    :data:`TIMEOUT_RETURNCODE` and a diagnosis appended to stderr, so existing
+    ``returncode == 0`` checks keep working instead of having to grow a new
+    exception path.
 
     Args:
         cmd: Command and arguments.
@@ -128,12 +215,19 @@ def run_guarded(
         cwd: Working directory.
         env: Environment; prompt-suppressing defaults are layered underneath.
         interactive: Set True only for a command that must reach a terminal.
-            Skips prompt suppression; the timeout still applies.
-        **kwargs: Forwarded to ``subprocess.run``.
+            Skips prompt suppression and stdin redirection; the timeout and
+            the group kill still apply.
+        check: Raise ``CalledProcessError`` on a non-zero exit, matching
+            ``subprocess.run``. A timeout still returns rather than raising.
+        text: Decode output as text.
+        capture_output: Capture stdout and stderr.
+        **kwargs: Forwarded to ``subprocess.Popen``.
     """
     resolved_timeout = _default_timeout() if timeout is None else timeout
-    kwargs.setdefault("capture_output", True)
-    kwargs.setdefault("text", True)
+
+    if capture_output:
+        kwargs.setdefault("stdout", subprocess.PIPE)
+        kwargs.setdefault("stderr", subprocess.PIPE)
 
     # stdin at /dev/null turns "wait forever for input" into an immediate EOF
     # for tools that honour it, so the timeout is a backstop rather than the
@@ -141,32 +235,66 @@ def run_guarded(
     if not interactive:
         kwargs.setdefault("stdin", subprocess.DEVNULL)
 
-    try:
-        return subprocess.run(
-            list(cmd),
-            timeout=resolved_timeout,
-            cwd=cwd,
-            env=env if interactive else _non_interactive_env(env),
-            **kwargs,
+    # Isolate the command so the whole tree can be killed together.
+    if os.name == "nt":
+        kwargs["creationflags"] = (
+            kwargs.get("creationflags", 0) | subprocess.CREATE_NEW_PROCESS_GROUP
         )
-    except subprocess.TimeoutExpired as exc:
-        partial_out = _as_text(exc.stdout)
-        partial_err = _as_text(exc.stderr)
-        reason = diagnose(f"{partial_out}\n{partial_err}")
+    else:
+        kwargs.setdefault("start_new_session", True)
+
+    argv = list(cmd)
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=env if interactive else _non_interactive_env(env),
+        text=text,
+        **kwargs,
+    )
+
+    try:
+        stdout, stderr = proc.communicate(timeout=resolved_timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        stdout, stderr = _reap(proc)
+        stdout = _as_text(stdout)
+        stderr = _as_text(stderr)
+        # Built outside the f-string: a backslash inside an f-string
+        # expression is a syntax error before Python 3.12, and this package
+        # supports 3.10+.
+        captured = stdout + "\n" + stderr
         detail = (
-            f"Command killed after {resolved_timeout:g}s: {' '.join(cmd)}\n"
-            f"{reason}"
+            f"Command killed after {resolved_timeout:g}s: {' '.join(argv)}\n"
+            f"{diagnose(captured)}"
         )
         return subprocess.CompletedProcess(
-            args=list(cmd),
+            args=argv,
             returncode=TIMEOUT_RETURNCODE,
-            stdout=partial_out,
-            stderr=(partial_err + "\n" + detail).strip(),
+            stdout=stdout,
+            stderr=(stderr + "\n" + detail).strip(),
         )
+    except BaseException:
+        # Never leave a running child behind on an unexpected error, including
+        # KeyboardInterrupt.
+        _kill_process_group(proc)
+        _reap(proc)
+        raise
+
+    result = subprocess.CompletedProcess(
+        args=argv,
+        returncode=proc.returncode,
+        stdout=_as_text(stdout) if capture_output else stdout,
+        stderr=_as_text(stderr) if capture_output else stderr,
+    )
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, argv, result.stdout, result.stderr
+        )
+    return result
 
 
 def _as_text(value) -> str:
-    """Normalise TimeoutExpired's stdout/stderr, which may be bytes or None."""
+    """Normalise stdout/stderr, which may be bytes, None, or already str."""
     if value is None:
         return ""
     if isinstance(value, bytes):

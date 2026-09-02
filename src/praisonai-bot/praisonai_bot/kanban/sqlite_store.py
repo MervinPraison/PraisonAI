@@ -1,4 +1,5 @@
 """SQLite kanban store implementation."""
+import logging
 import sqlite3
 import json
 import uuid
@@ -12,6 +13,8 @@ from .models import (
     KanbanStoreProtocol,
 )
 from .paths import get_kanban_db_path
+
+_logger = logging.getLogger(__name__)
 
 # Board-wide default for the per-task retry/circuit-breaker.
 DEFAULT_MAX_RETRIES = 3
@@ -223,7 +226,7 @@ class SQLiteKanbanStore:
         if not path or not isinstance(path, str):
             return False
         try:
-            from .._guarded_subprocess import run_guarded
+            from .._guarded_subprocess import TIMEOUT_RETURNCODE, run_guarded
 
             # Bounded: this sits on the create_task path, which the gateway
             # dispatcher calls from its event loop. A git command that stalls
@@ -233,6 +236,19 @@ class SQLiteKanbanStore:
                 ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
                 timeout=15,
             )
+            if result.returncode == TIMEOUT_RETURNCODE:
+                # A timeout is "unknown", not "not a repository". We still
+                # answer False so a slow path can never fail the create, but
+                # say so: the caller downgrades the task to the shared
+                # workspace, and silently losing worktree isolation is the
+                # kind of thing an operator needs to see.
+                _logger.warning(
+                    "Timed out probing %s for a git worktree; treating it as "
+                    "not a repository, so this task will run in the shared "
+                    "workspace rather than an isolated worktree. %s",
+                    path,
+                    result.stderr.strip(),
+                )
             return result.returncode == 0 and result.stdout.strip() == "true"
         except Exception:
             return False
