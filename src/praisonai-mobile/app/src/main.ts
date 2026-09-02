@@ -212,6 +212,20 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   toSettings.textContent = strings.routeSettings;
   bar.append(title, newChat, toSettings);
 
+  // A boot-time banner that is NOT the transcript. The engine-not-ready warning
+  // describes the state of the app itself, not a row in any one conversation,
+  // so it lives here rather than inside `transcript`. Two reasons this matters:
+  //
+  //  - `reconcile`/`applyOps` place transcript rows by index into
+  //    `transcript.children`. A node appended out of band would sit in that
+  //    child list, shifting every index the reconciler computed and misplacing
+  //    real rows. Keeping the banner out of `transcript` leaves that math sound.
+  //  - New chat clears the transcript. The engine being unreachable is not per
+  //    conversation, so a fresh chat must not silently drop the warning while
+  //    the engine is still down.
+  const noticeBar = doc.createElement("div");
+  noticeBar.className = "notice-bar";
+
   const transcript = doc.createElement("main");
   transcript.className = "transcript";
   // NOT a live region, deliberately. `reconcile`/`applyOps` mutate this
@@ -247,7 +261,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   sendButton.textContent = strings.actionSend;
   composer.append(input, sendButton);
 
-  screen.append(bar, transcript, composer, polite, assertive);
+  screen.append(bar, noticeBar, transcript, composer, polite, assertive);
   root.textContent = "";
   root.append(screen);
 
@@ -350,7 +364,10 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     warning.className = "row row-notice";
     warning.dataset["tone"] = "warning";
     warning.textContent = strings.engineNotReady(booted.notReady.detail);
-    transcript.append(warning);
+    // Into the banner, not the transcript: it is app state, not a chat row, so
+    // it must neither shift the reconciler's index math nor be cleared by a
+    // New chat while the engine is still unreachable.
+    noticeBar.append(warning);
     assertive.textContent = strings.engineNotReady(booted.notReady.detail);
   }
 

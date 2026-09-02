@@ -798,3 +798,43 @@ test("a PERMANENT refusal still stops the app, with a name", async () => {
   assert.match(dom.text(), /could not start/, dom.text());
   assert.match(dom.text(), /too_old|engine=1|protocol/, "and it must name the reason");
 });
+
+test("the not-answering warning is NOT a transcript row", async () => {
+  // It described app state, not a chat row, but was appended straight into the
+  // transcript. `applyOps` places rows by index into `transcript.children`, so
+  // an out-of-band node there shifts every index the reconciler computed --
+  // the first real row inserts BEFORE the warning and later moves land wrong.
+  // The banner belongs outside the transcript entirely.
+  const { dom, platform } = harness(); // no /health: the engine is unreachable
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const notice = dom.find((n) => n.className.includes("row-notice"));
+  assert.ok(notice, "the warning must be on screen");
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.ok(transcript, "no transcript");
+  assert.equal(
+    transcript.children.length,
+    0,
+    "the warning must not sit among the reconciled rows and skew their indices",
+  );
+  app?.dispose();
+});
+
+test("New chat KEEPS the not-answering warning while the engine is still down", async () => {
+  // New chat clears the transcript. The engine being unreachable is not a
+  // property of one conversation, so wiping the warning with it left a fresh
+  // chat looking healthy while sending would still fail with no explanation.
+  const { dom, platform } = harness(); // no /health: still unreachable
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  assert.ok(dom.find((n) => n.className.includes("row-notice")), "the warning must be shown at boot");
+
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+
+  assert.ok(
+    dom.find((n) => n.className.includes("row-notice")),
+    "a New chat must not drop the warning while the engine is still unreachable",
+  );
+  app?.dispose();
+});
