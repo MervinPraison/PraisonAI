@@ -162,6 +162,25 @@ def _clock_to_next_at(hour: int, minute: int, tz: str | None) -> str:
     return target.isoformat()
 
 
+def _cron_schedule(cron_expr: str, tz: str | None) -> Schedule:
+    """Build a cron Schedule, refusing if nothing can evaluate it.
+
+    ``is_due()`` returns False for a cron job when ``croniter`` is missing --
+    a log line, no error, a job that never runs. A schedule the runtime
+    cannot evaluate must be rejected here, where the user can still see the
+    answer, not accepted and ignored. Every natural-language recurring form
+    ("every day at 9am") arrives through this path.
+    """
+    try:
+        import croniter  # noqa: F401  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise ValueError(
+            f"Schedule {cron_expr!r} needs the cron engine, which is not "
+            "installed. Install with: pip install croniter"
+        ) from exc
+    return Schedule(kind="cron", cron_expr=cron_expr, tz=tz)
+
+
 def parse_schedule(expr: str, tz: str | None = None) -> Schedule:
     """Parse a schedule expression string into a ``Schedule`` object.
 
@@ -185,7 +204,7 @@ def parse_schedule(expr: str, tz: str | None = None) -> Schedule:
         cron_expr = expr[5:].strip()
         if not cron_expr:
             raise ValueError("Empty cron expression after 'cron:' prefix")
-        return Schedule(kind="cron", cron_expr=cron_expr, tz=tz)
+        return _cron_schedule(cron_expr, tz)
 
     # At prefix (ISO timestamp)
     if lower.startswith("at:"):
@@ -231,7 +250,7 @@ def parse_schedule(expr: str, tz: str | None = None) -> Schedule:
         has_dow = cron_expr.rsplit(" ", 1)[-1] != "*"
         recurring = has_dow or bool(re.match(r"(?i)^\s*(every|daily|each)\b", expr))
         if recurring:
-            return Schedule(kind="cron", cron_expr=cron_expr, tz=tz)
+            return _cron_schedule(cron_expr, tz)
         minute, hour = cron_expr.split(" ")[:2]
         at = _clock_to_next_at(int(hour), int(minute), tz)
         return Schedule(kind="at", at=at, tz=tz)
