@@ -163,6 +163,10 @@ class Run:
         # but the pid outlives the restart and is how stop() reaches an
         # adopted run.
         self.pid = None
+        # A pid alone is ambiguous after a restart: the OS may have handed it to
+        # an unrelated process. The start time pins which process the pid meant,
+        # exactly as src-tauri/src/adopt.rs does for the engine.
+        self.pid_start = None
         self._lock = threading.Lock()
 
     # -- event history --------------------------------------------------
@@ -259,7 +263,8 @@ class Trainer:
         tmp = f"{path}.{os.getpid()}.tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({**run.summary(), "pid": run.pid}, fh)
+                json.dump({**run.summary(), "pid": run.pid,
+                             "pid_start": run.pid_start}, fh)
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp, path)
@@ -299,8 +304,9 @@ class Trainer:
             run.started = saved.get("started", run.started)
             run.ended, run.error = saved.get("ended"), saved.get("error")
             run.pid = saved.get("pid")
+            run.pid_start = saved.get("pid_start")
             if run.state not in TERMINAL:
-                if run.pid and _pid_alive(run.pid):
+                if run.pid and _same_process(run.pid, run.pid_start):
                     run.state = RUNNING
                     self.current = run          # stop() signals run.pid's group
                 else:
@@ -433,6 +439,10 @@ class Trainer:
             return
         run._proc = proc
         run.pid = proc.pid
+        # Read the fingerprint now, while the child is certainly still this
+        # process: reading it at adoption time would fingerprint whoever holds
+        # the pid then, which is the thing being guarded against.
+        run.pid_start = _pid_start_time(proc.pid)
         # Written now, before the RUNNING transition, so a crash in the next
         # instruction still leaves a pid on disk for the next process to adopt
         # or reap rather than a run that looks like it never spawned.
@@ -677,10 +687,13 @@ def _pid_alive(pid):
     signal but CTRL_C/CTRL_BREAK to TerminateProcess, so it would kill a live
     pid; Windows therefore gets an OpenProcess probe that only observes.
 
-    This does not guard against pid reuse -- a minimal version, as the audit
-    noted. The window is a restart landing on a recycled pid, which is narrow
-    on the desktop; the cost of getting it wrong is one adopted-then-reaped
-    run, not a lost GPU.
+    Liveness alone is NOT sufficient to adopt a run -- pids are recycled. Call
+    _same_process() for that. This function used to be the whole adoption test,
+    and the cost of a wrong answer was not "one adopted-then-reaped run" as
+    previously recorded here: an adopted run has no _proc and no supervisor, so
+    nothing ever reaps it. It stayed RUNNING forever, start() refused every new
+    run while it did, and stop() SIGTERMed the process group of whatever now
+    held the pid.
     """
     try:
         pid = int(pid)
@@ -721,6 +734,84 @@ def _pid_alive_windows(pid):
         return code.value == STILL_ACTIVE
     finally:
         kernel32.CloseHandle(handle)
+
+
+def _pid_start_time(pid):
+    """A fingerprint distinguishing this process from a later reuse of its pid.
+
+    src-tauri/src/adopt.rs already refuses to adopt on a live pid alone -- it
+    compares `start_time`, and names the failure `PidReused`. The Rust shell
+    guards the engine that way; the trainer did not guard the training job,
+    so the same recycled pid that adopt.rs rejects was adopted here.
+
+    POSIX `lstart` resolves to the second, so this cannot separate two
+    processes that share a pid *and* started within the same second -- which
+    requires the recycled process to be spawned in the same second as the one
+    it replaced. The remaining ambiguity is far narrower than a bare pid.
+
+    Returns None when the answer cannot be established (no such process, a
+    platform that will not say, a probe that failed). None is not "matches" --
+    callers must treat it as "cannot prove ownership".
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    if IS_WINDOWS:
+        return _pid_start_time_windows(pid)
+    try:
+        # lstart is the absolute start time; etime/etimes are relative to now
+        # and so change between the write and the read. Portable across the
+        # macOS and Linux ps implementations.
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    stamp = out.stdout.strip()
+    return stamp or None
+
+
+def _pid_start_time_windows(pid):
+    """GetProcessTimes' creation time, via the observe-only handle."""
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        creation = wintypes.FILETIME()
+        rest = (wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME())
+        ok = kernel32.GetProcessTimes(handle, ctypes.byref(creation),
+                                      *[ctypes.byref(x) for x in rest])
+        if not ok:
+            return None
+        return "%d:%d" % (creation.dwHighDateTime, creation.dwLowDateTime)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _same_process(pid, recorded_start):
+    """Whether `pid` is still the process that `recorded_start` came from.
+
+    Both halves must hold and be knowable. A live pid with no recorded
+    fingerprint is the pre-upgrade state file: it cannot be proven ours, and
+    the penalty for guessing wrong is SIGTERM to an unrelated process group,
+    so it is refused rather than adopted.
+    """
+    if not _pid_alive(pid):
+        return False
+    if not recorded_start:
+        return False
+    return _pid_start_time(pid) == recorded_start
 
 
 def _terminate_pid_group(pid):
