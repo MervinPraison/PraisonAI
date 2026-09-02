@@ -26,9 +26,18 @@ name: mobile
 on:
   push:
     branches: [main]
-    paths: ['src/praisonai-mobile/**', '.github/workflows/mobile.yml']
+    paths: &watched
+      - 'src/praisonai-mobile/**'
+      - '.github/workflows/mobile.yml'
+      # The `upstream parity` job below typechecks the REAL praisonai-ts Agent
+      # against the structural contract in engines/src/praisonai-ts/agent-api.ts.
+      # Watching only praisonai-mobile made that gate fire when the CONSUMER
+      # changed and stay silent when the thing it watches did -- so upstream
+      # drift landed on main unchecked. Verified on 71197fa80, which edited
+      # src/praisonai-ts/src/agent/simple.ts: no parity check ran on it.
+      - 'src/praisonai-ts/src/**'
   pull_request:
-    paths: ['src/praisonai-mobile/**', '.github/workflows/mobile.yml']
+    paths: *watched
 
 concurrency:
   group: mobile-${{ github.ref }}

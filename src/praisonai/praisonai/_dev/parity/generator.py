@@ -119,11 +119,35 @@ class ParityTrackerGenerator:
             current = current.parent
         return Path("/Users/praison/praisonai-package")
     
+
+    def _refuse_empty(self, features, language: str, source: str) -> None:
+        """An extractor that found nothing has FAILED; it has not found parity.
+
+        Both extractors swallow their errors and return an empty result, and
+        every downstream number is a set difference -- so a missing or
+        unparseable source file produces a plausible tracker rather than an
+        error. Measured against a scratch tree with an unparseable
+        `__init__.py`: `{'pythonCoreFeatures': 0, 'gapCount': 0}`, exit 0, and
+        CI would have committed it as "no gaps".
+
+        Zero exports is never a real answer for either SDK, so it is refused
+        here rather than published.
+        """
+        count = len(getattr(features, "exports", ()) or ())
+        if count == 0:
+            raise RuntimeError(
+                f"{language} extractor found 0 exports in {source}. That is a "
+                f"read or parse failure, not parity -- refusing to write a "
+                f"tracker that would report zero gaps."
+            )
+
     def generate(self) -> dict:
         """Generate the parity tracker data structure."""
         # Extract features from both SDKs
         python_features = self.python_extractor.extract()
         ts_features = self.ts_extractor.extract()
+        self._refuse_empty(python_features, "Python", "praisonaiagents/__init__.py")
+        self._refuse_empty(ts_features, "TypeScript", "praisonai-ts/src/index.ts")
         
         # Get version from existing tracker or default
         version = self._get_current_version()
@@ -198,7 +222,7 @@ class ParityTrackerGenerator:
     def _build_python_section(self, features: PythonFeatures) -> dict:
         """Build Python SDK section."""
         return {
-            'path': str(self.repo_root / "src" / "praisonai-agents" / "praisonaiagents"),
+            'path': "src/praisonai-agents/praisonaiagents",
             'exports': sorted([e.name for e in features.exports]),
             'modules': {
                 name: sorted(mod.exports)
@@ -209,14 +233,14 @@ class ParityTrackerGenerator:
     def _build_wrapper_section(self, features: PythonFeatures) -> dict:
         """Build Python wrapper section."""
         return {
-            'path': str(self.repo_root / "src" / "praisonai" / "praisonai"),
+            'path': "src/praisonai/praisonai",
             'cliFeatures': sorted(features.cli_features),
         }
     
     def _build_typescript_section(self, features: TypeScriptFeatures) -> dict:
         """Build TypeScript SDK section."""
         return {
-            'path': str(self.repo_root / "src" / "praisonai-ts" / "src"),
+            'path': "src/praisonai-ts/src",
             'exports': sorted([e.name for e in features.exports if not e.is_type]),
             'modules': {
                 name: sorted(mod.exports)
@@ -334,7 +358,10 @@ class ParityTrackerGenerator:
             status = 'EARLY_DEVELOPMENT'
         elif rust_count < python_count * 0.75:
             status = 'IN_PROGRESS'
-        elif rust_count < python_count:
+        elif gap_count > 0:
+            # Was `rust_count < python_count`, which compared VOLUME: a crate
+            # exporting more names than Python scored PARITY_ACHIEVED with 129
+            # features missing. Any outstanding gap means parity is not achieved.
             status = 'NEAR_PARITY'
         else:
             status = 'PARITY_ACHIEVED'
@@ -349,13 +376,18 @@ class ParityTrackerGenerator:
                 'pythonCoreFeatures': python_count,
                 'rustFeatures': rust_count,
                 'gapCount': gap_count,
-                'parityPercentage': round((rust_count / python_count * 100) if python_count > 0 else 0, 1),
+                # IMPLEMENTED over expected, not total-exports over expected. Dividing
+                # the whole Rust surface by Python's produced 162.3% alongside a
+                # gapCount of 129 -- a number that cannot fall below 100% however
+                # much is missing, and that contradicted the PARITY.md written by
+                # the same run (69.8%). Volume is not parity.
+                'parityPercentage': round(((python_count - gap_count) / python_count * 100) if python_count > 0 else 0, 1),
             },
             'pythonCoreSDK': {
                 'exports': sorted([e.name for e in python_features.exports]),
             },
             'rustSDK': {
-                'path': str(self.repo_root / "src" / "praisonai-rust"),
+                'path': "src/praisonai-rust",
                 'exports': sorted(list(rust_exports)),
                 'modules': {
                     name: sorted(mod.exports)

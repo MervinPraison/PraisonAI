@@ -1,12 +1,28 @@
 name: Update Feature Parity Tracker
 
 on:
+  pull_request:
+    paths: &watched
+      - 'src/praisonai-agents/praisonaiagents/**/*.py'
+      - 'src/praisonai-ts/src/**/*.ts'
+      - 'src/praisonai-rust/praisonai/src/**/*.rs'
+      - 'src/praisonai/praisonai/_dev/parity/**/*.py'
+      - 'src/praisonai/praisonai/cli/features/**/*.py'
+      - '.github/workflows/update-parity-tracker.yml'
   push:
     branches: [ "main" ]
     paths:
       - 'src/praisonai-agents/praisonaiagents/**/*.py'
       - 'src/praisonai-ts/src/**/*.ts'
-      - 'src/praisonai-rust/src/**/*.rs'
+      # The crate lives at src/praisonai-rust/praisonai/src -- the old
+      # 'src/praisonai-rust/src/**' path does not exist, so a Rust change
+      # never triggered either tracker and the Rust numbers only ever
+      # refreshed incidentally, on an unrelated push.
+      - 'src/praisonai-rust/praisonai/src/**/*.rs'
+      # The generator's own code and the wrapper features it counts. Change
+      # either and nothing regenerated until an unrelated push landed.
+      - 'src/praisonai/praisonai/_dev/parity/**/*.py'
+      - 'src/praisonai/praisonai/cli/features/**/*.py'
       - '.github/workflows/update-parity-tracker.yml'
 
 permissions:
@@ -14,6 +30,10 @@ permissions:
 
 jobs:
   update-parity-tracker:
+    # Push only. On a PR the job below CHECKS instead -- committing a
+    # regenerated tracker onto a contributor's branch is not this
+    # workflow's business, and would fail on a fork besides.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     
     steps:
@@ -59,3 +79,31 @@ jobs:
         commit_user_email: "454862+MervinPraison@users.noreply.github.com"
         commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"
 
+  # ------------------------------------------------------------------
+  # On a PR: CHECK, do not commit.
+  #
+  # `--check` has existed since the script was written and exits 1 on a stale
+  # tracker -- and was invoked by nothing, so the tracker could only ever be
+  # corrected after the fact by the push job below. It was also unusable as a
+  # gate until the absolute `path` field was removed from the output, because
+  # it failed on every machine that was not the GitHub runner.
+  #
+  # This does NOT check parity. It checks that the committed artifact matches
+  # what today's source produces -- staleness only. What the number means is a
+  # separate problem, recorded in the tracker's own disclaimer.
+  # ------------------------------------------------------------------
+  check-parity-tracker:
+    name: parity tracker is current
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # The generator imports pyyaml. The first run of this job failed in 8s
+      # with `No module named 'yaml'` -- the push job above installs it and
+      # this one did not.
+      - run: pip install pyyaml
+      - name: Is the committed tracker what the source produces?
+        run: python3 src/praisonai/scripts/generate_parity_tracker.py --check
