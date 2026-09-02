@@ -676,6 +676,15 @@ const SETTINGS = [
     control: { kind: "slider", min: 0, max: 1, step: 0.01 },
     default: 1, validate: clampNum(0, 1) },
 
+  { key: "reasoning_effort", section: "model", label: "Reasoning effort",
+    description: "How hard the model thinks before answering. Off leaves the provider default. Maps to each backend's native knob.",
+    keywords: ["thinking", "reasoning", "effort", "budget", "o1", "o3"],
+    control: { kind: "select", options: [
+      { value: "off", label: "Off" }, { value: "minimal", label: "Minimal" },
+      { value: "low", label: "Low" }, { value: "medium", label: "Medium" },
+      { value: "high", label: "High" }]},
+    default: "off" },
+
   { key: "base_url", section: "model", label: "Base URL override",
     description: "Point at a proxy, Azure, or a local server. Blank uses the provider default.",
     keywords: ["endpoint", "proxy", "azure", "ollama", "lm studio"],

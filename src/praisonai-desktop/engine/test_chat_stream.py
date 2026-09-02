@@ -44,6 +44,7 @@ class StubAgent:
         self.started = 0
         self.chat_history = []
         self.seen_history = None
+        self.seen_kwargs = None
 
     def _append_to_chat_history(self, message):
         self.chat_history.append(message)
@@ -51,6 +52,7 @@ class StubAgent:
     def start(self, prompt, stream=True, **kwargs):
         self.started += 1
         self.seen_history = list(self.chat_history)
+        self.seen_kwargs = dict(kwargs)
         # Tools "run" before the model's answer would arrive, exactly as the
         # display callback records them during a real turn.
         for tool in self.tools:
@@ -310,6 +312,71 @@ class HistoryAcrossSessions(unittest.TestCase):
         agent = self._say("second", ["two"])
         self.assertTrue(all(t.strip() for _, t in self._roles_and_text(agent)),
                         f"a blank turn was replayed: {agent.seen_history}")
+
+
+class ReasoningEffortReachesTheModel(unittest.TestCase):
+    """The GUI setting must actually arrive at the turn.
+
+    reasoning_effort is a first-class Agent kwarg -- the engine forwards it
+    through start() alongside temperature/top_p, and only when the user chose a
+    real level. "off" is the default no-op and must not be sent, or it would
+    override a provider default the user never touched.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        server._agents.clear()
+        server._tool_queue().clear()
+        self._orig = server.load_settings
+
+    def tearDown(self):
+        server.load_settings = self._orig
+
+    def _install(self):
+        agent = StubAgent(chunks=["ok"])
+        server._agents["t"] = agent
+        server._agents["t\x00notools"] = agent
+        return agent
+
+    def _chat(self):
+        body = json.dumps({"prompt": "hi", "chat_id": "t", "session": "t"}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/chat", data=body, method="POST",
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as response:
+            response.read()
+
+    def test_a_chosen_level_is_forwarded_to_start(self):
+        server.load_settings = lambda: dict(self._orig(), reasoning_effort="high")
+        agent = self._install()
+        self._chat()
+        self.assertEqual(agent.seen_kwargs.get("reasoning_effort"), "high",
+                         "the GUI reasoning_effort never reached the turn")
+
+    def test_off_is_the_default_and_is_not_sent(self):
+        # Forwarding "off" unasked would override a provider default the user
+        # never touched, exactly as sending temperature=0.7 unasked would.
+        agent = self._install()
+        self._chat()
+        self.assertNotIn("reasoning_effort", agent.seen_kwargs,
+                         "the no-op default was forwarded and overrode the provider")
+
+    def test_the_setting_round_trips_through_save(self):
+        # It is a real storage key, not a value dropped by load_settings.
+        server.save_settings({"reasoning_effort": "low"})
+        self.assertEqual(server.load_settings()["reasoning_effort"], "low")
+        server.save_settings({"reasoning_effort": "off"})
 
 
 class FetchUrlDoesNotFollowRedirects(unittest.TestCase):
