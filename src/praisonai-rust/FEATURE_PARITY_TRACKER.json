@@ -3,12 +3,12 @@
   "lastUpdated": "2026-09-02",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
-  "status": "PARITY_ACHIEVED",
+  "status": "NEAR_PARITY",
   "summary": {
     "pythonCoreFeatures": 411,
     "rustFeatures": 667,
     "gapCount": 129,
-    "parityPercentage": 162.3
+    "parityPercentage": 68.6
   },
   "pythonCoreSDK": {
     "exports": [
@@ -426,7 +426,7 @@
     ]
   },
   "rustSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-rust",
+    "path": "src/praisonai-rust",
     "exports": [
       "A2A",
       "A2AAgentCapabilities",
@@ -1181,6 +1181,7 @@
         "WebSearchProvider"
       ],
       "config_loader": [
+        "AutoRagConfig",
         "SessionConfig"
       ],
       "context": [
@@ -1802,7 +1803,6 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
-        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1816,9 +1816,6 @@
       "sandbox": [],
       "session": [],
       "skills": [],
-      "specialized": [
-        "AutoRagConfig"
-      ],
       "specialized_agents": [],
       "streaming": [],
       "task": [],
@@ -1827,6 +1824,7 @@
       "tools": [
         "FunctionTool",
         "Tool",
+        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],

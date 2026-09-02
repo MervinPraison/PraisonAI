@@ -14,7 +14,7 @@
     "priorityP3": 103
   },
   "pythonCoreSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
+    "path": "src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
       "A2UI",
@@ -901,7 +901,7 @@
     }
   },
   "pythonWrapper": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/praisonai",
+    "path": "src/praisonai/praisonai",
     "cliFeatures": [
       "acp",
       "agent_scheduler",
@@ -927,7 +927,7 @@
     ]
   },
   "typescriptSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src",
+    "path": "src/praisonai-ts/src",
     "exports": [
       "A2A",
       "A2ARole",
