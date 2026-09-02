@@ -208,3 +208,19 @@ test('the deliberate Train choice is kept while the engine is down', async () =>
   assert.equal(b.window.localStorage.getItem('view'), 'train',
     'the saved Train view was overwritten by the engine gate');
 });
+
+test('the restored Train view returns once setup succeeds (#4441)', async () => {
+  // The gate forces Chat so setup is visible; the point of keeping the saved
+  // view is that a deliberate Train choice comes back when the engine is up --
+  // not that the session is left stranded on Chat until a relaunch.
+  const b = await boot({ savedView: 'train', provision: 'ok' });
+  assert.equal(b.doc.body.classList.contains('training'), false,
+    'Train is still hidden while setup is on screen');
+  click(b.doc.querySelector('.setup .go'));
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(b.doc.querySelector('.setup'), null, 'the setup screen stayed up');
+  assert.equal(b.doc.body.classList.contains('training'), true,
+    'the saved Train view was not restored after the engine came up');
+  assert.equal(b.window.localStorage.getItem('view'), 'train',
+    'the saved Train view was lost');
+});

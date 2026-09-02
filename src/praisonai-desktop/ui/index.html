@@ -1429,6 +1429,11 @@ if(st.state==='ready'){
   // so a fine-tune started in an earlier session reappears rather than looking
   // like it never happened.
   if(typeof refreshTraining==='function') refreshTraining();
+  // The engine gate forces Chat (without persisting) so setup is visible when a
+  // restored Train view would otherwise hide it. Now the engine is up, restore
+  // the saved choice so a deliberate Train view returns rather than being stuck
+  // on Chat after setup completes.
+  restoreView();
   try{ CFG={...DEFAULTS,...await (await fetch(
         `http://127.0.0.1:${PORT}/settings`)).json()}; }catch{}
   applyTheme(CFG.theme);
@@ -2604,15 +2609,15 @@ document.getElementById('tRunOn').addEventListener('change',e=>{
 
 // Always go through showView, including for the default: it is what sets the
 // selected state on the nav, and skipping it for 'chat' left neither tab
-// looking selected on first launch.
-let startView='chat';
-try{ if(localStorage.getItem('view')==='train') startView='train'; }catch(e){}
-initialBoot.then(()=>{
-  let nextView=startView;
-  try{
-    const savedView=localStorage.getItem('view');
-    if(savedView==='chat'||savedView==='train') nextView=savedView;
-  }catch(e){}
-  showView(nextView);
-});
+// looking selected on first launch. Re-applies the *saved* choice, so calling
+// it after the engine is ready undoes the engine gate's temporary Chat and
+// brings a deliberate Train view back without inventing a new selection. While
+// the engine is not ready showView forces Chat, so restoreView() is safe to run
+// at startup too: it selects the tab and setup stays visible.
+function restoreView(){
+  let saved='chat';
+  try{ if(localStorage.getItem('view')==='train') saved='train'; }catch(e){}
+  showView(saved);
+}
+initialBoot.then(restoreView);
 </script></body></html>
