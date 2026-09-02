@@ -19,7 +19,11 @@ from typing import Callable, Dict, Optional
 # Built-in model-name → provider matchers. Kept intentionally small and data
 # driven; extend via the entry-point group rather than editing callers.
 _BUILTINS: Dict[str, Callable[[str], bool]] = {
-    "anthropic": lambda m: m.startswith("claude-") or "/claude" in m,
+    # ``claude`` is matched as a substring so cloud-vendored forms
+    # (``us.anthropic.claude-3-5-sonnet``, ``anthropic.claude-...``) still
+    # resolve, preserving the pre-refactor behaviour that keyed off
+    # ``'claude' in model``.
+    "anthropic": lambda m: "claude" in m,
     "openai": lambda m: m.startswith(("gpt-", "o1-", "o3-", "o4-", "chatgpt-")),
     "google": lambda m: m.startswith(("gemini-", "gemma-")),
     "groq": lambda m: m.startswith(("llama-", "mixtral-", "gemma2-")) and "groq" in m,

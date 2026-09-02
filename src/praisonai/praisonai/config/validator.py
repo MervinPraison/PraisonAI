@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic import ValidationError
 
-from .schema import YAMLConfig, ValidationResult, AgentConfig, TaskConfig
+from .schema import YAMLConfig, ValidationResult, AgentConfig
 from ..tool_resolver import ToolResolver
 
 
@@ -15,9 +15,12 @@ from ..tool_resolver import ToolResolver
 # of truth. Adding a field to the schema automatically teaches the validator
 # about it — no parallel hand-maintained set to drift out of sync.
 _KNOWN_TOP_LEVEL = frozenset(YAMLConfig.model_fields.keys())
-_KNOWN_AGENT_FIELDS = frozenset(AgentConfig.model_fields.keys()) | frozenset(
-    TaskConfig.model_fields.keys()
-)
+# Agent-only fields. TaskConfig fields are intentionally NOT unioned in: an
+# agent declaration with a task-only key (``expected_output``, ``output_file``,
+# ``async_execution``, ``context``, ``condition``) is a genuine mistake the
+# runtime ignores, so it must still warn. ``name`` is accepted as an alias the
+# runtime tolerates but the schema doesn't declare.
+_KNOWN_AGENT_FIELDS = frozenset(AgentConfig.model_fields.keys()) | {"name"}
 
 
 class ConfigValidator:
