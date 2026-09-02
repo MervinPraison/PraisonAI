@@ -29,7 +29,7 @@ Memory Providers:
 - RulesManager: Rules/instructions file management
 - AutoMemory: Automatic memory extraction from conversations
 - WorkflowManager: Multi-step workflow execution
-- HooksManager: Pre/post operation hooks
+- HooksManager: Standalone, opt-in pre/post operation hooks (call .execute() yourself; not auto-wired into the agent pipeline)
 - DocsManager: Documentation context management
 - MCPConfigManager: MCP server configuration management
 """
