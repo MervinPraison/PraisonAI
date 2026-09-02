@@ -106,6 +106,13 @@ class PendingRequest:
     # this request. ``None`` (default) keeps today's behaviour where any holder
     # of the APPROVALS scope may resolve any request.
     authorized_reviewers: Optional[frozenset] = None
+    # Optional turn-liveness binding. ``session_id`` and ``run_generation``
+    # stamp the originating turn so a supersede/stop can cancel this pending
+    # approval, and ``resolve()`` can drop a resolution that arrives after the
+    # turn is gone (fail-closed). ``None`` (default) preserves today's behaviour
+    # where an approval is unbound and always considered live.
+    session_id: Optional[str] = None
+    run_generation: Optional[int] = None
     # Resolved via the asyncio Future
     _future: Optional[asyncio.Future] = field(default=None, repr=False)
     # Store the event loop at registration time for thread-safe resolution
@@ -603,6 +610,11 @@ class ExecApprovalManager:
         # weak task tracking cannot GC them mid-execution (see CPython docs
         # for asyncio.create_task).
         self._bg_tasks: Set[asyncio.Task] = set()
+        # Highest superseded run generation seen per session. A pending approval
+        # bound to a generation <= this value is stale (its turn was stopped or
+        # replaced). Sessions with no entry are fully live. Kept tiny — one int
+        # per active session — and pruned lazily as sessions come and go.
+        self._superseded_generation: Dict[str, int] = {}
         self.allowlist = allowlist or PermissionAllowlist(
             durable=durable, path=allowlist_path,
         )
@@ -671,6 +683,8 @@ class ExecApprovalManager:
         agent_name: str = "",
         risk_level: str = "medium",
         authorized_reviewers: Optional[Iterable[str]] = None,
+        session_id: Optional[str] = None,
+        run_generation: Optional[int] = None,
     ) -> tuple:
         """Create a pending request and return ``(request_id, future)``.
 
@@ -681,6 +695,12 @@ class ExecApprovalManager:
         ``authorized_reviewers`` optionally binds the request to a set of
         reviewer identities; only those principals may resolve it. ``None``
         (default) leaves resolution open to any holder of the APPROVALS scope.
+
+        ``session_id``/``run_generation`` optionally bind the request to the
+        liveness of the originating turn. When supplied, :meth:`resolve` drops a
+        resolution that arrives after the turn was superseded/stopped, and
+        :meth:`cancel_for_generation` can fail-close the pending future when the
+        turn is interrupted. Both ``None`` (default) preserve today's behaviour.
         """
         # Fast path: already permanently allowed (scoped to this agent, its
         # argument signature, or a legacy global grant).
@@ -694,6 +714,24 @@ class ExecApprovalManager:
             future.set_result(Resolution(approved=True, reason="allow-always"))
             return ("auto", future)
 
+        # Defensive: a session-bound request must carry an integer generation.
+        # A non-int would raise during the ``<=`` comparison in
+        # cancel_for_generation()/_is_generation_live(), which callers swallow —
+        # leaving the approval silently un-cancellable. Coerce a clean int or
+        # drop the (untrustworthy) binding fail-open to unbound rather than
+        # register something that can never be superseded.
+        if session_id is not None and run_generation is not None:
+            if isinstance(run_generation, bool) or not isinstance(run_generation, int):
+                try:
+                    run_generation = int(run_generation)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Ignoring non-integer run_generation %r for session %s; "
+                        "registering approval unbound.",
+                        run_generation, session_id,
+                    )
+                    run_generation = None
+
         request_id = self._make_id()
         loop = asyncio.get_running_loop()
         future = loop.create_future()
@@ -706,11 +744,32 @@ class ExecApprovalManager:
             agent_name=agent_name,
             risk_level=risk_level,
             authorized_reviewers=reviewers,
+            session_id=session_id,
+            run_generation=run_generation,
             _future=future,
             _loop=loop,  # capture loop at registration for thread-safe resolve
         )
 
         with self._lock:
+            # Fail-closed: if this turn's generation was already superseded (a
+            # /stop or interrupt raced ahead of registration), never park the
+            # caller on a future no cancel batch will ever complete — resolve it
+            # denied immediately and skip insertion.
+            if (
+                session_id is not None
+                and run_generation is not None
+                and not self._is_generation_live_locked(session_id, run_generation)
+            ):
+                future.set_result(
+                    Resolution(approved=False, reason="superseded")
+                )
+                logger.info(
+                    "Approval request %s denied at registration: session=%s "
+                    "generation=%s already superseded",
+                    request_id, session_id, run_generation,
+                )
+                return (request_id, future)
+
             self._prune()
             self._pending[request_id] = req
 
@@ -769,6 +828,34 @@ class ExecApprovalManager:
             logger.warning(
                 "Rejected approval resolution for %s: resolver %r not authorised",
                 request_id, resolution.resolver,
+            )
+            return False
+
+        # Turn-liveness revalidation (fail-closed). If this request was bound to
+        # a turn that has since been superseded/stopped, drop the resolution:
+        # never execute the approved tool or deliver a reply for an abandoned
+        # turn. The pending future is already gone (popped above); complete it
+        # as denied so any awaiting caller unwinds. Requests with no liveness
+        # binding (session_id/run_generation ``None``) are always considered
+        # live, preserving today's behaviour.
+        if req.session_id is not None and not self._is_generation_live(
+            req.session_id, req.run_generation
+        ):
+            logger.warning(
+                "Dropping stale approval resolution for %s (tool=%s): turn "
+                "session=%s generation=%s is no longer current",
+                request_id, req.tool_name, req.session_id, req.run_generation,
+            )
+            if req._future and not req._future.done() and req._loop:
+                req._loop.call_soon_threadsafe(
+                    req._future.set_result,
+                    Resolution(approved=False, reason="superseded"),
+                )
+            self._record_resolution(
+                request_id,
+                Resolution(approved=False, reason="superseded",
+                           resolver=resolution.resolver),
+                approver=resolution.resolver or "gateway",
             )
             return False
 
@@ -890,6 +977,90 @@ class ExecApprovalManager:
         """Remove a pending request without resolving it. Returns ``True`` if found."""
         with self._lock:
             return self._pending.pop(request_id, None) is not None
+
+    # ── Turn-liveness binding ─────────────────────────────────────────
+
+    def _is_generation_live_locked(
+        self, session_id: str, run_generation: Optional[int]
+    ) -> bool:
+        """``_is_generation_live`` body, callable while already holding ``_lock``.
+
+        Split out so :meth:`register` can perform the liveness check inside its
+        own critical section (avoiding a lock re-entry / TOCTOU window) while
+        :meth:`resolve` keeps using the lock-acquiring wrapper.
+        """
+        if run_generation is None:
+            return True
+        superseded = self._superseded_generation.get(session_id)
+        return superseded is None or run_generation > superseded
+
+    def _is_generation_live(
+        self, session_id: str, run_generation: Optional[int]
+    ) -> bool:
+        """Return whether ``run_generation`` for ``session_id`` is still current.
+
+        An approval is live unless its generation was explicitly superseded via
+        :meth:`cancel_for_generation`. Callers pass ``session_id is None`` for
+        unbound requests and never reach here (always live).
+        """
+        if run_generation is None:
+            return True
+        with self._lock:
+            return self._is_generation_live_locked(session_id, run_generation)
+
+    def cancel_for_generation(
+        self, session_id: str, run_generation: int
+    ) -> int:
+        """Fail-closed cancel every pending approval bound to a superseded turn.
+
+        Marks generations ``<= run_generation`` for ``session_id`` as superseded
+        so any *later*-arriving resolution is dropped by :meth:`resolve`, and
+        completes any currently-pending future as denied so the awaiting tool
+        call unwinds promptly (this is what makes ``/stop`` produce a visible
+        outcome instead of parking indefinitely on the approval wait).
+
+        Returns the number of pending approvals cancelled. A no-op for sessions
+        with no bound pending approvals.
+        """
+        with self._lock:
+            prev = self._superseded_generation.get(session_id)
+            if prev is None or run_generation > prev:
+                self._superseded_generation[session_id] = run_generation
+            to_cancel = [
+                r for r in self._pending.values()
+                if r.session_id == session_id
+                and r.run_generation is not None
+                and r.run_generation <= run_generation
+            ]
+            for r in to_cancel:
+                self._pending.pop(r.request_id, None)
+
+        for r in to_cancel:
+            if r._future and not r._future.done() and r._loop:
+                r._loop.call_soon_threadsafe(
+                    r._future.set_result,
+                    Resolution(approved=False, reason="cancelled"),
+                )
+            self._record_resolution(
+                r.request_id,
+                Resolution(approved=False, reason="cancelled"),
+                approver="gateway",
+            )
+        if to_cancel:
+            logger.info(
+                "Cancelled %d pending approval(s) for session=%s generation<=%s",
+                len(to_cancel), session_id, run_generation,
+            )
+        return len(to_cancel)
+
+    def forget_session(self, session_id: str) -> None:
+        """Drop the superseded-generation marker for a finished session.
+
+        Bounds the tiny per-session bookkeeping so it cannot grow unbounded as
+        sessions churn. Safe no-op when the session is unknown.
+        """
+        with self._lock:
+            self._superseded_generation.pop(session_id, None)
 
     # ── Query API ─────────────────────────────────────────────────────
 

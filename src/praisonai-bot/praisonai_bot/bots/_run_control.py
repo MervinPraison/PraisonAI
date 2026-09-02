@@ -37,13 +37,52 @@ import asyncio
 import logging
 import time
 from enum import Enum
-from typing import Dict, Optional, Any, TYPE_CHECKING
+from typing import Callable, Dict, Optional, Any, TYPE_CHECKING
 from .._lockmap import LockMap
 
 if TYPE_CHECKING:
     from praisonaiagents.agent.interrupt import InterruptController
 
 logger = logging.getLogger(__name__)
+
+
+def make_approval_supersede_callback(
+    manager: Optional[Any] = None,
+) -> Callable[[str, int], None]:
+    """Build an ``on_supersede`` callback that cancels a turn's gateway approvals.
+
+    Bridges :class:`SessionRunControl` to the gateway's ``ExecApprovalManager``
+    so a ``/stop`` (or an interrupting message) fail-closes any approval parked
+    on the abandoned turn: the awaiting tool call unwinds promptly and a
+    resolution that arrives after the stop is dropped.
+
+    The returned callback maps ``user_id`` → the approval manager's
+    ``session_id`` (a bot user *is* the approval session in the single-agent bot
+    flow) and calls ``cancel_for_generation``. It is intentionally best-effort:
+    any failure (e.g. the gateway package or manager singleton being absent in a
+    lightweight deployment) is logged and swallowed so stop/interrupt handling is
+    never broken.
+
+    Args:
+        manager: Optional explicit ``ExecApprovalManager``. Resolved lazily from
+            the gateway singleton when ``None`` so importing this module never
+            pulls in the gateway.
+    """
+
+    def _on_supersede(user_id: str, generation: int) -> None:
+        mgr = manager
+        try:
+            if mgr is None:
+                from ..gateway.exec_approval import get_exec_approval_manager
+                mgr = get_exec_approval_manager()
+            mgr.cancel_for_generation(user_id, generation)
+        except Exception:  # noqa: BLE001 - callback must not break run control
+            logger.debug(
+                "Approval supersede callback no-op for user=%s generation=%s",
+                user_id, generation, exc_info=True,
+            )
+
+    return _on_supersede
 
 
 class RunDecision(Enum):
@@ -86,13 +125,21 @@ class SessionRunControl:
     def __init__(
         self, 
         busy_mode: str = "queue",
-        busy_ack_template: str = "⏳ {action} — will be considered next"
+        busy_ack_template: str = "⏳ {action} — will be considered next",
+        on_supersede: Optional[Callable[[str, int], Any]] = None,
     ):
         """Initialize session run control.
         
         Args:
             busy_mode: Policy for mid-run messages ("queue", "interrupt", "steer")
             busy_ack_template: Template for busy acknowledgment messages
+            on_supersede: Optional callback invoked as ``(user_id, generation)``
+                whenever a run is stopped or interrupted, where ``generation`` is
+                the run generation being abandoned. The gateway wires this to
+                cancel pending approvals bound to that turn so a ``/stop`` (or a
+                superseding message) unblocks an approval-parked turn and drops
+                a resolution that arrives after the turn is gone. ``None``
+                (default) keeps today's behaviour (no approval cancellation).
         """
         try:
             self._busy_mode = BusyMode(busy_mode)
@@ -101,8 +148,25 @@ class SessionRunControl:
             self._busy_mode = BusyMode.QUEUE
             
         self._busy_ack_template = busy_ack_template
+        self._on_supersede = on_supersede
         self._sessions: Dict[str, SessionRunState] = {}
         self._locks = LockMap()
+
+    def _notify_supersede(self, user_id: str, generation: int) -> None:
+        """Best-effort notify that ``generation`` for ``user_id`` was abandoned.
+
+        Failures in the callback must never break stop/interrupt handling, so
+        exceptions are logged and swallowed.
+        """
+        if self._on_supersede is None:
+            return
+        try:
+            self._on_supersede(user_id, generation)
+        except Exception:  # noqa: BLE001 - callback must not break run control
+            logger.exception(
+                "on_supersede callback failed for user=%s generation=%s",
+                user_id, generation,
+            )
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         """Get or create lock for user."""
@@ -150,7 +214,12 @@ class SessionRunControl:
                 # Cancel current run and start new one
                 if session.interrupt_controller:
                     session.interrupt_controller.request("user_new_message")
-                
+
+                # Cancel any pending approval bound to the turn being superseded
+                # so an approval-parked turn unwinds and a late resolution for it
+                # is dropped, before we advance the generation.
+                self._notify_supersede(user_id, session.run_generation)
+
                 session.pending_message = None  # Clear any pending
                 session.run_generation += 1
                 session.start_time = time.time()
@@ -247,7 +316,12 @@ class SessionRunControl:
             # Request interrupt
             if session.interrupt_controller:
                 session.interrupt_controller.request("user_stop_command")
-                
+
+            # Cancel any pending approval bound to this turn so a turn parked on
+            # a blocking approval wait unwinds promptly (making /stop visible)
+            # and a resolution that arrives after the stop is dropped.
+            self._notify_supersede(user_id, session.run_generation)
+
             # Clear state
             session.is_running = False
             session.pending_message = None

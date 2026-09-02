@@ -151,10 +151,14 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         run_control = None
         if hasattr(self.config, 'busy_mode') and self.config.busy_mode != "queue":
             try:
-                from ._run_control import SessionRunControl
+                from ._run_control import (
+                    SessionRunControl,
+                    make_approval_supersede_callback,
+                )
                 run_control = SessionRunControl(
                     busy_mode=self.config.busy_mode,
-                    busy_ack_template=getattr(self.config, 'busy_ack', "⏳ {action} — will be considered next")
+                    busy_ack_template=getattr(self.config, 'busy_ack', "⏳ {action} — will be considered next"),
+                    on_supersede=make_approval_supersede_callback(),
                 )
             except ImportError:
                 logger.warning("Run control not available, falling back to basic session management")

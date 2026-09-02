@@ -84,12 +84,22 @@ class GatewayApprovalBackend:
 
         Satisfies :class:`praisonaiagents.approval.protocols.ApprovalProtocol`.
         """
+        # Bind this pending approval to the originating turn's liveness when the
+        # caller stamped a session id / run generation (the latter travels in
+        # ``context`` to avoid widening the core contract). Both optional and a
+        # no-op when absent, preserving today's unbound behaviour.
+        run_generation = None
+        if isinstance(request.context, dict):
+            run_generation = request.context.get("run_generation")
+
         request_id, future = await self.manager.register(
             tool_name=request.tool_name,
             arguments=request.arguments,
             agent_name=request.agent_name or "",
             risk_level=request.risk_level,
             authorized_reviewers=request.authorized_reviewers,
+            session_id=request.session_id,
+            run_generation=run_generation,
         )
 
         # Fire optional notification (fire-and-forget)
