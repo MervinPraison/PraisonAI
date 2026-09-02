@@ -673,8 +673,13 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     screen.style.setProperty("--keyboard-height", `${geometry.composerBottomPx}px`);
     screen.style.setProperty("--inset-top", `${geometry.scrollTopPx}px`);
     const logical = logicalInsets(bundle.direction, geometry.composerLeftPx, geometry.composerRightPx);
-    composer.style.setProperty("padding-inline-start", `${logical.startPx}px`);
-    composer.style.setProperty("padding-inline-end", `${logical.endPx}px`);
+    // The GUTTER is added here, not left to the stylesheet. An inline style
+    // beats `app.css`'s `calc(var(--safe-area-inset-left) + .75rem)`, so
+    // writing the bare inset put the composer flush against the screen edge
+    // while the topbar and transcript kept their gutter -- measured at a 320px
+    // viewport with no side insets: the textarea's left edge sat at x = 0.
+    composer.style.setProperty("padding-inline-start", `calc(${logical.startPx}px + .75rem)`);
+    composer.style.setProperty("padding-inline-end", `calc(${logical.endPx}px + .75rem)`);
   };
   applyGeometry();
   platform.shell.onInsetsChanged(applyGeometry);

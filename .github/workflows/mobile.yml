@@ -146,3 +146,58 @@ jobs:
         run: cargo test
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  # ------------------------------------------------------------------
+  # The mobile targets, which nothing compiled.
+  #
+  # `src/lib.rs` is `#[cfg_attr(mobile, tauri::mobile_entry_point)]`, and
+  # `tauri_build::build()` emits `cargo:rustc-cfg=mobile` only for android and
+  # ios targets. Both legs of `rust shell` above are HOST targets, so that
+  # attribute -- the one that generates the Android JNI symbol and the iOS
+  # start_app symbol -- expanded exactly zero times in CI, and neither did the
+  # `#[cfg(target_os = "android")]` / `ios` arms of `commands.rs`. The job
+  # above says it covers cfg mistakes; it covers the ones in `shell/`, not
+  # these.
+  #
+  # `cargo check`, not `build`: it type-checks and macro-expands under the
+  # mobile cfg, which is the thing that was never done, and needs no NDK and no
+  # Xcode project. Verified at 18s for the android target.
+  # ------------------------------------------------------------------
+  cross-check:
+    name: cross-check (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-linux-android
+            os: ubuntu-22.04
+          - target: aarch64-apple-ios
+            os: macos-15
+    defaults:
+      run:
+        working-directory: src/praisonai-mobile/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/praisonai-mobile/src-tauri
+          key: ${{ matrix.target }}
+      # generate_context! expands frontendDist at COMPILE time and dist/ is
+      # gitignored, so the crate cannot be checked without this -- the same
+      # reason the job above needs it.
+      - name: Build the webview (creates ../dist for generate_context!)
+        working-directory: src/praisonai-mobile
+        run: |
+          npm ci
+          npm run build
+      - name: Does the crate still expand and type-check for a phone?
+        run: cargo check --lib --target ${{ matrix.target }}

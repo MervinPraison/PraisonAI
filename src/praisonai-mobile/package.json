@@ -17,9 +17,11 @@
     "check": "npm run typecheck && npm run boundaries && npm run test",
     "check:upstream": "node tools/check-upstream-parity.mjs",
     "build:webview": "node tools/build-webview.mjs",
-    "test:rust": "cd src-tauri && cargo test"
+    "test:rust": "cd src-tauri && cargo test",
+    "tauri": "tauri"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/node": "^22.20.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3"

@@ -10,6 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -258,4 +259,47 @@ test("a relative import that is external is not reported as a bare module", () =
     },
   });
   assert.deepEqual([...bare.keys()], ["crypto"], "only the bare specifier is bare");
+});
+
+test("the shipping bundle resolves everything it imports", async () => {
+  // The positive control, and the one that would actually catch a regression:
+  // the real app entry, through the real gate.
+  const out = join(mkdtempSync(join(tmpdir(), "ship-")), "app.js");
+  const report = await bundle({ entry: "app/src/main.ts", outfile: out, write: false });
+
+  assert.deepEqual(report.unresolved, [], `the shipped bundle must resolve everything: ${report.unresolved}`);
+  assert.equal(isShippable(report), true, report.problems.join("\n"));
+});
+
+test("an unresolvable import fails the gate, with the package named", async () => {
+  // Driven through the REAL bundler against a real unresolvable specifier,
+  // rather than a hand-built report -- the check has to survive esbuild's
+  // actual externals behaviour, not my model of it.
+  const dir = mkdtempSync(join(tmpdir(), "unres-"));
+  const entry = join(dir, "probe.ts");
+  writeFileSync(entry, 'import x from "a-package-that-is-not-installed";\nexport const y = x;\n');
+
+  const report = await bundle({ entry, outfile: join(dir, "o.js"), write: false });
+
+  assert.equal(isShippable(report), false, "an unresolvable import must not be shippable");
+  assert.ok(
+    report.unresolved.includes("a-package-that-is-not-installed"),
+    `it must be listed: ${JSON.stringify(report.unresolved)}`,
+  );
+  assert.match(report.problems.join("\n"), /could not resolve/);
+  assert.match(report.problems.join("\n"), /a-package-that-is-not-installed/, "and named in the message");
+});
+
+test("a LAZY Node builtin is still allowed -- the pair", async () => {
+  // The unresolved check must not swallow the static-vs-dynamic distinction
+  // this file's header is built on: a dynamic `await import("readline")` in a
+  // CLI-only path is unavailable on a phone, not fatal.
+  const dir = mkdtempSync(join(tmpdir(), "lazy-"));
+  const entry = join(dir, "probe.ts");
+  writeFileSync(entry, 'export async function cli() { return await import("readline"); }\n');
+
+  const report = await bundle({ entry, outfile: join(dir, "o.js"), write: false });
+
+  assert.deepEqual(report.unresolved, [], "a builtin is classified as a builtin, not as unresolved");
+  assert.deepEqual(report.fatal, [], "and a dynamic one is not fatal");
 });
