@@ -442,6 +442,44 @@ class BasePlatformAdapter(ABC):
         await self.disconnect()
 
     # ------------------------------------------------------------------ #
+    # Identity canonicalization seam.                                     #
+    #                                                                     #
+    # The gateway keys each conversation on the platform-supplied user id.#
+    # When a platform changes the *native* id for the *same human*        #
+    # (WhatsApp JID→LID migration, a renamed handle-as-id, a              #
+    # phone-number↔UUID alias flip) the raw id changes and the session    #
+    # would silently fork — history/memory/run-state orphaned. This seam  #
+    # lets an adapter map a volatile raw id to a stable canonical id      #
+    # *before* it becomes part of the session key; the resolver's         #
+    # explicit link/pairing lookup then runs on the stabilised id.        #
+    #                                                                     #
+    # It fulfils ``IdentityCanonicalizerProtocol`` (praisonaiagents.      #
+    # gateway.protocols) so an adapter *is* its own canonicalizer: pass   #
+    # ``self`` where that protocol is accepted.                           #
+    # ------------------------------------------------------------------ #
+
+    def canonicalize(self, platform: str, raw_user_id: str) -> str:
+        """Map a raw, potentially-volatile platform id to a stable canonical id.
+
+        Consulted on the session-key path *before* link/pairing resolution so
+        an alias/format change for the *same* human (e.g. WhatsApp's JID→LID
+        migration, a number↔UUID alias flip) collapses to one stable session
+        key — preserving transcript, memory and in-flight run-state — instead
+        of silently forking the conversation.
+
+        This is the :class:`~praisonaiagents.gateway.protocols.
+        IdentityCanonicalizerProtocol` method, so a ``BasePlatformAdapter``
+        conforms structurally and can be handed anywhere that protocol is
+        accepted.
+
+        Default is the identity function, so adapters that do not override this
+        are fully backward-compatible (the raw id keys the session exactly as
+        before). Implementations MUST be deterministic and total: return the
+        raw id unchanged when no canonical form is known, never raise.
+        """
+        return raw_user_id
+
+    # ------------------------------------------------------------------ #
     # Capability helpers                                                  #
     # ------------------------------------------------------------------ #
 

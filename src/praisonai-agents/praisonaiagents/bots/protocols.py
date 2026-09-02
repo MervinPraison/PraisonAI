@@ -335,6 +335,13 @@ class GatewayRuntimeSeams:
     Attributes:
         identity_resolver: Cross-platform identity resolver; unifies the same
             human across platforms onto one session key.
+        identity_canonicalizer: Identity-canonicalization seam (Issue #4661) —
+            an :class:`IdentityCanonicalizerProtocol`
+            (``canonicalize(platform, raw_user_id) -> str``) applied *before*
+            the resolver, e.g. an adapter itself (see
+            :meth:`BasePlatformAdapter.canonicalize`). Stabilises a volatile
+            platform id (WhatsApp JID→LID, a number↔UUID alias flip) so the same
+            human keeps one session instead of silently forking.
         delivery_router: Backing router for the built-in ``send_message`` tool,
             so an agent turn can proactively reach the user mid-task.
         admission_gate: Gateway-wide admission control (concurrency ceiling /
@@ -347,6 +354,7 @@ class GatewayRuntimeSeams:
     """
 
     identity_resolver: Optional[Any] = None
+    identity_canonicalizer: Optional[Any] = None
     delivery_router: Optional[Any] = None
     admission_gate: Optional[Any] = None
     turn_lock_map: Optional[Any] = None
