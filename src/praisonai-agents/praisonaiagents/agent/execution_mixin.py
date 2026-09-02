@@ -1723,6 +1723,14 @@ Write the complete compiled report:"""
                     if found:
                         if inspect.isawaitable(mcp_result):
                             mcp_result = await mcp_result
+                        # Normalize MCP transport/timeout failures into a native
+                        # error dict — parity with the sync path so an async MCP
+                        # timeout classifies as a retryable failure instead of
+                        # being handed to the model as a bare "Error: ..." string
+                        # that looks like a successful result.
+                        normalize_mcp = getattr(self, "_normalize_mcp_result", None)
+                        if normalize_mcp is not None:
+                            mcp_result = normalize_mcp(mcp_result)
                         return mcp_result
 
             # Try to find the function in the override tools list first, then agent's tools list.

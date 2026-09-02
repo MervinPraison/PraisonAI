@@ -4617,10 +4617,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             order so the existing message-building loop stays unchanged.
             """
             if parallel_tool_calls and len(dispatch_specs) > 1:
-                return await asyncio.gather(*(
+                # return_exceptions=True so a single failing tool does not cancel
+                # its still-in-flight siblings and orphan their coroutines (the
+                # exact leak class this PR fixes). We then re-raise the first
+                # error after every sibling has settled, preserving the
+                # sequential path's fail-fast propagation semantics.
+                gathered = await asyncio.gather(*(
                     _dispatch_async_tool(execute_tool_fn, fn, args, tc_id, iteration_index)
                     for (fn, args, tc_id) in dispatch_specs
-                ))
+                ), return_exceptions=True)
+                for item in gathered:
+                    if isinstance(item, BaseException):
+                        raise item
+                return gathered
             results = []
             for (fn, args, tc_id) in dispatch_specs:
                 results.append(await _dispatch_async_tool(

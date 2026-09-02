@@ -2585,36 +2585,15 @@ class ToolExecutionMixin:
             return policy_result  # Error dict
         _, arguments = policy_result
 
-        # Normalize MCP transport/timeout failures (returned as bare "Error: ..."
-        # strings by MCPClient.call_tool) into the same {"error": ...} dict shape
-        # used by native tools, so they participate in retry, doom-loop detection
-        # and circuit-breaking instead of looking like a successful string result.
-        #
-        # IMPORTANT: a successful MCP tool may legitimately return text that
-        # begins with "Error: " (e.g. a linter/grep/echo tool). To avoid
-        # misclassifying valid output as a failure, we only convert MCP's own
-        # unambiguous internally-generated failure signatures, not any string
-        # that merely starts with the "Error: " prefix.
-        def _normalize_mcp_result(res):
-            if not isinstance(res, str) or not res.startswith("Error: "):
-                return res
-            message = res[len("Error: "):]
-            # MCP-internal timeout messages are unambiguous:
-            #   "MCP tool call timed out after Ns"
-            #   "MCP initialization timed out after Ns"
-            is_mcp_timeout = (
-                message.startswith("MCP tool call timed out after")
-                or message.startswith("MCP initialization timed out after")
-            )
-            if is_mcp_timeout:
-                return {"error": message, "timeout": True}
-            return res
-
         # Resolve MCP-backed tools via the shared helper (also used by the async
-        # path) so chat()/achat() behave identically for MCP tool calls.
+        # path) so chat()/achat() behave identically for MCP tool calls. MCP
+        # transport/timeout failures are normalized (via the shared
+        # _normalize_mcp_result) into a native {"error": ..., "timeout": True}
+        # dict so they participate in retry/doom-loop/circuit handling instead of
+        # looking like a successful string result.
         found, result = self._resolve_mcp_tool_result(function_name, arguments)
         if found:
-            return _normalize_mcp_result(result)
+            return self._normalize_mcp_result(result)
 
         # Try to find the function in the agent's tools list first
         func = None
@@ -2880,6 +2859,34 @@ class ToolExecutionMixin:
         """Names of the agent's currently active tools, for corrective feedback."""
         names = [name for name, _tool in self._iter_active_named_tools()]
         return sorted(set(names))
+
+    @staticmethod
+    def _normalize_mcp_result(res):
+        """Normalize MCP transport/timeout failures into a native error dict.
+
+        ``MCPClient.call_tool`` surfaces transport/timeout failures as bare
+        ``"Error: ..."`` strings. Converting MCP's own unambiguous
+        internally-generated timeout signatures into ``{"error": ..., "timeout":
+        True}`` lets them participate in retry, doom-loop detection and circuit
+        breaking instead of looking like a successful string result. Shared by
+        the sync (``_execute_tool_impl``) and async (``_execute_tool_async_impl``)
+        paths so achat()/chat() classify an MCP timeout identically.
+
+        A successful MCP tool may legitimately return text starting with
+        ``"Error: "`` (e.g. a linter/grep/echo tool), so only MCP's own
+        unambiguous timeout messages are converted, never any string that merely
+        starts with the prefix.
+        """
+        if not isinstance(res, str) or not res.startswith("Error: "):
+            return res
+        message = res[len("Error: "):]
+        is_mcp_timeout = (
+            message.startswith("MCP tool call timed out after")
+            or message.startswith("MCP initialization timed out after")
+        )
+        if is_mcp_timeout:
+            return {"error": message, "timeout": True}
+        return res
 
     def _resolve_mcp_tool_result(self, function_name, arguments):
         """Resolve an MCP-backed tool and return ``(found, result)``.
