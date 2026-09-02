@@ -74,7 +74,14 @@ export interface App {
 }
 
 export type BootResult =
-  | { readonly ok: true; readonly app: App }
+  | {
+      readonly ok: true;
+      readonly app: App;
+      /** The app started, but the engine is not answering yet. A caller must
+       *  SAY so -- silently booting into an engine that cannot reply is how a
+       *  first message fails with no explanation. */
+      readonly notReady?: { readonly reason: string; readonly detail: string };
+    }
   | {
       readonly ok: false;
       readonly reason: string;
@@ -209,6 +216,9 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
 
   return {
     ok: true,
+    // Attached, not swallowed: `selectEngine` hands back an engine that is not
+    // answering yet rather than refusing to boot, and the caller has to say so.
+    ...(selection.notReady === undefined ? {} : { notReady: selection.notReady }),
     app: {
       engine,
       controller,
