@@ -110,32 +110,56 @@ class GatewayApiEndpoints:
         aid = agents[0]
         return aid, self._gw.get_agent(aid)
 
-    async def _dispatch(self, session: Any, agent: Any, content: str) -> str:
-        """Run one agent turn through the same admission gate as chat users."""
+    async def _dispatch(self, session: Any, agent: Any, content: str) -> tuple:
+        """Run one agent turn through the same admission gate as chat users.
+
+        Returns ``(reply, usage)`` where ``usage`` is a snapshot of the agent's
+        per-turn token metrics captured **atomically** with the turn's result.
+
+        One ``Agent`` instance can serve overlapping turns for several sessions
+        on the single gateway event loop, and the SDK stores per-turn counts on
+        a *shared, mutable* ``llm.last_token_metrics`` reference that each turn
+        overwrites. Reading that attribute in a later handler line (after any
+        further ``await``) could therefore report a different concurrent
+        request's counts. We snapshot it here, immediately after the turn
+        completes and with **no intervening ``await``**, so the value is bound to
+        *this* turn before the loop can run another (Greptile/Qodo P1).
+        """
         gate = getattr(self._gw, "_admission_gate", None)
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
                 async with gate.admit(session_id=session.session_id):
                     result = await self._gw._dispatch_agent_turn(agent, content)
+                    usage = self._usage_for(agent)
             except AdmissionRejected as rej:
-                return str(rej.message)
+                return str(rej.message), self._zero_usage()
         else:
             result = await self._gw._dispatch_agent_turn(agent, content)
-        return "" if result is None else str(result)
+            usage = self._usage_for(agent)
+        return ("" if result is None else str(result)), usage
+
+    @staticmethod
+    def _zero_usage() -> dict:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     @staticmethod
     def _usage_for(agent: Any) -> dict:
-        """Map the agent's last-turn token metrics into an OpenAI ``usage`` block.
+        """Snapshot the agent's last-turn token metrics as an OpenAI ``usage`` block.
 
-        The core SDK already records true per-turn counts on the LLM instance
+        The core SDK records true per-turn counts on the LLM instance
         (``last_token_metrics`` with ``input_tokens``/``output_tokens``). We read
         them straight off the boundary so cost-accounting clients get real
         figures instead of the previous hardcoded zeros. When metrics are
         unavailable (e.g. a custom agent that does not expose an LLM instance)
         we fall back to zeros so the response stays spec-shaped.
+
+        Call sites MUST invoke this immediately after the dispatched turn
+        completes with no intervening ``await`` (see ``_dispatch``); the value
+        is read into plain ints here so the returned dict is an immutable
+        snapshot that a later concurrent turn cannot mutate.
         """
-        zero = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        zero = GatewayApiEndpoints._zero_usage()
         # Read the already-created LLM instance without forcing lazy creation.
         llm = getattr(agent, "_llm_instance", None) or getattr(
             agent, "llm_instance", None
@@ -245,7 +269,7 @@ class GatewayApiEndpoints:
                 agent_id, agent, session, content, completion_id, include_usage
             )
 
-        reply = await self._dispatch(session, agent, content)
+        reply, usage = await self._dispatch(session, agent, content)
         return JSONResponse(
             {
                 "id": completion_id,
@@ -259,7 +283,7 @@ class GatewayApiEndpoints:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": self._usage_for(agent),
+                "usage": usage,
             }
         )
 
@@ -297,7 +321,7 @@ class GatewayApiEndpoints:
             }
             yield f"data: {json.dumps(first)}\n\n"
 
-            reply = await self._dispatch(session, agent, content)
+            reply, usage = await self._dispatch(session, agent, content)
             chunk = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
@@ -325,7 +349,7 @@ class GatewayApiEndpoints:
                     "created": created,
                     "model": agent_id,
                     "choices": [],
-                    "usage": self._usage_for(agent),
+                    "usage": usage,
                 }
                 yield f"data: {json.dumps(usage_chunk)}\n\n"
 
@@ -358,9 +382,8 @@ class GatewayApiEndpoints:
         raw = body.get("input", "")
         content = raw if isinstance(raw, str) else _extract_text(raw)
         session = self._session_for(agent_id, self._caller_key(request))
-        reply = await self._dispatch(session, agent, content)
+        reply, usage = await self._dispatch(session, agent, content)
 
-        usage = self._usage_for(agent)
         return JSONResponse(
             {
                 "id": "resp-" + uuid.uuid4().hex,
@@ -457,7 +480,7 @@ class GatewayApiEndpoints:
                 return err(-32602, f"Unknown agent/tool: {name}")
             content = str(arguments.get("message", ""))
             session = self._session_for(agent_id, self._caller_key(request))
-            reply = await self._dispatch(session, agent, content)
+            reply, _usage = await self._dispatch(session, agent, content)
             return ok(
                 {
                     "content": [{"type": "text", "text": reply}],

@@ -237,6 +237,110 @@ def test_openai_chat_stream_omits_usage_by_default():
     assert parts[-1] == "data: [DONE]\n\n"
 
 
+def test_dispatch_binds_usage_snapshot_to_its_turn():
+    # ``_dispatch`` must return the token usage snapshotted atomically with the
+    # turn result. A later overwrite of the shared, mutable ``last_token_metrics``
+    # (as a concurrent turn on the same Agent would do) must not change the
+    # already-returned snapshot.
+    class _MutableMetrics:
+        def __init__(self, i, o):
+            self.input_tokens = i
+            self.output_tokens = o
+
+    class _SharedLLM:
+        def __init__(self):
+            self.last_token_metrics = _MutableMetrics(11, 7)
+
+    class _SharedAgent:
+        def __init__(self):
+            self._llm_instance = _SharedLLM()
+
+        async def achat(self, content):
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SharedAgent()
+
+    gw = _Gw()
+    ep = GatewayApiEndpoints(gw)
+    reply, usage = asyncio.run(
+        ep._dispatch(_FakeSession(), gw._agent, "hi")
+    )
+    # Mutate the shared metric AFTER dispatch returned its snapshot.
+    gw._agent._llm_instance.last_token_metrics = _MutableMetrics(999, 999)
+    assert reply == "echo:hi"
+    assert usage == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
+def test_stream_usage_snapshot_survives_concurrent_overwrite():
+    # The SSE generator yields (suspends) several frames after the turn before
+    # emitting the usage chunk. While suspended, a concurrent turn on the same
+    # shared Agent can overwrite ``last_token_metrics``. The streamed usage must
+    # still reflect THIS turn (snapshotted at dispatch), not the overwrite.
+    class _MutableMetrics:
+        def __init__(self, i, o):
+            self.input_tokens = i
+            self.output_tokens = o
+
+    class _SharedLLM:
+        def __init__(self):
+            self.last_token_metrics = _MutableMetrics(11, 7)
+
+    class _SharedAgent:
+        def __init__(self):
+            self._llm_instance = _SharedLLM()
+
+        async def achat(self, content):
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _SharedAgent()
+
+    gw = _Gw()
+    ep = GatewayApiEndpoints(gw)
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+
+    async def _drain_with_overwrite():
+        parts = []
+        async for part in resp.body_iterator:
+            text = part if isinstance(part, str) else part.decode()
+            parts.append(text)
+            # Once the assistant content frame has streamed (i.e. the turn has
+            # already completed and been snapshotted), simulate a *concurrent*
+            # turn overwriting the shared, mutable metric before the usage frame.
+            if '"content"' in text:
+                gw._agent._llm_instance.last_token_metrics = _MutableMetrics(
+                    999, 999
+                )
+        return parts
+
+    parts = asyncio.run(_drain_with_overwrite())
+    usage_payloads = [
+        json.loads(p[len("data: "):])
+        for p in parts
+        if p.startswith("data: ") and '"usage"' in p
+    ]
+    assert usage_payloads, "expected a usage-bearing chunk"
+    usage = usage_payloads[-1]["usage"]
+    # Snapshotted at dispatch -> original counts, not the mid-stream overwrite.
+    assert usage == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
 def test_openai_responses_reports_usage():
     ep = GatewayApiEndpoints(_FakeGateway())
     resp = asyncio.run(
