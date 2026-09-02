@@ -46,6 +46,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def make_approval_supersede_callback(
+    manager: Optional[Any] = None,
+) -> Callable[[str, int], None]:
+    """Build an ``on_supersede`` callback that cancels a turn's gateway approvals.
+
+    Bridges :class:`SessionRunControl` to the gateway's ``ExecApprovalManager``
+    so a ``/stop`` (or an interrupting message) fail-closes any approval parked
+    on the abandoned turn: the awaiting tool call unwinds promptly and a
+    resolution that arrives after the stop is dropped.
+
+    The returned callback maps ``user_id`` → the approval manager's
+    ``session_id`` (a bot user *is* the approval session in the single-agent bot
+    flow) and calls ``cancel_for_generation``. It is intentionally best-effort:
+    any failure (e.g. the gateway package or manager singleton being absent in a
+    lightweight deployment) is logged and swallowed so stop/interrupt handling is
+    never broken.
+
+    Args:
+        manager: Optional explicit ``ExecApprovalManager``. Resolved lazily from
+            the gateway singleton when ``None`` so importing this module never
+            pulls in the gateway.
+    """
+
+    def _on_supersede(user_id: str, generation: int) -> None:
+        mgr = manager
+        try:
+            if mgr is None:
+                from ..gateway.exec_approval import get_exec_approval_manager
+                mgr = get_exec_approval_manager()
+            mgr.cancel_for_generation(user_id, generation)
+        except Exception:  # noqa: BLE001 - callback must not break run control
+            logger.debug(
+                "Approval supersede callback no-op for user=%s generation=%s",
+                user_id, generation, exc_info=True,
+            )
+
+    return _on_supersede
+
+
 class RunDecision(Enum):
     """Decision for how to handle a submitted message."""
     RUN_NOW = "run_now"          # No current run, start immediately

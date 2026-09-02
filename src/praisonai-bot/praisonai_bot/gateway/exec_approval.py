@@ -714,6 +714,24 @@ class ExecApprovalManager:
             future.set_result(Resolution(approved=True, reason="allow-always"))
             return ("auto", future)
 
+        # Defensive: a session-bound request must carry an integer generation.
+        # A non-int would raise during the ``<=`` comparison in
+        # cancel_for_generation()/_is_generation_live(), which callers swallow —
+        # leaving the approval silently un-cancellable. Coerce a clean int or
+        # drop the (untrustworthy) binding fail-open to unbound rather than
+        # register something that can never be superseded.
+        if session_id is not None and run_generation is not None:
+            if isinstance(run_generation, bool) or not isinstance(run_generation, int):
+                try:
+                    run_generation = int(run_generation)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Ignoring non-integer run_generation %r for session %s; "
+                        "registering approval unbound.",
+                        run_generation, session_id,
+                    )
+                    run_generation = None
+
         request_id = self._make_id()
         loop = asyncio.get_running_loop()
         future = loop.create_future()
@@ -733,6 +751,25 @@ class ExecApprovalManager:
         )
 
         with self._lock:
+            # Fail-closed: if this turn's generation was already superseded (a
+            # /stop or interrupt raced ahead of registration), never park the
+            # caller on a future no cancel batch will ever complete — resolve it
+            # denied immediately and skip insertion.
+            if (
+                session_id is not None
+                and run_generation is not None
+                and not self._is_generation_live_locked(session_id, run_generation)
+            ):
+                future.set_result(
+                    Resolution(approved=False, reason="superseded")
+                )
+                logger.info(
+                    "Approval request %s denied at registration: session=%s "
+                    "generation=%s already superseded",
+                    request_id, session_id, run_generation,
+                )
+                return (request_id, future)
+
             self._prune()
             self._pending[request_id] = req
 
@@ -943,6 +980,20 @@ class ExecApprovalManager:
 
     # ── Turn-liveness binding ─────────────────────────────────────────
 
+    def _is_generation_live_locked(
+        self, session_id: str, run_generation: Optional[int]
+    ) -> bool:
+        """``_is_generation_live`` body, callable while already holding ``_lock``.
+
+        Split out so :meth:`register` can perform the liveness check inside its
+        own critical section (avoiding a lock re-entry / TOCTOU window) while
+        :meth:`resolve` keeps using the lock-acquiring wrapper.
+        """
+        if run_generation is None:
+            return True
+        superseded = self._superseded_generation.get(session_id)
+        return superseded is None or run_generation > superseded
+
     def _is_generation_live(
         self, session_id: str, run_generation: Optional[int]
     ) -> bool:
@@ -955,8 +1006,7 @@ class ExecApprovalManager:
         if run_generation is None:
             return True
         with self._lock:
-            superseded = self._superseded_generation.get(session_id)
-        return superseded is None or run_generation > superseded
+            return self._is_generation_live_locked(session_id, run_generation)
 
     def cancel_for_generation(
         self, session_id: str, run_generation: int
