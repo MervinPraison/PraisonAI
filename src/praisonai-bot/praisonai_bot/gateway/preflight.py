@@ -879,7 +879,8 @@ def _read_env_file_tokens(path: str) -> Dict[str, str]:
 def _scan_launch_agent(label: str) -> DuplicateService:
     """Inspect a macOS LaunchAgent plist by label."""
     import plistlib
-    import subprocess
+
+    from .._guarded_subprocess import run_guarded
 
     plist_path = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
     service = DuplicateService(label=label, plist_path=plist_path)
@@ -899,11 +900,9 @@ def _scan_launch_agent(label: str) -> DuplicateService:
             pass
 
     try:
-        result = subprocess.run(
-            ["launchctl", "list", label],
-            capture_output=True,
-            text=True,
-        )
+        # Bounded: preflight runs on the gateway's startup path, and a
+        # launchctl that stalls would hold up service discovery indefinitely.
+        result = run_guarded(["launchctl", "list", label], timeout=15)
         service.running = result.returncode == 0
         if service.running and result.stdout:
             parts = result.stdout.strip().split("\t")

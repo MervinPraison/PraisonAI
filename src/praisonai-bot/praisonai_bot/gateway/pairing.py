@@ -111,7 +111,8 @@ def _restrict_windows_acl(secret_path: str) -> bool:
     """
     try:
         import getpass
-        import subprocess
+
+        from .._guarded_subprocess import run_guarded
 
         user = os.environ.get("USERNAME") or getpass.getuser()
         # Resolve icacls from the trusted system directory rather than PATH
@@ -123,7 +124,9 @@ def _restrict_windows_acl(secret_path: str) -> bool:
         )
         # Quote the username so principals containing spaces (e.g. "John Doe")
         # are parsed as a single principal by icacls.
-        result = subprocess.run(
+        # Bounded: this runs while hardening the pairing secret on the gateway
+        # startup path, so a stalled icacls must not block it forever.
+        result = run_guarded(
             [
                 icacls,
                 secret_path,
@@ -131,7 +134,7 @@ def _restrict_windows_acl(secret_path: str) -> bool:
                 "/grant:r",
                 f'"{user}":F',
             ],
-            capture_output=True,
+            timeout=15,
             check=False,
         )
         return result.returncode == 0
