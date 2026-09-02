@@ -20,6 +20,7 @@ from praisonai_bot._guarded_subprocess import (
 
 
 class TestHappyPath:
+    """A bounded call must stay a faithful subprocess.run replacement."""
     def test_returns_completed_process(self):
         result = run_guarded([sys.executable, "-c", "print('ok')"])
         assert result.returncode == 0
@@ -38,6 +39,7 @@ class TestHappyPath:
 
 
 class TestTimeout:
+    """A stalled command returns a value; it never raises and never blocks."""
     def test_hanging_command_returns_instead_of_blocking(self):
         result = run_guarded(
             [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -70,6 +72,7 @@ class TestTimeout:
 
 
 class TestDiagnosis:
+    """Stall output is turned into guidance a caller can act on."""
     def test_credential_prompt(self):
         assert "credential prompt" in diagnose("Username for 'https://github.com':")
 
@@ -103,6 +106,7 @@ class TestDiagnosis:
 
 
 class TestEnvironment:
+    """Prompt suppression is layered under the caller, never over it."""
     def test_suppresses_git_prompting_by_default(self):
         result = run_guarded(
             [sys.executable, "-c", "import os; print(os.environ['GIT_TERMINAL_PROMPT'])"]
@@ -140,6 +144,7 @@ class TestEnvironment:
 
 
 class TestTimeoutResolution:
+    """Explicit argument beats env var beats default; junk never wins."""
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("PRAISONAI_SUBPROCESS_TIMEOUT", "0.3")
         result = run_guarded([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -163,6 +168,7 @@ class TestTimeoutResolution:
 
 
 class TestCompatibility:
+    """Call sites read .returncode/.stdout/.stderr unconditionally."""
     def test_result_is_a_real_completed_process(self):
         result = run_guarded([sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.3)
         assert isinstance(result, subprocess.CompletedProcess)
@@ -263,6 +269,7 @@ class TestDescendantTermination:
 
 
 class TestCheck:
+    """check= matches subprocess.run, except a timeout still returns."""
     def test_check_raises_on_nonzero(self):
         with pytest.raises(subprocess.CalledProcessError):
             run_guarded([sys.executable, "-c", "import sys; sys.exit(2)"], check=True)
@@ -280,3 +287,45 @@ class TestCheck:
             check=True,
         )
         assert result.returncode == TIMEOUT_RETURNCODE
+
+
+class TestNonFiniteTimeoutOverrides:
+    """An override that parses as positive can still be unbounded.
+
+    float("inf") passes a bare `value > 0` check, which would hand back an
+    infinite timeout and silently reinstate the hang this module prevents.
+    """
+
+    @pytest.mark.parametrize("bad", ["inf", "Infinity", "+inf", "1e400", "nan"])
+    def test_subprocess_timeout_rejects_non_finite(self, monkeypatch, bad):
+        import math
+
+        from praisonai_bot._guarded_subprocess import DEFAULT_TIMEOUT, _default_timeout
+
+        # Assert on the resolver, not on run_guarded with an explicit
+        # timeout= -- an explicit argument bypasses the env var entirely, so
+        # that spelling would pass even with the bug present.
+        monkeypatch.setenv("PRAISONAI_SUBPROCESS_TIMEOUT", bad)
+        resolved = _default_timeout()
+        assert math.isfinite(resolved)
+        assert resolved == DEFAULT_TIMEOUT
+
+    @pytest.mark.parametrize("bad", ["inf", "Infinity", "+inf", "1e400", "nan"])
+    def test_git_timeout_rejects_non_finite(self, monkeypatch, bad):
+        import math
+
+        from praisonai_bot.gateway.kanban_dispatcher import _git_timeout
+
+        monkeypatch.setenv("PRAISONAI_KANBAN_GIT_TIMEOUT", bad)
+        resolved = _git_timeout()
+        assert math.isfinite(resolved)
+        assert resolved >= 300.0
+
+    def test_default_resolver_stays_finite_without_override(self, monkeypatch):
+        import math
+
+        from praisonai_bot._guarded_subprocess import _default_timeout
+
+        monkeypatch.delenv("PRAISONAI_SUBPROCESS_TIMEOUT", raising=False)
+        assert math.isfinite(_default_timeout())
+

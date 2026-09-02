@@ -33,6 +33,7 @@ Callers with legitimately long work should pass an explicit ``timeout``.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -104,7 +105,13 @@ def diagnose(captured: str) -> str:
 
 
 def _default_timeout() -> float:
-    """Resolve the global timeout, ignoring an unusable env override."""
+    """Resolve the global timeout, ignoring an unusable env override.
+
+    ``inf`` is rejected alongside zero and negatives: it parses cleanly and is
+    positive, so a bare ``value > 0`` check would accept it and hand back an
+    unbounded wait -- reinstating the exact hang this module prevents. ``nan``
+    fails the comparison on its own, but is covered explicitly for clarity.
+    """
     raw = os.environ.get(_ENV_TIMEOUT)
     if not raw:
         return DEFAULT_TIMEOUT
@@ -112,7 +119,9 @@ def _default_timeout() -> float:
         value = float(raw)
     except (TypeError, ValueError):
         return DEFAULT_TIMEOUT
-    return value if value > 0 else DEFAULT_TIMEOUT
+    if not math.isfinite(value) or value <= 0:
+        return DEFAULT_TIMEOUT
+    return value
 
 
 def _non_interactive_env(env: Optional[Mapping[str, str]]) -> dict:

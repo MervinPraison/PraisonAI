@@ -8,6 +8,7 @@ system and follows Hermes patterns for worker management.
 
 import asyncio
 import logging
+import math
 import os
 import re
 import subprocess
@@ -26,7 +27,12 @@ _DEFAULT_GIT_TIMEOUT = 300.0
 
 
 def _git_timeout() -> float:
-    """Resolve the per-git-command ceiling, ignoring an unusable override."""
+    """Resolve the per-git-command ceiling, ignoring an unusable override.
+
+    ``inf`` is rejected as well as zero and negatives: it is positive and
+    parses cleanly, so accepting it would silently restore the unbounded git
+    call this guard exists to remove.
+    """
     raw = os.environ.get("PRAISONAI_KANBAN_GIT_TIMEOUT")
     if not raw:
         return _DEFAULT_GIT_TIMEOUT
@@ -34,7 +40,9 @@ def _git_timeout() -> float:
         value = float(raw)
     except (TypeError, ValueError):
         return _DEFAULT_GIT_TIMEOUT
-    return value if value > 0 else _DEFAULT_GIT_TIMEOUT
+    if not math.isfinite(value) or value <= 0:
+        return _DEFAULT_GIT_TIMEOUT
+    return value
 
 # Global dispatcher state
 _dispatcher_running = False
