@@ -207,6 +207,12 @@ class TestNaturalLanguageSchedule:
         assert s.kind == "cron"
         assert s.cron_expr == "0 9 * * *"
 
+    def test_daily_at_clock_time(self):
+        from praisonaiagents.scheduler import parse_schedule
+        s = parse_schedule("daily at 9am")
+        assert s.kind == "cron"
+        assert s.cron_expr == "0 9 * * *"
+
     def test_weekdays_at_clock_time(self):
         from praisonaiagents.scheduler import parse_schedule
         s = parse_schedule("weekdays at 9am")
@@ -250,3 +256,29 @@ class TestNaturalLanguageSchedule:
         for bad in ("gibberish", "at bananas", "every florp"):
             with pytest.raises(ValueError):
                 parse_schedule(bad)
+
+    def test_one_shot_clock_time_honors_timezone(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from praisonaiagents.scheduler import parse_schedule
+
+        s = parse_schedule("at 9am", tz="America/New_York")
+        assert s.kind == "at"
+        target = datetime.fromisoformat(s.at)
+        # The clock time denotes 09:00 local (New York), not 09:00 UTC.
+        assert target.tzinfo is not None
+        local = target.astimezone(ZoneInfo("America/New_York"))
+        assert (local.hour, local.minute) == (9, 0)
+
+    def test_one_shot_clock_time_is_due_at_local_hour(self):
+        from datetime import datetime
+        from praisonaiagents.scheduler import parse_schedule
+        from praisonaiagents.scheduler.due import is_due
+        from praisonaiagents.scheduler.models import ScheduleJob
+
+        s = parse_schedule("at 9am", tz="America/New_York")
+        target = datetime.fromisoformat(s.at)
+        job = ScheduleJob(name="j1", schedule=s, message="p")
+        # Just before the target: not due. At/after target: due.
+        assert is_due(job, target.timestamp() - 1) is False
+        assert is_due(job, target.timestamp()) is True

@@ -104,7 +104,7 @@ def _natural_to_cron(expr: str):
 
     # Drop filler words that carry no scheduling meaning once "every"/"at"/"on"
     # have been stripped ("every day at 9am" -> daily; "each morning" unsupported).
-    _FILLER = {"day", "the", "of", "a"}
+    _FILLER = {"day", "daily", "the", "of", "a"}
     tokens = [t for t in lower.split(" ") if t and t not in _FILLER]
     dow_parts = []
     clock = None
@@ -144,8 +144,18 @@ def _natural_to_cron(expr: str):
 
 
 def _clock_to_next_at(hour: int, minute: int, tz: str | None) -> str:
-    """Return the next ISO timestamp for the given clock time (one-shot)."""
-    now = datetime.now(timezone.utc)
+    """Return the next ISO timestamp for the given clock time (one-shot).
+
+    The clock time denotes local time in the schedule's timezone (``tz`` or
+    the process default), so ``at 9am`` fires at 09:00 in that zone rather
+    than 09:00 UTC. Falls back to UTC when the timezone cannot be resolved.
+    """
+    try:
+        from .due import resolve_schedule_timezone
+        tzinfo = resolve_schedule_timezone(tz)
+    except Exception:
+        tzinfo = timezone.utc
+    now = datetime.now(tzinfo)
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
