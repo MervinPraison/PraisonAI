@@ -217,6 +217,13 @@ class SkillCommandSource:
             name = getattr(skill, "name", None)
             if not name:
                 continue
+            # ``user-invocable: false`` marks a skill as model-only: it must
+            # not be offered in the ``/`` menu nor dispatch as ``/name``.
+            # ``SkillManager.get_user_invocable_skills`` / ``invoke`` apply
+            # the same rule, so the menu and the agent agree on what a user
+            # may run. Missing attribute (older SDK) defaults to invocable.
+            if not getattr(skill, "user_invocable", True):
+                continue
             commands.append(
                 Command(
                     name=str(name),
