@@ -384,3 +384,55 @@ Works with internationalization!
             assert "José María" in props.metadata["author"]  # accented characters
             assert "naïve" in props.metadata["notes"]  # accented character
             assert "émphasis" in props.metadata["notes"]  # accented character
+
+
+class TestReadPropertiesAutomation:
+    """Tests for parsing the optional automation frontmatter block."""
+
+    def test_read_properties_parses_automation(self):
+        from praisonaiagents.skills.parser import read_properties
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "morning-brief"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: morning-brief
+description: Summarise my calendar and unread priorities for the day.
+metadata:
+  praisonai:
+    automation:
+      schedule: "cron:0 8 * * mon-fri"
+      deliver: "origin"
+      prompt: "Give me today's brief."
+---
+
+# Morning Brief
+""")
+
+            props = read_properties(skill_dir)
+
+            assert props.automation is not None
+            assert props.automation.schedule == "cron:0 8 * * mon-fri"
+            assert props.automation.deliver == "origin"
+            assert props.automation.prompt == "Give me today's brief."
+
+    def test_read_properties_no_automation_defaults_none(self):
+        from praisonaiagents.skills.parser import read_properties
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "plain-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: plain-skill
+description: A skill with no automation block.
+metadata:
+  author: test-org
+---
+
+# Plain Skill
+""")
+
+            props = read_properties(skill_dir)
+
+            assert props.automation is None
+            assert props.metadata["author"] == "test-org"
