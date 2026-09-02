@@ -753,6 +753,16 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         
         client = self._get_client()
         
+        # Provider-level idempotency: derive ONE stable key per logical send so
+        # deliver_outbound()'s retries (default 3 attempts) never duplicate an
+        # email at the AgentMail boundary after a timeout-after-send. The same
+        # key must be reused for every retry, so it is generated here — outside
+        # _do_send() — and passed through request_options to both send/reply.
+        # Caller may supply idempotency_key to make replay deterministic; it must
+        # obey AgentMail's 1-256 char rule (24h key lifetime).
+        idempotency_key = kwargs.get("idempotency_key") or str(uuid.uuid4())
+        request_options = {"additional_headers": {"Idempotency-Key": idempotency_key}}
+        
         # Send via AgentMail API
         # SDK v0.4.7: uses text= (not body=); reply_to= is Reply-To header
         # For replying to a message, use messages.reply() method
@@ -764,12 +774,14 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     reply_to,  # message_id of original message
                     text=body,
                     subject=subject,
+                    request_options=request_options,
                 )
             return client.inboxes.messages.send(
                 self._inbox_id,
                 to=channel_id,
                 subject=subject,
                 text=body,
+                request_options=request_options,
             )
         
         try:
