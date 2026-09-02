@@ -10,9 +10,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  CONSUMED_SETTING_KEYS,
   ENGINE_PRAISONAI_TS,
   ENGINE_REMOTE_HTTP,
-  OPENAI_KEY,
   SETTING_DEFS,
   enginesFor,
 } from "./registry.ts";
@@ -121,30 +121,27 @@ test("the default engine is one that works with nothing configured", async () =>
   assert.equal(def?.default, ENGINE_REMOTE_HTTP);
 });
 
-test("the api key is the only secret, and it is secret", async () => {
+test("every declared setting is one the app actually reads", async () => {
+  // A setting nobody reads is a control that does nothing when a user moves it
+  // -- a promise the UI makes and the app does not keep (issue #4636). Five
+  // were declared ahead of consumers that do not exist: `model`,
+  // `temperature`, `showReasoning`, `showDiagnostics` and `apiKey`. They are
+  // removed rather than half-wired, and this pins the registry to only the
+  // keys the shipping code reads -- so re-adding an inert one, or declaring a
+  // new setting without also wiring a consumer, fails here.
+  const declared = SETTING_DEFS.map((d) => d.key).sort();
+  assert.deepEqual(declared, [...CONSUMED_SETTING_KEYS].sort());
+});
+
+test("there are no secret settings, so no secret is declared and never written", async () => {
+  // `apiKey` was the sharp one: `setSecret` is the only way in and nothing
+  // outside tests called it, so a configured key could never be written -- and
+  // even if it were, `enginesFor` never passed a `token`, so the Authorization
+  // header was never sent. A secret nobody can write and nothing reads is worse
+  // than absent. The store's secret machinery stays (contract-tested); it is
+  // the *declaration* that has no consumer.
   const secrets = SETTING_DEFS.filter((d) => d.secret === true).map((d) => d.key);
-  assert.deepEqual(secrets, ["apiKey"]);
-});
-
-test("the api key cannot be written through the ordinary path", async () => {
-  // The guarantee, asserted against the REAL registry rather than a fixture --
-  // a def that forgot `secret: true` would put a live key in a plain file.
-  const { store, storage } = await build();
-  assert.equal(await store.set("apiKey", "sk-live-leak"), false);
-  const written = await storage.read({ namespace: "settings", id: "app" });
-  assert.equal(written === null || !written.includes("sk-live-leak"), true);
-});
-
-test("temperature is clamped rather than accepted blindly", async () => {
-  const { store } = await build();
-  await store.set("temperature", 99);
-  assert.equal(store.get("temperature"), 2);
-});
-
-test("the secret ref is stable", async () => {
-  // It is the keychain lookup. Changing it silently orphans every key already
-  // stored on a device.
-  assert.deepEqual(OPENAI_KEY, { slot: "openai", account: "default" });
+  assert.deepEqual(secrets, []);
 });
 
 // ---- the refusal callback has to actually reach the engine ------------------

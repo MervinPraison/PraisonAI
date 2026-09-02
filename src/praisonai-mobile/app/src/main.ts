@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, OPENAI_KEY, SETTING_DEFS } from "./registry.ts";
+import { enginesFor, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -336,5 +336,3 @@ const el = globalThis.document?.getElementById("root");
 if (el !== null && el !== undefined) {
   void mount({ root: el });
 }
-
-export { OPENAI_KEY };

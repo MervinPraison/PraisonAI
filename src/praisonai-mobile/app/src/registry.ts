@@ -15,7 +15,6 @@ import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
-import { clampNum } from "../../core/src/settings/store.ts";
 import { createRemoteHttpEngine } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
 import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
@@ -28,11 +27,18 @@ export const ENGINE_PRAISONAI_TS = "praisonai-ts";
  *
  * `label` rather than the key, because a settings screen showing `maxSteps` to
  * a user is a screen written by someone who never opened it.
+ *
+ * ONLY SETTINGS THE SHIPPING APP ACTUALLY READS BELONG HERE. `model`,
+ * `temperature`, `showReasoning`, `showDiagnostics` and `apiKey` were declared
+ * ahead of consumers that do not exist -- no code path read any of them (issue
+ * #4636). A declared-but-unread setting is a control the UI promises and the
+ * app does not keep: moving it does nothing, and `showDiagnostics`'s `false`
+ * default even described a hiding that never happened, since the dropped row is
+ * rendered unconditionally. They are removed rather than half-wired; the
+ * store's secret and validation machinery stays (it is contract-tested) so a
+ * real setting can be added the day its consumer does. `registry.test.ts` pins
+ * that every declared key is one the app reads, so re-adding an inert one fails.
  */
-/** The one secret this app stores. It is the keychain lookup, so changing it
- *  silently orphans every key already on a device. */
-export const OPENAI_KEY = { slot: "openai" as const, account: "default" };
-
 export const SETTING_DEFS: readonly SettingDef[] = [
   {
     key: "engineId",
@@ -55,55 +61,13 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     help: "Only used by the remote engine.",
     section: "Engine",
   },
-  {
-    key: "model",
-    default: "gpt-4o-mini",
-    label: "Model",
-    section: "Model",
-  },
-  {
-    key: "temperature",
-    default: 0.7,
-    label: "Temperature",
-    help: "Higher is more varied. 0 is closest to repeatable.",
-    section: "Model",
-    validate: clampNum(0, 2),
-  },
-  {
-    key: "showReasoning",
-    default: false,
-    label: "Show reasoning",
-    help: "Display the model's intermediate thinking when the engine reports it.",
-    section: "Display",
-  },
-  {
-    // NOT YET CONSUMED, and unlike its neighbours this one contradicts what
-    // the app actually does: the dropped row is rendered unconditionally
-    // (ui/src/transcript/view-model.ts), so the `false` default describes a
-    // hiding that does not happen. Left declared rather than deleted because
-    // the row SHOULD be gated once a settings screen exists -- but the gate
-    // must default to showing, since a diagnostic nobody can find is the same
-    // as no diagnostic. `model`, `temperature` and `showReasoning` are also
-    // declared ahead of their consumers; the difference is that they make no
-    // claim about behaviour that already exists.
-    key: "showDiagnostics",
-    default: false,
-    label: "Show dropped events",
-    help: "Surface stream events the app could not read. Useful when an answer looks wrong.",
-    section: "Display",
-  },
-  {
-    // Never reaches StoragePort. `set()` refuses it; `setSecret` is the only
-    // way in, and there is deliberately no way back out.
-    key: "apiKey",
-    default: "",
-    label: "API key",
-    help: "Stored in the device keychain where one is available.",
-    section: "Credentials",
-    secret: true,
-    secretRef: OPENAI_KEY,
-  },
 ];
+
+/** The keys the shipping app actually reads. `engineId` in `boot.ts`, `baseUrl`
+ *  in `enginesFor` below. Exported so the test that forbids an inert setting
+ *  compares `SETTING_DEFS` against a list an author has to consciously extend
+ *  in the same commit that adds the code reading the new key. */
+export const CONSUMED_SETTING_KEYS: readonly string[] = ["engineId", "baseUrl"];
 
 export interface RegistryDeps {
   readonly settings: SettingsFacade;

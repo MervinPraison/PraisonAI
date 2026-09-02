@@ -387,12 +387,22 @@ bearing to the next person who changes pacing.
 Fix it by wiring the tick's publish through the gate, or delete the module and
 its constants. Do not leave it looking wired.
 
-Four settings are declared and not yet consumed by anything: `model`,
-`temperature`, `showReasoning` and `showDiagnostics`. That is expected — they
-were written for the settings screen and the engine parameterisation that do
-not exist yet — but it is recorded here so nobody reads the registry and
-concludes they work. `showDiagnostics` is the one to watch: it claims to hide
-dropped events, which are currently rendered unconditionally.
+Five settings used to be declared and consumed by nothing: `model`,
+`temperature`, `showReasoning`, `showDiagnostics` and `apiKey` (issue #4636).
+They were written for a settings screen and engine parameterisation that do not
+exist yet. That is not a neutral "not done": a declared-but-unread setting is a
+control the UI promises and the app does not keep, and `showDiagnostics` was
+worse still — its `false` default claimed to hide dropped events, which are
+rendered unconditionally. `apiKey` was the sharp one: `setSecret` was its only
+write path and nothing outside tests called it, and even a written key was never
+sent, because `enginesFor` never passed a `token`.
+
+**Removed rather than half-wired.** `registry.ts` now declares only `engineId`
+and `baseUrl` — the two the shipping app reads — and `registry.test.ts` pins
+`SETTING_DEFS` to `CONSUMED_SETTING_KEYS`, so declaring a setting without also
+wiring the code that reads it fails. The store's secret and validation machinery
+stays (it is contract-tested in `core/src/settings/store.test.ts`), so a real
+setting can return the day its consumer does.
 
 What actually remains for praisonai-mobile, all of it unbuilt rather than
 broken:
