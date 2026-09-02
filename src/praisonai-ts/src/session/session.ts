@@ -27,9 +27,19 @@ export interface SessionMessage {
  * Configuration for Session.
  */
 export interface SessionConfig {
-  /** Unique session identifier (auto-generated if not provided) */
+  /**
+   * Unique session identifier (auto-generated if not provided).
+   * Python `session_id` defaults to None and is then generated; TS generates
+   * eagerly - same observable outcome.
+   */
   id?: string;
-  /** User identifier for user-specific operations */
+  /** Python parity: session_id (Optional[str], default None). Alias of `id`; `id` wins when both are given. */
+  sessionId?: string;
+  /**
+   * User identifier for user-specific operations.
+   * Python `user_id` defaults to None and resolves to "default_user"; TS
+   * resolves to "default_user" directly - same observable outcome.
+   */
   userId?: string;
   /** Parent session for hierarchy */
   parent?: Session;
@@ -37,6 +47,8 @@ export interface SessionConfig {
   db?: DbAdapter;
   /** Time-to-live in seconds */
   ttl?: number;
+  /** Python parity: session_ttl (Optional[int], default None). Alias of `ttl`; `ttl` wins when both are given. */
+  sessionTtl?: number;
   /** Memory configuration */
   memoryConfig?: Record<string, any>;
   /** Knowledge configuration */
@@ -118,11 +130,17 @@ export class Session {
   private children: Session[] = [];
 
   constructor(config: SessionConfig = {}) {
-    this.id = config.id || randomUUID().slice(0, 8);
+    this.id = config.id || config.sessionId || randomUUID().slice(0, 8);
     this.userId = config.userId || 'default_user';
     this.parent = config.parent;
     this.db = config.db;
-    this.ttl = config.ttl;
+    this.ttl = config.ttl ?? config.sessionTtl;
+    // Python raises ValueError for a negative session_ttl.
+    if (this.ttl !== undefined && this.ttl < 0) {
+      throw new RangeError(
+        `Invalid ttl=${this.ttl} for session ${this.id}. Use undefined (no expiry) or a non-negative number of seconds.`
+      );
+    }
     this.agentUrl = config.agentUrl;
     this.timeout = config.timeout || 30;
     this.isRemote = !!config.agentUrl;

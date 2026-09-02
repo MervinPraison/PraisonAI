@@ -18,25 +18,25 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 | Surface | Params | Exact | camelCase | Alias | Flattened | Missing | Mismatches | Waived | TS-only / TS total |
 |---|---|---|---|---|---|---|---|---|---|
-| `Agent.__init__` | 42 | 8 | 1 | 4 | 2 | 27 | 6 | 33 | 13 / 30 |
-| `AgentTeam.__init__` | 23 | 3 | 0 | 0 | 0 | 20 | 1 | 21 | 2 / 5 |
-| `Task.__init__` | 60 | 4 | 0 | 2 | 0 | 54 | 3 | 57 | 0 / 5 |
-| `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 4 / 5 |
-| `Agent.chat` | 17 | 1 | 0 | 1 | 0 | 15 | 0 | 15 | 1 / 3 |
-| `AgentTeam.start` | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 3 | 0 / 0 |
-| `Handoff.__init__` | 7 | 1 | 1 | 3 | 0 | 2 | 2 | 4 | 11 / 16 |
-| `LLM.__init__` | 25 | 2 | 2 | 1 | 0 | 20 | 0 | 20 | 0 / 5 |
-| `Session.__init__` | 7 | 1 | 4 | 2 | 0 | 0 | 2 | 2 | 2 / 9 |
-| `tool()` | 11 | 2 | 0 | 1 | 0 | 8 | 3 | 11 | 2 / 5 |
-| **Total (10 surfaces)** | 196 | 23 | 8 | 14 | 2 | 149 | 18 | 167 | 35 / 83 |
+| `Agent.__init__` | 42 | 29 | 8 | 3 | 2 | 0 | 4 | 4 | 13 / 58 |
+| `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 4 | 4 | 2 / 25 |
+| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 8 | 8 | 1 / 61 |
+| `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 20 / 21 |
+| `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 3 | 3 | 2 / 19 |
+| `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 1 | 1 | 1 / 4 |
+| `Handoff.__init__` | 7 | 2 | 2 | 3 | 0 | 0 | 2 | 2 | 11 / 18 |
+| `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 0 / 25 |
+| `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 4 / 11 |
+| `tool()` | 11 | 5 | 5 | 1 | 0 | 0 | 4 | 4 | 2 / 13 |
+| **Total (10 surfaces)** | 196 | 106 | 79 | 9 | 2 | 0 | 28 | 28 | 56 / 255 |
 
 ## Surfaces
 
 ### `Agent.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:583`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:99` (ctor `src/praisonai-ts/src/agent/simple.ts:295`)
-- Counts: 42 python params: 8 exact, 1 camelCase, 4 alias, 2 flattened, 27 missing; 6 mismatches; 33 waived; 13 TS-only of 30
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:116` (ctor `src/praisonai-ts/src/agent/simple.ts:712`)
+- Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 4 mismatches; 4 waived; 13 TS-only of 58
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -44,298 +44,298 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `role` | positional | null | `Optional[str]` | exact | `role` | `config.goal \|\| config.backstory` | `string` | default mismatch (waived) |
 | `goal` | positional | null | `Optional[str]` | exact | `goal` | undefined | `string` | ok |
 | `backstory` | positional | null | `Optional[str]` | exact | `backstory` | undefined | `string` | ok |
-| `instructions` | positional | null | `Optional[str]` | exact | `instructions` | *required* | `string` | required mismatch (waived) |
-| `llm` | positional | null | `Optional[Union[str, Any]]` | exact | `llm` | `getEnv('OPENAI_MODEL_NAME') \|\| getEnv('PRAISONAI_MODEL') \|\| 'gpt-4o-mini'` | `string` | default mismatch (waived) |
-| `model` | positional | null | `Optional[Union[str, Any]]` | alias | `llm` | `getEnv('OPENAI_MODEL_NAME') \|\| getEnv('PRAISONAI_MODEL') \|\| 'gpt-4o-mini'` | `string` | default mismatch (waived) |
+| `instructions` | positional | null | `Optional[str]` | exact | `instructions` | undefined | `string` | ok |
+| `llm` | positional | null | `Optional[Union[str, Any]]` | exact | `llm` | undefined | `string \| LLMConfig` | ok |
+| `model` | positional | null | `Optional[Union[str, Any]]` | exact | `model` | `llmName \|\| getEnv('OPENAI_MODEL_NAME') \|\| getEnv('PRAISONAI_MODEL') \|\| 'gpt-4o-mini'` | `string` | default mismatch (waived) |
 | `base_url` | positional | null | `Optional[str]` | alias | `baseURL` | undefined | `string` | ok |
 | `api_key` | positional | null | `Optional[str]` | camelCase | `apiKey` | undefined | `string` | ok |
-| `auth` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
+| `auth` | positional | null | `Optional[str]` | exact | `auth` | undefined | `string` | ok |
 | `tools` | positional | null | `Optional[List[Any]]` | exact | `tools` | undefined | `any[] \| Function[]` | ok |
-| `toolsets` | positional | null | `Optional[List[str]]` | missing |  |  |  | MISSING (waived) |
-| `handoffs` | keyword | null | `Optional[List[Union['Agent', 'Handoff']]]` | missing |  |  |  | MISSING (waived) |
-| `memory` | keyword | null | `Optional[Union[bool, str, 'MemoryConfig', Any]]` | missing |  |  |  | MISSING (waived) |
-| `knowledge` | keyword | null | `Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']]` | missing |  |  |  | MISSING (waived) |
-| `planning` | keyword | false | `Optional[Union[bool, str, 'PlanningConfig']]` | missing |  |  |  | MISSING (waived) |
-| `reflection` | keyword | null | `Optional[Union[bool, str, 'ReflectionConfig']]` | missing |  |  |  | MISSING (waived) |
-| `rules` | keyword | null | `Optional[Union[bool, 'RulesConfig']]` | missing |  |  |  | MISSING (waived) |
-| `guardrails` | keyword | null | `Optional[Union[bool, str, Callable, 'GuardrailConfig']]` | missing |  |  |  | MISSING (waived) |
-| `web` | keyword | null | `Optional[Union[bool, str, 'WebConfig']]` | missing |  |  |  | MISSING (waived) |
-| `context` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']]` | missing |  |  |  | MISSING (waived) |
-| `autonomy` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]` | missing |  |  |  | MISSING (waived) |
+| `toolsets` | positional | null | `Optional[List[str]]` | exact | `toolsets` | undefined | `string[]` | ok |
+| `handoffs` | keyword | null | `Optional[List[Union['Agent', 'Handoff']]]` | exact | `handoffs` | undefined | `(Agent \| Handoff)[]` | ok |
+| `memory` | keyword | null | `Optional[Union[bool, str, 'MemoryConfig', Any]]` | exact | `memory` | undefined | `boolean \| string \| MemoryConfig \| AgentMemoryStore` | ok |
+| `knowledge` | keyword | null | `Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']]` | exact | `knowledge` | undefined | `boolean \| string \| string[] \| KnowledgeBaseConfig \| KnowledgeBase` | ok |
+| `planning` | keyword | false | `Optional[Union[bool, str, 'PlanningConfig']]` | exact | `planning` | false | `boolean \| string \| PlanningAgentConfig` | ok |
+| `reflection` | keyword | null | `Optional[Union[bool, str, 'ReflectionConfig']]` | exact | `reflection` | undefined | `boolean \| string \| Record<string, unknown>` | ok |
+| `rules` | keyword | null | `Optional[Union[bool, 'RulesConfig']]` | exact | `rules` | undefined | `boolean \| Rule[] \| RulesManagerConfig \| RulesManager` | ok |
+| `guardrails` | keyword | null | `Optional[Union[bool, str, Callable, 'GuardrailConfig']]` | exact | `guardrails` | undefined | `AgentGuardrailInput` | ok (type differs) |
+| `web` | keyword | null | `Optional[Union[bool, str, 'WebConfig']]` | exact | `web` | undefined | `boolean \| string \| AgentWebConfig` | ok |
+| `context` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']]` | exact | `context` | undefined | `boolean \| string \| ContextManagerConfig \| ContextManager` | ok |
+| `autonomy` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]` | exact | `autonomy` | undefined | `boolean \| string \| Record<string, unknown>` | ok |
 | `output` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']]` | flattened | `verbose, markdown, stream` |  |  | ok |
 | `execution` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']]` | flattened | `maxIterations, maxToolCallsPerTurn` |  |  | ok |
-| `templates` | keyword | null | `Optional[Union[Dict[str, Any], 'TemplateConfig']]` | missing |  |  |  | MISSING (waived) |
+| `templates` | keyword | null | `Optional[Union[Dict[str, Any], 'TemplateConfig']]` | exact | `templates` | undefined | `Record<string, unknown>` | ok |
 | `caching` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]` | alias | `cache` | false | `boolean` | default mismatch (waived) |
-| `hooks` | keyword | null | `Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']]` | missing |  |  |  | MISSING (waived) |
-| `skills` | keyword | null | `Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']]` | missing |  |  |  | MISSING (waived) |
-| `self_improve` | keyword | false | `Optional[Union[bool, str, 'SkillReviewProtocol']]` | missing |  |  |  | MISSING (waived) |
+| `hooks` | keyword | null | `Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']]` | exact | `hooks` | undefined | `AgentHooksInput` | ok (type differs) |
+| `skills` | keyword | null | `Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']]` | exact | `skills` | undefined | `string \| string[] \| SkillDiscoveryOptions \| SkillManager` | ok |
+| `self_improve` | keyword | false | `Optional[Union[bool, str, 'SkillReviewProtocol']]` | camelCase | `selfImprove` | false | `boolean \| string \| Record<string, unknown>` | ok |
 | `approval` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']]` | exact | `approval` | undefined | `boolean \| ApprovalManager` | ok |
-| `tool_config` | keyword | null | `Optional[Union[bool, 'ToolConfig']]` | missing |  |  |  | MISSING (waived) |
-| `learn` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']]` | missing |  |  |  | MISSING (waived) |
-| `backend` | keyword | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `run_on` | keyword | null | `Optional[Union['ManagedRuntime', str]]` | missing |  |  |  | MISSING (waived) |
-| `tools_run_on` | keyword | null | `Optional[Union['ToolPlace', str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `runtime` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']]` | missing |  |  |  | MISSING (waived) |
+| `tool_config` | keyword | null | `Optional[Union[bool, 'ToolConfig']]` | camelCase | `toolConfig` | undefined | `boolean \| Record<string, unknown>` | ok |
+| `learn` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']]` | exact | `learn` | undefined | `boolean \| string \| Record<string, unknown>` | ok |
+| `backend` | keyword | null | `Optional[Any]` | exact | `backend` | undefined | `unknown` | ok |
+| `run_on` | keyword | null | `Optional[Union['ManagedRuntime', str]]` | camelCase | `runOn` | undefined | `string \| Record<string, unknown>` | ok |
+| `tools_run_on` | keyword | null | `Optional[Union['ToolPlace', str, Any]]` | camelCase | `toolsRunOn` | undefined | `string \| Record<string, unknown>` | ok |
+| `runtime` | keyword | null | `Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']]` | exact | `runtime` | undefined | `boolean \| string \| Record<string, unknown>` | ok |
 | `interrupt_controller` | keyword | null | `Optional['InterruptController']` | alias | `signal` | undefined | `AbortSignal` | ok |
-| `tool_search` | keyword | false | `Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']]` | missing |  |  |  | MISSING (waived) |
-| `message_steering` | keyword | false | `Optional[Union[bool, 'MessageSteeringProtocol']]` | missing |  |  |  | MISSING (waived) |
-| `sandbox` | keyword | null | `Optional[Union[bool, 'SandboxConfig']]` | missing |  |  |  | MISSING (waived) |
-| `retry` | keyword | null | `Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]` | missing |  |  |  | MISSING (waived) |
-| `reasoning_effort` | keyword | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
+| `tool_search` | keyword | false | `Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']]` | camelCase | `toolSearch` | false | `boolean \| string \| Record<string, unknown>` | ok |
+| `message_steering` | keyword | false | `Optional[Union[bool, 'MessageSteeringProtocol']]` | camelCase | `messageSteering` | false | `boolean \| Record<string, unknown>` | ok |
+| `sandbox` | keyword | null | `Optional[Union[bool, 'SandboxConfig']]` | exact | `sandbox` | undefined | `boolean \| Record<string, unknown>` | ok |
+| `retry` | keyword | null | `Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]` | exact | `retry` | undefined | `boolean \| AgentRetryConfig` | ok |
+| `reasoning_effort` | keyword | null | `Optional[str]` | camelCase | `reasoningEffort` | undefined | `'off' \| 'minimal' \| 'low' \| 'medium' \| 'high' \| string` | ok |
 
 TS-only members: `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `cacheTTL`?, `telemetry`?
 
 ### `AgentTeam.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:648`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1612` (ctor `src/praisonai-ts/src/agent/simple.ts:1669`)
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2673` (ctor `src/praisonai-ts/src/agent/simple.ts:2866`)
 - Python aliases: PraisonAIAgents, Agents
-- Counts: 23 python params: 3 exact, 0 camelCase, 0 alias, 0 flattened, 20 missing; 1 mismatches; 21 waived; 2 TS-only of 5
+- Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 4 mismatches; 4 waived; 2 TS-only of 25
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `agents` | positional | *required* |  | exact | `agents` | *required* | `Agent[]` | ok |
-| `tasks` | positional | null |  | exact | `tasks` | undefined | `string[]` | ok |
-| `process` | positional | "sequential" |  | exact | `process` | undefined | `'sequential' \| 'parallel'` | default mismatch (waived) |
-| `manager_llm` | positional | null |  | missing |  |  |  | MISSING (waived) |
-| `name` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `variables` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `llm` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `model` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `memory` | positional | false | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `planning` | positional | false | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `context` | positional | false | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `output` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `execution` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `hooks` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `autonomy` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `knowledge` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `guardrails` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `web` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `reflection` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `caching` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `learn` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `tools_run_on` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `run_on` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
+| `tasks` | positional | null |  | exact | `tasks` | undefined | `(string \| Task)[]` | ok |
+| `process` | positional | "sequential" |  | exact | `process` | undefined | `AgentTeamProcess` | default mismatch (waived) |
+| `manager_llm` | positional | null |  | camelCase | `managerLlm` | undefined | `string` | ok |
+| `name` | positional | null | `Optional[str]` | exact | `name` | undefined | `string` | ok |
+| `variables` | positional | null | `Optional[Dict[str, Any]]` | exact | `variables` | undefined | `Record<string, unknown>` | ok |
+| `llm` | positional | null | `Optional[str]` | exact | `llm` | undefined | `string` | ok |
+| `model` | positional | null | `Optional[str]` | exact | `model` | undefined | `string` | ok |
+| `memory` | positional | false | `Optional[Any]` | exact | `memory` | undefined | `unknown` | default mismatch (waived) |
+| `planning` | positional | false | `Optional[Any]` | exact | `planning` | undefined | `unknown` | default mismatch (waived) |
+| `context` | positional | false | `Optional[Any]` | exact | `context` | undefined | `unknown` | default mismatch (waived) |
+| `output` | positional | null | `Optional[Any]` | exact | `output` | undefined | `unknown` | ok |
+| `execution` | positional | null | `Optional[Any]` | exact | `execution` | undefined | `unknown` | ok |
+| `hooks` | positional | null | `Optional[Any]` | exact | `hooks` | undefined | `unknown` | ok |
+| `autonomy` | positional | null | `Optional[Any]` | exact | `autonomy` | undefined | `unknown` | ok |
+| `knowledge` | positional | null | `Optional[Any]` | exact | `knowledge` | undefined | `unknown` | ok |
+| `guardrails` | positional | null | `Optional[Any]` | exact | `guardrails` | undefined | `unknown` | ok |
+| `web` | positional | null | `Optional[Any]` | exact | `web` | undefined | `unknown` | ok |
+| `reflection` | positional | null | `Optional[Any]` | exact | `reflection` | undefined | `unknown` | ok |
+| `caching` | positional | null | `Optional[Any]` | exact | `caching` | undefined | `unknown` | ok |
+| `learn` | positional | null | `Optional[Any]` | exact | `learn` | undefined | `unknown` | ok |
+| `tools_run_on` | positional | null | `Optional[Any]` | camelCase | `toolsRunOn` | undefined | `unknown` | ok |
+| `run_on` | positional | null | `Optional[Any]` | camelCase | `runOn` | undefined | `unknown` | ok |
 
 TS-only members: `verbose`?, `pretty`?
 
 ### `Task.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:47`
-- TypeScript: `src/praisonai-ts/src/agent/types.ts:4` (ctor `src/praisonai-ts/src/agent/types.ts:20`)
-- Counts: 60 python params: 4 exact, 0 camelCase, 2 alias, 0 flattened, 54 missing; 3 mismatches; 57 waived; 0 TS-only of 5
+- TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:327`)
+- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 8 mismatches; 8 waived; 1 TS-only of 61
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
-| `description` | positional | null | `Optional[str]` | exact | `description` | *required* | `string` | required mismatch (waived) |
-| `expected_output` | positional | null | `Optional[str]` | exact | `expected_output` | *required* | `string` | required mismatch (waived) |
+| `description` | positional | null | `Optional[str]` | exact | `description` | `config.action` | `string` | default mismatch (waived) |
+| `expected_output` | positional | null | `Optional[str]` | exact | `expected_output` | "Complete the task successfully" | `string` | default mismatch (waived) |
 | `agent` | positional | null | `Optional[Agent]` | exact | `agent` | null | `any` | ok |
-| `name` | positional | null | `Optional[str]` | exact | `name` | *required* | `string` | required mismatch (waived) |
-| `tools` | positional | null | `Optional[List[Any]]` | missing |  |  |  | MISSING (waived) |
-| `context` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | alias | `dependencies` | [] | `Task[]` | ok |
-| `depends_on` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | alias | `dependencies` | [] | `Task[]` | ok |
-| `async_execution` | positional | false | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
-| `config` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `output_file` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `output_json` | positional | null | `Optional[Type[BaseModel]]` | missing |  |  |  | MISSING (waived) |
-| `output_pydantic` | positional | null | `Optional[Type[BaseModel]]` | missing |  |  |  | MISSING (waived) |
-| `callback` | positional | null | `Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]` | missing |  |  |  | MISSING (waived) |
-| `on_task_complete` | positional | null | `Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]` | missing |  |  |  | MISSING (waived) |
-| `status` | positional | "not started" | `str` | missing |  |  |  | MISSING (waived) |
-| `result` | positional | null | `Optional[TaskOutput]` | missing |  |  |  | MISSING (waived) |
-| `create_directory` | positional | false | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
-| `id` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
-| `images` | positional | null | `Optional[List[str]]` | missing |  |  |  | MISSING (waived) |
-| `next_tasks` | positional | null | `Optional[List[str]]` | missing |  |  |  | MISSING (waived) |
-| `task_type` | positional | "task" | `str` | missing |  |  |  | MISSING (waived) |
-| `condition` | positional | null | `Optional[Dict[str, List[str]]]` | missing |  |  |  | MISSING (waived) |
-| `is_start` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `loop_state` | positional | null | `Optional[Dict[str, Union[str, int]]]` | missing |  |  |  | MISSING (waived) |
-| `memory` | positional | null |  | missing |  |  |  | MISSING (waived) |
-| `quality_check` | positional | true |  | missing |  |  |  | MISSING (waived) |
-| `input_file` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `rerun` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `retain_full_context` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `guardrail` | positional | null | `Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]` | missing |  |  |  | MISSING (waived) |
-| `guardrails` | positional | null | `Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]` | missing |  |  |  | MISSING (waived) |
-| `max_retries` | positional | 3 | `int` | missing |  |  |  | MISSING (waived) |
-| `retry_count` | positional | 0 | `int` | missing |  |  |  | MISSING (waived) |
-| `agent_config` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `variables` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `skip_on_failure` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `retry_delay` | positional | 0.0 | `float` | missing |  |  |  | MISSING (waived) |
-| `on_error` | positional | "stop" | `str` | missing |  |  |  | MISSING (waived) |
-| `action` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `handler` | positional | null | `Optional[Callable]` | missing |  |  |  | MISSING (waived) |
-| `should_run` | positional | null | `Optional[Callable]` | missing |  |  |  | MISSING (waived) |
-| `loop_over` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `loop_var` | positional | "item" | `str` | missing |  |  |  | MISSING (waived) |
-| `execution` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `routing` | positional | null | `Optional[Dict[str, List[str]]]` | missing |  |  |  | MISSING (waived) |
-| `output_config` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `output` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `when` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `then_task` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `else_task` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `autonomy` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `knowledge` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `web` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `reflection` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `planning` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `hooks` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `caching` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `output_variable` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `fail_on_callback_error` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `fail_on_memory_error` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
+| `name` | positional | null | `Optional[str]` | exact | `name` | undefined | `string` | ok |
+| `tools` | positional | null | `Optional[List[Any]]` | exact | `tools` | [] | `any[]` | ok |
+| `context` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | exact | `context` | undefined | `(string \| Task)[]` | ok |
+| `depends_on` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | camelCase | `dependsOn` | `config.context ?? []` | `Task[]` | default mismatch (waived) |
+| `async_execution` | positional | false | `Optional[bool]` | camelCase | `asyncExecution` | false | `boolean` | ok |
+| `config` | positional | null | `Optional[Dict[str, Any]]` | exact | `config` | {} | `Record<string, unknown>` | ok |
+| `output_file` | positional | null | `Optional[str]` | camelCase | `outputFile` | undefined | `string` | ok |
+| `output_json` | positional | null | `Optional[Type[BaseModel]]` | camelCase | `outputJson` | undefined | `unknown` | ok |
+| `output_pydantic` | positional | null | `Optional[Type[BaseModel]]` | camelCase | `outputPydantic` | undefined | `unknown` | ok |
+| `callback` | positional | null | `Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]` | exact | `callback` | undefined | `TaskCallback` | ok (type differs) |
+| `on_task_complete` | positional | null | `Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]` | camelCase | `onTaskComplete` | undefined | `TaskCallback` | ok (type differs) |
+| `status` | positional | "not started" | `str` | exact | `status` | "not started" | `string` | ok |
+| `result` | positional | null | `Optional[TaskOutput]` | exact | `result` | null | `TaskOutput \| string \| null` | ok (type differs) |
+| `create_directory` | positional | false | `Optional[bool]` | camelCase | `createDirectory` | false | `boolean` | ok |
+| `id` | positional | null | `Optional[int]` | exact | `id` | `randomUUID()` | `number \| string` | default mismatch (waived) |
+| `images` | positional | null | `Optional[List[str]]` | exact | `images` | [] | `string[]` | ok |
+| `next_tasks` | positional | null | `Optional[List[str]]` | camelCase | `nextTasks` | [] | `string[]` | ok |
+| `task_type` | positional | "task" | `str` | camelCase | `taskType` | "task" | `string` | ok |
+| `condition` | positional | null | `Optional[Dict[str, List[str]]]` | exact | `condition` | {} | `Record<string, string[]>` | ok |
+| `is_start` | positional | false | `bool` | camelCase | `isStart` | false | `boolean` | ok |
+| `loop_state` | positional | null | `Optional[Dict[str, Union[str, int]]]` | camelCase | `loopState` | {} | `Record<string, string \| number>` | ok |
+| `memory` | positional | null |  | exact | `memory` | undefined | `unknown` | ok |
+| `quality_check` | positional | true |  | camelCase | `qualityCheck` | true | `boolean` | ok |
+| `input_file` | positional | null | `Optional[str]` | camelCase | `inputFile` | undefined | `string` | ok |
+| `rerun` | positional | false | `bool` | exact | `rerun` | false | `boolean` | ok |
+| `retain_full_context` | positional | false | `bool` | camelCase | `retainFullContext` | false | `boolean` | ok |
+| `guardrail` | positional | null | `Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]` | exact | `guardrail` | undefined | `TaskGuardrail` | ok (type differs) |
+| `guardrails` | positional | null | `Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]` | exact | `guardrails` | `config.guardrail` | `TaskGuardrail` | default mismatch (waived) |
+| `max_retries` | positional | 3 | `int` | camelCase | `maxRetries` | 3 | `number` | ok |
+| `retry_count` | positional | 0 | `int` | camelCase | `retryCount` | 0 | `number` | ok |
+| `agent_config` | positional | null | `Optional[Dict[str, Any]]` | camelCase | `agentConfig` | undefined | `Record<string, unknown>` | ok |
+| `variables` | positional | null | `Optional[Dict[str, Any]]` | exact | `variables` | {} | `Record<string, unknown>` | ok |
+| `skip_on_failure` | positional | false | `bool` | camelCase | `skipOnFailure` | false | `boolean` | ok |
+| `retry_delay` | positional | 0.0 | `float` | camelCase | `retryDelay` | 0 | `number` | default mismatch (waived) |
+| `on_error` | positional | "stop" | `str` | camelCase | `onError` | "stop" | `TaskOnError` | ok (type differs) |
+| `action` | positional | null | `Optional[str]` | exact | `action` | `description` | `string` | default mismatch (waived) |
+| `handler` | positional | null | `Optional[Callable]` | exact | `handler` | undefined | `(...args: unknown[]) => unknown` | ok |
+| `should_run` | positional | null | `Optional[Callable]` | camelCase | `shouldRun` | undefined | `() => boolean \| Promise<boolean>` | ok |
+| `loop_over` | positional | null | `Optional[str]` | camelCase | `loopOver` | undefined | `string` | ok |
+| `loop_var` | positional | "item" | `str` | camelCase | `loopVar` | "item" | `string` | ok |
+| `execution` | positional | null | `Optional[Any]` | exact | `execution` | undefined | `unknown` | ok |
+| `routing` | positional | null | `Optional[Dict[str, List[str]]]` | exact | `routing` | `this.condition` | `Record<string, string[]>` | default mismatch (waived) |
+| `output_config` | positional | null | `Optional[Any]` | camelCase | `outputConfig` | undefined | `unknown` | ok |
+| `output` | positional | null | `Optional[Any]` | exact | `output` | undefined | `unknown` | ok |
+| `when` | positional | null | `Optional[str]` | exact | `when` | undefined | `string` | ok |
+| `then_task` | positional | null | `Optional[str]` | camelCase | `thenTask` | undefined | `string` | ok |
+| `else_task` | positional | null | `Optional[str]` | camelCase | `elseTask` | undefined | `string` | ok |
+| `autonomy` | positional | null | `Optional[Any]` | exact | `autonomy` | undefined | `unknown` | ok |
+| `knowledge` | positional | null | `Optional[Any]` | exact | `knowledge` | undefined | `unknown` | ok |
+| `web` | positional | null | `Optional[Any]` | exact | `web` | undefined | `unknown` | ok |
+| `reflection` | positional | null | `Optional[Any]` | exact | `reflection` | undefined | `unknown` | ok |
+| `planning` | positional | null | `Optional[Any]` | exact | `planning` | undefined | `unknown` | ok |
+| `hooks` | positional | null | `Optional[Any]` | exact | `hooks` | undefined | `unknown` | ok |
+| `caching` | positional | null | `Optional[Any]` | exact | `caching` | undefined | `unknown` | ok |
+| `output_variable` | positional | null | `Optional[str]` | camelCase | `outputVariable` | undefined | `string` | ok |
+| `fail_on_callback_error` | positional | false | `bool` | camelCase | `failOnCallbackError` | false | `boolean` | ok |
+| `fail_on_memory_error` | positional | false | `bool` | camelCase | `failOnMemoryError` | false | `boolean` | ok |
 
-TS-only members: none
+TS-only members: `dependencies`?
 
 ### `Agent.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:831`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:812`
-- Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 4 TS-only of 5
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1717`
+- Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 20 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `prompt` | positional | null | `Optional[str]` | exact | `prompt` | *required* | `string` | required mismatch (waived) |
 
-TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?
+TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`?, `temperature`?, `tools`?, `outputJson`?, `outputPydantic`?, `reasoningSteps`?, `stream`?, `taskName`?, `taskDescription`?, `taskId`?, `config`?, `forceRetrieval`?, `skipRetrieval`?, `attachments`?, `toolChoice`?, `seed`?
 
 ### `Agent.chat`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3056`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1310`
-- Counts: 17 python params: 1 exact, 0 camelCase, 1 alias, 0 flattened, 15 missing; 0 mismatches; 15 waived; 1 TS-only of 3
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2364`
+- Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 3 mismatches; 3 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `prompt` | positional | *required* | `str` | exact | `prompt` | *required* | `string` | ok |
-| `temperature` | positional | null | `Optional[float]` | missing |  |  |  | MISSING (waived) |
-| `tools` | positional | null | `Optional[List[Any]]` | missing |  |  |  | MISSING (waived) |
-| `output_json` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `output_pydantic` | positional | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `reasoning_steps` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `stream` | positional | null | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
-| `task_name` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `task_description` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `task_id` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `config` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `force_retrieval` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `skip_retrieval` | positional | false | `bool` | missing |  |  |  | MISSING (waived) |
-| `attachments` | positional | null | `Optional[List[str]]` | missing |  |  |  | MISSING (waived) |
-| `tool_choice` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `seed` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
+| `temperature` | positional | null | `Optional[float]` | exact | `temperature` | undefined | `number` | ok |
+| `tools` | positional | null | `Optional[List[Any]]` | exact | `tools` | undefined | `any[]` | ok |
+| `output_json` | positional | null | `Optional[Any]` | camelCase | `outputJson` | undefined | `Record<string, any>` | ok |
+| `output_pydantic` | positional | null | `Optional[Any]` | camelCase | `outputPydantic` | undefined | `Record<string, any>` | ok |
+| `reasoning_steps` | positional | false | `bool` | camelCase | `reasoningSteps` | undefined | `boolean` | default mismatch (waived) |
+| `stream` | positional | null | `Optional[bool]` | exact | `stream` | undefined | `boolean` | ok |
+| `task_name` | positional | null | `Optional[str]` | camelCase | `taskName` | undefined | `string` | ok |
+| `task_description` | positional | null | `Optional[str]` | camelCase | `taskDescription` | undefined | `string` | ok |
+| `task_id` | positional | null | `Optional[str]` | camelCase | `taskId` | undefined | `string` | ok |
+| `config` | positional | null | `Optional[Dict[str, Any]]` | exact | `config` | undefined | `Record<string, unknown>` | ok |
+| `force_retrieval` | positional | false | `bool` | camelCase | `forceRetrieval` | undefined | `boolean` | default mismatch (waived) |
+| `skip_retrieval` | positional | false | `bool` | camelCase | `skipRetrieval` | undefined | `boolean` | default mismatch (waived) |
+| `attachments` | positional | null | `Optional[List[str]]` | exact | `attachments` | undefined | `string[]` | ok |
+| `tool_choice` | positional | null | `Optional[str]` | camelCase | `toolChoice` | undefined | `'auto' \| 'none' \| 'required' \| string` | ok |
+| `seed` | positional | null | `Optional[int]` | exact | `seed` | undefined | `number` | ok |
 | `cancel_token` | positional | null | `Optional[Any]` | alias | `signal` | undefined | `AbortSignal` | ok |
 
-TS-only members: `previousResult`?
+TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:1719`
-- Counts: 3 python params: 0 exact, 0 camelCase, 0 alias, 0 flattened, 3 missing; 0 mismatches; 3 waived; 0 TS-only of 0
+- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3053`
+- Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
-| `content` | positional | null |  | missing |  |  |  | MISSING (waived) |
-| `return_dict` | positional | false |  | missing |  |  |  | MISSING (waived) |
-| `output` | positional | null |  | missing |  |  |  | MISSING (waived) |
+| `content` | positional | null |  | exact | `content` | undefined | `string` | ok |
+| `return_dict` | positional | false |  | camelCase | `returnDict` | undefined | `false` | default mismatch (waived) |
+| `output` | positional | null |  | exact | `output` | undefined | `unknown` | ok |
 
-TS-only members: none
+TS-only members: `options`?
 
 ### `Handoff.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:320`
-- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:156` (ctor `src/praisonai-ts/src/agent/handoff.ts:222`)
-- Counts: 7 python params: 1 exact, 1 camelCase, 3 alias, 0 flattened, 2 missing; 2 mismatches; 4 waived; 11 TS-only of 16
+- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:172` (ctor `src/praisonai-ts/src/agent/handoff.ts:338`)
+- Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 11 TS-only of 18
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `agent` | positional | *required* | `'Agent'` | exact | `agent` | *required* | `EnhancedAgent` | ok |
-| `tool_name_override` | positional | null | `Optional[str]` | alias | `name` | ``handoff_to_${config.agent.name}`` | `string` | default mismatch (waived) |
-| `tool_description_override` | positional | null | `Optional[str]` | alias | `description` | ``Transfer conversation to ${config.agent.name}`` | `string` | default mismatch (waived) |
+| `tool_name_override` | positional | null | `Optional[str]` | alias | `name` | `nested.name \|\| `handoff_to_${config.agent.name}`` | `string` | default mismatch (waived) |
+| `tool_description_override` | positional | null | `Optional[str]` | alias | `description` | `nested.description \|\| `Transfer conversation to ${config.agent.name}`` | `string` | default mismatch (waived) |
 | `on_handoff` | positional | null | `Optional[Callable]` | camelCase | `onHandoff` | undefined | `(context: HandoffContext) => void \| Promise<void>` | ok |
-| `input_type` | positional | null | `Optional[type]` | missing |  |  |  | MISSING (waived) |
+| `input_type` | positional | null | `Optional[type]` | camelCase | `inputType` | undefined | `HandoffInputType` | ok |
 | `input_filter` | positional | null | `Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]]` | alias | `transformContext` | undefined | `(messages: any[]) => any[]` | ok (type differs) |
-| `config` | positional | null | `Optional[HandoffConfig]` | missing |  |  |  | MISSING (waived) |
+| `config` | positional | null | `Optional[HandoffConfig]` | exact | `config` | undefined | `Partial<HandoffConfig>` | ok |
 
 TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContextMessages`?, `preserveSystem`?, `timeoutSeconds`?, `maxConcurrent`?, `detectCycles`?, `maxDepth`?, `onComplete`?, `onError`?
 
 ### `LLM.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:413`
-- TypeScript: `src/praisonai-ts/src/llm/index.ts:1` (ctor `src/praisonai-ts/src/llm/index.ts:28`)
-- Counts: 25 python params: 2 exact, 2 camelCase, 1 alias, 0 flattened, 20 missing; 0 mismatches; 20 waived; 0 TS-only of 5
+- TypeScript: `src/praisonai-ts/src/llm/index.ts:18` (ctor `src/praisonai-ts/src/llm/index.ts:110`)
+- Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 0 TS-only of 25
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `model` | positional | *required* | `str` | exact | `model` | *required* | `string` | ok |
-| `timeout` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
+| `timeout` | positional | null | `Optional[int]` | exact | `timeout` | undefined | `number` | ok |
 | `temperature` | positional | null | `Optional[float]` | exact | `temperature` | undefined | `number` | ok |
-| `top_p` | positional | null | `Optional[float]` | missing |  |  |  | MISSING (waived) |
-| `n` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
+| `top_p` | positional | null | `Optional[float]` | camelCase | `topP` | undefined | `number` | ok |
+| `n` | positional | null | `Optional[int]` | exact | `n` | undefined | `number` | ok |
 | `max_tokens` | positional | null | `Optional[int]` | camelCase | `maxTokens` | undefined | `number` | ok |
-| `presence_penalty` | positional | null | `Optional[float]` | missing |  |  |  | MISSING (waived) |
-| `frequency_penalty` | positional | null | `Optional[float]` | missing |  |  |  | MISSING (waived) |
-| `logit_bias` | positional | null | `Optional[Dict[int, float]]` | missing |  |  |  | MISSING (waived) |
-| `response_format` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
-| `seed` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
-| `logprobs` | positional | null | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
-| `top_logprobs` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
-| `api_version` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `stop_phrases` | positional | null | `Optional[Union[str, List[str]]]` | missing |  |  |  | MISSING (waived) |
+| `presence_penalty` | positional | null | `Optional[float]` | camelCase | `presencePenalty` | undefined | `number` | ok |
+| `frequency_penalty` | positional | null | `Optional[float]` | camelCase | `frequencyPenalty` | undefined | `number` | ok |
+| `logit_bias` | positional | null | `Optional[Dict[int, float]]` | camelCase | `logitBias` | undefined | `Record<number, number>` | ok |
+| `response_format` | positional | null | `Optional[Dict[str, Any]]` | camelCase | `responseFormat` | undefined | `Record<string, unknown>` | ok |
+| `seed` | positional | null | `Optional[int]` | exact | `seed` | undefined | `number` | ok |
+| `logprobs` | positional | null | `Optional[bool]` | exact | `logprobs` | undefined | `boolean` | ok |
+| `top_logprobs` | positional | null | `Optional[int]` | camelCase | `topLogprobs` | undefined | `number` | ok |
+| `api_version` | positional | null | `Optional[str]` | camelCase | `apiVersion` | undefined | `string` | ok |
+| `stop_phrases` | positional | null | `Optional[Union[str, List[str]]]` | camelCase | `stopPhrases` | undefined | `string \| string[]` | ok |
 | `api_key` | positional | null | `Optional[str]` | camelCase | `apiKey` | undefined | `string` | ok |
 | `base_url` | positional | null | `Optional[str]` | alias | `baseURL` | undefined | `string` | ok |
-| `events` | positional | [] | `List[Any]` | missing |  |  |  | MISSING (waived) |
-| `web_search` | positional | null | `Optional[Union[bool, Dict[str, Any]]]` | missing |  |  |  | MISSING (waived) |
-| `web_fetch` | positional | null | `Optional[Union[bool, Dict[str, Any]]]` | missing |  |  |  | MISSING (waived) |
-| `prompt_caching` | positional | null | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
-| `claude_memory` | positional | null | `Optional[Union[bool, Any]]` | missing |  |  |  | MISSING (waived) |
-| `failover_manager` | positional | null | `Optional[FailoverManagerProtocol]` | missing |  |  |  | MISSING (waived) |
-| `auth` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
-| `max_iter` | positional | null | `Optional[int]` | missing |  |  |  | MISSING (waived) |
+| `events` | positional | [] | `List[Any]` | exact | `events` | [] | `unknown[]` | ok |
+| `web_search` | positional | null | `Optional[Union[bool, Dict[str, Any]]]` | camelCase | `webSearch` | undefined | `boolean \| Record<string, unknown>` | ok |
+| `web_fetch` | positional | null | `Optional[Union[bool, Dict[str, Any]]]` | camelCase | `webFetch` | undefined | `boolean \| Record<string, unknown>` | ok |
+| `prompt_caching` | positional | null | `Optional[bool]` | camelCase | `promptCaching` | undefined | `boolean` | ok |
+| `claude_memory` | positional | null | `Optional[Union[bool, Any]]` | camelCase | `claudeMemory` | undefined | `boolean \| unknown` | ok |
+| `failover_manager` | positional | null | `Optional[FailoverManagerProtocol]` | camelCase | `failoverManager` | undefined | `unknown` | ok |
+| `auth` | positional | null | `Optional[str]` | exact | `auth` | undefined | `string` | ok |
+| `max_iter` | positional | null | `Optional[int]` | camelCase | `maxIter` | undefined | `number` | ok |
 
 TS-only members: none
 
 ### `Session.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/session/api.py:66`
-- TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:120`)
-- Counts: 7 python params: 1 exact, 4 camelCase, 2 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 2 TS-only of 9
+- TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:132`)
+- Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 4 TS-only of 11
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
-| `session_id` | positional | null | `Optional[str]` | alias | `id` | `randomUUID().slice(0, 8)` | `string` | default mismatch (waived) |
+| `session_id` | positional | null | `Optional[str]` | camelCase | `sessionId` | undefined | `string` | ok |
 | `user_id` | positional | null | `Optional[str]` | camelCase | `userId` | "default_user" | `string` | default mismatch (waived) |
 | `agent_url` | positional | null | `Optional[str]` | camelCase | `agentUrl` | undefined | `string` | ok |
 | `memory_config` | positional | null | `Optional[Dict[str, Any]]` | camelCase | `memoryConfig` | undefined | `Record<string, any>` | ok |
 | `knowledge_config` | positional | null | `Optional[Dict[str, Any]]` | camelCase | `knowledgeConfig` | undefined | `Record<string, any>` | ok |
 | `timeout` | positional | 30 | `int` | exact | `timeout` | 30 | `number` | ok |
-| `session_ttl` | positional | null | `Optional[int]` | alias | `ttl` | undefined | `number` | ok |
+| `session_ttl` | positional | null | `Optional[int]` | camelCase | `sessionTtl` | undefined | `number` | ok |
 
-TS-only members: `parent`?, `db`?
+TS-only members: `id`?, `parent`?, `db`?, `ttl`?
 
 ### `tool()`
 
 - Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:235`
-- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:16` (ctor `src/praisonai-ts/src/tools/decorator.ts:48`)
-- Counts: 11 python params: 2 exact, 0 camelCase, 1 alias, 0 flattened, 8 missing; 3 mismatches; 11 waived; 2 TS-only of 5
+- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:49` (ctor `src/praisonai-ts/src/tools/decorator.ts:163`)
+- Counts: 11 python params: 5 exact, 5 camelCase, 1 alias, 0 flattened, 0 missing; 4 mismatches; 4 waived; 2 TS-only of 13
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `func` | positional | null | `Optional[Callable]` | alias | `execute` | *required* | `(params: TParams, context?: ToolContext) => Promise<TResult> \| TResult` | required mismatch (waived) |
 | `name` | keyword | null | `Optional[str]` | exact | `name` | *required* | `string` | required mismatch (waived) |
 | `description` | keyword | null | `Optional[str]` | exact | `description` | ``Function ${config.name}`` | `string` | default mismatch (waived) |
-| `version` | keyword | "1.0.0" | `str` | missing |  |  |  | MISSING (waived) |
-| `availability` | keyword | null | `Optional[Callable[[], tuple[bool, str]]]` | missing |  |  |  | MISSING (waived) |
-| `dynamic_schema_overrides` | keyword | null | `Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]` | missing |  |  |  | MISSING (waived) |
-| `retry_policy` | keyword | null | `Optional[Any]` | missing |  |  |  | MISSING (waived) |
-| `approval` | keyword | null | `Optional[Union[bool, str]]` | missing |  |  |  | MISSING (waived) |
-| `requires_approval` | keyword | `_UNSET` | `Union[bool, str]` | missing |  |  |  | MISSING (waived) |
-| `to_model_output` | keyword | null | `Optional[Callable[[Any], Any]]` | missing |  |  |  | MISSING (waived) |
-| `restart_safe` | keyword | null | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
+| `version` | keyword | "1.0.0" | `str` | exact | `version` | "1.0.0" | `string` | ok |
+| `availability` | keyword | null | `Optional[Callable[[], tuple[bool, str]]]` | exact | `availability` | undefined | `() => [boolean, string]` | ok |
+| `dynamic_schema_overrides` | keyword | null | `Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]` | camelCase | `dynamicSchemaOverrides` | undefined | `(schema: ToolParameters) => ToolParameters` | ok |
+| `retry_policy` | keyword | null | `Optional[Any]` | camelCase | `retryPolicy` | undefined | `RetryPolicy` | ok |
+| `approval` | keyword | null | `Optional[Union[bool, str]]` | exact | `approval` | undefined | `boolean \| RiskLevel \| string` | ok |
+| `requires_approval` | keyword | `_UNSET` | `Union[bool, str]` | camelCase | `requiresApproval` | undefined | `boolean \| RiskLevel \| string` | default mismatch (waived) |
+| `to_model_output` | keyword | null | `Optional[Callable[[Any], Any]]` | camelCase | `toModelOutput` | undefined | `(result: TResult) => unknown` | ok |
+| `restart_safe` | keyword | null | `Optional[bool]` | camelCase | `restartSafe` | undefined | `boolean` | ok |
 
 TS-only members: `parameters`?, `category`?
 
@@ -343,170 +343,31 @@ TS-only members: `parameters`?, `category`?
 
 | Key | Reason | Owner | Issue | Expires |
 |---|---|---|---|---|
-| `Agent.__init__.auth` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.autonomy` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.backend` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.__init__.caching` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.context` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.guardrails` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.handoffs` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.hooks` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.instructions` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.knowledge` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.learn` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.llm` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.memory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.message_steering` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.__init__.model` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.__init__.name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.planning` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.reasoning_effort` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.reflection` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.retry` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.__init__.role` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.rules` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.run_on` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.runtime` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.sandbox` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.self_improve` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.skills` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.templates` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.tool_config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.tool_search` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.tools_run_on` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.toolsets` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.web` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.attachments` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.chat.force_retrieval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.output_json` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.output_pydantic` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.chat.reasoning_steps` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.seed` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.chat.skip_retrieval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.stream` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.task_description` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.task_id` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.task_name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.temperature` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.tool_choice` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.tools` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Agent.start.prompt` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.autonomy` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.caching` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `AgentTeam.__init__.context` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.execution` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.guardrails` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.hooks` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.knowledge` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.learn` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.llm` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.manager_llm` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `AgentTeam.__init__.memory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.model` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.output` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `AgentTeam.__init__.planning` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `AgentTeam.__init__.process` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.reflection` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.run_on` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.tools_run_on` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.variables` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.web` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.start.content` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.start.output` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `AgentTeam.start.return_dict` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Handoff.__init__.config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Handoff.__init__.input_type` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Handoff.__init__.tool_description_override` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Handoff.__init__.tool_name_override` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.api_version` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.auth` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.claude_memory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.events` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.failover_manager` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.frequency_penalty` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.logit_bias` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.logprobs` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.max_iter` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.n` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.presence_penalty` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.prompt_caching` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.response_format` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.seed` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.stop_phrases` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.timeout` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.top_logprobs` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.top_p` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.web_fetch` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `LLM.__init__.web_search` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Session.__init__.session_id` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Session.__init__.user_id` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.action` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.agent_config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.async_execution` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.autonomy` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.caching` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.callback` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.condition` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.create_directory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
+| `Task.__init__.depends_on` | TS dependsOn falls back to context then []; Python None means empty (same as the waived context alias) | praisonai-ts |  |  |
 | `Task.__init__.description` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.else_task` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.execution` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.expected_output` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.fail_on_callback_error` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.fail_on_memory_error` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.guardrail` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.guardrails` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.handler` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.hooks` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.id` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.images` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.input_file` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.is_start` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.knowledge` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.loop_over` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.loop_state` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.loop_var` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.max_retries` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.memory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.next_tasks` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.on_error` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.on_task_complete` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.output` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.output_config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.output_file` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.output_json` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.output_pydantic` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.output_variable` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.planning` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.quality_check` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.reflection` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.rerun` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.result` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.retain_full_context` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.retry_count` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.retry_delay` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.routing` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.should_run` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.skip_on_failure` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.status` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.task_type` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.then_task` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.tools` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.variables` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.web` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.when` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().approval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().availability` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().description` | TS derives a default description from the tool name; Python leaves it None and infers from the docstring | praisonai-ts |  |  |
-| `tool().dynamic_schema_overrides` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().func` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `tool().requires_approval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().restart_safe` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().retry_policy` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().to_model_output` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().version` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |

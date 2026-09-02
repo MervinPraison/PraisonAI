@@ -10,6 +10,7 @@
  */
 
 import type { EnhancedAgent } from './enhanced';
+import { notYetHonoured } from '../utils/parity-notice';
 
 // ============================================================================
 // Constants (Python Parity)
@@ -150,6 +151,21 @@ export interface HandoffInputData {
 }
 
 /**
+ * A zod-like schema: anything exposing `parse` (and optionally `safeParse`).
+ */
+export interface ParseableSchema {
+  parse(input: unknown): unknown;
+  safeParse?(input: unknown): { success: boolean; data?: unknown; error?: unknown };
+  _def?: any;
+}
+
+/**
+ * Accepted shapes for `HandoffConfig.inputType`: a JSON-schema object
+ * (`{ type: 'object', properties, required }`) or a zod-like schema.
+ */
+export type HandoffInputType = Record<string, any> | ParseableSchema;
+
+/**
  * Unified configuration for handoff behavior.
  * Python parity with HandoffConfig dataclass.
  */
@@ -164,7 +180,11 @@ export interface HandoffConfig {
   condition?: (context: HandoffContext) => boolean;
   /** Function to filter/transform input before passing to target agent */
   transformContext?: (messages: any[]) => any[];
-  
+  /** Python parity: input_type (Optional[type], default None). JSON schema or zod-like schema describing the structured handoff input; becomes the handoff tool's parameters and validates `context.input`. */
+  inputType?: HandoffInputType;
+  /** Python parity: config (Optional[HandoffConfig], default None). Nested settings merged beneath the top-level ones (top-level keys win). */
+  config?: Partial<HandoffConfig>;
+
   // Context control (Python parity)
   /** How to share context during handoff (default: summary for safety) */
   contextPolicy?: ContextPolicyType;
@@ -201,7 +221,99 @@ export interface HandoffContext {
   lastMessage: string;
   topic?: string;
   metadata?: Record<string, any>;
+  /** Structured input for the handoff; validated against `inputType` when one is set. */
+  input?: unknown;
 }
+
+/**
+ * The settings a Handoff runs with once the nested `config` block has been
+ * merged beneath the top-level keys and Python's defaults applied.
+ */
+export interface ResolvedHandoffConfig {
+  contextPolicy: ContextPolicyType;
+  maxContextTokens: number;
+  maxContextMessages: number;
+  preserveSystem: boolean;
+  timeoutSeconds: number;
+  maxConcurrent: number;
+  detectCycles: boolean;
+  maxDepth: number;
+  onHandoff?: (context: HandoffContext) => void | Promise<void>;
+  onComplete?: (result: HandoffResult) => void | Promise<void>;
+  onError?: (error: Error) => void | Promise<void>;
+}
+
+function isParseableSchema(value: unknown): value is ParseableSchema {
+  return !!value && typeof (value as ParseableSchema).parse === 'function';
+}
+
+function zodFieldToJsonSchema(def: any): any {
+  switch (def?.typeName) {
+    case 'ZodString':
+      return { type: 'string', ...(def.description ? { description: def.description } : {}) };
+    case 'ZodNumber':
+      return { type: 'number', ...(def.description ? { description: def.description } : {}) };
+    case 'ZodBoolean':
+      return { type: 'boolean', ...(def.description ? { description: def.description } : {}) };
+    case 'ZodArray':
+      return { type: 'array', items: zodFieldToJsonSchema(def.type?._def) };
+    case 'ZodEnum':
+      return { type: 'string', enum: def.values };
+    case 'ZodOptional':
+    case 'ZodNullable':
+      return zodFieldToJsonSchema(def.innerType?._def);
+    case 'ZodDefault': {
+      const inner = zodFieldToJsonSchema(def.innerType?._def);
+      inner.default = def.defaultValue();
+      return inner;
+    }
+    default:
+      return { type: 'string' };
+  }
+}
+
+/** Best-effort zod -> JSON schema for the handoff tool definition. */
+function schemaToJsonSchema(schema: HandoffInputType): Record<string, any> {
+  if (isParseableSchema(schema)) {
+    const def = schema._def;
+    if (def?.typeName === 'ZodObject' && typeof def.shape === 'function') {
+      const properties: Record<string, any> = {};
+      const required: string[] = [];
+      for (const [key, value] of Object.entries(def.shape())) {
+        const fieldDef = (value as any)?._def;
+        properties[key] = zodFieldToJsonSchema(fieldDef);
+        if (fieldDef?.typeName !== 'ZodOptional' && fieldDef?.typeName !== 'ZodDefault') {
+          required.push(key);
+        }
+      }
+      return { type: 'object', properties, required };
+    }
+    return { type: 'object', properties: {}, required: [] };
+  }
+  return schema;
+}
+
+/** Python `HandoffConfig` dataclass defaults for the settings execute() does not consult yet. */
+const HANDOFF_DEFAULTS: Omit<ResolvedHandoffConfig, 'onHandoff' | 'onComplete' | 'onError'> = {
+  contextPolicy: ContextPolicy.SUMMARY,
+  maxContextTokens: 4000,
+  maxContextMessages: 10,
+  preserveSystem: true,
+  timeoutSeconds: 300,
+  maxConcurrent: 5,
+  detectCycles: true,
+  maxDepth: 10,
+};
+
+const JSON_TYPE_CHECKS: Record<string, (v: unknown) => boolean> = {
+  string: v => typeof v === 'string',
+  number: v => typeof v === 'number',
+  integer: v => Number.isInteger(v),
+  boolean: v => typeof v === 'boolean',
+  array: v => Array.isArray(v),
+  object: v => typeof v === 'object' && v !== null && !Array.isArray(v),
+  null: v => v === null,
+};
 
 export interface HandoffResult {
   handedOffTo: string;
@@ -218,13 +330,47 @@ export class Handoff {
   readonly description: string;
   readonly condition?: (context: HandoffContext) => boolean;
   readonly transformContext?: (messages: any[]) => any[];
+  /** Python parity: input_type. */
+  readonly inputType?: HandoffInputType;
+  /** Effective settings after merging the nested `config` block (top-level keys win). */
+  readonly config: ResolvedHandoffConfig;
 
   constructor(config: HandoffConfig) {
+    // Nested `config` values sit beneath the top-level ones: a key given at
+    // the top level always wins, a key given only in the block is used.
+    const nested: Partial<HandoffConfig> = Object.assign({}, config.config);
+    const pick = <K extends keyof HandoffConfig>(key: K): HandoffConfig[K] | undefined =>
+      config[key] !== undefined ? config[key] : nested[key];
+
     this.targetAgent = config.agent;
-    this.name = config.name || `handoff_to_${config.agent.name}`;
-    this.description = config.description || `Transfer conversation to ${config.agent.name}`;
-    this.condition = config.condition;
-    this.transformContext = config.transformContext;
+    this.name = config.name || nested.name || `handoff_to_${config.agent.name}`;
+    this.description = config.description || nested.description || `Transfer conversation to ${config.agent.name}`;
+    this.condition = pick('condition');
+    this.transformContext = pick('transformContext');
+    this.inputType = pick('inputType');
+    this.config = {
+      contextPolicy: pick('contextPolicy') ?? HANDOFF_DEFAULTS.contextPolicy,
+      maxContextTokens: pick('maxContextTokens') ?? HANDOFF_DEFAULTS.maxContextTokens,
+      maxContextMessages: pick('maxContextMessages') ?? HANDOFF_DEFAULTS.maxContextMessages,
+      preserveSystem: pick('preserveSystem') ?? HANDOFF_DEFAULTS.preserveSystem,
+      timeoutSeconds: pick('timeoutSeconds') ?? HANDOFF_DEFAULTS.timeoutSeconds,
+      maxConcurrent: pick('maxConcurrent') ?? HANDOFF_DEFAULTS.maxConcurrent,
+      detectCycles: pick('detectCycles') ?? HANDOFF_DEFAULTS.detectCycles,
+      maxDepth: pick('maxDepth') ?? HANDOFF_DEFAULTS.maxDepth,
+      onHandoff: pick('onHandoff'),
+      onComplete: pick('onComplete'),
+      onError: pick('onError'),
+    };
+    this.reportUnhonoured();
+  }
+
+  private reportUnhonoured(): void {
+    // Settings that Handoff.execute() does not consult yet. They are exposed on
+    // `this.config` for callers that drive the handoff themselves; a
+    // non-default value is reported so it is never silently ignored.
+    for (const key of Object.keys(HANDOFF_DEFAULTS) as Array<keyof typeof HANDOFF_DEFAULTS>) {
+      if (this.config[key] !== HANDOFF_DEFAULTS[key]) notYetHonoured('Handoff', key);
+    }
   }
 
   /**
@@ -238,45 +384,115 @@ export class Handoff {
   }
 
   /**
+   * Validate `input` against `inputType`. Returns the parsed value (zod) or
+   * the input itself (JSON schema). Throws HandoffError on failure. Without
+   * an `inputType` the input passes through untouched.
+   */
+  validateInput(input: unknown): unknown {
+    const schema = this.inputType;
+    if (!schema) return input;
+    if (isParseableSchema(schema)) {
+      if (schema.safeParse) {
+        const result = schema.safeParse(input);
+        if (!result.success) {
+          const detail = result.error instanceof Error ? result.error.message : String(result.error ?? 'invalid input');
+          throw new HandoffError(`Invalid input for handoff '${this.name}': ${detail}`);
+        }
+        return result.data;
+      }
+      try {
+        return schema.parse(input);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new HandoffError(`Invalid input for handoff '${this.name}': ${detail}`);
+      }
+    }
+    // Plain JSON schema: check required keys and primitive property types.
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HandoffError(`Invalid input for handoff '${this.name}': expected an object`);
+    }
+    const record = input as Record<string, unknown>;
+    for (const key of (schema.required as string[] | undefined) ?? []) {
+      if (record[key] === undefined) {
+        throw new HandoffError(`Invalid input for handoff '${this.name}': missing required field '${key}'`);
+      }
+    }
+    const properties = (schema.properties as Record<string, any> | undefined) ?? {};
+    for (const [key, prop] of Object.entries(properties)) {
+      const value = record[key];
+      if (value === undefined) continue;
+      const expected = typeof prop?.type === 'string' ? prop.type : undefined;
+      const check = expected ? JSON_TYPE_CHECKS[expected] : undefined;
+      if (check && !check(value)) {
+        throw new HandoffError(`Invalid input for handoff '${this.name}': field '${key}' should be ${expected}`);
+      }
+    }
+    return input;
+  }
+
+  /**
    * Execute the handoff
    */
   async execute(context: HandoffContext): Promise<HandoffResult> {
     let messages = context.messages;
-    
+
     if (this.transformContext) {
       messages = this.transformContext(messages);
     }
 
-    // Transfer context to target agent
-    const response = await this.targetAgent.chat(context.lastMessage);
+    const input = context.input !== undefined ? this.validateInput(context.input) : context.input;
 
-    return {
-      handedOffTo: this.targetAgent.name,
-      response: response.text,
-      context: {
-        ...context,
-        messages,
-      },
-    };
+    if (this.config.onHandoff) {
+      await this.config.onHandoff({ ...context, messages, input });
+    }
+
+    try {
+      // Transfer context to target agent
+      const response = await this.targetAgent.chat(context.lastMessage);
+
+      const result: HandoffResult = {
+        handedOffTo: this.targetAgent.name,
+        response: response.text,
+        context: {
+          ...context,
+          messages,
+          ...(input !== undefined ? { input } : {}),
+        },
+      };
+      if (this.config.onComplete) {
+        await this.config.onComplete(result);
+      }
+      return result;
+    } catch (error) {
+      if (this.config.onError) {
+        await this.config.onError(error instanceof Error ? error : new Error(String(error)));
+      }
+      throw error;
+    }
   }
 
   /**
-   * Get tool definition for LLM
+   * Get tool definition for LLM. With an `inputType` the tool's parameters
+   * are that schema (as in Python, where the input type's fields become the
+   * tool signature); otherwise a free-text `reason` is offered.
    */
   getToolDefinition(): { name: string; description: string; parameters: any } {
+    const parameters = this.inputType
+      ? schemaToJsonSchema(this.inputType)
+      : {
+          type: 'object',
+          properties: {
+            reason: {
+              type: 'string',
+              description: 'Reason for the handoff',
+            },
+          },
+          required: [],
+        };
     return {
       name: this.name,
       description: this.description,
-      parameters: {
-        type: 'object',
-        properties: {
-          reason: {
-            type: 'string',
-            description: 'Reason for the handoff',
-          },
-        },
-        required: [],
-      },
+      parameters,
     };
   }
 }

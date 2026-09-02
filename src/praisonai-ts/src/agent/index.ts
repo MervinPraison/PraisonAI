@@ -11,6 +11,12 @@
 // Core exports - the main API surface
 export { Agent, AgentTeam, PraisonAIAgents, Agents } from './simple';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './simple';
+// Python-parity surfaces (see src/praisonai-ts/SIGNATURE_PARITY.md)
+export type {
+  AgentChatOptions, AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,
+  AgentGuardrailInput, AgentHooksInput, AgentWebConfig, AgentTeamProcess, AgentTeamStartOptions,
+  AgentTeamStartDictOptions, AgentTeamStartOptionsInput,
+} from './simple';
 
 // AudioAgent - Speech synthesis and transcription
 export { AudioAgent, createAudioAgent } from './audio';
@@ -61,7 +67,8 @@ export type { RouterConfig, RouteConfig, RouteContext, SimpleRouterConfig, Simpl
 
 // Task support (for advanced use cases)
 export { Task } from './types';
-export type { TaskConfig, AgentConfig as TaskAgentConfig } from './types';
+export type { TaskConfig, AgentConfig as TaskAgentConfig, TaskOutput, TaskCallback, TaskGuardrail, TaskOnError } from './types';
+export { TASK_STATUS } from './types';
 
 // Legacy compatibility - setTaskMode is deprecated but kept for backward compat
 let useTaskMode = false;

@@ -24,7 +24,7 @@
 |--------|-------|
 | Python Core Features | 411 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 1370 |
+| TypeScript Features | 1388 |
 | **Gap Count** | **115** |
 | Stub Exported (parity shim only) | 56 |
 | P0 (Critical) | 2 |
@@ -735,10 +735,10 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 **Path:** `src/praisonai-ts/src`
 
 <details>
-<summary><strong>agent</strong> (68 exports)</summary>
+<summary><strong>agent</strong> (84 exports)</summary>
 
 ```typescript
-import { Agent, AgentEvent, AgentMessage, AgentStreamOptions, AgentTeam, AgentTeamConfig, Agents, AudioAgent, AudioAgentConfig, AudioProvider... } from 'praisonai';
+import { Agent, AgentChatOptions, AgentEvent, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput, AgentMemoryStore, AgentMessage, AgentRetryConfig... } from 'praisonai';
 ```
 
 </details>
@@ -852,7 +852,7 @@ import { BaseKnowledgeBase, BaseReranker, ChonkieAdapter, ChonkieChunk, ChonkieC
 </details>
 
 <details>
-<summary><strong>llm</strong> (67 exports)</summary>
+<summary><strong>llm</strong> (69 exports)</summary>
 
 ```typescript
 import { ADAPTERS, AISDK_PROVIDERS, AdapterInfo, AnthropicProvider, BackendResolutionResult, BackendSource, BaseLLM, BaseProvider, COMMUNITY_PROVIDERS, CommunityProvider... } from 'praisonai';

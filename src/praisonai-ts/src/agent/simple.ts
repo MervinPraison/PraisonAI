@@ -8,6 +8,23 @@ import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 import { getEnv } from '../llm/openaiClientOptions';
 import { randomUUID } from '../utils/uuid';
 import { parseModelString } from '../llm/backend-resolver';
+import { notYetHonoured } from '../utils/parity-notice';
+import { Handoff, promptWithHandoffInstructions } from './handoff';
+import { Memory, type MemoryConfig } from '../memory/memory';
+import { KnowledgeBase, type KnowledgeBaseConfig } from '../knowledge/rag';
+import { Guardrail, type GuardrailConfig, type GuardrailContext, type GuardrailResult } from '../guardrails';
+import { LLMGuardrail } from '../guardrails/llm-guardrail';
+import { HooksManager, type HookEvent, type HookHandler } from '../hooks/manager';
+import { ContextManager, type ContextManagerConfig } from '../context/manager';
+import { RulesManager, createSafetyRules, type Rule, type RulesManagerConfig } from '../memory/rules-manager';
+import { tavilySearch } from '../tools/builtins/tavily';
+import { exaSearch } from '../tools/builtins/exa';
+import { perplexitySearch } from '../tools/builtins/perplexity';
+import { parallelSearch } from '../tools/builtins/parallel';
+import type { SkillManager, SkillDiscoveryOptions } from '../skills';
+import type { PlanningAgentConfig, Plan } from '../planning';
+import type { LLMConfig } from '../llm';
+import type { Task, TaskOutput } from './types';
 
 /**
  * The default token sink for `start()` when no `onToken` is supplied.
@@ -97,8 +114,12 @@ export interface AgentMessage {
 }
 
 export interface SimpleAgentConfig {
-  /** Agent instructions/system prompt (required) */
-  instructions: string;
+  /**
+   * Agent instructions/system prompt. Optional: when omitted the prompt is
+   * built from role/goal/backstory, else a default assistant prompt is used.
+   * Python parity: instructions (Optional[str]).
+   */
+  instructions?: string;
   /** Agent name (auto-generated if not provided) */
   name?: string;
   /** Enable verbose logging (default: true) */
@@ -110,8 +131,16 @@ export interface SimpleAgentConfig {
    * - Model name: "gpt-4o-mini", "claude-3-sonnet"
    * - Provider/model: "openai/gpt-4o", "anthropic/claude-3"
    * Default: "gpt-4o-mini"
+   * Also accepts an LLMConfig object ({ model, temperature, maxTokens,
+   * apiKey, baseURL }). Python parity: llm (Optional[Union[str, Any]]).
    */
-  llm?: string;
+  llm?: string | LLMConfig;
+  /**
+   * Canonical model name as documented by the Python SDK. `llm` remains
+   * accepted; when both are given `model` wins.
+   * Python parity: model (Optional[Union[str, Any]]).
+   */
+  model?: string;
   /**
    * API key for the LLM provider. Mirrors Python's per-agent `api_key`
    * (agent/agent.py). Falls back to OPENAI_API_KEY when omitted.
@@ -196,6 +225,116 @@ export interface SimpleAgentConfig {
    */
   signal?: AbortSignal;
 
+  // ---- Python-parity options (see SIGNATURE_PARITY.md). Each is either
+  // wired to an existing TypeScript module or accepted with a parity notice
+  // (never silently dropped). ----
+
+  /** Python parity: auth (Optional[str]). Subscription auth provider, e.g. "claude-code". */
+  auth?: string;
+  /** Python parity: toolsets (Optional[List[str]]). Named toolset groups. */
+  toolsets?: string[];
+  /**
+   * Agents (or Handoff objects) this agent may transfer the conversation to.
+   * Each becomes a `transfer_to_<name>` tool and the system prompt lists them.
+   * Python parity: handoffs (Optional[List[Union['Agent', 'Handoff']]]).
+   */
+  handoffs?: (Agent | Handoff)[];
+  /**
+   * Conversation memory: `true` for an in-memory store, a MemoryConfig, a
+   * JSONL file path, or any store with `search()`/`add()` (Memory, FileMemory).
+   * Relevant memories are injected into the system prompt on every turn.
+   * Python parity: memory (Optional[Union[bool, str, 'MemoryConfig', Any]]).
+   */
+  memory?: boolean | string | MemoryConfig | AgentMemoryStore;
+  /**
+   * Retrieval knowledge: `true`, a KnowledgeBaseConfig, a KnowledgeBase, or
+   * file/directory paths that are loaded on first use. Matching documents are
+   * injected into the system prompt.
+   * Python parity: knowledge (Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']]).
+   */
+  knowledge?: boolean | string | string[] | KnowledgeBaseConfig | KnowledgeBase;
+  /**
+   * Plan-then-execute: a plan is drafted with PlanningAgent before each turn
+   * and appended to the prompt. A string selects the planner model.
+   * Python parity: planning (Optional[Union[bool, str, 'PlanningConfig']]).
+   */
+  planning?: boolean | string | PlanningAgentConfig;
+  /** Python parity: reflection (Optional[Union[bool, str, 'ReflectionConfig']]). */
+  reflection?: boolean | string | Record<string, unknown>;
+  /**
+   * Output rules: `true` enables the built-in safety rules, or pass Rule[],
+   * a RulesManagerConfig or a RulesManager. Blocking rules throw.
+   * Python parity: rules (Optional[Union[bool, 'RulesConfig']]).
+   */
+  rules?: boolean | Rule[] | RulesManagerConfig | RulesManager;
+  /**
+   * Output guardrails: a check function, a Guardrail, a GuardrailConfig, a
+   * criteria string (validated by an LLM guardrail), or a list of those.
+   * Python parity: guardrails (Optional[Union[bool, str, Callable, 'GuardrailConfig']]).
+   */
+  guardrails?: AgentGuardrailInput;
+  /**
+   * Web search tool: `true` (Tavily), a provider name (tavily, exa,
+   * perplexity, parallel) or `{ provider, ...providerConfig }`.
+   * Python parity: web (Optional[Union[bool, str, 'WebConfig']]).
+   */
+  web?: boolean | string | AgentWebConfig;
+  /**
+   * Context budgeting: `true`, a ContextManagerConfig or a ContextManager.
+   * Every turn is recorded into it; read it back via getContextManager().
+   * Python parity: context (Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']]).
+   */
+  context?: boolean | string | ContextManagerConfig | ContextManager;
+  /** Python parity: autonomy (Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]). */
+  autonomy?: boolean | string | Record<string, unknown>;
+  /** Python parity: templates (Optional[Union[Dict[str, Any], 'TemplateConfig']]). */
+  templates?: Record<string, unknown>;
+  /**
+   * Lifecycle hooks: a HooksManager, `{ event: handler }` or a list of
+   * `{ event, handler }`. Fired: agent_start, agent_complete, pre_tool_call,
+   * post_tool_call. A handler returning null blocks the operation.
+   * Python parity: hooks (Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']]).
+   */
+  hooks?: AgentHooksInput;
+  /**
+   * Skills (SKILL.md): skill names, skill directories, discovery options or
+   * a SkillManager. Loaded on first use and injected into the system prompt.
+   * Python parity: skills (Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']]).
+   */
+  skills?: string | string[] | SkillDiscoveryOptions | SkillManager;
+  /** Python parity: self_improve (Optional[Union[bool, str, 'SkillReviewProtocol']]). */
+  selfImprove?: boolean | string | Record<string, unknown>;
+  /** Python parity: tool_config (Optional[Union[bool, 'ToolConfig']]). */
+  toolConfig?: boolean | Record<string, unknown>;
+  /** Python parity: learn (Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']]). */
+  learn?: boolean | string | Record<string, unknown>;
+  /** Python parity: backend (Optional[Any]). */
+  backend?: unknown;
+  /** Python parity: run_on (Optional[Union['ManagedRuntime', str]]). */
+  runOn?: string | Record<string, unknown>;
+  /** Python parity: tools_run_on (Optional[Union['ToolPlace', str, Any]]). */
+  toolsRunOn?: string | Record<string, unknown>;
+  /** Python parity: runtime (Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']]). */
+  runtime?: boolean | string | Record<string, unknown>;
+  /** Python parity: tool_search (Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']]). */
+  toolSearch?: boolean | string | Record<string, unknown>;
+  /** Python parity: message_steering (Optional[Union[bool, 'MessageSteeringProtocol']]). */
+  messageSteering?: boolean | Record<string, unknown>;
+  /** Python parity: sandbox (Optional[Union[bool, 'SandboxConfig']]). */
+  sandbox?: boolean | Record<string, unknown>;
+  /**
+   * Retry transient provider failures (429, 5xx, ECONNRESET, ETIMEDOUT) with
+   * jittered exponential backoff. `true` uses the Python defaults.
+   * Python parity: retry (Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]).
+   */
+  retry?: boolean | AgentRetryConfig;
+  /**
+   * Reasoning effort forwarded as `reasoning_effort` on OpenAI-compatible
+   * requests: off | minimal | low | medium | high.
+   * Python parity: reasoning_effort (Optional[str]).
+   */
+  reasoningEffort?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | string;
+
   // Advanced mode (role/goal/backstory) - for compatibility
   /** Agent role (advanced mode) */
   role?: string;
@@ -203,6 +342,95 @@ export interface SimpleAgentConfig {
   goal?: string;
   /** Agent backstory (advanced mode) */
   backstory?: string;
+}
+
+/**
+ * A store usable for {@link SimpleAgentConfig.memory}. Both `Memory` and
+ * `FileMemory` from src/memory satisfy it.
+ */
+export interface AgentMemoryStore {
+  search(query: string, limit?: number): Promise<Array<{ entry: { content: string; role: string }; score: number }>>;
+  add(content: string, role: 'user' | 'assistant' | 'system', metadata?: Record<string, any>): Promise<unknown>;
+}
+
+/**
+ * A guardrail check as accepted by {@link SimpleAgentConfig.guardrails}. Besides
+ * a full GuardrailResult it may return a boolean or Python's `(ok, value)`
+ * tuple, where `value` is the replacement content on success or the reason on
+ * failure.
+ */
+export type AgentGuardrailFunction = (
+  content: string,
+  context?: GuardrailContext
+) => GuardrailResult | boolean | [boolean, unknown] | Promise<GuardrailResult | boolean | [boolean, unknown]>;
+
+export type AgentGuardrailEntry = string | AgentGuardrailFunction | Guardrail | GuardrailConfig;
+export type AgentGuardrailInput = boolean | AgentGuardrailEntry | AgentGuardrailEntry[];
+
+/** Hooks as accepted by {@link SimpleAgentConfig.hooks}. */
+export type AgentHooksInput =
+  | HooksManager
+  | Array<{ event: HookEvent; handler: HookHandler }>
+  | Partial<Record<HookEvent, HookHandler | HookHandler[]>>;
+
+/** Web search configuration: `provider` plus that provider's own options. */
+export interface AgentWebConfig {
+  provider?: 'tavily' | 'exa' | 'perplexity' | 'parallel' | string;
+  [option: string]: unknown;
+}
+
+/**
+ * Retry with jittered exponential backoff. Delays are in seconds and default
+ * to Python's RetryBackoffConfig (baseDelay 5, maxDelay 120, jitterRatio 0.5,
+ * maxRetries 3).
+ */
+export interface AgentRetryConfig {
+  maxRetries?: number;
+  baseDelay?: number;
+  maxDelay?: number;
+  jitterRatio?: number;
+  /** Override the retryable-error test (default: 429, 5xx, ECONNRESET, ETIMEDOUT). */
+  shouldRetry?: (error: unknown) => boolean;
+}
+
+/**
+ * Per-call options for {@link Agent.chat} (and {@link Agent.stream}), mirroring
+ * the keyword arguments of Python's `Agent.chat`.
+ */
+export interface AgentChatOptions {
+  /** Python parity: temperature (Optional[float]). Sampling temperature for this call. */
+  temperature?: number;
+  /** Python parity: tools (Optional[List[Any]]). Tools for this call only (replaces the agent's). */
+  tools?: any[];
+  /** Python parity: output_json (Optional[Any]). JSON Schema for structured output on this call. */
+  outputJson?: Record<string, any>;
+  /**
+   * Python parity: output_pydantic (Optional[Any]). A JSON Schema, an object
+   * with `toJSONSchema()`, or a zod schema (converted via zod-to-json-schema).
+   */
+  outputPydantic?: Record<string, any>;
+  /** Python parity: reasoning_steps (bool). */
+  reasoningSteps?: boolean;
+  /** Python parity: stream (Optional[bool]). Overrides the agent's `stream` for this call. */
+  stream?: boolean;
+  /** Python parity: task_name (Optional[str]). */
+  taskName?: string;
+  /** Python parity: task_description (Optional[str]). */
+  taskDescription?: string;
+  /** Python parity: task_id (Optional[str]). */
+  taskId?: string;
+  /** Python parity: config (Optional[Dict[str, Any]]). */
+  config?: Record<string, unknown>;
+  /** Python parity: force_retrieval (bool). Knowledge/memory retrieval already runs whenever a source is configured. */
+  forceRetrieval?: boolean;
+  /** Python parity: skip_retrieval (bool). Skip knowledge/memory retrieval for this call. */
+  skipRetrieval?: boolean;
+  /** Python parity: attachments (Optional[List[str]]). */
+  attachments?: string[];
+  /** Python parity: tool_choice (Optional[str]). "auto" | "none" | "required" | a tool name. */
+  toolChoice?: 'auto' | 'none' | 'required' | string;
+  /** Python parity: seed (Optional[int]). Forwarded on OpenAI-compatible requests. */
+  seed?: number;
 }
 
 /**
@@ -231,8 +459,12 @@ export type AgentEvent =
   | { type: 'finish'; text: string }
   | { type: 'error'; error: Error };
 
-/** Options for {@link Agent.stream} / {@link Agent.streamEvents}. */
-export interface AgentStreamOptions {
+/**
+ * Options for {@link Agent.stream} / {@link Agent.streamEvents}. Accepts every
+ * {@link AgentChatOptions} member as well (`stream: false` makes the run
+ * non-streaming, so only a terminal `finish` event carries the text).
+ */
+export interface AgentStreamOptions extends AgentChatOptions {
   /** Previous result to substitute for the `{{previous}}` placeholder. */
   previousResult?: string;
   /**
@@ -245,6 +477,128 @@ export interface AgentStreamOptions {
   signal?: AbortSignal;
 }
 
+/** Options resolved for one turn (agent defaults merged with per-call options). */
+interface PreparedTurn {
+  /** The prompt actually sent (after {{previous}}, hooks and planning). */
+  prompt: string;
+  /** The caller's prompt, as recorded in memory/context/hooks. */
+  userPrompt: string;
+  extraSystem: string[];
+  temperature: number;
+  tools?: any[];
+  streaming: boolean;
+  outputSchema?: Record<string, any>;
+  toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+  seed?: number;
+}
+
+/** Web search tool factories keyed by the provider name accepted by `web`. */
+const WEB_SEARCH_PROVIDERS: Record<string, (config?: any) => any> = {
+  tavily: tavilySearch,
+  exa: exaSearch,
+  perplexity: perplexitySearch,
+  parallel: parallelSearch,
+};
+
+/** A tool name the OpenAI API accepts (^[a-zA-Z0-9_-]+$). */
+function toolSafeName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'agent';
+}
+
+/**
+ * Wrap `fetch` so JSON chat-completion bodies gain extra fields (reasoning_effort,
+ * seed, max_tokens). OpenAIService exposes no hook for provider-specific body
+ * params, and every OpenAI-compatible request passes through this one seam, so
+ * the fields reach streaming and non-streaming calls alike. Returns undefined
+ * when no fetch implementation is available (nothing can be wrapped).
+ */
+function wrapFetchWithBodyExtras(
+  base: typeof fetch | undefined,
+  extras: () => Record<string, unknown>
+): typeof fetch | undefined {
+  const underlying = base ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined);
+  if (!underlying) return undefined;
+  const wrapped = async (input: any, init?: any) => {
+    const fields = extras();
+    if (init && typeof init.body === 'string' && Object.keys(fields).length > 0) {
+      try {
+        const parsed = JSON.parse(init.body);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.messages)) {
+          init = { ...init, body: JSON.stringify({ ...parsed, ...fields }) };
+        }
+      } catch {
+        // Not a JSON body: leave it untouched.
+      }
+    }
+    return underlying(input, init);
+  };
+  return wrapped as typeof fetch;
+}
+
+function isRetryableError(error: any): boolean {
+  const status = error?.status ?? error?.statusCode ?? error?.response?.status;
+  if (status === 429 || (typeof status === 'number' && status >= 500)) return true;
+  const code = error?.code ?? error?.cause?.code;
+  return code === 'ECONNRESET' || code === 'ETIMEDOUT';
+}
+
+type ResolvedRetryConfig = Required<Omit<AgentRetryConfig, 'shouldRetry'>> & Pick<AgentRetryConfig, 'shouldRetry'>;
+
+function resolveRetryConfig(retry: boolean | AgentRetryConfig | undefined): ResolvedRetryConfig | undefined {
+  if (retry === undefined || retry === false) return undefined;
+  const cfg = retry === true ? {} : retry;
+  return {
+    maxRetries: cfg.maxRetries ?? 3,
+    baseDelay: cfg.baseDelay ?? 5,
+    maxDelay: cfg.maxDelay ?? 120,
+    jitterRatio: cfg.jitterRatio ?? 0.5,
+    shouldRetry: cfg.shouldRetry,
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normaliseToolChoice(
+  choice: string | undefined
+): PreparedTurn['toolChoice'] {
+  if (choice === undefined) return undefined;
+  if (choice === 'auto' || choice === 'none' || choice === 'required') return choice;
+  return { type: 'function', function: { name: choice } };
+}
+
+/**
+ * Turn an `outputPydantic` value into a JSON Schema: JSON Schema passes through,
+ * an object exposing `toJSONSchema()` is asked, and a zod schema is converted
+ * with zod-to-json-schema (or zod v4's own `toJSONSchema`). Anything else is
+ * reported as not honoured and ignored.
+ */
+async function toJsonSchema(schema: any): Promise<Record<string, any> | undefined> {
+  if (!schema || typeof schema !== 'object') return undefined;
+  if (typeof schema.toJSONSchema === 'function') return schema.toJSONSchema();
+  if ('type' in schema || 'properties' in schema || '$schema' in schema || 'anyOf' in schema || 'oneOf' in schema) {
+    return schema as Record<string, any>;
+  }
+  if ('_def' in schema || '_zod' in schema) {
+    try {
+      const mod: any = await import('zod-to-json-schema');
+      const convert = mod.zodToJsonSchema ?? mod.default;
+      if (typeof convert === 'function') return convert(schema);
+    } catch {
+      // fall through to zod v4
+    }
+    try {
+      const zod: any = await import('zod');
+      if (typeof zod.toJSONSchema === 'function') return zod.toJSONSchema(schema);
+    } catch {
+      // no converter available
+    }
+  }
+  notYetHonoured('Agent.chat', 'outputPydantic', 'Pass a JSON Schema, an object with toJSONSchema(), or a zod schema.');
+  return undefined;
+}
+
 export class Agent {
   private instructions: string;
   public name: string;
@@ -253,7 +607,7 @@ export class Agent {
   private llm: string;
   private markdown: boolean;
   private streamEnabled: boolean;
-  private llmService: OpenAIService;
+  private llmService!: OpenAIService;
   private tools?: any[];
   private outputSchema?: Record<string, any>;
   private outputSchemaName: string = 'response';
@@ -291,6 +645,69 @@ export class Agent {
   // OpenAI path but not on the one their model actually takes.
   private _apiKey?: string;
   private _baseURL?: string;
+  private _fetch?: typeof fetch;
+  /** True when the outgoing fetch is wrapped so body extras (seed, reasoning_effort) can be injected. */
+  private _fetchWrapped: boolean = false;
+  /** Whether the caller chose the model explicitly (AgentTeam only overrides an implicit default). */
+  private _llmExplicit: boolean;
+  private defaultTemperature: number = 0.7;
+  private defaultMaxTokens?: number;
+  private _turnSeed?: number;
+  private _currentPrompt?: string;
+
+  // ---- Python-parity options: wired ----
+  /** Python parity: handoffs (Optional[List[Union['Agent', 'Handoff']]]). Registered as transfer tools. */
+  readonly handoffs: Handoff[] = [];
+  /** Python parity: planning (Optional[Union[bool, str, 'PlanningConfig']]). */
+  readonly planning: boolean | string | PlanningAgentConfig;
+  /** The plan produced for the most recent turn when `planning` is enabled. */
+  public lastPlan: Plan | null = null;
+  /** Python parity: reasoning_effort (Optional[str]). */
+  readonly reasoningEffort?: string;
+  private memory?: AgentMemoryStore;
+  private _memoryFile?: string;
+  private knowledge?: KnowledgeBase;
+  private _knowledgeSources: string[] = [];
+  private _knowledgeLoaded: boolean = false;
+  private guardrails: Guardrail[] = [];
+  private rules?: RulesManager;
+  private hooks?: HooksManager;
+  private contextManager?: ContextManager;
+  private _skillsInput?: string | string[] | SkillDiscoveryOptions | SkillManager;
+  private _skillsPrompt?: string;
+  private retryConfig?: ResolvedRetryConfig;
+
+  // ---- Python-parity options: accepted with a parity notice ----
+  /** Python parity: auth (Optional[str]). */
+  readonly auth?: string;
+  /** Python parity: toolsets (Optional[List[str]]). */
+  readonly toolsets?: string[];
+  /** Python parity: reflection (Optional[Union[bool, str, 'ReflectionConfig']]). */
+  readonly reflection?: boolean | string | Record<string, unknown>;
+  /** Python parity: autonomy (Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]). */
+  readonly autonomy?: boolean | string | Record<string, unknown>;
+  /** Python parity: templates (Optional[Union[Dict[str, Any], 'TemplateConfig']]). */
+  readonly templates?: Record<string, unknown>;
+  /** Python parity: self_improve (Optional[Union[bool, str, 'SkillReviewProtocol']]). */
+  readonly selfImprove: boolean | string | Record<string, unknown>;
+  /** Python parity: tool_config (Optional[Union[bool, 'ToolConfig']]). */
+  readonly toolConfig?: boolean | Record<string, unknown>;
+  /** Python parity: learn (Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']]). */
+  readonly learn?: boolean | string | Record<string, unknown>;
+  /** Python parity: backend (Optional[Any]). */
+  readonly backend?: unknown;
+  /** Python parity: run_on (Optional[Union['ManagedRuntime', str]]). */
+  readonly runOn?: string | Record<string, unknown>;
+  /** Python parity: tools_run_on (Optional[Union['ToolPlace', str, Any]]). */
+  readonly toolsRunOn?: string | Record<string, unknown>;
+  /** Python parity: runtime (Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']]). */
+  readonly runtime?: boolean | string | Record<string, unknown>;
+  /** Python parity: tool_search (Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']]). */
+  readonly toolSearch: boolean | string | Record<string, unknown>;
+  /** Python parity: message_steering (Optional[Union[bool, 'MessageSteeringProtocol']]). */
+  readonly messageSteering: boolean | Record<string, unknown>;
+  /** Python parity: sandbox (Optional[Union[bool, 'SandboxConfig']]). */
+  readonly sandbox?: boolean | Record<string, unknown>;
 
   constructor(config: SimpleAgentConfig) {
     // Build instructions from either simple or advanced mode
@@ -310,7 +727,14 @@ export class Agent {
     this.name = config.name || `Agent_${Math.random().toString(36).substr(2, 9)}`;
     this.verbose = config.verbose ?? getEnv('PRAISON_VERBOSE') !== 'false';
     this.pretty = config.pretty ?? getEnv('PRAISON_PRETTY') === 'true';
-    this.llm = config.llm || getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini';
+    // `model` is the canonical name (Python parity); `llm` may be a string or an
+    // LLMConfig whose apiKey/baseURL/temperature/maxTokens are honoured too.
+    const llmConfig: LLMConfig | undefined = typeof config.llm === 'object' && config.llm !== null ? config.llm : undefined;
+    const llmName = typeof config.llm === 'string' ? config.llm : llmConfig?.model;
+    this.llm = config.model || llmName || getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini';
+    this._llmExplicit = config.model !== undefined || config.llm !== undefined;
+    if (llmConfig?.temperature !== undefined) this.defaultTemperature = llmConfig.temperature;
+    this.defaultMaxTokens = llmConfig?.maxTokens;
     this.markdown = config.markdown ?? true;
     this.streamEnabled = config.stream ?? true;
     // NOTE: this.tools is rebuilt below from a snapshot of config.tools —
@@ -344,7 +768,74 @@ export class Agent {
     this.cacheTTL = config.cacheTTL ?? 3600;
     this.telemetryEnabled = config.telemetry ?? false;
     this.signal = config.signal;
-    
+
+    // Python-parity options with a non-null Python default.
+    this.planning = config.planning ?? false;
+    this.selfImprove = config.selfImprove ?? false;
+    this.toolSearch = config.toolSearch ?? false;
+    this.messageSteering = config.messageSteering ?? false;
+    this.auth = config.auth;
+    this.toolsets = config.toolsets;
+    this.reflection = config.reflection;
+    this.autonomy = config.autonomy;
+    this.templates = config.templates;
+    this.toolConfig = config.toolConfig;
+    this.learn = config.learn;
+    this.backend = config.backend;
+    this.runOn = config.runOn;
+    this.toolsRunOn = config.toolsRunOn;
+    this.runtime = config.runtime;
+    this.sandbox = config.sandbox;
+    this.reasoningEffort = config.reasoningEffort;
+
+    // Per-agent credentials, resolved before the model so configureModel()
+    // (also used by AgentTeam's default model) sees them.
+    // (Plain assignments, not `??`: an LLMConfig fallback is not a default the
+    // parity checker should read as one.)
+    this._apiKey = config.apiKey;
+    if (this._apiKey === undefined) this._apiKey = llmConfig?.apiKey;
+    this._baseURL = config.baseURL;
+    if (this._baseURL === undefined) this._baseURL = llmConfig?.baseURL;
+    this._fetch = wrapFetchWithBodyExtras(config.fetch, () => this.requestExtras());
+    this._fetchWrapped = this._fetch !== undefined;
+    if (!this._fetchWrapped) this._fetch = config.fetch;
+    this.configureModel(this.llm);
+
+    // Configure logging
+    Logger.setVerbose(this.verbose);
+    Logger.setPretty(this.pretty);
+
+    // Process tools array - handle both tool definitions and functions.
+    if (config.tools && Array.isArray(config.tools)) {
+      const processed = this.processToolInputs(config.tools, []);
+      if (processed.length > 0) {
+        this.tools = this.tools || [];
+        this.tools.push(...processed);
+      }
+    }
+
+    // Register directly provided tool functions if any
+    if (config.toolFunctions) {
+      for (const [name, func] of Object.entries(config.toolFunctions)) {
+        this.registerToolFunction(name, func);
+
+        // Auto-generate tool definition if not already provided
+        if (!this.hasToolDefinition(name)) {
+          this.addAutoGeneratedToolDefinition(name, func);
+        }
+      }
+    }
+
+    this.initialiseParityOptions(config);
+  }
+
+  /**
+   * Point the agent at `modelName`: pick the provider path (OpenAI-compatible
+   * vs AI SDK) and rebuild the OpenAI service. Used by the constructor and by
+   * {@link Agent.applyDefaultModel}.
+   */
+  private configureModel(modelName: string): void {
+    this.llm = modelName;
     // Parse model string to extract provider and model ID.
     //
     // This was a private copy of the parsing rule that defaulted EVERY
@@ -360,94 +851,485 @@ export class Agent {
     // OpenAI-compatible proxy that serves `claude-*` is a real deployment,
     // and prefix inference would route it away from the endpoint the caller
     // explicitly asked for.
-    const hasCustomEndpoint = config.baseURL !== undefined && config.baseURL !== '';
-    const parsed = hasCustomEndpoint && !this.llm.includes('/')
-      ? { providerId: 'openai', modelId: this.llm }
-      : parseModelString(this.llm);
+    const hasCustomEndpoint = this._baseURL !== undefined && this._baseURL !== '';
+    const parsed = hasCustomEndpoint && !modelName.includes('/')
+      ? { providerId: 'openai', modelId: modelName }
+      : parseModelString(modelName);
     const providerId = parsed.providerId;
     const modelId = parsed.modelId;
-    
+
     // For OpenAI, use OpenAIService directly for backward compatibility
     // For other providers, we'll use the AI SDK backend via getBackend()
     this._useAISDKBackend = providerId !== 'openai';
-    this._apiKey = config.apiKey;
-    this._baseURL = config.baseURL;
+    this._backend = null;
+    this._backendPromise = null;
     this.llmService = new OpenAIService(modelId, {
-      apiKey: config.apiKey,
-      baseURL: config.baseURL,
-      fetch: config.fetch,
+      apiKey: this._apiKey,
+      baseURL: this._baseURL,
+      fetch: this._fetch,
     });
+  }
 
-    // Configure logging
-    Logger.setVerbose(this.verbose);
-    Logger.setPretty(this.pretty);
-    
-    // Process tools array - handle both tool definitions and functions.
-    // Iterate a SNAPSHOT: addAutoGeneratedToolDefinition pushes into
-    // this.tools, and iterating the same array re-processed generated
-    // definitions into duplicates.
-    if (config.tools && Array.isArray(config.tools)) {
-      const inputTools = [...config.tools];
-      // Convert tools array to proper format if it contains functions
-      const processedTools: any[] = [];
+  /**
+   * Adopt `model` when the agent was constructed without an explicit
+   * `llm`/`model` (Python parity: AgentTeam's `llm`/`model` is the default for
+   * member agents). Returns whether the model was applied.
+   */
+  applyDefaultModel(model: string): boolean {
+    if (this._llmExplicit) return false;
+    this.configureModel(model);
+    return true;
+  }
 
-      for (let i = 0; i < inputTools.length; i++) {
-        const tool = inputTools[i];
+  /**
+   * Convert a tools array (plain functions, FunctionTool-like objects with
+   * `execute`, or OpenAI tool definitions) into OpenAI tool definitions pushed
+   * into `sink`, registering the implementations on this agent. Iterates a
+   * SNAPSHOT of the input: an auto-generated definition must never be
+   * re-processed into a duplicate.
+   */
+  private processToolInputs(tools: any[], sink: any[]): any[] {
+    const inputTools = [...tools];
 
-        if (typeof tool === 'function') {
-          // If it's a function, extract its name and register it
-          const funcName = tool.name || `function_${i}`;
+    for (let i = 0; i < inputTools.length; i++) {
+      const tool = inputTools[i];
 
-          // Skip functions with empty names
-          if (funcName && funcName.trim() !== '') {
-            this.registerPlainFunction(funcName, tool);
-          } else {
-            // Generate a random name for functions without names
-            const randomName = `function_${Math.random().toString(36).substring(2, 9)}`;
-            this.registerPlainFunction(randomName, tool);
-          }
-        } else if (tool && typeof tool === 'object' && typeof tool.execute === 'function' && tool.name) {
-          // If it's a FunctionTool instance (has execute method and name)
-          const funcName = tool.name;
-          
-          // Register the execute function with args as object (not spread)
-          this.registerToolFunction(funcName, async (args: any) => {
-            return tool.execute(args);
-          });
-          
-          // Add the tool definition from FunctionTool
-          processedTools.push(tool.toOpenAITool ? tool.toOpenAITool() : {
-            type: 'function',
-            function: {
-              name: tool.name,
-              description: tool.description || `Function ${tool.name}`,
-              parameters: tool.parameters || { type: 'object', properties: {} },
-            }
-          });
+      if (typeof tool === 'function') {
+        // If it's a function, extract its name and register it
+        const funcName = tool.name || `function_${i}`;
+
+        // Skip functions with empty names
+        if (funcName && funcName.trim() !== '') {
+          this.registerPlainFunction(funcName, tool, sink);
         } else {
-          // If it's already a tool definition, add it as is
-          processedTools.push(tool);
+          // Generate a random name for functions without names
+          const randomName = `function_${Math.random().toString(36).substring(2, 9)}`;
+          this.registerPlainFunction(randomName, tool, sink);
         }
+      } else if (tool && typeof tool === 'object' && typeof tool.execute === 'function' && tool.name) {
+        // If it's a FunctionTool instance (has execute method and name)
+        const funcName = tool.name;
+
+        // Register the execute function with args as object (not spread)
+        this.registerToolFunction(funcName, async (args: any) => {
+          return tool.execute(args);
+        });
+
+        // Add the tool definition from FunctionTool
+        sink.push(tool.toOpenAITool ? tool.toOpenAITool() : {
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description || `Function ${tool.name}`,
+            parameters: tool.parameters || { type: 'object', properties: {} },
+          }
+        });
+      } else {
+        // If it's already a tool definition, add it as is
+        sink.push(tool);
       }
-      
-      // Add any pre-defined tool definitions
-      if (processedTools.length > 0) {
+    }
+    return sink;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Python-parity option wiring
+  // ---------------------------------------------------------------------------
+
+  private initialiseParityOptions(config: SimpleAgentConfig): void {
+    // Accepted for signature parity but not yet honoured: say so, once, rather
+    // than silently dropping the setting.
+    const accepted: Array<[string, unknown]> = [
+      ['auth', config.auth],
+      ['toolsets', config.toolsets],
+      ['reflection', config.reflection],
+      ['autonomy', config.autonomy],
+      ['templates', config.templates],
+      ['selfImprove', config.selfImprove],
+      ['toolConfig', config.toolConfig],
+      ['learn', config.learn],
+      ['backend', config.backend],
+      ['runOn', config.runOn],
+      ['toolsRunOn', config.toolsRunOn],
+      ['runtime', config.runtime],
+      ['toolSearch', config.toolSearch],
+      ['messageSteering', config.messageSteering],
+      ['sandbox', config.sandbox],
+    ];
+    for (const [name, value] of accepted) {
+      if (value !== undefined && value !== false) notYetHonoured('Agent', name);
+    }
+
+    this.attachHandoffs(config.handoffs);
+    this.attachMemory(config.memory);
+    this.attachKnowledge(config.knowledge);
+    this.attachGuardrails(config.guardrails);
+    this.attachRules(config.rules);
+    this.attachHooks(config.hooks);
+    this.attachContext(config.context);
+    this.attachWeb(config.web);
+    if (config.skills !== undefined) this._skillsInput = config.skills;
+    this.retryConfig = resolveRetryConfig(config.retry);
+
+    if (config.reasoningEffort !== undefined && (this._useAISDKBackend || !this._fetchWrapped)) {
+      notYetHonoured(
+        'Agent',
+        'reasoningEffort',
+        this._useAISDKBackend
+          ? 'It is only forwarded on the OpenAI-compatible path; non-OpenAI backends do not receive it yet.'
+          : 'No fetch implementation is available to carry it.'
+      );
+    }
+  }
+
+  /** Extra JSON body fields for OpenAI-compatible requests (see wrapFetchWithBodyExtras). */
+  private requestExtras(): Record<string, unknown> {
+    const extras: Record<string, unknown> = {};
+    if (this.reasoningEffort && this.reasoningEffort !== 'off') extras.reasoning_effort = this.reasoningEffort;
+    if (this.defaultMaxTokens !== undefined) extras.max_tokens = this.defaultMaxTokens;
+    if (this._turnSeed !== undefined) extras.seed = this._turnSeed;
+    return extras;
+  }
+
+  private attachHandoffs(handoffs?: (Agent | Handoff)[]): void {
+    if (!handoffs || handoffs.length === 0) return;
+    for (const entry of handoffs) {
+      // Python names the tool transfer_to_<agent>; a Handoff object keeps its own name.
+      const h = entry instanceof Handoff
+        ? entry
+        : new Handoff({ agent: entry as any, name: `transfer_to_${toolSafeName(entry.name)}` });
+      this.handoffs.push(h);
+      const def = h.getToolDefinition();
+      this.registerToolFunction(def.name, async (args: Record<string, unknown>) => this.executeHandoff(h, args));
+      if (!this.hasToolDefinition(def.name)) {
         this.tools = this.tools || [];
-        this.tools.push(...processedTools);
+        this.tools.push({
+          type: 'function',
+          function: { name: def.name, description: def.description, parameters: def.parameters },
+        });
       }
     }
-    
-    // Register directly provided tool functions if any
-    if (config.toolFunctions) {
-      for (const [name, func] of Object.entries(config.toolFunctions)) {
-        this.registerToolFunction(name, func);
-        
-        // Auto-generate tool definition if not already provided
-        if (!this.hasToolDefinition(name)) {
-          this.addAutoGeneratedToolDefinition(name, func);
+  }
+
+  private async executeHandoff(h: Handoff, args: Record<string, unknown>): Promise<string> {
+    const lastMessage = this._currentPrompt ?? String(args.reason ?? '');
+    const context = { messages: this.getHistory(), lastMessage, metadata: args };
+    if (!h.shouldTrigger(context)) {
+      return `Handoff to ${h.targetAgent.name} was not triggered: its condition returned false.`;
+    }
+    // The target may be a simple Agent (chat returns a string) or an
+    // EnhancedAgent (chat returns { text }).
+    const reply = await (h.targetAgent as any).chat(lastMessage);
+    return typeof reply === 'string' ? reply : (reply?.text ?? JSON.stringify(reply));
+  }
+
+  private attachMemory(memory: SimpleAgentConfig['memory']): void {
+    if (memory === undefined || memory === false) return;
+    if (memory === true) { this.memory = new Memory(); return; }
+    if (typeof memory === 'string') {
+      if (/[\/\\]|\.jsonl?$/.test(memory)) {
+        this._memoryFile = memory; // FileMemory is created lazily (needs fs)
+        return;
+      }
+      notYetHonoured('Agent', 'memory', `Provider preset "${memory}" is not available; pass true, a MemoryConfig, a file path or a Memory instance.`);
+      return;
+    }
+    const store = memory as AgentMemoryStore;
+    if (typeof store.search === 'function' && typeof store.add === 'function') { this.memory = store; return; }
+    this.memory = new Memory(memory as MemoryConfig);
+  }
+
+  private async ensureMemory(): Promise<AgentMemoryStore | undefined> {
+    if (!this.memory && this._memoryFile) {
+      const { FileMemory } = await import('../memory/file-memory');
+      const store = new FileMemory({ filePath: this._memoryFile });
+      await store.initialize();
+      this.memory = store;
+    }
+    return this.memory;
+  }
+
+  private async recallMemory(prompt: string): Promise<string> {
+    const store = await this.ensureMemory();
+    if (!store) return '';
+    try {
+      const hits = await store.search(prompt, 5);
+      return hits.map((h) => `- (${h.entry.role}) ${h.entry.content}`).join('\n');
+    } catch (error) {
+      await Logger.warn('Memory recall failed:', error);
+      return '';
+    }
+  }
+
+  private async rememberTurn(prompt: string, response: string): Promise<void> {
+    const store = await this.ensureMemory();
+    if (!store) return;
+    try {
+      await store.add(prompt, 'user', { agent: this.name, sessionId: this.sessionId });
+      await store.add(response, 'assistant', { agent: this.name, sessionId: this.sessionId });
+    } catch (error) {
+      await Logger.warn('Memory write failed:', error);
+    }
+  }
+
+  private attachKnowledge(knowledge: SimpleAgentConfig['knowledge']): void {
+    if (knowledge === undefined || knowledge === false) return;
+    if (knowledge === true) { this.knowledge = new KnowledgeBase(); return; }
+    if (typeof knowledge === 'string' || Array.isArray(knowledge)) {
+      this.knowledge = new KnowledgeBase();
+      this._knowledgeSources = Array.isArray(knowledge) ? knowledge : [knowledge];
+      return;
+    }
+    if (knowledge instanceof KnowledgeBase) { this.knowledge = knowledge; return; }
+    this.knowledge = new KnowledgeBase(knowledge as KnowledgeBaseConfig);
+  }
+
+  /** Load file/directory knowledge sources on first use (needs fs, so it is deferred). */
+  private async ensureKnowledgeLoaded(): Promise<void> {
+    if (this._knowledgeLoaded || !this.knowledge || this._knowledgeSources.length === 0) return;
+    this._knowledgeLoaded = true;
+    const fs = await import('fs');
+    const path = await import('path');
+    for (const source of this._knowledgeSources) {
+      if (/^https?:\/\//.test(source)) {
+        notYetHonoured('Agent', 'knowledge', `URL sources are not fetched yet (${source}); load the page yourself and pass a KnowledgeBase.`);
+        continue;
+      }
+      if (!fs.existsSync(source)) {
+        await Logger.warn(`Knowledge source not found: ${source}`);
+        continue;
+      }
+      const files = fs.statSync(source).isDirectory()
+        ? fs.readdirSync(source).map((f) => path.join(source, f)).filter((f) => fs.statSync(f).isFile())
+        : [source];
+      for (const file of files) {
+        await this.knowledge.add({ id: file, content: fs.readFileSync(file, 'utf-8'), metadata: { source: file } });
+      }
+    }
+  }
+
+  private async retrieveKnowledge(prompt: string): Promise<string> {
+    if (!this.knowledge) return '';
+    await this.ensureKnowledgeLoaded();
+    try {
+      const results = await this.knowledge.search(prompt);
+      return this.knowledge.buildContext(results);
+    } catch (error) {
+      await Logger.warn('Knowledge retrieval failed:', error);
+      return '';
+    }
+  }
+
+  private attachGuardrails(input: AgentGuardrailInput | undefined): void {
+    if (input === undefined || input === false) return;
+    if (input === true) {
+      notYetHonoured('Agent', 'guardrails', '`true` selects no criteria in TypeScript; pass a function, a Guardrail, a GuardrailConfig or a criteria string.');
+      return;
+    }
+    const entries = Array.isArray(input) ? input : [input];
+    entries.forEach((entry, i) => {
+      if (typeof entry === 'string') {
+        const llmGuard = new LLMGuardrail({ name: `llm_guardrail_${i + 1}`, criteria: entry, llm: this.llm });
+        this.guardrails.push(new Guardrail({ name: llmGuard.name, check: (content) => llmGuard.run(content) }));
+      } else if (entry instanceof Guardrail) {
+        this.guardrails.push(entry);
+      } else if (typeof entry === 'function') {
+        const fn = entry;
+        this.guardrails.push(new Guardrail({
+          name: fn.name || `guardrail_${i + 1}`,
+          check: async (content, ctx) => {
+            const result = await fn(content, ctx);
+            if (typeof result === 'boolean') return { status: result ? 'passed' : 'failed' };
+            if (Array.isArray(result)) {
+              const [ok, value] = result;
+              return ok
+                ? { status: 'passed', modifiedContent: typeof value === 'string' ? value : undefined }
+                : { status: 'failed', message: typeof value === 'string' ? value : undefined };
+            }
+            return result;
+          },
+        }));
+      } else {
+        this.guardrails.push(new Guardrail(entry));
+      }
+    });
+  }
+
+  private async applyOutputGuardrails(response: string): Promise<string> {
+    let current = response;
+    for (const g of this.guardrails) {
+      const result = await g.run(current, { role: 'output', agentName: this.name, sessionId: this.sessionId });
+      if (result.status === 'failed') {
+        if (g.onFail === 'block') {
+          throw new Error(`Agent ${this.name}: guardrail "${g.name}" blocked the response${result.message ? `: ${result.message}` : ''}`);
+        }
+        if (g.onFail === 'modify' && typeof result.modifiedContent === 'string') {
+          current = result.modifiedContent;
+          continue;
+        }
+        await Logger.warn(`Guardrail "${g.name}" flagged the response`, result.message);
+      } else if (typeof result.modifiedContent === 'string') {
+        current = result.modifiedContent;
+      }
+    }
+    return current;
+  }
+
+  private attachRules(rules: SimpleAgentConfig['rules']): void {
+    if (rules === undefined || rules === false) return;
+    if (rules instanceof RulesManager) { this.rules = rules; return; }
+    if (rules === true) { this.rules = new RulesManager({ rules: createSafetyRules() }); return; }
+    if (Array.isArray(rules)) { this.rules = new RulesManager({ rules }); return; }
+    this.rules = new RulesManager(rules);
+  }
+
+  private applyRules(response: string): string {
+    if (!this.rules) return response;
+    const evaluation = this.rules.evaluate(response, { source: 'agent', agentId: this.name, sessionId: this.sessionId });
+    if (!evaluation.passed) {
+      const reason = evaluation.blocked[0]?.message ?? evaluation.blocked[0]?.ruleId;
+      throw new Error(`Agent ${this.name}: response blocked by rules${reason ? `: ${reason}` : ''}`);
+    }
+    return evaluation.content;
+  }
+
+  private attachHooks(hooks: AgentHooksInput | undefined): void {
+    if (!hooks) return;
+    if (hooks instanceof HooksManager) { this.hooks = hooks; return; }
+    const manager = new HooksManager();
+    if (Array.isArray(hooks)) {
+      for (const h of hooks) manager.register(h.event, h.handler);
+    } else {
+      for (const [event, handler] of Object.entries(hooks)) {
+        const handlers = Array.isArray(handler) ? handler : [handler];
+        for (const fn of handlers) {
+          if (typeof fn === 'function') manager.register(event as HookEvent, fn);
         }
       }
     }
+    this.hooks = manager;
+  }
+
+  /** Run `event` hooks; null means a hook blocked the operation. */
+  private async runHook<T extends Record<string, unknown>>(event: HookEvent, context: T): Promise<T | null> {
+    if (!this.hooks || !this.hooks.hasHooks(event)) return context;
+    const result = await this.hooks.execute(event, context);
+    if (result.blocked) return null;
+    return (result.modifiedContext ?? context) as T;
+  }
+
+  private attachContext(context: SimpleAgentConfig['context']): void {
+    if (context === undefined || context === false) return;
+    if (context instanceof ContextManager) { this.contextManager = context; return; }
+    if (typeof context === 'string') {
+      notYetHonoured('Agent', 'context', `Preset "${context}" is not available; pass true, a ContextManagerConfig or a ContextManager.`);
+      return;
+    }
+    this.contextManager = new ContextManager(context === true ? {} : context);
+    this.contextManager.addSystem(this.instructions);
+  }
+
+  private attachWeb(web: SimpleAgentConfig['web']): void {
+    if (web === undefined || web === false) return;
+    const provider = web === true ? 'tavily' : typeof web === 'string' ? web : (web.provider ?? 'tavily');
+    const factory = WEB_SEARCH_PROVIDERS[provider];
+    if (!factory) {
+      notYetHonoured('Agent', 'web', `Unknown web search provider "${provider}" (available: ${Object.keys(WEB_SEARCH_PROVIDERS).join(', ')}).`);
+      return;
+    }
+    let providerConfig: Record<string, unknown> | undefined;
+    if (typeof web === 'object') {
+      const { provider: _ignored, ...rest } = web;
+      providerConfig = rest;
+    }
+    this.tools = this.tools || [];
+    this.processToolInputs([factory(providerConfig)], this.tools);
+  }
+
+  /** Resolve `skills` into a prompt block once (needs fs, so it is deferred). */
+  private async ensureSkillsPrompt(): Promise<void> {
+    if (this._skillsPrompt !== undefined || this._skillsInput === undefined) return;
+    const input = this._skillsInput;
+    const skillsModule = await import('../skills');
+    let manager: SkillManager;
+    let names: string[] = [];
+    if (input instanceof skillsModule.SkillManager) {
+      manager = input;
+      await manager.discover();
+    } else if (typeof input === 'string' || Array.isArray(input)) {
+      const fs = await import('fs');
+      const path = await import('path');
+      const entries = Array.isArray(input) ? input : [input];
+      const roots: string[] = [];
+      const single: string[] = [];
+      for (const entry of entries) {
+        if (fs.existsSync(path.join(entry, 'SKILL.md'))) single.push(entry);
+        else if (fs.existsSync(entry) && fs.statSync(entry).isDirectory()) roots.push(entry);
+        else names.push(entry);
+      }
+      manager = new skillsModule.SkillManager({ paths: roots });
+      await manager.discover();
+      for (const dir of single) {
+        const skill = await manager.loadSkill(path.join(dir, 'SKILL.md'));
+        skill.path = dir;
+        manager.register(skill);
+        names.push(skill.metadata.name);
+      }
+      // Explicit names filter the prompt; a bare discovery root includes everything it found.
+      if (roots.length > 0 && names.length === 0) names = [];
+    } else {
+      manager = new skillsModule.SkillManager(input as SkillDiscoveryOptions);
+      await manager.discover();
+    }
+    this._skillsPrompt = manager.generatePrompt(names.length > 0 ? names : undefined);
+  }
+
+  private async applyPlanning(prompt: string): Promise<string> {
+    if (!this.planning) return prompt;
+    const { PlanningAgent } = await import('../planning');
+    const cfg: PlanningAgentConfig = typeof this.planning === 'object' ? this.planning : {};
+    const planner = new PlanningAgent({
+      ...cfg,
+      llm: typeof this.planning === 'string' ? this.planning : (cfg.llm ?? this.llm),
+      // The planner builds its own Agent, whose constructor sets the global
+      // logger verbosity: keep it aligned with this agent.
+      verbose: cfg.verbose ?? this.verbose,
+    });
+    const plan = await planner.createPlan(prompt);
+    this.lastPlan = plan;
+    const steps = plan.steps.map((step, i) => `${i + 1}. ${step.description}`);
+    if (steps.length === 0) return prompt;
+    return `${prompt}\n\nFollow this plan:\n${steps.join('\n')}`;
+  }
+
+  /** The ContextManager attached via `context`, if any. */
+  getContextManager(): ContextManager | undefined {
+    return this.contextManager;
+  }
+
+  /** The HooksManager attached via `hooks`, if any. */
+  getHooks(): HooksManager | undefined {
+    return this.hooks;
+  }
+
+  /** The memory store attached via `memory`, if any (a file store is created on first turn). */
+  getMemory(): AgentMemoryStore | undefined {
+    return this.memory;
+  }
+
+  /** The knowledge base attached via `knowledge`, if any. */
+  getKnowledge(): KnowledgeBase | undefined {
+    return this.knowledge;
+  }
+
+  /** The guardrails attached via `guardrails`. */
+  getGuardrails(): readonly Guardrail[] {
+    return this.guardrails;
+  }
+
+  /** The rules manager attached via `rules`, if any. */
+  getRules(): RulesManager | undefined {
+    return this.rules;
   }
 
   /**
@@ -480,7 +1362,7 @@ export class Agent {
    * (city) => ... need them mapped back to positional order — previously the
    * whole object landed in the first parameter ("Weather in [object Object]").
    */
-  private registerPlainFunction(name: string, func: Function): void {
+  private registerPlainFunction(name: string, func: Function, sink?: any[]): void {
     const paramNames = this.extractParamNames(func);
     if (paramNames.length > 0) {
       this.registerToolFunction(name, (args: any) => {
@@ -492,17 +1374,17 @@ export class Agent {
     } else {
       this.registerToolFunction(name, func);
     }
-    this.addAutoGeneratedToolDefinition(name, func);
+    this.addAutoGeneratedToolDefinition(name, func, sink);
   }
 
   /** Build the OpenAI response_format payload when outputSchema is set. */
-  private getResponseFormat():
+  private getResponseFormat(schema: Record<string, any> | undefined = this.outputSchema):
     | { type: 'json_schema'; json_schema: { name: string; schema: Record<string, any>; strict?: boolean } }
     | undefined {
-    if (!this.outputSchema) return undefined;
+    if (!schema) return undefined;
     return {
       type: 'json_schema',
-      json_schema: { name: this.outputSchemaName, schema: this.outputSchema },
+      json_schema: { name: this.outputSchemaName, schema },
     };
   }
 
@@ -513,9 +1395,9 @@ export class Agent {
    * litellm does for the Python SDK: format once, translate at the transport —
    * so tools are never dropped by provider.
    */
-  private getFlatToolDefinitions(): Array<{ name: string; description?: string; parameters?: Record<string, any> }> {
-    if (!this.tools || this.tools.length === 0) return [];
-    return this.tools.map((tool: any) => {
+  private getFlatToolDefinitions(tools: any[] | undefined = this.tools): Array<{ name: string; description?: string; parameters?: Record<string, any> }> {
+    if (!tools || tools.length === 0) return [];
+    return tools.map((tool: any) => {
       if (tool && tool.type === 'function' && tool.function) {
         return {
           name: tool.function.name,
@@ -596,8 +1478,17 @@ export class Agent {
     this.responseCache.set(cacheKey, { response, timestamp: Date.now() });
   }
 
-  private createSystemPrompt(): string {
+  private createSystemPrompt(extraSystem: string[] = []): string {
     let prompt = this.instructions;
+    if (this.handoffs.length > 0) {
+      prompt = promptWithHandoffInstructions(prompt, this.handoffs);
+    }
+    if (this._skillsPrompt) {
+      prompt += `\n\n${this._skillsPrompt}`;
+    }
+    for (const block of extraSystem) {
+      prompt += `\n\n${block}`;
+    }
     if (this.markdown) {
       prompt += '\nPlease format your response in markdown.';
     }
@@ -635,10 +1526,11 @@ export class Agent {
    * @param name Function name
    * @param func Function implementation
    */
-  private addAutoGeneratedToolDefinition(name: string, func: Function): void {
-    if (!this.tools) {
+  private addAutoGeneratedToolDefinition(name: string, func: Function, sink?: any[]): void {
+    if (!sink && !this.tools) {
       this.tools = [];
     }
+    const target: any[] = sink ?? this.tools!;
     
     // Ensure we have a valid function name
     const functionName = name || func.name || `function_${Math.random().toString(36).substring(2, 9)}`;
@@ -683,7 +1575,7 @@ export class Agent {
       toolDef.function.parameters.required = required;
     }
     
-    this.tools.push(toolDef);
+    target.push(toolDef);
     Logger.debug(`Auto-generated tool definition for ${functionName}`);
   }
 
@@ -738,6 +1630,17 @@ export class Agent {
           throw new Error(`Function ${name} not registered`);
         }
 
+        // pre_tool_call hook: a handler returning null blocks the call (the
+        // model is told, as with an approval denial, so it can course-correct).
+        const preHook = await this.runHook('pre_tool_call', { agent: this.name, name, args });
+        if (preHook === null) {
+          const blocked = `Error: Tool call "${name}" was blocked by a pre_tool_call hook.`;
+          results.push({ role: 'tool', tool_call_id: id, name, content: blocked });
+          onEvent?.({ type: 'tool_result', callId: id, name, ok: false, output: blocked });
+          continue;
+        }
+        const effectiveArgs = (preHook.args as Record<string, unknown>) ?? args;
+
         // Human-in-the-loop gate: block the tool until approved. A denial is
         // fed back to the model as the tool result so it can course-correct,
         // rather than aborting the run.
@@ -745,7 +1648,7 @@ export class Agent {
           const approved = await this.approvalManager.requestApproval({
             toolInvocationId: id,
             toolName: name,
-            input: args,
+            input: effectiveArgs,
           });
           if (!approved) {
             await Logger.debug(`Tool call denied by approval gate: ${name}`);
@@ -759,7 +1662,9 @@ export class Agent {
         }
 
         // Call the function - registered wrappers handle positional mapping
-        const result = await this.toolFunctions[name](args);
+        let result = await this.toolFunctions[name](effectiveArgs);
+        const postHook = await this.runHook('post_tool_call', { agent: this.name, name, args: effectiveArgs, result });
+        if (postHook && 'result' in postHook) result = postHook.result;
 
         // Serialize faithfully: .toString() rendered objects as
         // "[object Object]" and threw on null/undefined results. Preserve a
@@ -820,17 +1725,154 @@ export class Agent {
      * passes four arguments and gets exactly the behaviour it had before.
      */
     onEvent?: (event: AgentEvent) => void,
+    /**
+     * Per-call options (see {@link AgentChatOptions}). AgentTeam uses this to
+     * carry a Task's `tools` and `outputJson` into the run.
+     */
+    options?: AgentChatOptions,
   ): Promise<string> {
-    await Logger.debug(`Agent ${this.name} starting with prompt: ${prompt}`);
+    return this.runTurn(prompt, previousResult, onToken, signal, onEvent, options);
+  }
 
+  /**
+   * One complete turn: resolve per-call options and retrieval (prepareTurn),
+   * run the model with retry (runTurnOnce), then apply rules, guardrails,
+   * hooks, context and memory (finishTurn). Every public entry point --
+   * start(), chat(), stream(), streamEvents() -- goes through here.
+   */
+  private async runTurn(
+    prompt: string,
+    previousResult: string | undefined,
+    onToken: ((token: string) => void) | undefined,
+    signal: AbortSignal | undefined,
+    onEvent: ((event: AgentEvent) => void) | undefined,
+    options?: AgentChatOptions,
+  ): Promise<string> {
+    const turn = await this.prepareTurn(prompt, previousResult, options);
     // Token sink: when a caller (e.g. stream()) supplies onToken, tokens go
     // there instead of the terminal. Defaulting to stdout preserves CLI
     // behaviour without leaking process.stdout into non-terminal hosts.
-    const emitToken = onToken ?? writeTokenToStdout;
+    const sink = onToken ?? writeTokenToStdout;
+    let emitted = false;
+    const countingSink = (token: string) => { emitted = true; sink(token); };
+    const abortSignal = signal ?? this.signal;
+    const response = await this.withRetry(
+      () => this.runTurnOnce(turn.prompt, undefined, countingSink, signal, onEvent, turn),
+      // A retry after tokens reached the caller would replay them; a
+      // cancelled run is not a transient failure.
+      () => !emitted && !abortSignal?.aborted,
+    );
+    return this.finishTurn(turn.userPrompt, response);
+  }
+
+  private async withRetry<T>(fn: () => Promise<T>, canRetry: () => boolean): Promise<T> {
+    const cfg = this.retryConfig;
+    if (!cfg) return fn();
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (error) {
+        const retryable = cfg.shouldRetry ? cfg.shouldRetry(error) : isRetryableError(error);
+        if (!retryable || attempt >= cfg.maxRetries || !canRetry()) throw error;
+        const delay = Math.min(cfg.baseDelay * 2 ** attempt, cfg.maxDelay);
+        const jitter = delay * cfg.jitterRatio * Math.random();
+        attempt++;
+        await Logger.warn(`Agent ${this.name}: retrying after a transient error (attempt ${attempt}/${cfg.maxRetries})`);
+        await sleep((delay + jitter) * 1000);
+      }
+    }
+  }
+
+  private async prepareTurn(prompt: string, previousResult: string | undefined, options?: AgentChatOptions): Promise<PreparedTurn> {
+    // Replace placeholder with previous result if available
+    if (previousResult) {
+      prompt = prompt.replace('{{previous}}', previousResult);
+    }
+    const opts = options ?? {};
+    const accepted: Array<[string, unknown]> = [
+      ['reasoningSteps', opts.reasoningSteps],
+      ['taskName', opts.taskName],
+      ['taskDescription', opts.taskDescription],
+      ['taskId', opts.taskId],
+      ['config', opts.config],
+      ['attachments', opts.attachments],
+    ];
+    for (const [name, value] of accepted) {
+      if (value !== undefined && value !== false) notYetHonoured('Agent.chat', name);
+    }
+    if (opts.seed !== undefined && (this._useAISDKBackend || !this._fetchWrapped)) {
+      notYetHonoured('Agent.chat', 'seed', 'It is only forwarded on the OpenAI-compatible path.');
+    }
+
+    const userPrompt = prompt;
+    const started = await this.runHook('agent_start', { agent: this.name, prompt });
+    if (started === null) throw new Error(`Agent ${this.name}: run blocked by an agent_start hook`);
+    if (typeof started.prompt === 'string') prompt = started.prompt;
+
+    const extraSystem: string[] = [];
+    await this.ensureSkillsPrompt();
+    if (!opts.skipRetrieval) {
+      const knowledgeContext = await this.retrieveKnowledge(prompt);
+      if (knowledgeContext) extraSystem.push(`Relevant knowledge:\n${knowledgeContext}`);
+      const memoryContext = await this.recallMemory(prompt);
+      if (memoryContext) extraSystem.push(`Relevant memories:\n${memoryContext}`);
+    }
+    prompt = await this.applyPlanning(prompt);
+
+    const outputSchema = opts.outputJson
+      ?? (opts.outputPydantic ? await toJsonSchema(opts.outputPydantic) : undefined)
+      ?? this.outputSchema;
+    const tools = opts.tools ? this.processToolInputs(opts.tools, []) : this.tools;
+
+    return {
+      prompt,
+      userPrompt,
+      extraSystem,
+      temperature: opts.temperature ?? this.defaultTemperature,
+      tools,
+      streaming: opts.stream ?? this.streamEnabled,
+      outputSchema,
+      toolChoice: normaliseToolChoice(opts.toolChoice),
+      seed: opts.seed,
+    };
+  }
+
+  private async finishTurn(prompt: string, response: string): Promise<string> {
+    let final = this.applyRules(response);
+    final = await this.applyOutputGuardrails(final);
+    const completed = await this.runHook('agent_complete', { agent: this.name, prompt, response: final });
+    if (completed && typeof completed.response === 'string') final = completed.response;
+    if (this.contextManager) {
+      this.contextManager.addUser(prompt);
+      this.contextManager.addAssistant(final);
+    }
+    await this.rememberTurn(prompt, final);
+    return final;
+  }
+
+  private async runTurnOnce(
+    prompt: string,
+    previousResult: string | undefined,
+    emitToken: (token: string) => void,
+    signal: AbortSignal | undefined,
+    onEvent: ((event: AgentEvent) => void) | undefined,
+    turn: PreparedTurn,
+  ): Promise<string> {
+    await Logger.debug(`Agent ${this.name} starting with prompt: ${prompt}`);
 
     // Explicit per-call signal wins over the agent-level default (mirrors
     // Python's resolution: cancel_token overrides interrupt_controller).
     const abortSignal = signal ?? this.signal;
+
+    // Per-turn resolution of the agent defaults (see PreparedTurn).
+    const temperature = turn.temperature;
+    const tools = turn.tools;
+    const streaming = turn.streaming;
+    const outputSchema = turn.outputSchema;
+    const toolChoice = turn.toolChoice;
+    this._turnSeed = turn.seed;
+    this._currentPrompt = prompt;
 
     try {
       // Replace placeholder with previous result if available
@@ -840,7 +1882,7 @@ export class Agent {
 
       // Initialize messages array with system prompt and conversation history
       const messages: Array<any> = [
-        { role: 'system', content: this.createSystemPrompt() }
+        { role: 'system', content: this.createSystemPrompt(turn.extraSystem) }
       ];
       
       // Add conversation history (excluding the current prompt which will be added below).
@@ -871,11 +1913,11 @@ export class Agent {
       if (this._useAISDKBackend) {
         const backend = await this.getBackend();
 
-        if (this.tools && this.tools.length > 0) {
+        if (tools && tools.length > 0) {
           // Tools survive on every provider: format once (provider-agnostic
           // ToolDefinition) and let the AI SDK backend translate at the
           // transport — the same contract litellm gives the Python SDK.
-          const toolDefinitions = this.getFlatToolDefinitions();
+          const toolDefinitions = this.getFlatToolDefinitions(tools);
           let continueConversation = true;
           let iterations = 0;
           const maxIterations = this.maxIterations;
@@ -901,12 +1943,12 @@ export class Agent {
             // StreamChunk carries text AND toolCalls, and StreamTextOptions
             // extends GenerateTextOptions, so one shape covers both.
             let result: { text: string; toolCalls?: any[] };
-            if (this.streamEnabled) {
+            if (streaming) {
               const stream = await backend.streamText({
                 messages,
-                temperature: 0.7,
+                temperature,
                 tools: toolDefinitions,
-                toolChoice: 'auto',
+                toolChoice: toolChoice ?? 'auto',
                 signal: abortSignal,
               });
               let streamedText = '';
@@ -924,9 +1966,9 @@ export class Agent {
             } else {
               result = await backend.generateText({
                 messages,
-                temperature: 0.7,
+                temperature,
                 tools: toolDefinitions,
-                toolChoice: 'auto',
+                toolChoice: toolChoice ?? 'auto',
                 signal: abortSignal,
               });
             }
@@ -947,11 +1989,11 @@ export class Agent {
               // generateObject so structured output survives alongside tools —
               // mirrors the OpenAI native path threading responseFormat through
               // the loop.
-              if (this.outputSchema) {
+              if (outputSchema) {
                 const structured = await backend.generateObject({
                   messages,
-                  schema: this.outputSchema,
-                  temperature: 0.7,
+                  schema: outputSchema,
+                  temperature,
                   signal: abortSignal,
                 });
                 finalResponse = typeof structured.object === 'string'
@@ -971,22 +2013,22 @@ export class Agent {
               `Increase maxIterations in the agent config if the task legitimately needs more tool round-trips.`
             );
           }
-        } else if (this.outputSchema) {
+        } else if (outputSchema) {
           // Structured output via the AI SDK backend's generateObject.
           const result = await backend.generateObject({
             messages,
-            schema: this.outputSchema,
-            temperature: 0.7,
+            schema: outputSchema,
+            temperature,
             signal: abortSignal,
           });
           finalResponse = typeof result.object === 'string'
             ? result.object
             : JSON.stringify(result.object);
-        } else if (this.streamEnabled) {
+        } else if (streaming) {
           // Streaming with AI SDK backend
           const stream = await backend.streamText({
             messages,
-            temperature: 0.7,
+            temperature,
             signal: abortSignal
           });
           
@@ -1002,12 +2044,12 @@ export class Agent {
           // Non-streaming with AI SDK backend
           const result = await backend.generateText({
             messages,
-            temperature: 0.7,
+            temperature,
             signal: abortSignal
           });
           finalResponse = result.text;
         }
-      } else if (this.tools) {
+      } else if (tools) {
         // Unified streaming/tools loop (OpenAI). Streaming and tools are no
         // longer mutually exclusive: when `stream` is set, text deltas, tool
         // calls and tool results interleave on one request per round-trip via
@@ -1031,18 +2073,18 @@ export class Agent {
           // returns tool_calls. So during tool rounds we omit the schema and let
           // the model decide; once the model stops calling tools we re-issue a
           // final request with the schema applied to shape the answer.
-          const response = this.streamEnabled
+          const response = streaming
             ? await this.llmService.streamChatWithTools(
                 messages,
-                0.7,
-                this.tools,
+                temperature,
+                tools,
                 (token: string) => emitToken(token),
-                undefined,
+                toolChoice,
                 undefined,
                 abortSignal
               )
             : await this.llmService.generateChat(
-                messages, 0.7, this.tools, undefined, undefined, abortSignal
+                messages, temperature, tools, toolChoice, undefined, abortSignal
               );
 
           // Cap tool calls executed per turn (Python parity:
@@ -1076,13 +2118,13 @@ export class Agent {
 
             // Continue conversation to get final response
             continueConversation = true;
-          } else if (this.outputSchema) {
+          } else if (outputSchema) {
             // Model produced no tool calls: issue one final request that pins the
             // structured output schema. Tools are omitted here so `tools` and
             // `response_format` never coexist (OpenAI treats them as mutually
             // exclusive). generateChat sends the full history.
             const finalResp = await this.llmService.generateChat(
-              messages, 0.7, undefined, undefined, this.getResponseFormat(), abortSignal
+              messages, temperature, undefined, undefined, this.getResponseFormat(outputSchema), abortSignal
             );
             finalResponse = finalResp.content || response.content || '';
             continueConversation = false;
@@ -1104,17 +2146,17 @@ export class Agent {
             `Increase maxIterations in the agent config if the task legitimately needs more tool round-trips.`
           );
         }
-      } else if (this.streamEnabled && !this.outputSchema) {
+      } else if (streaming && !outputSchema) {
         // Use streaming with full conversation history (OpenAI, no tools)
         finalResponse = await this.llmService.streamChat(
           messages,
-          0.7,
+          temperature,
           (token: string) => {
             emitToken(token);
           },
           abortSignal
         );
-      } else if (this.outputSchema) {
+      } else if (outputSchema) {
         // Structured output (no tools): go through generateChat so the full
         // `messages` history (system + prior turns + current prompt) is sent.
         // generateText only takes a single prompt + system prompt, so on a
@@ -1122,10 +2164,10 @@ export class Agent {
         // wrong structured responses.
         const response = await this.llmService.generateChat(
           messages,
-          0.7,
+          temperature,
           undefined,
           undefined,
-          this.getResponseFormat(),
+          this.getResponseFormat(outputSchema),
           abortSignal
         );
         finalResponse = response.content || '';
@@ -1136,10 +2178,10 @@ export class Agent {
         // model. generateChat sends the full `messages` history built above.
         const response = await this.llmService.generateChat(
           messages,
-          0.7,
+          temperature,
           undefined,
           undefined,
-          this.getResponseFormat(),
+          this.getResponseFormat(outputSchema),
           abortSignal
         );
         finalResponse = response.content || '';
@@ -1147,11 +2189,11 @@ export class Agent {
         // Use regular text generation without streaming
         const response = await this.llmService.generateText(
           prompt,
-          this.createSystemPrompt(),
-          0.7,
+          this.createSystemPrompt(turn.extraSystem),
+          temperature,
           undefined,
           undefined,
-          this.getResponseFormat(),
+          this.getResponseFormat(outputSchema),
           abortSignal
         );
         finalResponse = response;
@@ -1171,6 +2213,9 @@ export class Agent {
       }
       await Logger.error('Error in agent execution', error);
       throw error;
+    } finally {
+      this._turnSeed = undefined;
+      this._currentPrompt = undefined;
     }
   }
 
@@ -1276,7 +2321,7 @@ export class Agent {
       wake();
     };
 
-    const run = this.start(prompt, opts?.previousResult, onToken, controller.signal, onEvent)
+    const run = this.runTurn(prompt, opts?.previousResult, onToken, controller.signal, onEvent, opts)
       .then((text) => ({ text } as { text: string }))
       .catch((error) => ({
         error: error instanceof Error ? error : new Error(String(error)),
@@ -1307,7 +2352,16 @@ export class Agent {
     }
   }
 
-  async chat(prompt: string, previousResult?: string, signal?: AbortSignal): Promise<string> {
+  /**
+   * Send one message and return the reply, keeping conversation history.
+   *
+   * @param prompt - The user message.
+   * @param previousResult - Substituted for `{{previous}}` in the prompt.
+   * @param signal - Turn-scoped abort signal (Python parity: cancel_token).
+   * @param options - Per-call options mirroring Python's `Agent.chat` keyword
+   *   arguments (temperature, tools, outputJson, stream, toolChoice, seed, ...).
+   */
+  async chat(prompt: string, previousResult?: string, signal?: AbortSignal, options?: AgentChatOptions): Promise<string> {
     // Lazy init: restore history on first chat (like Python SDK)
     await this.initDbSession();
     
@@ -1325,7 +2379,7 @@ export class Agent {
     // start() replays this.messages AND appends the prompt itself, so the
     // user message goes into history only AFTER the call — pushing it first
     // sent every prompt to the model twice.
-    const response = await this.start(prompt, previousResult, undefined, signal);
+    const response = await this.runTurn(prompt, previousResult, undefined, signal, undefined, options);
 
     // Add user message and assistant response to history
     this.messages.push({ role: 'user', content: prompt });
@@ -1607,15 +2661,100 @@ export class Agent {
 }
 
 /**
+ * How an AgentTeam runs its tasks. `workflow` runs like `sequential`;
+ * `hierarchical` also runs sequentially until a manager agent exists in
+ * TypeScript (see `managerLlm`).
+ */
+export type AgentTeamProcess = 'sequential' | 'parallel' | 'workflow' | 'hierarchical';
+
+/**
  * Configuration for multi-agent orchestration
  */
 export interface AgentTeamConfig {
   agents: Agent[];
-  tasks?: string[];
+  /**
+   * Prompts to run, one per agent, or Task objects: a Task's `description` is
+   * the prompt, its `expected_output` is appended, and its `agent` (when set)
+   * runs it. Python parity: tasks.
+   */
+  tasks?: (string | Task)[];
   verbose?: boolean;
   pretty?: boolean;
-  process?: 'sequential' | 'parallel';
+  /** Python parity: process (default "sequential"). */
+  process?: AgentTeamProcess;
+  /** Python parity: manager_llm. Model for the hierarchical manager. */
+  managerLlm?: string;
+  /** Python parity: name (Optional[str]). */
+  name?: string;
+  /**
+   * Python parity: variables (Optional[Dict[str, Any]]). `{{key}}`
+   * placeholders in task prompts are replaced with these values.
+   */
+  variables?: Record<string, unknown>;
+  /** Python parity: llm (Optional[str]). Default model for agents constructed without one. */
+  llm?: string;
+  /** Python parity: model (Optional[str]). Alias of `llm`; wins when both are given. */
+  model?: string;
+  /** Python parity: memory (Optional[Any]). */
+  memory?: unknown;
+  /** Python parity: planning (Optional[Any]). */
+  planning?: unknown;
+  /** Python parity: context (Optional[Any]). */
+  context?: unknown;
+  /**
+   * Python parity: output (Optional[Any]). Output preset: "silent" hides the
+   * per-task result printing, "verbose" forces it.
+   */
+  output?: unknown;
+  /** Python parity: execution (Optional[Any]). */
+  execution?: unknown;
+  /** Python parity: hooks (Optional[Any]). */
+  hooks?: unknown;
+  /** Python parity: autonomy (Optional[Any]). */
+  autonomy?: unknown;
+  /** Python parity: knowledge (Optional[Any]). */
+  knowledge?: unknown;
+  /** Python parity: guardrails (Optional[Any]). */
+  guardrails?: unknown;
+  /** Python parity: web (Optional[Any]). */
+  web?: unknown;
+  /** Python parity: reflection (Optional[Any]). */
+  reflection?: unknown;
+  /** Python parity: caching (Optional[Any]). */
+  caching?: unknown;
+  /** Python parity: learn (Optional[Any]). */
+  learn?: unknown;
+  /** Python parity: tools_run_on (Optional[Any]). */
+  toolsRunOn?: unknown;
+  /** Python parity: run_on (Optional[Any]). */
+  runOn?: unknown;
 }
+
+/**
+ * Options for {@link AgentTeam.start}. With `returnDict` unset (or false) the
+ * results come back as an ordered array; pass {@link AgentTeamStartDictOptions}
+ * (`returnDict: true`) for a map keyed by task name.
+ */
+export interface AgentTeamStartOptions {
+  /**
+   * Python parity: return_dict (default false). `true` (see
+   * {@link AgentTeamStartDictOptions}) returns the results as a map keyed by
+   * task name (a Task's `name`, else `task_<n>`) instead of an ordered array.
+   */
+  returnDict?: false;
+  /** Python parity: output. Output preset for this run: "silent" | "verbose" | "normal". */
+  output?: unknown;
+}
+
+/** {@link AgentTeam.start} options selecting the map-shaped result (Python `return_dict=True`). */
+export interface AgentTeamStartDictOptions {
+  returnDict: true;
+  /** Python parity: output. Output preset for this run: "silent" | "verbose" | "normal". */
+  output?: unknown;
+}
+
+/** Either form of {@link AgentTeam.start} options. */
+export type AgentTeamStartOptionsInput = AgentTeamStartOptions | AgentTeamStartDictOptions;
 
 /**
  * @deprecated Use AgentTeamConfig instead. This is a silent alias for backward compatibility.
@@ -1625,12 +2764,32 @@ export type PraisonAIAgentsConfig = AgentTeamConfig;
 /**
  * @deprecated Use AgentTeamConfig instead. This is a silent alias for backward compatibility.
  */
-export interface AgentsConfig {
-  agents: Agent[];
-  tasks?: string[];
-  verbose?: boolean;
-  pretty?: boolean;
-  process?: 'sequential' | 'parallel';
+export type AgentsConfig = AgentTeamConfig;
+
+/** A task normalised for execution. */
+interface TeamTask {
+  name: string;
+  prompt: string;
+  agent?: Agent;
+  /** Per-run options carried from a Task (tools, outputJson, outputPydantic). */
+  options?: AgentChatOptions;
+  /** The originating Task, when one was given: its status and callbacks are honoured. */
+  task?: Task;
+}
+
+function looksLikeJsonSchema(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object'
+    && ('type' in value || 'properties' in value || '$schema' in value || 'anyOf' in value || 'oneOf' in value);
+}
+
+/** Resolve an output preset to "print results?" (undefined = keep the team default). */
+function resolveOutputPreset(output: unknown, surface: string): boolean | undefined {
+  if (output === undefined || output === null) return undefined;
+  if (output === 'silent') return false;
+  if (output === 'verbose') return true;
+  if (output === 'normal') return undefined;
+  notYetHonoured(surface, 'output', `Preset ${JSON.stringify(output)} is not recognised (silent | verbose | normal).`);
+  return undefined;
 }
 
 /**
@@ -1657,10 +2816,48 @@ export interface AgentsConfig {
  */
 export class AgentTeam {
   private agents: Agent[];
-  private tasks: string[];
+  private tasks: TeamTask[];
   private verbose: boolean;
   private pretty: boolean;
-  private process: 'sequential' | 'parallel';
+  private process: AgentTeamProcess;
+  /** Python parity: name (Optional[str]). */
+  readonly name?: string;
+  /** Python parity: variables (Optional[Dict[str, Any]]). */
+  readonly variables?: Record<string, unknown>;
+  /** Python parity: manager_llm. */
+  readonly managerLlm?: string;
+  /** Python parity: llm / model. The default model applied to member agents. */
+  readonly llm?: string;
+  /** Python parity: memory (default false). */
+  readonly memory: unknown;
+  /** Python parity: planning (default false). */
+  readonly planning: unknown;
+  /** Python parity: context (default false). */
+  readonly context: unknown;
+  /** Python parity: output. */
+  readonly output?: unknown;
+  /** Python parity: execution. */
+  readonly execution?: unknown;
+  /** Python parity: hooks. */
+  readonly hooks?: unknown;
+  /** Python parity: autonomy. */
+  readonly autonomy?: unknown;
+  /** Python parity: knowledge. */
+  readonly knowledge?: unknown;
+  /** Python parity: guardrails. */
+  readonly guardrails?: unknown;
+  /** Python parity: web. */
+  readonly web?: unknown;
+  /** Python parity: reflection. */
+  readonly reflection?: unknown;
+  /** Python parity: caching. */
+  readonly caching?: unknown;
+  /** Python parity: learn. */
+  readonly learn?: unknown;
+  /** Python parity: tools_run_on. */
+  readonly toolsRunOn?: unknown;
+  /** Python parity: run_on. */
+  readonly runOn?: unknown;
 
   /**
    * Create a multi-agent orchestration
@@ -1668,47 +2865,177 @@ export class AgentTeam {
    */
   constructor(configOrAgents: AgentTeamConfig | Agent[]) {
     // Support array syntax: new AgentTeam([a1, a2])
-    const config: AgentTeamConfig = Array.isArray(configOrAgents) 
+    const config: AgentTeamConfig = Array.isArray(configOrAgents)
       ? { agents: configOrAgents }
       : configOrAgents;
-    
+
     this.agents = config.agents;
+    this.name = config.name;
+    this.variables = config.variables;
+    this.managerLlm = config.managerLlm;
     this.verbose = config.verbose ?? getEnv('PRAISON_VERBOSE') !== 'false';
     this.pretty = config.pretty ?? getEnv('PRAISON_PRETTY') === 'true';
     this.process = config.process || 'sequential';
+    this.memory = config.memory ?? false;
+    this.planning = config.planning ?? false;
+    this.context = config.context ?? false;
+    this.output = config.output;
+    this.execution = config.execution;
+    this.hooks = config.hooks;
+    this.autonomy = config.autonomy;
+    this.knowledge = config.knowledge;
+    this.guardrails = config.guardrails;
+    this.web = config.web;
+    this.reflection = config.reflection;
+    this.caching = config.caching;
+    this.learn = config.learn;
+    this.toolsRunOn = config.toolsRunOn;
+    this.runOn = config.runOn;
+
+    // Default model for member agents constructed without one (Python parity:
+    // AgentTeam(llm=...) / AgentTeam(model=...); `model` wins).
+    this.llm = config.model ?? config.llm;
+    if (this.llm) {
+      for (const agent of this.agents) agent.applyDefaultModel(this.llm);
+    }
+
+    // Output preset: "silent" / "verbose" override the verbose default.
+    const printResults = resolveOutputPreset(config.output, 'AgentTeam');
+    if (printResults !== undefined) this.verbose = printResults;
+
+    // Accepted for signature parity but not yet honoured on the team surface.
+    const accepted: Array<[string, unknown]> = [
+      ['managerLlm', config.managerLlm],
+      ['memory', config.memory],
+      ['planning', config.planning],
+      ['context', config.context],
+      ['execution', config.execution],
+      ['hooks', config.hooks],
+      ['autonomy', config.autonomy],
+      ['knowledge', config.knowledge],
+      ['guardrails', config.guardrails],
+      ['web', config.web],
+      ['reflection', config.reflection],
+      ['caching', config.caching],
+      ['learn', config.learn],
+      ['toolsRunOn', config.toolsRunOn],
+      ['runOn', config.runOn],
+    ];
+    for (const [name, value] of accepted) {
+      if (value !== undefined && value !== false && value !== null) {
+        notYetHonoured('AgentTeam', name, name === 'managerLlm' ? 'A hierarchical process runs sequentially until a manager agent exists.' : undefined);
+      }
+    }
 
     // Auto-generate tasks if not provided
-    this.tasks = config.tasks || this.generateTasks();
+    this.tasks = config.tasks
+      ? config.tasks.map((task, i) => this.normaliseTask(task, i))
+      : this.generateTasks();
 
     // Configure logging
     Logger.setVerbose(this.verbose);
     Logger.setPretty(this.pretty);
   }
 
-  private generateTasks(): string[] {
-    return this.agents.map(agent => {
-      const instructions = agent.getInstructions();
-      // Extract task from instructions - get first sentence or whole instruction if no period
-      const task = instructions.split('.')[0].trim();
-      return task;
+  /** Turn a prompt string or Task object into a TeamTask, applying `variables`. */
+  private normaliseTask(task: string | Task, index: number): TeamTask {
+    if (typeof task === 'string') {
+      return { name: `task_${index + 1}`, prompt: this.substituteVariables(task) };
+    }
+    let prompt = this.substituteVariables(task.description ?? '');
+    if (task.expected_output) {
+      prompt += `\n\nExpected output: ${this.substituteVariables(task.expected_output)}`;
+    }
+    const agent = task.agent && typeof (task.agent as Agent).start === 'function' ? (task.agent as Agent) : undefined;
+    // A Task's tools and structured-output request travel with the run.
+    const options: AgentChatOptions = {};
+    if (Array.isArray(task.tools) && task.tools.length > 0) options.tools = task.tools;
+    if (task.outputJson !== undefined && task.outputJson !== null) {
+      if (looksLikeJsonSchema(task.outputJson)) options.outputJson = task.outputJson;
+      else options.outputPydantic = task.outputJson as Record<string, any>;
+    }
+    if (task.outputPydantic !== undefined && task.outputPydantic !== null) {
+      options.outputPydantic = task.outputPydantic as Record<string, any>;
+    }
+    return {
+      name: task.name || `task_${index + 1}`,
+      prompt,
+      agent,
+      options: Object.keys(options).length > 0 ? options : undefined,
+      task,
+    };
+  }
+
+  /** Run one task on `agent`, keeping the originating Task's status and callbacks in step. */
+  private async runTask(entry: TeamTask, agent: Agent, prompt: string, previousResult?: string): Promise<string> {
+    entry.task?.markStarted();
+    let result: string;
+    try {
+      result = await agent.start(prompt, previousResult, undefined, undefined, undefined, entry.options);
+    } catch (error) {
+      entry.task?.markFailed();
+      throw error;
+    }
+    if (entry.task) {
+      const output: TaskOutput = { description: entry.task.description, raw: result, agent: agent.name, outputFormat: 'RAW' };
+      if (entry.options?.outputJson || entry.options?.outputPydantic) {
+        try {
+          const parsed = JSON.parse(result);
+          if (entry.options.outputJson) { output.outputJson = parsed; output.outputFormat = 'JSON'; }
+          else { output.outputPydantic = parsed; output.outputFormat = 'Pydantic'; }
+        } catch {
+          // Not JSON: the raw text stands.
+        }
+      }
+      entry.task.markCompleted(output);
+      await entry.task.notifyComplete(output);
+    }
+    return result;
+  }
+
+  private substituteVariables(text: string): string {
+    if (!this.variables) return text;
+    return text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (match, key: string) => {
+      const value = this.variables![key];
+      return value === undefined ? match : String(value);
     });
   }
 
-  private async executeSequential(): Promise<string[]> {
+  private generateTasks(): TeamTask[] {
+    return this.agents.map((agent, i) => {
+      const instructions = agent.getInstructions();
+      // Extract task from instructions - get first sentence or whole instruction if no period
+      const task = instructions.split('.')[0].trim();
+      return { name: `task_${i + 1}`, prompt: task };
+    });
+  }
+
+  /** The agent that runs task `i`: the Task's own agent, else the i-th (or last) team member. */
+  private agentFor(task: TeamTask, index: number): Agent {
+    return task.agent ?? this.agents[Math.min(index, this.agents.length - 1)];
+  }
+
+  /** `content` (Python parity) is added to every task's context. */
+  private withContent(prompt: string, content?: string): string {
+    return content ? `${prompt}\n\nContext: ${content}` : prompt;
+  }
+
+  private async executeSequential(content?: string): Promise<string[]> {
     const results: string[] = [];
     let previousResult: string | undefined;
 
-    for (let i = 0; i < this.agents.length; i++) {
-      const agent = this.agents[i];
+    for (let i = 0; i < this.tasks.length; i++) {
       const task = this.tasks[i];
+      const agent = this.agentFor(task, i);
 
       await Logger.debug(`Running agent ${i + 1}: ${agent.name}`);
-      await Logger.debug(`Task: ${task}`);
-      
+      await Logger.debug(`Task: ${task.prompt}`);
+
       // For first agent, use task directly
       // For subsequent agents, append previous result to their instructions
-      const prompt = i === 0 ? task : `${task}\n\nHere is the input: ${previousResult}`;
-      const result = await agent.start(prompt, previousResult);
+      const base = this.withContent(task.prompt, content);
+      const prompt = i === 0 ? base : `${base}\n\nHere is the input: ${previousResult}`;
+      const result = await this.runTask(task, agent, prompt, previousResult);
       results.push(result);
       previousResult = result;
     }
@@ -1716,37 +3043,55 @@ export class AgentTeam {
     return results;
   }
 
-  async start(): Promise<string[]> {
+  /**
+   * Run every task.
+   *
+   * @param content - Python parity: content. Added to every task's context.
+   * @param options - Python parity: return_dict (map keyed by task name
+   *   instead of an array) and output (preset for this run).
+   */
+  async start(content?: string, options?: AgentTeamStartOptions): Promise<string[]>;
+  async start(content: string | undefined, options: AgentTeamStartDictOptions): Promise<Record<string, string>>;
+  async start(content?: string, options?: AgentTeamStartOptionsInput): Promise<string[] | Record<string, string>>;
+  async start(content?: string, options?: AgentTeamStartOptionsInput): Promise<string[] | Record<string, string>> {
+    const returnDict = options?.returnDict ?? false;
+    const printResults = resolveOutputPreset(options?.output, 'AgentTeam.start') ?? this.verbose;
+
     await Logger.debug('Starting AgentTeam execution...');
     await Logger.debug('Process mode:', this.process);
-    await Logger.debug('Tasks:', this.tasks);
+    await Logger.debug('Tasks:', this.tasks.map((t) => t.prompt));
 
     let results: string[];
 
     if (this.process === 'parallel') {
-      // Run all agents in parallel
-      const promises = this.agents.map((agent, i) => {
-        const task = this.tasks[i];
-        return agent.start(task);
-      });
+      // Run all tasks in parallel
+      const promises = this.tasks.map((task, i) => this.runTask(task, this.agentFor(task, i), this.withContent(task.prompt, content)));
       results = await Promise.all(promises);
     } else {
-      // Run agents sequentially (default)
-      results = await this.executeSequential();
+      // sequential (default), workflow, and hierarchical (no manager yet) run in order
+      results = await this.executeSequential(content);
     }
 
-    if (this.verbose) {
+    if (printResults) {
       await Logger.info('AgentTeam execution completed.');
       for (let i = 0; i < results.length; i++) {
         await Logger.section(`Result from Agent ${i + 1}`, results[i]);
       }
     }
 
+    if (returnDict) {
+      const byTask: Record<string, string> = {};
+      this.tasks.forEach((task, i) => { byTask[task.name] = results[i]; });
+      return byTask;
+    }
     return results;
   }
 
-  async chat(): Promise<string[]> {
-    return this.start();
+  async chat(content?: string, options?: AgentTeamStartOptions): Promise<string[]>;
+  async chat(content: string | undefined, options: AgentTeamStartDictOptions): Promise<Record<string, string>>;
+  async chat(content?: string, options?: AgentTeamStartOptionsInput): Promise<string[] | Record<string, string>>;
+  async chat(content?: string, options?: AgentTeamStartOptionsInput): Promise<string[] | Record<string, string>> {
+    return this.start(content, options);
   }
 }
 
