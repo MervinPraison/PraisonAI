@@ -84,6 +84,57 @@ fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
     Err(format!("no usable Python found. Tried: {}", tried.join("; ")))
 }
 
+/// Bring an existing venv up to the current `ENGINE_PACKAGES` if it drifted.
+///
+/// The venv is built once, on first run, and then left alone -- so a fix
+/// shipped in `praisonaiagents` after that never reaches the user, and raising
+/// the pin in `ENGINE_PACKAGES` changes only what *new* installs get. This
+/// compares a stamp written beside the venv against the current requirement
+/// and, when they differ, re-runs the single install step (uv is near-instant
+/// when nothing changed) and rewrites the stamp.
+///
+/// Returns whether an install was attempted, so the caller can label the tray.
+/// Best effort throughout: a failure here must not block starting the engine,
+/// because a stale-but-working engine is better than no engine, and the UI
+/// reports the truth of what version is actually running.
+fn reconcile_engine_packages(data: &Path) -> bool {
+    use praisonai_desktop_core::provision::{
+        deps_step, locate_uv, needs_reprovision, stamp_contents, stamp_path, uv_candidates, Uv,
+        ENGINE_PACKAGES,
+    };
+    let stamp = std::fs::read_to_string(stamp_path(data)).ok();
+    if !needs_reprovision(stamp.as_deref(), ENGINE_PACKAGES) {
+        return false;
+    }
+    let Some(home) = home_dir() else { return false };
+    let platform = Platform::current();
+    let uv = match locate_uv(&uv_candidates(&home, data, platform), |p| p.is_file()) {
+        Uv::Found(p) => p,
+        // No uv means no first-run provision has completed; there is nothing to
+        // reconcile, and fetching one here would turn a normal launch into a
+        // download.
+        Uv::Fetch => return false,
+    };
+    let step = deps_step(&uv, data, ENGINE_PACKAGES, platform);
+    let mut command = std::process::Command::new(&step.program);
+    no_console(&mut command);
+    match command.args(&step.args).output() {
+        Ok(out) if out.status.success() => {
+            // Only stamp on success: a failed install must be retried next
+            // launch, not silently recorded as done.
+            let _ = std::fs::write(stamp_path(data), stamp_contents(ENGINE_PACKAGES));
+        }
+        Ok(out) => {
+            eprintln!(
+                "[praisonai] package update failed, starting with what is installed: {}",
+                String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
+            );
+        }
+        Err(e) => eprintln!("[praisonai] could not run package update: {e}"),
+    }
+    true
+}
+
 /// Build the engine's Python environment, reporting each step as it starts.
 ///
 /// Emits `provision` events rather than returning a lump at the end: the whole
@@ -232,6 +283,14 @@ async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
     if !py.is_file() {
         return Err(format!("finished, but {} is not there", py.display()));
     }
+    // Record what was installed, so a later launch can tell whether the venv is
+    // still current or predates a raised requirement and needs re-applying.
+    // Best effort: a venv that provisioned correctly must not be reported as a
+    // failure because a note beside it could not be written.
+    let _ = std::fs::write(
+        praisonai_desktop_core::provision::stamp_path(&data),
+        praisonai_desktop_core::provision::stamp_contents(ENGINE_PACKAGES),
+    );
     Ok(py.display().to_string())
 }
 
@@ -262,6 +321,17 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
     // from Tauri package metadata, which the release workflow derives from the
     // tag, rather than from Cargo.toml's development-only package version.
     let shell_version = app.package_info().version.to_string();
+    // A resolved Python means a venv exists. Before starting the engine from
+    // it, bring it up to the current package requirement if it drifted -- the
+    // venv is provisioned once and otherwise never revisited, so a library fix
+    // shipped after first run would never reach this user. On failure the
+    // engine still starts, reporting whatever version is actually installed.
+    if let Some(dir) = user_data.as_deref() {
+        praisonai_desktop_core::tray::set_engine_label(&app, "Engine: updating\u{2026}");
+        if reconcile_engine_packages(dir) {
+            praisonai_desktop_core::tray::set_engine_label(&app, "Engine: starting\u{2026}");
+        }
+    }
     // Reap or adopt whatever the last run left. Neither `Drop` nor the reap on
     // exit runs when the shell is killed by a signal, and that was observed:
     // `kill -TERM` on the app left the Python child alive with a lockfile still
