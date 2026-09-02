@@ -1205,6 +1205,12 @@ steps:
         researcher = parser._agents.get('researcher')
         assert researcher is not None
         assert hasattr(researcher, '_yaml_max_rpm')
+        assert researcher._yaml_max_rpm == 10
+        # YAML max_rpm must wire a live RateLimiter (not just store metadata).
+        from praisonaiagents.llm.rate_limiter import RateLimiter
+        assert isinstance(researcher._rate_limiter, RateLimiter)
+        assert researcher._rate_limiter.requests_per_minute == 10
+        assert researcher.max_rpm == 10
     
     def test_agent_with_max_execution_time(self):
         """Test that agents can have max_execution_time for timeout."""

@@ -380,6 +380,35 @@ class TestMaxRpmAutoWiresRateLimiter:
                 execution=ExecutionConfig(max_rpm=-1, rate_limiter=custom),
             )
 
+    def test_auto_wired_limiter_actually_throttles(self):
+        """The auto-built limiter must space requests, not just exist.
+
+        Uses an injectable clock/sleep so no real time passes: with
+        max_rpm=1 and burst=1, the second acquire() must wait ~60s.
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        agent = Agent(
+            name="test",
+            instructions="test",
+            execution=ExecutionConfig(max_rpm=1),
+        )
+        limiter = agent._rate_limiter
+        clock = [0.0]
+        slept = []
+        def fake_sleep(seconds):
+            slept.append(seconds)
+            clock[0] += seconds
+        limiter._get_time = lambda: clock[0]
+        limiter._sleep = fake_sleep
+        limiter.reset()
+
+        limiter.acquire()  # consumes the single burst token, no wait
+        assert slept == []
+        limiter.acquire()  # must wait ~60s for the next token at 1 rpm
+        assert slept, "second acquire() should have blocked under max_rpm=1"
+        assert abs(sum(slept) - 60.0) < 1e-6
+
 
 class TestLegacyKwargsCompatibility:
     """Signature-reduction backward-compat: keyword-only guard, internal
