@@ -323,6 +323,138 @@ class TestAgentMailBotProbe:
             assert "not installed" in result.error
 
 
+class TestAgentMailBotIdempotency:
+    """Test AgentMail send/reply pass a stable Idempotency-Key across retries."""
+
+    @pytest.mark.asyncio
+    async def test_same_key_across_retries(self):
+        """Every retry of one logical send must reuse the same Idempotency-Key."""
+        from praisonai_bot.bots import AgentMailBot
+
+        bot = AgentMailBot(token="test_token")
+        bot._inbox_id = "agent@agentmail.to"
+
+        seen_keys = []
+        call_count = {"n": 0}
+
+        def send_side_effect(*args, **kwargs):
+            opts = kwargs.get("request_options", {})
+            seen_keys.append(opts.get("additional_headers", {}).get("Idempotency-Key"))
+            call_count["n"] += 1
+            # Fail the first attempt with a recoverable timeout (the exact
+            # timeout-after-send case) so deliver_outbound() retries.
+            if call_count["n"] == 1:
+                raise TimeoutError("simulated timeout after send")
+            return MagicMock(message_id="sent-123")
+
+        mock_client = MagicMock()
+        mock_client.inboxes.messages.send.side_effect = send_side_effect
+
+        with patch.object(bot, "_get_client", return_value=mock_client):
+            await bot.send_message(
+                channel_id="user@example.com",
+                content={"subject": "Hi", "body": "hello"},
+            )
+
+        assert len(seen_keys) >= 2
+        assert all(k is not None for k in seen_keys)
+        assert len(set(seen_keys)) == 1
+
+    @pytest.mark.asyncio
+    async def test_reply_passes_idempotency_key(self):
+        """messages.reply() must also receive an Idempotency-Key header."""
+        from praisonai_bot.bots import AgentMailBot
+
+        bot = AgentMailBot(token="test_token")
+        bot._inbox_id = "agent@agentmail.to"
+
+        mock_client = MagicMock()
+        mock_client.inboxes.messages.reply.return_value = MagicMock(message_id="r-1")
+
+        with patch.object(bot, "_get_client", return_value=mock_client):
+            await bot.send_message(
+                channel_id="user@example.com",
+                content={"subject": "Re: Hi", "body": "reply"},
+                reply_to="orig-msg-id",
+            )
+
+        _, kwargs = mock_client.inboxes.messages.reply.call_args
+        key = kwargs["request_options"]["additional_headers"]["Idempotency-Key"]
+        assert key
+
+    @pytest.mark.asyncio
+    async def test_distinct_sends_get_distinct_keys(self):
+        """Two distinct logical sends must receive different keys."""
+        from praisonai_bot.bots import AgentMailBot
+
+        bot = AgentMailBot(token="test_token")
+        bot._inbox_id = "agent@agentmail.to"
+
+        keys = []
+
+        def capture(*args, **kwargs):
+            keys.append(
+                kwargs["request_options"]["additional_headers"]["Idempotency-Key"]
+            )
+            return MagicMock(message_id="s")
+
+        mock_client = MagicMock()
+        mock_client.inboxes.messages.send.side_effect = capture
+
+        with patch.object(bot, "_get_client", return_value=mock_client):
+            await bot.send_message(
+                channel_id="a@example.com", content={"body": "one"}
+            )
+            await bot.send_message(
+                channel_id="b@example.com", content={"body": "two"}
+            )
+
+        assert len(keys) == 2
+        assert keys[0] != keys[1]
+
+    @pytest.mark.asyncio
+    async def test_explicit_key_is_used(self):
+        """A caller-supplied idempotency_key must be forwarded verbatim."""
+        from praisonai_bot.bots import AgentMailBot
+
+        bot = AgentMailBot(token="test_token")
+        bot._inbox_id = "agent@agentmail.to"
+
+        keys = []
+
+        def capture(*args, **kwargs):
+            keys.append(
+                kwargs["request_options"]["additional_headers"]["Idempotency-Key"]
+            )
+            return MagicMock(message_id="s")
+
+        mock_client = MagicMock()
+        mock_client.inboxes.messages.send.side_effect = capture
+
+        with patch.object(bot, "_get_client", return_value=mock_client):
+            await bot.send_message(
+                channel_id="a@example.com",
+                content={"body": "one"},
+                idempotency_key="stable-deterministic-key",
+            )
+
+        assert keys == ["stable-deterministic-key"]
+
+    def test_idempotency_key_is_explicit_param(self):
+        """The param must be declared explicitly so DurableDelivery detects it.
+
+        ``DurableDelivery._send_accepts_idempotency_key()`` only forwards its
+        persisted key to adapters whose ``send_message`` signature contains an
+        explicit ``idempotency_key`` parameter (a ``**kwargs`` fallback is
+        deliberately excluded). This guards that contract for AgentMail.
+        """
+        import inspect
+        from praisonai_bot.bots import AgentMailBot
+
+        params = inspect.signature(AgentMailBot.send_message).parameters
+        assert "idempotency_key" in params
+
+
 class TestAgentMailBotHealth:
     """Test AgentMailBot health functionality."""
     

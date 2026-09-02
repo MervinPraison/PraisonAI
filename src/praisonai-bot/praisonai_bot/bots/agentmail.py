@@ -714,6 +714,7 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         content: Union[str, Dict[str, Any]],
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
         **kwargs,
     ) -> BotMessage:
         """Send an email message.
@@ -723,6 +724,12 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             content: Message content (str or {"subject": ..., "body": ...})
             reply_to: Message-ID to reply to
             thread_id: Thread ID for conversation tracking
+            idempotency_key: Optional stable key for deterministic replay. Passed
+                as AgentMail's provider-level ``Idempotency-Key`` header so a
+                timeout-after-send never duplicates the email. Declared
+                explicitly (not via ``**kwargs``) so the durable-delivery layer
+                can detect and forward its persisted key. 1-256 chars; AgentMail
+                honours the key for 24h. Defaults to a generated UUID.
             
         Returns:
             The sent message
@@ -753,6 +760,17 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         
         client = self._get_client()
         
+        # Provider-level idempotency: derive ONE stable key per logical send so
+        # deliver_outbound()'s retries (default 3 attempts) never duplicate an
+        # email at the AgentMail boundary after a timeout-after-send. The same
+        # key must be reused for every retry, so it is generated here — outside
+        # _do_send() — and passed through request_options to both send/reply.
+        # Caller may supply idempotency_key to make replay deterministic; it must
+        # obey AgentMail's 1-256 char rule (24h key lifetime). Accept it via the
+        # explicit param or a legacy **kwargs entry, else generate a UUID.
+        idempotency_key = idempotency_key or kwargs.get("idempotency_key") or str(uuid.uuid4())
+        request_options = {"additional_headers": {"Idempotency-Key": idempotency_key}}
+        
         # Send via AgentMail API
         # SDK v0.4.7: uses text= (not body=); reply_to= is Reply-To header
         # For replying to a message, use messages.reply() method
@@ -764,12 +782,14 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     reply_to,  # message_id of original message
                     text=body,
                     subject=subject,
+                    request_options=request_options,
                 )
             return client.inboxes.messages.send(
                 self._inbox_id,
                 to=channel_id,
                 subject=subject,
                 text=body,
+                request_options=request_options,
             )
         
         try:
