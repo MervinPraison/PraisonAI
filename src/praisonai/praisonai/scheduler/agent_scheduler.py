@@ -125,6 +125,9 @@ class AgentScheduler(_BaseAgentScheduler):
         self._total_cost = 0.0
         self._start_time = None
         self._stats_lock = threading.Lock()
+        # Eagerly initialize delivery counters + their lock so concurrent
+        # deliveries share one stable lock (no lazy-init race).
+        self._init_delivery_accounting()
         # Instance-owned timeout pool with leak accounting, mirroring the
         # AgentsGenerator tool-timeout pattern. A single pool is reused across
         # retries/runs instead of allocating a fresh one per attempt; workers
@@ -402,17 +405,28 @@ class AgentScheduler(_BaseAgentScheduler):
                 success = True
 
                 # Deliver the result to the configured chat target (if any)
-                # through the shared resilient router. Best-effort — a delivery
-                # failure must not fail the run or block the callback.
-                self._deliver_result(result)
+                # through the shared resilient router, folding the delivery
+                # outcome into truthful accounting: a genuinely undelivered
+                # result is counted, surfaced, and routed to on_failure — not
+                # silently reported as on_success.
+                delivered_ok = self._finalize_delivery(result)
 
-                if self.on_success:
-                    try:
-                        self.on_success(result)
-                    except Exception as e:
-                        logger.error(f"Callback error in on_success: {e}")
-                
-                # Update state file after successful execution
+                if delivered_ok:
+                    if self.on_success:
+                        try:
+                            self.on_success(result)
+                        except Exception as e:
+                            logger.error(f"Callback error in on_success: {e}")
+                else:
+                    if self.on_failure:
+                        try:
+                            self.on_failure(
+                                "scheduled result could not be delivered"
+                            )
+                        except Exception as e:
+                            logger.error(f"Callback error in on_failure: {e}")
+
+                # Update state file after execution
                 self._update_state_if_daemon()
                     
                 break
@@ -455,14 +469,26 @@ class AgentScheduler(_BaseAgentScheduler):
             result = self._executor.execute(self.task)
             logger.debug(f"One-time execution successful: {result}")
 
-            self._deliver_result(result)
+            # Fold the delivery outcome into callback dispatch so a one-time run
+            # whose configured delivery fails fires on_failure (and is counted),
+            # matching the scheduled-loop path.
+            delivered_ok = self._finalize_delivery(result)
 
-            if self.on_success:
-                try:
-                    self.on_success(result)
-                except Exception as e:
-                    logger.error(f"Callback error in on_success: {e}")
-            
+            if delivered_ok:
+                if self.on_success:
+                    try:
+                        self.on_success(result)
+                    except Exception as e:
+                        logger.error(f"Callback error in on_success: {e}")
+            else:
+                if self.on_failure:
+                    try:
+                        self.on_failure(
+                            "scheduled result could not be delivered"
+                        )
+                    except Exception as e:
+                        logger.error(f"Callback error in on_failure: {e}")
+
             return result
         except Exception as e:
             logger.error(f"One-time execution failed: {e}")

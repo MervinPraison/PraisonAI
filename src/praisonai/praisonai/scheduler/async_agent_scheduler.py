@@ -175,6 +175,9 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self._success_count = 0
         self._failure_count = 0
         self._start_time: Optional[datetime] = None
+        # Eagerly initialize delivery counters + their lock so concurrent
+        # deliveries share one stable lock (no lazy-init race).
+        self._init_delivery_accounting()
         
         # Sync lock for async primitives creation and bound loop tracking
         self._primitives_lock = threading.Lock()
@@ -498,10 +501,22 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 
                 # Deliver to the configured chat target (if any) off the event
                 # loop, since the shared delivery helper uses the sync bridge.
+                # Fold the outcome into truthful accounting: a genuinely
+                # undelivered result fires on_failure (and is counted), not
+                # on_success.
+                delivered_ok = True
                 if self.deliver:
-                    await asyncio.to_thread(self._deliver_result, result)
+                    delivered_ok = await asyncio.to_thread(
+                        self._finalize_delivery, result
+                    )
 
-                safe_call(self.on_success, result)
+                if delivered_ok:
+                    safe_call(self.on_success, result)
+                else:
+                    safe_call(
+                        self.on_failure,
+                        "scheduled result could not be delivered",
+                    )
                 await asyncio.to_thread(self._update_state_if_daemon)
                 return
                 
@@ -545,10 +560,22 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
 
             # Deliver to the configured chat target (if any) off the event loop,
             # since the shared delivery helper uses the sync bridge. Mirrors the
-            # scheduled-loop success path so a one-time async run is not silently
-            # undelivered.
+            # scheduled-loop success path so a one-time async run whose configured
+            # delivery fails is counted, surfaced via MESSAGE_UNDELIVERED, and
+            # fires on_failure — not silently reported as success.
+            delivered_ok = True
             if self.deliver:
-                await asyncio.to_thread(self._deliver_result, result)
+                delivered_ok = await asyncio.to_thread(
+                    self._finalize_delivery, result
+                )
+
+            if delivered_ok:
+                safe_call(self.on_success, result)
+            else:
+                safe_call(
+                    self.on_failure,
+                    "scheduled result could not be delivered",
+                )
 
             return result
         except Exception as e:
