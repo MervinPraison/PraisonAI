@@ -206,3 +206,21 @@ class TestEvaluateConditionFailSafeFallback:
         from praisonaiagents.conditions.evaluator import evaluate_condition
 
         assert evaluate_condition("{{flag}}", {"flag": "ready > now"}) is True
+
+    def test_substituted_value_parseable_as_numeric_comparison_stays_truthy(self):
+        """A plain flag whose value parses as a numeric comparison
+        (e.g. "5 < 3") must not be evaluated as a comparison: the template
+        has no operator, so the non-empty value is truthy."""
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{flag}}", {"flag": "5 < 3"}) is True
+        assert evaluate_condition("{{flag}}", {"flag": "5 > 3"}) is True
+
+    def test_substituted_value_parseable_as_equality_stays_truthy(self):
+        """A plain flag whose value parses as an equality comparison
+        (e.g. "a == b") must stay on the truthy-string path because the
+        template contains no comparison operator."""
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{flag}}", {"flag": "a == b"}) is True
+        assert evaluate_condition("{{flag}}", {"flag": "a != b"}) is True
