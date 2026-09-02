@@ -352,48 +352,59 @@ It also used to omit **route→view dispatch**, which the body of this file list
 as open and which is still open; dropping it from the closing line implied it
 had landed.
 
-## The publish gate is wired and unreachable
+## The publish gate was wired and unreachable — CLOSED
 
 `core/src/pacing/publish-gate.ts` is a verbatim port of the desktop's
 stream-pacing, with two constants tightened deliberately for mobile
-(`MAX_HELD_CHARS = 96`, `UNPAINTED_REOPEN_MS = 200`). It IS called --
-`controller.ts` has `if (frames.length > 0 && gate(streamed)) publish()` -- but
-in the shipped pipeline that condition is almost never true, so neither
-constant affects anything.
+(`MAX_HELD_CHARS = 96`, `UNPAINTED_REOPEN_MS = 200`). It WAS called --
+`controller.ts` had `if (frames.length > 0 && gate(streamed)) publish()` -- but
+in the shipped pipeline that condition was almost never true, so neither
+constant affected anything.
 
-The reason is the coalescer's flush tick, added to fix answers arriving in one
+The reason was the coalescer's flush tick, added to fix answers arriving in one
 lump. The tick drains the coalescer every `maxDelayMs`, so by the time a delta
-arrives `push()` usually returns `[]` and the gate is not consulted at all. The
-tick's own publish is deliberately ungated, which is correct -- that frame
-exists precisely because nothing has painted recently.
+arrives `push()` usually returns `[]` and the gate was not consulted at all. The
+tick's own publish was ungated, on the reasoning that its frame "exists
+precisely because nothing has painted recently."
 
 Measured by driving the real controller with a virtual clock and counting
 whether the gate was consulted even once (it calls `requestFrame` on its first
 invocation, so the count is exact rather than inferred):
 
-| tokens/sec | publishes for 2000 tokens | gate consulted |
-|-----------:|--------------------------:|:---------------|
-|         20 |                      2004 | no             |
-|         60 |                      2004 | no             |
-|        150 |                       670 | no             |
-|        400 |                       289 | no             |
-|       1600 |                        80 | no             |
-|       3200 |                        42 | YES            |
-|       8000 |                        42 | YES            |
+| tokens/sec | publishes for 2000 tokens | gate consulted (before) |
+|-----------:|--------------------------:|:------------------------|
+|         20 |                      2004 | no                      |
+|         60 |                      2004 | no                      |
+|        150 |                       670 | no                      |
+|        400 |                       289 | no                      |
+|       1600 |                        80 | no                      |
+|       3200 |                        42 | YES                     |
+|       8000 |                        42 | YES                     |
 
-The threshold is where 256 bytes land inside a single 16ms window. Real model
-streaming is 20-150 tokens/sec, so the gate is unreachable in practice.
+The threshold was where 256 bytes land inside a single 16ms window. Real model
+streaming is 20-150 tokens/sec, so the gate was unreachable in practice.
 
-This is not currently a defect: paints stay bounded by time (20-38/sec
-observed), which is the property that matters, and the per-publish view work is
-under 9% of a frame even in the worst measured case. It is recorded because
-two things follow from it. There is no backpressure path at all -- the gate is
-the mechanism that notices the renderer cannot keep up, and it never runs. And
-a module with its own tuned constants that never executes will read as load-
-bearing to the next person who changes pacing.
+This was not a live defect: paints stayed bounded by time (20-38/sec observed).
+But two things followed from it. There was no backpressure path at all -- the
+gate is the mechanism that notices the renderer cannot keep up, and it never
+ran. And a module with its own tuned constants that never executes reads as
+load-bearing to the next person who changes pacing.
 
-Fix it by wiring the tick's publish through the gate, or delete the module and
-its constants. Do not leave it looking wired.
+**CLOSED by wiring, not deletion.** The flush tick now publishes THROUGH the
+gate: `if (gate(streamed)) publish()`. The old "ungated is correct here"
+reasoning had the gate's state backwards -- `gate()` returns `true` whenever the
+gate is OPEN, and it is open exactly when nothing has painted recently (it opens
+on its first call and reopens on a frame callback or after `UNPAINTED_REOPEN_MS`
+with no paint). So the tick after a quiet period still paints immediately; the
+gate only skips a tick that fires just after a paint, which is backpressure and
+the one thing this pipeline lacked. `MAX_HELD_CHARS` still forces the tail out,
+so a closed gate cannot swallow the end of an answer, and the final
+`finally`-publish is ungated as before. Both constants are now load-bearing.
+
+Pinned by `controller.test.ts` ("the flush tick paints through the publish gate,
+so backpressure bounds it"): 40 ticks with no frame release produce a handful of
+paints, not 40. Reverting to the ungated tick makes every tick paint (measured:
+45 paints for 40 ticks) and fails the bound.
 
 Five settings used to be declared and consumed by nothing: `model`,
 `temperature`, `showReasoning`, `showDiagnostics` and `apiKey` (issue #4636).

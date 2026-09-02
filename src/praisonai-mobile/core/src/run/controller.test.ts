@@ -249,6 +249,73 @@ test("the tick stops when the turn ends", async () => {
   assert.equal(h.views.length, before, "a tick after the turn must publish nothing");
 });
 
+test("the flush tick paints through the publish gate, so backpressure bounds it", async () => {
+  // The gate (core/src/pacing/publish-gate.ts) exists to skip a paint when the
+  // renderer cannot keep up, and it carries two mobile-tuned constants. Before
+  // this it was unreachable in the shipping pipeline: the coalescer's flush tick
+  // drains every maxDelayMs, so `coalescer.push()` in the run loop almost always
+  // returned [] and the per-event `gate()` was never consulted, while the tick's
+  // own publish was ungated (issue #4639). A module with tuned constants that
+  // never runs reads as load-bearing to the next person who changes pacing.
+  //
+  // Now the tick publishes THROUGH the gate. This test drives many small deltas,
+  // each flushed by a tick, WITHOUT releasing an animation frame between them --
+  // so the gate closes after its first paint and stays closed until MAX_HELD_CHARS
+  // of new text has streamed. The paint count must therefore be far below the
+  // number of ticks. Reverting to an ungated tick publish makes every tick paint
+  // and fails the upper bound; the gate never being consulted at all fails it too.
+  const time = createFakeTime();
+  const views: RunView[] = [];
+  const DELTAS = 40;
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run() {
+      yield { type: "start", msgId: "m", runId: "r" } as RunEvent;
+      for (let i = 0; i < DELTAS; i++) {
+        // Ten chars a delta: well under MAX_HELD_CHARS (96), so several ticks
+        // must pass before the gate reopens on the character cap alone.
+        yield { type: "delta", msgId: "m", text: "0123456789" } as RunEvent;
+        // Flush this delta on the tick path -- and DO NOT release a frame, so
+        // the gate cannot reopen that way. A closed gate then skips the paint.
+        time.advance(20);
+        time.tick();
+        await Promise.resolve();
+      }
+      yield {
+        type: "end", msgId: "m", userIndex: 0, assistantIndex: 1, versions: 1, active: 0,
+      } as RunEvent;
+    },
+    async decide() { return false; },
+    async cancel() { return false; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({
+    engine, time,
+    onPublish: (v) => views.push(v),
+  });
+  await controller.send("go");
+
+  // No token may be lost to pacing: the final answer is every delta.
+  assert.equal(views.at(-1)?.turn.text.length, DELTAS * 10, "no token may be lost to pacing");
+
+  // The point of the fix: paints are bounded by the gate, not one per tick. With
+  // 40 ticks and no frame release, only a handful of tick paints get through --
+  // the ones where MAX_HELD_CHARS of new text has accumulated since the last.
+  // (send() and the final finally-publish are ungated, hence the small slack.)
+  const tickCeiling = Math.ceil((DELTAS * 10) / 96) + 4;
+  assert.ok(
+    views.length <= tickCeiling,
+    `the gate must bound tick paints: got ${views.length} for ${DELTAS} ticks`,
+  );
+  assert.ok(views.length >= 2, "something must have been published");
+});
+
 // ---- an approval the engine refuses -----------------------------------------
 
 test("an approval the engine refuses is shown as failed, never as sent", async () => {

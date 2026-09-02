@@ -225,11 +225,29 @@ export function createRunController(deps: ControllerDeps): RunController {
         return;
       }
       applyFrame(frame);
-      // Deliberately NOT gated. The gate skips intermediate paints when the
-      // renderer cannot keep up; this frame exists precisely because nothing
-      // has painted for maxDelayMs, so skipping it reintroduces the stall it
-      // was added to prevent.
-      publish();
+      // Gated -- and this is where the gate actually earns its constants.
+      //
+      // It used to publish unconditionally, reasoning that a tick frame exists
+      // "precisely because nothing has painted for maxDelayMs, so skipping it
+      // reintroduces the stall". That reasoning had the gate's own state
+      // backwards. `gate(streamed)` returns TRUE whenever the gate is OPEN, and
+      // the gate is open exactly when nothing has painted recently: it opens on
+      // its first call, and reopens on a frame callback or after
+      // UNPAINTED_REOPEN_MS (200) with no paint. So the tick after a quiet
+      // period passes the gate and paints immediately -- the stall the old
+      // comment feared cannot happen.
+      //
+      // What the gate DOES skip is a tick that fires just after a paint, while
+      // the renderer is still catching up. That is backpressure, and it is the
+      // one thing this pipeline had no path for: with the coalescer's flush
+      // tick draining every 16ms, `coalescer.push()` below almost always
+      // returns [] so the per-event gate at line ~275 was never consulted, and
+      // MAX_HELD_CHARS / UNPAINTED_REOPEN_MS -- tuned for mobile -- bound
+      // nothing (issue #4639). Consulting the gate here makes it the single
+      // backpressure authority and both constants load-bearing, while
+      // MAX_HELD_CHARS still forces the tail out so a closed gate cannot swallow
+      // the end of an answer.
+      if (gate(streamed)) publish();
     });
 
     const request: RunRequest = {
