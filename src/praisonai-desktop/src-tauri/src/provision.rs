@@ -186,6 +186,50 @@ pub fn plan(uv: &Path, data_dir: &Path, packages: &[&str], platform: Platform) -
     steps
 }
 
+/// Just the dependency-install step, for re-applying a changed package set into
+/// a venv that already exists. This is the last step of `plan`, reused so the
+/// re-provision path and the first-run path cannot disagree about how packages
+/// are installed (one resolution, targeting this venv's interpreter).
+pub fn deps_step(uv: &Path, data_dir: &Path, packages: &[&str], platform: Platform) -> Step {
+    plan(uv, data_dir, packages, platform)
+        .into_iter()
+        .find(|s| s.id == "deps")
+        .expect("plan always contains a deps step")
+}
+
+/// The stamp recording which packages were last installed into the venv.
+///
+/// Kept beside the venv, not in the data directory, so deleting the venv to
+/// repair it also clears the record -- a stamp that outlived its venv would
+/// claim packages that are no longer installed.
+pub fn stamp_path(data_dir: &Path) -> PathBuf {
+    venv_dir(data_dir).join(".praisonai-packages")
+}
+
+/// The stamp's contents for a given package set: one requirement per line.
+///
+/// Order-independent, so a reordering of `ENGINE_PACKAGES` alone does not force
+/// a reinstall, but any added, removed, or changed requirement does.
+pub fn stamp_contents(packages: &[&str]) -> String {
+    let mut lines: Vec<&str> = packages.to_vec();
+    lines.sort_unstable();
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// Whether the venv must be brought up to `packages`, given whatever stamp was
+/// found (or `None` if there is no stamp yet).
+///
+/// A missing stamp means an install that predates stamping: treat it as drift
+/// so those users get the current package set once, rather than never.
+pub fn needs_reprovision(existing_stamp: Option<&str>, packages: &[&str]) -> bool {
+    match existing_stamp {
+        Some(found) => found != stamp_contents(packages),
+        None => true,
+    }
+}
+
 /// What the engine needs to import. Kept here so the provisioning plan and the
 /// failure message cannot disagree about it.
 // Pinned to a floor, not left open.
@@ -359,5 +403,50 @@ mod tests {
     fn the_python_version_is_pinned() {
         assert!(PYTHON_VERSION.starts_with("3."), "{PYTHON_VERSION}");
         assert!(!PYTHON_VERSION.contains("latest"));
+    }
+
+    #[test]
+    fn the_reprovision_step_is_the_plans_deps_step() {
+        // Re-applying a changed package set must install exactly as first-run
+        // does: one resolution, targeting this venv's interpreter.
+        let step = deps_step(Path::new("/uv"), Path::new("/data"), ENGINE_PACKAGES, Platform::Mac);
+        assert_eq!(step.id, "deps");
+        let i = step.args.iter().position(|a| a == "--python").unwrap();
+        assert_eq!(
+            step.args[i + 1],
+            venv_python(Path::new("/data"), Platform::Mac).display().to_string()
+        );
+        for p in ENGINE_PACKAGES {
+            assert!(step.args.iter().any(|a| a == p), "{p} missing");
+        }
+    }
+
+    #[test]
+    fn the_stamp_sits_inside_the_venv_so_deleting_it_clears_the_record() {
+        let p = stamp_path(Path::new("/data"));
+        assert!(p.starts_with(venv_dir(Path::new("/data"))), "{p:?}");
+    }
+
+    #[test]
+    fn reordering_the_packages_is_not_drift_but_changing_one_is() {
+        // The stamp is order-independent, so shuffling ENGINE_PACKAGES alone
+        // does not reinstall; a version bump or an added name does.
+        let stamp = stamp_contents(&["praisonaiagents>=1.7.2", "b"]);
+        assert!(!needs_reprovision(Some(&stamp), &["b", "praisonaiagents>=1.7.2"]));
+        assert!(needs_reprovision(Some(&stamp), &["praisonaiagents>=1.7.3", "b"]));
+        assert!(needs_reprovision(Some(&stamp), &["praisonaiagents>=1.7.2"]));
+    }
+
+    #[test]
+    fn no_stamp_is_treated_as_drift_so_pre_stamp_installs_get_updated_once() {
+        // An install made before stamping existed has no record; those users
+        // must get the current set once, not never.
+        assert!(needs_reprovision(None, ENGINE_PACKAGES));
+    }
+
+    #[test]
+    fn a_matching_stamp_is_not_drift_so_startup_stays_fast() {
+        let stamp = stamp_contents(ENGINE_PACKAGES);
+        assert!(!needs_reprovision(Some(&stamp), ENGINE_PACKAGES));
     }
 }

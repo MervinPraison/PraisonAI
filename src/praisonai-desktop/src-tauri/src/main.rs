@@ -84,6 +84,85 @@ fn resolve_python(user_data: Option<&Path>) -> Result<PathBuf, String> {
     Err(format!("no usable Python found. Tried: {}", tried.join("; ")))
 }
 
+/// Bring an existing venv up to the current `ENGINE_PACKAGES` if it drifted.
+///
+/// The venv is built once, on first run, and then left alone -- so a fix
+/// shipped in `praisonaiagents` after that never reaches the user, and raising
+/// the pin in `ENGINE_PACKAGES` changes only what *new* installs get. This
+/// compares a stamp written beside the venv against the current requirement
+/// and, when they differ, re-runs the single install step (uv is near-instant
+/// when nothing changed) and rewrites the stamp.
+///
+/// Returns whether an install was attempted, so the caller can label the tray.
+/// Best effort throughout: a failure here must not block starting the engine,
+/// because a stale-but-working engine is better than no engine, and the UI
+/// reports the truth of what version is actually running.
+///
+/// `python` is the interpreter startup resolved. Reconciliation only touches
+/// the venv that interpreter belongs to: `python_candidates` may resolve a
+/// `PRAISONAI_PYTHON` override or a checkout venv ahead of `data/venv`, and
+/// installing into `data/venv` in that case would modify an environment the
+/// engine is not running from -- or fail every launch against a `data/venv`
+/// that was never provisioned. The stamp lives beside that same venv, so a
+/// non-`data/venv` interpreter is left untouched: its owner manages its
+/// packages.
+/// Returns whether packages were actually installed. A `true` means the venv's
+/// code changed underneath any engine still running from it, so the caller must
+/// not adopt that stale process: it is still executing the old package code and
+/// only a restart picks up the new one.
+fn reconcile_engine_packages(data: &Path, python: &Path, app: &tauri::AppHandle) -> bool {
+    use praisonai_desktop_core::provision::{
+        deps_step, locate_uv, needs_reprovision, stamp_contents, stamp_path, uv_candidates,
+        venv_python, Uv, ENGINE_PACKAGES,
+    };
+    // Only reconcile the venv we own and provisioned. If startup picked some
+    // other interpreter, its packages are not ours to rewrite.
+    if python != venv_python(data, Platform::current()) {
+        return false;
+    }
+    let stamp = std::fs::read_to_string(stamp_path(data)).ok();
+    if !needs_reprovision(stamp.as_deref(), ENGINE_PACKAGES) {
+        return false;
+    }
+    let Some(home) = home_dir() else { return false };
+    let platform = Platform::current();
+    let uv = match locate_uv(&uv_candidates(&home, data, platform), |p| p.is_file()) {
+        Uv::Found(p) => p,
+        // No uv means no first-run provision has completed; there is nothing to
+        // reconcile, and fetching one here would turn a normal launch into a
+        // download.
+        Uv::Fetch => return false,
+    };
+    let step = deps_step(&uv, data, ENGINE_PACKAGES, platform);
+    let mut command = std::process::Command::new(&step.program);
+    no_console(&mut command);
+    // "updating…" is shown only around the install that is actually running,
+    // and "starting…" restored before returning -- so no path out of here
+    // leaves the tray claiming an update that has finished or never ran.
+    praisonai_desktop_core::tray::set_engine_label(app, "Engine: updating\u{2026}");
+    let installed = match command.args(&step.args).output() {
+        Ok(out) if out.status.success() => {
+            // Only stamp on success: a failed install must be retried next
+            // launch, not silently recorded as done.
+            let _ = std::fs::write(stamp_path(data), stamp_contents(ENGINE_PACKAGES));
+            true
+        }
+        Ok(out) => {
+            eprintln!(
+                "[praisonai] package update failed, starting with what is installed: {}",
+                String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("[praisonai] could not run package update: {e}");
+            false
+        }
+    };
+    praisonai_desktop_core::tray::set_engine_label(app, "Engine: starting\u{2026}");
+    installed
+}
+
 /// Build the engine's Python environment, reporting each step as it starts.
 ///
 /// Emits `provision` events rather than returning a lump at the end: the whole
@@ -232,6 +311,14 @@ async fn provision_engine(app: tauri::AppHandle) -> Result<String, String> {
     if !py.is_file() {
         return Err(format!("finished, but {} is not there", py.display()));
     }
+    // Record what was installed, so a later launch can tell whether the venv is
+    // still current or predates a raised requirement and needs re-applying.
+    // Best effort: a venv that provisioned correctly must not be reported as a
+    // failure because a note beside it could not be written.
+    let _ = std::fs::write(
+        praisonai_desktop_core::provision::stamp_path(&data),
+        praisonai_desktop_core::provision::stamp_contents(ENGINE_PACKAGES),
+    );
     Ok(py.display().to_string())
 }
 
@@ -262,21 +349,48 @@ fn engine_status(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> En
     // from Tauri package metadata, which the release workflow derives from the
     // tag, rather than from Cargo.toml's development-only package version.
     let shell_version = app.package_info().version.to_string();
+    // A resolved Python means a venv exists. Before starting the engine from
+    // it, bring it up to the current package requirement if it drifted -- the
+    // venv is provisioned once and otherwise never revisited, so a library fix
+    // shipped after first run would never reach this user. On failure the
+    // engine still starts, reporting whatever version is actually installed.
+    // `reconcile_engine_packages` shows "updating…" itself only while an
+    // install actually runs, and always restores "starting…" on return -- so a
+    // no-drift launch, a non-owned interpreter, or a subsequent `resolve_engine`
+    // failure never strands the tray on "updating…" reporting an update that is
+    // not running. It returns whether it actually installed: a fresh install
+    // means any engine still running from this venv is executing the old code,
+    // so that process must be reaped and restarted rather than adopted.
+    let reinstalled = match user_data.as_deref() {
+        Some(dir) => reconcile_engine_packages(dir, &python, &app),
+        None => false,
+    };
     // Reap or adopt whatever the last run left. Neither `Drop` nor the reap on
     // exit runs when the shell is killed by a signal, and that was observed:
     // `kill -TERM` on the app left the Python child alive with a lockfile still
     // claiming it, and the next launch started a second engine beside it.
+    //
+    // When packages were just reinstalled, adoption is suppressed: the survivor
+    // imported the old code at its own start and cannot see the new files, so
+    // it is killed and its lock cleared, and the fresh `start` below launches
+    // one that loads what was installed. Nothing is adopted stale.
     if let Some(dir) = user_data.as_deref() {
         let venv = venv_root_for_python(&python, &RealFs, Platform::current())
             .map(|l| l.root.display().to_string())
             .unwrap_or_default();
-        match reclaim(
+        // A fresh install forces the survivor to be treated as unhealthy: the
+        // probe closure returns `false`, so a matching engine is killed and its
+        // lock cleared (`KillAndRespawn`) rather than adopted, and the PID-reuse
+        // guard in `reclaim` still protects an unrelated process on the same
+        // PID. Otherwise probe for real and adopt a healthy survivor.
+        let decision = reclaim(
             dir,
             &python.display().to_string(),
             &venv,
-            |port| supervisor::probe_health(port, &shell_version),
+            |port| !reinstalled && supervisor::probe_health(port, &shell_version),
             kill_pid,
-        ) {
+        );
+        match decision {
             Decision::Adopt { port } => {
                 log_decision(&Decision::Adopt { port });
                 praisonai_desktop_core::tray::set_engine_label(
