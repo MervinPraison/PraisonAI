@@ -35,18 +35,6 @@ from ..goal.loop import GoalLoopMixin
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
 
-_COMPLETION_NEGATION_RE = re.compile(
-    r'\b(?:not|never|no longer|hardly|barely|isn\'t|aren\'t|wasn\'t|weren\'t|hasn\'t|haven\'t|hadn\'t|won\'t|wouldn\'t|can\'t|couldn\'t|shouldn\'t|don\'t|doesn\'t|didn\'t)\b'
-    r'.{0,20}'
-)
-_COMPLETION_PATTERNS = (
-    (re.compile(r'\btask\s+completed?\b'), False),
-    (re.compile(r'\bcompleted\s+successfully\b'), False),
-    (re.compile(r'\ball\s+done\b'), False),
-    (re.compile(r'\bdone\b'), True),
-    (re.compile(r'\bfinished\b'), True),
-)
-
 # ============================================================================
 # Performance: Lazy imports for heavy dependencies
 # Rich, LLM, and display utilities are only imported when needed (output=verbose)
