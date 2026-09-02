@@ -869,7 +869,7 @@ test("the settings screen is EDITABLE, so a phone can point the engine somewhere
   assert.ok(field, `the engine address must be editable:\n${dom.text()}`);
 
   (field as { value: string }).value = "http://10.0.0.7:9000";
-  (field as { dispatch(t: string, e: unknown): void }).dispatch("change", {});
+  dom.change(field as never);
   await settle();
 
   // Persisted in the live facade AND written through to storage, so the next
@@ -901,7 +901,7 @@ test("a setting the store REFUSES resets the field instead of showing a phantom 
   );
   assert.ok(select, "the engine choice must be a select");
   (select as { value: string }).value = "not-a-real-engine";
-  (select as { dispatch(t: string, e: unknown): void }).dispatch("change", {});
+  dom.change(select as never);
   await settle();
 
   assert.equal(app?.settings.get("engineId"), ENGINE_REMOTE_HTTP, "a rejected choice must not persist");
@@ -936,7 +936,7 @@ test("a storage failure while editing a setting stays LOCAL, not fatal", async (
   const before = app?.settings.get("baseUrl");
   storage.failNext("QuotaExceededError: the storage is full");
   (field as { value: string }).value = "http://10.0.0.7:9000";
-  (field as { dispatch(t: string, e: unknown): void }).dispatch("change", {});
+  dom.change(field as never);
   await settle();
 
   // The app must survive: the chat screen and composer are still reachable, and
@@ -1155,5 +1155,127 @@ test("an English device still lays out left-to-right -- the pair", async () => {
   });
 
   assert.equal(dom.root.getAttribute("dir"), "ltr");
+  app?.dispose();
+});
+
+// ---- the recovery path, end to end -----------------------------------------
+//
+// A phone reaches no `127.0.0.1:8765`, so first launch warns that the engine
+// is not answering and points at Settings. Everything from that warning to a
+// working engine has to hold, and two links of it did not: a refused value
+// vanished with no explanation, and a corrected address changed nothing until
+// the app was force-quit and relaunched.
+
+const settingField = (dom: ReturnType<typeof createFakeDom>, label: string) =>
+  dom.find(
+    (n) => (n.tagName === "INPUT" || n.tagName === "SELECT") && n.getAttribute("aria-label") === label,
+  );
+
+const openSettings = async (dom: ReturnType<typeof createFakeDom>): Promise<void> => {
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+};
+
+test("a corrected engine address redirects the very NEXT message, with no relaunch", async () => {
+  // The whole point of making the screen editable. `enginesFor` read `baseUrl`
+  // once at construction and the app builds its engine once at boot, so the
+  // address the user typed was persisted, displayed, and then ignored for the
+  // rest of the session -- every message still went to the unreachable default.
+  const { dom, http, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  await openSettings(dom);
+  const field = settingField(dom, "Engine address");
+  assert.ok(field, `the engine address must be editable:\n${dom.text()}`);
+  field.value = "http://10.0.0.7:9000";
+  dom.change(field as never);
+  await settle();
+
+  submit(dom, "hello");
+  await settle();
+
+  const chats = http.sent.filter((r) => r.url.endsWith("/chat")).map((r) => r.url);
+  assert.ok(chats.length > 0, "the message never reached the transport at all");
+  assert.equal(
+    chats.at(-1),
+    "http://10.0.0.7:9000/chat",
+    `the turn still went to the old address: ${chats.join(", ")}`,
+  );
+  app?.dispose();
+});
+
+test("a REFUSED setting says so on screen, instead of the field quietly snapping back", async () => {
+  // A field that resets and says nothing is indistinguishable from a mis-tap,
+  // a lost keystroke, or a save that worked. On the one screen whose job is to
+  // repair an unreachable engine, "nothing happened and nothing was said" is
+  // the failure mode that leaves a user re-typing the same rejected value.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  await openSettings(dom);
+  const select = settingField(dom, "Engine");
+  assert.ok(select, "the engine choice must be a select");
+  select.value = "not-a-real-engine";
+  dom.change(select as never);
+  await settle();
+
+  // Still refused, and still snapped back -- the existing guarantees.
+  assert.equal(app?.settings.get("engineId"), ENGINE_REMOTE_HTTP, "a rejected choice must not persist");
+  assert.equal(select.value, ENGINE_REMOTE_HTTP, "the field must reset to what is stored");
+
+  // And now SAID. Visibly, for a sighted user...
+  const shown = dom.find((n) => n.className.includes("setting-error") && n.hidden === false);
+  assert.ok(shown, `a refused setting was dropped silently:\n${dom.text()}`);
+  assert.match(shown.textContent, /Engine/, "the message must name the setting it refused");
+
+  // ...and out loud, because the field it belongs to may be off screen and a
+  // screen-reader user gets no "it snapped back" cue at all.
+  const spoken = dom.find((n) => n.getAttribute("aria-live") === "assertive");
+  assert.match(spoken?.textContent ?? "", /Engine/, "a refused setting must also be announced");
+  app?.dispose();
+});
+
+test("an ACCEPTED setting clears its OWN refusal, and only its own", async () => {
+  // Two pairs in one, because each guards the other's cheap implementation. A
+  // screen that reports every write as refused would satisfy the test above
+  // while making the setting look permanently broken, so an accepted write has
+  // to clear its message. And clearing ALL of them on any accepted write would
+  // wipe a refusal the user has not read off a DIFFERENT setting -- the note
+  // beside `engineId` is still true while `baseUrl` is being edited.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  const errorFor = (key: string) =>
+    dom.find((n) => n.dataset["settingError"] === key && n.hidden === false);
+
+  await openSettings(dom);
+  const select = settingField(dom, "Engine");
+  assert.ok(select);
+  select.value = "not-a-real-engine";
+  dom.change(select as never);
+  await settle();
+  assert.ok(errorFor("engineId"), "the refusal this test clears must be on screen first");
+
+  // An accepted write to a DIFFERENT setting leaves it alone.
+  const field = settingField(dom, "Engine address");
+  assert.ok(field);
+  field.value = "http://10.0.0.7:9000";
+  dom.change(field as never);
+  await settle();
+  assert.equal(app?.settings.get("baseUrl"), "http://10.0.0.7:9000", "the accepted edit must persist");
+  assert.equal(errorFor("baseUrl"), null, "an accepted write must not accuse itself");
+  assert.ok(errorFor("engineId"), "a refusal must not be cleared by a write to another setting");
+
+  // An accepted write to the SAME setting does clear it.
+  select.value = ENGINE_REMOTE_HTTP;
+  dom.change(select as never);
+  await settle();
+  assert.equal(app?.settings.get("engineId"), ENGINE_REMOTE_HTTP);
+  assert.equal(
+    errorFor("engineId"),
+    null,
+    `an accepted write must leave no refusal on its own field:\n${dom.text()}`,
+  );
   app?.dispose();
 });
