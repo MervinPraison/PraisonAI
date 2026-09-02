@@ -7,8 +7,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { stopNotice } from "./main.ts";
+import { defaultEngineIdFor, stopNotice } from "./main.ts";
 import { en } from "../../ui/src/i18n/strings.ts";
+
+test("every platform's first-launch default is the remote engine, for now", () => {
+  // Tempting to default a device to the in-process engine -- a phone cannot
+  // reach `http://127.0.0.1:8765` and the cleartext localhost address is
+  // refused by iOS ATS and Android -- but the in-process engine's module is
+  // ABSENT from the shipping webview: build-webview.mjs bundles only
+  // `main.ts` into `dist/app.js`, and the engine reaches praisonai-ts through a
+  // runtime-computed import left outside that bundle (#4437). So defaulting a
+  // device to it would swap the "not answering" warning (which names Settings
+  // as the fix) for a first prompt that fails "unavailable in this build" with
+  // no recovery -- the very brick registry.ts keeps the engine out of the
+  // picker to avoid. Until #4437 ships praisonai-ts inside the webview, remote
+  // is the honest default. `Platform["kind"]` also cannot tell desktop Tauri
+  // (`cargo tauri dev`) from a phone, so a `kind === "tauri"` default would
+  // strand the desktop/dev flow too.
+  assert.equal(defaultEngineIdFor("tauri"), ENGINE_REMOTE_HTTP);
+  assert.equal(defaultEngineIdFor("web"), ENGINE_REMOTE_HTTP);
+});
 
 test("a stop the engine REFUSED is announced", () => {
   // Discarding the controller's boolean made a refused Stop indistinguishable

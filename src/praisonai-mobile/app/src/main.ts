@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, SETTING_DEFS } from "./registry.ts";
+import { enginesFor, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -121,6 +121,39 @@ export function appEngines(deps: {
     onIgnored: deps.onIgnored,
     createInProcess: (persistence) => createInProcessEngine(persistence, deps.settings),
   });
+}
+
+/**
+ * The engine to start with when settings name none.
+ *
+ * `remote-http` on every platform, for now, and the reason is a hard fact about
+ * this build rather than a preference: the webview ships only `dist/app.js`
+ * (build-webview.mjs bundles `app/src/main.ts` and copies nothing else), and
+ * the in-process engine reaches praisonai-ts through a RUNTIME-computed import
+ * that is deliberately outside that bundle (#4437). So on a real device the
+ * in-process engine's module is simply ABSENT -- its first turn rejects with
+ * "the in-process engine is unavailable in this build". Making it the device
+ * DEFAULT would therefore swap the old "not answering" warning (which at least
+ * names Settings as the fix) for a first prompt that fails with no recovery,
+ * and would do it on the exact path registry.ts keeps the engine OUT of the
+ * shipping picker to avoid ("a picker must not offer a choice that bricks the
+ * app"). Until #4437 makes praisonai-ts resolvable inside the webview, the
+ * honest first-launch default stays the remote engine.
+ *
+ * A second reason the ternary this replaced was wrong: `Platform["kind"]` is
+ * only `"tauri" | "web"`, and DESKTOP Tauri (`cargo tauri dev`) reports
+ * `"tauri"` too -- so keying the in-process engine off `kind === "tauri"` also
+ * flipped the desktop/dev flow away from the remote engine it exists for, with
+ * no way here to tell a phone from a laptop.
+ *
+ * Kept as an exported function, taking the platform kind, so the seam is ready
+ * for the day a device can be told apart AND the engine ships -- and so a test
+ * drives it directly rather than asserting an expression appears in `mount`.
+ * The persisted `engineId` still wins over this (see `chosenStringOr` in
+ * boot.ts), so it only ever decides the very first launch.
+ */
+export function defaultEngineIdFor(_kind: Platform["kind"]): string {
+  return ENGINE_REMOTE_HTTP;
 }
 
 export interface MountDeps {
@@ -316,9 +349,12 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     engines: (persistence, settings, onIgnored) =>
       appEngines({ settings, http: platform.http, persistence, onIgnored }),
     settingDefs: SETTING_DEFS,
-    // The default when settings name none. createApp prefers the persisted
-    // `engineId` over this; passing it as a literal was ignoring the setting.
-    engineId: "remote-http",
+    // The default when settings name none, chosen by platform: the in-process
+    // engine on a device (a phone has no `127.0.0.1:8765` to reach, and a
+    // cleartext localhost address is refused by iOS ATS and Android), the
+    // remote engine on desktop/dev where one actually runs. createApp prefers
+    // the persisted `engineId` over this, so it only decides the first launch.
+    engineId: defaultEngineIdFor(platform.kind),
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),
     newChatId: mintChatId,
