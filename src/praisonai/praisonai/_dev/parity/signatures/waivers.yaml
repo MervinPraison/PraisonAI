@@ -327,13 +327,7 @@ waivers:
   Task.__init__.config:
     owner: praisonai-ts
     reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  Task.__init__.context:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
   Task.__init__.create_directory:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  Task.__init__.depends_on:
     owner: praisonai-ts
     reason: 'baseline 2026-09-02: not yet ported to TypeScript'
   Task.__init__.description:

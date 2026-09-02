@@ -20,15 +20,15 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 |---|---|---|---|---|---|---|---|---|---|
 | `Agent.__init__` | 42 | 8 | 1 | 4 | 2 | 27 | 6 | 33 | 13 / 30 |
 | `AgentTeam.__init__` | 23 | 3 | 0 | 0 | 0 | 20 | 1 | 21 | 2 / 5 |
-| `Task.__init__` | 60 | 4 | 0 | 2 | 0 | 54 | 5 | 59 | 0 / 5 |
+| `Task.__init__` | 60 | 4 | 0 | 2 | 0 | 54 | 3 | 57 | 0 / 5 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 4 / 5 |
 | `Agent.chat` | 17 | 1 | 0 | 1 | 0 | 15 | 0 | 15 | 1 / 3 |
 | `AgentTeam.start` | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 3 | 0 / 0 |
 | `Handoff.__init__` | 7 | 1 | 1 | 3 | 0 | 2 | 2 | 4 | 11 / 16 |
 | `LLM.__init__` | 25 | 2 | 2 | 1 | 0 | 20 | 0 | 20 | 0 / 5 |
 | `Session.__init__` | 7 | 1 | 4 | 2 | 0 | 0 | 2 | 2 | 2 / 9 |
-| `tool()` | 11 | 2 | 0 | 1 | 0 | 8 | 2 | 10 | 2 / 5 |
-| **Total (10 surfaces)** | 196 | 23 | 8 | 14 | 2 | 149 | 19 | 168 | 35 / 83 |
+| `tool()` | 11 | 2 | 0 | 1 | 0 | 8 | 3 | 10 | 2 / 5 |
+| **Total (10 surfaces)** | 196 | 23 | 8 | 14 | 2 | 149 | 18 | 166 | 35 / 83 |
 
 ## Surfaces
 
@@ -124,7 +124,7 @@ TS-only members: `verbose`?, `pretty`?
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:47`
 - TypeScript: `src/praisonai-ts/src/agent/types.ts:4` (ctor `src/praisonai-ts/src/agent/types.ts:20`)
-- Counts: 60 python params: 4 exact, 0 camelCase, 2 alias, 0 flattened, 54 missing; 5 mismatches; 59 waived; 0 TS-only of 5
+- Counts: 60 python params: 4 exact, 0 camelCase, 2 alias, 0 flattened, 54 missing; 3 mismatches; 57 waived; 0 TS-only of 5
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -133,8 +133,8 @@ TS-only members: `verbose`?, `pretty`?
 | `agent` | positional | null | `Optional[Agent]` | exact | `agent` | null | `any` | ok |
 | `name` | positional | null | `Optional[str]` | exact | `name` | *required* | `string` | required mismatch (waived) |
 | `tools` | positional | null | `Optional[List[Any]]` | missing |  |  |  | MISSING (waived) |
-| `context` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | alias | `dependencies` | [] | `Task[]` | default mismatch (waived) |
-| `depends_on` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | alias | `dependencies` | [] | `Task[]` | default mismatch (waived) |
+| `context` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | alias | `dependencies` | [] | `Task[]` | ok |
+| `depends_on` | positional | null | `Optional[List[Union[str, List, 'Task']]]` | alias | `dependencies` | [] | `Task[]` | ok |
 | `async_execution` | positional | false | `Optional[bool]` | missing |  |  |  | MISSING (waived) |
 | `config` | positional | null | `Optional[Dict[str, Any]]` | missing |  |  |  | MISSING (waived) |
 | `output_file` | positional | null | `Optional[str]` | missing |  |  |  | MISSING (waived) |
@@ -266,7 +266,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 ### `LLM.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:413`
-- TypeScript: `src/praisonai-ts/src/llm/index.ts:1`
+- TypeScript: `src/praisonai-ts/src/llm/index.ts:1` (ctor `src/praisonai-ts/src/llm/index.ts:28`)
 - Counts: 25 python params: 2 exact, 2 camelCase, 1 alias, 0 flattened, 20 missing; 0 mismatches; 20 waived; 0 TS-only of 5
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -320,14 +320,14 @@ TS-only members: `parent`?, `db`?
 ### `tool()`
 
 - Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:235`
-- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:16`
-- Counts: 11 python params: 2 exact, 0 camelCase, 1 alias, 0 flattened, 8 missing; 2 mismatches; 10 waived; 2 TS-only of 5
+- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:16` (ctor `src/praisonai-ts/src/tools/decorator.ts:48`)
+- Counts: 11 python params: 2 exact, 0 camelCase, 1 alias, 0 flattened, 8 missing; 3 mismatches; 10 waived; 2 TS-only of 5
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `func` | positional | null | `Optional[Callable]` | alias | `execute` | *required* | `(params: TParams, context?: ToolContext) => Promise<TResult> \| TResult` | required mismatch (waived) |
 | `name` | keyword | null | `Optional[str]` | exact | `name` | *required* | `string` | required mismatch (waived) |
-| `description` | keyword | null | `Optional[str]` | exact | `description` | undefined | `string` | ok |
+| `description` | keyword | null | `Optional[str]` | exact | `description` | ``Function ${config.name}`` | `string` | default mismatch |
 | `version` | keyword | "1.0.0" | `str` | missing |  |  |  | MISSING (waived) |
 | `availability` | keyword | null | `Optional[Callable[[], tuple[bool, str]]]` | missing |  |  |  | MISSING (waived) |
 | `dynamic_schema_overrides` | keyword | null | `Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]` | missing |  |  |  | MISSING (waived) |
@@ -450,9 +450,7 @@ TS-only members: `parameters`?, `category`?
 | `Task.__init__.callback` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.condition` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.config` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.context` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.create_directory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.depends_on` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.description` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.else_task` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
 | `Task.__init__.execution` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |

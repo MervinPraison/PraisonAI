@@ -2939,6 +2939,7 @@
       },
       "ts_only": [],
       "typescript": {
+        "ctor_location": "src/praisonai-ts/src/llm/index.ts:28",
         "location": "src/praisonai-ts/src/llm/index.ts:1"
       }
     },
@@ -3175,12 +3176,12 @@
         "camelCase": 0,
         "exact": 4,
         "flattened": 0,
-        "mismatches": 5,
+        "mismatches": 3,
         "missing": 54,
         "params": 60,
         "ts_only": 0,
         "ts_total": 5,
-        "waived": 59
+        "waived": 57
       },
       "params": [
         {
@@ -3315,10 +3316,7 @@
           "canonical": "context",
           "default": null,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=null typescript=[] (TS `dependencies`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "alias",
           "name": "context",
@@ -3336,17 +3334,14 @@
           "ts_name": "dependencies",
           "type_class": "array",
           "type_text": "Optional[List[Union[str, List, 'Task']]]",
-          "waived": "Task.__init__.context",
+          "waived": null,
           "warnings": []
         },
         {
           "canonical": "dependsOn",
           "default": null,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=null typescript=[] (TS `dependencies`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "alias",
           "name": "depends_on",
@@ -3364,7 +3359,7 @@
           "ts_name": "dependencies",
           "type_class": "array",
           "type_text": "Optional[List[Union[str, List, 'Task']]]",
-          "waived": "Task.__init__.depends_on",
+          "waived": null,
           "warnings": []
         },
         {
@@ -4391,7 +4386,7 @@
         "camelCase": 0,
         "exact": 2,
         "flattened": 0,
-        "mismatches": 2,
+        "mismatches": 3,
         "missing": 8,
         "params": 11,
         "ts_only": 2,
@@ -4459,15 +4454,18 @@
           "canonical": "description",
           "default": null,
           "default_kind": "literal",
-          "gap": null,
+          "gap": {
+            "detail": "default differs: python=null typescript=``Function ${config.name}`` (TS `description`)",
+            "kind": "default"
+          },
           "kind": "keyword",
           "match": "exact",
           "name": "description",
           "required": false,
           "ts": {
             "canonical": "description",
-            "default": null,
-            "default_kind": null,
+            "default": "`Function ${config.name}`",
+            "default_kind": "expr",
             "kind": "property",
             "name": "description",
             "required": false,
@@ -4659,6 +4657,7 @@
         }
       ],
       "typescript": {
+        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:48",
         "location": "src/praisonai-ts/src/tools/decorator.ts:16"
       }
     }
@@ -4668,13 +4667,13 @@
     "camelCase": 8,
     "exact": 23,
     "flattened": 2,
-    "mismatches": 19,
+    "mismatches": 18,
     "missing": 149,
     "params": 196,
     "surfaces": 10,
     "ts_only": 35,
     "ts_total": 83,
-    "waived": 168
+    "waived": 166
   },
   "waivers": [
     {
@@ -5429,21 +5428,7 @@
     {
       "expires": null,
       "issue": null,
-      "key": "Task.__init__.context",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
       "key": "Task.__init__.create_directory",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "Task.__init__.depends_on",
       "owner": "praisonai-ts",
       "reason": "baseline 2026-09-02: not yet ported to TypeScript"
     },

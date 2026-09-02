@@ -44,5 +44,8 @@ flattened:
 # means "no default / not set in the constructor".
 default_equivalences:
   - {python: null, typescript: undefined}
+  # Python "None means empty" (`tools if tools else []`) vs a TS empty literal.
+  - {python: null, typescript: []}
+  - {python: null, typescript: {}}
   - {python: true, typescript: true}
   - {python: false, typescript: false}

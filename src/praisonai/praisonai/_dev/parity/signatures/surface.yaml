@@ -48,7 +48,7 @@ surfaces:
 
   - key: LLM.__init__
     python: {file: llm/llm.py, class: LLM, function: __init__}
-    typescript: {file: llm/index.ts, kind: interface, name: LLMConfig}
+    typescript: {file: llm/index.ts, kind: interface, name: LLMConfig, ctorClass: BaseLLM}
 
   - key: Session.__init__
     python: {file: session/api.py, class: Session, function: __init__}
@@ -56,4 +56,4 @@ surfaces:
 
   - key: tool()
     python: {file: tools/decorator.py, function: tool}
-    typescript: {file: tools/decorator.ts, kind: interface, name: ToolConfig}
+    typescript: {file: tools/decorator.ts, kind: interface, name: ToolConfig, ctorClass: FunctionTool}
