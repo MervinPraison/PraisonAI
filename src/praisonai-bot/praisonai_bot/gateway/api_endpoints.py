@@ -124,6 +124,33 @@ class GatewayApiEndpoints:
             result = await self._gw._dispatch_agent_turn(agent, content)
         return "" if result is None else str(result)
 
+    @staticmethod
+    def _usage_for(agent: Any) -> dict:
+        """Map the agent's last-turn token metrics into an OpenAI ``usage`` block.
+
+        The core SDK already records true per-turn counts on the LLM instance
+        (``last_token_metrics`` with ``input_tokens``/``output_tokens``). We read
+        them straight off the boundary so cost-accounting clients get real
+        figures instead of the previous hardcoded zeros. When metrics are
+        unavailable (e.g. a custom agent that does not expose an LLM instance)
+        we fall back to zeros so the response stays spec-shaped.
+        """
+        zero = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        # Read the already-created LLM instance without forcing lazy creation.
+        llm = getattr(agent, "_llm_instance", None) or getattr(
+            agent, "llm_instance", None
+        )
+        metrics = getattr(llm, "last_token_metrics", None) if llm else None
+        if metrics is None:
+            return zero
+        prompt = int(getattr(metrics, "input_tokens", 0) or 0)
+        completion = int(getattr(metrics, "output_tokens", 0) or 0)
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+        }
+
     def _session_for(self, agent_id: str, key: str) -> Any:
         """Get or create a stable session keyed by the API caller."""
         session_id = f"api:{key}:{agent_id}"
@@ -210,7 +237,13 @@ class GatewayApiEndpoints:
         completion_id = "chatcmpl-" + uuid.uuid4().hex
 
         if stream:
-            return self._sse_chat(agent_id, agent, session, content, completion_id)
+            opts = body.get("stream_options")
+            include_usage = bool(
+                isinstance(opts, dict) and opts.get("include_usage")
+            )
+            return self._sse_chat(
+                agent_id, agent, session, content, completion_id, include_usage
+            )
 
         reply = await self._dispatch(session, agent, content)
         return JSONResponse(
@@ -226,15 +259,13 @@ class GatewayApiEndpoints:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                },
+                "usage": self._usage_for(agent),
             }
         )
 
-    def _sse_chat(self, agent_id, agent, session, content, completion_id):
+    def _sse_chat(
+        self, agent_id, agent, session, content, completion_id, include_usage=False
+    ):
         """Emit a spec-shaped SSE chat-completion stream.
 
         The frames are correctly ``chat.completion.chunk`` shaped and terminate
@@ -245,6 +276,11 @@ class GatewayApiEndpoints:
         is deliberately out of scope here to avoid a hot-path regression. Latency
         to first *content* therefore matches non-streaming; response correctness
         and client compatibility are unaffected.
+
+        When the client sets ``stream_options.include_usage`` (the OpenAI
+        opt-in for streamed usage), a final ``usage``-only chunk carrying the
+        real per-turn token counts is emitted before ``[DONE]``, matching the
+        OpenAI streaming contract.
         """
         from starlette.responses import StreamingResponse
 
@@ -281,6 +317,18 @@ class GatewayApiEndpoints:
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             }
             yield f"data: {json.dumps(final)}\n\n"
+
+            if include_usage:
+                usage_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": agent_id,
+                    "choices": [],
+                    "usage": self._usage_for(agent),
+                }
+                yield f"data: {json.dumps(usage_chunk)}\n\n"
+
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
@@ -312,6 +360,7 @@ class GatewayApiEndpoints:
         session = self._session_for(agent_id, self._caller_key(request))
         reply = await self._dispatch(session, agent, content)
 
+        usage = self._usage_for(agent)
         return JSONResponse(
             {
                 "id": "resp-" + uuid.uuid4().hex,
@@ -328,6 +377,11 @@ class GatewayApiEndpoints:
                     }
                 ],
                 "output_text": reply,
+                "usage": {
+                    "input_tokens": usage["prompt_tokens"],
+                    "output_tokens": usage["completion_tokens"],
+                    "total_tokens": usage["total_tokens"],
+                },
             }
         )
 

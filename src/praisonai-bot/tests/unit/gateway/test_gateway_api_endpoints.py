@@ -19,7 +19,19 @@ from praisonaiagents.gateway import GatewayConfig, ApiConfig
 from praisonai_bot.gateway.api_endpoints import GatewayApiEndpoints, _extract_text
 
 
+class _FakeMetrics:
+    input_tokens = 11
+    output_tokens = 7
+
+
+class _FakeLLM:
+    last_token_metrics = _FakeMetrics()
+
+
 class _FakeAgent:
+    def __init__(self):
+        self._llm_instance = _FakeLLM()
+
     async def achat(self, content):
         return f"echo:{content}"
 
@@ -130,6 +142,110 @@ def test_openai_chat_dispatches_to_registered_agent():
     data = _body(resp)
     assert data["object"] == "chat.completion"
     assert data["choices"][0]["message"]["content"] == "echo:hi"
+
+
+def test_openai_chat_reports_real_usage():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {"model": "assistant", "messages": [{"role": "user", "content": "hi"}]}
+            )
+        )
+    )
+    usage = _body(resp)["usage"]
+    assert usage["prompt_tokens"] == 11
+    assert usage["completion_tokens"] == 7
+    assert usage["total_tokens"] == 18
+
+
+def test_openai_chat_usage_zero_when_no_metrics():
+    class _NoMetricsAgent:
+        async def achat(self, content):
+            return f"echo:{content}"
+
+    class _Gw(_FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _NoMetricsAgent()
+
+    ep = GatewayApiEndpoints(_Gw())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {"model": "assistant", "messages": [{"role": "user", "content": "hi"}]}
+            )
+        )
+    )
+    usage = _body(resp)["usage"]
+    assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+
+def _collect_sse(resp):
+    async def _run():
+        chunks = []
+        async for part in resp.body_iterator:
+            chunks.append(part if isinstance(part, str) else part.decode())
+        return chunks
+
+    return asyncio.run(_run())
+
+
+def test_openai_chat_stream_emits_usage_chunk_when_opted_in():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    usage_payloads = [
+        json.loads(p[len("data: "):])
+        for p in parts
+        if p.startswith("data: ") and '"usage"' in p
+    ]
+    assert usage_payloads, "expected a usage-bearing chunk"
+    usage = usage_payloads[-1]["usage"]
+    assert usage["prompt_tokens"] == 11
+    assert usage["completion_tokens"] == 7
+    assert usage["total_tokens"] == 18
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_openai_chat_stream_omits_usage_by_default():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_chat(
+            _FakeReq(
+                {
+                    "model": "assistant",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+            )
+        )
+    )
+    parts = _collect_sse(resp)
+    assert not any('"usage"' in p for p in parts)
+    assert parts[-1] == "data: [DONE]\n\n"
+
+
+def test_openai_responses_reports_usage():
+    ep = GatewayApiEndpoints(_FakeGateway())
+    resp = asyncio.run(
+        ep.openai_responses(_FakeReq({"model": "assistant", "input": "ping"}))
+    )
+    usage = _body(resp)["usage"]
+    assert usage["input_tokens"] == 11
+    assert usage["output_tokens"] == 7
+    assert usage["total_tokens"] == 18
 
 
 def test_openai_chat_no_agents_returns_503():
