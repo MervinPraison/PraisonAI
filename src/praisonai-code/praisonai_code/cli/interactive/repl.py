@@ -271,7 +271,7 @@ class InteractiveREPL:
                 from .command_registry import create_default_registry
 
                 self._registry = create_default_registry(
-                    DEFAULT_COMMANDS, include_custom=True
+                    DEFAULT_COMMANDS, include_custom=True, include_skills=True
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Command registry unavailable: %s", exc)
