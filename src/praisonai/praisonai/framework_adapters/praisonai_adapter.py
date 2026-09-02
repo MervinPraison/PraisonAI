@@ -124,25 +124,25 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 if isinstance(model_config, dict) and 'runtime' in model_config:
                     return model_config['runtime']
         
-        # 4. Check provider-scoped runtime
+        # 4. Check provider-scoped runtime. Provider inference is data-driven
+        # and entry-point-extensible (core SDK), so any declared vendor —
+        # groq, deepseek, mistral, cohere, ... — resolves, not just three.
         if agent_model and 'providers' in config:
-            # Extract provider from model name
-            provider = None
-            if '/' in agent_model:
-                provider = agent_model.split('/')[0]
-            elif 'claude' in agent_model.lower():
-                provider = 'anthropic'
-            elif 'gpt' in agent_model.lower():
-                provider = 'openai'
-            elif 'gemini' in agent_model.lower():
-                provider = 'google'
-            
+            from praisonaiagents.llm.model_providers import resolve_provider
+
+            provider = resolve_provider(agent_model)
             if provider:
                 providers_config = config['providers']
                 if isinstance(providers_config, dict) and provider in providers_config:
                     provider_config = providers_config[provider]
                     if isinstance(provider_config, dict) and 'runtime_default' in provider_config:
                         return provider_config['runtime_default']
+            else:
+                logger.debug(
+                    "runtime resolution: no provider registered for model %r; "
+                    "provider-scoped 'runtime_default' not consulted",
+                    agent_model,
+                )
         
         # 5. Check global config
         global_config = config.get('config', {})

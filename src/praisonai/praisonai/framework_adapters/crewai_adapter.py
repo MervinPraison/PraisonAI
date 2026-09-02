@@ -19,6 +19,13 @@ class CrewAIAdapter(BaseFrameworkAdapter):
     requires_tools_extra = True
     # CrewAI's kickoff() is sync-only; arun offloads run() to a bounded pool.
     SUPPORTS_ASYNC = False
+    # Extended YAML fields CrewAI actually consumes; the rest are dropped and
+    # warned about via warn_unsupported_fields.
+    SUPPORTED_YAML_FIELDS = frozenset({
+        "allow_delegation", "max_iter", "max_rpm", "max_execution_time",
+        "verbose", "cache", "system_template", "prompt_template",
+        "response_template", "llm", "function_calling_llm",
+    })
     
     def is_available(self) -> bool:
         """Check if CrewAI is available for import."""
@@ -88,7 +95,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     details = spec.extras
 
                     # Surface any extended YAML fields this backend silently drops
-                    warn_unsupported_fields(self.name, details)
+                    warn_unsupported_fields(self, details)
 
                     # Configure LLM using shared resolver
                     llm = self._resolve_llm(details.get('llm'), llm_config)

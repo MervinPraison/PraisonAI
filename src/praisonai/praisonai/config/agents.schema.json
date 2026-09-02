@@ -1199,6 +1199,19 @@
       "default": "sequential",
       "description": "Process type"
     },
+    "type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Configuration type discriminator",
+      "title": "Type"
+    },
     "roles": {
       "anyOf": [
         {
@@ -1405,6 +1418,31 @@
       "default": null,
       "description": "Provider configurations",
       "title": "Providers"
+    },
+    "deploy": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Deployment configuration",
+      "title": "Deploy"
+    },
+    "dependencies": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Task dependency declarations",
+      "title": "Dependencies"
     }
   },
   "title": "PraisonAI Agents Configuration",

@@ -374,6 +374,7 @@ class YAMLConfig(BaseModel):
     description: Optional[str] = Field(default=None, description="Configuration description")
     framework: Optional[str] = Field(default="praisonai", description="Framework to use")
     process: Optional[ProcessType] = Field(default=ProcessType.SEQUENTIAL, description="Process type")
+    type: Optional[str] = Field(default=None, description="Configuration type discriminator")
     
     # Core sections (at least one required)
     roles: Optional[Dict[str, AgentConfig]] = Field(default=None, description="Agent roles (canonical)")
@@ -397,6 +398,10 @@ class YAMLConfig(BaseModel):
     llm: Optional[str] = Field(default=None, description="Default LLM")
     models: Optional[Dict[str, Any]] = Field(default=None, description="Model configurations")
     providers: Optional[Dict[str, Any]] = Field(default=None, description="Provider configurations")
+
+    # Deployment / dependency declarations
+    deploy: Optional[Dict[str, Any]] = Field(default=None, description="Deployment configuration")
+    dependencies: Optional[Any] = Field(default=None, description="Task dependency declarations")
     
     @model_validator(mode='after')
     def validate_config_structure(self):

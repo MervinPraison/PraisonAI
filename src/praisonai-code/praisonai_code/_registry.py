@@ -290,6 +290,18 @@ class PluginRegistry(Generic[T]):
         except ValueError:
             return False
 
+    def has(self, name: str) -> bool:
+        """Return True if ``name`` is registered, without loading it.
+
+        Unlike :meth:`is_available`, this never materialises the plugin — it
+        only checks the registered names/aliases — so it is safe for cheap
+        membership tests (e.g. cross-registry ``__getattr__`` dispatch).
+        """
+        normalized_name = name.lower()
+        with self._lock:
+            canonical_name = self._aliases.get(normalized_name, normalized_name)
+            return canonical_name in self._items or canonical_name in self._loaders
+
     def list_aliases(self) -> Dict[str, str]:
         """List all aliases and their target plugins.
         

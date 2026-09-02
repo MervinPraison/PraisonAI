@@ -219,6 +219,10 @@ def __getattr__(name):
             from .error_classifier import classify_error
             _lazy_cache[name] = classify_error
             return classify_error
+        elif name == "resolve_provider":
+            from .model_providers import resolve_provider
+            _lazy_cache[name] = resolve_provider
+            return resolve_provider
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -278,5 +282,7 @@ __all__ = [
     "sanitize_text",
     # Error Classification (G5)
     "ErrorCategory",
-    "classify_error"
+    "classify_error",
+    # Model-name → provider-id resolution
+    "resolve_provider",
 ]

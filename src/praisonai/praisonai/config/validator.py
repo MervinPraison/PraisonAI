@@ -7,8 +7,20 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic import ValidationError
 
-from .schema import YAMLConfig, ValidationResult
+from .schema import YAMLConfig, ValidationResult, AgentConfig
 from ..tool_resolver import ToolResolver
+
+
+# Field names are derived from the Pydantic schema so there is a single source
+# of truth. Adding a field to the schema automatically teaches the validator
+# about it — no parallel hand-maintained set to drift out of sync.
+_KNOWN_TOP_LEVEL = frozenset(YAMLConfig.model_fields.keys())
+# Agent-only fields. TaskConfig fields are intentionally NOT unioned in: an
+# agent declaration with a task-only key (``expected_output``, ``output_file``,
+# ``async_execution``, ``context``, ``condition``) is a genuine mistake the
+# runtime ignores, so it must still warn. ``name`` is accepted as an alias the
+# runtime tolerates but the schema doesn't declare.
+_KNOWN_AGENT_FIELDS = frozenset(AgentConfig.model_fields.keys()) | {"name"}
 
 
 class ConfigValidator:
@@ -218,44 +230,19 @@ class ConfigValidator:
     
     def _is_known_optional_tool(self, tool_name: str) -> bool:
         """Check if a tool name is a known optional tool.
-        
+
+        The single source of truth is ``praisonaiagents.tools.TOOL_MAPPINGS``:
+        adding an optional tool upstream teaches the validator about it with no
+        wrapper edit. ``resolve()`` returns None for such tools when their
+        optional dependencies aren't installed; that's a "needs deps" warning,
+        not an "unknown tool" error.
+
         Args:
             tool_name: Tool name to check
-            
+
         Returns:
             True if it's a known optional tool
         """
-        # List of known optional tools that require extra dependencies
-        known_optional = {
-            # Database tools
-            'PostgreSQLTool', 'MySQLTool', 'SQLiteTool', 'MongoDBTool', 'RedisTool',
-            'SurrealDBTool', 'CassandraTool', 'ElasticsearchTool',
-            
-            # Web/API tools
-            'SlackTool', 'DiscordTool', 'TelegramTool', 'EmailTool',
-            'TwitterTool', 'LinkedInTool', 'GitHubTool',
-            
-            # Cloud tools
-            'AWSTool', 'AzureTool', 'GCPTool', 'S3Tool',
-            
-            # AI/ML tools
-            'HuggingFaceTool', 'OpenAITool', 'AnthropicTool',
-            
-            # Data tools
-            'PandasTool', 'NumpyTool', 'ScipyTool',
-            
-            # Other
-            'BrowserTool', 'SeleniumTool', 'PlaywrightTool',
-            'KubernetesTool', 'DockerTool', 'TerraformTool',
-        }
-        
-        if tool_name in known_optional:
-            return True
-        
-        # Also treat any tool declared in praisonaiagents' TOOL_MAPPINGS as a
-        # known tool. resolve() returns None for such tools when their optional
-        # dependencies aren't installed; that's a "needs deps" warning, not an
-        # "unknown tool" error.
         try:
             from praisonaiagents import tools as agent_tools
             tool_mappings = getattr(agent_tools, 'TOOL_MAPPINGS', None)
@@ -263,7 +250,7 @@ class ConfigValidator:
                 return True
         except Exception:
             pass
-        
+
         return False
     
     def _check_unknown_fields(self, config: Dict[str, Any], file_prefix: str = "") -> List[str]:
@@ -277,46 +264,25 @@ class ConfigValidator:
             List of warnings about unknown fields
         """
         warnings = []
-        
-        # Known top-level fields
-        known_top_level = {
-            'name', 'description', 'framework', 'process', 'type',
-            'roles', 'agents', 'tasks', 'workflow', 'steps',
-            'input', 'topic', 'tools', 'toolsets',
-            'config', 'llm', 'models', 'providers',
-            'deploy',  # Deployment configuration
-            'dependencies',  # Task dependency declarations
-        }
-        
-        # Known agent/role fields
-        known_agent_fields = {
-            'role', 'goal', 'instructions', 'backstory', 'tools', 'toolsets', 'tasks', 'llm',
-            'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
-            'max_execution_time', 'verbose', 'cache', 'system_template',
-            'prompt_template', 'response_template', 'tool_timeout', 'tool_retry_policy',
-            'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff',
-            'web', 'web_fetch', 'name',  # Sometimes used as alias
-        }
-        
-        # Check top-level unknown fields
+
+        # Check top-level unknown fields (derived from YAMLConfig schema)
         for field in config:
-            if field not in known_top_level:
+            if field not in _KNOWN_TOP_LEVEL:
                 warnings.append(
                     f"{file_prefix}Unknown top-level field '{field}'. "
                     f"This field will be ignored."
                 )
-        
-        # Check agent/role fields
+
+        # Check agent/role fields (derived from AgentConfig/TaskConfig schema)
         for section in ['agents', 'roles']:
             if section in config and isinstance(config[section], dict):
                 for agent_name, agent_config in config[section].items():
                     if isinstance(agent_config, dict):
                         for field in agent_config:
-                            if field not in known_agent_fields:
+                            if field not in _KNOWN_AGENT_FIELDS:
                                 warnings.append(
                                     f"{file_prefix}{section}.{agent_name}: Unknown field '{field}'. "
                                     f"This field will be ignored."
                                 )
-        
+
         return warnings
