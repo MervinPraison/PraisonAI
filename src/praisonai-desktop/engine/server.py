@@ -1372,6 +1372,25 @@ def _persist(chat_id: str, prompt: str, reply: list,
         return None
 
 
+def redacted(cfg: dict) -> dict:
+    """A settings dict that is safe to put on the wire.
+
+    GET /settings has masked the key since the beginning. POST /settings
+    returned save_settings()'s merged dict, and that dict starts from
+    load_settings(), which reads the real secret back out of the keychain -- so
+    every settings write answered with the credential in cleartext, including a
+    write that only changed the theme.
+
+    Masking one of two exits is not masking. The secret is stored exactly as
+    before; only what leaves the process changes.
+    """
+    out = dict(cfg)
+    for key in SECRET_KEYS:
+        if key in out:
+            out[key] = "\u2022" * 8 if out[key] else ""
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -1530,8 +1549,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/settings":
             cfg = load_settings()
             # The UI only needs to know whether a key is set, never its value.
-            cfg["api_key"] = "\u2022" * 8 if cfg.get("api_key") else ""
-            self._json(cfg)
+            self._json(redacted(cfg))
             return
         if self.path == "/projects":
             names = sorted({(load_chat(c["id"]).get("project") or "")
@@ -1714,7 +1732,8 @@ class Handler(BaseHTTPRequestHandler):
                 saved["launch_at_login_result"] = result
             else:
                 saved = save_settings(patch)
-            self._json(saved)
+            # Redacted: this is the reply that carried the key in cleartext.
+            self._json(redacted(saved))
             return
 
         if self.path == "/mcp":
