@@ -65,7 +65,8 @@ def main() -> None:
     print(notes)
 
     qa = build_qa_agent(transcript_path)
-    qa.start("What were the main action items and who owns them?")
+    print("\n=== Q&A ===\n")
+    print(qa.start("What were the main action items and who owns them?"))
 
 
 if __name__ == "__main__":
