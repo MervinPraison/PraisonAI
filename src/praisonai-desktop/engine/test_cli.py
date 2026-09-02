@@ -130,6 +130,82 @@ class ParserWiring(unittest.TestCase):
             args = parser.parse_args(argv)
             self.assertIs(args.func, func)
 
+    def test_chat_defaults_deny_approval(self):
+        args = cli.build_parser().parse_args(["chat", "hi"])
+        self.assertFalse(args.approve)
+
+    def test_chat_approve_flag(self):
+        args = cli.build_parser().parse_args(["chat", "hi", "--approve"])
+        self.assertTrue(args.approve)
+
+
+class LivePort(unittest.TestCase):
+    """Only *our* engine is adopted: ok plus the right protocol version."""
+
+    def _run(self, fields, health):
+        real_fields = cli._lockfile_fields
+        real_http = cli._http_json
+        cli._lockfile_fields = lambda home=None: fields
+        cli._http_json = lambda url, timeout=4.0: health
+        try:
+            return cli._live_port()
+        finally:
+            cli._lockfile_fields = real_fields
+            cli._http_json = real_http
+
+    def test_matching_protocol_is_adopted(self):
+        port = self._run({"port": "5000"},
+                         {"ok": True, "version": cli.server.PROTOCOL_VERSION})
+        self.assertEqual(port, "5000")
+
+    def test_wrong_protocol_is_rejected(self):
+        # A recycled port answered by an unrelated loopback service.
+        port = self._run({"port": "5000"},
+                         {"ok": True, "version": cli.server.PROTOCOL_VERSION + 99})
+        self.assertIsNone(port)
+
+    def test_not_ok_is_rejected(self):
+        port = self._run({"port": "5000"}, {"ok": False})
+        self.assertIsNone(port)
+
+
+class ApprovalAnswer(unittest.TestCase):
+    """A headless turn answers the approval gate rather than blocking on it."""
+
+    def test_posts_choice_to_approve_route(self):
+        sent = {}
+
+        class _FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_urlopen(req, timeout=None):
+            sent["url"] = req.full_url
+            sent["body"] = req.data
+            return _FakeResp()
+
+        real = cli.urllib.request.urlopen
+        cli.urllib.request.urlopen = _fake_urlopen
+        try:
+            cli._answer_approval("5000", {"approval_id": "ap_1"}, "deny")
+        finally:
+            cli.urllib.request.urlopen = real
+        self.assertIn("/approve/ap_1", sent["url"])
+        self.assertIn(b"deny", sent["body"])
+
+    def test_missing_id_is_a_noop(self):
+        called = []
+        real = cli.urllib.request.urlopen
+        cli.urllib.request.urlopen = lambda *a, **k: called.append(1)
+        try:
+            cli._answer_approval("5000", {}, "deny")
+        finally:
+            cli.urllib.request.urlopen = real
+        self.assertEqual(called, [])
+
 
 if __name__ == "__main__":
     unittest.main()

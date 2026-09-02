@@ -91,7 +91,11 @@ def _live_port(home=None):
 
     A lockfile alone is not proof: a crashed engine leaves one behind, and a
     recycled pid can look live. The /health probe confirms the port really is
-    our engine before anything is sent to it.
+    our engine before anything is sent to it -- and it must be *our* engine, so
+    the protocol version is checked too, not just `ok`. A recycled port that
+    another loopback service happens to answer with `{"ok": true}` would
+    otherwise be handed the user's prompt; the engine stamps every /health with
+    server.PROTOCOL_VERSION, which an unrelated service will not.
     """
     fields = _lockfile_fields(home)
     if not fields or not fields.get("port"):
@@ -101,7 +105,11 @@ def _live_port(home=None):
         health = _http_json(f"http://127.0.0.1:{port}/health", timeout=1.5)
     except (urllib.error.URLError, OSError, ValueError):
         return None
-    return port if health.get("ok") is True else None
+    if health.get("ok") is not True:
+        return None
+    if health.get("version") != server.PROTOCOL_VERSION:
+        return None
+    return port
 
 
 def cmd_engine_start(args):
@@ -161,8 +169,12 @@ def cmd_chat(args):
               "praisonai-desktop engine start", file=sys.stderr)
         return 1
 
+    # session, not just chat_id: the engine caches one agent per `session`
+    # (default "default") and only loads history per chat_id, so without this
+    # every --chat-id would share one agent and inherit the others' history.
     body = json.dumps({
         "prompt": args.prompt,
+        "session": args.chat_id,
         "chat_id": args.chat_id,
         "run_id": args.chat_id,
         "tools": not args.no_tools,
@@ -184,6 +196,15 @@ def cmd_chat(args):
                     sys.stdout.flush()
                 elif event == "tool_result":
                     tools_ran += 1
+                elif event == "approval_request":
+                    # A tool-enabled turn can hit the approval gate (the engine
+                    # defaults approval_mode to "ask"), which blocks the run for
+                    # up to its 300s timeout waiting on /approve. There is no
+                    # human on a headless turn, so answer it here rather than
+                    # hang: --approve to allow, otherwise deny. A denied tool is
+                    # recoverable; a frozen turn is not.
+                    _answer_approval(port, payload,
+                                     "allow" if args.approve else "deny")
                 elif event == "error":
                     error = payload.get("message", "unknown error")
     except (urllib.error.URLError, OSError) as exc:
@@ -224,6 +245,27 @@ def _iter_sse(resp):
                 pass
         elif line == "":
             event = "message"
+
+
+def _answer_approval(port, payload, choice):
+    """Answer an approval_request so a headless turn does not block on the gate.
+
+    Posts the decision to /approve/{id}; failure is swallowed because the turn
+    will fall back to the engine's own approval timeout, and a broken answer
+    must not itself crash the stream we are still reading.
+    """
+    aid = payload.get("approval_id")
+    if not aid:
+        return
+    body = json.dumps({"choice": choice}).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/approve/{aid}", data=body,
+        headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=4.0):
+            pass
+    except (urllib.error.URLError, OSError):
+        pass
 
 
 def cmd_doctor(args):
@@ -282,6 +324,8 @@ def build_parser():
     chat = sub.add_parser("chat", help="run one turn against a running engine")
     chat.add_argument("prompt", help="the message to send")
     chat.add_argument("--no-tools", action="store_true", help="disable built-in tools")
+    chat.add_argument("--approve", action="store_true",
+                      help="auto-allow tool approval prompts (default: deny)")
     chat.add_argument("--chat-id", default="cli", help="conversation id to use")
     chat.add_argument("--home", help="data directory to look for the lockfile in")
     chat.add_argument("--timeout", type=float, default=120.0, help="seconds to wait")
