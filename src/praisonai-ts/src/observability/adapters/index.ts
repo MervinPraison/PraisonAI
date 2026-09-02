@@ -189,7 +189,7 @@ async function createArizeAdapter(config?: ObservabilityToolConfig): Promise<Obs
     const { ArizeObservabilityAdapter } = await import('./external/arize');
     return new ArizeObservabilityAdapter(config);
   } catch (error) {
-    console.warn('Arize not available, using memory adapter. Install with: npm install arize-phoenix');
+    console.warn('Arize not available, using memory adapter. Install with: npm install @arizeai/openinference-core');
     return new MemoryObservabilityAdapter();
   }
 }
