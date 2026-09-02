@@ -376,6 +376,11 @@ _agents = {}
 _approval_lock = threading.Condition()
 _approvals = {}          # approval_id -> {"call_id","name","args","decision"}
 _always_allow = set()    # tool names the user granted for this process
+# What approval_mode "smart" waves through. Reads of the local filesystem and
+# the clock never leave the machine. fetch_url is deliberately absent: it
+# sends a model-chosen URL to an arbitrary host, which is the exfiltration
+# and SSRF surface a "risky actions" gate exists to catch.
+_LOW_RISK_TOOLS = frozenset({"read_file", "list_directory", "current_time"})
 
 APPROVAL_TIMEOUT_S = 300
 
@@ -522,6 +527,12 @@ def _builtin_tools():
         """Ask the user before a filesystem read. Returns True when allowed."""
         mode = load_settings().get("approval_mode", "ask")
         if mode == "never" or name in _always_allow:
+            return True
+        if mode == "smart" and name in _LOW_RISK_TOOLS:
+            # "Ask for risky actions" used to be checked nowhere -- it fell
+            # through to the same prompt as "ask", so the setting did nothing.
+            # Local reads stay on the machine; the one tool that sends a
+            # model-chosen URL out over the network still asks.
             return True
         if getattr(_tool_events, "emit", None) is None:
             # No stream to ask on. Blocking here would hang the turn for the

@@ -124,11 +124,11 @@ const SETTINGS = [
 
   // ---- Safety -------------------------------------------------------------
   { key: "approval_mode", section: "safety", label: "Tool approval",
-    description: "How tool calls that touch your files are approved before running.",
+    description: "How tool calls are approved. Local file reads are low risk; fetching a URL sends data out and is asked for in all but Never.",
     keywords: ["permissions", "confirm", "yolo", "sandbox"],
     control: { kind: "select", options: [
       { value: "ask",   label: "Ask every time" },
-      { value: "smart", label: "Ask for risky actions" },
+      { value: "smart", label: "Ask only for network fetches" },
       { value: "never", label: "Never ask" }]},
     default: "ask",
     confirm: { when: (_p, n) => n === "never",
