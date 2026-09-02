@@ -1266,6 +1266,15 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown"
+version = "3.10.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/6f/da4c6aea59b3001f2e8c0ec7497475aadaf3b021c10cab5b2858f0f32b26/markdown-3.10.3.tar.gz", hash = "sha256:3589362618f743188b4d955b874402bc814f4f83f544dc207719f4baa7d9c45f", size = 372596, upload-time = "2026-07-30T19:05:29.005Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/69/4a5af2bc115a9a33fefe51709749de8262be3f9ba063d1753a837cdbc49c/markdown-3.10.3-py3-none-any.whl", hash = "sha256:fa6c92a00a4a3c98b22728c64a935ae1928250ae65058a6ded814d2cc29a4cea", size = 110757, upload-time = "2026-07-30T19:05:27.883Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2449,8 +2458,73 @@ wheels = [
 ]
 
 [[package]]
+name = "praisonai"
+version = "4.7.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "litellm" },
+    { name = "markdown" },
+    { name = "mcp" },
+    { name = "praisonai-bot" },
+    { name = "praisonai-browser" },
+    { name = "praisonai-code" },
+    { name = "praisonai-deploy" },
+    { name = "praisonai-mcp" },
+    { name = "praisonai-sandbox" },
+    { name = "praisonai-train" },
+    { name = "praisonaiagents" },
+    { name = "pydantic" },
+    { name = "pyparsing" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "textual" },
+    { name = "toml" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e1/a8/e6c8175f0e83684efb73f8341fe22358606e0acb7ee7e354bf86f069ed4f/praisonai-4.7.4.tar.gz", hash = "sha256:a2dbe955e6320d7df5d010db30fcba486bf6c4e395d824fec34b304473c148bd", size = 1159477, upload-time = "2026-08-28T22:12:03.098Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/48/db78c2a680c2953d75a94ab081c523a855d16d3da09267f744e731325c4d/praisonai-4.7.4-py3-none-any.whl", hash = "sha256:f106647defc5728c6f880fd058e7d9ef5a82c69291afc68415c0ade48021ad4f", size = 1373684, upload-time = "2026-08-28T22:12:00.908Z" },
+]
+
+[[package]]
+name = "praisonai-bot"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "click" },
+    { name = "praisonaiagents" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/d6/93876a2dbe04c0d5a3996063288fba11c1c09ba0081878b62a9a89203be2/praisonai_bot-0.1.1.tar.gz", hash = "sha256:78e7c02f3361dbb737175e63822ff74065a382695be619c5b0a8acdfbb5f101f", size = 736273, upload-time = "2026-08-24T09:35:53.647Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d8/c6/5efafb612d76775041d26360e6bbb0b91f213b60dc70b7d939e851294945/praisonai_bot-0.1.1-py3-none-any.whl", hash = "sha256:cd549e15b09ab90bed6ec70bd1237312f4793f0435c418fb6d6f387e9840035b", size = 823687, upload-time = "2026-08-24T09:35:52.185Z" },
+]
+
+[[package]]
+name = "praisonai-browser"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "praisonaiagents" },
+    { name = "rich" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/0d/f4b91b1726bd09a5ec957c2d74e4022aae2e4050213cf6a0606f6a176be2/praisonai_browser-0.1.1.tar.gz", hash = "sha256:eff0626cada2a957347d2afa3f84042cd61b9c06d827019fa8f1ef9d10a7a41c", size = 99441, upload-time = "2026-08-24T09:36:01.907Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/a0/4a606582f59cbb1eec3fe5b52c239cb544af18dc646c5746b65ba95e5b1e/praisonai_browser-0.1.1-py3-none-any.whl", hash = "sha256:2e326ca9a467632b9babfbe4b4e9eafd0f8a7e8f92506ec18f747425f94bd372", size = 107907, upload-time = "2026-08-24T09:36:00.774Z" },
+]
+
+[[package]]
 name = "praisonai-code"
-version = "0.0.56"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -2465,14 +2539,62 @@ dependencies = [
     { name = "toml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/eb/f65adeb6ac0f779402809201e49c784378103111c0cfe72866d792054810/praisonai_code-0.0.56.tar.gz", hash = "sha256:b3d540946504ecf596df20e95fb539cb5fc21592f35542fd4696e01e91f6f04a", size = 794976, upload-time = "2026-07-25T17:23:08.213Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/af/dbd5226a26486164edea1201506ba3455b147c40772ae1c6b4eac954210f/praisonai_code-0.1.2.tar.gz", hash = "sha256:9b45a1c1c22529ea0997737ddaeb766a9347a5c269bcf9667a9de1698f7083c4", size = 903377, upload-time = "2026-09-02T10:59:22.192Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/cf/5a6159d4cc31afbec55788453d52355c9e375f57daa012f3c564fbc07e54/praisonai_code-0.0.56-py3-none-any.whl", hash = "sha256:650d92da1288ed779c822feb1954dc5bce7a2215b9d4344ef874c6d398eb4a5f", size = 958929, upload-time = "2026-07-25T17:23:06.766Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/ff/c3f7514984d6a6e9759b76a89e1eac291538658029301255244ec2f83f31/praisonai_code-0.1.2-py3-none-any.whl", hash = "sha256:8c44602b56599be1419d68c2fe060cbdff4f6ade8fcb9298bc1c2c52a4399042", size = 1074280, upload-time = "2026-09-02T10:59:20.709Z" },
+]
+
+[[package]]
+name = "praisonai-deploy"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "praisonaiagents" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/34/1ed38655c17c2a87744eebeb3b764332a8cd535962c34f129817961f4573/praisonai_deploy-0.1.1.tar.gz", hash = "sha256:ad3ee9b811c71d34f43fdd4c379e1f1effe39fd28418eb98a0d305b548a90b57", size = 47149, upload-time = "2026-08-24T09:36:13.357Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/45/865d02c1845a3b1d82c6f7c69730fd367b9214d7b2f3350072991dd98090/praisonai_deploy-0.1.1-py3-none-any.whl", hash = "sha256:abc4fb6ba965e8c9052e7418e78c11dc93f3a408e49612e58136a48f267129ff", size = 60151, upload-time = "2026-08-24T09:36:11.965Z" },
+]
+
+[[package]]
+name = "praisonai-mcp"
+version = "0.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "mcp" },
+    { name = "praisonaiagents" },
+    { name = "rich" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/1f/5e1c9bb4ff9eeb09969afea244b30f006583235e2469ec443b43de716bcc/praisonai_mcp-0.1.3.tar.gz", hash = "sha256:b9245832b3f3f459bfd4a63e75351137d50667327988f96aca47286f7cd68e78", size = 87668, upload-time = "2026-08-24T09:36:05.555Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/2d/df511f19429f3e0c8a28303f2a8ec121ba4217a4e196439f5373e6916f67/praisonai_mcp-0.1.3-py3-none-any.whl", hash = "sha256:8af516fb030ebd2fec9a2611a46a73b342895589e565fc3bc59aa7b0b5e61aa2", size = 104218, upload-time = "2026-08-24T09:36:04.585Z" },
+]
+
+[[package]]
+name = "praisonai-sandbox"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "praisonaiagents" },
+    { name = "rich" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3a/47/5c66a893890f3722e6200e04b3efc18ce6311753294898a7342ec91fbac7/praisonai_sandbox-0.1.1.tar.gz", hash = "sha256:738bb26b371a8b2c1026a13c11e217d112382faee879aa407b2df6e6018363a6", size = 74237, upload-time = "2026-08-24T09:36:09.287Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/86/fe2a8ca542ff99b62487072136f39faefdf88406df0d0b609b1efbd710a5/praisonai_sandbox-0.1.1-py3-none-any.whl", hash = "sha256:de8b65192f21ccf0339e8ae86cda7b973f82cab0515219cfe860b562dca5c314", size = 74217, upload-time = "2026-08-24T09:36:08.348Z" },
 ]
 
 [[package]]
 name = "praisonai-train"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -2491,6 +2613,7 @@ all = [
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "peft" },
+    { name = "praisonai" },
     { name = "praisonai-code" },
     { name = "protobuf" },
     { name = "sentencepiece" },
@@ -2506,6 +2629,7 @@ llm = [
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "peft" },
+    { name = "praisonai" },
     { name = "praisonai-code" },
     { name = "protobuf" },
     { name = "sentencepiece" },
@@ -2521,6 +2645,7 @@ vision = [
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "peft" },
+    { name = "praisonai" },
     { name = "praisonai-code" },
     { name = "protobuf" },
     { name = "sentencepiece" },
@@ -2540,6 +2665,7 @@ requires-dist = [
     { name = "huggingface-hub", marker = "extra == 'llm'", specifier = ">=0.23.0" },
     { name = "litellm", specifier = ">=1.0" },
     { name = "peft", marker = "extra == 'llm'", specifier = ">=0.13.0" },
+    { name = "praisonai", marker = "extra == 'llm'", specifier = ">=0.0.1" },
     { name = "praisonai-code", marker = "extra == 'llm'", specifier = ">=0.0.1" },
     { name = "praisonai-train", extras = ["llm"], marker = "extra == 'all'" },
     { name = "praisonai-train", extras = ["llm"], marker = "extra == 'vision'" },
@@ -2558,7 +2684,7 @@ provides-extras = ["llm", "vision", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.1"
+version = "1.7.3"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -3028,6 +3154,15 @@ wheels = [
 [package.optional-dependencies]
 crypto = [
     { name = "cryptography" },
+]
+
+[[package]]
+name = "pyparsing"
+version = "3.3.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
 ]
 
 [[package]]
