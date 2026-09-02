@@ -19,16 +19,16 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | Surface | Params | Exact | camelCase | Alias | Flattened | Missing | Mismatches | Waived | TS-only / TS total |
 |---|---|---|---|---|---|---|---|---|---|
 | `Agent.__init__` | 42 | 29 | 8 | 3 | 2 | 0 | 4 | 4 | 13 / 58 |
-| `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 4 | 4 | 2 / 25 |
-| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 8 | 8 | 1 / 61 |
+| `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 2 / 25 |
+| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 1 / 61 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 20 / 21 |
-| `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 3 | 3 | 2 / 19 |
-| `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 1 | 1 | 1 / 4 |
+| `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 0 | 0 | 2 / 19 |
+| `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 / 4 |
 | `Handoff.__init__` | 7 | 2 | 2 | 3 | 0 | 0 | 2 | 2 | 11 / 18 |
 | `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 0 / 25 |
 | `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 4 / 11 |
 | `tool()` | 11 | 5 | 5 | 1 | 0 | 0 | 4 | 4 | 2 / 13 |
-| **Total (10 surfaces)** | 196 | 106 | 79 | 9 | 2 | 0 | 28 | 28 | 56 / 255 |
+| **Total (10 surfaces)** | 196 | 106 | 79 | 9 | 2 | 0 | 20 | 20 | 56 / 255 |
 
 ## Surfaces
 
@@ -90,7 +90,7 @@ TS-only members: `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `too
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:648`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2673` (ctor `src/praisonai-ts/src/agent/simple.ts:2866`)
 - Python aliases: PraisonAIAgents, Agents
-- Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 4 mismatches; 4 waived; 2 TS-only of 25
+- Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 2 TS-only of 25
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -102,9 +102,9 @@ TS-only members: `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `too
 | `variables` | positional | null | `Optional[Dict[str, Any]]` | exact | `variables` | undefined | `Record<string, unknown>` | ok |
 | `llm` | positional | null | `Optional[str]` | exact | `llm` | undefined | `string` | ok |
 | `model` | positional | null | `Optional[str]` | exact | `model` | undefined | `string` | ok |
-| `memory` | positional | false | `Optional[Any]` | exact | `memory` | undefined | `unknown` | default mismatch (waived) |
-| `planning` | positional | false | `Optional[Any]` | exact | `planning` | undefined | `unknown` | default mismatch (waived) |
-| `context` | positional | false | `Optional[Any]` | exact | `context` | undefined | `unknown` | default mismatch (waived) |
+| `memory` | positional | false | `Optional[Any]` | exact | `memory` | undefined | `unknown` | ok |
+| `planning` | positional | false | `Optional[Any]` | exact | `planning` | undefined | `unknown` | ok |
+| `context` | positional | false | `Optional[Any]` | exact | `context` | undefined | `unknown` | ok |
 | `output` | positional | null | `Optional[Any]` | exact | `output` | undefined | `unknown` | ok |
 | `execution` | positional | null | `Optional[Any]` | exact | `execution` | undefined | `unknown` | ok |
 | `hooks` | positional | null | `Optional[Any]` | exact | `hooks` | undefined | `unknown` | ok |
@@ -124,7 +124,7 @@ TS-only members: `verbose`?, `pretty`?
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:47`
 - TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:327`)
-- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 8 mismatches; 8 waived; 1 TS-only of 61
+- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 61
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -164,7 +164,7 @@ TS-only members: `verbose`?, `pretty`?
 | `agent_config` | positional | null | `Optional[Dict[str, Any]]` | camelCase | `agentConfig` | undefined | `Record<string, unknown>` | ok |
 | `variables` | positional | null | `Optional[Dict[str, Any]]` | exact | `variables` | {} | `Record<string, unknown>` | ok |
 | `skip_on_failure` | positional | false | `bool` | camelCase | `skipOnFailure` | false | `boolean` | ok |
-| `retry_delay` | positional | 0.0 | `float` | camelCase | `retryDelay` | 0 | `number` | default mismatch (waived) |
+| `retry_delay` | positional | 0.0 | `float` | camelCase | `retryDelay` | 0 | `number` | ok |
 | `on_error` | positional | "stop" | `str` | camelCase | `onError` | "stop" | `TaskOnError` | ok (type differs) |
 | `action` | positional | null | `Optional[str]` | exact | `action` | `description` | `string` | default mismatch (waived) |
 | `handler` | positional | null | `Optional[Callable]` | exact | `handler` | undefined | `(...args: unknown[]) => unknown` | ok |
@@ -207,7 +207,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3056`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2364`
-- Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 3 mismatches; 3 waived; 2 TS-only of 19
+- Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -216,14 +216,14 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 | `tools` | positional | null | `Optional[List[Any]]` | exact | `tools` | undefined | `any[]` | ok |
 | `output_json` | positional | null | `Optional[Any]` | camelCase | `outputJson` | undefined | `Record<string, any>` | ok |
 | `output_pydantic` | positional | null | `Optional[Any]` | camelCase | `outputPydantic` | undefined | `Record<string, any>` | ok |
-| `reasoning_steps` | positional | false | `bool` | camelCase | `reasoningSteps` | undefined | `boolean` | default mismatch (waived) |
+| `reasoning_steps` | positional | false | `bool` | camelCase | `reasoningSteps` | undefined | `boolean` | ok |
 | `stream` | positional | null | `Optional[bool]` | exact | `stream` | undefined | `boolean` | ok |
 | `task_name` | positional | null | `Optional[str]` | camelCase | `taskName` | undefined | `string` | ok |
 | `task_description` | positional | null | `Optional[str]` | camelCase | `taskDescription` | undefined | `string` | ok |
 | `task_id` | positional | null | `Optional[str]` | camelCase | `taskId` | undefined | `string` | ok |
 | `config` | positional | null | `Optional[Dict[str, Any]]` | exact | `config` | undefined | `Record<string, unknown>` | ok |
-| `force_retrieval` | positional | false | `bool` | camelCase | `forceRetrieval` | undefined | `boolean` | default mismatch (waived) |
-| `skip_retrieval` | positional | false | `bool` | camelCase | `skipRetrieval` | undefined | `boolean` | default mismatch (waived) |
+| `force_retrieval` | positional | false | `bool` | camelCase | `forceRetrieval` | undefined | `boolean` | ok |
+| `skip_retrieval` | positional | false | `bool` | camelCase | `skipRetrieval` | undefined | `boolean` | ok |
 | `attachments` | positional | null | `Optional[List[str]]` | exact | `attachments` | undefined | `string[]` | ok |
 | `tool_choice` | positional | null | `Optional[str]` | camelCase | `toolChoice` | undefined | `'auto' \| 'none' \| 'required' \| string` | ok |
 | `seed` | positional | null | `Optional[int]` | exact | `seed` | undefined | `number` | ok |
@@ -235,12 +235,12 @@ TS-only members: `previousResult`?, `options`?
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3053`
-- Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 4
+- Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `content` | positional | null |  | exact | `content` | undefined | `string` | ok |
-| `return_dict` | positional | false |  | camelCase | `returnDict` | undefined | `false` | default mismatch (waived) |
+| `return_dict` | positional | false |  | camelCase | `returnDict` | undefined | `false` | ok |
 | `output` | positional | null |  | exact | `output` | undefined | `unknown` | ok |
 
 TS-only members: `options`?
@@ -343,31 +343,23 @@ TS-only members: `parameters`?, `category`?
 
 | Key | Reason | Owner | Issue | Expires |
 |---|---|---|---|---|
-| `Agent.__init__.caching` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.model` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.__init__.role` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.force_retrieval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.reasoning_steps` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.chat.skip_retrieval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Agent.start.prompt` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.context` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.memory` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.planning` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.__init__.process` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `AgentTeam.start.return_dict` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Handoff.__init__.tool_description_override` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Handoff.__init__.tool_name_override` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Session.__init__.user_id` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.action` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
+| `Agent.__init__.caching` | TS cache is a boolean defaulting to false; Python None resolves a caching preset | praisonai-ts |  |  |
+| `Agent.__init__.model` | TS resolves the model from env then gpt-4o-mini; Python resolves per available credential | praisonai-ts |  |  |
+| `Agent.__init__.name` | TS generates a unique Agent_<id> name; Python defaults to "Agent" | praisonai-ts |  |  |
+| `Agent.__init__.role` | TS folds role/goal/backstory into instructions; role falls back to goal or backstory text | praisonai-ts |  |  |
+| `Agent.start.prompt` | TS start requires a prompt; Python None falls back to the task description | praisonai-ts |  |  |
+| `AgentTeam.__init__.process` | TS treats an undefined process as sequential, the Python default | praisonai-ts |  |  |
+| `Handoff.__init__.tool_description_override` | TS derives "Transfer conversation to <agent>"; Python derives the same in the body | praisonai-ts |  |  |
+| `Handoff.__init__.tool_name_override` | TS derives handoff_to_<agent> when unset; Python derives the same in the body | praisonai-ts |  |  |
+| `Session.__init__.user_id` | TS sets "default_user" eagerly; Python resolves the same value lazily | praisonai-ts |  |  |
+| `Task.__init__.action` | TS action mirrors description; Python resolves the same in the body | praisonai-ts |  |  |
 | `Task.__init__.depends_on` | TS dependsOn falls back to context then []; Python None means empty (same as the waived context alias) | praisonai-ts |  |  |
-| `Task.__init__.description` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.expected_output` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.guardrails` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.id` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.retry_delay` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `Task.__init__.routing` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
+| `Task.__init__.description` | TS description falls back to action at construction; Python resolves the same in the body | praisonai-ts |  |  |
+| `Task.__init__.expected_output` | TS fills "Complete the task successfully" at construction; Python does so lazily | praisonai-ts |  |  |
+| `Task.__init__.guardrails` | TS guardrails falls back to guardrail; Python resolves the same precedence in the body | praisonai-ts |  |  |
+| `Task.__init__.id` | TS assigns a UUID at construction; Python assigns an id lazily | praisonai-ts |  |  |
+| `Task.__init__.routing` | TS routing falls back to condition; Python resolves the same in the body | praisonai-ts |  |  |
 | `tool().description` | TS derives a default description from the tool name; Python leaves it None and infers from the docstring | praisonai-ts |  |  |
-| `tool().func` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().name` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
-| `tool().requires_approval` | baseline 2026-09-02: not yet ported to TypeScript | praisonai-ts |  |  |
+| `tool().func` | TS execute is required; Python func is optional because @tool can be applied bare | praisonai-ts |  |  |
+| `tool().name` | TS cannot infer a name from an anonymous function; Python infers it from __name__ | praisonai-ts |  |  |
+| `tool().requires_approval` | Python uses an _UNSET sentinel to detect explicit use; TS uses undefined | praisonai-ts |  |  |

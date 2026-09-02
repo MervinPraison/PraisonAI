@@ -6,87 +6,63 @@
 # Regenerate missing entries with: python -m praisonai._dev.parity.signatures --baseline
 
 waivers:
-  Task.__init__.depends_on:
-    owner: praisonai-ts
-    reason: 'TS dependsOn falls back to context then []; Python None means empty (same as the waived context alias)'
   Agent.__init__.caching:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS cache is a boolean defaulting to false; Python None resolves a caching preset
   Agent.__init__.model:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS resolves the model from env then gpt-4o-mini; Python resolves per available credential
   Agent.__init__.name:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS generates a unique Agent_<id> name; Python defaults to "Agent"
   Agent.__init__.role:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  Agent.chat.force_retrieval:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  Agent.chat.reasoning_steps:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  Agent.chat.skip_retrieval:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS folds role/goal/backstory into instructions; role falls back to goal or backstory text
   Agent.start.prompt:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  AgentTeam.__init__.context:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  AgentTeam.__init__.memory:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  AgentTeam.__init__.planning:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS start requires a prompt; Python None falls back to the task description
   AgentTeam.__init__.process:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  AgentTeam.start.return_dict:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS treats an undefined process as sequential, the Python default
   Handoff.__init__.tool_description_override:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS derives "Transfer conversation to <agent>"; Python derives the same in the body
   Handoff.__init__.tool_name_override:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS derives handoff_to_<agent> when unset; Python derives the same in the body
   Session.__init__.user_id:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS sets "default_user" eagerly; Python resolves the same value lazily
   Task.__init__.action:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS action mirrors description; Python resolves the same in the body
+  Task.__init__.depends_on:
+    owner: praisonai-ts
+    reason: TS dependsOn falls back to context then []; Python None means empty (same as the waived context alias)
   Task.__init__.description:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS description falls back to action at construction; Python resolves the same in the body
   Task.__init__.expected_output:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS fills "Complete the task successfully" at construction; Python does so lazily
   Task.__init__.guardrails:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS guardrails falls back to guardrail; Python resolves the same precedence in the body
   Task.__init__.id:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
-  Task.__init__.retry_delay:
-    owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS assigns a UUID at construction; Python assigns an id lazily
   Task.__init__.routing:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS routing falls back to condition; Python resolves the same in the body
   tool().description:
     owner: praisonai-ts
     reason: TS derives a default description from the tool name; Python leaves it None and infers from the docstring
   tool().func:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS execute is required; Python func is optional because @tool can be applied bare
   tool().name:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: TS cannot infer a name from an anonymous function; Python infers it from __name__
   tool().requires_approval:
     owner: praisonai-ts
-    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+    reason: Python uses an _UNSET sentinel to detect explicit use; TS uses undefined

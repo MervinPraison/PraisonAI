@@ -1215,12 +1215,12 @@
         "camelCase": 9,
         "exact": 7,
         "flattened": 0,
-        "mismatches": 3,
+        "mismatches": 0,
         "missing": 0,
         "params": 17,
         "ts_only": 2,
         "ts_total": 19,
-        "waived": 3
+        "waived": 0
       },
       "params": [
         {
@@ -1352,10 +1352,7 @@
           "canonical": "reasoningSteps",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `reasoningSteps`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "camelCase",
           "name": "reasoning_steps",
@@ -1373,7 +1370,7 @@
           "ts_name": "reasoningSteps",
           "type_class": "boolean",
           "type_text": "bool",
-          "waived": "Agent.chat.reasoning_steps",
+          "waived": null,
           "warnings": []
         },
         {
@@ -1505,10 +1502,7 @@
           "canonical": "forceRetrieval",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `forceRetrieval`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "camelCase",
           "name": "force_retrieval",
@@ -1526,17 +1520,14 @@
           "ts_name": "forceRetrieval",
           "type_class": "boolean",
           "type_text": "bool",
-          "waived": "Agent.chat.force_retrieval",
+          "waived": null,
           "warnings": []
         },
         {
           "canonical": "skipRetrieval",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `skipRetrieval`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "camelCase",
           "name": "skip_retrieval",
@@ -1554,7 +1545,7 @@
           "ts_name": "skipRetrieval",
           "type_class": "boolean",
           "type_text": "bool",
-          "waived": "Agent.chat.skip_retrieval",
+          "waived": null,
           "warnings": []
         },
         {
@@ -1955,12 +1946,12 @@
         "camelCase": 3,
         "exact": 20,
         "flattened": 0,
-        "mismatches": 4,
+        "mismatches": 1,
         "missing": 0,
         "params": 23,
         "ts_only": 2,
         "ts_total": 25,
-        "waived": 4
+        "waived": 1
       },
       "params": [
         {
@@ -2170,10 +2161,7 @@
           "canonical": "memory",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `memory`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "exact",
           "name": "memory",
@@ -2191,17 +2179,14 @@
           "ts_name": "memory",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
-          "waived": "AgentTeam.__init__.memory",
+          "waived": null,
           "warnings": []
         },
         {
           "canonical": "planning",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `planning`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "exact",
           "name": "planning",
@@ -2219,17 +2204,14 @@
           "ts_name": "planning",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
-          "waived": "AgentTeam.__init__.planning",
+          "waived": null,
           "warnings": []
         },
         {
           "canonical": "context",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `context`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "exact",
           "name": "context",
@@ -2247,7 +2229,7 @@
           "ts_name": "context",
           "type_class": "unknown",
           "type_text": "Optional[Any]",
-          "waived": "AgentTeam.__init__.context",
+          "waived": null,
           "warnings": []
         },
         {
@@ -2592,12 +2574,12 @@
         "camelCase": 1,
         "exact": 2,
         "flattened": 0,
-        "mismatches": 1,
+        "mismatches": 0,
         "missing": 0,
         "params": 3,
         "ts_only": 1,
         "ts_total": 4,
-        "waived": 1
+        "waived": 0
       },
       "params": [
         {
@@ -2629,10 +2611,7 @@
           "canonical": "returnDict",
           "default": false,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=false typescript=undefined (TS `returnDict`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "camelCase",
           "name": "return_dict",
@@ -2650,7 +2629,7 @@
           "ts_name": "returnDict",
           "type_class": "unknown",
           "type_text": "",
-          "waived": "AgentTeam.start.return_dict",
+          "waived": null,
           "warnings": []
         },
         {
@@ -3922,12 +3901,12 @@
         "camelCase": 29,
         "exact": 31,
         "flattened": 0,
-        "mismatches": 8,
+        "mismatches": 7,
         "missing": 0,
         "params": 60,
         "ts_only": 1,
         "ts_total": 61,
-        "waived": 8
+        "waived": 7
       },
       "params": [
         {
@@ -4861,10 +4840,7 @@
           "canonical": "retryDelay",
           "default": 0.0,
           "default_kind": "literal",
-          "gap": {
-            "detail": "default differs: python=0.0 typescript=0 (TS `retryDelay`)",
-            "kind": "default"
-          },
+          "gap": null,
           "kind": "positional",
           "match": "camelCase",
           "name": "retry_delay",
@@ -4882,7 +4858,7 @@
           "ts_name": "retryDelay",
           "type_class": "number",
           "type_text": "float",
-          "waived": "Task.__init__.retry_delay",
+          "waived": null,
           "warnings": []
         },
         {
@@ -5828,13 +5804,13 @@
     "camelCase": 79,
     "exact": 106,
     "flattened": 2,
-    "mismatches": 28,
+    "mismatches": 20,
     "missing": 0,
     "params": 196,
     "surfaces": 10,
     "ts_only": 56,
     "ts_total": 255,
-    "waived": 28
+    "waived": 20
   },
   "waivers": [
     {
@@ -5842,119 +5818,70 @@
       "issue": null,
       "key": "Agent.__init__.caching",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS cache is a boolean defaulting to false; Python None resolves a caching preset"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.__init__.model",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS resolves the model from env then gpt-4o-mini; Python resolves per available credential"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.__init__.name",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS generates a unique Agent_<id> name; Python defaults to \"Agent\""
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.__init__.role",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "Agent.chat.force_retrieval",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "Agent.chat.reasoning_steps",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "Agent.chat.skip_retrieval",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS folds role/goal/backstory into instructions; role falls back to goal or backstory text"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Agent.start.prompt",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "AgentTeam.__init__.context",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "AgentTeam.__init__.memory",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "AgentTeam.__init__.planning",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS start requires a prompt; Python None falls back to the task description"
     },
     {
       "expires": null,
       "issue": null,
       "key": "AgentTeam.__init__.process",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "AgentTeam.start.return_dict",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS treats an undefined process as sequential, the Python default"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Handoff.__init__.tool_description_override",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS derives \"Transfer conversation to <agent>\"; Python derives the same in the body"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Handoff.__init__.tool_name_override",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS derives handoff_to_<agent> when unset; Python derives the same in the body"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Session.__init__.user_id",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS sets \"default_user\" eagerly; Python resolves the same value lazily"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.action",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS action mirrors description; Python resolves the same in the body"
     },
     {
       "expires": null,
@@ -5968,42 +5895,35 @@
       "issue": null,
       "key": "Task.__init__.description",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS description falls back to action at construction; Python resolves the same in the body"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.expected_output",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS fills \"Complete the task successfully\" at construction; Python does so lazily"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.guardrails",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS guardrails falls back to guardrail; Python resolves the same precedence in the body"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.id",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
-    },
-    {
-      "expires": null,
-      "issue": null,
-      "key": "Task.__init__.retry_delay",
-      "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS assigns a UUID at construction; Python assigns an id lazily"
     },
     {
       "expires": null,
       "issue": null,
       "key": "Task.__init__.routing",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS routing falls back to condition; Python resolves the same in the body"
     },
     {
       "expires": null,
@@ -6017,21 +5937,21 @@
       "issue": null,
       "key": "tool().func",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS execute is required; Python func is optional because @tool can be applied bare"
     },
     {
       "expires": null,
       "issue": null,
       "key": "tool().name",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "TS cannot infer a name from an anonymous function; Python infers it from __name__"
     },
     {
       "expires": null,
       "issue": null,
       "key": "tool().requires_approval",
       "owner": "praisonai-ts",
-      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+      "reason": "Python uses an _UNSET sentinel to detect explicit use; TS uses undefined"
     }
   ]
 }
