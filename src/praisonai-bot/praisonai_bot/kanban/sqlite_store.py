@@ -223,10 +223,15 @@ class SQLiteKanbanStore:
         if not path or not isinstance(path, str):
             return False
         try:
-            import subprocess
-            result = subprocess.run(
+            from .._guarded_subprocess import run_guarded
+
+            # Bounded: this sits on the create_task path, which the gateway
+            # dispatcher calls from its event loop. A git command that stalls
+            # on a network-mounted or lock-contended path would otherwise
+            # block every card creation.
+            result = run_guarded(
                 ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True,
+                timeout=15,
             )
             return result.returncode == 0 and result.stdout.strip() == "true"
         except Exception:

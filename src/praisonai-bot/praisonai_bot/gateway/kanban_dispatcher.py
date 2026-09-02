@@ -14,7 +14,27 @@ import subprocess
 import time
 from typing import Dict, Any, List, Optional
 
+from .._guarded_subprocess import run_guarded
+
 logger = logging.getLogger(__name__)
+
+# Ceiling for a single git invocation. Worktree add, merge and commit on a
+# large repository are legitimately slow, so this is set well above the
+# general default: the aim is to bound an indefinite hang, not to fail slow
+# work. Override with PRAISONAI_KANBAN_GIT_TIMEOUT (seconds).
+_DEFAULT_GIT_TIMEOUT = 300.0
+
+
+def _git_timeout() -> float:
+    """Resolve the per-git-command ceiling, ignoring an unusable override."""
+    raw = os.environ.get("PRAISONAI_KANBAN_GIT_TIMEOUT")
+    if not raw:
+        return _DEFAULT_GIT_TIMEOUT
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_GIT_TIMEOUT
+    return value if value > 0 else _DEFAULT_GIT_TIMEOUT
 
 # Global dispatcher state
 _dispatcher_running = False
@@ -415,12 +435,22 @@ class KanbanDispatcher:
 
         A thin subprocess wrapper so worktree isolation stays self-contained in
         the wrapper without pulling in a Tier-2 package dependency.
+
+        Bounded via :func:`run_guarded`: the dispatcher calls this from inside
+        the gateway's event loop, so a git command blocked on a credential
+        prompt or an ``index.lock`` would otherwise stall every WebSocket
+        client indefinitely. On timeout the result carries returncode 124 and
+        a diagnosis in stderr, which the existing ``returncode == 0`` checks
+        already treat as failure.
+
+        The ceiling is deliberately generous — worktree creation and merges on
+        a large repository are legitimately slow, and the goal is to bound a
+        hang, not to fail slow-but-healthy work.
         """
-        return subprocess.run(
+        return run_guarded(
             ["git", *args],
-            capture_output=True,
-            text=True,
             cwd=cwd or self._repo_dir(),
+            timeout=_git_timeout(),
         )
 
     def _worktree_root(self) -> str:
