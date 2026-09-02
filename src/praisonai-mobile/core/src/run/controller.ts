@@ -193,6 +193,17 @@ export function createRunController(deps: ControllerDeps): RunController {
     const coalescer = createCoalescer(maxBytes, maxDelayMs);
     const gate = createPublishGate(deps.time.createScheduler());
     let streamed = 0;
+    // A tick drains the coalescer BEFORE the gate is consulted, so a frame the
+    // gate rejects is already gone from the coalescer -- its text lives only on
+    // `turn`, applied by the run loop, and is not yet painted. If the stream
+    // then pauses, no later tick sees pending text and the gate reopening does
+    // not itself publish, so that progress would stay invisible until the next
+    // delta or the final publish. `paintedChars` records how far the screen has
+    // actually been painted; when a tick finds nothing new to drain but the gate
+    // has since reopened and `streamed` has moved past it, it flushes that
+    // stranded progress. This is the backpressure RELEASE the gate needs to be
+    // safe: it skips a paint under load, then catches up once the renderer can.
+    let paintedChars = 0;
 
     // The coalescer's TIME bound, which was declared, documented and never
     // connected -- TimePort.every's own comment calls it "the coalescer's
@@ -219,17 +230,50 @@ export function createRunController(deps: ControllerDeps): RunController {
 
       const frame = coalescer.tick(deps.time.nowMs());
       if (frame === null) {
-        // Nothing to paint from the coalescer, but refusals still need to
-        // reach the screen -- and to stop piling up in the sink.
-        if (hadDrops) publish();
+        // Nothing new to drain. Two reasons a paint may still be owed:
+        //  - a refusal arrived and must reach the screen (and stop piling up);
+        //  - a previous tick drained text but the gate rejected it, so that
+        //    progress is on `turn` yet unpainted. Once the gate reopens, catch
+        //    it up -- otherwise a stream that pauses right after a rejected tick
+        //    leaves already-received text invisible until the next delta.
+        const stranded = streamed > paintedChars;
+        if (hadDrops || (stranded && gate(streamed))) {
+          paintedChars = streamed;
+          publish();
+        }
         return;
       }
       applyFrame(frame);
-      // Deliberately NOT gated. The gate skips intermediate paints when the
-      // renderer cannot keep up; this frame exists precisely because nothing
-      // has painted for maxDelayMs, so skipping it reintroduces the stall it
-      // was added to prevent.
-      publish();
+      // Gated -- and this is where the gate actually earns its constants.
+      //
+      // It used to publish unconditionally, reasoning that a tick frame exists
+      // "precisely because nothing has painted for maxDelayMs, so skipping it
+      // reintroduces the stall". That reasoning had the gate's own state
+      // backwards. `gate(streamed)` returns TRUE whenever the gate is OPEN, and
+      // the gate is open exactly when nothing has painted recently: it opens on
+      // its first call, and reopens on a frame callback or after
+      // UNPAINTED_REOPEN_MS (200) with no paint. So the tick after a quiet
+      // period passes the gate and paints immediately -- the stall the old
+      // comment feared cannot happen.
+      //
+      // What the gate DOES skip is a tick that fires just after a paint, while
+      // the renderer is still catching up. That is backpressure, and it is the
+      // one thing this pipeline had no path for: with the coalescer's flush
+      // tick draining every 16ms, `coalescer.push()` below almost always
+      // returns [] so the per-event gate at line ~275 was never consulted, and
+      // MAX_HELD_CHARS / UNPAINTED_REOPEN_MS -- tuned for mobile -- bound
+      // nothing (issue #4639). Consulting the gate here makes it the single
+      // backpressure authority and both constants load-bearing, while
+      // MAX_HELD_CHARS still forces the tail out so a closed gate cannot swallow
+      // the end of an answer.
+      //
+      // When the gate rejects here, the drained text is left unpainted on
+      // `turn`; `paintedChars` stays behind `streamed` and a later tick catches
+      // it up once the gate reopens (see the frame === null branch above).
+      if (gate(streamed)) {
+        paintedChars = streamed;
+        publish();
+      }
     });
 
     const request: RunRequest = {
@@ -264,6 +308,9 @@ export function createRunController(deps: ControllerDeps): RunController {
           for (const frame of coalescer.push({ kind: "structured", payload: event.type }, deps.time.nowMs())) {
             applyFrame(frame);
           }
+          // A structured event flushes the buffered text and paints the whole
+          // transcript, so nothing is left stranded for a catch-up tick.
+          paintedChars = streamed;
           publish();
           continue;
         }
@@ -272,7 +319,10 @@ export function createRunController(deps: ControllerDeps): RunController {
         const frames = coalescer.push({ kind: "text", text: event.text }, deps.time.nowMs());
         // Two independent bounds. The coalescer decides a frame is worth
         // painting; the gate decides the renderer can keep up with it.
-        if (frames.length > 0 && gate(streamed)) publish();
+        if (frames.length > 0 && gate(streamed)) {
+          paintedChars = streamed;
+          publish();
+        }
       }
     } catch (error) {
       // A stream that dies BECAUSE WE ABORTED IT is not a failure.
