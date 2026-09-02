@@ -41,6 +41,7 @@ import { createFakeShell, PHONE_INSETS } from "../../testing/src/fake-shell.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
 import { createFakeHttp, sseResponse, streamOf } from "../../testing/src/fake-http.ts";
+import { PROTOCOL_VERSION } from "../../protocol/src/version.ts";
 import { appEngines, mount } from "./main.ts";
 import { ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
 import { createSettingsStore, facadeFor, type SettingsFacade } from "../../core/src/settings/store.ts";
@@ -728,4 +729,72 @@ test("the message field is labelled as the field, not as the button beside it", 
   assert.equal(box.getAttribute("aria-label"), en.composerLabel);
   assert.notEqual(box.getAttribute("aria-label"), en.actionSend, "not the button's name");
   app?.dispose();
+});
+
+// ---- an unreachable engine must not be a dead app ---------------------------
+
+test("the app STARTS when the engine is not answering, and says so", async () => {
+  // PR #4647 made the health probe a hard boot gate, and the whole app
+  // rendered "PraisonAI could not start: 404" -- 17 end-to-end tests went red
+  // on main, and on a phone with no desktop engine to reach the app simply
+  // would not open. The user cannot fix it either: the address is changed in
+  // Settings, and Settings is behind the app that will not start.
+  const { dom, platform } = harness(); // no /health route: the engine is unreachable
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  assert.notEqual(app, null, "an unreachable engine must not stop the app from starting");
+  assert.ok(dom.find((n) => n.tagName === "TEXTAREA"), "the composer must be there");
+  assert.ok(dom.find((n) => String(n.dataset["action"]) === "send"), "and the send control");
+
+  const notice = dom.find((n) => n.className.includes("row-notice"));
+  assert.ok(notice, `the app must SAY the engine is not answering:\n${dom.text()}`);
+  assert.equal(notice.dataset["tone"], "warning");
+
+  // Assertive, because the user is about to type into something that cannot
+  // reply yet -- waiting politely for the queue means they find out by sending.
+  const shouted = dom.all().find((n) => n.getAttribute("aria-live") === "assertive");
+  assert.match(String(shouted?.textContent), /not answering yet/);
+  app?.dispose();
+});
+
+test("a HEALTHY engine boots with no warning -- the pair", async () => {
+  // Without this, an app that always warned would pass the test above and cry
+  // wolf on every launch.
+  const { dom, http, platform } = harness();
+  http.on("/health", () => ({
+    status: 200,
+    headers: {},
+    body: streamOf(JSON.stringify({ ok: true, version: PROTOCOL_VERSION })),
+  }));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  assert.notEqual(app, null);
+  assert.equal(
+    dom.find((n) => n.className.includes("row-notice")),
+    null,
+    "a healthy engine must not be reported as unhealthy",
+  );
+  app?.dispose();
+});
+
+test("a PERMANENT refusal still stops the app, with a name", async () => {
+  // The other half. A retryable unreadiness boots and warns; a protocol
+  // mismatch never resolves itself, so booting into it only defers the same
+  // failure to the user's first message. It must still be fatal.
+  //
+  // Version 1, not 99: a NEWER engine is deliberately accepted, because
+  // version.ts treats unknown fields as additive and refusing one would strand
+  // every shipped client on the day the engine ships first. Too OLD is the
+  // permanent refusal.
+  const { dom, http, platform } = harness();
+  http.on("/health", () => ({
+    status: 200,
+    headers: {},
+    body: streamOf(JSON.stringify({ ok: true, version: 1 })),
+  }));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  assert.equal(app, null, "a version mismatch must refuse to boot");
+  assert.match(dom.text(), /could not start/, dom.text());
+  assert.match(dom.text(), /too_old|engine=1|protocol/, "and it must name the reason");
 });
