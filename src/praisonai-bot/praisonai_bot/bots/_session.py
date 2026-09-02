@@ -194,6 +194,7 @@ class BotSessionManager:
         platform: str = "",
         dlq: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
+        identity_canonicalizer: Optional[Any] = None,
         ingress_journal: Optional[Any] = None,
         run_control: Optional[Any] = None,
         run_timeout: float = 300.0,  # 5 minutes default timeout
@@ -245,6 +246,16 @@ class BotSessionManager:
         # session key is the resolver-returned unified user id, so the
         # same human pinging from multiple platforms shares one history.
         self._identity_resolver = identity_resolver
+        # Issue #4661: optional identity-canonicalization seam. An
+        # ``IdentityCanonicalizerProtocol`` (``canonicalize(platform,
+        # raw_user_id) -> str`` — typically the active adapter itself, since
+        # ``BasePlatformAdapter`` implements it) consulted on the raw platform
+        # id *before* it enters the session key / resolver lookup, so a
+        # platform-side id change for the *same* human (WhatsApp JID→LID, a
+        # number↔UUID alias flip) collapses to one stable session instead of
+        # silently forking history/memory/run-state. ``None`` (default) is the
+        # identity function — behaviour is byte-for-byte unchanged.
+        self._identity_canonicalizer = identity_canonicalizer
         # Ingress journal: optional durable message processing with dedup.
         # When set, messages are journaled before agent processing for
         # crash recovery and webhook redelivery protection.
@@ -409,6 +420,13 @@ class BotSessionManager:
         identity_resolver = getattr(runtime, "identity_resolver", None)
         if identity_resolver is not None:
             self._identity_resolver = identity_resolver
+        # Issue #4661: adopt an identity-canonicalization seam when the runtime
+        # carries one (an ``IdentityCanonicalizerProtocol``, e.g. the active
+        # adapter itself), so a volatile platform id is stabilised before it
+        # keys a session. Absent seam leaves the identity default untouched.
+        identity_canonicalizer = getattr(runtime, "identity_canonicalizer", None)
+        if identity_canonicalizer is not None:
+            self._identity_canonicalizer = identity_canonicalizer
         delivery_router = getattr(runtime, "delivery_router", None)
         if delivery_router is not None:
             self._delivery_router = delivery_router
@@ -578,6 +596,29 @@ class BotSessionManager:
             return "per_user"
         return "per_chat"
 
+    def _canonical_user_id(self, user_id: str) -> str:
+        """Stabilise a volatile raw platform id before it keys a session.
+
+        Applies the optional identity-canonicalization seam (Issue #4661): an
+        ``IdentityCanonicalizerProtocol`` (``canonicalize(platform,
+        raw_user_id) -> str`` — typically the active adapter, since
+        ``BasePlatformAdapter`` implements it) wired in via
+        ``__init__``/``attach_gateway_runtime``. Lets a platform-side id change
+        for the same human (WhatsApp JID→LID, a number↔UUID alias flip) collapse
+        to one stable session key instead of silently forking. No-op (identity)
+        when none is wired, and fail-open: any error falls back to the raw id so
+        a buggy canonicalizer can never break session keying.
+        """
+        canonicalizer = self._identity_canonicalizer
+        if canonicalizer is None:
+            return user_id
+        try:
+            canonical = canonicalizer.canonicalize(self._platform, user_id)
+        except Exception as e:  # pragma: no cover — defensive, never break keying
+            logger.warning("identity canonicalizer failed: %s", e)
+            return user_id
+        return canonical if isinstance(canonical, str) and canonical else user_id
+
     def _storage_key(
         self,
         user_id: str,
@@ -618,14 +659,23 @@ class BotSessionManager:
             prefix = self._platform or "bot"
             account_key = account or "default"
             base = f"{prefix}:acct:{account_key}:chat:{chat_id}:{thread_id}"
-        elif self._identity_resolver is not None and self._platform:
-            try:
-                base = self._identity_resolver.resolve(self._platform, user_id)
-            except Exception as e:  # pragma: no cover — defensive
-                logger.warning("identity resolver failed: %s", e)
-                base = user_id
         else:
-            base = user_id
+            # Issue #4661: canonicalise a volatile platform id to a stable one
+            # BEFORE it enters the session key or the link/pairing resolver, so
+            # a platform-side id change for the same human (WhatsApp JID→LID, a
+            # number↔UUID alias flip) resolves to one session rather than
+            # silently forking. No-op (identity) when no normalizer is wired.
+            canonical_user_id = self._canonical_user_id(user_id)
+            if self._identity_resolver is not None and self._platform:
+                try:
+                    base = self._identity_resolver.resolve(
+                        self._platform, canonical_user_id
+                    )
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.warning("identity resolver failed: %s", e)
+                    base = canonical_user_id
+            else:
+                base = canonical_user_id
         # Per-tenant memory isolation (Issue #4341): when a route resolved to a
         # ``profile``, its namespace is bound turn-locally in ``_ACTIVE_PROFILE_NS``
         # so every storage key is prefixed with the tenant scope. Reading the
