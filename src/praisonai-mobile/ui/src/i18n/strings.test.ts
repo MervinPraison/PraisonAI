@@ -20,6 +20,7 @@ import { UNKNOWN } from "../format.ts";
  *  asserted below, so a new function key cannot be added without a sample. */
 const SAMPLES: Readonly<Record<string, () => string>> = {
   bootFailed: () => en.bootFailed("no storage"),
+  engineNotReady: () => en.engineNotReady("ECONNREFUSED"),
   chatUnreadable: () => en.chatUnreadable("chat-7"),
   chatsAllUnreadable: () => en.chatsAllUnreadable(3),
   minutesAgo: () => en.minutesAgo(2, "2"),

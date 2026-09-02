@@ -62,6 +62,10 @@ export interface Strings {
   /** The app could not start at all. The detail is machine text appended, not
    *  interpolated into the middle of a sentence. */
   readonly bootFailed: (detail: string) => string;
+  /** The app started but the engine is not answering yet. Says the app is
+   *  usable and what is wrong, which is the difference between a warning
+   *  and the fatal screen this used to be. */
+  readonly engineNotReady: (detail: string) => string;
   /** The crash screen. It has to say the conversations survived, because the
    *  user's next thought is that they did not. */
   readonly crashed: string;
@@ -256,6 +260,8 @@ export const en: Strings = {
   appName: "PraisonAI",
   newChat: "New chat",
   bootFailed: (detail) => `PraisonAI could not start: ${detail}`,
+  engineNotReady: (detail) =>
+    `The engine is not answering yet (${detail}). You can still type; sending will retry it.`,
   stopRefused: "The engine did not accept the stop. It may still be running.",
   crashed: "Something went wrong. Your conversations are saved.",
 

@@ -496,10 +496,39 @@ test("an engine answering 200 with ok:false is refused at BOOT, not mid-turn", a
     engines: () => [probedChoice("remote", () => probeHealth(http, "http://engine.test"))],
   }));
 
-  assert.equal(result.ok, false, "boot must refuse an unhealthy engine");
+  // The probe RUNS -- that is what this file's predecessor was written for, and
+  // it stands. What changed is the verdict: an unhealthy engine may recover, so
+  // it is reported rather than refused. Making it fatal meant a phone with no
+  // desktop engine to reach could not open the app at all, and the user could
+  // not correct the address because Settings is inside the app that would not
+  // start. `main.ts` renders `notReady` as a warning and announces it.
+  assert.equal(result.ok, true, "a recoverable unreadiness must not stop the app");
+  if (!result.ok) return;
+  assert.equal(result.notReady?.reason, "unhealthy", "but the app must be told");
+  assert.match(String(result.notReady?.detail), /false/, "and told what the engine said");
+  await result.app.dispose();
+});
+
+test("a PERMANENT unreadiness is still refused at boot", async () => {
+  // The pair, and the line between the two: a version mismatch does not fix
+  // itself, so booting into it only defers the same failure to the user's
+  // first message. `readiness.ts` marks exactly these `retryable: false`.
+  const http = createFakeHttp();
+  http.on("/health", () => ({
+    status: 200,
+    headers: {},
+    body: streamOf(JSON.stringify({ ok: true, version: 1 })),
+  }));
+
+  const result = await createApp(deps({
+    engineId: "remote",
+    engines: () => [probedChoice("remote", () => probeHealth(http, "http://engine.test"))],
+  }));
+
+  assert.equal(result.ok, false, "a too-old engine must refuse to boot");
   if (result.ok) return;
-  assert.equal(result.reason, "unhealthy");
-  assert.equal(result.retryable, true, "an unhealthy engine may recover, so a caller can poll");
+  assert.equal(result.reason, "version_mismatch");
+  assert.equal(result.retryable, false, "waiting will not fix a version mismatch");
 });
 
 test("an engine that cannot be reached at all is refused at boot, and retryably", async () => {
@@ -512,10 +541,13 @@ test("an engine that cannot be reached at all is refused at boot, and retryably"
     engines: () => [probedChoice("remote", () => probeHealth(http, "http://engine.test"))],
   }));
 
-  assert.equal(result.ok, false);
-  if (result.ok) return;
-  assert.equal(result.reason, "http_status");
-  assert.equal(result.retryable, true);
+  // Retryable, so the app STARTS and reports it. This is the case that made
+  // the hard gate untenable: on a phone there is usually no desktop engine to
+  // reach, so refusing here meant the app never opened.
+  assert.equal(result.ok, true, "an unreachable engine must not stop the app");
+  if (!result.ok) return;
+  assert.equal(result.notReady?.reason, "http_status");
+  await result.app.dispose();
 });
 
 test("a healthy probe lets the boot through -- the pair", async () => {
@@ -548,7 +580,7 @@ test("an engine with no probe boots unchanged -- probing is optional", async () 
   if (result.ok) await result.app.dispose();
 });
 
-test("an engine rejected by its probe is disposed, not left holding a socket", async () => {
+test("an engine PERMANENTLY rejected by its probe is disposed, not left holding a socket", async () => {
   // Same guarantee a protocol mismatch already has: a refused engine that keeps
   // its socket is a leak that only surfaces as a second, unrelated failure.
   let disposed = false;
@@ -561,10 +593,34 @@ test("an engine rejected by its probe is disposed, not left holding a socket", a
   await createApp(deps({
     engineId: "remote",
     engines: () => [
-      { id: "remote", create: () => engine, probe: async () => ({ ready: false, reason: "unhealthy", detail: "false", retryable: true }) },
+      { id: "remote", create: () => engine, probe: async () => ({ ready: false, reason: "version_mismatch", detail: "too old", retryable: false }) },
     ],
   }));
   assert.equal(disposed, true);
+});
+
+test("an engine kept despite a RETRYABLE rejection is NOT disposed", async () => {
+  // The pair, and the reason the two cases differ: a retryable unreadiness
+  // hands the engine over so the app can use it once the remote comes up.
+  // Disposing it here would leave the app holding a dead engine it can never
+  // retry through.
+  let disposed = false;
+  const inner = createScriptedEngine({ script: SCRIPTS.happy });
+  const engine: AgentEnginePort = {
+    ...inner,
+    id: "remote",
+    dispose: async () => void (disposed = true),
+  };
+  const result = await createApp(deps({
+    engineId: "remote",
+    engines: () => [
+      { id: "remote", create: () => engine, probe: async () => ({ ready: false, reason: "unhealthy", detail: "false", retryable: true }) },
+    ],
+  }));
+  assert.equal(disposed, false, "the engine is still the one the app will use");
+  assert.equal(result.ok, true);
+  if (result.ok) await result.app.dispose();
+  assert.equal(disposed, true, "and it is disposed when the app is");
 });
 
 test("selectEngine runs the probe only after the protocol check passes", async () => {

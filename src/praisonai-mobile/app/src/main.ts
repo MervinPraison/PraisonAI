@@ -328,11 +328,31 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // A named failure, on screen. `app/src/engines.ts` promises exactly this
     // and nothing rendered it: an unusable engine used to be an unhandled
     // branch that left a blank page.
+    //
+    // Reached now only by a PERMANENT failure -- storage that will not open, a
+    // protocol mismatch. An engine that is merely unreachable boots and warns
+    // instead; see below.
     renderFatal(root, strings.bootFailed(booted.detail));
     return null;
   }
 
   const app = booted.app;
+
+  // The engine is not answering, but the app is usable. Said out loud rather
+  // than left for the first message to discover -- and assertive, because the
+  // user is about to type into something that cannot reply yet.
+  //
+  // This branch exists because refusing to boot on an unreachable engine left
+  // the user on an error screen with no way back: they cannot open Settings to
+  // change the address, because Settings is where the address is changed.
+  if (booted.notReady !== undefined) {
+    const warning = doc.createElement("p");
+    warning.className = "row row-notice";
+    warning.dataset["tone"] = "warning";
+    warning.textContent = strings.engineNotReady(booted.notReady.detail);
+    transcript.append(warning);
+    assertive.textContent = strings.engineNotReady(booted.notReady.detail);
+  }
 
   // ---- the shell drives layout -------------------------------------------
   const applyGeometry = (): void => {

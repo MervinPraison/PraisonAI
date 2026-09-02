@@ -34,7 +34,14 @@ export interface EngineChoice {
 }
 
 export type EngineSelection =
-  | { readonly ok: true; readonly engine: AgentEnginePort }
+  | {
+      readonly ok: true;
+      readonly engine: AgentEnginePort;
+      /** The engine was selected but is not answering yet. Set only for a
+       *  RETRYABLE unreadiness -- see the probe branch below for why that is
+       *  not a refusal. */
+      readonly notReady?: { readonly reason: string; readonly detail: string };
+    }
   | {
       readonly ok: false;
       readonly reason: "unknown_engine" | "protocol_mismatch" | Extract<Readiness, { ready: false }>["reason"];
@@ -99,15 +106,30 @@ export async function selectEngine(
   if (choice.probe !== undefined) {
     const readiness = await choice.probe();
     if (!readiness.ready) {
-      // Dispose for the same reason a protocol mismatch does: an engine left
-      // holding a socket is a leak that only shows up as a second failure.
-      await engine.dispose();
-      return {
-        ok: false,
-        reason: readiness.reason,
-        detail: readiness.detail,
-        retryable: readiness.retryable,
-      };
+      // A PERMANENT unreadiness is a refusal: a version mismatch does not fix
+      // itself, so booting into it only defers the same failure to the user's
+      // first message.
+      if (readiness.retryable === false) {
+        // Dispose for the same reason a protocol mismatch does: an engine left
+        // holding a socket is a leak that only shows up as a second failure.
+        await engine.dispose();
+        return { ok: false, reason: readiness.reason, detail: readiness.detail, retryable: false };
+      }
+
+      // A RETRYABLE one is not. An engine that is still binding its socket, or
+      // a phone that has no desktop engine to reach at all, must not stop the
+      // app from starting: refusing here left the user on an error screen with
+      // no way back -- they cannot open Settings to change the address,
+      // because that is where the address is changed.
+      //
+      // Measured before this branch existed: with no `/health` route the whole
+      // app rendered "PraisonAI could not start: 404" and nothing else, and 17
+      // end-to-end tests went red on main.
+      //
+      // So the engine is handed over WITH its unreadiness attached. The app
+      // starts, says what is wrong, and a retry costs the user one tap instead
+      // of a reinstall.
+      return { ok: true, engine, notReady: { reason: readiness.reason, detail: readiness.detail } };
     }
   }
 
