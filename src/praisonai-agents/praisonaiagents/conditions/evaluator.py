@@ -204,52 +204,61 @@ def evaluate_condition(
         else:
             substituted = substituted.replace(placeholder, str(value))
     
+    # A comparison operator in the *template* (not the substituted values)
+    # is what makes this a comparison condition. When the template has no
+    # operator, it is a plain flag/contains/truthy check and the comparison
+    # parsers below must be skipped, otherwise a placeholder whose value
+    # happens to look like a comparison (e.g. "{{flag}}" -> "5 < 3") would be
+    # mis-parsed as a comparison instead of honoring the truthy-string path.
+    template_has_comparison = re.search(r'>=|<=|==|!=|>|<', condition) is not None
+
     # Now evaluate the substituted condition
     try:
         # Handle different condition formats
         
-        # Check if we have unsubstituted empty values in comparisons
-        # If a variable was missing, it becomes empty string which can cause issues
-        if ' > ' in substituted or ' < ' in substituted or ' >= ' in substituted or ' <= ' in substituted:
-            # Check for empty left side in comparison (missing variable)
-            if substituted.strip().startswith('>') or substituted.strip().startswith('<'):
-                return False
-            if substituted.strip().startswith('='):
-                return False
-        
-        # Numeric comparisons: "90 > 80", "50 >= 50", "10 < 20", etc.
-        numeric_pattern = r'^(-?\d+(?:\.\d+)?)\s*(>|>=|<|<=|==|!=)\s*(-?\d+(?:\.\d+)?)$'
-        numeric_match = re.match(numeric_pattern, substituted.strip())
-        if numeric_match:
-            left = float(numeric_match.group(1))
-            op = numeric_match.group(2)
-            right = float(numeric_match.group(3))
+        if template_has_comparison:
+            # Check if we have unsubstituted empty values in comparisons
+            # If a variable was missing, it becomes empty string which can cause issues
+            if ' > ' in substituted or ' < ' in substituted or ' >= ' in substituted or ' <= ' in substituted:
+                # Check for empty left side in comparison (missing variable)
+                if substituted.strip().startswith('>') or substituted.strip().startswith('<'):
+                    return False
+                if substituted.strip().startswith('='):
+                    return False
             
-            if op == '>':
-                return left > right
-            if op == '>=':
-                return left >= right
-            if op == '<':
-                return left < right
-            if op == '<=':
-                return left <= right
-            if op == '==':
-                return left == right
-            if op == '!=':
-                return left != right
-        
-        # String equality: "approved == approved", "status != rejected"
-        string_eq_pattern = r'^(.+?)\s*(==|!=)\s*(.+)$'
-        string_match = re.match(string_eq_pattern, substituted.strip())
-        if string_match:
-            left = string_match.group(1).strip()
-            op = string_match.group(2)
-            right = string_match.group(3).strip()
+            # Numeric comparisons: "90 > 80", "50 >= 50", "10 < 20", etc.
+            numeric_pattern = r'^(-?\d+(?:\.\d+)?)\s*(>|>=|<|<=|==|!=)\s*(-?\d+(?:\.\d+)?)$'
+            numeric_match = re.match(numeric_pattern, substituted.strip())
+            if numeric_match:
+                left = float(numeric_match.group(1))
+                op = numeric_match.group(2)
+                right = float(numeric_match.group(3))
+                
+                if op == '>':
+                    return left > right
+                if op == '>=':
+                    return left >= right
+                if op == '<':
+                    return left < right
+                if op == '<=':
+                    return left <= right
+                if op == '==':
+                    return left == right
+                if op == '!=':
+                    return left != right
             
-            if op == '==':
-                return left == right
-            if op == '!=':
-                return left != right
+            # String equality: "approved == approved", "status != rejected"
+            string_eq_pattern = r'^(.+?)\s*(==|!=)\s*(.+)$'
+            string_match = re.match(string_eq_pattern, substituted.strip())
+            if string_match:
+                left = string_match.group(1).strip()
+                op = string_match.group(2)
+                right = string_match.group(3).strip()
+                
+                if op == '==':
+                    return left == right
+                if op == '!=':
+                    return left != right
         
         # Contains check: "error in some message", "status contains success"
         if ' in ' in substituted:
@@ -272,7 +281,16 @@ def evaluate_condition(
             return True
         if substituted.strip().lower() == 'false':
             return False
-        
+
+        # A comparison operator in the template survived every format-specific
+        # check above, so the comparison it was meant to drive never matched
+        # (e.g. a missing or non-numeric operand). Fail safe per this
+        # function's own contract instead of treating the leftover operator
+        # text as a truthy string. Plain flag values (no template operator)
+        # are untouched and fall through to the truthy check below.
+        if template_has_comparison:
+            return False
+
         # Non-empty string is truthy
         return bool(substituted.strip())
         

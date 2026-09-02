@@ -158,9 +158,69 @@ class TestExpressionConditionClass:
     def test_expression_condition_with_previous_output(self):
         """Test ExpressionCondition with previous_output in context."""
         from praisonaiagents.conditions.evaluator import ExpressionCondition
-        
+
         cond = ExpressionCondition("success in {{previous_output}}")
-        
+
         # previous_output is passed via context
         assert cond.evaluate({"previous_output": "Operation success"}) is True
         assert cond.evaluate({"previous_output": "Operation failed"}) is False
+
+
+class TestEvaluateConditionFailSafeFallback:
+    """A comparison operator that never resolves must fail safe to False,
+    per evaluate_condition's own documented contract, instead of falling
+    through to the final truthy-string check."""
+
+    def test_relational_with_undefined_right_operand(self):
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{score}} > {{threshold}}", {"score": 90}) is False
+
+    def test_equality_with_undefined_right_operand(self):
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{status}} == {{expected}}", {"status": "approved"}) is False
+
+    def test_relational_with_non_numeric_operands(self):
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{a}} > {{b}}", {"a": "apple", "b": "banana"}) is False
+
+    def test_equality_with_undefined_left_operand(self):
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{error_flag}} == true", {}) is False
+
+    def test_plain_flag_truthy_check_still_works(self):
+        """Guard against over-broadly rejecting values with no comparison
+        operator at all: the existing boolean/flag path is unaffected."""
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{flag}}", {"flag": "yes"}) is True
+        assert evaluate_condition("{{flag}}", {"flag": ""}) is False
+
+    def test_substituted_value_containing_operator_stays_truthy(self):
+        """A placeholder with no comparison operator in the template must
+        stay on the truthy-string path even if its substituted value
+        happens to contain '>', '<', '==', etc."""
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{flag}}", {"flag": "ready > now"}) is True
+
+    def test_substituted_value_parseable_as_numeric_comparison_stays_truthy(self):
+        """A plain flag whose value parses as a numeric comparison
+        (e.g. "5 < 3") must not be evaluated as a comparison: the template
+        has no operator, so the non-empty value is truthy."""
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{flag}}", {"flag": "5 < 3"}) is True
+        assert evaluate_condition("{{flag}}", {"flag": "5 > 3"}) is True
+
+    def test_substituted_value_parseable_as_equality_stays_truthy(self):
+        """A plain flag whose value parses as an equality comparison
+        (e.g. "a == b") must stay on the truthy-string path because the
+        template contains no comparison operator."""
+        from praisonaiagents.conditions.evaluator import evaluate_condition
+
+        assert evaluate_condition("{{flag}}", {"flag": "a == b"}) is True
+        assert evaluate_condition("{{flag}}", {"flag": "a != b"}) is True
