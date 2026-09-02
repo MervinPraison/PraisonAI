@@ -19,6 +19,7 @@ from praisonaiagents.compaction import CompactionConfig, ContextCompactor
 
 
 def _config(**overrides):
+    """A tight budget so a handful of turns is enough to trip the guard."""
     base = dict(
         max_tokens=200,
         target_tokens=150,
@@ -50,6 +51,7 @@ class TestGuardHolds:
     """Anti-thrashing behaviour must be preserved."""
 
     def test_unchanged_conversation_is_still_skipped(self):
+        """Re-running on identical input is the thrashing the guard exists to stop."""
         config = _config()
         messages = _conversation(200)
         probe = ContextCompactor(config=config, strategy="summarize")
@@ -61,8 +63,12 @@ class TestGuardHolds:
         assert result.messages_removed == 0
 
     def test_marginal_growth_is_still_skipped(self):
-        # Below the retry threshold: not enough new material to justify
-        # re-running a summarisation that just failed to pay for itself.
+        """Growth below the retry threshold is not new evidence.
+
+        A couple of extra turns does not justify re-running a summarisation
+        that just failed to pay for itself; without this the release would
+        fire on essentially every turn.
+        """
         config = _config()
         probe = ContextCompactor(config=config, strategy="summarize")
         compactor = _latched(config, probe.count_total_tokens(_conversation(200)))
@@ -76,6 +82,7 @@ class TestGuardReleases:
     """A materially larger conversation is new evidence."""
 
     def test_growth_releases_the_guard(self):
+        """Past the threshold the verdict is retried, and the retry pays off."""
         config = _config()
         probe = ContextCompactor(config=config, strategy="summarize")
         compactor = _latched(config, probe.count_total_tokens(_conversation(200)))
@@ -89,8 +96,12 @@ class TestGuardReleases:
         assert result.compacted_tokens < result.original_tokens
 
     def test_release_matches_a_fresh_compactor(self):
-        # The clearest statement of the bug: a latched compactor used to
-        # return input untouched that an identical fresh one shrinks by ~96%.
+        """The clearest statement of the bug.
+
+        A latched compactor used to hand back untouched the very input an
+        otherwise-identical fresh one shrinks by ~96%. Once released the two
+        must be indistinguishable.
+        """
         config = _config()
         messages = _conversation(300)
         probe = ContextCompactor(config=config, strategy="summarize")
@@ -103,6 +114,11 @@ class TestGuardReleases:
         assert latched_result.compacted_tokens == fresh_result.compacted_tokens
 
     def test_streak_resets_so_the_full_allowance_returns(self):
+        """Releasing must clear the streak, not merely skip the check once.
+
+        A release that left the streak at the cap would re-latch on the next
+        call, turning the fix into a one-shot reprieve.
+        """
         config = _config()
         probe = ContextCompactor(config=config, strategy="summarize")
         compactor = _latched(config, probe.count_total_tokens(_conversation(200)))
@@ -112,9 +128,12 @@ class TestGuardReleases:
         assert compactor._low_savings_streak < config.max_consecutive_low_savings
 
     def test_needs_compaction_agrees_with_compact(self):
-        # needs_compaction() is the public gate callers consult; if it kept
-        # reporting False the release would never be reached in the agent's
-        # real code path, and compact() alone being fixed would be useless.
+        """Both gates must release together.
+
+        ``needs_compaction()`` is the public gate callers consult. If it kept
+        reporting False the release would never be reached in the agent's real
+        code path, and fixing ``compact()`` alone would be dead code.
+        """
         config = _config()
         probe = ContextCompactor(config=config, strategy="summarize")
         compactor = _latched(config, probe.count_total_tokens(_conversation(200)))
@@ -122,6 +141,7 @@ class TestGuardReleases:
         assert compactor.needs_compaction(_conversation(300)) is True
 
     def test_needs_compaction_still_declines_an_unchanged_conversation(self):
+        """The other half of that agreement: both gates must also hold together."""
         config = _config()
         messages = _conversation(200)
         probe = ContextCompactor(config=config, strategy="summarize")
@@ -134,6 +154,11 @@ class TestLongSession:
     """End-to-end: the failure this guard bug actually caused."""
 
     def test_compaction_keeps_engaging_across_a_long_session(self):
+        """No white-box setup: drive a real session and watch compaction die.
+
+        This is the failure a user actually hits, reproduced only through the
+        public API, so it stands even if the guard's internals are reworked.
+        """
         config = CompactionConfig(max_tokens=300, target_tokens=200, preserve_recent=2)
         compactor = ContextCompactor(config=config, strategy="summarize")
         messages = [{"role": "system", "content": "You are a coding agent."}]
