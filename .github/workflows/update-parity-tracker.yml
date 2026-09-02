@@ -1,21 +1,35 @@
 name: Update Feature Parity Tracker
 
+# Regenerates the exported-name parity trackers on push to main and commits them.
+# Validation on pull requests (fail on drift) lives in parity-gate.yml.
+
 on:
   push:
     branches: [ "main" ]
     paths:
       - 'src/praisonai-agents/praisonaiagents/**/*.py'
       - 'src/praisonai-ts/src/**/*.ts'
-      - 'src/praisonai-rust/src/**/*.rs'
+      # The crate lives at src/praisonai-rust/praisonai/src -- the old
+      # 'src/praisonai-rust/src/**' path does not exist, so a Rust change
+      # never triggered either tracker and the Rust numbers only ever
+      # refreshed incidentally, on an unrelated push.
+      - 'src/praisonai-rust/praisonai/src/**/*.rs'
+      # The generator's own code and the wrapper features it counts. Change
+      # either and nothing regenerated until an unrelated push landed.
+      - 'src/praisonai/praisonai/_dev/parity/**/*.py'
+      - 'src/praisonai/praisonai/cli/features/**/*.py'
       - '.github/workflows/update-parity-tracker.yml'
-
 permissions:
   contents: write
 
 jobs:
   update-parity-tracker:
+    # Push only. On a PR the parity-gate.yml `names` job CHECKS instead --
+    # committing a regenerated tracker onto a contributor's branch is not this
+    # workflow's business, and would fail on a fork besides.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -36,7 +50,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE
         python3 src/praisonai/scripts/generate_parity_tracker.py
-        
+
     - name: Check for changes
       id: check_changes
       run: |
@@ -58,4 +72,3 @@ jobs:
         commit_user_name: "MervinPraison"
         commit_user_email: "454862+MervinPraison@users.noreply.github.com"
         commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"
-

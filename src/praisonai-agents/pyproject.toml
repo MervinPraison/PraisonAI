@@ -17,7 +17,12 @@ dependencies = [
     "openai>=1.68.2",
     "posthog>=3.0.0",
     "PyYAML>=6.0",
-    "aiohttp>=3.8.0"
+    "aiohttp>=3.8.0",
+    # The scheduler converts every natural-language recurring schedule
+    # ("every day at 9am", "weekdays at 9am") to cron; without this engine
+    # those jobs are accepted and silently never fire. Pure Python; pulls
+    # only python-dateutil.
+    "croniter>=6.0"
 ]
 
 [project.optional-dependencies]

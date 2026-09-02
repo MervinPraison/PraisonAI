@@ -5,9 +5,14 @@
 
 > [!IMPORTANT]
 > **What this measures:** whether a matching *exported symbol name* exists in
-> the TypeScript SDK's public surface (parsed from `src/index.ts`). It does **not**
-> verify that the capability is reachable, wired up, or behaves like its Python
-> counterpart. A `✅ exported` cell means the name is exported — not that it works.
+> the TypeScript SDK's public surface (parsed from `src/index.ts`, following
+> `export * from` re-exports). It does **not** verify that the capability is
+> reachable, wired up, or behaves like its Python counterpart. A `✅ exported`
+> cell means the name is exported — not that it works. A `⚠️ stub exported`
+> cell means the *only* provider of the name is the `src/parity` shim module,
+> which exists to satisfy this tracker's name matching rather than to implement
+> the feature. Snake_case Python names are also matched against their camelCase
+> spelling (shown as `→ tsName`).
 > Counts include barrel re-exports, so `TypeScript Features` reflects module
 > structure, not distinct capabilities, and is not directly comparable to the
 > Python count. For a capability with a testable contract, rely on its conformance
@@ -19,52 +24,61 @@
 |--------|-------|
 | Python Core Features | 411 |
 | Python Wrapper Features | 21 |
-| TypeScript Features | 1194 |
-| **Gap Count** | **116** |
+| TypeScript Features | 1370 |
+| **Gap Count** | **115** |
+| Stub Exported (parity shim only) | 56 |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 103 |
+| P3 (Low) | 102 |
 
 ## Gap Matrix
 
-### P0_CoreParity (52 exported, 2 missing)
+### P0_CoreParity (31 exported, 21 stub, 2 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
 | `HandoffToolPolicy` | ✅ | ❌ | high | ⏳ missing |
 | `parallel\_handoffs` | ✅ | ❌ | low | ⏳ missing |
+| `AudioConfig` | ✅ | ✅ | low | ⚠️ stub exported |
+| `CodeAgent` | ✅ | ✅ | high | ⚠️ stub exported |
+| `CodeConfig` | ✅ | ✅ | low | ⚠️ stub exported |
+| `CodeExecutionStep` | ✅ | ✅ | high | ⚠️ stub exported |
+| `DeepResearchResponse` | ✅ | ✅ | high | ⚠️ stub exported |
+| `EmbeddingAgent` | ✅ | ✅ | high | ⚠️ stub exported |
+| `FileSearchCall` | ✅ | ✅ | high | ⚠️ stub exported |
+| `MCPCall` | ✅ | ✅ | high | ⚠️ stub exported |
+| `OCRAgent` | ✅ | ✅ | high | ⚠️ stub exported |
+| `OCRConfig` | ✅ | ✅ | low | ⚠️ stub exported |
+| `Provider` | ✅ | ✅ | high | ⚠️ stub exported |
+| `RealtimeAgent` | ✅ | ✅ | high | ⚠️ stub exported |
+| `RealtimeConfig` | ✅ | ✅ | low | ⚠️ stub exported |
+| `VideoAgent` | ✅ | ✅ | high | ⚠️ stub exported |
+| `VideoConfig` | ✅ | ✅ | low | ⚠️ stub exported |
+| `VisionAgent` | ✅ | ✅ | high | ⚠️ stub exported |
+| `VisionConfig` | ✅ | ✅ | low | ⚠️ stub exported |
+| `WebSearchCall` | ✅ | ✅ | high | ⚠️ stub exported |
+| `create\_context\_agent` | ✅ | ✅ | low | ⚠️ stub exported |
+| `handoff\_filters` | ✅ | ✅ | low | ⚠️ stub exported |
+| `prompt\_with\_handoff\_instructions` | ✅ | ✅ | low | ⚠️ stub exported |
 | `Agent` | ✅ | ✅ | high | ✅ exported |
 | `AudioAgent` | ✅ | ✅ | high | ✅ exported |
-| `AudioConfig` | ✅ | ✅ | low | ✅ exported |
 | `BaseTool` | ✅ | ✅ | high | ✅ exported |
-| `CodeAgent` | ✅ | ✅ | high | ✅ exported |
-| `CodeConfig` | ✅ | ✅ | low | ✅ exported |
-| `CodeExecutionStep` | ✅ | ✅ | high | ✅ exported |
 | `ContextAgent` | ✅ | ✅ | high | ✅ exported |
 | `ContextPolicy` | ✅ | ✅ | high | ✅ exported |
 | `DeepResearchAgent` | ✅ | ✅ | high | ✅ exported |
-| `DeepResearchResponse` | ✅ | ✅ | high | ✅ exported |
-| `EmbeddingAgent` | ✅ | ✅ | high | ✅ exported |
 | `EmbeddingConfig` | ✅ | ✅ | low | ✅ exported |
 | `ExpandResult` | ✅ | ✅ | low | ✅ exported |
 | `ExpandStrategy` | ✅ | ✅ | high | ✅ exported |
-| `FileSearchCall` | ✅ | ✅ | high | ✅ exported |
 | `FunctionTool` | ✅ | ✅ | high | ✅ exported |
 | `Handoff` | ✅ | ✅ | high | ✅ exported |
 | `HandoffConfig` | ✅ | ✅ | low | ✅ exported |
 | `HandoffInputData` | ✅ | ✅ | high | ✅ exported |
 | `HandoffResult` | ✅ | ✅ | low | ✅ exported |
 | `ImageAgent` | ✅ | ✅ | high | ✅ exported |
-| `MCPCall` | ✅ | ✅ | high | ✅ exported |
-| `OCRAgent` | ✅ | ✅ | high | ✅ exported |
-| `OCRConfig` | ✅ | ✅ | low | ✅ exported |
 | `PromptExpanderAgent` | ✅ | ✅ | high | ✅ exported |
-| `Provider` | ✅ | ✅ | high | ✅ exported |
 | `QueryRewriterAgent` | ✅ | ✅ | high | ✅ exported |
 | `RECOMMENDED\_PROMPT\_PREFIX` | ✅ | ✅ | low | ✅ exported |
-| `RealtimeAgent` | ✅ | ✅ | high | ✅ exported |
-| `RealtimeConfig` | ✅ | ✅ | low | ✅ exported |
 | `ReasoningStep` | ✅ | ✅ | high | ✅ exported |
 | `RewriteResult` | ✅ | ✅ | low | ✅ exported |
 | `RewriteStrategy` | ✅ | ✅ | high | ✅ exported |
@@ -72,22 +86,14 @@
 | `ToolResult` | ✅ | ✅ | low | ✅ exported |
 | `ToolValidationError` | ✅ | ✅ | low | ✅ exported |
 | `Tools` | ✅ | ✅ | high | ✅ exported |
-| `VideoAgent` | ✅ | ✅ | high | ✅ exported |
-| `VideoConfig` | ✅ | ✅ | low | ✅ exported |
-| `VisionAgent` | ✅ | ✅ | high | ✅ exported |
-| `VisionConfig` | ✅ | ✅ | low | ✅ exported |
-| `WebSearchCall` | ✅ | ✅ | high | ✅ exported |
-| `create\_context\_agent` | ✅ | ✅ | low | ✅ exported |
 | `get\_registry` | ✅ | ✅ | low | ✅ exported |
 | `get\_tool` | ✅ | ✅ | low | ✅ exported |
 | `handoff` | ✅ | ✅ | low | ✅ exported |
-| `handoff\_filters` | ✅ | ✅ | low | ✅ exported |
-| `prompt\_with\_handoff\_instructions` | ✅ | ✅ | low | ✅ exported |
 | `register\_tool` | ✅ | ✅ | low | ✅ exported |
 | `tool` | ✅ | ✅ | low | ✅ exported |
 | `validate\_tool` | ✅ | ✅ | low | ✅ exported |
 
-### P1_Persistence (20 exported, 5 missing)
+### P1_Persistence (16 exported, 4 stub, 5 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -96,16 +102,17 @@
 | `YAMLWorkflowParser` | ✅ | ❌ | high | ⏳ missing |
 | `if\_` | ✅ | ❌ | low | ⏳ missing |
 | `include` | ✅ | ❌ | low | ⏳ missing |
+| `If` | ✅ | ✅ | high | ⚠️ stub exported |
+| `Parallel` | ✅ | ✅ | high | ⚠️ stub exported |
+| `Route` | ✅ | ✅ | high | ⚠️ stub exported |
+| `when` | ✅ | ✅ | low | ⚠️ stub exported |
 | `AgentFlow` | ✅ | ✅ | high | ✅ exported |
 | `Chunking` | ✅ | ✅ | high | ✅ exported |
-| `If` | ✅ | ✅ | high | ✅ exported |
 | `Knowledge` | ✅ | ✅ | high | ✅ exported |
 | `Loop` | ✅ | ✅ | high | ✅ exported |
 | `Memory` | ✅ | ✅ | high | ✅ exported |
-| `Parallel` | ✅ | ✅ | high | ✅ exported |
 | `Pipeline` | ✅ | ✅ | high | ✅ exported |
 | `Repeat` | ✅ | ✅ | high | ✅ exported |
-| `Route` | ✅ | ✅ | high | ✅ exported |
 | `Session` | ✅ | ✅ | high | ✅ exported |
 | `StepResult` | ✅ | ✅ | low | ✅ exported |
 | `Workflow` | ✅ | ✅ | high | ✅ exported |
@@ -115,9 +122,8 @@
 | `parallel` | ✅ | ✅ | low | ✅ exported |
 | `repeat` | ✅ | ✅ | low | ✅ exported |
 | `route` | ✅ | ✅ | low | ✅ exported |
-| `when` | ✅ | ✅ | low | ✅ exported |
 
-### P2_CLI (41 exported, 6 missing)
+### P2_CLI (34 exported, 7 stub, 6 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -127,12 +133,18 @@
 | `load\_skill` | ✅ | ❌ | low | ⏳ missing |
 | `validate` | ✅ | ❌ | low | ⏳ missing |
 | `validate\_metadata` | ✅ | ❌ | low | ⏳ missing |
+| `ContextPack` | ✅ | ✅ | high | ⚠️ stub exported |
+| `cleanup\_telemetry\_resources` | ✅ | ✅ | low | ⚠️ stub exported |
+| `disable\_performance\_mode` | ✅ | ✅ | low | ⚠️ stub exported |
+| `disable\_telemetry` | ✅ | ✅ | low | ⚠️ stub exported |
+| `enable\_performance\_mode` | ✅ | ✅ | low | ⚠️ stub exported |
+| `enable\_telemetry` | ✅ | ✅ | low | ⚠️ stub exported |
+| `get\_telemetry` | ✅ | ✅ | low | ⚠️ stub exported |
 | `ApprovalCallback` | ✅ | ✅ | high | ✅ exported |
 | `Citation` | ✅ | ✅ | high | ✅ exported |
 | `CitationsMode` | ✅ | ✅ | high | ✅ exported |
 | `ContextConfig` | ✅ | ✅ | low | ✅ exported |
 | `ContextManager` | ✅ | ✅ | high | ✅ exported |
-| `ContextPack` | ✅ | ✅ | high | ✅ exported |
 | `FastContext` | ✅ | ✅ | high | ✅ exported |
 | `FastContextResult` | ✅ | ✅ | low | ✅ exported |
 | `FileMatch` | ✅ | ✅ | high | ✅ exported |
@@ -162,14 +174,8 @@
 | `TelemetryCollector` | ✅ | ✅ | high | ✅ exported |
 | `TodoItem` | ✅ | ✅ | high | ✅ exported |
 | `TodoList` | ✅ | ✅ | high | ✅ exported |
-| `cleanup\_telemetry\_resources` | ✅ | ✅ | low | ✅ exported |
-| `disable\_performance\_mode` | ✅ | ✅ | low | ✅ exported |
-| `disable\_telemetry` | ✅ | ✅ | low | ✅ exported |
-| `enable\_performance\_mode` | ✅ | ✅ | low | ✅ exported |
-| `enable\_telemetry` | ✅ | ✅ | low | ✅ exported |
-| `get\_telemetry` | ✅ | ✅ | low | ✅ exported |
 
-### P3_Advanced (182 exported, 103 missing)
+### P3_Advanced (159 exported, 24 stub, 102 missing)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -236,7 +242,6 @@
 | `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ missing |
 | `RulesConfig` | ✅ | ❌ | low | ⏳ missing |
 | `RunOutcome` | ✅ | ❌ | high | ⏳ missing |
-| `RunStatus` | ✅ | ❌ | high | ⏳ missing |
 | `ScopeRequiredError` | ✅ | ❌ | low | ⏳ missing |
 | `SendResult` | ✅ | ❌ | low | ⏳ missing |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ missing |
@@ -276,6 +281,30 @@
 | `termination\_to\_run\_status` | ✅ | ❌ | low | ⏳ missing |
 | `unregister\_toolset` | ✅ | ❌ | low | ⏳ missing |
 | `validate\_decision\_string` | ✅ | ❌ | low | ⏳ missing |
+| `async\_display\_callbacks` | ✅ | ✅ | low | ⚠️ stub exported |
+| `discover\_and\_load\_plugins` | ✅ | ✅ | low | ⚠️ stub exported |
+| `discover\_plugins` | ✅ | ✅ | low | ⚠️ stub exported |
+| `display\_error` | ✅ | ✅ | low | ⚠️ stub exported |
+| `display\_generating` | ✅ | ✅ | low | ⚠️ stub exported |
+| `display\_instruction` | ✅ | ✅ | low | ⚠️ stub exported |
+| `display\_interaction` | ✅ | ✅ | low | ⚠️ stub exported |
+| `display\_self\_reflection` | ✅ | ✅ | low | ⚠️ stub exported |
+| `display\_tool\_call` | ✅ | ✅ | low | ⚠️ stub exported |
+| `ensure\_plugin\_dir` | ✅ | ✅ | low | ⚠️ stub exported |
+| `error\_logs` | ✅ | ✅ | low | ⚠️ stub exported |
+| `evaluate\_condition` | ✅ | ✅ | low | ⚠️ stub exported |
+| `get\_default\_plugin\_dirs` | ✅ | ✅ | low | ⚠️ stub exported |
+| `get\_dimensions` | ✅ | ✅ | low | ⚠️ stub exported |
+| `get\_plugin\_manager` | ✅ | ✅ | low | ⚠️ stub exported |
+| `get\_plugin\_template` | ✅ | ✅ | low | ⚠️ stub exported |
+| `load\_plugin` | ✅ | ✅ | low | ⚠️ stub exported |
+| `parse\_plugin\_header` | ✅ | ✅ | low | ⚠️ stub exported |
+| `parse\_plugin\_header\_from\_file` | ✅ | ✅ | low | ⚠️ stub exported |
+| `register\_display\_callback` | ✅ | ✅ | low | ⚠️ stub exported |
+| `resolve\_guardrail\_policies` | ✅ | ✅ | low | ⚠️ stub exported |
+| `sync\_display\_callbacks` | ✅ | ✅ | low | ⚠️ stub exported |
+| `trace\_context` | ✅ | ✅ | low | ⚠️ stub exported |
+| `track\_workflow` | ✅ | ✅ | low | ⚠️ stub exported |
 | `A2A` | ✅ | ✅ | low | ✅ exported |
 | `AGUI` | ✅ | ✅ | low | ✅ exported |
 | `AUTONOMY\_PRESETS` | ✅ | ✅ | low | ✅ exported |
@@ -379,6 +408,7 @@
 | `ReflectionOutput` | ✅ | ✅ | high | ✅ exported |
 | `ResourceLimits` | ✅ | ✅ | high | ✅ exported |
 | `RoutingConditionProtocol` | ✅ | ✅ | medium | ✅ exported |
+| `RunStatus` | ✅ | ✅ | high | ✅ exported |
 | `SandboxConfig` | ✅ | ✅ | low | ✅ exported |
 | `SandboxProtocol` | ✅ | ✅ | medium | ✅ exported |
 | `SandboxResult` | ✅ | ✅ | low | ✅ exported |
@@ -400,47 +430,26 @@
 | `aembedding` | ✅ | ✅ | low | ✅ exported |
 | `aembeddings` | ✅ | ✅ | low | ✅ exported |
 | `apply\_config\_defaults` | ✅ | ✅ | low | ✅ exported |
-| `async\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
 | `clean\_triple\_backticks` | ✅ | ✅ | low | ✅ exported |
 | `config` | ✅ | ✅ | low | ✅ exported |
 | `detect\_url\_scheme` | ✅ | ✅ | low | ✅ exported |
-| `discover\_and\_load\_plugins` | ✅ | ✅ | low | ✅ exported |
-| `discover\_plugins` | ✅ | ✅ | low | ✅ exported |
-| `display\_error` | ✅ | ✅ | low | ✅ exported |
-| `display\_generating` | ✅ | ✅ | low | ✅ exported |
-| `display\_instruction` | ✅ | ✅ | low | ✅ exported |
-| `display\_interaction` | ✅ | ✅ | low | ✅ exported |
-| `display\_self\_reflection` | ✅ | ✅ | low | ✅ exported |
-| `display\_tool\_call` | ✅ | ✅ | low | ✅ exported |
 | `embed` | ✅ | ✅ | low | ✅ exported |
 | `embedding` | ✅ | ✅ | low | ✅ exported |
 | `embeddings` | ✅ | ✅ | low | ✅ exported |
-| `ensure\_plugin\_dir` | ✅ | ✅ | low | ✅ exported |
-| `error\_logs` | ✅ | ✅ | low | ✅ exported |
-| `evaluate\_condition` | ✅ | ✅ | low | ✅ exported |
 | `get\_config` | ✅ | ✅ | low | ✅ exported |
 | `get\_config\_path` | ✅ | ✅ | low | ✅ exported |
 | `get\_default` | ✅ | ✅ | low | ✅ exported |
-| `get\_default\_plugin\_dirs` | ✅ | ✅ | low | ✅ exported |
 | `get\_defaults\_config` | ✅ | ✅ | low | ✅ exported |
-| `get\_dimensions` | ✅ | ✅ | low | ✅ exported |
-| `get\_plugin\_manager` | ✅ | ✅ | low | ✅ exported |
-| `get\_plugin\_template` | ✅ | ✅ | low | ✅ exported |
 | `get\_plugins\_config` | ✅ | ✅ | low | ✅ exported |
 | `is\_path\_like` | ✅ | ✅ | low | ✅ exported |
 | `is\_policy\_string` | ✅ | ✅ | low | ✅ exported |
-| `load\_plugin` | ✅ | ✅ | low | ✅ exported |
 | `memory` | ✅ | ✅ | low | ✅ exported |
-| `parse\_plugin\_header` | ✅ | ✅ | low | ✅ exported |
-| `parse\_plugin\_header\_from\_file` | ✅ | ✅ | low | ✅ exported |
 | `parse\_policy\_string` | ✅ | ✅ | low | ✅ exported |
-| `register\_display\_callback` | ✅ | ✅ | low | ✅ exported |
 | `resolve` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_autonomy` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_caching` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_context` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_execution` | ✅ | ✅ | low | ✅ exported |
-| `resolve\_guardrail\_policies` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_guardrails` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_hooks` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_knowledge` | ✅ | ✅ | low | ✅ exported |
@@ -452,16 +461,13 @@
 | `resolve\_skills` | ✅ | ✅ | low | ✅ exported |
 | `resolve\_web` | ✅ | ✅ | low | ✅ exported |
 | `suggest\_similar` | ✅ | ✅ | low | ✅ exported |
-| `sync\_display\_callbacks` | ✅ | ✅ | low | ✅ exported |
 | `tools` | ✅ | ✅ | low | ✅ exported |
-| `trace\_context` | ✅ | ✅ | low | ✅ exported |
-| `track\_workflow` | ✅ | ✅ | low | ✅ exported |
 | `validate\_config` | ✅ | ✅ | low | ✅ exported |
 | `workflows` | ✅ | ✅ | low | ✅ exported |
 
 ## Python Core SDK Exports
 
-**Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents`
+**Path:** `src/praisonai-agents/praisonaiagents`
 
 <details>
 <summary><strong>agent</strong> (43 exports)</summary>
@@ -726,7 +732,7 @@ from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Par
 
 ## TypeScript SDK Exports
 
-**Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src`
+**Path:** `src/praisonai-ts/src`
 
 <details>
 <summary><strong>agent</strong> (68 exports)</summary>
@@ -774,6 +780,15 @@ import { ActionDecision, ActionRequest, ActionType, AiderAgent, ApprovalPolicy, 
 </details>
 
 <details>
+<summary><strong>context</strong> (38 exports)</summary>
+
+```typescript
+import { BudgetAllocation, ContextBudget, ContextBudgeter, ContextBudgeterAllocation, ContextBudgeterConfig, ContextConfig, ContextItem, ContextLedger, ContextManager, ContextManagerConfig... } from 'praisonai';
+```
+
+</details>
+
+<details>
 <summary><strong>db</strong> (26 exports)</summary>
 
 ```typescript
@@ -801,10 +816,10 @@ import { AgentEventBus, AgentEvents, Event, EventEmitterPubSub, EventHandler, Pu
 </details>
 
 <details>
-<summary><strong>guardrails</strong> (4 exports)</summary>
+<summary><strong>guardrails</strong> (16 exports)</summary>
 
 ```typescript
-import { LLMGuardrail, LLMGuardrailConfig, LLMGuardrailResult, createLLMGuardrail } from 'praisonai';
+import { Guardrail, GuardrailConfig, GuardrailContext, GuardrailFunction, GuardrailManager, GuardrailResult, GuardrailStatus, GuardrailValidationResult, LLMGuardrail, LLMGuardrailConfig... } from 'praisonai';
 ```
 
 </details>
@@ -828,19 +843,19 @@ import { BaseObservabilityProvider, BaseVectorStore, BaseVoiceProvider, ChromaVe
 </details>
 
 <details>
-<summary><strong>knowledge</strong> (16 exports)</summary>
+<summary><strong>knowledge</strong> (61 exports)</summary>
 
 ```typescript
-import { BaseReranker, CohereReranker, CrossEncoderReranker, GraphEdge, GraphNode, GraphQueryResult, GraphRAG, GraphRAGConfig, GraphStore, LLMReranker... } from 'praisonai';
+import { BaseKnowledgeBase, BaseReranker, ChonkieAdapter, ChonkieChunk, ChonkieConfig, ChonkieStrategy, Chunk, ChunkStrategy, Chunking, ChunkingConfig... } from 'praisonai';
 ```
 
 </details>
 
 <details>
-<summary><strong>llm</strong> (44 exports)</summary>
+<summary><strong>llm</strong> (67 exports)</summary>
 
 ```typescript
-import { ADAPTERS, AISDK_PROVIDERS, AdapterInfo, AnthropicProvider, BaseProvider, COMMUNITY_PROVIDERS, CommunityProvider, CreateProviderOptions, GenerateObjectOptions, GenerateObjectResult... } from 'praisonai';
+import { ADAPTERS, AISDK_PROVIDERS, AdapterInfo, AnthropicProvider, BackendResolutionResult, BackendSource, BaseLLM, BaseProvider, COMMUNITY_PROVIDERS, CommunityProvider... } from 'praisonai';
 ```
 
 </details>
@@ -909,10 +924,28 @@ import { ApprovalCallback, ApprovalCallbackConfig, Plan, PlanConfig, PlanResult,
 </details>
 
 <details>
+<summary><strong>process</strong> (3 exports)</summary>
+
+```typescript
+import { BaseProcess, Process, ProcessConfig } from 'praisonai';
+```
+
+</details>
+
+<details>
 <summary><strong>protocols</strong> (30 exports)</summary>
 
 ```typescript
 import { A2A, A2AAgentCapabilities, A2AAgentCard, A2AAgentSkill, A2AArtifact, A2ADataPart, A2AFilePart, A2AMessage, A2APart, A2ARole... } from 'praisonai';
+```
+
+</details>
+
+<details>
+<summary><strong>session</strong> (32 exports)</summary>
+
+```typescript
+import { EnhancedSession, EnhancedSessionConfig, FileSessionStore, HierarchicalSession, HierarchicalSessionConfig, ISessionStore, MemorySessionStore, Message, Run, RunConfig... } from 'praisonai';
 ```
 
 </details>
@@ -945,10 +978,10 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (89 exports)</summary>
+<summary><strong>tools</strong> (95 exports)</summary>
 
 ```typescript
-import { BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool... } from 'praisonai';
+import { ArxivDownloadTool, ArxivPaper, ArxivSearchTool, BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MCP, MCPTool... } from 'praisonai';
 ```
 
 </details>

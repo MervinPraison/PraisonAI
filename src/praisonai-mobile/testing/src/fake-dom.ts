@@ -64,6 +64,18 @@ export interface FakeDom {
   find(pred: (n: FakeNode) => boolean): FakeNode | null;
   /** Click an element, bubbling to delegated listeners on its ancestors. */
   click(el: FakeNode): { defaultPrevented: boolean };
+  /**
+   * Commit a field, bubbling like the real `change` event does.
+   *
+   * `change` BUBBLES in a real DOM, which is what lets one delegated listener
+   * on root hear every settings field -- the same arrangement `click` already
+   * uses here. Dispatching it on the field alone (`el.dispatch("change", {})`)
+   * only ever reaches a listener attached to that element, so a test written
+   * that way passes against a per-field listener and reports nothing at all
+   * against a delegated one. Modelling the bubble is what makes the two
+   * indistinguishable to a test, as they are to a browser.
+   */
+  change(el: FakeNode): { defaultPrevented: boolean };
   text(): string;
   /** The element `focus()` was last called on, or null -- what a test asserts
    *  a route change moved focus to. Mirrors `document.activeElement`. */
@@ -228,6 +240,20 @@ export function createFakeDom(): FakeDom {
   };
   const root = make("div");
 
+  /** Dispatch one event up the ancestor chain, as a real bubbling event does.
+   *  Shared by `click` and `change` so the two cannot drift: a delegated
+   *  listener on root must hear both or neither. */
+  const bubble = (type: string, el: FakeNode): { defaultPrevented: boolean } => {
+    const event = {
+      target: el,
+      defaultPrevented: false,
+      preventDefault(this: { defaultPrevented: boolean }) { this.defaultPrevented = true; },
+    };
+    let node: FakeNode | null = el;
+    while (node !== null) { node.dispatch(type, event); node = node.parentElement; }
+    return event;
+  };
+
   const all = (): FakeNode[] => {
     const out: FakeNode[] = [];
     const walk = (n: FakeNode): void => { out.push(n); for (const c of n.children) walk(c); };
@@ -245,15 +271,12 @@ export function createFakeDom(): FakeDom {
       // A real click focuses the control it lands on, so the app's "remember
       // where to return on Back" reads the tapped row, not stale focus.
       active = el;
-      const event = {
-        target: el,
-        defaultPrevented: false,
-        preventDefault(this: { defaultPrevented: boolean }) { this.defaultPrevented = true; },
-      };
-      let node: FakeNode | null = el;
-      while (node !== null) { node.dispatch("click", event); node = node.parentElement; }
-      return event;
+      return bubble("click", el);
     },
+    // No focus side effect: a `change` fires on a field the user is ALREADY in
+    // (or has just left), and moving focus here would paper over an app that
+    // forgot to.
+    change: (el) => bubble("change", el),
     text: () => root.textContent,
     activeElement: () => active,
   };

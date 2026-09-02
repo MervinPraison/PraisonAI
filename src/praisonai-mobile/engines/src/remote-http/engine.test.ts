@@ -578,3 +578,103 @@ test("a 200 with ok:true IS accepted -- the pair", async () => {
   assert.equal(await engine.decide("a1", "allow"), true);
   assert.equal(await engine.cancel("r1"), true);
 });
+
+// ---- a control request stays with the engine that owns its id ---------------
+//
+// The resolver fixes the recovery path -- the NEXT /chat reaches the address
+// the user just corrected -- but a run's /cancel and an approval's /approve are
+// addressed by an id the ORIGINATING engine minted. If a mid-turn address
+// change redirected them to the new engine, it would refuse the foreign id;
+// controller.ts only aborts the local reader once cancel returns true, so the
+// original turn would keep generating at the old address while the user
+// believes they stopped it. The id is pinned to the base it was born at.
+
+test("a stop reaches the address the run STARTED at, even after Settings moved it", async () => {
+  // The real scenario: the run is STILL STREAMING when the user, having gone to
+  // Settings to fix an address they thought was the problem, taps Stop. The
+  // generator is suspended at a yield, so the run is live and its pin stands.
+  let address = "http://first.test";
+  const http = createFakeHttp();
+  http.on("/chat", () =>
+    sseResponse(encodeSseFrame({ type: "start", msgId: "m1", runId: "r1" })),
+  );
+  http.on("/cancel/r1", () => ({ status: 200, headers: {}, body: streamOf('{"ok":true}') }));
+  const engine = createRemoteHttpEngine({ baseUrl: () => address, http });
+
+  // Pull the first event and STOP -- the run is mid-stream, not exhausted.
+  const iterator = engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: false, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )[Symbol.asyncIterator]();
+  await iterator.next();
+  address = "http://second.test";
+  await engine.cancel("r1");
+
+  const cancel = http.sent.find((r) => r.url.includes("/cancel"));
+  assert.equal(
+    cancel?.url,
+    "http://first.test/cancel/r1",
+    "the stop must go to the engine that owns r1, not the newly-typed address",
+  );
+  await iterator.return?.();
+});
+
+test("an approval decision reaches the engine that ASKED, after the address moved", async () => {
+  // An approval blocks the run and is answered by an id this engine minted.
+  // A `deny` sent to a freshly-corrected address hands a foreign id to an
+  // engine that never issued it -- the run stays blocked at the old one.
+  let address = "http://first.test";
+  const http = createFakeHttp();
+  http.on("/chat", () =>
+    sseResponse(
+      encodeSseFrame({ type: "start", msgId: "m1", runId: "r1" }) +
+        encodeSseFrame({
+          type: "approval_request",
+          msgId: "m1",
+          approvalId: "ap1",
+          callId: "c1",
+          name: "rm",
+          args: {},
+        }),
+    ),
+  );
+  http.on("/approve/ap1", () => ({ status: 200, headers: {}, body: streamOf('{"ok":true}') }));
+  const engine = createRemoteHttpEngine({ baseUrl: () => address, http });
+
+  // Drain until the approval prompt is seen -- the run is now blocked on it.
+  for await (const event of engine.run(
+    { prompt: "hi", chatId: "c1", runId: "r1", tools: true, regenerateOf: null, attachments: [] },
+    new AbortController().signal,
+  )) {
+    if (event.type === "approval_request") break;
+  }
+  address = "http://second.test";
+  await engine.decide("ap1", "deny");
+
+  const approve = http.sent.find((r) => r.url.includes("/approve"));
+  assert.equal(
+    approve?.url,
+    "http://first.test/approve/ap1",
+    "the decision must return to the engine that asked, not the newly-typed address",
+  );
+});
+
+test("with the address unchanged, a control request still follows the live resolver", async () => {
+  // The pair. Pinning must not mean IGNORING the resolver: a cancel for a run
+  // this instance never saw (a resumed app) has no pin, and must fall back to
+  // the current address rather than a stale or empty one.
+  let address = "http://first.test";
+  const http = createFakeHttp();
+  http.on("/cancel/unknown", () => ({ status: 200, headers: {}, body: streamOf('{"ok":true}') }));
+  const engine = createRemoteHttpEngine({ baseUrl: () => address, http });
+
+  address = "http://second.test";
+  await engine.cancel("unknown");
+
+  const cancel = http.sent.find((r) => r.url.includes("/cancel"));
+  assert.equal(
+    cancel?.url,
+    "http://second.test/cancel/unknown",
+    "an id with no origin pin must use the address in effect now",
+  );
+});
