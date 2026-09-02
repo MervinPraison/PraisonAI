@@ -39,20 +39,20 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Embeddings | 6 | 23 | 2049 |
 | ✅ Evaluation | 1 | 7 | 2924 |
 | ✅ Events | 1 | 2 | 767 |
-| ✅ Execution | 3 | 4 | 1606 |
+| ✅ Execution | 3 | 4 | 1621 |
 | ✅ Failover | 2 | 1 | 452 |
-| ✅ Files | 2 | 7 | 2275 |
+| ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 788 |
-| ✅ Gateway | 7 | 83 | 30845 |
+| ✅ Gateway | 7 | 83 | 30919 |
 | ✅ Guardrails | 4 | 4 | 2288 |
 | ✅ Handoffs | 11 | 6 | 2626 |
-| ✅ Hooks | 2 | 9 | 4632 |
+| ✅ Hooks | 2 | 9 | 4690 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 17 | 5226 |
 | ✅ LLM | 3 | 15 | 5395 |
 | ✅ Loops | 4 | 5 | 1475 |
-| ✅ MCP | 1 | 62 | 14434 |
-| ✅ Memory | 6 | 18 | 7245 |
+| ✅ MCP | 1 | 62 | 14436 |
+| ✅ Memory | 6 | 19 | 7512 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2811 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44077 |
+| ✅ Tools | 12 | 145 | 44104 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |

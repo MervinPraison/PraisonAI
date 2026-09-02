@@ -48,14 +48,14 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Gateway | 6 | 1 | 401 |
 | ✅ Guardrails | 6 | 3 | 744 |
 | ✅ Handoffs | 12 | 1 | 179 |
-| ✅ Hooks | 8 | 1 | 199 |
+| ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
 | ✅ Jobs | 8 | 1 | 156 |
 | ✅ Knowledge | 3 | 2 | 312 |
 | ✅ LLM | 6 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 180 |
 | ✅ MCP | 17 | 4 | 870 |
-| ✅ Memory | 17 | 4 | 779 |
+| ✅ Memory | 17 | 4 | 783 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 2 | 1 | 162 |
 | ✅ Observability | 6 | 28 | 2318 |
