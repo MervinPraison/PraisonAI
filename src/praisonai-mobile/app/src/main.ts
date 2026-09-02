@@ -706,7 +706,20 @@ export async function mount(deps: MountDeps): Promise<App | null> {
           );
           section.textContent = "";
           for (const child of [...fresh.children]) section.append(child as HTMLElement);
-        })();
+        })().catch(() => {
+          // Storage can reject while the list loads -- SecurityError with site
+          // data blocked, QuotaExceededError. A floating rejection here reaches
+          // the global crash handler and replaces the WHOLE app with the fatal
+          // screen; a failed chat list must stay a LOCAL failure, so the user
+          // can go back and keep using the conversation they are in.
+          section.textContent = "";
+          const notice = doc.createElement("p");
+          notice.className = "row row-notice";
+          notice.dataset["tone"] = "warning";
+          notice.setAttribute("role", "alert");
+          notice.textContent = strings.crashed;
+          section.append(notice);
+        });
         return section;
       }
       // "about" and "chat" have no builder here: chat is the pre-built root
