@@ -359,7 +359,11 @@ export function describeEngineContract(harness: EngineHarness): void {
     const made0 = made();
     const engine = await harness.create("happy");
     if (!engine.capabilities.cancellation) {
+      // Same shape as the tools/approvals capability cases: an engine without
+      // cancellation still has to close its ledger, or the final case counts
+      // only 20 of 21 and rejects an otherwise-conforming engine.
       await engine.dispose();
+      close(made0, 0);
       return;
     }
     const controller = new AbortController();

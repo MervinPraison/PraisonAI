@@ -13,9 +13,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -122,9 +122,20 @@ test("with no praisonai-ts beside it, the checker SKIPS and exits clean", () => 
   );
 });
 
-test("with praisonai-ts present, it does NOT skip -- the pair", () => {
+test("with praisonai-ts present, it does NOT skip -- the pair", (t) => {
   // Without this, an `exists` that always answered false would satisfy the
   // test above and skip on every machine, including CI, forever.
+  //
+  // Gated on the sibling actually being there: a standalone clone has no
+  // praisonai-ts beside it, and the checker is documented to run in exactly
+  // that layout, so this pair skips rather than turning the supported
+  // standalone case into a red build. In the monorepo the sibling is present
+  // and the assertion below still pins the mutation.
+  const sibling = resolve(here, "../../praisonai-ts/src/agent/simple.ts");
+  if (!existsSync(sibling)) {
+    t.skip("no praisonai-ts sibling -- standalone clone, nothing to pair against");
+    return;
+  }
   const result = spawnSync(process.execPath, [script], { encoding: "utf8" });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   assert.doesNotMatch(output, /SKIPPED/, `the monorepo has the sibling:\n${output}`);
