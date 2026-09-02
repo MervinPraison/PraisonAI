@@ -243,7 +243,13 @@ pub fn needs_reprovision(existing_stamp: Option<&str>, packages: &[&str]) -> boo
 //
 // A floor rather than an exact pin, so a user who already has something newer
 // is not downgraded.
-pub const ENGINE_PACKAGES: &[&str] = &["praisonaiagents>=1.7.2"];
+//
+// `praisonai` is the wrapper that owns the documented YAML CLI
+// (`praisonai agents.yaml`, `praisonai run <file>`) and the multi-agent /
+// workflow surface (AgentsGenerator, AgentTeam, AgentFlow). Without it the
+// app's venv has no `praisonai` binary, so that entire surface is unreachable
+// from inside the bundle even though the docs point users straight at it.
+pub const ENGINE_PACKAGES: &[&str] = &["praisonaiagents>=1.7.2", "praisonai>=4.7.5"];
 
 #[cfg(test)]
 mod tests {
