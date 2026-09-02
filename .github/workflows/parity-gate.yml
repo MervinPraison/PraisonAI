@@ -2,8 +2,9 @@ name: Parity Gate
 
 # Validates Python <-> TypeScript SDK parity on pull requests and FAILS on drift.
 #
-# The exported-name tracker (PARITY.md / FEATURE_PARITY_TRACKER.json) is checked
-# by the `check` job in update-parity-tracker.yml. This workflow adds:
+# Two named checks, so each kind of drift is visible in the checks list:
+#   names      - the exported-name tracker (PARITY.md / FEATURE_PARITY_TRACKER.json)
+#                must be regenerated in the PR when the public surface changes.
 #   signatures - constructor/method parameters of the curated surfaces in
 #                src/praisonai/praisonai/_dev/parity/signatures/surface.yaml must
 #                match (after camelCase/alias/flattening rules) or be waived with a
@@ -33,6 +34,22 @@ permissions:
   contents: read
 
 jobs:
+  names:
+    name: names (exported-symbol tracker up to date)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - name: Tracker files match the sources
+        run: |
+          if ! python3 src/praisonai/scripts/generate_parity_tracker.py --check; then
+            echo "::error::Parity tracker is out of date. Run: python3 src/praisonai/scripts/generate_parity_tracker.py  and commit src/praisonai-ts/PARITY.md, FEATURE_PARITY_TRACKER.json and the Rust pair."
+            exit 1
+          fi
+
   signatures:
     name: signatures (constructor and method parameters)
     runs-on: ubuntu-latest
