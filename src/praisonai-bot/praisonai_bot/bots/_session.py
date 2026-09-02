@@ -2350,6 +2350,38 @@ class BotSessionManager:
                 logger.warning("export_history store read failed: %s", e)
         return list(self._histories.get(storage_key, []))
 
+    def resolve_thread_key(
+        self,
+        chat_id: str,
+        thread_id: str = "",
+        *,
+        account: str = "",
+    ) -> Optional[str]:
+        """Resolve the session key an inbound turn on a thread will use.
+
+        The live-session handoff (Issue #4660) seeds the destination transcript
+        under the *same* key the next inbound turn on the created thread will
+        resolve to — otherwise the seeded history is stored under a key nothing
+        reads. That key is only stable/shareable in ``per_chat`` scope, where a
+        group/channel thread maps to one shared session
+        (``{platform}:acct:{account}:chat:{chat_id}:{thread_id}``). In the
+        default ``per_user`` scope a thread's session is keyed by whichever
+        human next messages it — unknowable at handoff time — so this returns
+        ``None`` and the caller skips seeding (the thread is still created).
+
+        Returns the resolved storage key, or ``None`` when the destination
+        scope cannot pre-resolve a thread to a shareable session.
+        """
+        if self._session_scope != "per_chat" or not chat_id:
+            return None
+        return self._storage_key(
+            chat_id,
+            account=account,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            chat_type="group",
+        )
+
     def seed_history(
         self, storage_key: str, history: List[Dict[str, Any]]
     ) -> None:

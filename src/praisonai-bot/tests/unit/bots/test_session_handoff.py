@@ -20,14 +20,29 @@ from praisonai_bot.bots import BotOS, ThreadRef  # noqa: E402
 
 
 class _FakeSession:
-    """Minimal BotSessionManager stand-in for handoff export/seed."""
+    """Minimal BotSessionManager stand-in for handoff export/seed.
 
-    def __init__(self, histories=None):
+    ``scope`` mirrors the real manager's ``session_scope`` so the handoff
+    seeds the transcript under the *same* key a subsequent inbound turn on the
+    created thread would resolve to (Issue #4660 review): shareable in
+    ``per_chat`` (``{platform}:acct:{account}:chat:{chat_id}:{thread_id}``) and
+    un-pre-resolvable in ``per_user`` (returns ``None`` → no pre-seed).
+    """
+
+    def __init__(self, histories=None, *, platform="telegram", scope="per_chat"):
         self._by_key = dict(histories or {})
+        self._platform = platform
+        self._scope = scope
         self.seeded = {}
 
     def export_history(self, storage_key):
         return list(self._by_key.get(storage_key, []))
+
+    def resolve_thread_key(self, chat_id, thread_id="", *, account=""):
+        if self._scope != "per_chat" or not chat_id:
+            return None
+        acct = account or "default"
+        return f"{self._platform}:acct:{acct}:chat:{chat_id}:{thread_id}"
 
     def seed_history(self, storage_key, history):
         self.seeded[storage_key] = list(history)
@@ -85,11 +100,36 @@ def test_handoff_creates_thread_and_seeds_session():
     assert ref.ok
     assert ref.platform == "telegram"
     assert ref.thread_id == "T-42"
-    assert ref.session_key == "telegram:C-home:T-42"
+    # The transcript is seeded — and the ref reports — the resolved session key
+    # a subsequent inbound turn on the new thread will load, not the raw
+    # delivery-target syntax (Issue #4660 review).
+    resolved_key = "telegram:acct:default:chat:C-home:T-42"
+    assert ref.session_key == resolved_key
+    # ``target`` stays the delivery-target syntax (for posting into the thread),
+    # distinct from the resolved routing ``session_key``.
     assert ref.target == "telegram:C-home:T-42"
     # Thread was created and the origin transcript was seeded onto it.
     assert adapter.created == [("C-home", "Handoff")]
-    assert session.seeded["telegram:C-home:T-42"] == transcript
+    assert session.seeded[resolved_key] == transcript
+
+
+def test_handoff_per_user_scope_creates_thread_without_preseed():
+    # In per_user scope a thread maps to whichever human next messages it —
+    # unknowable at handoff time — so the transcript is NOT pre-seeded, but the
+    # thread is still created and a routable delivery handle is returned.
+    transcript = [{"role": "user", "content": "hi"}]
+    session = _FakeSession({"cli:alice": transcript}, scope="per_user")
+    adapter = _FakeAdapter(thread_id="T-5")
+    bot = _FakeBot("telegram", adapter=adapter, session=session)
+    botos = _make_botos(bot)
+
+    ref = asyncio.run(botos.handoff("cli:alice", "telegram"))
+
+    assert ref.ok
+    assert adapter.created == [("C-home", "Handoff")]
+    # No pre-seed (unresolvable key) but a routable delivery-target handle.
+    assert session.seeded == {}
+    assert ref.session_key == "telegram:C-home:T-5"
 
 
 def test_handoff_posts_seed_text_into_new_thread():
@@ -153,6 +193,7 @@ def test_handoff_of_empty_session_still_creates_thread():
 
 if __name__ == "__main__":
     test_handoff_creates_thread_and_seeds_session()
+    test_handoff_per_user_scope_creates_thread_without_preseed()
     test_handoff_posts_seed_text_into_new_thread()
     test_handoff_unsupported_when_adapter_cannot_thread()
     test_handoff_no_route_for_unknown_platform()

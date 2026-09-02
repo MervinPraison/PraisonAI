@@ -1289,19 +1289,32 @@ class BotOS:
                 status=status,
             )
 
+        # Delivery target for posting into the new thread (seed_text / router
+        # syntax): ``platform:channel:thread_id``.
+        delivery_target = f"{platform}:{channel}:{thread_id}"
+
         # Seed the destination session with the origin transcript so the same
-        # conversation continues on the new thread. Both sessions are located
-        # by reusing the existing session-manager discovery; a missing manager
-        # or empty transcript is non-fatal (the thread is still created).
-        dest_session_key = f"{platform}:{channel}:{thread_id}"
+        # conversation continues on the new thread. Crucially, the transcript
+        # must be seeded under the *same* session key a subsequent inbound turn
+        # on this thread will resolve to — not the delivery-target syntax —
+        # otherwise the next turn loads an empty/unrelated session (Issue #4660
+        # review). The destination session manager resolves that key; it is
+        # only pre-resolvable in ``per_chat`` scope (a thread maps to a shared
+        # session), so ``dest_session_key`` may be ``None`` (per_user), in which
+        # case the thread is still created but not pre-seeded. A missing manager
+        # or empty transcript is likewise non-fatal.
+        dest_session_key: Optional[str] = None
         try:
-            history = self._export_session_history(session_key)
-            if history:
-                dest_bot = self.get_bot(platform)
-                dest_session = (
-                    self._find_session_manager(dest_bot) if dest_bot else None
-                )
-                if dest_session is not None and hasattr(dest_session, "seed_history"):
+            dest_bot = self.get_bot(platform)
+            dest_session = (
+                self._find_session_manager(dest_bot) if dest_bot else None
+            )
+            if dest_session is not None and hasattr(dest_session, "seed_history"):
+                resolver = getattr(dest_session, "resolve_thread_key", None)
+                if callable(resolver):
+                    dest_session_key = resolver(channel, thread_id)
+                history = self._export_session_history(session_key)
+                if dest_session_key and history:
                     dest_session.seed_history(dest_session_key, history)
         except Exception as e:  # pragma: no cover — defensive, never break handoff
             logger.warning("handoff session seed failed: %s", e)
@@ -1309,7 +1322,7 @@ class BotOS:
         # Post an optional first message into the new thread.
         if seed_text:
             try:
-                await self._delivery_router.deliver(dest_session_key, seed_text)
+                await self._delivery_router.deliver(delivery_target, seed_text)
             except Exception as e:  # pragma: no cover — defensive
                 logger.debug("handoff seed_text delivery failed: %s", e)
 
@@ -1326,7 +1339,10 @@ class BotOS:
             platform=platform,
             channel=channel,
             thread_id=thread_id,
-            session_key=dest_session_key,
+            # Report the resolved destination session key subsequent turns route
+            # to when it was pre-resolvable (per_chat); otherwise fall back to
+            # the delivery-target handle so callers still get a routable ref.
+            session_key=dest_session_key or delivery_target,
             status="ok",
         )
 
