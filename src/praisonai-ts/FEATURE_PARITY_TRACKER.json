@@ -6,15 +6,16 @@
   "summary": {
     "pythonCoreFeatures": 411,
     "pythonWrapperFeatures": 21,
-    "typescriptFeatures": 1194,
-    "gapCount": 116,
+    "typescriptFeatures": 1370,
+    "gapCount": 115,
+    "stubCount": 56,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 103
+    "priorityP3": 102
   },
   "pythonCoreSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
+    "path": "src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
       "A2UI",
@@ -901,7 +902,7 @@
     }
   },
   "pythonWrapper": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/praisonai",
+    "path": "src/praisonai/praisonai",
     "cliFeatures": [
       "acp",
       "agent_scheduler",
@@ -927,42 +928,14 @@
     ]
   },
   "typescriptSDK": {
-    "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-ts/src",
+    "path": "src/praisonai-ts/src",
     "exports": [
       "A2A",
       "A2ARole",
       "A2ATaskState",
       "ADAPTERS",
       "AGUI",
-      "AIAgentStep",
-      "AIEmbedManyResult",
-      "AIEmbedOptions",
-      "AIEmbedResult",
-      "AIFilePart",
-      "AIGenerateImageOptions",
-      "AIGenerateImageResult",
-      "AIGenerateObjectOptions",
-      "AIGenerateObjectResult",
-      "AIGenerateTextOptions",
-      "AIGenerateTextResult",
-      "AIImagePart",
-      "AIMiddleware",
-      "AIMiddlewareConfig",
-      "AIModelMessage",
       "AISDK_PROVIDERS",
-      "AISpan",
-      "AISpanKind",
-      "AISpanOptions",
-      "AISpanStatus",
-      "AIStreamObjectOptions",
-      "AIStreamObjectResult",
-      "AIStreamTextOptions",
-      "AIStreamTextResult",
-      "AITelemetryEvent",
-      "AITelemetrySettings",
-      "AITextPart",
-      "AIToolDefinition",
-      "AITracer",
       "AUTONOMY_PRESETS",
       "AccuracyJudge",
       "Agent",
@@ -976,8 +949,6 @@
       "AgentOS",
       "AgentOSConfig",
       "AgentOSProtocol",
-      "AgentTask",
-      "AgentTaskConfig",
       "AgentTeam",
       "AgentTelemetry",
       "Agents",
@@ -986,19 +957,21 @@
       "ApprovalCallback",
       "ApprovalManager",
       "ArrayMode",
+      "ArxivDownloadTool",
+      "ArxivSearchTool",
       "AudioAgent",
       "AutoAgents",
       "AutoMemory",
-      "AutoMemoryKnowledgeBase",
-      "AutoMemoryVectorStore",
       "AutoRagAgent",
       "AutoRetrievalPolicy",
-      "AutoTaskConfig",
       "AutonomyLevel",
       "AutonomyManager",
       "BaseCache",
       "BaseExternalAgent",
+      "BaseKnowledgeBase",
+      "BaseLLM",
       "BaseObservabilityProvider",
+      "BaseProcess",
       "BaseProvider",
       "BaseReranker",
       "BaseTask",
@@ -1011,12 +984,14 @@
       "COMMUNITY_PROVIDERS",
       "CONTEXT_PRESETS",
       "CheckpointManager",
+      "ChonkieAdapter",
       "ChromaVectorStore",
       "Chunking",
       "ChunkingStrategy",
       "CitationsMode",
       "ClaudeCodeAgent",
       "CodeAgent",
+      "CodeReader",
       "CodexCliAgent",
       "CohereReranker",
       "CommandValidator",
@@ -1025,14 +1000,16 @@
       "ConsoleObservabilityAdapter",
       "ConsoleObservabilityProvider",
       "ContextAgent",
+      "ContextBudgeter",
       "ContextEventType",
       "ContextListSink",
       "ContextManager",
       "ContextNoOpSink",
+      "ContextOptimizer",
       "ContextPolicy",
+      "ContextSegment",
       "ContextTraceEmitter",
       "ContextTraceSink",
-      "CostTokenUsage",
       "CostTracker",
       "CriteriaJudge",
       "CrossEncoderReranker",
@@ -1048,12 +1025,12 @@
       "DictCondition",
       "DiffViewer",
       "DisplayFlow",
-      "DisplayFlowConfig",
       "DisplayTypes",
       "DocsManager",
       "EXECUTION_PRESETS",
       "ElevenLabsVoiceProvider",
       "EmbeddingAgent",
+      "EnhancedSession",
       "EvalResults",
       "EvalSuite",
       "Evaluator",
@@ -1063,11 +1040,11 @@
       "ExpressionCondition",
       "FailoverManager",
       "FastContext",
-      "FeatureMemoryConfig",
       "FileCache",
       "FileCheckpointStorage",
       "FileJobStorage",
       "FileMemory",
+      "FileSessionStore",
       "FlowDisplay",
       "FunctionCondition",
       "FunctionPlugin",
@@ -1080,12 +1057,16 @@
       "GoogleProvider",
       "GraphRAG",
       "GraphStore",
+      "Guardrail",
       "GuardrailAction",
+      "GuardrailManager",
+      "HTMLReader",
       "Handoff",
       "HandoffCycleError",
       "HandoffDepthError",
       "HandoffError",
       "HandoffTimeoutError",
+      "HierarchicalSession",
       "HistoryManager",
       "HooksManager",
       "If",
@@ -1101,10 +1082,10 @@
       "Loop",
       "MCP",
       "MCPClient",
-      "MCPClientType",
       "MCPSecurity",
       "MCPServer",
       "MCPSessionManager",
+      "MCPTool",
       "MEMORY_PRESETS",
       "MEMORY_URL_SCHEMES",
       "MODEL_ALIASES",
@@ -1112,6 +1093,7 @@
       "MODE_POLICIES",
       "MULTI_AGENT_EXECUTION_PRESETS",
       "MULTI_AGENT_OUTPUT_PRESETS",
+      "MarkdownReader",
       "Memory",
       "MemoryBackend",
       "MemoryCache",
@@ -1122,6 +1104,7 @@
       "MemoryObservabilityProvider",
       "MemoryPostgresAdapter",
       "MemoryRedisAdapter",
+      "MemorySessionStore",
       "MemoryVectorStore",
       "MessageType",
       "MinimalTelemetry",
@@ -1129,16 +1112,16 @@
       "MissingEnvVarError",
       "N8NIntegration",
       "NLPostgresClient",
-      "NLPostgresConfig",
       "NeonPostgresAdapter",
       "NoopObservabilityAdapter",
       "OBSERVABILITY_TOOLS",
       "OCRAgent",
       "OUTPUT_PRESETS",
-      "ObservabilityTraceContext",
       "OpenAIProvider",
       "OpenAIVoiceProvider",
+      "OptimizerStrategy",
       "OutputPreset",
+      "PDFReader",
       "PLANNING_PRESETS",
       "PROVIDER_ALIASES",
       "Parallel",
@@ -1157,15 +1140,13 @@
       "PostgresSessionStorage",
       "PraisonAIAgents",
       "PromptExpanderAgent",
-      "ProviderMessage",
       "ProviderRegistry",
-      "ProviderToolDefinition",
       "PubSub",
       "QdrantVectorStore",
+      "QueryEngine",
       "QueryRewriterAgent",
       "RAG",
-      "RAGCitation",
-      "RAGContextPack",
+      "RAGPipeline",
       "READ_ONLY_TOOLS",
       "RECOMMENDED_PROMPT_PREFIX",
       "REFLECTION_PRESETS",
@@ -1182,12 +1163,15 @@
       "Router",
       "RouterAgent",
       "RulesManager",
+      "Run",
       "SPEECH_MODELS",
       "SQLiteAdapter",
       "SandboxExecutor",
       "SandboxStatus",
       "Scheduler",
       "Session",
+      "SessionManager",
+      "SessionParts",
       "SkillLoader",
       "SkillManager",
       "SlackBot",
@@ -1199,6 +1183,7 @@
       "TaskAgent",
       "TelemetryCollector",
       "TelemetryIntegration",
+      "TextReader",
       "TodoItem",
       "TodoList",
       "ToolApprovalDeniedError",
@@ -1208,10 +1193,9 @@
       "ToolValidationError",
       "Tools",
       "ToolsRegistry",
-      "TraceCtx",
+      "Trace",
       "TraceSink",
       "UpstashRedisAdapter",
-      "VectorQueryResult",
       "VideoAgent",
       "VisionAgent",
       "WEB_PRESETS",
@@ -1245,6 +1229,7 @@
       "bedrockBrowserFill",
       "bedrockBrowserNavigate",
       "bedrockCodeInterpreter",
+      "builtinGuardrails",
       "clean_triple_backticks",
       "cleanupTelemetry",
       "cleanupTelemetryResources",
@@ -1279,10 +1264,13 @@
       "createAutoAgents",
       "createAutoMemory",
       "createAutonomyManager",
+      "createBudgetAllocation",
       "createCLIApprovalPrompt",
       "createCachingMiddleware",
       "createCheckpointManager",
+      "createChonkieAdapter",
       "createChromaStore",
+      "createChunking",
       "createCitation",
       "createCohereReranker",
       "createComputerUse",
@@ -1292,8 +1280,14 @@
       "createConsoleObservability",
       "createConsoleSink",
       "createContextAgent",
+      "createContextBudgeter",
+      "createContextConfig",
       "createContextEvent",
+      "createContextLedger",
+      "createContextManager",
+      "createContextOptimizer",
       "createContextPack",
+      "createContextSnapshot",
       "createCostTracker",
       "createCrossEncoderReranker",
       "createCustomTool",
@@ -1306,6 +1300,7 @@
       "createDiffViewer",
       "createDocsManager",
       "createElevenLabsVoice",
+      "createEmbeddingProvider",
       "createEncryptionHooks",
       "createEvalResults",
       "createEvaluator",
@@ -1323,7 +1318,9 @@
       "createFlowDisplay",
       "createGitManager",
       "createGraphRAG",
+      "createGuardrailValidationResult",
       "createHTTPSink",
+      "createHierarchicalSession",
       "createHistoryManager",
       "createHonoHandler",
       "createHooksManager",
@@ -1346,6 +1343,7 @@
       "createMCPSecurity",
       "createMCPServer",
       "createMCPSession",
+      "createManagerConfig",
       "createMemory",
       "createMemoryAdapter",
       "createMemoryCache",
@@ -1355,6 +1353,7 @@
       "createMemoryRedis",
       "createMemoryVectorStore",
       "createModel",
+      "createMonitorConfig",
       "createMultimodalMessage",
       "createN8NIntegration",
       "createNLPostgres",
@@ -1362,6 +1361,7 @@
       "createNestHandler",
       "createObservabilityAdapter",
       "createOpenAIVoice",
+      "createOptimizationResult",
       "createPagesHandler",
       "createPdfPart",
       "createPerformanceMonitor",
@@ -1376,12 +1376,16 @@
       "createProviderRegistry",
       "createPubSub",
       "createQdrantStore",
+      "createQueryEngine",
       "createQueryRewriterAgent",
       "createRAG",
       "createRAGConfig",
+      "createRAGPipeline",
       "createRAGResult",
       "createRateLimitMiddleware",
       "createRateLimitPolicy",
+      "createReader",
+      "createRecipeContextConfig",
       "createRedactionMiddleware",
       "createRepoMap",
       "createRetrievalConfig",
@@ -1393,6 +1397,11 @@
       "createSafetyRules",
       "createSandboxExecutor",
       "createScheduler",
+      "createSession",
+      "createSessionParts",
+      "createSessionStore",
+      "createSimpleQueryEngine",
+      "createSimpleRAGPipeline",
       "createSimpleRetrievalConfig",
       "createSkillLoader",
       "createSkillManager",
@@ -1401,6 +1410,7 @@
       "createSlashCommandHandler",
       "createSmartRetrievalConfig",
       "createStatusDisplay",
+      "createStoredSession",
       "createSubagentTool",
       "createSubagentTools",
       "createSystemMessage",
@@ -1456,6 +1466,7 @@
       "display_self_reflection",
       "display_tool_call",
       "embed",
+      "embedMany",
       "embedding",
       "embeddings",
       "enableAITelemetry",
@@ -1491,6 +1502,8 @@
       "getApprovalManager",
       "getAvailableProviders",
       "getDefaultDbAdapter",
+      "getDefaultEmbeddingModel",
+      "getDefaultModel",
       "getDefaultPluginDirs",
       "getDefaultProvider",
       "getDefaultRegistry",
@@ -1499,7 +1512,9 @@
       "getDimensions",
       "getEvents",
       "getExternalAgentRegistry",
+      "getHistoryBudget",
       "getJudge",
+      "getLedgerTotal",
       "getLineCount",
       "getMCPClient",
       "getMCPTools",
@@ -1510,10 +1525,14 @@
       "getOptimizationRule",
       "getPluginManager",
       "getPluginTemplate",
+      "getPreferredBackend",
       "getQuickContext",
+      "getReaderForPath",
+      "getReductionPercent",
       "getRegisteredDisplayTypes",
       "getRegistry",
       "getRepoTree",
+      "getSessionManager",
       "getTelemetry",
       "getTelemetrySettings",
       "getTool",
@@ -1521,6 +1540,7 @@
       "getToolsRegistry",
       "getTotalLines",
       "getTracer",
+      "getUsableBudget",
       "get_config",
       "get_config_path",
       "get_default",
@@ -1533,16 +1553,20 @@
       "get_registry",
       "get_telemetry",
       "get_tool",
+      "guardrail",
+      "guardrailResultFromTuple",
       "handoff",
       "handoffFilters",
       "handoff_filters",
       "hasApprovalCallback",
+      "hasChonkie",
       "hasCitations",
       "hasModelAlias",
       "hasObservabilityToolEnvVar",
       "hasPendingApprovals",
       "hasProvider",
       "initOpenTelemetry",
+      "isAISDKAvailable",
       "isDangerous",
       "isDataUrl",
       "isDevToolsEnabled",
@@ -1579,6 +1603,7 @@
       "parallel",
       "parallelSearch",
       "parseArgs",
+      "parseEmbeddingModel",
       "parseJudgeResponse",
       "parseModel",
       "parseModelString",
@@ -1597,6 +1622,7 @@
       "promptWithHandoffInstructions",
       "prompt_with_handoff_instructions",
       "rangesOverlap",
+      "readDocument",
       "recordEvent",
       "registerApprovalCallback",
       "registerBuiltinProviders",
@@ -1619,9 +1645,12 @@
       "repeat",
       "repeatPattern",
       "requestApproval",
+      "resetAISDKAvailabilityCache",
       "resetObservabilityAdapter",
       "resetToolsRegistry",
       "resolve",
+      "resolveBackend",
+      "resolveBackendSync",
       "resolveGuardrailPolicies",
       "resolveModelAlias",
       "resolve_autonomy",
@@ -2081,6 +2110,46 @@
         "sandboxExec",
         "triggerN8NWebhook"
       ],
+      "context": [
+        "BudgetAllocation",
+        "ContextBudget",
+        "ContextBudgeter",
+        "ContextBudgeterAllocation",
+        "ContextBudgeterConfig",
+        "ContextConfig",
+        "ContextItem",
+        "ContextLedger",
+        "ContextManager",
+        "ContextManagerConfig",
+        "ContextOptimizationResult",
+        "ContextOptimizer",
+        "ContextOptimizerConfig",
+        "ContextSegment",
+        "ContextSegmentType",
+        "ContextSnapshot",
+        "ManagerConfig",
+        "MonitorConfig",
+        "OptimizableItem",
+        "OptimizationResult",
+        "OptimizationStrategy",
+        "OptimizerStrategy",
+        "OptimizerStrategyType",
+        "createBudgetAllocation",
+        "createContextBudgeter",
+        "createContextConfig",
+        "createContextLedger",
+        "createContextManager",
+        "createContextOptimizer",
+        "createContextSnapshot",
+        "createManagerConfig",
+        "createMonitorConfig",
+        "createOptimizationResult",
+        "createRecipeContextConfig",
+        "getHistoryBudget",
+        "getLedgerTotal",
+        "getReductionPercent",
+        "getUsableBudget"
+      ],
       "db": [
         "DbAdapter",
         "DbConfig",
@@ -2162,10 +2231,22 @@
         "createPubSub"
       ],
       "guardrails": [
+        "Guardrail",
+        "GuardrailConfig",
+        "GuardrailContext",
+        "GuardrailFunction",
+        "GuardrailManager",
+        "GuardrailResult",
+        "GuardrailStatus",
+        "GuardrailValidationResult",
         "LLMGuardrail",
         "LLMGuardrailConfig",
         "LLMGuardrailResult",
-        "createLLMGuardrail"
+        "builtinGuardrails",
+        "createGuardrailValidationResult",
+        "createLLMGuardrail",
+        "guardrail",
+        "guardrailResultFromTuple"
       ],
       "hooks": [
         "ApprovalCallbackFn",
@@ -2263,39 +2344,93 @@
         "verifySlackSignature"
       ],
       "knowledge": [
+        "BaseKnowledgeBase",
         "BaseReranker",
+        "ChonkieAdapter",
+        "ChonkieChunk",
+        "ChonkieConfig",
+        "ChonkieStrategy",
+        "Chunk",
+        "ChunkStrategy",
+        "Chunking",
+        "ChunkingConfig",
+        "CodeReader",
         "CohereReranker",
         "CrossEncoderReranker",
+        "EmbedderFn",
         "GraphEdge",
         "GraphNode",
         "GraphQueryResult",
         "GraphRAG",
         "GraphRAGConfig",
         "GraphStore",
+        "HTMLReader",
+        "Knowledge",
+        "KnowledgeBase",
         "LLMReranker",
+        "MarkdownReader",
+        "MemoryVectorStore",
+        "PDFReader",
+        "ParsedDocument",
+        "QueryEngine",
+        "QueryEngineConfig",
+        "QueryOptions",
+        "QueryResult",
+        "RAGChunk",
+        "RAGChunker",
+        "RAGContext",
+        "RAGDocument",
+        "RAGEmbedder",
+        "RAGPipeline",
+        "RAGPipelineConfig",
+        "RAGReranker",
+        "RAGResult",
+        "RAGVectorStore",
+        "Reader",
         "RerankConfig",
         "RerankResult",
+        "TextReader",
+        "VectorStoreInterface",
+        "createChonkieAdapter",
+        "createChunking",
         "createCohereReranker",
         "createCrossEncoderReranker",
         "createGraphRAG",
-        "createLLMReranker"
+        "createLLMReranker",
+        "createQueryEngine",
+        "createRAGPipeline",
+        "createReader",
+        "createSimpleQueryEngine",
+        "createSimpleRAGPipeline",
+        "getReaderForPath",
+        "hasChonkie",
+        "readDocument"
       ],
       "llm": [
         "ADAPTERS",
         "AISDK_PROVIDERS",
         "AdapterInfo",
         "AnthropicProvider",
+        "BackendResolutionResult",
+        "BackendSource",
+        "BaseLLM",
         "BaseProvider",
         "COMMUNITY_PROVIDERS",
         "CommunityProvider",
         "CreateProviderOptions",
+        "EmbeddingBatchResult",
+        "EmbeddingOptions",
+        "EmbeddingResult",
         "GenerateObjectOptions",
         "GenerateObjectResult",
         "GenerateTextOptions",
         "GenerateTextResult",
         "GoogleProvider",
         "IProviderRegistry",
+        "LLM",
+        "LLMConfig",
         "LLMProvider",
+        "LLMResponse",
         "OpenAIProvider",
         "PROVIDER_ALIASES",
         "ProviderConfig",
@@ -2309,21 +2444,35 @@
         "ProviderRegistry",
         "ProviderToolDefinition",
         "RegisterOptions",
+        "ResolveBackendOptions",
         "StreamChunk",
         "StreamTextOptions",
         "TokenUsage",
         "ToolCall",
+        "cosineSimilarity",
+        "createEmbeddingProvider",
         "createProvider",
         "createProviderRegistry",
+        "embed",
+        "embedMany",
+        "euclideanDistance",
         "getAvailableProviders",
+        "getDefaultEmbeddingModel",
+        "getDefaultModel",
         "getDefaultProvider",
         "getDefaultRegistry",
+        "getPreferredBackend",
         "hasProvider",
+        "isAISDKAvailable",
         "isProviderAvailable",
         "listProviders",
+        "parseEmbeddingModel",
         "parseModelString",
         "registerBuiltinProviders",
         "registerProvider",
+        "resetAISDKAvailabilityCache",
+        "resolveBackend",
+        "resolveBackendSync",
         "unregisterProvider"
       ],
       "mcp": [
@@ -2737,6 +2886,11 @@
         "createTaskAgent",
         "createTodoList"
       ],
+      "process": [
+        "BaseProcess",
+        "Process",
+        "ProcessConfig"
+      ],
       "protocols": [
         "A2A",
         "A2AAgentCapabilities",
@@ -2768,6 +2922,40 @@
         "obs",
         "resolveGuardrailPolicies",
         "workflows"
+      ],
+      "session": [
+        "EnhancedSession",
+        "EnhancedSessionConfig",
+        "FileSessionStore",
+        "HierarchicalSession",
+        "HierarchicalSessionConfig",
+        "ISessionStore",
+        "MemorySessionStore",
+        "Message",
+        "Run",
+        "RunConfig",
+        "RunStatus",
+        "Session",
+        "SessionConfig",
+        "SessionManager",
+        "SessionMessage",
+        "SessionPart",
+        "SessionPartType",
+        "SessionParts",
+        "SessionPartsConfig",
+        "SessionScope",
+        "SessionState",
+        "SessionStoreConfig",
+        "StoredSession",
+        "Trace",
+        "TraceConfig",
+        "TraceStatus",
+        "createHierarchicalSession",
+        "createSession",
+        "createSessionParts",
+        "createSessionStore",
+        "createStoredSession",
+        "getSessionManager"
       ],
       "skills": [
         "Skill",
@@ -2817,11 +3005,17 @@
         "getTelemetry"
       ],
       "tools": [
+        "ArxivDownloadTool",
+        "ArxivPaper",
+        "ArxivSearchTool",
         "BaseTool",
         "BudgetExceededError",
         "DelegatorConfig",
         "FunctionTool",
         "InstallHints",
+        "MCP",
+        "MCPTool",
+        "MCPToolInfo",
         "MissingDependencyError",
         "MissingEnvVarError",
         "PraisonTool",
@@ -2968,8 +3162,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "BaseTool",
@@ -2986,8 +3181,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "CodeConfig",
@@ -2995,8 +3191,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "CodeExecutionStep",
@@ -3004,8 +3201,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "ContextAgent",
@@ -3040,8 +3238,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "EmbeddingAgent",
@@ -3049,8 +3248,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "EmbeddingConfig",
@@ -3085,8 +3285,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "FunctionTool",
@@ -3157,8 +3358,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "OCRAgent",
@@ -3166,8 +3368,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "OCRConfig",
@@ -3175,8 +3378,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "PromptExpanderAgent",
@@ -3193,8 +3397,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "QueryRewriterAgent",
@@ -3220,8 +3425,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "RealtimeConfig",
@@ -3229,8 +3435,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "ReasoningStep",
@@ -3301,8 +3508,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "VideoConfig",
@@ -3310,8 +3518,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "VisionAgent",
@@ -3319,8 +3528,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "VisionConfig",
@@ -3328,8 +3538,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "WebSearchCall",
@@ -3337,8 +3548,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "high",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "create_context_agent",
@@ -3346,8 +3558,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_registry",
@@ -3382,8 +3595,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "parallel_handoffs",
@@ -3400,8 +3614,9 @@
         "typescript": true,
         "priority": "P0",
         "effort": "low",
-        "status": "DONE",
-        "category": "agent"
+        "status": "STUB",
+        "category": "agent",
+        "tsSource": "./parity"
       },
       {
         "feature": "register_tool",
@@ -3456,8 +3671,9 @@
         "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "DONE",
-        "category": "workflows"
+        "status": "STUB",
+        "category": "workflows",
+        "tsSource": "./parity"
       },
       {
         "feature": "Include",
@@ -3510,8 +3726,9 @@
         "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "DONE",
-        "category": "workflows"
+        "status": "STUB",
+        "category": "workflows",
+        "tsSource": "./parity"
       },
       {
         "feature": "Pipeline",
@@ -3537,8 +3754,9 @@
         "typescript": true,
         "priority": "P1",
         "effort": "high",
-        "status": "DONE",
-        "category": "workflows"
+        "status": "STUB",
+        "category": "workflows",
+        "tsSource": "./parity"
       },
       {
         "feature": "Session",
@@ -3654,8 +3872,9 @@
         "typescript": true,
         "priority": "P1",
         "effort": "low",
-        "status": "DONE",
-        "category": "workflows"
+        "status": "STUB",
+        "category": "workflows",
+        "tsSource": "./parity"
       }
     ],
     "P2_CLI": [
@@ -3710,8 +3929,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "high",
-        "status": "DONE",
-        "category": "rag"
+        "status": "STUB",
+        "category": "rag",
+        "tsSource": "./parity"
       },
       {
         "feature": "EnforcementLevel",
@@ -3998,8 +4218,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "DONE",
-        "category": "telemetry"
+        "status": "STUB",
+        "category": "telemetry",
+        "tsSource": "./parity"
       },
       {
         "feature": "disable_performance_mode",
@@ -4007,8 +4228,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "DONE",
-        "category": "telemetry"
+        "status": "STUB",
+        "category": "telemetry",
+        "tsSource": "./parity"
       },
       {
         "feature": "disable_telemetry",
@@ -4016,8 +4238,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "DONE",
-        "category": "telemetry"
+        "status": "STUB",
+        "category": "telemetry",
+        "tsSource": "./parity"
       },
       {
         "feature": "discover_skills",
@@ -4034,8 +4257,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "DONE",
-        "category": "telemetry"
+        "status": "STUB",
+        "category": "telemetry",
+        "tsSource": "./parity"
       },
       {
         "feature": "enable_telemetry",
@@ -4043,8 +4267,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "DONE",
-        "category": "telemetry"
+        "status": "STUB",
+        "category": "telemetry",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_telemetry",
@@ -4052,8 +4277,9 @@
         "typescript": true,
         "priority": "P2",
         "effort": "low",
-        "status": "DONE",
-        "category": "telemetry"
+        "status": "STUB",
+        "category": "telemetry",
+        "tsSource": "./parity"
       },
       {
         "feature": "load_skill",
@@ -5581,10 +5807,10 @@
       {
         "feature": "RunStatus",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
@@ -5926,8 +6152,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "clean_triple_backticks",
@@ -5971,8 +6198,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "discover_plugins",
@@ -5980,8 +6208,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "display_error",
@@ -5989,8 +6218,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "display_generating",
@@ -5998,8 +6228,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "display_instruction",
@@ -6007,8 +6238,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "display_interaction",
@@ -6016,8 +6248,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "display_self_reflection",
@@ -6025,8 +6258,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "display_tool_call",
@@ -6034,8 +6268,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "embed",
@@ -6070,8 +6305,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "error_logs",
@@ -6079,8 +6315,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "evaluate_condition",
@@ -6088,8 +6325,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "conditions"
+        "status": "STUB",
+        "category": "conditions",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_config",
@@ -6124,8 +6362,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_default_policy",
@@ -6151,8 +6390,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "embedding"
+        "status": "STUB",
+        "category": "embedding",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_logger",
@@ -6178,8 +6418,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_plugin_template",
@@ -6187,8 +6428,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "get_plugins_config",
@@ -6286,8 +6528,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "memory",
@@ -6304,8 +6547,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "parse_plugin_header_from_file",
@@ -6313,8 +6557,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "plugins"
+        "status": "STUB",
+        "category": "plugins",
+        "tsSource": "./parity"
       },
       {
         "feature": "parse_policy_string",
@@ -6331,8 +6576,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "register_memory_adapter",
@@ -6430,8 +6676,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "config"
+        "status": "STUB",
+        "category": "config",
+        "tsSource": "./parity"
       },
       {
         "feature": "resolve_guardrails",
@@ -6574,8 +6821,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "main"
+        "status": "STUB",
+        "category": "main",
+        "tsSource": "./parity"
       },
       {
         "feature": "termination_to_run_status",
@@ -6601,8 +6849,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "trace"
+        "status": "STUB",
+        "category": "trace",
+        "tsSource": "./parity"
       },
       {
         "feature": "track_workflow",
@@ -6610,8 +6859,9 @@
         "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "DONE",
-        "category": "flow_display"
+        "status": "STUB",
+        "category": "flow_display",
+        "tsSource": "./parity"
       },
       {
         "feature": "unregister_toolset",

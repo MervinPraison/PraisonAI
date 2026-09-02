@@ -1,21 +1,25 @@
 name: Update Feature Parity Tracker
 
+# Regenerates the exported-name parity trackers on push to main and commits them.
+# Validation on pull requests (fail on drift) lives in parity-gate.yml.
+
 on:
   push:
     branches: [ "main" ]
     paths:
       - 'src/praisonai-agents/praisonaiagents/**/*.py'
       - 'src/praisonai-ts/src/**/*.ts'
-      - 'src/praisonai-rust/src/**/*.rs'
+      - 'src/praisonai-rust/praisonai/src/**/*.rs'
+      - 'src/praisonai/praisonai/_dev/parity/**'
+      - 'src/praisonai/praisonai/cli/features/**'
       - '.github/workflows/update-parity-tracker.yml'
-
 permissions:
   contents: write
 
 jobs:
   update-parity-tracker:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -36,7 +40,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE
         python3 src/praisonai/scripts/generate_parity_tracker.py
-        
+
     - name: Check for changes
       id: check_changes
       run: |
@@ -58,4 +62,3 @@ jobs:
         commit_user_name: "MervinPraison"
         commit_user_email: "454862+MervinPraison@users.noreply.github.com"
         commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"
-
