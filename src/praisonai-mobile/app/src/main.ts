@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, ENGINE_PRAISONAI_TS, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
+import { enginesFor, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -124,24 +124,36 @@ export function appEngines(deps: {
 }
 
 /**
- * The engine to start with when settings name none, chosen by platform.
+ * The engine to start with when settings name none.
  *
- * On a DEVICE the old default -- `remote-http` at `http://127.0.0.1:8765` -- is
- * nothing to reach: there is no desktop engine on the phone, so a fresh install
- * opened to a "not answering" warning and no way to fix it, because Settings is
- * unreachable (#4635). And a cleartext localhost address is refused outright by
- * iOS ATS and by Android since API 28. The in-process `praisonai-ts` engine
- * needs no remote and no cleartext, so it is the honest default on native.
+ * `remote-http` on every platform, for now, and the reason is a hard fact about
+ * this build rather than a preference: the webview ships only `dist/app.js`
+ * (build-webview.mjs bundles `app/src/main.ts` and copies nothing else), and
+ * the in-process engine reaches praisonai-ts through a RUNTIME-computed import
+ * that is deliberately outside that bundle (#4437). So on a real device the
+ * in-process engine's module is simply ABSENT -- its first turn rejects with
+ * "the in-process engine is unavailable in this build". Making it the device
+ * DEFAULT would therefore swap the old "not answering" warning (which at least
+ * names Settings as the fix) for a first prompt that fails with no recovery,
+ * and would do it on the exact path registry.ts keeps the engine OUT of the
+ * shipping picker to avoid ("a picker must not offer a choice that bricks the
+ * app"). Until #4437 makes praisonai-ts resolvable inside the webview, the
+ * honest first-launch default stays the remote engine.
  *
- * The desktop/dev default stays `remote-http`: that is where a local engine
- * actually runs, and the persisted `engineId` still wins over either (see
- * `chosenStringOr` in boot.ts), so this only decides the very first launch.
+ * A second reason the ternary this replaced was wrong: `Platform["kind"]` is
+ * only `"tauri" | "web"`, and DESKTOP Tauri (`cargo tauri dev`) reports
+ * `"tauri"` too -- so keying the in-process engine off `kind === "tauri"` also
+ * flipped the desktop/dev flow away from the remote engine it exists for, with
+ * no way here to tell a phone from a laptop.
  *
- * Extracted and exported so a test calls it rather than asserting the ternary
- * appears in `mount` -- the house rule this package keeps by.
+ * Kept as an exported function, taking the platform kind, so the seam is ready
+ * for the day a device can be told apart AND the engine ships -- and so a test
+ * drives it directly rather than asserting an expression appears in `mount`.
+ * The persisted `engineId` still wins over this (see `chosenStringOr` in
+ * boot.ts), so it only ever decides the very first launch.
  */
-export function defaultEngineIdFor(kind: Platform["kind"]): string {
-  return kind === "tauri" ? ENGINE_PRAISONAI_TS : ENGINE_REMOTE_HTTP;
+export function defaultEngineIdFor(_kind: Platform["kind"]): string {
+  return ENGINE_REMOTE_HTTP;
 }
 
 export interface MountDeps {

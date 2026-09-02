@@ -10,19 +10,21 @@ import assert from "node:assert/strict";
 import { defaultEngineIdFor, stopNotice } from "./main.ts";
 import { en } from "../../ui/src/i18n/strings.ts";
 
-test("a device defaults to the in-process engine, not a localhost remote", () => {
-  // The old default -- `remote-http` at `http://127.0.0.1:8765` -- is nothing a
-  // phone can reach, so a fresh install opened to a "not answering" warning
-  // with no way to fix it (Settings is unreachable, #4635), and the cleartext
-  // localhost address is refused outright by iOS ATS and Android. The
-  // in-process engine needs neither a remote nor cleartext.
-  assert.equal(defaultEngineIdFor("tauri"), ENGINE_PRAISONAI_TS);
-});
-
-test("desktop/web keeps the remote engine as the default -- the pair", () => {
-  // Where a local engine actually runs, `remote-http` is right; flipping every
-  // platform to in-process would strand the desktop/dev flow the remote engine
-  // exists for.
+test("every platform's first-launch default is the remote engine, for now", () => {
+  // Tempting to default a device to the in-process engine -- a phone cannot
+  // reach `http://127.0.0.1:8765` and the cleartext localhost address is
+  // refused by iOS ATS and Android -- but the in-process engine's module is
+  // ABSENT from the shipping webview: build-webview.mjs bundles only
+  // `main.ts` into `dist/app.js`, and the engine reaches praisonai-ts through a
+  // runtime-computed import left outside that bundle (#4437). So defaulting a
+  // device to it would swap the "not answering" warning (which names Settings
+  // as the fix) for a first prompt that fails "unavailable in this build" with
+  // no recovery -- the very brick registry.ts keeps the engine out of the
+  // picker to avoid. Until #4437 ships praisonai-ts inside the webview, remote
+  // is the honest default. `Platform["kind"]` also cannot tell desktop Tauri
+  // (`cargo tauri dev`) from a phone, so a `kind === "tauri"` default would
+  // strand the desktop/dev flow too.
+  assert.equal(defaultEngineIdFor("tauri"), ENGINE_REMOTE_HTTP);
   assert.equal(defaultEngineIdFor("web"), ENGINE_REMOTE_HTTP);
 });
 
