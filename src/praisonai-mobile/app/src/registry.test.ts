@@ -8,6 +8,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import {
   CONSUMED_SETTING_KEYS,
@@ -121,16 +124,67 @@ test("the default engine is one that works with nothing configured", async () =>
   assert.equal(def?.default, ENGINE_REMOTE_HTTP);
 });
 
+// The files that actually read a setting in the shipping composition. A key is
+// "consumed" only if it appears here as a literal passed to the store -- not
+// merely because someone listed it. `boot.ts` reads `engineId`
+// (`chosenStringOr(settings, "engineId", ...)`); `registry.ts` reads `baseUrl`
+// (`stringSetting(deps.settings, "baseUrl", ...)`). Test files are excluded on
+// purpose: a fixture that reads a key does not make the app read it.
+const CONSUMER_SOURCES = ["boot.ts", "registry.ts"] as const;
+
+/** True when `key` is passed as a string literal to a settings read in any
+ *  shipping consumer source -- i.e. the app genuinely reads it, not just
+ *  declares it. Derived from the source so a key added to a declaration
+ *  without a real reader cannot pass. */
+function keyIsReadInSource(key: string): boolean {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // A read is `settings.get("key")`, `settings.isSet("key")`, or the same key
+  // handed to one of the string helpers as their `key` argument. Matching the
+  // quoted literal against these call shapes is what ties "declared" to "read".
+  const reads = [
+    new RegExp(`\\.(?:get|isSet)\\(\\s*["']${key}["']`),
+    new RegExp(`(?:stringSetting|chosenStringOr)\\([^)]*["']${key}["']`),
+  ];
+  return CONSUMER_SOURCES.some((file) => {
+    const source = readFileSync(join(here, file), "utf8");
+    return reads.some((re) => re.test(source));
+  });
+}
+
+test("every key in CONSUMED_SETTING_KEYS is actually read by the shipping source", () => {
+  // The half Qodo flagged: comparing SETTING_DEFS to a hand-maintained twin
+  // list lets an inert key pass by being added to both. This pins the list to
+  // reality -- a key here that no consumer reads fails, so CONSUMED_SETTING_KEYS
+  // cannot be padded to smuggle an unread setting past the check below.
+  for (const key of CONSUMED_SETTING_KEYS) {
+    assert.ok(
+      keyIsReadInSource(key),
+      `${key} is listed as consumed but no shipping source reads it`,
+    );
+  }
+});
+
 test("every declared setting is one the app actually reads", async () => {
   // A setting nobody reads is a control that does nothing when a user moves it
   // -- a promise the UI makes and the app does not keep (issue #4636). Five
   // were declared ahead of consumers that do not exist: `model`,
   // `temperature`, `showReasoning`, `showDiagnostics` and `apiKey`. They are
-  // removed rather than half-wired, and this pins the registry to only the
-  // keys the shipping code reads -- so re-adding an inert one, or declaring a
-  // new setting without also wiring a consumer, fails here.
-  const declared = SETTING_DEFS.map((d) => d.key).sort();
-  assert.deepEqual(declared, [...CONSUMED_SETTING_KEYS].sort());
+  // removed rather than half-wired. Each declared key must appear in a real
+  // read in shipping source -- so re-adding an inert one, or declaring a new
+  // setting without also wiring a consumer, fails here even if the author also
+  // adds it to CONSUMED_SETTING_KEYS.
+  for (const def of SETTING_DEFS) {
+    assert.ok(
+      keyIsReadInSource(def.key),
+      `${def.key} is declared but no shipping source reads it`,
+    );
+  }
+  // And the authored list stays honest against the declarations: no consumed
+  // key without a def, no def missing from the list.
+  assert.deepEqual(
+    SETTING_DEFS.map((d) => d.key).sort(),
+    [...CONSUMED_SETTING_KEYS].sort(),
+  );
 });
 
 test("there are no secret settings, so no secret is declared and never written", async () => {
