@@ -181,9 +181,25 @@ export function createSettingsStore(
       const validated = def.validate === undefined ? value : def.validate(value);
       if (validated === null) return false;
 
+      // Persist BEFORE mutating the in-memory map. `persist` reaches
+      // StoragePort, which rejects on a real device (SecurityError with site
+      // data blocked, QuotaExceededError under storage pressure). Updating
+      // `values`/`chosen` first left `get` returning a value the next launch's
+      // `load` will never read -- a setting the user believes they changed and
+      // did not, and a field that cannot honestly reset to what is stored. The
+      // write is committed to memory only once it is durable.
+      const previous = values.get(key);
+      const wasChosen = chosen.has(key);
       values.set(key, validated);
       chosen.add(key);
-      await persist();
+      try {
+        await persist();
+      } catch (error) {
+        if (previous === undefined) values.delete(key);
+        else values.set(key, previous);
+        if (!wasChosen) chosen.delete(key);
+        throw error;
+      }
       notify();
       return true;
     },

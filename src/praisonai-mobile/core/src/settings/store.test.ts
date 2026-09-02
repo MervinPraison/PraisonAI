@@ -183,6 +183,26 @@ test("a REFUSED write wakes nobody", async () => {
   assert.equal(calls, 0);
 });
 
+test("a write whose PERSIST fails rolls back and wakes nobody", async () => {
+  // `persist` reaches StoragePort, which rejects on a real device
+  // (SecurityError with site data blocked, QuotaExceededError). Committing the
+  // value to memory before persisting left `get` returning a value the next
+  // launch's `load` would never read -- a phantom the settings field then could
+  // not honestly reset to. The write must be all-or-nothing: on a persist
+  // failure the value rolls back, the key stays un-chosen, and no subscriber is
+  // told a change landed.
+  const { storage, store } = build();
+  let calls = 0;
+  store.subscribe(() => void calls++);
+  storage.failNext("QuotaExceededError: the storage is full");
+
+  await assert.rejects(store.set("model", "gpt-4o"), /QuotaExceededError/);
+
+  assert.equal(store.get("model"), "gpt-4o-mini", "the value must roll back to what is stored");
+  assert.equal(store.isSet("model"), false, "a write that did not persist must not mark the key chosen");
+  assert.equal(calls, 0, "a failed write must not tell a subscriber a change landed");
+});
+
 test("storing a secret wakes subscribers", async () => {
   // A row reads "configured" from hasSecret; storing a key must redraw it.
   const { store } = build();

@@ -844,6 +844,120 @@ test("tapping Settings paints the settings screen", async () => {
   app?.dispose();
 });
 
+test("the settings screen is EDITABLE, so a phone can point the engine somewhere reachable", async () => {
+  // The recovery the remote-http default depends on. A phone reaches no
+  // `127.0.0.1:8765`, so first launch warns that the engine is not answering --
+  // and the only fix is to change `baseUrl`. That was impossible: every setting
+  // rendered as a read-only <span>, and `facade.set` / `validateInput` had no
+  // caller, so an unreachable engine had no way back. The row is a real field
+  // now; committing it must PERSIST -- createApp loads settings first and builds
+  // the engine from them, so the change takes effect on the next launch, which
+  // is the recovery this unblocks.
+  const storage = createFakeStorage();
+  const { dom, platform } = harness({ storage });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+
+  // The baseUrl row must carry an editable control, not a read-only span.
+  const field = dom.find(
+    (n) =>
+      (n.tagName === "INPUT" || n.tagName === "SELECT") &&
+      n.getAttribute("aria-label") === "Engine address",
+  );
+  assert.ok(field, `the engine address must be editable:\n${dom.text()}`);
+
+  (field as { value: string }).value = "http://10.0.0.7:9000";
+  (field as { dispatch(t: string, e: unknown): void }).dispatch("change", {});
+  await settle();
+
+  // Persisted in the live facade AND written through to storage, so the next
+  // launch's `settings.load()` reads the address the user set, not the default.
+  assert.equal(app?.settings.get("baseUrl"), "http://10.0.0.7:9000", "the edit must persist in the facade");
+  const raw = await storage.read({ namespace: "settings", id: "app" });
+  assert.ok(
+    raw !== null && raw.includes("10.0.0.7:9000"),
+    `the edit must survive a relaunch:\n${String(raw)}`,
+  );
+  app?.dispose();
+});
+
+test("a setting the store REFUSES resets the field instead of showing a phantom value", async () => {
+  // `set` returns false for a value the def rejects, and `validateInput`
+  // returns null for one that will not parse. Either way the field must fall
+  // back to what is actually stored -- a screen showing a value the store never
+  // accepted is a setting the user believes they changed and did not.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+
+  // The engine choice is a closed set (`choices: [remote-http]`), so an unknown
+  // id must be refused and the select must snap back.
+  const select = dom.find(
+    (n) => n.tagName === "SELECT" && n.getAttribute("aria-label") === "Engine",
+  );
+  assert.ok(select, "the engine choice must be a select");
+  (select as { value: string }).value = "not-a-real-engine";
+  (select as { dispatch(t: string, e: unknown): void }).dispatch("change", {});
+  await settle();
+
+  assert.equal(app?.settings.get("engineId"), ENGINE_REMOTE_HTTP, "a rejected choice must not persist");
+  assert.equal((select as { value: string }).value, ENGINE_REMOTE_HTTP, "the field must reset to what is stored");
+  app?.dispose();
+});
+
+test("a storage failure while editing a setting stays LOCAL, not fatal", async () => {
+  // `commit` was a fire-and-forget `void commit(...)`, and `settings.set`
+  // persists through StoragePort -- which rejects on a real device
+  // (SecurityError with site data blocked, QuotaExceededError). Left to float,
+  // that rejection reached the global crash handler and replaced the WHOLE app
+  // with the fatal screen; worse, the store had already committed the value to
+  // memory before persisting, so the field showed an address the next launch
+  // would never read. A failed write must stay local: the app keeps working and
+  // the field resets to what is actually stored.
+  const storage = createFakeStorage();
+  const { dom, platform } = harness({ storage });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  dom.click(dom.find((n) => n.dataset["route"] === "settings") as never);
+  await settle();
+
+  const field = dom.find(
+    (n) =>
+      (n.tagName === "INPUT" || n.tagName === "SELECT") &&
+      n.getAttribute("aria-label") === "Engine address",
+  );
+  assert.ok(field, `the engine address must be editable:\n${dom.text()}`);
+
+  const before = app?.settings.get("baseUrl");
+  storage.failNext("QuotaExceededError: the storage is full");
+  (field as { value: string }).value = "http://10.0.0.7:9000";
+  (field as { dispatch(t: string, e: unknown): void }).dispatch("change", {});
+  await settle();
+
+  // The app must survive: the chat screen and composer are still reachable, and
+  // nothing escalated to the fatal "could not start" screen.
+  assert.ok(
+    dom.find((n) => n.tagName === "TEXTAREA" || n.tagName === "INPUT" || n.tagName === "SELECT"),
+    `a failed setting write must not take down the app:\n${dom.text()}`,
+  );
+  assert.equal(
+    /could not start/.test(dom.text()),
+    false,
+    "a failed settings write must not become the app-wide crash screen",
+  );
+
+  // The store rolled the value back, so the field shows what is actually
+  // stored -- not a phantom the next launch will not read.
+  assert.equal(app?.settings.get("baseUrl"), before, "a value that did not persist must not linger in memory");
+  assert.equal((field as { value: string }).value, String(before), "the field must reset to what is stored");
+  app?.dispose();
+});
+
 test("a route change MOVES focus to the new heading, and Back restores it", async () => {
   // focus.ts computes where focus belongs on every route change and the app
   // used to throw the answer away -- it read the target only to decide whether
