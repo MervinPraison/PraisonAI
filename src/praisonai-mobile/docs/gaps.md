@@ -21,8 +21,10 @@ type AgentEvent =
 
 Protocol v2 has **eleven** events. The channel now carries tool calls and
 results, so this engine reports tool activity. What it still cannot carry is an
-approval request, reasoning, or usage — so the two approval conformance
-scenarios below are declared unsupported rather than faked.
+approval request, reasoning, or usage — so the `two_approvals` conformance
+scenario below is declared unsupported rather than faked. (`approval` is *not*
+unsupported: its case only decides an unknown id, which needs no approval
+channel — see the note under the table.)
 
 ### What that means per capability
 
@@ -52,13 +54,19 @@ indistinguishable from a normal answer — which is the exact defect protocol v2
 
 | Scenario | Reason |
 |---|---|
-| `approval` | `ApprovalManager` gates tool execution upstream but cannot reach the event channel |
-| `two_approvals` | same as `approval` |
+| `two_approvals` | `ApprovalManager` gates tool execution upstream but its prompt cannot reach the event channel, so two `approval_request` events cannot be emitted |
 
 `tool_ok`, `tool_failed` and `tool_unresolved` were listed here until upstream
 gained `tool_call`/`tool_result`; they are now produced and passing. The suite
 prints every remaining omission on each run, so a contract that quietly shrinks
 is visible in the output rather than silently green.
+
+`approval` was also listed here until it was confirmed dead: that case only
+asserts that deciding an *unknown* id returns `false`, which this engine's
+`decide()` always does — it needs no approval channel. Declaring it unsupported
+skipped a case that already passed, so it now runs. `capabilities.approvals`
+stays `false`: the engine still cannot *emit* an approval request, which is what
+`two_approvals` needs.
 
 ### Closing the remaining gap
 
