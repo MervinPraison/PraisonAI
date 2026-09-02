@@ -666,6 +666,15 @@ def baseline_waivers(comparisons: List[SurfaceComparison], existing: List[Waiver
 
 # -------------------------------------------------------------------------- CLI
 
+def prune_waivers(comparisons: List[SurfaceComparison], waivers: List[Waiver]) -> List[Waiver]:
+    """Return the waivers whose gap still exists, dropping stale ones."""
+    live = {
+        f'{c.key}.{row.python.name}'
+        for c in comparisons for row in c.rows if row.gap is not None
+    }
+    return [w for w in waivers if w.key in live]
+
+
 def _print_report(evaluation: Evaluation, comparisons: List[SurfaceComparison], out=None) -> None:
     out = out or sys.stdout
     print(f'Active waivers ({len(evaluation.active_waivers)}):', file=out)
@@ -700,6 +709,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument('--check', action='store_true', help='fail on drift, gaps, or waiver problems (CI gate)')
     mode.add_argument('--diff', metavar='SURFACE', help='print one surface table to stdout')
     mode.add_argument('--baseline', action='store_true', help='add waivers for every current un-waived gap')
+    mode.add_argument('--prune', action='store_true', help='delete waivers whose gap no longer exists (stale)')
     parser.add_argument('--repo-root', type=Path, default=None)
     parser.add_argument('--today', type=date.fromisoformat, default=None, help=argparse.SUPPRESS)
     return parser
@@ -728,6 +738,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             waivers = baseline_waivers(comparisons, waivers)
             write_waivers(DEFAULT_WAIVERS_FILE, waivers)
             print(f'waivers.yaml: {len(waivers) - before} added, {len(waivers)} total -> {DEFAULT_WAIVERS_FILE}')
+            return EXIT_OK
+
+        if args.prune:
+            before = len(waivers)
+            waivers = prune_waivers(comparisons, waivers)
+            write_waivers(DEFAULT_WAIVERS_FILE, waivers)
+            print(f'waivers.yaml: {before - len(waivers)} stale removed, {len(waivers)} remain -> {DEFAULT_WAIVERS_FILE}')
             return EXIT_OK
 
         evaluation = evaluate(comparisons, waivers, args.today)

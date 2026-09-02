@@ -192,7 +192,16 @@ function flattenChain(ts, node, opKind) {
 function collectCtorDefaults(ts, cls, sf) {
   const ctor = cls.members.find((m) => ts.isConstructorDeclaration(m) && m.body);
   if (!ctor) return { defaults: new Map(), line: null };
-  const param = ctor.parameters[0];
+  return collectDefaultsFrom(ts, ctor, sf, ctor.parameters[0]);
+}
+
+// Defaults read from `<param>.x ?? v`, `<param>.x || v`, ternaries on
+// `<param>.x`, and destructuring `{ x = v } = <param>` inside a function body.
+// Used for constructors (config object) and for methods that take an options
+// object (see extractMethod), so both surfaces report defaults the same way.
+function collectDefaultsFrom(ts, fnLike, sf, param) {
+  const ctor = fnLike;
+  if (!ctor || !ctor.body) return { defaults: new Map(), line: null };
   const paramName = param && ts.isIdentifier(param.name) ? param.name.text : 'config';
   const defaults = new Map();
   const record = (name, value) => { if (!defaults.has(name)) defaults.set(name, value); };
@@ -321,6 +330,41 @@ function extractMethod(ts, sf, target, location) {
     };
   });
   const extra = {};
+  // An options object (`options?: FooOptions`) declared as an interface in the
+  // same file is flattened: its members count as parameters of the method, the
+  // way Python spells them out as keyword arguments. Defaults are read from
+  // `options.x ?? v` / `options?.x ?? v` in the method body.
+  const flattened = [];
+  for (const p of decl.parameters) {
+    if (!p.type || !ts.isTypeReferenceNode(p.type) || !ts.isIdentifier(p.type.typeName)) continue;
+    const ifaceName = p.type.typeName.text;
+    const iface = findAll(ts, sf, (n) => ts.isInterfaceDeclaration(n) && n.name.text === ifaceName)[0];
+    if (!iface) continue;
+    const optName = p.name.getText(sf);
+    const optIsOptional = !!p.questionToken || !!p.initializer;
+    const defaults = collectDefaultsFrom(ts, decl, sf, p).defaults;
+    for (const m of iface.members) {
+      if (!ts.isPropertySignature(m) && !ts.isMethodSignature(m)) continue;
+      const name = m.name.getText(sf);
+      const typeText = ts.isMethodSignature(m)
+        ? compact(m.getText(sf).replace(/^[^(]*/, ''))
+        : (m.type ? compact(m.type.getText(sf)) : 'any');
+      const d = defaults.get(name) || { default: null, default_kind: null };
+      flattened.push({
+        name,
+        canonical: name,
+        kind: 'property',
+        required: optIsOptional ? false : !m.questionToken,
+        default: d.default,
+        default_kind: d.default_kind,
+        type_text: typeText,
+        type_class: ts.isMethodSignature(m) ? 'callable' : typeClass(typeText),
+        via: optName,
+      });
+    }
+    (extra.options_interfaces = extra.options_interfaces || []).push(`${optName}: ${ifaceName}`);
+  }
+  params.push(...flattened);
   const cls = enclosingClassName(ts, decl);
   if (cls) extra.resolved_class = cls;
   return {

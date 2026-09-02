@@ -541,3 +541,75 @@ class TestCli:
         assert (None, 'undefined') in rules.default_equivalences
         for w in C.load_waivers():
             assert w.reason and w.owner
+
+
+class TestOptionsObjectFlattening:
+    """A method's `options?: FooOptions` parameter counts its members as parameters."""
+
+    FIXTURE = '''
+export interface ChatOptions {
+  temperature?: number;
+  reasoningSteps?: boolean;
+  seed?: number;
+}
+export class Agent {
+  async chat(prompt: string, signal?: AbortSignal, options?: ChatOptions): Promise<string> {
+    const steps = options?.reasoningSteps ?? false;
+    const temp = options.temperature ?? 0.7;
+    return prompt + String(steps) + String(temp) + String(signal);
+  }
+  plain(prompt: string): string { return prompt; }
+}
+'''
+
+    @staticmethod
+    def _fake_repo(tmp_path):
+        src = tmp_path / 'src' / 'praisonai-ts' / 'src' / 'agent'
+        src.mkdir(parents=True)
+        (src / 'simple.ts').write_text(TestOptionsObjectFlattening.FIXTURE)
+        return tmp_path
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_options_members_become_params_with_defaults(self, tmp_path):
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [
+            {'surface': 'Agent.chat', 'file': 'agent/simple.ts', 'kind': 'method', 'name': 'chat', 'cls': 'Agent'},
+        ])
+        params = {p['name']: p for p in items[0]['params']}
+        assert set(params) == {'prompt', 'signal', 'options', 'temperature', 'reasoningSteps', 'seed'}
+        assert params['reasoningSteps']['default'] is False and params['reasoningSteps']['via'] == 'options'
+        assert params['temperature']['default'] == 0.7
+        assert params['seed']['default'] is None and params['seed']['required'] is False
+        assert items[0]['extra']['options_interfaces'] == ['options: ChatOptions']
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_control_method_without_options_is_not_flattened(self, tmp_path):
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [
+            {'surface': 'Agent.plain', 'file': 'agent/simple.ts', 'kind': 'method', 'name': 'plain', 'cls': 'Agent'},
+        ])
+        assert [p['name'] for p in items[0]['params']] == ['prompt']
+        assert 'options_interfaces' not in items[0]['extra']
+
+
+class TestPruneWaivers:
+    def _comparison_with_gap(self, gap_name='auth'):
+        py = C.signatures_from_json([sig('python', [py_param(gap_name), py_param('name')])])[SURFACE]
+        ts = C.signatures_from_json([sig('typescript', [ts_param('name')])])[SURFACE]
+        return C.compare_surface(py, ts, default_rules())
+
+    def test_prune_drops_only_stale_waivers(self):
+        comparison = self._comparison_with_gap()
+        live = waiver('Agent.__init__.auth')
+        stale = waiver('Agent.__init__.ported')
+        kept = C.prune_waivers([comparison], [live, stale])
+        assert [w.key for w in kept] == ['Agent.__init__.auth']
+
+    def test_control_prune_keeps_everything_when_nothing_is_stale(self):
+        comparison = self._comparison_with_gap()
+        live = waiver('Agent.__init__.auth')
+        assert [w.key for w in C.prune_waivers([comparison], [live])] == ['Agent.__init__.auth']

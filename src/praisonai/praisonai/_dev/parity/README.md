@@ -24,6 +24,7 @@ python3 -m praisonai._dev.parity.signatures --write               # regenerate r
 python3 -m praisonai._dev.parity.signatures --check               # exit 1 on drift or un-waived gap, 2 on tooling failure
 python3 -m praisonai._dev.parity.signatures --diff Agent.__init__ # one surface, side by side
 python3 -m praisonai._dev.parity.signatures --baseline            # add waivers for every current un-waived gap
+python3 -m praisonai._dev.parity.signatures --prune               # delete waivers whose gap has been closed
 ```
 
 ## Keeping the SDKs in sync
@@ -32,6 +33,8 @@ python3 -m praisonai._dev.parity.signatures --baseline            # add waivers 
 2. Run `--diff <surface>`. The row shows the canonical TS name the convention expects
    (snake_case → camelCase unless `rules.yaml` names an alias or a flattening) and the default to carry over.
 3. Port it in `src/praisonai-ts`, or add a waiver with a `reason` and `owner` to `waivers.yaml`.
+   A method that takes an options object (`chat(prompt, options?: AgentChatOptions)`) counts the
+   interface's members as parameters, so Python keyword arguments map onto it one to one.
 4. Run `--write` and commit the regenerated report with the change.
 
 CI (`.github/workflows/parity-gate.yml`) runs both `--check` modes on pull requests and fails on:
