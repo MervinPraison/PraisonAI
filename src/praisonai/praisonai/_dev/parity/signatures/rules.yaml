@@ -1,0 +1,51 @@
+# Normalisation rules for the signature parity checker. Written once here so
+# neither extractor nor the comparator hard-codes naming conventions.
+
+# Applied automatically to every Python parameter before matching.
+case: snake_to_camel
+
+# Per-surface semantic aliases (python name -> typescript name) that are NOT a
+# pure case change. Several Python names may map to one TS field.
+aliases:
+  Agent.__init__:
+    base_url: baseURL
+    output_json: outputSchema
+    output_pydantic: outputSchema
+    interrupt_controller: signal
+    caching: cache
+    model: llm
+  Task.__init__:
+    context: dependencies
+    depends_on: dependencies
+  Handoff.__init__:
+    tool_name_override: name
+    tool_description_override: description
+    input_filter: transformContext
+  LLM.__init__:
+    base_url: baseURL
+  Session.__init__:
+    session_id: id
+    agent_url: agentUrl
+    session_ttl: ttl
+  tool():
+    func: execute
+  Agent.chat:
+    cancel_token: signal
+
+# Python nested-config parameters that TypeScript exposes as top-level fields.
+# A Python param counts as "flattened" when every listed TS field exists.
+flattened:
+  Agent.__init__:
+    output: [verbose, markdown, stream]
+    execution: [maxIterations, maxToolCallsPerTurn]
+    caching: [cache, cacheTTL]
+
+# Defaults that mean the same thing on both sides. `typescript: undefined`
+# means "no default / not set in the constructor".
+default_equivalences:
+  - {python: null, typescript: undefined}
+  # Python "None means empty" (`tools if tools else []`) vs a TS empty literal.
+  - {python: null, typescript: []}
+  - {python: null, typescript: {}}
+  - {python: true, typescript: true}
+  - {python: false, typescript: false}

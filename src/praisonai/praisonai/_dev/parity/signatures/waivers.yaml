@@ -1,0 +1,509 @@
+# Signature parity waivers.
+#
+# Key: "<surface key>.<python parameter>". Required: reason, owner.
+# Optional: issue, expires (ISO date; an expired waiver FAILS the check).
+# A waiver whose gap no longer exists is stale and FAILS the check: delete it.
+# Regenerate missing entries with: python -m praisonai._dev.parity.signatures --baseline
+
+waivers:
+  Agent.__init__.auth:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.autonomy:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.backend:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.caching:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.context:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.guardrails:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.handoffs:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.hooks:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.instructions:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.knowledge:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.learn:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.llm:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.memory:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.message_steering:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.model:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.name:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.planning:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.reasoning_effort:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.reflection:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.retry:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.role:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.rules:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.run_on:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.runtime:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.sandbox:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.self_improve:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.skills:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.templates:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.tool_config:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.tool_search:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.tools_run_on:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.toolsets:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.__init__.web:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.attachments:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.config:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.force_retrieval:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.output_json:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.output_pydantic:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.reasoning_steps:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.seed:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.skip_retrieval:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.stream:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.task_description:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.task_id:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.task_name:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.temperature:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.tool_choice:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.chat.tools:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Agent.start.prompt:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.autonomy:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.caching:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.context:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.execution:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.guardrails:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.hooks:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.knowledge:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.learn:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.llm:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.manager_llm:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.memory:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.model:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.name:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.output:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.planning:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.process:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.reflection:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.run_on:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.tools_run_on:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.variables:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.__init__.web:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.start.content:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.start.output:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  AgentTeam.start.return_dict:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Handoff.__init__.config:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Handoff.__init__.input_type:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Handoff.__init__.tool_description_override:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Handoff.__init__.tool_name_override:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.api_version:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.auth:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.claude_memory:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.events:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.failover_manager:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.frequency_penalty:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.logit_bias:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.logprobs:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.max_iter:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.n:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.presence_penalty:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.prompt_caching:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.response_format:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.seed:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.stop_phrases:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.timeout:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.top_logprobs:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.top_p:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.web_fetch:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  LLM.__init__.web_search:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Session.__init__.session_id:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Session.__init__.user_id:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.action:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.agent_config:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.async_execution:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.autonomy:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.caching:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.callback:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.condition:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.config:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.create_directory:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.description:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.else_task:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.execution:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.expected_output:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.fail_on_callback_error:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.fail_on_memory_error:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.guardrail:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.guardrails:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.handler:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.hooks:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.id:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.images:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.input_file:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.is_start:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.knowledge:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.loop_over:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.loop_state:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.loop_var:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.max_retries:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.memory:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.name:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.next_tasks:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.on_error:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.on_task_complete:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.output:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.output_config:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.output_file:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.output_json:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.output_pydantic:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.output_variable:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.planning:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.quality_check:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.reflection:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.rerun:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.result:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.retain_full_context:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.retry_count:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.retry_delay:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.routing:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.should_run:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.skip_on_failure:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.status:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.task_type:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.then_task:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.tools:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.variables:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.web:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  Task.__init__.when:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().approval:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().availability:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().description:
+    owner: praisonai-ts
+    reason: 'TS derives a default description from the tool name; Python leaves it None and infers from the docstring'
+  tool().dynamic_schema_overrides:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().func:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().name:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().requires_approval:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().restart_safe:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().retry_policy:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().to_model_output:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'
+  tool().version:
+    owner: praisonai-ts
+    reason: 'baseline 2026-09-02: not yet ported to TypeScript'

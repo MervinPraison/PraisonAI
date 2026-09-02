@@ -1,0 +1,59 @@
+# Curated surfaces compared by the signature parity checker.
+#
+# python.file is relative to python_root; typescript.file is relative to
+# typescript_root. `discover.init_first_param` resolves a class by the first
+# parameter of its __init__ instead of by name (agents.py exports the team
+# class under several aliases).
+#
+# Run: python -m praisonai._dev.parity.signatures --check
+
+python_root: src/praisonai-agents/praisonaiagents
+typescript_root: src/praisonai-ts/src
+
+surfaces:
+  - key: Agent.__init__
+    python: {file: agent/agent.py, class: Agent, function: __init__}
+    typescript: {file: agent/simple.ts, kind: interface, name: SimpleAgentConfig, ctorClass: Agent}
+
+  - key: AgentTeam.__init__
+    python:
+      file: agents/agents.py
+      discover: {init_first_param: agents}
+      aliases: [PraisonAIAgents, Agents]
+      function: __init__
+    typescript: {file: agent/simple.ts, kind: interface, name: AgentTeamConfig, ctorClass: AgentTeam}
+
+  - key: Task.__init__
+    python: {file: task/task.py, class: Task, function: __init__}
+    typescript: {file: agent/types.ts, kind: interface, name: TaskConfig, ctorClass: Task}
+
+  - key: Agent.start
+    python: {file: agent/execution_mixin.py, function: start}
+    typescript: {file: agent/simple.ts, kind: method, name: start, cls: Agent}
+
+  - key: Agent.chat
+    python: {file: agent/chat_mixin.py, function: chat}
+    typescript: {file: agent/simple.ts, kind: method, name: chat, cls: Agent}
+
+  - key: AgentTeam.start
+    python:
+      file: agents/agents.py
+      discover: {init_first_param: agents}
+      function: start
+    typescript: {file: agent/simple.ts, kind: method, name: start, cls: AgentTeam}
+
+  - key: Handoff.__init__
+    python: {file: agent/handoff.py, class: Handoff, function: __init__}
+    typescript: {file: agent/handoff.ts, kind: interface, name: HandoffConfig, ctorClass: Handoff}
+
+  - key: LLM.__init__
+    python: {file: llm/llm.py, class: LLM, function: __init__}
+    typescript: {file: llm/index.ts, kind: interface, name: LLMConfig, ctorClass: BaseLLM}
+
+  - key: Session.__init__
+    python: {file: session/api.py, class: Session, function: __init__}
+    typescript: {file: session/session.ts, kind: interface, name: SessionConfig, ctorClass: Session}
+
+  - key: tool()
+    python: {file: tools/decorator.py, function: tool}
+    typescript: {file: tools/decorator.ts, kind: interface, name: ToolConfig, ctorClass: FunctionTool}

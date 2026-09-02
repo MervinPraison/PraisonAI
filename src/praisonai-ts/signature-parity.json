@@ -1,0 +1,5849 @@
+{
+  "generatedBy": "praisonai._dev.parity.signatures",
+  "surfaces": {
+    "Agent.__init__": {
+      "counts": {
+        "alias": 4,
+        "camelCase": 1,
+        "exact": 8,
+        "flattened": 2,
+        "mismatches": 6,
+        "missing": 27,
+        "params": 42,
+        "ts_only": 13,
+        "ts_total": 30,
+        "waived": 33
+      },
+      "params": [
+        {
+          "canonical": "name",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=``Agent_${Math.random().toString(36).substr(2, 9)}`` (TS `name`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "name",
+          "required": false,
+          "ts": {
+            "canonical": "name",
+            "default": "`Agent_${Math.random().toString(36).substr(2, 9)}`",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "name",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "name",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.__init__.name",
+          "warnings": []
+        },
+        {
+          "canonical": "role",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=`config.goal || config.backstory` (TS `role`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "role",
+          "required": false,
+          "ts": {
+            "canonical": "role",
+            "default": "config.goal || config.backstory",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "role",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "role",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.__init__.role",
+          "warnings": []
+        },
+        {
+          "canonical": "goal",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "goal",
+          "required": false,
+          "ts": {
+            "canonical": "goal",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "goal",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "goal",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "backstory",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "backstory",
+          "required": false,
+          "ts": {
+            "canonical": "backstory",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "backstory",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "backstory",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "instructions",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `instructions`)",
+            "kind": "required"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "instructions",
+          "required": false,
+          "ts": {
+            "canonical": "instructions",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "instructions",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "instructions",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.__init__.instructions",
+          "warnings": []
+        },
+        {
+          "canonical": "llm",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=`getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini'` (TS `llm`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "llm",
+          "required": false,
+          "ts": {
+            "canonical": "llm",
+            "default": "getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini'",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "llm",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "llm",
+          "type_class": "union",
+          "type_text": "Optional[Union[str, Any]]",
+          "waived": "Agent.__init__.llm",
+          "warnings": [
+            "type differs: python union (Optional[Union[str, Any]]) vs typescript string (string)"
+          ]
+        },
+        {
+          "canonical": "model",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=`getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini'` (TS `llm`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "alias",
+          "name": "model",
+          "required": false,
+          "ts": {
+            "canonical": "llm",
+            "default": "getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini'",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "llm",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "llm",
+          "type_class": "union",
+          "type_text": "Optional[Union[str, Any]]",
+          "waived": "Agent.__init__.model",
+          "warnings": [
+            "type differs: python union (Optional[Union[str, Any]]) vs typescript string (string)"
+          ]
+        },
+        {
+          "canonical": "baseUrl",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "base_url",
+          "required": false,
+          "ts": {
+            "canonical": "baseURL",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "baseURL",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "baseURL",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "apiKey",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "api_key",
+          "required": false,
+          "ts": {
+            "canonical": "apiKey",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "apiKey",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "apiKey",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "auth",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `auth`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "auth",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.__init__.auth",
+          "warnings": []
+        },
+        {
+          "canonical": "tools",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "tools",
+          "required": false,
+          "ts": {
+            "canonical": "tools",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "tools",
+            "required": false,
+            "type_class": "array",
+            "type_text": "any[] | Function[]"
+          },
+          "ts_name": "tools",
+          "type_class": "array",
+          "type_text": "Optional[List[Any]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "toolsets",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toolsets`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "toolsets",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[str]]",
+          "waived": "Agent.__init__.toolsets",
+          "warnings": []
+        },
+        {
+          "canonical": "handoffs",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `handoffs`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "handoffs",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[Union['Agent', 'Handoff']]]",
+          "waived": "Agent.__init__.handoffs",
+          "warnings": []
+        },
+        {
+          "canonical": "memory",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `memory`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "memory",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, 'MemoryConfig', Any]]",
+          "waived": "Agent.__init__.memory",
+          "warnings": []
+        },
+        {
+          "canonical": "knowledge",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `knowledge`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "knowledge",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']]",
+          "waived": "Agent.__init__.knowledge",
+          "warnings": []
+        },
+        {
+          "canonical": "planning",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `planning`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "planning",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, 'PlanningConfig']]",
+          "waived": "Agent.__init__.planning",
+          "warnings": []
+        },
+        {
+          "canonical": "reflection",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `reflection`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "reflection",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, 'ReflectionConfig']]",
+          "waived": "Agent.__init__.reflection",
+          "warnings": []
+        },
+        {
+          "canonical": "rules",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `rules`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "rules",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, 'RulesConfig']]",
+          "waived": "Agent.__init__.rules",
+          "warnings": []
+        },
+        {
+          "canonical": "guardrails",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `guardrails`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "guardrails",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Callable, 'GuardrailConfig']]",
+          "waived": "Agent.__init__.guardrails",
+          "warnings": []
+        },
+        {
+          "canonical": "web",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `web`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "web",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, 'WebConfig']]",
+          "waived": "Agent.__init__.web",
+          "warnings": []
+        },
+        {
+          "canonical": "context",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `context`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "context",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']]",
+          "waived": "Agent.__init__.context",
+          "warnings": []
+        },
+        {
+          "canonical": "autonomy",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `autonomy`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "autonomy",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'AutonomyConfig']]",
+          "waived": "Agent.__init__.autonomy",
+          "warnings": []
+        },
+        {
+          "canonical": "output",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "keyword",
+          "match": "flattened",
+          "name": "output",
+          "required": false,
+          "ts": null,
+          "ts_name": "verbose, markdown, stream",
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "execution",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "keyword",
+          "match": "flattened",
+          "name": "execution",
+          "required": false,
+          "ts": null,
+          "ts_name": "maxIterations, maxToolCallsPerTurn",
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "templates",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `templates`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "templates",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Union[Dict[str, Any], 'TemplateConfig']]",
+          "waived": "Agent.__init__.templates",
+          "warnings": []
+        },
+        {
+          "canonical": "caching",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=false (TS `cache`)",
+            "kind": "default"
+          },
+          "kind": "keyword",
+          "match": "alias",
+          "name": "caching",
+          "required": false,
+          "ts": {
+            "canonical": "cache",
+            "default": false,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "cache",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean"
+          },
+          "ts_name": "cache",
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]",
+          "waived": "Agent.__init__.caching",
+          "warnings": [
+            "type differs: python union (Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']]) vs typescript boolean (boolean)"
+          ]
+        },
+        {
+          "canonical": "hooks",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `hooks`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "hooks",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']]",
+          "waived": "Agent.__init__.hooks",
+          "warnings": []
+        },
+        {
+          "canonical": "skills",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `skills`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "skills",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']]",
+          "waived": "Agent.__init__.skills",
+          "warnings": []
+        },
+        {
+          "canonical": "selfImprove",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `selfImprove`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "self_improve",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, 'SkillReviewProtocol']]",
+          "waived": "Agent.__init__.self_improve",
+          "warnings": []
+        },
+        {
+          "canonical": "approval",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "keyword",
+          "match": "exact",
+          "name": "approval",
+          "required": false,
+          "ts": {
+            "canonical": "approval",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "approval",
+            "required": false,
+            "type_class": "union",
+            "type_text": "boolean | ApprovalManager"
+          },
+          "ts_name": "approval",
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "toolConfig",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toolConfig`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "tool_config",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, 'ToolConfig']]",
+          "waived": "Agent.__init__.tool_config",
+          "warnings": []
+        },
+        {
+          "canonical": "learn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `learn`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "learn",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']]",
+          "waived": "Agent.__init__.learn",
+          "warnings": []
+        },
+        {
+          "canonical": "backend",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `backend`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "backend",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Agent.__init__.backend",
+          "warnings": []
+        },
+        {
+          "canonical": "runOn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `runOn`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "run_on",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union['ManagedRuntime', str]]",
+          "waived": "Agent.__init__.run_on",
+          "warnings": []
+        },
+        {
+          "canonical": "toolsRunOn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toolsRunOn`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "tools_run_on",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union['ToolPlace', str, Any]]",
+          "waived": "Agent.__init__.tools_run_on",
+          "warnings": []
+        },
+        {
+          "canonical": "runtime",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `runtime`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "runtime",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']]",
+          "waived": "Agent.__init__.runtime",
+          "warnings": []
+        },
+        {
+          "canonical": "interruptController",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "keyword",
+          "match": "alias",
+          "name": "interrupt_controller",
+          "required": false,
+          "ts": {
+            "canonical": "signal",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "signal",
+            "required": false,
+            "type_class": "object",
+            "type_text": "AbortSignal"
+          },
+          "ts_name": "signal",
+          "type_class": "object",
+          "type_text": "Optional['InterruptController']",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "toolSearch",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toolSearch`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "tool_search",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']]",
+          "waived": "Agent.__init__.tool_search",
+          "warnings": []
+        },
+        {
+          "canonical": "messageSteering",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `messageSteering`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "message_steering",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, 'MessageSteeringProtocol']]",
+          "waived": "Agent.__init__.message_steering",
+          "warnings": []
+        },
+        {
+          "canonical": "sandbox",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `sandbox`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "sandbox",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, 'SandboxConfig']]",
+          "waived": "Agent.__init__.sandbox",
+          "warnings": []
+        },
+        {
+          "canonical": "retry",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `retry`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "retry",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]",
+          "waived": "Agent.__init__.retry",
+          "warnings": []
+        },
+        {
+          "canonical": "reasoningEffort",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `reasoningEffort`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "reasoning_effort",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.__init__.reasoning_effort",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:583",
+        "resolved_class": "Agent"
+      },
+      "ts_only": [
+        {
+          "canonical": "pretty",
+          "default": "getEnv('PRAISON_PRETTY') === 'true'",
+          "default_kind": "expr",
+          "kind": "property",
+          "name": "pretty",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "fetch",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "fetch",
+          "required": false,
+          "type_class": "unknown",
+          "type_text": "typeof fetch"
+        },
+        {
+          "canonical": "outputSchema",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "outputSchema",
+          "required": false,
+          "type_class": "object",
+          "type_text": "Record<string, any>"
+        },
+        {
+          "canonical": "outputSchemaName",
+          "default": "response",
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "outputSchemaName",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
+        },
+        {
+          "canonical": "toolFunctions",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "toolFunctions",
+          "required": false,
+          "type_class": "object",
+          "type_text": "Record<string, Function>"
+        },
+        {
+          "canonical": "db",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "db",
+          "required": false,
+          "type_class": "object",
+          "type_text": "DbAdapter"
+        },
+        {
+          "canonical": "sessionId",
+          "default": "this.generateSessionId()",
+          "default_kind": "expr",
+          "kind": "property",
+          "name": "sessionId",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
+        },
+        {
+          "canonical": "runId",
+          "default": "randomUUID()",
+          "default_kind": "expr",
+          "kind": "property",
+          "name": "runId",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
+        },
+        {
+          "canonical": "historyLimit",
+          "default": 100,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "historyLimit",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "autoRestore",
+          "default": true,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "autoRestore",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "autoPersist",
+          "default": true,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "autoPersist",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "cacheTTL",
+          "default": 3600,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "cacheTTL",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "telemetry",
+          "default": false,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "telemetry",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:295",
+        "location": "src/praisonai-ts/src/agent/simple.ts:99"
+      }
+    },
+    "Agent.chat": {
+      "counts": {
+        "alias": 1,
+        "camelCase": 0,
+        "exact": 1,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 15,
+        "params": 17,
+        "ts_only": 1,
+        "ts_total": 3,
+        "waived": 15
+      },
+      "params": [
+        {
+          "canonical": "prompt",
+          "default": null,
+          "default_kind": null,
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "prompt",
+          "required": true,
+          "ts": {
+            "canonical": "prompt",
+            "default": null,
+            "default_kind": null,
+            "kind": "positional",
+            "name": "prompt",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "prompt",
+          "type_class": "string",
+          "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "temperature",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `temperature`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "temperature",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[float]",
+          "waived": "Agent.chat.temperature",
+          "warnings": []
+        },
+        {
+          "canonical": "tools",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `tools`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "tools",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[Any]]",
+          "waived": "Agent.chat.tools",
+          "warnings": []
+        },
+        {
+          "canonical": "outputJson",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputJson`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_json",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Agent.chat.output_json",
+          "warnings": []
+        },
+        {
+          "canonical": "outputPydantic",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputPydantic`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_pydantic",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Agent.chat.output_pydantic",
+          "warnings": []
+        },
+        {
+          "canonical": "reasoningSteps",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `reasoningSteps`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "reasoning_steps",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Agent.chat.reasoning_steps",
+          "warnings": []
+        },
+        {
+          "canonical": "stream",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `stream`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "stream",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": "Agent.chat.stream",
+          "warnings": []
+        },
+        {
+          "canonical": "taskName",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `taskName`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "task_name",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.chat.task_name",
+          "warnings": []
+        },
+        {
+          "canonical": "taskDescription",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `taskDescription`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "task_description",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.chat.task_description",
+          "warnings": []
+        },
+        {
+          "canonical": "taskId",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `taskId`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "task_id",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.chat.task_id",
+          "warnings": []
+        },
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `config`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "config",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": "Agent.chat.config",
+          "warnings": []
+        },
+        {
+          "canonical": "forceRetrieval",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `forceRetrieval`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "force_retrieval",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Agent.chat.force_retrieval",
+          "warnings": []
+        },
+        {
+          "canonical": "skipRetrieval",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `skipRetrieval`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "skip_retrieval",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Agent.chat.skip_retrieval",
+          "warnings": []
+        },
+        {
+          "canonical": "attachments",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `attachments`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "attachments",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[str]]",
+          "waived": "Agent.chat.attachments",
+          "warnings": []
+        },
+        {
+          "canonical": "toolChoice",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toolChoice`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "tool_choice",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.chat.tool_choice",
+          "warnings": []
+        },
+        {
+          "canonical": "seed",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `seed`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "seed",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "Agent.chat.seed",
+          "warnings": []
+        },
+        {
+          "canonical": "cancelToken",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "cancel_token",
+          "required": false,
+          "ts": {
+            "canonical": "signal",
+            "default": null,
+            "default_kind": null,
+            "kind": "positional",
+            "name": "signal",
+            "required": false,
+            "type_class": "object",
+            "type_text": "AbortSignal"
+          },
+          "ts_name": "signal",
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3056",
+        "resolved_class": "ChatMixin"
+      },
+      "ts_only": [
+        {
+          "canonical": "previousResult",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "previousResult",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
+        }
+      ],
+      "typescript": {
+        "location": "src/praisonai-ts/src/agent/simple.ts:1310",
+        "resolved_class": "Agent"
+      }
+    },
+    "Agent.start": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 0,
+        "exact": 1,
+        "flattened": 0,
+        "mismatches": 1,
+        "missing": 0,
+        "params": 1,
+        "ts_only": 4,
+        "ts_total": 5,
+        "waived": 1
+      },
+      "params": [
+        {
+          "canonical": "prompt",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `prompt`)",
+            "kind": "required"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "prompt",
+          "required": false,
+          "ts": {
+            "canonical": "prompt",
+            "default": null,
+            "default_kind": null,
+            "kind": "positional",
+            "name": "prompt",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "prompt",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Agent.start.prompt",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:831",
+        "resolved_class": "ExecutionMixin"
+      },
+      "ts_only": [
+        {
+          "canonical": "previousResult",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "previousResult",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
+        },
+        {
+          "canonical": "onToken",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "onToken",
+          "required": false,
+          "type_class": "callable",
+          "type_text": "(token: string) => void"
+        },
+        {
+          "canonical": "signal",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "signal",
+          "required": false,
+          "type_class": "object",
+          "type_text": "AbortSignal"
+        },
+        {
+          "canonical": "onEvent",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "onEvent",
+          "required": false,
+          "type_class": "callable",
+          "type_text": "(event: AgentEvent) => void"
+        }
+      ],
+      "typescript": {
+        "location": "src/praisonai-ts/src/agent/simple.ts:812",
+        "resolved_class": "Agent"
+      }
+    },
+    "AgentTeam.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 0,
+        "exact": 3,
+        "flattened": 0,
+        "mismatches": 1,
+        "missing": 20,
+        "params": 23,
+        "ts_only": 2,
+        "ts_total": 5,
+        "waived": 21
+      },
+      "params": [
+        {
+          "canonical": "agents",
+          "default": null,
+          "default_kind": null,
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "agents",
+          "required": true,
+          "ts": {
+            "canonical": "agents",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "agents",
+            "required": true,
+            "type_class": "array",
+            "type_text": "Agent[]"
+          },
+          "ts_name": "agents",
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "tasks",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "tasks",
+          "required": false,
+          "ts": {
+            "canonical": "tasks",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "tasks",
+            "required": false,
+            "type_class": "array",
+            "type_text": "string[]"
+          },
+          "ts_name": "tasks",
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "process",
+          "default": "sequential",
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=\"sequential\" typescript=undefined (TS `process`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "process",
+          "required": false,
+          "ts": {
+            "canonical": "process",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "process",
+            "required": false,
+            "type_class": "string",
+            "type_text": "'sequential' | 'parallel'"
+          },
+          "ts_name": "process",
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "AgentTeam.__init__.process",
+          "warnings": []
+        },
+        {
+          "canonical": "managerLlm",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `managerLlm`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "manager_llm",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "AgentTeam.__init__.manager_llm",
+          "warnings": []
+        },
+        {
+          "canonical": "name",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `name`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "name",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "AgentTeam.__init__.name",
+          "warnings": []
+        },
+        {
+          "canonical": "variables",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `variables`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "variables",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": "AgentTeam.__init__.variables",
+          "warnings": []
+        },
+        {
+          "canonical": "llm",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `llm`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "llm",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "AgentTeam.__init__.llm",
+          "warnings": []
+        },
+        {
+          "canonical": "model",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `model`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "model",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "AgentTeam.__init__.model",
+          "warnings": []
+        },
+        {
+          "canonical": "memory",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `memory`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "memory",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.memory",
+          "warnings": []
+        },
+        {
+          "canonical": "planning",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `planning`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "planning",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.planning",
+          "warnings": []
+        },
+        {
+          "canonical": "context",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `context`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "context",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.context",
+          "warnings": []
+        },
+        {
+          "canonical": "output",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `output`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.output",
+          "warnings": []
+        },
+        {
+          "canonical": "execution",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `execution`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "execution",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.execution",
+          "warnings": []
+        },
+        {
+          "canonical": "hooks",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `hooks`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "hooks",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.hooks",
+          "warnings": []
+        },
+        {
+          "canonical": "autonomy",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `autonomy`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "autonomy",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.autonomy",
+          "warnings": []
+        },
+        {
+          "canonical": "knowledge",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `knowledge`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "knowledge",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.knowledge",
+          "warnings": []
+        },
+        {
+          "canonical": "guardrails",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `guardrails`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "guardrails",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.guardrails",
+          "warnings": []
+        },
+        {
+          "canonical": "web",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `web`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "web",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.web",
+          "warnings": []
+        },
+        {
+          "canonical": "reflection",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `reflection`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "reflection",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.reflection",
+          "warnings": []
+        },
+        {
+          "canonical": "caching",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `caching`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "caching",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.caching",
+          "warnings": []
+        },
+        {
+          "canonical": "learn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `learn`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "learn",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.learn",
+          "warnings": []
+        },
+        {
+          "canonical": "toolsRunOn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toolsRunOn`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "tools_run_on",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.tools_run_on",
+          "warnings": []
+        },
+        {
+          "canonical": "runOn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `runOn`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "run_on",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "AgentTeam.__init__.run_on",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "aliases": [
+          "PraisonAIAgents",
+          "Agents"
+        ],
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:648",
+        "resolved_class": "AgentTeam"
+      },
+      "ts_only": [
+        {
+          "canonical": "verbose",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "verbose",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "pretty",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "pretty",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1669",
+        "location": "src/praisonai-ts/src/agent/simple.ts:1612"
+      }
+    },
+    "AgentTeam.start": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 0,
+        "exact": 0,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 3,
+        "params": 3,
+        "ts_only": 0,
+        "ts_total": 0,
+        "waived": 3
+      },
+      "params": [
+        {
+          "canonical": "content",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `content`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "content",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "AgentTeam.start.content",
+          "warnings": []
+        },
+        {
+          "canonical": "returnDict",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `returnDict`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "return_dict",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "AgentTeam.start.return_dict",
+          "warnings": []
+        },
+        {
+          "canonical": "output",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `output`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "AgentTeam.start.output",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2007",
+        "resolved_class": "AgentTeam"
+      },
+      "ts_only": [],
+      "typescript": {
+        "location": "src/praisonai-ts/src/agent/simple.ts:1719",
+        "resolved_class": "AgentTeam"
+      }
+    },
+    "Handoff.__init__": {
+      "counts": {
+        "alias": 3,
+        "camelCase": 1,
+        "exact": 1,
+        "flattened": 0,
+        "mismatches": 2,
+        "missing": 2,
+        "params": 7,
+        "ts_only": 11,
+        "ts_total": 16,
+        "waived": 4
+      },
+      "params": [
+        {
+          "canonical": "agent",
+          "default": null,
+          "default_kind": null,
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "agent",
+          "required": true,
+          "ts": {
+            "canonical": "agent",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "agent",
+            "required": true,
+            "type_class": "object",
+            "type_text": "EnhancedAgent"
+          },
+          "ts_name": "agent",
+          "type_class": "object",
+          "type_text": "'Agent'",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "toolNameOverride",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=``handoff_to_${config.agent.name}`` (TS `name`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "alias",
+          "name": "tool_name_override",
+          "required": false,
+          "ts": {
+            "canonical": "name",
+            "default": "`handoff_to_${config.agent.name}`",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "name",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "name",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Handoff.__init__.tool_name_override",
+          "warnings": []
+        },
+        {
+          "canonical": "toolDescriptionOverride",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=``Transfer conversation to ${config.agent.name}`` (TS `description`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "alias",
+          "name": "tool_description_override",
+          "required": false,
+          "ts": {
+            "canonical": "description",
+            "default": "`Transfer conversation to ${config.agent.name}`",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "description",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "description",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Handoff.__init__.tool_description_override",
+          "warnings": []
+        },
+        {
+          "canonical": "onHandoff",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "on_handoff",
+          "required": false,
+          "ts": {
+            "canonical": "onHandoff",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "onHandoff",
+            "required": false,
+            "type_class": "callable",
+            "type_text": "(context: HandoffContext) => void | Promise<void>"
+          },
+          "ts_name": "onHandoff",
+          "type_class": "callable",
+          "type_text": "Optional[Callable]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "inputType",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `inputType`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "input_type",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[type]",
+          "waived": "Handoff.__init__.input_type",
+          "warnings": []
+        },
+        {
+          "canonical": "inputFilter",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "input_filter",
+          "required": false,
+          "ts": {
+            "canonical": "transformContext",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "transformContext",
+            "required": false,
+            "type_class": "callable",
+            "type_text": "(messages: any[]) => any[]"
+          },
+          "ts_name": "transformContext",
+          "type_class": "union",
+          "type_text": "Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]]",
+          "waived": null,
+          "warnings": [
+            "type differs: python union (Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]]) vs typescript callable ((messages: any[]) => any[])"
+          ]
+        },
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `config`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "config",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[HandoffConfig]",
+          "waived": "Handoff.__init__.config",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:320",
+        "resolved_class": "Handoff"
+      },
+      "ts_only": [
+        {
+          "canonical": "condition",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "condition",
+          "required": false,
+          "type_class": "callable",
+          "type_text": "(context: HandoffContext) => boolean"
+        },
+        {
+          "canonical": "contextPolicy",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "contextPolicy",
+          "required": false,
+          "type_class": "object",
+          "type_text": "ContextPolicyType"
+        },
+        {
+          "canonical": "maxContextTokens",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxContextTokens",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxContextMessages",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxContextMessages",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "preserveSystem",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "preserveSystem",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "timeoutSeconds",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "timeoutSeconds",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxConcurrent",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxConcurrent",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "detectCycles",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "detectCycles",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "maxDepth",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxDepth",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "onComplete",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "onComplete",
+          "required": false,
+          "type_class": "callable",
+          "type_text": "(result: HandoffResult) => void | Promise<void>"
+        },
+        {
+          "canonical": "onError",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "onError",
+          "required": false,
+          "type_class": "callable",
+          "type_text": "(error: Error) => void | Promise<void>"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:222",
+        "location": "src/praisonai-ts/src/agent/handoff.ts:156"
+      }
+    },
+    "LLM.__init__": {
+      "counts": {
+        "alias": 1,
+        "camelCase": 2,
+        "exact": 2,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 20,
+        "params": 25,
+        "ts_only": 0,
+        "ts_total": 5,
+        "waived": 20
+      },
+      "params": [
+        {
+          "canonical": "model",
+          "default": null,
+          "default_kind": null,
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "model",
+          "required": true,
+          "ts": {
+            "canonical": "model",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "model",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "model",
+          "type_class": "string",
+          "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "timeout",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `timeout`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "timeout",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "LLM.__init__.timeout",
+          "warnings": []
+        },
+        {
+          "canonical": "temperature",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "temperature",
+          "required": false,
+          "ts": {
+            "canonical": "temperature",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "temperature",
+            "required": false,
+            "type_class": "number",
+            "type_text": "number"
+          },
+          "ts_name": "temperature",
+          "type_class": "number",
+          "type_text": "Optional[float]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "topP",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `topP`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "top_p",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[float]",
+          "waived": "LLM.__init__.top_p",
+          "warnings": []
+        },
+        {
+          "canonical": "n",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `n`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "n",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "LLM.__init__.n",
+          "warnings": []
+        },
+        {
+          "canonical": "maxTokens",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "max_tokens",
+          "required": false,
+          "ts": {
+            "canonical": "maxTokens",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "maxTokens",
+            "required": false,
+            "type_class": "number",
+            "type_text": "number"
+          },
+          "ts_name": "maxTokens",
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "presencePenalty",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `presencePenalty`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "presence_penalty",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[float]",
+          "waived": "LLM.__init__.presence_penalty",
+          "warnings": []
+        },
+        {
+          "canonical": "frequencyPenalty",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `frequencyPenalty`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "frequency_penalty",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[float]",
+          "waived": "LLM.__init__.frequency_penalty",
+          "warnings": []
+        },
+        {
+          "canonical": "logitBias",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `logitBias`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "logit_bias",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[int, float]]",
+          "waived": "LLM.__init__.logit_bias",
+          "warnings": []
+        },
+        {
+          "canonical": "responseFormat",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `responseFormat`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "response_format",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": "LLM.__init__.response_format",
+          "warnings": []
+        },
+        {
+          "canonical": "seed",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `seed`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "seed",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "LLM.__init__.seed",
+          "warnings": []
+        },
+        {
+          "canonical": "logprobs",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `logprobs`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "logprobs",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": "LLM.__init__.logprobs",
+          "warnings": []
+        },
+        {
+          "canonical": "topLogprobs",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `topLogprobs`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "top_logprobs",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "LLM.__init__.top_logprobs",
+          "warnings": []
+        },
+        {
+          "canonical": "apiVersion",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `apiVersion`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "api_version",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "LLM.__init__.api_version",
+          "warnings": []
+        },
+        {
+          "canonical": "stopPhrases",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `stopPhrases`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "stop_phrases",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[str, List[str]]]",
+          "waived": "LLM.__init__.stop_phrases",
+          "warnings": []
+        },
+        {
+          "canonical": "apiKey",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "api_key",
+          "required": false,
+          "ts": {
+            "canonical": "apiKey",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "apiKey",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "apiKey",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "baseUrl",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "base_url",
+          "required": false,
+          "ts": {
+            "canonical": "baseURL",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "baseURL",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "baseURL",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "events",
+          "default": [],
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `events`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "events",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "List[Any]",
+          "waived": "LLM.__init__.events",
+          "warnings": []
+        },
+        {
+          "canonical": "webSearch",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `webSearch`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "web_search",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, Dict[str, Any]]]",
+          "waived": "LLM.__init__.web_search",
+          "warnings": []
+        },
+        {
+          "canonical": "webFetch",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `webFetch`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "web_fetch",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, Dict[str, Any]]]",
+          "waived": "LLM.__init__.web_fetch",
+          "warnings": []
+        },
+        {
+          "canonical": "promptCaching",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `promptCaching`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "prompt_caching",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": "LLM.__init__.prompt_caching",
+          "warnings": []
+        },
+        {
+          "canonical": "claudeMemory",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `claudeMemory`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "claude_memory",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, Any]]",
+          "waived": "LLM.__init__.claude_memory",
+          "warnings": []
+        },
+        {
+          "canonical": "failoverManager",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `failoverManager`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "failover_manager",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[FailoverManagerProtocol]",
+          "waived": "LLM.__init__.failover_manager",
+          "warnings": []
+        },
+        {
+          "canonical": "auth",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `auth`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "auth",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "LLM.__init__.auth",
+          "warnings": []
+        },
+        {
+          "canonical": "maxIter",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `maxIter`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "max_iter",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "LLM.__init__.max_iter",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:413",
+        "resolved_class": "LLM"
+      },
+      "ts_only": [],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/llm/index.ts:28",
+        "location": "src/praisonai-ts/src/llm/index.ts:1"
+      }
+    },
+    "Session.__init__": {
+      "counts": {
+        "alias": 2,
+        "camelCase": 4,
+        "exact": 1,
+        "flattened": 0,
+        "mismatches": 2,
+        "missing": 0,
+        "params": 7,
+        "ts_only": 2,
+        "ts_total": 9,
+        "waived": 2
+      },
+      "params": [
+        {
+          "canonical": "sessionId",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=`randomUUID().slice(0, 8)` (TS `id`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "alias",
+          "name": "session_id",
+          "required": false,
+          "ts": {
+            "canonical": "id",
+            "default": "randomUUID().slice(0, 8)",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "id",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "id",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Session.__init__.session_id",
+          "warnings": []
+        },
+        {
+          "canonical": "userId",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=\"default_user\" (TS `userId`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "user_id",
+          "required": false,
+          "ts": {
+            "canonical": "userId",
+            "default": "default_user",
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "userId",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "userId",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Session.__init__.user_id",
+          "warnings": []
+        },
+        {
+          "canonical": "agentUrl",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "agent_url",
+          "required": false,
+          "ts": {
+            "canonical": "agentUrl",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "agentUrl",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "agentUrl",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "memoryConfig",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "memory_config",
+          "required": false,
+          "ts": {
+            "canonical": "memoryConfig",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "memoryConfig",
+            "required": false,
+            "type_class": "object",
+            "type_text": "Record<string, any>"
+          },
+          "ts_name": "memoryConfig",
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "knowledgeConfig",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "knowledge_config",
+          "required": false,
+          "ts": {
+            "canonical": "knowledgeConfig",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "knowledgeConfig",
+            "required": false,
+            "type_class": "object",
+            "type_text": "Record<string, any>"
+          },
+          "ts_name": "knowledgeConfig",
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "timeout",
+          "default": 30,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "timeout",
+          "required": false,
+          "ts": {
+            "canonical": "timeout",
+            "default": 30,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "timeout",
+            "required": false,
+            "type_class": "number",
+            "type_text": "number"
+          },
+          "ts_name": "timeout",
+          "type_class": "number",
+          "type_text": "int",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "sessionTtl",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "session_ttl",
+          "required": false,
+          "ts": {
+            "canonical": "ttl",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "ttl",
+            "required": false,
+            "type_class": "number",
+            "type_text": "number"
+          },
+          "ts_name": "ttl",
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/session/api.py:66",
+        "resolved_class": "Session"
+      },
+      "ts_only": [
+        {
+          "canonical": "parent",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "parent",
+          "required": false,
+          "type_class": "object",
+          "type_text": "Session"
+        },
+        {
+          "canonical": "db",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "db",
+          "required": false,
+          "type_class": "object",
+          "type_text": "DbAdapter"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/session/session.ts:120",
+        "location": "src/praisonai-ts/src/session/session.ts:29"
+      }
+    },
+    "Task.__init__": {
+      "counts": {
+        "alias": 2,
+        "camelCase": 0,
+        "exact": 4,
+        "flattened": 0,
+        "mismatches": 3,
+        "missing": 54,
+        "params": 60,
+        "ts_only": 0,
+        "ts_total": 5,
+        "waived": 57
+      },
+      "params": [
+        {
+          "canonical": "description",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `description`)",
+            "kind": "required"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "description",
+          "required": false,
+          "ts": {
+            "canonical": "description",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "description",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "description",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.description",
+          "warnings": []
+        },
+        {
+          "canonical": "expectedOutput",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `expected_output`)",
+            "kind": "required"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "expected_output",
+          "required": false,
+          "ts": {
+            "canonical": "expected_output",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "expected_output",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "expected_output",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.expected_output",
+          "warnings": []
+        },
+        {
+          "canonical": "agent",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "agent",
+          "required": false,
+          "ts": {
+            "canonical": "agent",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "agent",
+            "required": false,
+            "type_class": "unknown",
+            "type_text": "any"
+          },
+          "ts_name": "agent",
+          "type_class": "object",
+          "type_text": "Optional[Agent]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "name",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `name`)",
+            "kind": "required"
+          },
+          "kind": "positional",
+          "match": "exact",
+          "name": "name",
+          "required": false,
+          "ts": {
+            "canonical": "name",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "name",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "name",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.name",
+          "warnings": []
+        },
+        {
+          "canonical": "tools",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `tools`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "tools",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[Any]]",
+          "waived": "Task.__init__.tools",
+          "warnings": []
+        },
+        {
+          "canonical": "context",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "context",
+          "required": false,
+          "ts": {
+            "canonical": "dependencies",
+            "default": [],
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "dependencies",
+            "required": false,
+            "type_class": "array",
+            "type_text": "Task[]"
+          },
+          "ts_name": "dependencies",
+          "type_class": "array",
+          "type_text": "Optional[List[Union[str, List, 'Task']]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "dependsOn",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "alias",
+          "name": "depends_on",
+          "required": false,
+          "ts": {
+            "canonical": "dependencies",
+            "default": [],
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "dependencies",
+            "required": false,
+            "type_class": "array",
+            "type_text": "Task[]"
+          },
+          "ts_name": "dependencies",
+          "type_class": "array",
+          "type_text": "Optional[List[Union[str, List, 'Task']]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "asyncExecution",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `asyncExecution`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "async_execution",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": "Task.__init__.async_execution",
+          "warnings": []
+        },
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `config`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "config",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": "Task.__init__.config",
+          "warnings": []
+        },
+        {
+          "canonical": "outputFile",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputFile`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_file",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.output_file",
+          "warnings": []
+        },
+        {
+          "canonical": "outputJson",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputJson`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_json",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Type[BaseModel]]",
+          "waived": "Task.__init__.output_json",
+          "warnings": []
+        },
+        {
+          "canonical": "outputPydantic",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputPydantic`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_pydantic",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Type[BaseModel]]",
+          "waived": "Task.__init__.output_pydantic",
+          "warnings": []
+        },
+        {
+          "canonical": "callback",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `callback`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "callback",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]",
+          "waived": "Task.__init__.callback",
+          "warnings": []
+        },
+        {
+          "canonical": "onTaskComplete",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `onTaskComplete`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "on_task_complete",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]]",
+          "waived": "Task.__init__.on_task_complete",
+          "warnings": []
+        },
+        {
+          "canonical": "status",
+          "default": "not started",
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `status`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "status",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "str",
+          "waived": "Task.__init__.status",
+          "warnings": []
+        },
+        {
+          "canonical": "result",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `result`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "result",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[TaskOutput]",
+          "waived": "Task.__init__.result",
+          "warnings": []
+        },
+        {
+          "canonical": "createDirectory",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `createDirectory`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "create_directory",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": "Task.__init__.create_directory",
+          "warnings": []
+        },
+        {
+          "canonical": "id",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `id`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "id",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": "Task.__init__.id",
+          "warnings": []
+        },
+        {
+          "canonical": "images",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `images`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "images",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[str]]",
+          "waived": "Task.__init__.images",
+          "warnings": []
+        },
+        {
+          "canonical": "nextTasks",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `nextTasks`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "next_tasks",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "array",
+          "type_text": "Optional[List[str]]",
+          "waived": "Task.__init__.next_tasks",
+          "warnings": []
+        },
+        {
+          "canonical": "taskType",
+          "default": "task",
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `taskType`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "task_type",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "str",
+          "waived": "Task.__init__.task_type",
+          "warnings": []
+        },
+        {
+          "canonical": "condition",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `condition`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "condition",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, List[str]]]",
+          "waived": "Task.__init__.condition",
+          "warnings": []
+        },
+        {
+          "canonical": "isStart",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `isStart`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "is_start",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Task.__init__.is_start",
+          "warnings": []
+        },
+        {
+          "canonical": "loopState",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `loopState`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "loop_state",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Union[str, int]]]",
+          "waived": "Task.__init__.loop_state",
+          "warnings": []
+        },
+        {
+          "canonical": "memory",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `memory`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "memory",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "Task.__init__.memory",
+          "warnings": []
+        },
+        {
+          "canonical": "qualityCheck",
+          "default": true,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `qualityCheck`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "quality_check",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "",
+          "waived": "Task.__init__.quality_check",
+          "warnings": []
+        },
+        {
+          "canonical": "inputFile",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `inputFile`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "input_file",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.input_file",
+          "warnings": []
+        },
+        {
+          "canonical": "rerun",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `rerun`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "rerun",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Task.__init__.rerun",
+          "warnings": []
+        },
+        {
+          "canonical": "retainFullContext",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `retainFullContext`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "retain_full_context",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Task.__init__.retain_full_context",
+          "warnings": []
+        },
+        {
+          "canonical": "guardrail",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `guardrail`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "guardrail",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]",
+          "waived": "Task.__init__.guardrail",
+          "warnings": []
+        },
+        {
+          "canonical": "guardrails",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `guardrails`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "guardrails",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]]",
+          "waived": "Task.__init__.guardrails",
+          "warnings": []
+        },
+        {
+          "canonical": "maxRetries",
+          "default": 3,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `maxRetries`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "max_retries",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "int",
+          "waived": "Task.__init__.max_retries",
+          "warnings": []
+        },
+        {
+          "canonical": "retryCount",
+          "default": 0,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `retryCount`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "retry_count",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "int",
+          "waived": "Task.__init__.retry_count",
+          "warnings": []
+        },
+        {
+          "canonical": "agentConfig",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `agentConfig`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "agent_config",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": "Task.__init__.agent_config",
+          "warnings": []
+        },
+        {
+          "canonical": "variables",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `variables`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "variables",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": "Task.__init__.variables",
+          "warnings": []
+        },
+        {
+          "canonical": "skipOnFailure",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `skipOnFailure`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "skip_on_failure",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Task.__init__.skip_on_failure",
+          "warnings": []
+        },
+        {
+          "canonical": "retryDelay",
+          "default": 0.0,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `retryDelay`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "retry_delay",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "number",
+          "type_text": "float",
+          "waived": "Task.__init__.retry_delay",
+          "warnings": []
+        },
+        {
+          "canonical": "onError",
+          "default": "stop",
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `onError`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "on_error",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "str",
+          "waived": "Task.__init__.on_error",
+          "warnings": []
+        },
+        {
+          "canonical": "action",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `action`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "action",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.action",
+          "warnings": []
+        },
+        {
+          "canonical": "handler",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `handler`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "handler",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Callable]",
+          "waived": "Task.__init__.handler",
+          "warnings": []
+        },
+        {
+          "canonical": "shouldRun",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `shouldRun`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "should_run",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Callable]",
+          "waived": "Task.__init__.should_run",
+          "warnings": []
+        },
+        {
+          "canonical": "loopOver",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `loopOver`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "loop_over",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.loop_over",
+          "warnings": []
+        },
+        {
+          "canonical": "loopVar",
+          "default": "item",
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `loopVar`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "loop_var",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "str",
+          "waived": "Task.__init__.loop_var",
+          "warnings": []
+        },
+        {
+          "canonical": "execution",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `execution`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "execution",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.execution",
+          "warnings": []
+        },
+        {
+          "canonical": "routing",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `routing`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "routing",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, List[str]]]",
+          "waived": "Task.__init__.routing",
+          "warnings": []
+        },
+        {
+          "canonical": "outputConfig",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputConfig`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_config",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.output_config",
+          "warnings": []
+        },
+        {
+          "canonical": "output",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `output`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.output",
+          "warnings": []
+        },
+        {
+          "canonical": "when",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `when`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "when",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.when",
+          "warnings": []
+        },
+        {
+          "canonical": "thenTask",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `thenTask`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "then_task",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.then_task",
+          "warnings": []
+        },
+        {
+          "canonical": "elseTask",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `elseTask`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "else_task",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.else_task",
+          "warnings": []
+        },
+        {
+          "canonical": "autonomy",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `autonomy`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "autonomy",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.autonomy",
+          "warnings": []
+        },
+        {
+          "canonical": "knowledge",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `knowledge`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "knowledge",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.knowledge",
+          "warnings": []
+        },
+        {
+          "canonical": "web",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `web`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "web",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.web",
+          "warnings": []
+        },
+        {
+          "canonical": "reflection",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `reflection`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "reflection",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.reflection",
+          "warnings": []
+        },
+        {
+          "canonical": "planning",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `planning`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "planning",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.planning",
+          "warnings": []
+        },
+        {
+          "canonical": "hooks",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `hooks`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "hooks",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.hooks",
+          "warnings": []
+        },
+        {
+          "canonical": "caching",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `caching`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "caching",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "Task.__init__.caching",
+          "warnings": []
+        },
+        {
+          "canonical": "outputVariable",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `outputVariable`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "output_variable",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "Task.__init__.output_variable",
+          "warnings": []
+        },
+        {
+          "canonical": "failOnCallbackError",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `failOnCallbackError`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "fail_on_callback_error",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Task.__init__.fail_on_callback_error",
+          "warnings": []
+        },
+        {
+          "canonical": "failOnMemoryError",
+          "default": false,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `failOnMemoryError`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "fail_on_memory_error",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": "Task.__init__.fail_on_memory_error",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/task/task.py:47",
+        "resolved_class": "Task"
+      },
+      "ts_only": [],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/agent/types.ts:20",
+        "location": "src/praisonai-ts/src/agent/types.ts:4"
+      }
+    },
+    "tool()": {
+      "counts": {
+        "alias": 1,
+        "camelCase": 0,
+        "exact": 2,
+        "flattened": 0,
+        "mismatches": 3,
+        "missing": 8,
+        "params": 11,
+        "ts_only": 2,
+        "ts_total": 5,
+        "waived": 11
+      },
+      "params": [
+        {
+          "canonical": "func",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `execute`)",
+            "kind": "required"
+          },
+          "kind": "positional",
+          "match": "alias",
+          "name": "func",
+          "required": false,
+          "ts": {
+            "canonical": "execute",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "execute",
+            "required": true,
+            "type_class": "callable",
+            "type_text": "(params: TParams, context?: ToolContext) => Promise<TResult> | TResult"
+          },
+          "ts_name": "execute",
+          "type_class": "callable",
+          "type_text": "Optional[Callable]",
+          "waived": "tool().func",
+          "warnings": []
+        },
+        {
+          "canonical": "name",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is optional in Python but required in TypeScript (TS `name`)",
+            "kind": "required"
+          },
+          "kind": "keyword",
+          "match": "exact",
+          "name": "name",
+          "required": false,
+          "ts": {
+            "canonical": "name",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "name",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "name",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "tool().name",
+          "warnings": []
+        },
+        {
+          "canonical": "description",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=``Function ${config.name}`` (TS `description`)",
+            "kind": "default"
+          },
+          "kind": "keyword",
+          "match": "exact",
+          "name": "description",
+          "required": false,
+          "ts": {
+            "canonical": "description",
+            "default": "`Function ${config.name}`",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "description",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "description",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "tool().description",
+          "warnings": []
+        },
+        {
+          "canonical": "version",
+          "default": "1.0.0",
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `version`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "version",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "str",
+          "waived": "tool().version",
+          "warnings": []
+        },
+        {
+          "canonical": "availability",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `availability`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "availability",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Callable[[], tuple[bool, str]]]",
+          "waived": "tool().availability",
+          "warnings": []
+        },
+        {
+          "canonical": "dynamicSchemaOverrides",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `dynamicSchemaOverrides`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "dynamic_schema_overrides",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]",
+          "waived": "tool().dynamic_schema_overrides",
+          "warnings": []
+        },
+        {
+          "canonical": "retryPolicy",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `retryPolicy`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "retry_policy",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": "tool().retry_policy",
+          "warnings": []
+        },
+        {
+          "canonical": "approval",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `approval`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "approval",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Optional[Union[bool, str]]",
+          "waived": "tool().approval",
+          "warnings": []
+        },
+        {
+          "canonical": "requiresApproval",
+          "default": "_UNSET",
+          "default_kind": "expr",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `requiresApproval`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "requires_approval",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "union",
+          "type_text": "Union[bool, str]",
+          "waived": "tool().requires_approval",
+          "warnings": []
+        },
+        {
+          "canonical": "toModelOutput",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `toModelOutput`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "to_model_output",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "callable",
+          "type_text": "Optional[Callable[[Any], Any]]",
+          "waived": "tool().to_model_output",
+          "warnings": []
+        },
+        {
+          "canonical": "restartSafe",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `restartSafe`)",
+            "kind": "missing"
+          },
+          "kind": "keyword",
+          "match": "missing",
+          "name": "restart_safe",
+          "required": false,
+          "ts": null,
+          "ts_name": null,
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": "tool().restart_safe",
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/tools/decorator.py:235"
+      },
+      "ts_only": [
+        {
+          "canonical": "parameters",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "parameters",
+          "required": false,
+          "type_class": "union",
+          "type_text": "ToolParameters | any"
+        },
+        {
+          "canonical": "category",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "category",
+          "required": false,
+          "type_class": "string",
+          "type_text": "string"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:48",
+        "location": "src/praisonai-ts/src/tools/decorator.ts:16"
+      }
+    }
+  },
+  "totals": {
+    "alias": 14,
+    "camelCase": 8,
+    "exact": 23,
+    "flattened": 2,
+    "mismatches": 18,
+    "missing": 149,
+    "params": 196,
+    "surfaces": 10,
+    "ts_only": 35,
+    "ts_total": 83,
+    "waived": 167
+  },
+  "waivers": [
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.auth",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.autonomy",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.backend",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.caching",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.context",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.guardrails",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.handoffs",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.hooks",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.instructions",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.knowledge",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.learn",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.llm",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.memory",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.message_steering",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.model",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.name",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.planning",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.reasoning_effort",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.reflection",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.retry",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.role",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.rules",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.run_on",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.runtime",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.sandbox",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.self_improve",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.skills",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.templates",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.tool_config",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.tool_search",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.tools_run_on",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.toolsets",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.__init__.web",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.attachments",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.config",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.force_retrieval",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.output_json",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.output_pydantic",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.reasoning_steps",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.seed",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.skip_retrieval",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.stream",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.task_description",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.task_id",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.task_name",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.temperature",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.tool_choice",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.chat.tools",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Agent.start.prompt",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.autonomy",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.caching",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.context",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.execution",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.guardrails",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.hooks",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.knowledge",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.learn",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.llm",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.manager_llm",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.memory",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.model",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.name",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.output",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.planning",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.process",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.reflection",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.run_on",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.tools_run_on",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.variables",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.web",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.start.content",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.start.output",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.start.return_dict",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Handoff.__init__.config",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Handoff.__init__.input_type",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Handoff.__init__.tool_description_override",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Handoff.__init__.tool_name_override",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.api_version",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.auth",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.claude_memory",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.events",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.failover_manager",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.frequency_penalty",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.logit_bias",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.logprobs",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.max_iter",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.n",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.presence_penalty",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.prompt_caching",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.response_format",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.seed",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.stop_phrases",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.timeout",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.top_logprobs",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.top_p",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.web_fetch",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "LLM.__init__.web_search",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Session.__init__.session_id",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Session.__init__.user_id",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.action",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.agent_config",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.async_execution",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.autonomy",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.caching",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.callback",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.condition",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.config",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.create_directory",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.description",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.else_task",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.execution",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.expected_output",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.fail_on_callback_error",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.fail_on_memory_error",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.guardrail",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.guardrails",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.handler",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.hooks",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.id",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.images",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.input_file",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.is_start",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.knowledge",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.loop_over",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.loop_state",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.loop_var",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.max_retries",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.memory",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.name",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.next_tasks",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.on_error",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.on_task_complete",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.output",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.output_config",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.output_file",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.output_json",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.output_pydantic",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.output_variable",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.planning",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.quality_check",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.reflection",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.rerun",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.result",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.retain_full_context",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.retry_count",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.retry_delay",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.routing",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.should_run",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.skip_on_failure",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.status",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.task_type",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.then_task",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.tools",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.variables",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.web",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "Task.__init__.when",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().approval",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().availability",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().description",
+      "owner": "praisonai-ts",
+      "reason": "TS derives a default description from the tool name; Python leaves it None and infers from the docstring"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().dynamic_schema_overrides",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().func",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().name",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().requires_approval",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().restart_safe",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().retry_policy",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().to_model_output",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "tool().version",
+      "owner": "praisonai-ts",
+      "reason": "baseline 2026-09-02: not yet ported to TypeScript"
+    }
+  ]
+}
