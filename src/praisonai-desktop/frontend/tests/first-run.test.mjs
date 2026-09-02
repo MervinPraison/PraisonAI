@@ -193,17 +193,18 @@ test('a failed setup says why and offers another go', async () => {
 // alone, that buries setup: the title bar says "setup needed" and nothing is on
 // screen to act on -- the reported Windows dead end. The engine gate must win
 // over the restored view while the engine is not ready.
-test('a restored Train view does not hide the setup screen', async () => {
+test('a restored Train view does not hide the setup screen (#4441)', async () => {
   const b = await boot({ savedView: 'train' });
-  assert.ok(b.doc.querySelector('.setup'), 'no setup screen');
+  assert.ok(b.doc.querySelector('.setup'), 'no setup screen was rendered');
   assert.equal(b.doc.body.classList.contains('training'), false,
-    'the Train view is still up, hiding the setup wizard');
+    'the Train view is still active, hiding the setup screen behind it');
+  assert.match(b.doc.getElementById('status').textContent, /setup/i);
 });
 
 // The forced switch must not clobber the deliberate choice: once the engine is
 // up, the user's Train tab should return, so we must not have persisted 'chat'.
-test('the forced Chat switch does not overwrite the saved Train choice', async () => {
+test('the deliberate Train choice is kept while the engine is down', async () => {
   const b = await boot({ savedView: 'train' });
   assert.equal(b.window.localStorage.getItem('view'), 'train',
-    'the saved view was overwritten by the engine gate');
+    'the saved Train view was overwritten by the engine gate');
 });
