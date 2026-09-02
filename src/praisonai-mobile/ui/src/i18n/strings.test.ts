@@ -21,6 +21,7 @@ import { UNKNOWN } from "../format.ts";
 const SAMPLES: Readonly<Record<string, () => string>> = {
   bootFailed: () => en.bootFailed("no storage"),
   engineNotReady: () => en.engineNotReady("ECONNREFUSED"),
+  settingRejected: () => en.settingRejected("Engine address"),
   chatUnreadable: () => en.chatUnreadable("chat-7"),
   chatsAllUnreadable: () => en.chatsAllUnreadable(3),
   minutesAgo: () => en.minutesAgo(2, "2"),
@@ -98,6 +99,9 @@ test("no string is blank and no parameterised string drops its argument", () => 
   assert.ok(en.chatUnreadable("chat-7").includes("chat-7"));
   assert.ok(en.errorRowName("auth", "bad key").includes("bad key"));
   assert.ok(en.droppedEvents(2, ["wrong_msg_id"]).includes("wrong_msg_id"));
+  // The refusal has to NAME the setting: the field it belongs to may already
+  // be off screen, and "that value was refused" alone says which of nothing.
+  assert.ok(en.settingRejected("Engine address").includes("Engine address"));
 });
 
 test("every sample corresponds to a key that still exists", () => {

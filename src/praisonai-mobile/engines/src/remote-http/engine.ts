@@ -29,8 +29,18 @@ import { createSseReader } from "../../../protocol/src/sse.ts";
 import { classify, type Readiness } from "./readiness.ts";
 
 export interface RemoteHttpOptions {
-  /** Base URL of the engine, no trailing slash. */
-  readonly baseUrl: string;
+  /**
+   * Base URL of the engine, no trailing slash.
+   *
+   * A RESOLVER is accepted as well as a string, and the difference is the
+   * whole recovery path for a device that cannot reach its engine. This engine
+   * is constructed once, at boot, and the app holds it for the session -- so a
+   * captured string means the address the user corrects in Settings is
+   * persisted, displayed, and then ignored until the app is force-quit. A
+   * function is re-read per request, so the next message goes where the user
+   * just said. A plain string still works and still means "this one, forever".
+   */
+  readonly baseUrl: string | (() => string);
   readonly http: HttpPort;
   /** Sent as a bearer token when present. The desktop engine is unauthenticated
    *  on loopback; anything off-device must not be. */
@@ -51,7 +61,12 @@ const CAPABILITIES: EngineCapabilities = {
 };
 
 export function createRemoteHttpEngine(options: RemoteHttpOptions): AgentEnginePort {
-  const base = options.baseUrl.replace(/\/+$/, "");
+  // Resolved per call, never captured. The trailing slash is stripped here
+  // rather than at the caller because a resolver's answer is not seen until
+  // now: `${base}/chat` against "http://host/" produces a double slash, which
+  // some servers 404 and others redirect -- losing the POST body.
+  const base = (): string =>
+    (typeof options.baseUrl === "string" ? options.baseUrl : options.baseUrl()).replace(/\/+$/, "");
   const id = options.id ?? "remote-http";
 
   const headers = (extra: Record<string, string> = {}): Record<string, string> => ({
@@ -81,7 +96,7 @@ export function createRemoteHttpEngine(options: RemoteHttpOptions): AgentEngineP
     try {
       const response = await options.http.send({
         method: "POST",
-        url: `${base}${path}`,
+        url: `${base()}${path}`,
         headers: headers(),
         body: JSON.stringify(body),
         signal: new AbortController().signal,
@@ -108,7 +123,7 @@ export function createRemoteHttpEngine(options: RemoteHttpOptions): AgentEngineP
     async *run(request: RunRequest, signal: AbortSignal): AsyncIterable<RunEvent> {
       const response = await options.http.send({
         method: "POST",
-        url: `${base}/chat`,
+        url: `${base()}/chat`,
         headers: headers({ accept: "text/event-stream" }),
         body: JSON.stringify({
           prompt: request.prompt,
