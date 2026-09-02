@@ -147,3 +147,56 @@ test("a delete-chat with no chat id is refused, not addressed at nothing", () =>
   // chat is keyed "", at the wrong one.
   assert.equal(intentFrom([{ dataset: { action: "delete-chat" }, disabled: false }]), null);
 });
+
+// ---- editing a setting -----------------------------------------------------
+//
+// The recovery path the remote-http default depends on. The settings screen
+// renders real fields, and until now each one committed itself from inside its
+// own `change` listener -- the one affordance in the app that did NOT go
+// through this file. That is the arrangement the header argues against: the
+// decision (which key, what was typed, and whether this element means anything
+// at all) could only be exercised by synthesising events against a DOM.
+
+test("a settings field resolves to a set-setting carrying its key AND what was typed", () => {
+  const intent = intentFrom([
+    { dataset: { action: "set-setting", settingKey: "baseUrl" }, value: "http://10.0.0.7:9000" },
+  ]);
+  assert.deepEqual(intent, { kind: "set-setting", key: "baseUrl", raw: "http://10.0.0.7:9000" });
+});
+
+test("a set-setting with no key is refused rather than aimed at nothing", () => {
+  // Same rule as delete-chat and navigate: an action that needs an id and has
+  // none must not resolve to a write against "" -- `settings.set` refuses an
+  // unknown key, but silently, and the user is told nothing.
+  assert.equal(intentFrom([{ dataset: { action: "set-setting" }, value: "x" }]), null);
+});
+
+test("a set-setting from an element with NO value is refused, not written as empty", () => {
+  // Only a field has a value. A tap that lands on the row's <label> and walks
+  // out to something carrying the action but no text must not be decoded as
+  // "the user cleared this setting" -- that would wipe the engine address on a
+  // stray tap, on the one screen whose job is to repair it.
+  assert.equal(intentFrom([{ dataset: { action: "set-setting", settingKey: "baseUrl" } }]), null);
+});
+
+test("an EMPTIED field is still a real edit, and decodes as an empty string", () => {
+  // The pair for the test above: `value: ""` is a person clearing a field, and
+  // refusing it too would make "" indistinguishable from "no field here" and
+  // leave a cleared setting silently ignored. Where the empty string is not a
+  // legal value, validateInput is what refuses it -- visibly.
+  assert.deepEqual(
+    intentFrom([{ dataset: { action: "set-setting", settingKey: "baseUrl" }, value: "" }]),
+    { kind: "set-setting", key: "baseUrl", raw: "" },
+  );
+});
+
+test("a DISABLED settings field commits nothing", () => {
+  // A field goes disabled while a write is in flight; honouring that is what
+  // stops a second commit racing the first to the store.
+  assert.equal(
+    intentFrom([
+      { dataset: { action: "set-setting", settingKey: "baseUrl" }, value: "x", disabled: true },
+    ]),
+    null,
+  );
+});
