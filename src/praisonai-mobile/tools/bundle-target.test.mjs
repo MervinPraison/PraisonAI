@@ -14,10 +14,11 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { TARGETS, ANDROID_WEBVIEW_FLOOR } from "./bundle.mjs";
+import { bundle, TARGETS, ANDROID_WEBVIEW_FLOOR } from "./bundle.mjs";
 
 const conf = JSON.parse(
   readFileSync(join(import.meta.dirname, "../src-tauri/tauri.conf.json"), "utf8"),
@@ -45,11 +46,22 @@ test("the Safari target matches the iOS minimum the app declares", () => {
   assert.equal(target("safari"), `safari${major}`, "iOS 16 ships Safari 16");
 });
 
-test("the shipped bundle contains no syntax the floor cannot parse", () => {
+test("the shipped bundle contains no syntax the floor cannot parse", async () => {
   // The assertion that would actually have caught it. Optional chaining and
   // nullish coalescing are Chrome 80; logical assignment is Chrome 85. Any of
   // them at a chrome58 floor is a blank screen.
-  const code = readFileSync(join(import.meta.dirname, "../dist/app.js"), "utf8");
+  //
+  // Built here through the same bundle() at the same TARGETS the ship path
+  // uses, rather than read from a pre-built dist/app.js: the `check` job runs
+  // `npm test` without a prior `npm run build`, so a disk read would be a test
+  // that can only pass by accident of build order. Same entry, same targets,
+  // same output -- with no ordering dependency.
+  const out = join(mkdtempSync(join(tmpdir(), "floor-")), "app.js");
+  const { code } = await bundle({
+    entry: join(import.meta.dirname, "../app/src/main.ts"),
+    outfile: out,
+    write: false,
+  });
   for (const [name, pattern] of [
     ["optional chaining", /\?\./],
     ["nullish coalescing", /\?\?[^=]/],
