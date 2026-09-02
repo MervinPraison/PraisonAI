@@ -252,12 +252,25 @@ function screenHeading(doc: Document, route: Route, strings: Strings): HTMLEleme
  */
 function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings: SettingsFacade): HTMLElement {
   const stored = (): string => String(settings.get(def.key) ?? def.default);
+  const reset = (): void => {
+    if (control.tagName === "SELECT" || control.tagName === "INPUT") control.value = stored();
+  };
 
   // A refused write must not leave the field showing a value the store rejected.
+  // `settings.set` can also REJECT, not merely return false: it persists through
+  // StoragePort, which raises on a real device (SecurityError with site data
+  // blocked, QuotaExceededError under storage pressure). Left to float, that
+  // rejection reaches the global crash handler and replaces the WHOLE app with
+  // the fatal screen -- the exact escalation the chat-list load guards against
+  // below. A failed write must stay LOCAL: reset the field to what is actually
+  // stored, so the screen never shows a value the next launch will not read.
   const commit = async (raw: string): Promise<void> => {
     const validated = validateInput(def, raw);
-    if (validated === null || !(await settings.set(def.key, validated))) {
-      if (control.tagName === "SELECT" || control.tagName === "INPUT") control.value = stored();
+    if (validated === null) return reset();
+    try {
+      if (!(await settings.set(def.key, validated))) reset();
+    } catch {
+      reset();
     }
   };
 
