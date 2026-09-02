@@ -71,7 +71,7 @@ class SmartApproval(unittest.TestCase):
 
     def test_every_registry_copy_describes_smart_the_same_way(self):
         root = pathlib.Path(__file__).resolve().parents[1]
-        texts = [(root / f).read_text() for f in
+        texts = [(root / f).read_text(encoding="utf-8") for f in
                  ("ui/index.html", "ui/settings-registry.js", "frontend/src/settings-registry.js")]
         for t in texts:
             self.assertIn('value: "smart", label: "Ask only for network fetches"', t)
