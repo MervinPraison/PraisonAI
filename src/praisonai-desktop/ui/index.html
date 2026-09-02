@@ -1904,7 +1904,14 @@ async function persistCfg(patch){
     r=await fetch('http://127.0.0.1:'+PORT+'/settings',{method:'POST',
       headers:{'content-type':'application/json'},body:JSON.stringify(patch)});
   }catch(_){}
-  if(!r||!r.ok){ toast('Could not save that setting.'); return false; }
+  if(!r||!r.ok){
+    // Prefer the engine's own reason (e.g. a model id this build cannot run)
+    // over the generic line, so the user is told what to change, not just that
+    // something failed.
+    let why='';
+    try{ why=(await r.json()).error||''; }catch{}
+    toast(why||'Could not save that setting.'); return false;
+  }
   let saved=null;
   try{ saved=await r.json(); }catch{}
   CFG={...CFG,...patch}; cfg={...cfg,...patch};
