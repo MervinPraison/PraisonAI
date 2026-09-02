@@ -361,6 +361,59 @@ def list_chats() -> list:
                         "count": 0, "corrupt": True})
     return sorted(out, key=lambda c: c["updated"], reverse=True)
 
+
+def _search_chats(query: str) -> list:
+    """Ranked full-text search over stored chats.
+
+    Delegates to the library's ``SqliteSessionStore`` (FTS5/bm25 with snippets
+    and lineage dedup) over the on-disk chat transcripts instead of loading
+    every chat JSON and doing a substring ``in`` scan. The chats already live
+    on disk as ``<id>.json`` with a ``messages`` list, which the store indexes
+    directly. Falls back to the substring scan if the store is unavailable so
+    search never breaks.
+    """
+    try:
+        from praisonaiagents.session import SqliteSessionStore
+
+        class _ChatSessionStore(SqliteSessionStore):
+            # Desktop chats persist their identity under ``id`` (see save_chat),
+            # not the ``session_id`` the session schema expects, so a loaded
+            # chat's ``session_id`` is empty and every chat would collide on the
+            # same empty index key. Backfill it from the filename-derived id so
+            # each chat is indexed and addressable independently.
+            def _read_session_fresh(self, session_id):
+                session = super()._read_session_fresh(session_id)
+                if not getattr(session, "session_id", ""):
+                    session.session_id = session_id
+                return session
+
+        # An in-memory index is rebuilt from the current on-disk transcripts on
+        # each query, so an edited chat is never served stale — a persistent
+        # index would skip re-indexing chats whose id is already present.
+        store = _ChatSessionStore(session_dir=str(CHATS_DIR), db_path=":memory:")
+        hits = store.search(query, limit=20)
+        titles = {c["id"]: c["title"] for c in list_chats()}
+        return [
+            {
+                "id": h.session_id,
+                "title": titles.get(h.session_id, h.title or "New chat"),
+                "snippet": h.snippet,
+            }
+            for h in hits
+        ]
+    except Exception:
+        needle = query.lower()
+        hits = []
+        for meta in list_chats():
+            chat = load_chat(meta["id"])
+            for m in chat.get("messages", []):
+                if needle in str(m.get("content", "")).lower():
+                    hits.append({"id": meta["id"], "title": meta["title"],
+                                 "snippet": str(m.get("content"))[:120]})
+                    break
+        return hits
+
+
 _agent_lock = threading.Lock()
 _agents = {}
 
@@ -1569,17 +1622,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/search?"):
             from urllib.parse import parse_qs, urlparse
-            q = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].lower().strip()
-            hits = []
-            if q:
-                for meta in list_chats():
-                    chat = load_chat(meta["id"])
-                    for m in chat.get("messages", []):
-                        if q in str(m.get("content", "")).lower():
-                            hits.append({"id": meta["id"], "title": meta["title"],
-                                         "snippet": str(m.get("content"))[:120]})
-                            break
-            self._json({"hits": hits})
+            q = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
+            self._json({"hits": _search_chats(q) if q else []})
             return
         if self.path == "/chats":
             self._json({"chats": list_chats()})
