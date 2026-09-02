@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, ClassVar, Dict, FrozenSet, List, Optional
 
 from praisonaiagents.frameworks.base import BaseFrameworkAdapter as _CoreBaseFrameworkAdapter
 from praisonaiagents.frameworks.protocols import FrameworkAdapterProtocol
@@ -20,50 +20,44 @@ FrameworkAdapter = FrameworkAdapterProtocol
 
 logger = logging.getLogger(__name__)
 
-# Extended YAML fields each backend actually consumes. Only ``framework:
-# praisonai`` honours the full wrapper feature set (approval, guardrails,
-# autonomy, ...); the other backends read a hand-picked subset. Anything a YAML
-# declares that the target adapter does not read is silently dropped today, so
-# warn the user rather than let a safety-relevant field (e.g. ``approval``) be
-# ignored without any diagnostic.
-_AUTOGEN_SUPPORTED = {"llm", "function_calling_llm"}
-_ADAPTER_SUPPORTED_FIELDS: Dict[str, set] = {
-    "crewai": {
-        "allow_delegation", "max_iter", "max_rpm", "max_execution_time",
-        "verbose", "cache", "system_template", "prompt_template",
-        "response_template", "llm", "function_calling_llm",
-    },
-    "autogen": _AUTOGEN_SUPPORTED,
-    "autogen_v2": _AUTOGEN_SUPPORTED,
-    "autogen_v4": _AUTOGEN_SUPPORTED,
-    "ag2": _AUTOGEN_SUPPORTED,
-}
-
 # Structural keys handled by the spec builder itself — never "unsupported".
 _STRUCTURAL_FIELDS = {"tools", "tasks", "role", "goal", "backstory"}
 
 
-def warn_unsupported_fields(adapter_name: str, spec_extras: Dict[str, Any]) -> None:
+def warn_unsupported_fields(adapter: Any, spec_extras: Dict[str, Any]) -> None:
     """Warn once per agent when a backend ignores declared YAML fields.
 
-    Non-breaking: pure visibility. ``framework: praisonai`` is treated as
-    supporting everything, so no warning is emitted there.
+    Each adapter declares the extended fields it consumes via the
+    ``SUPPORTED_YAML_FIELDS`` class attribute (single source of truth: the
+    adapter that reads a field owns the fact that it reads it). An empty set
+    means "supports everything" — ``framework: praisonai`` honours the full
+    feature set, so no warning is emitted there.
+
+    Non-breaking: pure visibility. Anything a YAML declares that the target
+    adapter does not read is silently dropped otherwise, so warn rather than
+    let a safety-relevant field (e.g. ``approval``) be ignored without any
+    diagnostic.
     """
-    if adapter_name not in _ADAPTER_SUPPORTED_FIELDS:
+    supported = getattr(adapter, "SUPPORTED_YAML_FIELDS", frozenset())
+    if not supported:
         return
-    supported = _ADAPTER_SUPPORTED_FIELDS[adapter_name]
-    declared = set(spec_extras.keys())
-    unhandled = declared - supported - _STRUCTURAL_FIELDS
+    unhandled = set(spec_extras.keys()) - supported - _STRUCTURAL_FIELDS
     if unhandled:
         logger.warning(
             "framework=%r ignores YAML field(s) %s for agent %r; "
             "these are only honoured by framework=praisonai.",
-            adapter_name, sorted(unhandled), spec_extras.get("role"),
+            getattr(adapter, "name", "?"), sorted(unhandled), spec_extras.get("role"),
         )
 
 
 class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
     """Wrapper base adapter with PraisonAIModel LLM resolution for CrewAI etc."""
+
+    # Extended YAML fields this backend actually consumes. The empty default
+    # means "supports everything" (the ``praisonai`` backend). Backends that
+    # read only a subset override this with the exact set they honour, so
+    # ``warn_unsupported_fields`` can surface silently-dropped fields.
+    SUPPORTED_YAML_FIELDS: ClassVar[FrozenSet[str]] = frozenset()
 
     # CLI runtime capabilities are opt-in. Adapters that do not implement
     # these contracts must fail before dispatch instead of silently ignoring

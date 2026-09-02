@@ -11,6 +11,10 @@ from .base import BaseFrameworkAdapter, warn_unsupported_fields
 
 logger = logging.getLogger(__name__)
 
+# Extended YAML fields every AutoGen-family backend consumes. The rest are
+# dropped and surfaced via warn_unsupported_fields.
+_AUTOGEN_SUPPORTED_FIELDS = frozenset({"llm", "function_calling_llm"})
+
 
 class AutoGenAdapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.2 framework with version resolution."""
@@ -20,6 +24,7 @@ class AutoGenAdapter(BaseFrameworkAdapter):
     requires_tools_extra = True
     # AutoGen v0.2 is sync-only; arun offloads run() to a bounded pool.
     SUPPORTS_ASYNC = False
+    SUPPORTED_YAML_FIELDS = _AUTOGEN_SUPPORTED_FIELDS
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.2 is available for import."""
@@ -203,7 +208,7 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         # Create agents from the normalized specs
         for spec in specs:
             # Surface any extended YAML fields this backend silently drops
-            warn_unsupported_fields(self.name, spec.extras)
+            warn_unsupported_fields(self, spec.extras)
 
             # Create AutoGen assistant agent
             agents[spec.key] = autogen.AssistantAgent(
@@ -288,6 +293,7 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
     install_hint = 'pip install "praisonai-frameworks[autogen-v4]"'
     requires_tools_extra = True
     implemented: bool = False  # explicit marker
+    SUPPORTED_YAML_FIELDS = _AUTOGEN_SUPPORTED_FIELDS
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.4 is available for import."""
@@ -335,6 +341,7 @@ class AG2Adapter(BaseFrameworkAdapter):
     install_hint = 'pip install "praisonai-frameworks[ag2]"'
     requires_tools_extra = False
     implemented: bool = False  # explicit marker
+    SUPPORTED_YAML_FIELDS = _AUTOGEN_SUPPORTED_FIELDS
     
     def is_available(self) -> bool:
         """Check if AG2 is available for import."""
@@ -384,6 +391,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
     name = "autogen"
     install_hint = 'pip install "praisonai-frameworks[autogen]"'
     is_router = True
+    SUPPORTED_YAML_FIELDS = _AUTOGEN_SUPPORTED_FIELDS
     
     def is_available(self) -> bool:
         """Check if any AutoGen variant is runnable.
