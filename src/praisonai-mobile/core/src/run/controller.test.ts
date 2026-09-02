@@ -316,6 +316,82 @@ test("the flush tick paints through the publish gate, so backpressure bounds it"
   assert.ok(views.length >= 2, "something must have been published");
 });
 
+test("text drained by a rejected tick is still painted when the stream pauses", async () => {
+  // The gate rejects a tick's paint under backpressure -- but the tick has
+  // ALREADY drained that text from the coalescer, so it lives only on the
+  // transcript, unpainted. If the stream then pauses (no further deltas), no
+  // later tick sees pending text and the gate reopening does not itself
+  // publish, so before the catch-up branch that progress stayed invisible
+  // until the next delta or the final finally-publish. On a phone a provider
+  // pausing mid-answer is ordinary, so "received but not shown" is a real
+  // stall, not a corner case.
+  //
+  // Here: one small delta (< MAX_HELD_CHARS) closes the gate on its first
+  // paint, a second small delta is drained by a tick the closed gate rejects,
+  // and then the stream goes quiet for many ticks. Advancing past
+  // UNPAINTED_REOPEN_MS reopens the gate; a catch-up tick must then paint the
+  // full text WHILE THE RUN IS STILL LIVE -- not only at the end.
+  const time = createFakeTime();
+  const views: RunView[] = [];
+  let releaseEnd: () => void = () => {};
+  const endHeld = new Promise<void>((r) => { releaseEnd = r; });
+  let paintedDuringPause = "";
+
+  const engine = {
+    id: "s",
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: {
+      streaming: true, reasoning: false, tools: true,
+      approvals: false, cancellation: true, attachments: false,
+    },
+    async *run() {
+      yield { type: "start", msgId: "m", runId: "r" } as RunEvent;
+      // First delta: paints on the tick, closing the gate.
+      yield { type: "delta", msgId: "m", text: "hello " } as RunEvent;
+      time.advance(20); time.tick(); await Promise.resolve();
+      // Second delta: drained by a tick the now-closed gate rejects, so it is
+      // on the transcript but unpainted.
+      yield { type: "delta", msgId: "m", text: "world" } as RunEvent;
+      time.advance(20); time.tick(); await Promise.resolve();
+      // The stream now PAUSES. The gate's reopen timer fires (as it would after
+      // UNPAINTED_REOPEN_MS on a real phone), reopening the gate; ticks keep
+      // firing. The catch-up branch must then paint the stranded "hello world"
+      // even though the coalescer is empty and no new delta has arrived.
+      for (const s of time.schedulers) s.fireTimer();
+      for (let i = 0; i < 20; i++) {
+        time.advance(20); time.tick(); await Promise.resolve();
+      }
+      // Snapshot what was on screen BEFORE the turn ends, so this cannot pass
+      // on the strength of the final finally-publish alone.
+      paintedDuringPause = views.at(-1)?.turn.text ?? "";
+      await endHeld;
+      yield {
+        type: "end", msgId: "m", userIndex: 0, assistantIndex: 1, versions: 1, active: 0,
+      } as RunEvent;
+    },
+    async decide() { return false; },
+    async cancel() { return false; },
+    async dispose() {},
+  } as unknown as Parameters<typeof createRunController>[0]["engine"];
+
+  const controller = createRunController({
+    engine, time,
+    onPublish: (v) => views.push(v),
+  });
+  const sent = controller.send("hi");
+  // Let the pause loop run, then release the end.
+  for (let i = 0; i < 60; i++) await Promise.resolve();
+  releaseEnd();
+  await sent;
+
+  assert.equal(
+    paintedDuringPause,
+    "hello world",
+    "text drained by a rejected tick must be painted once the gate reopens, not held until the turn ends",
+  );
+  assert.equal(views.at(-1)?.turn.text, "hello world", "and the final answer is complete");
+});
+
 // ---- an approval the engine refuses -----------------------------------------
 
 test("an approval the engine refuses is shown as failed, never as sent", async () => {

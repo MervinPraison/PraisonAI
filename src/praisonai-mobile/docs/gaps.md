@@ -406,6 +406,22 @@ so backpressure bounds it"): 40 ticks with no frame release produce a handful of
 paints, not 40. Reverting to the ungated tick makes every tick paint (measured:
 45 paints for 40 ticks) and fails the bound.
 
+One subtlety the wiring had to answer, or it would have traded a paint-rate
+problem for a visibility one. A tick DRAINS the coalescer before the gate is
+consulted, so a frame the gate rejects is already gone from the coalescer -- its
+text is on the transcript (the run loop applies every event) but not yet
+painted. If the stream then PAUSES, no later tick sees pending text and the gate
+reopening does not itself publish, so that progress would sit invisible until
+the next delta or the final publish -- on a phone, a provider pausing mid-answer
+is ordinary, so this is a real stall, not a corner case. The controller tracks
+how far the screen has actually painted (`paintedChars`) and, on a tick that
+finds nothing new to drain, flushes that stranded progress once the gate has
+reopened. This is the backpressure RELEASE the gate needs to be safe: skip a
+paint under load, then catch up the moment the renderer can. Pinned by
+`controller.test.ts` ("text drained by a rejected tick is still painted when the
+stream pauses"): the reopen fires mid-pause and the full answer paints WHILE THE
+RUN IS STILL LIVE, not only at `end`.
+
 Five settings used to be declared and consumed by nothing: `model`,
 `temperature`, `showReasoning`, `showDiagnostics` and `apiKey` (issue #4636).
 They were written for a settings screen and engine parameterisation that do not

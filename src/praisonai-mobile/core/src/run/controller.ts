@@ -193,6 +193,17 @@ export function createRunController(deps: ControllerDeps): RunController {
     const coalescer = createCoalescer(maxBytes, maxDelayMs);
     const gate = createPublishGate(deps.time.createScheduler());
     let streamed = 0;
+    // A tick drains the coalescer BEFORE the gate is consulted, so a frame the
+    // gate rejects is already gone from the coalescer -- its text lives only on
+    // `turn`, applied by the run loop, and is not yet painted. If the stream
+    // then pauses, no later tick sees pending text and the gate reopening does
+    // not itself publish, so that progress would stay invisible until the next
+    // delta or the final publish. `paintedChars` records how far the screen has
+    // actually been painted; when a tick finds nothing new to drain but the gate
+    // has since reopened and `streamed` has moved past it, it flushes that
+    // stranded progress. This is the backpressure RELEASE the gate needs to be
+    // safe: it skips a paint under load, then catches up once the renderer can.
+    let paintedChars = 0;
 
     // The coalescer's TIME bound, which was declared, documented and never
     // connected -- TimePort.every's own comment calls it "the coalescer's
@@ -219,9 +230,17 @@ export function createRunController(deps: ControllerDeps): RunController {
 
       const frame = coalescer.tick(deps.time.nowMs());
       if (frame === null) {
-        // Nothing to paint from the coalescer, but refusals still need to
-        // reach the screen -- and to stop piling up in the sink.
-        if (hadDrops) publish();
+        // Nothing new to drain. Two reasons a paint may still be owed:
+        //  - a refusal arrived and must reach the screen (and stop piling up);
+        //  - a previous tick drained text but the gate rejected it, so that
+        //    progress is on `turn` yet unpainted. Once the gate reopens, catch
+        //    it up -- otherwise a stream that pauses right after a rejected tick
+        //    leaves already-received text invisible until the next delta.
+        const stranded = streamed > paintedChars;
+        if (hadDrops || (stranded && gate(streamed))) {
+          paintedChars = streamed;
+          publish();
+        }
         return;
       }
       applyFrame(frame);
@@ -247,7 +266,14 @@ export function createRunController(deps: ControllerDeps): RunController {
       // backpressure authority and both constants load-bearing, while
       // MAX_HELD_CHARS still forces the tail out so a closed gate cannot swallow
       // the end of an answer.
-      if (gate(streamed)) publish();
+      //
+      // When the gate rejects here, the drained text is left unpainted on
+      // `turn`; `paintedChars` stays behind `streamed` and a later tick catches
+      // it up once the gate reopens (see the frame === null branch above).
+      if (gate(streamed)) {
+        paintedChars = streamed;
+        publish();
+      }
     });
 
     const request: RunRequest = {
@@ -282,6 +308,9 @@ export function createRunController(deps: ControllerDeps): RunController {
           for (const frame of coalescer.push({ kind: "structured", payload: event.type }, deps.time.nowMs())) {
             applyFrame(frame);
           }
+          // A structured event flushes the buffered text and paints the whole
+          // transcript, so nothing is left stranded for a catch-up tick.
+          paintedChars = streamed;
           publish();
           continue;
         }
@@ -290,7 +319,10 @@ export function createRunController(deps: ControllerDeps): RunController {
         const frames = coalescer.push({ kind: "text", text: event.text }, deps.time.nowMs());
         // Two independent bounds. The coalescer decides a frame is worth
         // painting; the gate decides the renderer can keep up with it.
-        if (frames.length > 0 && gate(streamed)) publish();
+        if (frames.length > 0 && gate(streamed)) {
+          paintedChars = streamed;
+          publish();
+        }
       }
     } catch (error) {
       // A stream that dies BECAUSE WE ABORTED IT is not a failure.
