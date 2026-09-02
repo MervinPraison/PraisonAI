@@ -791,7 +791,7 @@ class AsyncTUI:
                 )
 
                 self._registry = create_default_registry(
-                    self._BUILTIN_COMMANDS, include_custom=True
+                    self._BUILTIN_COMMANDS, include_custom=True, include_skills=True
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Command registry unavailable: %s", exc)
@@ -1883,10 +1883,20 @@ Example: /handoff code "refactor the auth module" """
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.completion import Completer, Completion
         
-        # Create completer for commands and files. Derive the list from the
-        # single source of truth (_BUILTIN_COMMANDS) so registration and
-        # autocomplete never drift (e.g. code-review/security-review).
+        # Create completer for commands and files. Start from the built-ins
+        # (single source of truth so registration and autocomplete never drift,
+        # e.g. code-review/security-review) and extend with discovered registry
+        # commands — custom ``.praisonai/commands/*.md`` and installed skills —
+        # so typing ``/`` offers them too. Degrades to built-ins on any failure.
         commands = list(self._BUILTIN_COMMANDS.keys())
+        registry = self._get_registry()
+        if registry is not None:
+            try:
+                for c in registry.list_commands():
+                    if c.name not in commands:
+                        commands.append(c.name)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Skipping registry completions: %s", exc)
         workspace_files = self._workspace_files
         
         class PraisonCompleter(Completer):

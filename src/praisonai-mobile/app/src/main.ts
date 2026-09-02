@@ -35,7 +35,7 @@ import {
   type FocusTarget,
   type Navigation,
 } from "../../ui/src/a11y/focus.ts";
-import { buildSettings, validateInput, type ValueRow } from "../../ui/src/settings/view-model.ts";
+import { buildSettings, labelOf, validateInput, type ValueRow } from "../../ui/src/settings/view-model.ts";
 import { buildChatList } from "../../ui/src/chats/list-view-model.ts";
 import type { ChatSummary, StoredMessage } from "../../core/src/chat/repository.ts";
 import { createBundle } from "../../ui/src/i18n/bundle.ts";
@@ -235,45 +235,30 @@ function screenHeading(doc: Document, route: Route, strings: Strings): HTMLEleme
 }
 
 /**
- * The editable control for one value row, wired to `facade.set`.
+ * The editable control for one value row. MARKUP ONLY -- no listener.
  *
  * A `choice` renders a `<select>`, everything else a `<textarea>`-free
- * `<input>`. The change is validated through the SAME pure `validateInput`
- * the view model exports -- parse, then the def's own `validate` -- so a value
- * the store would refuse is refused HERE, at the field, rather than accepted
- * into the UI and silently dropped by `set`. On accept it persists; on refuse
- * the field is reset to the last stored value so the screen never shows a value
- * that is not actually stored.
+ * `<input>`, and the kind comes from `row.control` (the def), never from the
+ * value: view-model.ts rule 4 -- one bad write to a hand-edited settings file
+ * would otherwise turn a picker into a text box and the setting could never be
+ * changed back.
  *
- * This is the recovery path the remote-http default depends on: a phone reaches
- * no `127.0.0.1:8765`, and until now `baseUrl` could be READ on the settings
- * screen but not CHANGED -- `facade.set` and `validateInput` had no caller, so
- * a first launch that could not reach the engine had no way to point it at one.
+ * The control carries `data-action="set-setting"` and its key, and does
+ * nothing else. Committing it used to happen inside a `change` listener
+ * attached right here, which made settings the ONE affordance in the app that
+ * did not go through `intents.ts` -- so the decision (which key, what was
+ * typed, and whether a refusal is worth saying anything about) could only be
+ * reached by synthesising events against a DOM, and the refusal path ended in
+ * a field that silently snapped back. Delegated on root like every tap, the
+ * decision is `intentFrom`'s and the write is `perform`'s, next to the live
+ * region that has to announce it.
+ *
+ * This is the recovery path the remote-http default depends on: a phone
+ * reaches no `127.0.0.1:8765`, and `baseUrl` could be READ on the settings
+ * screen but not CHANGED, so a first launch that could not reach the engine
+ * had no way to point it at one.
  */
 function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings: SettingsFacade): HTMLElement {
-  const stored = (): string => String(settings.get(def.key) ?? def.default);
-  const reset = (): void => {
-    if (control.tagName === "SELECT" || control.tagName === "INPUT") control.value = stored();
-  };
-
-  // A refused write must not leave the field showing a value the store rejected.
-  // `settings.set` can also REJECT, not merely return false: it persists through
-  // StoragePort, which raises on a real device (SecurityError with site data
-  // blocked, QuotaExceededError under storage pressure). Left to float, that
-  // rejection reaches the global crash handler and replaces the WHOLE app with
-  // the fatal screen -- the exact escalation the chat-list load guards against
-  // below. A failed write must stay LOCAL: reset the field to what is actually
-  // stored, so the screen never shows a value the next launch will not read.
-  const commit = async (raw: string): Promise<void> => {
-    const validated = validateInput(def, raw);
-    if (validated === null) return reset();
-    try {
-      if (!(await settings.set(def.key, validated))) reset();
-    } catch {
-      reset();
-    }
-  };
-
   let control: HTMLElement & { value: string };
   if (row.control === "choice" && row.choices !== null) {
     const select = doc.createElement("select") as HTMLElement & { value: string };
@@ -283,22 +268,40 @@ function settingControl(doc: Document, def: SettingDef, row: ValueRow, settings:
       option.textContent = String(choice);
       select.append(option);
     }
-    select.value = stored();
-    select.addEventListener("change", () => void commit(select.value));
     control = select;
   } else {
     const input = doc.createElement("input") as HTMLElement & { value: string; type: string };
     input.type = row.control === "number" ? "number" : "text";
-    input.value = stored();
-    // `change`, not `input`: persist when the field is committed (blur/Enter),
-    // not on every keystroke, so a half-typed address is never stored and
-    // `set` is not called on each character.
-    input.addEventListener("change", () => void commit(input.value));
     control = input;
   }
+  // From the STORE, not from `row.value`: identical today, and it stays
+  // identical only while nothing repaints a row from a stale view.
+  control.value = String(settings.get(def.key) ?? def.default);
   control.className = "setting-value setting-input";
   control.setAttribute("aria-label", row.label);
+  // `change`, not `input`: a field commits on blur or Enter, so a half-typed
+  // address is never stored and `set` is not called once per keystroke.
+  // Delegated on root -- `change` bubbles.
+  control.dataset["action"] = "set-setting";
+  control.dataset["settingKey"] = def.key;
   return control;
+}
+
+/**
+ * Where a refusal for one setting is written, and nothing until there is one.
+ *
+ * `role="alert"` and empty: an alert region that is created at the moment of
+ * the failure is announced unreliably, so it exists from first paint and only
+ * its text changes. `hidden` while empty, because an empty bordered box beside
+ * a field reads as a rendering fault.
+ */
+function settingError(doc: Document, key: string): HTMLElement {
+  const note = doc.createElement("p");
+  note.className = "setting-error";
+  note.dataset["settingError"] = key;
+  note.setAttribute("role", "alert");
+  note.hidden = true;
+  return note;
 }
 
 /**
@@ -346,7 +349,11 @@ export function buildSettingsScreen(
       el.append(label);
       const def = row.kind === "value" ? defByKey.get(row.key) : undefined;
       if (row.kind === "value" && def !== undefined) {
-        el.append(settingControl(doc, def, row, settings));
+        // The field and the place its refusal is written, together. The alert
+        // node ships empty and hidden rather than being created on the failure
+        // -- an alert region inserted at the moment it has something to say is
+        // announced unreliably by every screen reader.
+        el.append(settingControl(doc, def, row, settings), settingError(doc, row.key));
       } else {
         const value = doc.createElement("span");
         value.className = "setting-value";
@@ -908,19 +915,68 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   app.router.replace({ name: "chat", chatId: "" });
 
   // ---- taps ---------------------------------------------------------------
+  /** The tags that HOLD a value. Checked by tag rather than by reading
+   *  `node.value` on everything, because `Actionable.value` being ABSENT is
+   *  what tells intents.ts "this element is not a field" -- and a `<div>` in
+   *  the fake DOM reports `""`, which would read as a cleared setting. */
+  const FIELD_TAGS = new Set(["INPUT", "SELECT", "TEXTAREA"]);
+
   const chainOf = (target: EventTarget | null): Actionable[] => {
     const chain: Actionable[] = [];
     let node = target instanceof Element ? target : null;
     while (node !== null) {
       if (node instanceof HTMLElement) {
+        const value = (node as HTMLElement & { value?: unknown }).value;
         chain.push({
           dataset: { ...node.dataset },
           ...(node instanceof HTMLButtonElement ? { disabled: node.disabled } : {}),
+          ...(FIELD_TAGS.has(node.tagName) && typeof value === "string" ? { value } : {}),
         });
       }
       node = node.parentElement;
     }
     return chain;
+  };
+
+  /**
+   * Put every settings field back in step with the STORE, and show or clear
+   * the refusal for one key.
+   *
+   * A walk rather than a captured element, for two reasons. The settings
+   * screen is rebuilt on every visit (`screens.build`), so any reference held
+   * across a navigation points at a detached node. And a `set` the store
+   * ACCEPTS can still store something other than what was typed -- a def's
+   * `validate` may clamp -- so the honest thing after any write, accepted or
+   * refused, is to redraw the fields from what is actually stored rather than
+   * to leave the typed text on screen.
+   */
+  const syncSettings = (key: string, refusal: string | null): void => {
+    const defs = new Map(app.settings.defs().map((d) => [d.key, d]));
+    const stack: HTMLElement[] = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (node === undefined) break;
+      for (const child of node.children) {
+        if (child instanceof HTMLElement) stack.push(child);
+      }
+      if (node.dataset["action"] === "set-setting") {
+        const def = defs.get(node.dataset["settingKey"] ?? "");
+        if (def !== undefined) {
+          (node as HTMLElement & { value: string }).value = String(
+            app.settings.get(def.key) ?? def.default,
+          );
+        }
+        continue;
+      }
+      const errorFor = node.dataset["settingError"];
+      if (errorFor === undefined) continue;
+      // Only this key's note is touched. Clearing them all would wipe a
+      // refusal the user has not read off a DIFFERENT setting; leaving them
+      // all would keep accusing a write that has since succeeded.
+      if (errorFor !== key) continue;
+      node.textContent = refusal ?? "";
+      node.hidden = refusal === null;
+    }
   };
 
   const perform = async (intent: Intent): Promise<void> => {
@@ -966,6 +1022,38 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       case "navigate":
         app.router.push({ name: intent.route } as Route);
         return;
+      case "set-setting": {
+        // The def is looked up from the LIVE facade, not from `SETTING_DEFS`,
+        // so this cannot drift from what the screen was rendered off. An
+        // unknown key means the DOM and the registry disagree -- refuse it
+        // rather than write it: `set` would refuse anyway, silently.
+        const def = app.settings.defs().find((d) => d.key === intent.key);
+        if (def === undefined) return;
+        // `validateInput` first, so an unparseable value never reaches `set`
+        // where the refusal comes back as a bare `false` with no reason.
+        const validated = validateInput(def, intent.raw);
+        let stored = false;
+        if (validated !== null) {
+          try {
+            stored = await app.settings.set(intent.key, validated);
+          } catch {
+            // `set` persists through StoragePort, which REJECTS on a real
+            // device (SecurityError with site data blocked, QuotaExceededError
+            // under storage pressure). Left to float, that rejection reaches
+            // the global crash handler and replaces the WHOLE app with the
+            // fatal screen. A failed settings write must stay local -- and it
+            // is a refusal like any other, so it is said rather than swallowed.
+            stored = false;
+          }
+        }
+        // Said, not merely undone. A field that snaps back in silence is
+        // indistinguishable from a mis-tap or from a save that worked, and on
+        // this screen that leaves someone re-typing the same refused value.
+        const refusal = stored ? null : strings.settingRejected(labelOf(def));
+        if (refusal !== null) assertive.textContent = refusal;
+        syncSettings(intent.key, refusal);
+        return;
+      }
       case "open-chat": {
         // Reopen a previous conversation. `session.list()` had no app caller and
         // `session.open()` no way to be reached; this is the path from the chat
@@ -1073,6 +1161,17 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     const intent = intentFrom(chain);
     if (intent === null) return;
     (event as { preventDefault(): void }).preventDefault();
+    void perform(intent);
+  });
+
+  // Committing a field is delegated on ROOT for the same reason a tap is: the
+  // settings screen is rebuilt on every visit, so a listener attached to a
+  // field belongs to a node that is thrown away on the next navigation. No
+  // `preventDefault` -- `change` has no default action to cancel, and the
+  // composer's textarea carries no `data-action`, so `intentFrom` refuses it.
+  root.addEventListener("change", (event) => {
+    const intent = intentFrom(chainOf(event.target));
+    if (intent === null) return;
     void perform(intent);
   });
 

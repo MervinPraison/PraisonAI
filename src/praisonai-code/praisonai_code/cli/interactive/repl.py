@@ -271,7 +271,18 @@ class InteractiveREPL:
                 from .command_registry import create_default_registry
 
                 self._registry = create_default_registry(
-                    DEFAULT_COMMANDS, include_custom=True
+                    DEFAULT_COMMANDS, include_custom=True, include_skills=True
+                )
+                # Surface custom/skill/mcp commands in the ``/`` completion menu
+                # too — the built-ins are registered at init, but discovered
+                # commands (e.g. installed skills) must be added here so typing
+                # ``/`` offers them alongside the built-ins.
+                self.io.add_commands(
+                    {
+                        c.name: c.description
+                        for c in self._registry.list_commands()
+                        if c.kind.value != "builtin"
+                    }
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Command registry unavailable: %s", exc)
@@ -627,7 +638,12 @@ class InteractiveREPL:
             tools_count=tools_count,
             session_id=self._session_id
         )
-        
+
+        # Warm the command registry so discovered commands (custom + installed
+        # skills) populate the ``/`` completion menu before the first slash is
+        # typed, not only after the first custom/skill invocation.
+        self._get_registry()
+
         while self._running:
             try:
                 # Get input (SYNC - this is the key!)

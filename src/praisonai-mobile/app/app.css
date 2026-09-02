@@ -193,6 +193,19 @@ button:disabled { opacity: .45; cursor: default; }
 .setting .help { color: var(--soft); font-size: .84rem; }
 .setting input, .setting select { font: inherit; font-size: 16px; padding: .45rem .55rem;
   border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: inherit; }
+/* A refused setting, next to the field it was refused for. The row builder in
+   main.ts renders `.row-setting`, so the rules above (written against a
+   `.setting` class nothing emits) do not reach it -- these are matched on the
+   class names the app actually paints. `[hidden]` is stated explicitly for the
+   same reason `.screen[hidden]` is: an author `display` declaration beats the
+   user agent's, and an always-visible empty error box beside every field reads
+   as a rendering fault. */
+.row-setting { display: flex; flex-direction: column; gap: .25rem; }
+.row-setting .setting-input { font: inherit; font-size: 16px; padding: .45rem .55rem;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); color: inherit; }
+.setting-error { display: block; margin: .1rem 0 0; color: var(--warn); font-size: .84rem; }
+.setting-error[hidden] { display: none; }
+
 .section-heading { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
   color: var(--soft); margin: 1.2rem 0 .3rem; }
 .warning { border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius);

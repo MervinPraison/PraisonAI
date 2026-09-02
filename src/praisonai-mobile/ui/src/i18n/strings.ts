@@ -78,6 +78,17 @@ export interface Strings {
   readonly routeChat: string;
   readonly routeSettings: string;
   readonly routeAbout: string;
+  /**
+   * A settings value the store would not accept.
+   *
+   * Said rather than merely undone. A field that snaps back and says nothing
+   * is indistinguishable from a mis-tap, a lost keystroke, or a save that
+   * worked -- and on the settings screen, whose whole job is to repair an
+   * engine the app cannot reach, that silence leaves someone re-typing the
+   * same refused value. It names the setting, because the field it belongs to
+   * may already have scrolled off.
+   */
+  readonly settingRejected: (label: string) => string;
 
   // ---- chat list ---------------------------------------------------------
   /** A chat whose title is blank. A blank row has no hit target and reads as a
@@ -269,6 +280,10 @@ export const en: Strings = {
   routeChat: "Chat",
   routeSettings: "Settings",
   routeAbout: "About",
+  // The label, then what happened to it -- not "Invalid value", which names
+  // neither the setting nor the outcome. "was not changed" is the fact the
+  // user needs: the old value is still in force.
+  settingRejected: (label) => `${label} was not changed: that value was refused.`,
 
   untitled: "Untitled",
   chatUnreadable: (id) => `Could not be read: ${id}`,

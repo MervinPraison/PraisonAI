@@ -148,13 +148,56 @@ class CustomCommandSource:
         return commands
 
 
+def _make_skill_handler(skill: Any) -> Callable[[str], Optional[str]]:
+    """Build a handler that turns a discovered skill into a runnable prompt.
+
+    The interactive surfaces dispatch any registry command by calling its
+    ``handler`` and feeding the returned text to the agent. A skill therefore
+    needs a handler that renders its ``SKILL.md`` body (plus the user's ``args``)
+    into a prompt, matching how :class:`CustomCommandSource` renders custom
+    commands. Without this, ``/my-skill`` would appear in the menu but fall
+    through to "Unknown command" because both dispatchers require a handler.
+    """
+
+    def handler(args: str) -> Optional[str]:
+        name = str(getattr(skill, "name", "") or "")
+        description = getattr(skill, "description", "") or ""
+        body = ""
+        path = getattr(skill, "path", None)
+        if path is not None:
+            try:
+                from praisonaiagents.skills.parser import (
+                    find_skill_md,
+                    parse_frontmatter,
+                )
+
+                skill_md = find_skill_md(path)
+                if skill_md is not None:
+                    _, body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Skill body unavailable for %s: %s", name, exc)
+
+        sections = [f"Use the '{name}' skill."]
+        if description:
+            sections.append(description)
+        if body:
+            sections.append(body)
+        if args:
+            sections.append(args)
+        return "\n\n".join(section for section in sections if section)
+
+    return handler
+
+
 class SkillCommandSource:
     """Optional source exposing discovered skills as invocable commands.
 
     Skills live in the core SDK (``praisonaiagents.skills``); this source only
     *consumes* them. It fails silently (returns ``[]``) when the skills module
     or any project skills are unavailable, so it never adds import cost or
-    breaks surfaces that do not use skills.
+    breaks surfaces that do not use skills. Each skill carries a handler that
+    renders its ``SKILL.md`` body into a prompt so ``/name`` invocation works in
+    every interactive surface, not just the completion menu.
     """
 
     def discover(self) -> List[Command]:
@@ -180,6 +223,7 @@ class SkillCommandSource:
                     description=getattr(skill, "description", "") or "Skill",
                     kind=CommandKind.SKILL,
                     source="skill",
+                    handler=_make_skill_handler(skill),
                 )
             )
         return commands
