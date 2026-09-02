@@ -22,9 +22,10 @@ import {
 import { createSettingsStore, facadeFor } from "../../core/src/settings/store.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
-import { createFakeHttp, sseResponse } from "../../testing/src/fake-http.ts";
+import { createFakeHttp, jsonResponse, sseResponse } from "../../testing/src/fake-http.ts";
 import { createScriptedEngine } from "../../testing/src/scripted-engine.ts";
 import { SCRIPTS } from "../../testing/src/scripts.ts";
+import { PROTOCOL_VERSION } from "../../protocol/src/version.ts";
 
 const build = async () => {
   const storage = createFakeStorage();
@@ -196,6 +197,51 @@ test("there are no secret settings, so no secret is declared and never written",
   // the *declaration* that has no consumer.
   const secrets = SETTING_DEFS.filter((d) => d.secret === true).map((d) => d.key);
   assert.deepEqual(secrets, []);
+});
+
+// ---- the readiness probe has to actually be wired to the engine -------------
+
+test("enginesFor wires a health probe that refuses an engine answering 200 with ok:false", async () => {
+  // The boot tests supply their own probe, so dropping `probe` from the
+  // registry here still left the suite green. This exercises the REAL wiring:
+  // the choice `enginesFor` builds must carry a probe that runs the shipping
+  // `/health` classifier. A 200 with `{"ok": false}` is the engine saying it is
+  // NOT ready, and the probe must report exactly that.
+  const { settings, persistence } = await build();
+  const http = createFakeHttp();
+  http.on("/health", () => jsonResponse(200, { ok: false }));
+
+  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  assert.ok(choice?.probe, "the remote engine must carry a readiness probe");
+
+  const verdict = await choice.probe();
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.ready === false && verdict.reason, "unhealthy");
+});
+
+test("enginesFor's probe lets a healthy engine through -- the pair", async () => {
+  // Without this, a probe hard-wired to refuse would satisfy the case above.
+  const { settings, persistence } = await build();
+  const http = createFakeHttp();
+  http.on("/health", () => jsonResponse(200, { ok: true, version: PROTOCOL_VERSION }));
+
+  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  const verdict = await choice!.probe!();
+  assert.equal(verdict.ready, true);
+});
+
+test("enginesFor's probe targets the configured engine address", async () => {
+  // The probe must reach the address the user set, not a hardcoded default:
+  // otherwise a healthy default masks a broken configured engine, or the
+  // reverse. The trailing slash is stripped so `${baseUrl}/health` is clean.
+  const { store, settings, persistence } = await build();
+  await store.set("baseUrl", "http://configured.test:9000/");
+  const http = createFakeHttp();
+  http.on("/health", () => jsonResponse(200, { ok: true, version: PROTOCOL_VERSION }));
+
+  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  await choice!.probe!();
+  assert.equal(http.sent.at(-1)?.url, "http://configured.test:9000/health");
 });
 
 // ---- the refusal callback has to actually reach the engine ------------------

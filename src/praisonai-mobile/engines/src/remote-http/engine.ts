@@ -226,32 +226,54 @@ function parseFrame(data: string): ParsedFrame {
   return { ok: true, value: parsed as Record<string, unknown> };
 }
 
+/** How long a boot-time probe waits before giving up. This runs BEFORE the app
+ *  mounts, so an endpoint that accepts the connection but never answers -- or
+ *  never closes its body -- would otherwise hang `selectEngine`, `createApp`
+ *  and the whole mount forever. A bounded deadline turns that stall into a
+ *  named, retryable transport failure instead. */
+export const PROBE_TIMEOUT_MS = 5000;
+
 /** Probe `/health` and classify it. Separate from the engine so a connection
- *  manager can check readiness before offering the engine at all. */
+ *  manager can check readiness before offering the engine at all.
+ *
+ *  Bounded by `timeoutMs`: the probe blocks boot, so a request or body read
+ *  that never completes must abort rather than pin the app on a blank screen.
+ *  A timeout is classified as retryable transport -- a still-starting engine is
+ *  exactly the case worth polling. */
 export async function probeHealth(
   http: HttpPort,
   baseUrl: string,
   token?: string,
+  timeoutMs: number = PROBE_TIMEOUT_MS,
 ): Promise<Readiness> {
   const base = baseUrl.replace(/\/+$/, "");
+  // Abort BOTH the request and the body read below off one deadline: the reader
+  // shares this response, so aborting the signal unblocks a stalled read too.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await http.send({
       method: "GET",
       url: `${base}/health`,
       headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-      signal: new AbortController().signal,
+      signal: controller.signal,
     });
     const body = response.body;
     let text = "";
     if (body !== null) {
       const reader = body.getReader();
       const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += decoder.decode(value, { stream: true });
+        }
+        text += decoder.decode();
+      } finally {
+        // Release the stream lock so an aborted read does not leak the reader.
+        reader.releaseLock();
       }
-      text += decoder.decode();
     }
     return classify({ kind: "http", status: response.status, body: text });
   } catch (error) {
@@ -259,5 +281,7 @@ export async function probeHealth(
       kind: "transport",
       detail: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    clearTimeout(timer);
   }
 }
