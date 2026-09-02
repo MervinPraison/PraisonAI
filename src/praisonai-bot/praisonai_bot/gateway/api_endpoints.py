@@ -114,29 +114,42 @@ class GatewayApiEndpoints:
         """Run one agent turn through the same admission gate as chat users.
 
         Returns ``(reply, usage)`` where ``usage`` is a snapshot of the agent's
-        per-turn token metrics captured **atomically** with the turn's result.
+        per-turn token metrics captured **in the same execution context that
+        produced the turn's result**.
 
-        One ``Agent`` instance can serve overlapping turns for several sessions
-        on the single gateway event loop, and the SDK stores per-turn counts on
-        a *shared, mutable* ``llm.last_token_metrics`` reference that each turn
-        overwrites. Reading that attribute in a later handler line (after any
-        further ``await``) could therefore report a different concurrent
-        request's counts. We snapshot it here, immediately after the turn
-        completes and with **no intervening ``await``**, so the value is bound to
-        *this* turn before the loop can run another (Greptile/Qodo P1).
+        One ``Agent`` instance can serve overlapping turns for several sessions.
+        The SDK stores per-turn counts on a *shared, mutable*
+        ``llm.last_token_metrics`` reference that each turn overwrites, so any
+        read that is not bound to the completing turn's own context can report a
+        different concurrent request's counts. The native async path runs on the
+        single event loop (no cross-turn interleaving without an ``await``), but
+        the sync ``chat`` fallback runs in a worker **thread**, so a bare read
+        after the ``await`` could still observe another thread's overwrite
+        (Greptile/Qodo P1). We therefore hand ``_dispatch_agent_turn`` an
+        ``on_complete`` callback that snapshots the metrics *inside that same
+        context* — the worker thread for sync agents, the loop tick for async —
+        before it can be clobbered.
         """
+        holder: dict = {}
+
+        def _capture(a: Any) -> None:
+            holder["usage"] = self._usage_for(a)
+
         gate = getattr(self._gw, "_admission_gate", None)
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
                 async with gate.admit(session_id=session.session_id):
-                    result = await self._gw._dispatch_agent_turn(agent, content)
-                    usage = self._usage_for(agent)
+                    result = await self._gw._dispatch_agent_turn(
+                        agent, content, on_complete=_capture
+                    )
             except AdmissionRejected as rej:
                 return str(rej.message), self._zero_usage()
         else:
-            result = await self._gw._dispatch_agent_turn(agent, content)
-            usage = self._usage_for(agent)
+            result = await self._gw._dispatch_agent_turn(
+                agent, content, on_complete=_capture
+            )
+        usage = holder.get("usage") or self._zero_usage()
         return ("" if result is None else str(result)), usage
 
     @staticmethod

@@ -59,8 +59,13 @@ class _FakeGateway:
         return _FakeSession()
 
     @staticmethod
-    async def _dispatch_agent_turn(agent, content):
-        return await agent.achat(content)
+    async def _dispatch_agent_turn(agent, content, on_complete=None):
+        result = await agent.achat(content)
+        # Mirror the real gateway: snapshot per-turn state in the same context
+        # that produced the result, before returning to the caller.
+        if on_complete is not None:
+            on_complete(agent)
+        return result
 
 
 class _FakeReq:
@@ -339,6 +344,52 @@ def test_stream_usage_snapshot_survives_concurrent_overwrite():
     usage = usage_payloads[-1]["usage"]
     # Snapshotted at dispatch -> original counts, not the mid-stream overwrite.
     assert usage == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
+def test_sync_agent_usage_snapshot_captured_before_thread_returns():
+    # Greptile/Qodo P1 (sync fallback): a sync-only agent's ``chat`` runs in a
+    # worker THREAD. A bare read AFTER the executor ``await`` resolves is NOT
+    # atomic with the turn — the "no intervening await" guarantee only orders
+    # event-loop coroutines, not worker threads — so a concurrent turn can
+    # overwrite the shared, mutable ``last_token_metrics`` in the window between
+    # the turn's ``chat`` returning and the handler reading it. The real
+    # gateway's ``_dispatch_agent_turn`` must therefore snapshot INSIDE the
+    # worker thread, before it returns, via ``on_complete``. We assert exactly
+    # that ordering against the real server method.
+    from praisonai_bot.gateway.server import WebSocketGateway
+
+    events: list = []
+
+    class _Metrics:
+        input_tokens = 11
+        output_tokens = 7
+
+    class _LLM:
+        last_token_metrics = _Metrics()
+
+    class _SyncAgent:
+        # No ``arun``/``achat`` -> forces the sync ``chat`` executor path.
+        _llm_instance = _LLM()
+
+        def chat(self, content):
+            events.append("chat_returned")
+            return f"echo:{content}"
+
+    def _capture(a):
+        # Records that the snapshot ran, and its ordering vs ``chat`` return.
+        events.append("snapshot")
+
+    reply = asyncio.run(
+        WebSocketGateway._dispatch_agent_turn(
+            _SyncAgent(), "hi", on_complete=_capture
+        )
+    )
+    assert reply == "echo:hi"
+    # The snapshot must fire in the SAME worker-thread context, immediately
+    # after ``chat`` returns and before the future resolves back on the loop —
+    # so ``chat_returned`` is immediately followed by ``snapshot`` with no gap
+    # a concurrent turn could exploit.
+    assert events == ["chat_returned", "snapshot"]
 
 
 def test_openai_responses_reports_usage():
