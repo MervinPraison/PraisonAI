@@ -68,6 +68,10 @@ __all__ = [
     "EvalReport",
     "EvalPackage",
     "EvalRunnerProtocol",
+    # EvalPort adapter (framework-neutral interop; dependency-free)
+    "to_evalport",
+    "from_evalport",
+    "report_to_evalport",
     # Unified Judge API (follows add_X/get_X/list_X naming)
     "Judge",
     "JudgeConfig",
@@ -160,6 +164,10 @@ _LAZY_IMPORTS = {
     "EvalReport": ("praisonaiagents.eval.package", "EvalReport"),
     "EvalPackage": ("praisonaiagents.eval.package", "EvalPackage"),
     "EvalRunnerProtocol": ("praisonaiagents.eval.package", "EvalRunnerProtocol"),
+    # EvalPort adapter (framework-neutral interop; dependency-free)
+    "to_evalport": ("praisonaiagents.eval.evalport", "to_evalport"),
+    "from_evalport": ("praisonaiagents.eval.evalport", "from_evalport"),
+    "report_to_evalport": ("praisonaiagents.eval.evalport", "report_to_evalport"),
     # Unified Judge API (follows add_X/get_X/list_X naming)
     "Judge": ("praisonaiagents.eval.judge", "Judge"),
     "JudgeConfig": ("praisonaiagents.eval.judge", "JudgeConfig"),
