@@ -58,7 +58,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Memory | 17 | 4 | 779 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 2 | 1 | 162 |
-| ✅ Observability | 6 | 28 | 2277 |
+| ✅ Observability | 6 | 28 | 2318 |
 | ✅ Optimizer | 1 | 1 | 162 |
 | ✅ Output | 3 | 1 | 220 |
 | ✅ Parallel Execution | 3 | 2 | 256 |
