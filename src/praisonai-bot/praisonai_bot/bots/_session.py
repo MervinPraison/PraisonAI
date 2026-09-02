@@ -2280,6 +2280,61 @@ class BotSessionManager:
         """List user IDs with active sessions."""
         return list(self._histories.keys())
 
+    def export_history(self, storage_key: str) -> List[Dict[str, Any]]:
+        """Return a copy of the transcript for a resolved *storage_key*.
+
+        Used by the gateway's live-session handoff (Issue #4660) to read the
+        current session's transcript so it can be seeded onto a freshly created
+        thread/DM on another platform. Prefers the durable store (so a
+        soft-evicted but persisted session is still exportable) and falls back
+        to the in-memory cache. Keys are the resolved storage keys reported by
+        :meth:`warm_sessions` / :meth:`get_user_ids` — no user-id resolution is
+        applied here, so the caller controls exactly which session moves.
+        """
+        if self._store is not None:
+            try:
+                history = self._store.get_chat_history(self._persist_key(storage_key))
+                if history:
+                    return list(history)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning("export_history store read failed: %s", e)
+        return list(self._histories.get(storage_key, []))
+
+    def seed_history(
+        self, storage_key: str, history: List[Dict[str, Any]]
+    ) -> None:
+        """Seed a resolved *storage_key* session with *history*.
+
+        The counterpart to :meth:`export_history` for live-session handoff
+        (Issue #4660): the destination session on the target platform is
+        primed with the origin transcript so the same conversation continues
+        seamlessly there. Writes both the in-memory cache and the durable
+        store (when configured) under the resolved key, mirroring
+        :meth:`_save_history` but keyed directly (no user-id resolution).
+        """
+        history = list(history)
+        self._histories[storage_key] = history
+        if self._store is not None:
+            key = self._persist_key(storage_key)
+            self._flushed.discard(storage_key)
+            try:
+                if hasattr(self._store, "set_chat_history"):
+                    self._store.set_chat_history(key, history)
+                else:
+                    self._store.clear_session(key)
+                    for msg in history:
+                        self._store.add_message(
+                            key,
+                            msg.get("role", "user"),
+                            msg.get("content", ""),
+                            msg.get("metadata"),
+                        )
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning("seed_history store write failed: %s", e)
+            else:
+                self._flushed.add(storage_key)
+        self._last_active[storage_key] = time.monotonic()
+
 
 def resolve_durable_store_dir(platform: str = ""):
     """Resolve the canonical per-platform SQLite store directory for durability.

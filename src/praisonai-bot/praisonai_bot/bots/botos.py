@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -52,6 +53,37 @@ from .bot import Bot
 from .delivery import DeliveryRouter, SessionSource
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ThreadRef:
+    """A handle to a destination thread/DM created by a live-session handoff.
+
+    Returned by :meth:`BotOS.handoff` (Issue #4660). ``status`` is ``"ok"``
+    when the target thread was created and the session re-homed; otherwise it
+    carries the :meth:`DeliveryRouter.create_thread` outcome
+    (``"unsupported"`` / ``"failed"`` / ``"no_route"``) so a caller/chat
+    command can report *why* a handoff could not happen without exceptions.
+    ``session_key`` is the resolved destination session key subsequent turns
+    on ``platform`` route to.
+    """
+
+    platform: str
+    channel: str
+    thread_id: str
+    session_key: str
+    status: str = "ok"
+
+    @property
+    def ok(self) -> bool:
+        """True when the handoff succeeded and the thread is ready."""
+        return self.status == "ok"
+
+    @property
+    def target(self) -> str:
+        """The ``platform:channel:thread`` delivery target for the new thread."""
+        base = f"{self.platform}:{self.channel}"
+        return f"{base}:{self.thread_id}" if self.thread_id else base
 
 
 def _coerce_drain_timeout(value: Optional[Any]) -> Optional[float]:
@@ -1196,6 +1228,128 @@ class BotOS:
             await botos.deliver("ops-alerts", "Disk full")
         """
         return await self._delivery_router.deliver(target, text, origin)
+
+    async def handoff(
+        self,
+        session_key: str,
+        to: str,
+        *,
+        name: str = "",
+        seed_text: Optional[str] = None,
+        announce: bool = True,
+        origin: Optional[SessionSource] = None,
+    ) -> ThreadRef:
+        """Re-home a live session onto a fresh thread/DM on another platform.
+
+        The gateway's live-session handoff (Issue #4660): "start on one device,
+        continue on another". It orchestrates existing gateway primitives —
+        it does **not** add new per-platform behaviour:
+
+        1. Creates a fresh thread on the ``to`` target via the existing
+           :meth:`DeliveryRouter.create_thread` (capability-gated per adapter).
+        2. Seeds that thread's session with the **current** transcript of
+           ``session_key`` via the session store, so the same conversation
+           continues seamlessly there (:meth:`BotSessionManager.export_history`
+           → :meth:`~BotSessionManager.seed_history`).
+        3. Subsequent turns arriving on the new thread route to the seeded
+           destination session through the normal inbound path.
+        4. Optionally drops a breadcrumb into the origin (``announce``) and a
+           seed message into the new thread (``seed_text``).
+
+        Never raises for an unsupported/unreachable target — the returned
+        :class:`ThreadRef` carries a non-``ok`` ``status`` so a chat command
+        (``/handoff <platform>``) can explain why the move did not happen.
+
+        Args:
+            session_key: The resolved session key to move (as reported by
+                :meth:`BotSessionManager.warm_sessions` / ``get_user_ids``).
+            to: Destination target (``platform`` | ``platform:channel`` |
+                alias), resolved by the delivery router.
+            name: Optional thread name; defaults to a handoff label.
+            seed_text: Optional first message posted into the new thread.
+            announce: When True (default) leave a breadcrumb in ``origin``.
+            origin: Optional source of the original request (for breadcrumb /
+                target resolution).
+
+        Returns:
+            A :class:`ThreadRef` describing the destination thread and the
+            destination session key subsequent turns route to.
+        """
+        thread_name = name or "Handoff"
+        status, resolved, thread_id = await self._delivery_router.create_thread(
+            to, thread_name, origin
+        )
+        platform, _, channel = resolved.partition(":")
+        if status != "ok":
+            return ThreadRef(
+                platform=platform or to,
+                channel=channel,
+                thread_id="",
+                session_key="",
+                status=status,
+            )
+
+        # Seed the destination session with the origin transcript so the same
+        # conversation continues on the new thread. Both sessions are located
+        # by reusing the existing session-manager discovery; a missing manager
+        # or empty transcript is non-fatal (the thread is still created).
+        dest_session_key = f"{platform}:{channel}:{thread_id}"
+        try:
+            history = self._export_session_history(session_key)
+            if history:
+                dest_bot = self.get_bot(platform)
+                dest_session = (
+                    self._find_session_manager(dest_bot) if dest_bot else None
+                )
+                if dest_session is not None and hasattr(dest_session, "seed_history"):
+                    dest_session.seed_history(dest_session_key, history)
+        except Exception as e:  # pragma: no cover — defensive, never break handoff
+            logger.warning("handoff session seed failed: %s", e)
+
+        # Post an optional first message into the new thread.
+        if seed_text:
+            try:
+                await self._delivery_router.deliver(dest_session_key, seed_text)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug("handoff seed_text delivery failed: %s", e)
+
+        # Drop a breadcrumb in the origin channel ("continued on <platform>").
+        if announce and origin is not None:
+            try:
+                await self._delivery_router.deliver(
+                    "origin", f"Continued on {platform}.", origin
+                )
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug("handoff breadcrumb delivery failed: %s", e)
+
+        return ThreadRef(
+            platform=platform,
+            channel=channel,
+            thread_id=thread_id,
+            session_key=dest_session_key,
+            status="ok",
+        )
+
+    def _export_session_history(self, session_key: str) -> List[Dict[str, Any]]:
+        """Read a session's transcript from whichever bot owns *session_key*.
+
+        Scans registered bots' session managers for the transcript stored under
+        ``session_key`` (its resolved storage key). Returns the first non-empty
+        transcript, or an empty list when no session manager holds it — so a
+        handoff of an unknown/empty session still creates the thread cleanly.
+        """
+        for bot in self._bots.values():
+            session = self._find_session_manager(bot)
+            if session is None or not hasattr(session, "export_history"):
+                continue
+            try:
+                history = session.export_history(session_key)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug("export_history probe failed: %s", e)
+                continue
+            if history:
+                return history
+        return []
 
     @property
     def is_draining(self) -> bool:

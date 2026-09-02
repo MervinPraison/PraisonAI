@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .local import LocalBot
     from .webhook import WebhookBot, WebhookRoute
     from .bot import Bot
-    from .botos import BotOS
+    from .botos import BotOS, ThreadRef
     from ._session import BotSessionManager
     from ._identity import StoreBackedIdentityResolver
     from ._agent_registry import AgentRegistry, normalize_number
@@ -90,6 +90,9 @@ def __getattr__(name: str):
     if name == "BotOS":
         from .botos import BotOS
         return BotOS
+    if name == "ThreadRef":
+        from .botos import ThreadRef
+        return ThreadRef
     if name == "SlackApproval":
         from ._slack_approval import SlackApproval
         return SlackApproval
@@ -217,7 +220,7 @@ __all__ = [
     "SignalBot",
     "LocalBot",
     "WebhookBot", "WebhookRoute",
-    "Bot", "BotOS",
+    "Bot", "BotOS", "ThreadRef",
     "BotSessionManager",
     "StoreBackedIdentityResolver",
     "AgentRegistry", "normalize_number",
