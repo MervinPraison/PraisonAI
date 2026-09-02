@@ -648,3 +648,39 @@ test("the message field is labelled as the field, not as the button beside it", 
   assert.notEqual(box.getAttribute("aria-label"), en.actionSend, "not the button's name");
   app?.dispose();
 });
+
+// ---- the UI seam goes through the barrel ------------------------------------
+//
+// `main.ts` is the one file that puts `ui/src/index.ts` on the real import
+// graph -- until it imported the layer through the barrel rather than by deep
+// path, the module the whole UI layer documents as its outward surface had no
+// importer and the webview bundle never loaded it. Nothing pinned that: the
+// boundaries rule permits app -> ui by either route, so a return to deep
+// imports passes the gate silently. The house rule for this package is to
+// assert the BEHAVIOUR, not to grep the source -- so this checks the fact that
+// makes the wiring correct: every symbol `main.ts` relies on is the SAME
+// identity the barrel re-exports. A deep import of a symbol the barrel had
+// dropped, or drift between the two, breaks this without touching any assertion
+// above.
+import * as barrel from "../../ui/src/index.ts";
+import { en as enDeep } from "../../ui/src/i18n/strings.ts";
+
+test("the barrel re-exports the real UI modules, not a parallel copy", () => {
+  // The barrel must hand back the SAME `en` the deep module defines -- if it
+  // shadowed it with a second definition, "route main through the barrel" would
+  // change which object main runs against, and "through the barrel" would be a
+  // rename rather than the no-op re-export this PR relies on.
+  assert.equal(barrel.en, enDeep, "the barrel must re-export the real strings module, by identity");
+  // `main.ts` and this file both reach `en`; through the barrel or the deep
+  // path they must resolve to one object, or the layer has two sources of truth.
+  assert.equal(en, barrel.en, "every route to `en` must reach the same object");
+});
+
+test("the barrel exposes every UI symbol main.ts imports from it", () => {
+  // The exact runtime names `main.ts` pulls from `../../ui/src/index.ts`. If
+  // one is removed from the barrel, `main.ts` would have to deep-import it and
+  // the wiring this PR established would erode one symbol at a time.
+  for (const name of ["announce", "buildTranscript", "emptyRender", "en", "initialAnnouncer", "reconcile"]) {
+    assert.ok(name in barrel, `the barrel must export ${name}, which main.ts imports from it`);
+  }
+});
