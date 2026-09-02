@@ -412,6 +412,48 @@ class TestAgentMailBotIdempotency:
         assert len(keys) == 2
         assert keys[0] != keys[1]
 
+    @pytest.mark.asyncio
+    async def test_explicit_key_is_used(self):
+        """A caller-supplied idempotency_key must be forwarded verbatim."""
+        from praisonai_bot.bots import AgentMailBot
+
+        bot = AgentMailBot(token="test_token")
+        bot._inbox_id = "agent@agentmail.to"
+
+        keys = []
+
+        def capture(*args, **kwargs):
+            keys.append(
+                kwargs["request_options"]["additional_headers"]["Idempotency-Key"]
+            )
+            return MagicMock(message_id="s")
+
+        mock_client = MagicMock()
+        mock_client.inboxes.messages.send.side_effect = capture
+
+        with patch.object(bot, "_get_client", return_value=mock_client):
+            await bot.send_message(
+                channel_id="a@example.com",
+                content={"body": "one"},
+                idempotency_key="stable-deterministic-key",
+            )
+
+        assert keys == ["stable-deterministic-key"]
+
+    def test_idempotency_key_is_explicit_param(self):
+        """The param must be declared explicitly so DurableDelivery detects it.
+
+        ``DurableDelivery._send_accepts_idempotency_key()`` only forwards its
+        persisted key to adapters whose ``send_message`` signature contains an
+        explicit ``idempotency_key`` parameter (a ``**kwargs`` fallback is
+        deliberately excluded). This guards that contract for AgentMail.
+        """
+        import inspect
+        from praisonai_bot.bots import AgentMailBot
+
+        params = inspect.signature(AgentMailBot.send_message).parameters
+        assert "idempotency_key" in params
+
 
 class TestAgentMailBotHealth:
     """Test AgentMailBot health functionality."""
