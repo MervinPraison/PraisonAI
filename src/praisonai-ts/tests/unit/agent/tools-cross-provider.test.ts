@@ -22,7 +22,11 @@ const PROVIDERS = [
 
 describe('tools survive on every non-OpenAI provider', () => {
   for (const llm of PROVIDERS) {
-    it(`passes tools into generateText for ${llm}`, async () => {
+    it(`passes tools into the model call for ${llm}`, async () => {
+      // `stream` defaults to true, so the tool loop streams -- the same thing
+      // the OpenAI path has always done. What this test guards is that the
+      // TOOLS survive to the provider, not which method carries them, so it
+      // asserts on whichever one was actually used.
       const agent = new Agent({ instructions: 'weather', tools: [getWeather], llm, verbose: false });
 
       const generateText = jest.fn().mockResolvedValue({
@@ -31,19 +35,30 @@ describe('tools survive on every non-OpenAI provider', () => {
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         finishReason: 'stop',
       });
+      // A real async iterable, not a bare jest.fn(): the streaming path does
+      // `for await` over it, and an undefined return throws before the
+      // assertion this test is about.
+      const streamText = jest.fn().mockResolvedValue({
+        async *[Symbol.asyncIterator]() {
+          yield { text: 'sunny' };
+        },
+      });
 
       // Stub the resolved AI SDK backend so no network/keys are needed.
       jest.spyOn(agent as any, 'getBackend').mockResolvedValue({
         generateText,
-        streamText: jest.fn(),
+        streamText,
         generateObject: jest.fn(),
       });
 
       const out = await agent.start('weather in Paris?');
       expect(out).toBe('sunny');
 
-      expect(generateText).toHaveBeenCalled();
-      const callArgs = generateText.mock.calls[0][0];
+      // One of the two carried the request. Asserting on the union keeps the
+      // guarantee (tools reached the provider) without pinning the transport.
+      const used = streamText.mock.calls.length > 0 ? streamText : generateText;
+      expect(used).toHaveBeenCalled();
+      const callArgs = used.mock.calls[0][0];
       expect(Array.isArray(callArgs.tools)).toBe(true);
       expect(callArgs.tools.length).toBeGreaterThan(0);
       expect(callArgs.tools[0].name).toBe('getWeather');
@@ -56,6 +71,10 @@ describe('tools survive on every non-OpenAI provider', () => {
       tools: [getWeather],
       llm: 'anthropic/claude-3-5-sonnet-latest',
       verbose: false,
+      // Pinned to the non-streaming path: this case is about the tool LOOP
+      // across rounds, and generateText is the transport it was written for.
+      // The streaming transport is covered by nonopenai-stream-tools.test.ts.
+      stream: false,
     });
 
     const generateText = jest
@@ -107,6 +126,10 @@ describe('tools survive on every non-OpenAI provider', () => {
       outputSchema: schema,
       llm: 'anthropic/claude-3-5-sonnet-latest',
       verbose: false,
+      // Pinned to the non-streaming path: this case is about the tool LOOP
+      // across rounds, and generateText is the transport it was written for.
+      // The streaming transport is covered by nonopenai-stream-tools.test.ts.
+      stream: false,
     });
 
     // Tool loop resolves in one turn (no tool calls), then the final answer
