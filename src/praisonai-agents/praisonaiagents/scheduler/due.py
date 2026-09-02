@@ -86,10 +86,13 @@ def is_due(
                 # non-UTC zone would otherwise fire an hour (or more) off.
                 tz = sched.tz or default_timezone
                 if tz or os.environ.get("PRAISONAI_SCHEDULE_TIMEZONE"):
-                    tzinfo = resolve_schedule_timezone(tz)
+                    target = target.replace(tzinfo=resolve_schedule_timezone(tz))
                 else:
-                    tzinfo = datetime.now().astimezone().tzinfo
-                target = target.replace(tzinfo=tzinfo)
+                    # ``astimezone`` on a naive datetime interprets it as local
+                    # time using the offset in effect on the *target* date, so a
+                    # one-shot across a DST boundary keeps the user's wall clock
+                    # rather than inheriting today's fixed offset.
+                    target = target.astimezone()
             # Evaluate against the caller-supplied ``now`` (not wall-clock) so
             # one-shot jobs are deterministic and consistent with every/cron.
             return now >= target.timestamp()

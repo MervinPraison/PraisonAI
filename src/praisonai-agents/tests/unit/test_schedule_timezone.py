@@ -68,6 +68,31 @@ def test_offset_one_shot_keeps_its_explicit_offset():
     assert is_due(job, _epoch(2026, 7, 1, 7, 0)) is True
 
 
+def test_naive_one_shot_local_fallback_honours_target_date_dst():
+    import time as _time
+
+    if not hasattr(_time, "tzset"):
+        pytest.skip("time.tzset unavailable on this platform")
+
+    original_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/London"
+    _time.tzset()
+    try:
+        # Target sits in GMT (winter, +00:00) even though the check runs while
+        # the fixture below evaluates "now"; the naive wall clock must resolve
+        # against the target date's offset, not a fixed current-day offset.
+        job = _job(Schedule(kind="at", at="2027-01-15T12:00:00"))
+
+        assert is_due(job, _epoch(2027, 1, 15, 11, 59)) is False
+        assert is_due(job, _epoch(2027, 1, 15, 12, 0)) is True
+    finally:
+        if original_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original_tz
+        _time.tzset()
+
+
 def test_instance_timezone_environment_is_default(monkeypatch):
     monkeypatch.setenv("PRAISONAI_SCHEDULE_TIMEZONE", "Asia/Singapore")
     job = _job(Schedule(kind="at", at="2026-07-01T09:00:00"))
