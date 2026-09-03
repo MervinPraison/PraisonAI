@@ -221,13 +221,9 @@ def _refresh_env_globals() -> None:
     CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
     MAX_CONCURRENT_CONNECTIONS = int(os.getenv('MAX_CONCURRENT_CONNECTIONS', '5'))
     MAX_REQUESTS_PER_WINDOW = int(os.getenv('MAX_REQUESTS_PER_WINDOW', '100'))
-    # The included n8n invoke router captures CALL_SERVER_TOKEN in its own
-    # module at import; refresh it there too so its auth stays consistent.
-    try:
-        from . import agent_invoke as _agent_invoke
-        _agent_invoke.CALL_SERVER_TOKEN = CALL_SERVER_TOKEN
-    except Exception:
-        pass
+    # The included n8n invoke router now live-reads CALL_SERVER_TOKEN from the
+    # environment per request (agent_invoke._call_server_token), so no
+    # cross-module reach-in is needed to keep its auth consistent.
 
 
 # Set up logging

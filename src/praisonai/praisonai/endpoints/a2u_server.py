@@ -98,7 +98,11 @@ class A2UEventBus:
         # shared dicts with a reentrant lock rather than an asyncio.Lock.
         self._lock = threading.RLock()
         self._subscriptions: Dict[str, A2USubscription] = {}
-        self._queues: Dict[str, asyncio.Queue] = {}
+        # subscription_id -> (queue, owning_loop). The owning loop is the loop
+        # that first consumes the subscription (get_events); cross-loop delivery
+        # goes through owning_loop.call_soon_threadsafe so an asyncio.Future is
+        # only ever mutated on its own loop thread.
+        self._queues: Dict[str, tuple] = {}
         self._streams: Dict[str, Set[str]] = {}  # stream_name -> subscription_ids
     
     def subscribe(
@@ -135,15 +139,22 @@ class A2UEventBus:
         logger.debug(f"Created subscription {subscription_id} for stream {stream_name}")
         return subscription
     
-    def _get_queue(self, subscription_id: str) -> asyncio.Queue:
-        """Get or create the queue for a subscription.
-        
-        Deferred creation for Python 3.9 compatibility.
+    def _bind_queue(self, subscription_id: str, loop: "asyncio.AbstractEventLoop") -> asyncio.Queue:
+        """Get or create the queue for a subscription, binding its owning loop.
+
+        Called only from the consumer path (``get_events``) where a running loop
+        exists. The queue and the loop that awaits it are stored together so
+        publishers on other threads can hand events over via
+        ``call_soon_threadsafe`` instead of mutating a foreign loop's Future.
+        Deferred creation also keeps Python 3.9 compatibility (``asyncio.Queue``
+        needs a loop at creation time there).
         """
         with self._lock:
-            if subscription_id not in self._queues:
-                self._queues[subscription_id] = asyncio.Queue(maxsize=_QUEUE_MAX)
-            return self._queues[subscription_id]
+            entry = self._queues.get(subscription_id)
+            if entry is None:
+                entry = (asyncio.Queue(maxsize=_QUEUE_MAX), loop)
+                self._queues[subscription_id] = entry
+            return entry[0]
     
     def unsubscribe(self, subscription_id: str) -> bool:
         """
@@ -178,16 +189,33 @@ class A2UEventBus:
         Returns:
             Number of subscribers that received the event
         """
-        # Snapshot the target subscriptions under the lock, then deliver outside
-        # it so put_nowait / _get_queue cannot race against subscribe/unsubscribe.
+        # Snapshot the target subscriptions + their bound queues under the lock,
+        # then deliver outside it so put_nowait cannot race against
+        # subscribe/unsubscribe.
         with self._lock:
             sub_ids = list(self._streams.get(stream_name, ()))
-            snapshot = {sid: self._subscriptions.get(sid) for sid in sub_ids}
+            snapshot = {
+                sid: (self._subscriptions.get(sid), self._queues.get(sid))
+                for sid in sub_ids
+            }
+
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
 
         count = 0
-        for sub_id, subscription in snapshot.items():
-            if subscription and subscription.matches_event(event):
-                queue = self._get_queue(sub_id)
+        for sub_id, (subscription, entry) in snapshot.items():
+            if not (subscription and subscription.matches_event(event)):
+                continue
+            if entry is None:
+                # No consumer has attached a queue yet: drop (matches prior
+                # behaviour) rather than binding a queue to whatever thread the
+                # publisher happens to run on.
+                continue
+            queue, owner_loop = entry
+            if running_loop is owner_loop:
+                # Same loop as the consumer: mutate the Future directly.
                 try:
                     # Non-blocking put with a bounded queue: a slow/stalled
                     # consumer drops events instead of growing memory without
@@ -199,7 +227,27 @@ class A2UEventBus:
                         "A2U queue full for %s — dropping event %s",
                         sub_id, event.event_type,
                     )
-        
+            else:
+                # Cross-loop / cross-thread delivery: schedule the put on the
+                # queue's owning loop so its internal Future is only ever
+                # set_result()'d on its own loop thread. A bare put_nowait here
+                # would call _wakeup_next on a foreign loop's waiter and either
+                # lose the event or raise InvalidStateError.
+                def _put(q=queue, e=event, sid=sub_id):
+                    try:
+                        q.put_nowait(e)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "A2U queue full for %s — dropping event %s",
+                            sid, e.event_type,
+                        )
+                try:
+                    owner_loop.call_soon_threadsafe(_put)
+                    count += 1
+                except RuntimeError:
+                    # Owning loop is closed/stopped — consumer is gone.
+                    logger.debug("A2U owning loop unavailable for %s", sub_id)
+
         logger.debug(f"Published event {event.event_type} to {count} subscribers")
         return count
     
@@ -270,7 +318,7 @@ class A2UEventBus:
         if subscription_id not in self._subscriptions:
             return
         
-        queue = self._get_queue(subscription_id)
+        queue = self._bind_queue(subscription_id, asyncio.get_running_loop())
         
         while True:
             try:
