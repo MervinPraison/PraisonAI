@@ -152,9 +152,20 @@ jobs:
           # .so to look for -- the crate is INSIDE this binary, and its symbols
           # are the only real evidence it got there. An .app that built without
           # it would be the Swift template alone.
-          nm -a "$exe" 2>/dev/null | grep -qi 'praisonai_mobile\|start_app' \
-            || strings -a "$exe" | grep -qi 'praisonai_mobile' \
-            || { echo "::error::the Rust library is not linked into $exe"; exit 1; }
+          #
+          # Dumped to files rather than piped into `grep -q`: grep exits on the
+          # FIRST match, the dumper then dies of SIGPIPE, and `set -o pipefail`
+          # reports that as a failed pipeline -- so the check failed precisely
+          # BECAUSE it found what it was looking for. It cost a CI run.
+          nm -a "$exe" > "$RUNNER_TEMP/symbols.txt" 2>/dev/null || true
+          strings -a "$exe" > "$RUNNER_TEMP/strings.txt" 2>/dev/null || true
+          if grep -qi 'praisonai_mobile\|start_app' "$RUNNER_TEMP/symbols.txt" \
+            || grep -qi 'praisonai_mobile' "$RUNNER_TEMP/strings.txt"; then
+            echo "the Rust crate is linked into the executable"
+          else
+            echo "::error::the Rust library is not linked into $exe"
+            exit 1
+          fi
 
           # The frontend is embedded in that same binary by generate_context!,
           # not copied into the bundle as a resource, so it is checked the same
