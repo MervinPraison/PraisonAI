@@ -52,8 +52,23 @@ on:
     paths: *watched
 
 concurrency:
-  group: mobile-platforms-${{ github.ref }}
-  cancel-in-progress: true
+  # Per-ref on a PR, per-SHA on main. This is the crux of the fix, not
+  # cancel-in-progress alone: a concurrency group holds at most ONE
+  # running run and ONE pending run, and a newer arrival always replaces
+  # the pending one -- cancel-in-progress: false spares only the RUNNING
+  # run, never the queued one. So with a single mobile-platforms-main
+  # group, three merges in one ~3-minute window would still drop the
+  # middle commit's run (it is only ever pending), which is precisely the
+  # blindness the push trigger was added to remove. Giving each main SHA
+  # its own group makes every commit a candidate release with its own
+  # answer, with nothing to contend for and so nothing to cancel.
+  group: mobile-platforms-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # On a PR, superseding an in-flight build is right: only the tip
+  # matters and these jobs cost ~3 minutes on two runners. On main each
+  # group has a single run, so this is a no-op there -- left true because
+  # the condition that mattered is now expressed in the group name above,
+  # and this keeps the PR behaviour explicit.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 defaults:
   run:
