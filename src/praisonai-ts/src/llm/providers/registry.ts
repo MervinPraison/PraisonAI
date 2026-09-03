@@ -6,6 +6,15 @@
  */
 
 import type { LLMProvider, ProviderConfig } from './types';
+// Static, not `require()`d inside the loaders below. The only importer of this
+// file is ./index.ts, which already re-exports all three classes statically, so
+// the lazy require deferred nothing -- while in the ESM build it forced the
+// esm-shim to prepend a top-level-await createRequire banner (Chrome 89+), which
+// made the `praisonai/mobile` entry unbuildable for the Android 8 WebView. None
+// of these modules imports the registry back, so there is no cycle to defer.
+import { OpenAIProvider } from './openai';
+import { AnthropicProvider } from './anthropic';
+import { GoogleProvider } from './google';
 
 /**
  * Provider constructor type
@@ -351,26 +360,15 @@ export function listProviders(): string[] {
 
 /**
  * Register built-in providers to a registry
- * Uses lazy loaders to avoid importing all providers at module load time
+ *
+ * Registered through loader functions (not bare constructors) so the registry
+ * entries keep the same shape they always had: `get('openai')` still returns
+ * the loader, and `resolve()` still calls it on first use.
  */
 export function registerBuiltinProviders(registry: ProviderRegistry): void {
-  // OpenAI - lazy loaded
-  registry.register('openai', () => {
-    const { OpenAIProvider } = require('./openai');
-    return OpenAIProvider;
-  }, { aliases: ['oai'] });
-
-  // Anthropic - lazy loaded
-  registry.register('anthropic', () => {
-    const { AnthropicProvider } = require('./anthropic');
-    return AnthropicProvider;
-  }, { aliases: ['claude'] });
-
-  // Google - lazy loaded
-  registry.register('google', () => {
-    const { GoogleProvider } = require('./google');
-    return GoogleProvider;
-  }, { aliases: ['gemini'] });
+  registry.register('openai', () => OpenAIProvider, { aliases: ['oai'] });
+  registry.register('anthropic', () => AnthropicProvider, { aliases: ['claude'] });
+  registry.register('google', () => GoogleProvider, { aliases: ['gemini'] });
 }
 
 /**
