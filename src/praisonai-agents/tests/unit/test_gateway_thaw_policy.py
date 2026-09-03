@@ -61,6 +61,21 @@ def test_small_jitter_below_threshold_ignored():
     assert decision.suspended is False
 
 
+def test_forward_wall_clock_correction_not_suspend():
+    # NTP step / manual clock set jumps wall forward while the process is
+    # running normally: monotonic keeps advancing on schedule. This must NOT
+    # be classified as a host suspend (Greptile P1) — disrupting healthy
+    # transports and reconciling the scheduler against a nonexistent freeze.
+    policy = WallClockGapThawPolicy(tick_interval_s=15.0, gap_threshold_s=60.0)
+    policy.observe(monotonic_now=100.0, wall_now=1_000.0)
+    # Monotonic advanced a full tick (process alive, loop kept running);
+    # wall jumped 200s forward from an NTP step.
+    decision = policy.observe(monotonic_now=116.0, wall_now=1_216.0)
+    assert decision.suspended is False
+    assert decision.restart_transports is False
+    assert decision.reconcile_schedule is False
+
+
 def test_disabled_policy_never_reports():
     policy = WallClockGapThawPolicy(enabled=False)
     policy.observe(monotonic_now=100.0, wall_now=1_000.0)

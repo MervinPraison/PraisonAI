@@ -3441,12 +3441,19 @@ class WallClockGapThawPolicy:
     (restart channel sockets, refresh presence, reconcile the scheduler).
 
     A suspend gap is detected when, between two consecutive
-    :meth:`observe` calls, either clock advanced past
-    ``tick_interval_s + gap_threshold_s`` *and* the wall-clock delta ran
-    ahead of the monotonic delta by more than ``gap_threshold_s`` (the
-    signature of a frozen host: wall-clock jumps forward while monotonic
-    stalls). The reported ``gap_seconds`` is the wall-vs-monotonic
-    divergence — the time the host was actually frozen.
+    :meth:`observe` calls, the wall-clock delta ran ahead of the monotonic
+    delta by more than ``gap_threshold_s`` *and* the monotonic clock itself
+    stayed near-frozen (advanced by no more than one tick plus a small
+    tolerance). Both conditions are the true signature of a frozen host:
+    wall-clock jumps forward while ``CLOCK_MONOTONIC`` stalls. The reported
+    ``gap_seconds`` is the wall-vs-monotonic divergence — the time the host
+    was actually frozen.
+
+    Requiring the monotonic delta to stay near-frozen distinguishes a real
+    host suspend from a forward *wall-clock correction* (NTP step / manual
+    clock set) that occurs while the process is running normally: in the
+    correction case monotonic keeps advancing on schedule, so no recovery
+    is requested and healthy transports/schedule are left untouched.
 
     The first observation only seeds the baseline and never reports a gap,
     so the default preserves current behaviour when no freeze occurs.
@@ -3495,10 +3502,17 @@ class WallClockGapThawPolicy:
         # elapsed (monotonic) time — i.e. the frozen window.
         divergence = wall_delta - monotonic_delta
 
-        budget = self.tick_interval_s + self.gap_threshold_s
+        # A real host suspend freezes CLOCK_MONOTONIC: it stalls, so across
+        # the gap it advances by less than one scheduled tick. A forward
+        # wall-clock *correction* (NTP step / manual set) instead leaves
+        # monotonic advancing in step with the loop — a full tick or more —
+        # proving the process kept running. Requiring monotonic to have
+        # stalled below one tick rejects that false positive so healthy
+        # transports and the scheduler are left untouched.
+        monotonic_frozen = monotonic_delta < self.tick_interval_s
         gap_detected = (
             divergence > self.gap_threshold_s
-            and (wall_delta > budget or monotonic_delta > budget)
+            and monotonic_frozen
         )
         if not gap_detected:
             return ThawDecision(suspended=False)
