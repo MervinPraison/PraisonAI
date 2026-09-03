@@ -82,6 +82,15 @@ jobs:
           npm install --no-audit --no-fund --legacy-peer-deps
           npm run build
       - run: npm ci
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/praisonai-mobile/package-lock.json') }}
+      - name: Install Chromium for the boot proof
+        # `npm test` includes tools/web-boot.test.mjs, which loads the built
+        # dist/ in a real browser. It fails rather than skips without one.
+        run: npx playwright install --with-deps chromium
       - name: Typecheck
         run: npm run typecheck
       - name: Layer boundaries

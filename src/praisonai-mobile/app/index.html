@@ -3,6 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <!--
+      The web build's Content-Security-Policy. tauri.conf.json's csp applies
+      only inside the Tauri shell; a browser serving dist/ over HTTP sees only
+      what is in this file. tools/web-csp.test.mjs pins it.
+
+      Two things about it are not obvious:
+        - Tauri APPENDS its own meta tag to this page rather than replacing
+          this one, so inside the shell BOTH policies apply and the effective
+          policy is their intersection. `ipc:` and `http://ipc.localhost` are
+          therefore listed here too: a browser ignores a scheme it does not
+          know, and without them the Android IPC channel would be blocked by
+          this tag with nothing but a console line to say so.
+        - script-src is 'self' and nothing else. Every script on the page is
+          an external file, including the service-worker registration, so
+          there is no inline script to whitelist and no hash to keep in step.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https:; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'"
+    />
+    <!--
       viewport-fit=cover is NOT optional. Without it, env(safe-area-inset-*)
       resolves to 0px in WKWebView, every inset in the app collapses to flush,
       and content sits under the notch and the home indicator with no error
@@ -18,7 +38,17 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
     />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1f7a63" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="PraisonAI" />
     <title>PraisonAI</title>
+    <!-- Every URL below is relative on purpose: the web build is served from
+         a repository subpath on GitHub Pages, and an absolute /manifest or
+         /app.js resolves to the wrong site there. tools/web-boot.test.mjs
+         serves dist/ under a subpath to prove it. -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/32x32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="./icons/icon.png" />
     <link rel="stylesheet" href="./app.css" />
   </head>
   <body>
@@ -28,5 +58,6 @@
     <div id="root"></div>
     <noscript>PraisonAI needs JavaScript to run.</noscript>
     <script type="module" src="./app.js"></script>
+    <script src="./register-sw.js"></script>
   </body>
 </html>
