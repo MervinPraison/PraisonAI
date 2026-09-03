@@ -289,6 +289,15 @@ button:disabled { opacity: .45; cursor: default; }
 .setting-error { display: block; margin: .1rem 0 0; color: var(--warn); font-size: .84rem; }
 .setting-error[hidden] { display: none; }
 
+/* A secret row. The presence word sits above the field, so "Configured" is the
+   first thing read -- the answer to the only question a masked field cannot
+   show. `Remove` is a plain, small control: it destroys a credential, so it
+   must not be the easiest thing on the row to hit by accident. */
+.row-setting-secret .setting-presence { color: var(--soft); font-size: .84rem; }
+.setting-clear { font: inherit; font-size: .84rem; align-self: flex-start;
+  margin-top: .25rem; padding: .3rem .6rem; color: var(--ink);
+  background: none; border: 1px solid var(--rule); border-radius: .4rem; }
+
 .section-heading { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
   color: var(--soft); margin: 1.2rem 0 .3rem; }
 .warning { border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius);

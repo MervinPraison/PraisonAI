@@ -13,6 +13,7 @@ import {
   createSettingsStore,
   facadeFor,
   plainOnly,
+  readSecretSetting,
   secretRefOf,
   type SettingDef,
 } from "./store.ts";
@@ -492,4 +493,77 @@ test("the facade reports isSet from the store, not a constant", async () => {
   assert.equal(facade.isSet("model"), false, "an untouched setting is not set");
   await store.set("model", "gpt-4o");
   assert.equal(facade.isSet("model"), true, "and a written one is");
+});
+
+
+// ---- reading a secret back --------------------------------------------------
+//
+// `SecretsPort.get` had no caller outside its own conformance suite. Everything
+// needed to STORE a key existed and nothing read one, so a key the user typed
+// went into the keychain and stopped there -- which is the same defect as
+// having no key field at all, one layer further in.
+
+const REF = { slot: "openai", account: "default" } as const;
+const KEYED: readonly SettingDef[] = [
+  { key: "openaiApiKey", default: "", secret: true, secretRef: REF },
+  { key: "baseUrl", default: "http://127.0.0.1:8765" },
+  // A secret def with no ref: `secretRefOf` refuses it, and so must the reader.
+  { key: "orphanSecret", default: "", secret: true },
+];
+
+test("a stored secret can be read back by key", async () => {
+  const { secrets } = build();
+  await secrets.set(REF, "sk-stored");
+  assert.equal(await readSecretSetting(secrets, KEYED, "openaiApiKey"), "sk-stored");
+});
+
+test("an unstored secret reads as null, not as an empty credential", async () => {
+  const { secrets } = build();
+  assert.equal(await readSecretSetting(secrets, KEYED, "openaiApiKey"), null);
+});
+
+test("a stored EMPTY secret also reads as null", async () => {
+  // "" is what an `Authorization: Bearer ` header gets built from before
+  // anyone notices. Absent is the honest reading of it either way.
+  const { secrets } = build();
+  await secrets.set(REF, "");
+  assert.equal(await readSecretSetting(secrets, KEYED, "openaiApiKey"), null);
+});
+
+test("an unknown key reads as null and touches the keychain not at all", async () => {
+  const { secrets } = build();
+  assert.equal(await readSecretSetting(secrets, KEYED, "nosuch"), null);
+  assert.equal(secrets.reads, 0, "a key with no def must not produce a keychain lookup");
+});
+
+test("a NON-secret def is refused rather than read out of the keychain", async () => {
+  // The mirror of `secretRefOf`'s other refusal. Reading a plain setting from
+  // the keychain would always answer null and quietly mask the real value.
+  const { secrets } = build();
+  assert.equal(await readSecretSetting(secrets, KEYED, "baseUrl"), null);
+  assert.equal(secrets.reads, 0);
+});
+
+test("a secret def with NO ref is refused rather than guessed at", async () => {
+  // There is nowhere to read from, and inventing a slot would put the lookup
+  // in a keychain namespace nobody declared.
+  const { secrets } = build();
+  assert.equal(await readSecretSetting(secrets, KEYED, "orphanSecret"), null);
+  assert.equal(secrets.reads, 0);
+});
+
+test("the reader takes the PORT, so a view holding only the facade cannot call it", async () => {
+  // Rule 2 of ports/secrets.ts, enforced by a signature rather than a comment:
+  // "Only the engine receives the full port; ui/ receives a facade that exposes
+  // presence and no getter." The facade has no `get`, so it is not a
+  // SecretsPort and cannot be passed here -- which is what stops a view from
+  // faulting a key into a render tree, a log or a screenshot.
+  const { secrets, store } = build();
+  const facade = facadeFor(store, secrets);
+  // `get` exists for PLAIN settings; there is deliberately no secret getter
+  // beside `hasSecret`, and the facade's shape is not a SecretsPort at all.
+  assert.equal("getSecret" in facade, false, "the facade must not expose a secret getter");
+  assert.equal(typeof (facade as { has?: unknown }).has, "undefined", "nor the port's own reader");
+  // @ts-expect-error the facade is deliberately not a SecretsPort
+  void (() => readSecretSetting(facade, KEYED, "openaiApiKey"));
 });

@@ -200,3 +200,66 @@ test("a DISABLED settings field commits nothing", () => {
     null,
   );
 });
+
+// ---- secrets are their own intent -------------------------------------------
+
+test("a committed secret field decodes as set-secret, not as set-setting", () => {
+  // The split is the whole safeguard. A secret goes to SecretsPort through
+  // `setSecret`; a plain value goes to StoragePort through `set`. One shared
+  // intent carrying a boolean is a single code path that decides at runtime
+  // which store a value lands in -- and getting that boolean wrong once puts
+  // an API key in a plaintext settings file, which is the failure store.ts
+  // quotes from engine/server.py:653.
+  assert.deepEqual(
+    intentFrom([{ dataset: { action: "set-secret", settingKey: "openaiApiKey" }, value: "sk-abc" }]),
+    { kind: "set-secret", key: "openaiApiKey", raw: "sk-abc" },
+  );
+});
+
+test("a set-secret with no key is refused rather than aimed at nothing", () => {
+  assert.equal(intentFrom([{ dataset: { action: "set-secret" }, value: "sk-abc" }]), null);
+});
+
+test("a set-secret from an element with NO value is refused", () => {
+  // A tap that lands on the row and walks out to the action without a field
+  // must not read as "the user cleared their key".
+  assert.equal(intentFrom([{ dataset: { action: "set-secret", settingKey: "openaiApiKey" } }]), null);
+});
+
+test("an EMPTY secret commit is refused -- unlike an empty plain setting", () => {
+  // Deliberately the OPPOSITE of `set-setting`, where "" is a real edit. The
+  // secret field renders empty on every paint, so a blank commit is far more
+  // likely to be a stray blur than a decision -- and the decision it would be
+  // mistaken for is "destroy the credential". Removing a key is `clear-secret`,
+  // which the user reaches by pressing a button that says so.
+  for (const raw of ["", "   ", "\n"]) {
+    assert.equal(
+      intentFrom([{ dataset: { action: "set-secret", settingKey: "openaiApiKey" }, value: raw }]),
+      null,
+      `an empty commit (${JSON.stringify(raw)}) must not reach the keychain`,
+    );
+  }
+});
+
+test("the Remove button decodes as clear-secret, and needs no value", () => {
+  // A button holds nothing, so requiring a value here would make the control
+  // permanently inert -- and a key that can be entered but never removed
+  // leaves "no key configured" a state the user can never get back to.
+  assert.deepEqual(
+    intentFrom([{ dataset: { action: "clear-secret", settingKey: "openaiApiKey" } }]),
+    { kind: "clear-secret", key: "openaiApiKey" },
+  );
+});
+
+test("a clear-secret with no key is refused", () => {
+  assert.equal(intentFrom([{ dataset: { action: "clear-secret" } }]), null);
+});
+
+test("a DISABLED secret control commits nothing", () => {
+  assert.equal(
+    intentFrom([
+      { dataset: { action: "set-secret", settingKey: "openaiApiKey" }, value: "sk-abc", disabled: true },
+    ]),
+    null,
+  );
+});

@@ -81,6 +81,7 @@ test("the real composition root offers the in-process engine", async () => {
   const ids = appEngines({
     settings,
     http: createFakeHttp(),
+    secrets,
     persistence,
     onIgnored: () => {},
   }).map((c) => c.id);
@@ -115,6 +116,7 @@ test("the in-process engine, when its chunk cannot load, fails RECOVERABLY", asy
   const inProcess = appEngines({
     settings,
     http: createFakeHttp(),
+    secrets,
     persistence,
     onIgnored: () => {},
     loadAgent: async () => {
@@ -174,16 +176,29 @@ function harness(over: { storage?: ReturnType<typeof createFakeStorage> } = {}) 
   const dom = createFakeDom();
   const http = createFakeHttp();
   const storage = over.storage ?? createFakeStorage();
+  // Returned as well as installed: the secret tests below have to look INSIDE
+  // the keychain to prove a pasted key landed there, and `reads` is what proves
+  // the settings screen asked for presence rather than for the value.
+  const secrets = createFakeSecrets();
   const platform: Platform = {
     shell: createFakeShell(PHONE_INSETS),
     storage,
-    secrets: createFakeSecrets(),
+    secrets,
     http,
     time: nodeTime(),
     kind: "web",
   };
-  return { dom, http, storage, platform };
+  return { dom, http, storage, secrets, platform };
 }
+
+/** The API key field on the settings screen, by its accessible name. */
+const keyField = (dom: ReturnType<typeof createFakeDom>) =>
+  dom.find((n) => n.tagName === "INPUT" && n.getAttribute("aria-label") === "OpenAI API key");
+
+/** The presence word for a secret row ("Configured" / "Not set" / UNKNOWN). */
+const presenceOf = (dom: ReturnType<typeof createFakeDom>, key: string) =>
+  dom.find((n) => n.dataset["secretPresence"] === key)?.textContent ?? null;
+
 
 const submit = (dom: ReturnType<typeof createFakeDom>, text: string): void => {
   const box = dom.find((n) => n.tagName === "TEXTAREA");
@@ -1596,4 +1611,275 @@ test("streaming announcements are paced by the MONOTONIC clock, not the wall clo
     `the second sentence never reached the live region:\n${polite?.textContent}`,
   );
   app?.dispose();
+});
+
+// ---- the API key: entering one, and it reaching the engine -------------------
+//
+// The blocker this closes, measured on an Android emulator: the app launched,
+// the in-process engine loaded, and the first turn failed with "The
+// OPENAI_API_KEY environment variable is missing or empty; either provide it,
+// or instantiate the OpenAI client with an apiKey option." Settings showed
+// Engine and Engine address and nothing else. There was no field, and had there
+// been one nothing read it back: `secrets.get` had zero non-test callers and
+// the engine never received a key.
+
+test("the settings screen has a MASKED field for the API key", async () => {
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const field = keyField(dom);
+  assert.ok(field, `there must be somewhere to put a key:\n${dom.text()}`);
+  assert.equal(field.type, "password", "a credential typed in the clear is one a screenshot keeps");
+  assert.equal(field.dataset["action"], "set-secret", "it must commit through the secret path");
+  // Not `set-setting`: that path goes to StoragePort, which is the plaintext
+  // settings file this whole split exists to keep keys out of.
+  assert.notEqual(field.dataset["action"], "set-setting");
+  await app?.dispose();
+});
+
+test("a pasted key reaches the KEYCHAIN and never the settings file", async () => {
+  const storage = createFakeStorage();
+  const { dom, platform, secrets } = harness({ storage });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const field = keyField(dom);
+  field!.value = "sk-typed-by-a-user";
+  dom.change(field as never);
+  await settle();
+
+  assert.equal(
+    await secrets.get({ slot: "openai", account: "default" }),
+    "sk-typed-by-a-user",
+    "the key must actually be stored",
+  );
+  // And nothing was written to the plain store. store.ts quotes the failure
+  // this prevents: "One reference app keyrings its API keys and then writes its
+  // proxy password to the settings file."
+  const contents: string[] = [];
+  for (const key of storage.writes) {
+    const raw = await storage.read(key);
+    if (raw !== null) contents.push(raw);
+  }
+  assert.equal(
+    contents.join("\n").includes("sk-typed-by-a-user"),
+    false,
+    `the key reached the plain settings file:\n${contents.join("\n")}`,
+  );
+  await app?.dispose();
+});
+
+test("the field is EMPTIED after a commit and the key is nowhere in the DOM", async () => {
+  // The leak this closes is not hypothetical: `settingControl` seeds a plain
+  // field from the store, and the mirror of that line on a secret row would put
+  // the credential into every screenshot, crash report and accessibility dump
+  // of this screen. The facade has no getter precisely so that line cannot be
+  // written -- and the field must not hold what the user typed either.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const field = keyField(dom);
+  field!.value = "sk-should-not-linger";
+  dom.change(field as never);
+  await settle();
+
+  assert.equal(field!.value, "", "the field must not hold the key after committing it");
+  assert.equal(
+    dom.text().includes("sk-should-not-linger"),
+    false,
+    `the key is rendered somewhere on the page:\n${dom.text()}`,
+  );
+  await app?.dispose();
+});
+
+test("re-opening Settings does not echo the stored key back into the field", async () => {
+  // The other half: a screen rebuilt from the store must have nothing to draw
+  // it FROM. This is the test that fails the day someone "helpfully" adds a
+  // secret getter to the facade and uses it.
+  const { dom, platform, secrets } = harness();
+  await secrets.set({ slot: "openai", account: "default" }, "sk-already-stored");
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  assert.equal(keyField(dom)!.value, "", "a stored key must never be painted into the field");
+  assert.equal(dom.text().includes("sk-already-stored"), false, dom.text());
+  await app?.dispose();
+});
+
+test("the row says Configured from has(), without reading the value", async () => {
+  // ports/secrets.ts rule 2: "`has()` exists so the UI can render 'configured'
+  // without reading the value." A screen that answered this question with
+  // `get()` would fault the credential into the render pass every time the user
+  // opened Settings.
+  const { dom, platform, secrets } = harness();
+  await secrets.set({ slot: "openai", account: "default" }, "sk-already-stored");
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  const before = secrets.reads;
+  await openSettings(dom);
+
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Configured");
+  assert.equal(secrets.reads, before, "rendering presence must not read the secret's value");
+  await app?.dispose();
+});
+
+test("with nothing stored the row says Not set -- the pair", async () => {
+  // Without this, a row hard-wired to "Configured" would satisfy the test
+  // above, and a user with no key would be told they have one.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Not set");
+  await app?.dispose();
+});
+
+test("presence flips to Configured as soon as a key is entered", async () => {
+  // The row is the only confirmation the user gets -- the field empties itself,
+  // so a row that still said "Not set" would read as a save that silently
+  // failed, and the natural response is to paste it again.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Not set");
+
+  const field = keyField(dom);
+  field!.value = "sk-fresh";
+  dom.change(field as never);
+  await settle();
+
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Configured");
+  await app?.dispose();
+});
+
+test("a pasted key is trimmed, so a trailing newline is not part of the credential", async () => {
+  // A key pasted out of a mail client or a terminal arrives with whitespace,
+  // and the provider error it produces names the KEY rather than the
+  // whitespace -- so the user concludes their key is bad.
+  const { dom, platform, secrets } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+
+  const field = keyField(dom);
+  field!.value = "  sk-padded\n";
+  dom.change(field as never);
+  await settle();
+
+  assert.equal(await secrets.get({ slot: "openai", account: "default" }), "sk-padded");
+  await app?.dispose();
+});
+
+test("Remove takes the key back out, so 'no key' is a reachable state", async () => {
+  // A key that can be entered and replaced but never removed leaves "not
+  // configured" somewhere the user can never get back to -- and `clearSecret`
+  // was another facade method with no caller outside tests.
+  const { dom, platform, secrets } = harness();
+  await secrets.set({ slot: "openai", account: "default" }, "sk-to-remove");
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await openSettings(dom);
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Configured");
+
+  const remove = dom.find((n) => n.dataset["action"] === "clear-secret");
+  assert.ok(remove, `there must be a way to remove a stored key:\n${dom.text()}`);
+  dom.click(remove as never);
+  await settle();
+
+  assert.equal(await secrets.has({ slot: "openai", account: "default" }), false);
+  assert.equal(presenceOf(dom, "openaiApiKey"), "Not set");
+  await app?.dispose();
+});
+
+test("a keychain that REJECTS says so, and does not become the app-wide crash screen", async () => {
+  // SecretsPort rejects on a real device: a locked keychain, a keystore that
+  // will not open. Left to float, that rejection reaches the global crash
+  // handler and replaces the WHOLE app with the fatal screen -- on the one
+  // screen the user is trying to repair.
+  const { dom, platform } = harness();
+  const failing = {
+    ...platform.secrets,
+    async set(): Promise<void> {
+      throw new Error("keystore is locked");
+    },
+  };
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...platform, secrets: failing },
+    now: () => 1,
+    newChatId: () => "c1",
+  });
+  await openSettings(dom);
+
+  const field = keyField(dom);
+  field!.value = "sk-will-not-store";
+  dom.change(field as never);
+  await settle();
+
+  assert.ok(
+    dom.find((n) => n.className.includes("screen-settings")),
+    "the settings screen must survive a keychain failure",
+  );
+  const note = dom.find((n) => n.dataset["settingError"] === "openaiApiKey");
+  assert.ok(note !== null && note.textContent !== "", `a refused write must be said out loud:\n${dom.text()}`);
+  assert.equal(note.hidden, false);
+  await app?.dispose();
+});
+
+test("END TO END: a key entered in Settings authenticates the very next message", async () => {
+  // The acceptance test. Everything above proves a piece; this drives the whole
+  // path the user walks -- open Settings, paste a key, go back, send a message
+  // -- through the shipping composition root, and asserts the credential
+  // reached the agent that answers. A key stored and never used is the same bug
+  // in a new place.
+  const configs: { instructions: string; llm?: string; apiKey?: string }[] = [];
+  class ScriptedAgent {
+    lastStopReason: "completed" | null = "completed";
+    constructor(config: { instructions: string; llm?: string; apiKey?: string }) {
+      configs.push(config);
+    }
+    async *streamEvents() {
+      yield { type: "text", delta: "Paris." } as const;
+      yield { type: "finish", text: "Paris." } as const;
+    }
+  }
+
+  const { dom, http, platform: web } = harness();
+  http.on("/chat", () => {
+    throw new Error("the remote engine must not be contacted on a device");
+  });
+  // `kind: "tauri"` so the device default applies and the in-process engine is
+  // what answers -- the engine that had no way to be given a key.
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => ScriptedAgent as never,
+  });
+  assert.equal(app?.engine.id, ENGINE_PRAISONAI_TS);
+
+  await openSettings(dom);
+  const field = keyField(dom);
+  assert.ok(field, `no key field on the settings screen:\n${dom.text()}`);
+  field.value = "sk-end-to-end";
+  dom.change(field as never);
+  await settle();
+
+  // Back to the chat and ask something.
+  dom.click(dom.find((n) => n.dataset["route"] === "chat") as never);
+  await settle();
+  submit(dom, "capital of france?");
+  await settle(120);
+
+  assert.equal(configs.length, 1, "one Agent, built on the turn -- not at boot");
+  assert.equal(
+    configs[0]?.apiKey,
+    "sk-end-to-end",
+    "the key the user entered must authenticate the agent that answers",
+  );
+  const answer = dom.find((n) => n.textContent.includes("Paris") && n.className.includes("row"));
+  assert.ok(answer, `the answer must reach the transcript:\n${dom.text()}`);
+  assert.equal(dom.find((n) => n.className.includes("row-error")), null, "and nothing must fail on the way");
+  // And the key is still not anywhere on the page.
+  assert.equal(dom.text().includes("sk-end-to-end"), false, dom.text());
+  await app?.dispose();
 });

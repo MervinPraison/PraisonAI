@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, defaultEngineIdFor, settingDefsFor } from "./registry.ts";
+import { enginesFor, apiKeyFor, defaultEngineIdFor, settingDefsFor } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -35,7 +35,15 @@ import {
   type FocusTarget,
   type Navigation,
 } from "../../ui/src/a11y/focus.ts";
-import { buildSettings, labelOf, validateInput, type ValueRow } from "../../ui/src/settings/view-model.ts";
+import {
+  buildSettings,
+  labelOf,
+  presenceLabel,
+  validateInput,
+  type SecretPresence,
+  type SecretRow,
+  type ValueRow,
+} from "../../ui/src/settings/view-model.ts";
 import { buildChatList } from "../../ui/src/chats/list-view-model.ts";
 import type { ChatSummary, StoredMessage } from "../../core/src/chat/repository.ts";
 import { createBundle } from "../../ui/src/i18n/bundle.ts";
@@ -65,7 +73,8 @@ import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import { createPraisonTsEngine, type RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 import { loadPraisonAgent, type PraisonAgentModule } from "../../engines/src/praisonai-ts/load-agent.ts";
 import type { PraisonAgent } from "../../engines/src/praisonai-ts/agent-api.ts";
-import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
+import { secretRefOf, type SettingDef, type SettingsFacade } from "../../core/src/settings/store.ts";
+import type { SecretsPort } from "../../core/src/ports/secrets.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 
@@ -89,6 +98,7 @@ import type { HttpPort } from "../../core/src/ports/http.ts";
 async function createInProcessEngine(
   persistence: RunPersistence,
   settings: SettingsFacade,
+  secrets: SecretsPort,
   loadAgent: () => Promise<PraisonAgentModule>,
 ): Promise<AgentEnginePort> {
   const settingString = (key: string, fallback: string): string => {
@@ -102,9 +112,31 @@ async function createInProcessEngine(
       // fetch that fails then surfaces through engine.ts's run loop as a
       // recoverable `error` event rather than as a factory that throws.
       const Agent = await loadAgent();
+      /**
+       * The key, read on EVERY turn.
+       *
+       * The engine is built once, at boot, and held for the session -- so a
+       * key read here at construction would mean the key someone pastes into
+       * Settings does not work until they force-quit the app. That is the
+       * exact defect `enginesFor` fixed for `baseUrl`, and it is worse for a
+       * credential: the failure it produces ("the OPENAI_API_KEY environment
+       * variable is missing or empty") is the same message they were trying to
+       * clear, so the app appears to have ignored them.
+       *
+       * The secret goes into a local and into the agent config and NOWHERE
+       * else: not into settings state, not into a render tree, not into the
+       * announcer. `SecretsPort` is reachable here because this is the
+       * composition root; `ui/` holds a facade with no getter.
+       */
+      const apiKey = await apiKeyFor(secrets, settings.defs());
       return new Agent({
         instructions: "You are a helpful assistant.",
         llm: settingString("model", "gpt-4o-mini"),
+        // Omitted rather than passed as "" or null when unset: upstream treats
+        // a falsy apiKey as "fall back to the environment", and on a phone
+        // there is no environment -- so the honest shape for "no key" is an
+        // absent field and the provider's own missing-credential error.
+        ...(apiKey === null ? {} : { apiKey }),
       });
     },
     newMsgId: () => globalThis.crypto.randomUUID(),
@@ -123,6 +155,16 @@ async function createInProcessEngine(
 export function appEngines(deps: {
   readonly settings: SettingsFacade;
   readonly http: HttpPort;
+  /**
+   * The keychain, handed to the ENGINE and to nothing else.
+   *
+   * Required rather than optional on purpose. An optional port is a
+   * composition that can forget it and still build -- and what it builds is an
+   * engine with no credential, which fails on the first message with a
+   * provider error that names an environment variable no phone has. A missing
+   * argument here is a typecheck failure instead.
+   */
+  readonly secrets: SecretsPort;
   readonly persistence: RunPersistence;
   readonly onIgnored: (reason: IgnoredReason, detail: string) => void;
   /** How the in-process engine's `Agent` class is fetched. Defaults to the
@@ -136,7 +178,8 @@ export function appEngines(deps: {
     http: deps.http,
     persistence: deps.persistence,
     onIgnored: deps.onIgnored,
-    createInProcess: (persistence) => createInProcessEngine(persistence, deps.settings, loadAgent),
+    createInProcess: (persistence) =>
+      createInProcessEngine(persistence, deps.settings, deps.secrets, loadAgent),
   });
 }
 
@@ -259,6 +302,66 @@ function settingError(doc: Document, key: string): HTMLElement {
 }
 
 /**
+ * A secret row's controls: a masked field to set it, and a button to remove it.
+ *
+ * THREE properties, and each has a broken version that looks completely normal
+ * on screen.
+ *
+ *  1. `value` IS NEVER ASSIGNED. Not "assigned a masked stand-in" -- never
+ *     assigned. `settingControl` above reads the store to seed its field, and
+ *     the mirror of that line here would be the leak: `SettingsFacade` has no
+ *     secret getter precisely so a view "cannot accidentally fault a key into
+ *     the render tree where it can reach a log, a crash report or a
+ *     screenshot" (store.ts). The field paints empty on every visit, and
+ *     `syncSecret` empties it again after every commit, so the value is in the
+ *     DOM only while the user is holding it there.
+ *  2. `type="password"`, so a shoulder-surfer and a screen recording see dots.
+ *     `autocomplete="off"` and `spellcheck="false"` with it: a browser or
+ *     webview that offers to remember the field, or that ships an unrecognised
+ *     token off to a spellchecker, has moved the credential somewhere nobody
+ *     chose.
+ *  3. PRESENCE IS A SEPARATE NODE, addressed by `data-secret-presence`, so the
+ *     async `hasSecret` can land into it without repainting -- and without
+ *     wiping a key the user is mid-paste. It starts at UNKNOWN, never at "Not
+ *     set": view-model.ts rule 2, "telling someone their key is missing while
+ *     the keychain lookup is still in flight is how a working key gets pasted
+ *     twice".
+ */
+function secretControls(doc: Document, row: SecretRow, strings: Strings): readonly HTMLElement[] {
+  const presence = doc.createElement("span");
+  presence.className = "setting-value setting-presence";
+  presence.dataset["secretPresence"] = row.key;
+  presence.textContent = row.presence;
+
+  const input = doc.createElement("input") as HTMLElement & { type: string; placeholder: string };
+  // NOTE: no `input.value = ...` here, ever. See property 1 above.
+  input.type = "password";
+  input.className = "setting-value setting-input";
+  input.setAttribute("aria-label", row.label);
+  input.placeholder = strings.secretPlaceholder;
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("autocapitalize", "off");
+  input.setAttribute("autocorrect", "off");
+  input.setAttribute("spellcheck", "false");
+  // `change`, like every other field: committed on blur or Enter, so a
+  // half-pasted key never reaches the keychain.
+  input.dataset["action"] = "set-secret";
+  input.dataset["settingKey"] = row.key;
+
+  const clear = doc.createElement("button") as HTMLElement & { type: string };
+  clear.type = "button";
+  clear.className = "setting-clear";
+  clear.textContent = strings.actionClearSecret;
+  clear.dataset["action"] = "clear-secret";
+  clear.dataset["settingKey"] = row.key;
+  // Named for the key it clears. "Remove" alone, repeated once per secret, is
+  // a list of identical buttons to anyone navigating by control name.
+  clear.setAttribute("aria-label", `${strings.actionClearSecret}: ${row.label}`);
+
+  return [presence, input, clear, settingError(doc, row.key)];
+}
+
+/**
  * The settings screen, built from the live registry via `buildSettings`.
  *
  * Data-driven, so a setting added to the registry appears here without a code
@@ -273,6 +376,10 @@ export function buildSettingsScreen(
   doc: Document,
   settings: SettingsFacade,
   strings: Strings,
+  /** Resolved `hasSecret` answers. Empty by default, which paints every secret
+   *  as UNKNOWN -- the honest first frame for a screen whose keychain lookups
+   *  are async. `refreshSecretPresence` fills the nodes in when they land. */
+  secretPresence: SecretPresence = new Map(),
 ): HTMLElement {
   const section = doc.createElement("section");
   section.className = "screen screen-settings";
@@ -280,7 +387,7 @@ export function buildSettingsScreen(
 
   const defByKey = new Map(settings.defs().map((def) => [def.key, def]));
 
-  const view = buildSettings(settings);
+  const view = buildSettings(settings, secretPresence);
   for (const warning of view.warnings) {
     const note = doc.createElement("p");
     note.className = "row row-notice";
@@ -308,10 +415,16 @@ export function buildSettingsScreen(
         // -- an alert region inserted at the moment it has something to say is
         // announced unreliably by every screen reader.
         el.append(settingControl(doc, def, row, settings), settingError(doc, row.key));
+      } else if (row.kind === "secret") {
+        // Editable, at last. This row was a read-only `<span>` reporting
+        // "Not set" forever: there was no secret def to render it and, had
+        // there been one, no way to fill it in -- which is how the app shipped
+        // with an in-process engine and no field to give it a credential.
+        el.append(...secretControls(doc, row, strings));
       } else {
         const value = doc.createElement("span");
         value.className = "setting-value";
-        value.textContent = row.kind === "secret" ? row.presence : String(row.value);
+        value.textContent = String(row.value);
         el.append(value);
       }
       section.append(el);
@@ -729,6 +842,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       appEngines({
         settings,
         http: platform.http,
+        // The FULL port, straight from the platform. `createApp` hands this
+        // factory the settings FACADE, which deliberately cannot read a
+        // secret; the engine needs the value, so it gets the port here, in
+        // the one file allowed to name a concrete adapter.
+        secrets: platform.secrets,
         persistence,
         onIgnored,
         ...(deps.loadAgent === undefined ? {} : { loadAgent: deps.loadAgent }),
@@ -830,6 +948,94 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   platform.shell.onInsetsChanged(applyGeometry);
   platform.shell.onKeyboardHeightChanged(applyGeometry);
 
+  /** Every element under `scope`, including `scope` itself. The same walk
+   *  `syncSettings` and `byFocusId` do: there is no `querySelectorAll` in the
+   *  seam a test drives, and the tree is a settings screen, not a document. */
+  const everyElement = (scope: HTMLElement): readonly HTMLElement[] => {
+    const found: HTMLElement[] = [];
+    const stack: HTMLElement[] = [scope];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (node === undefined) break;
+      found.push(node);
+      for (const child of node.children) {
+        if (child instanceof HTMLElement) stack.push(child);
+      }
+    }
+    return found;
+  };
+
+  /**
+   * Put a secret row back the way it must always look: field EMPTY, and the
+   * refusal for this key shown or cleared.
+   *
+   * Emptying is the point, and it is not cosmetic. `syncSettings` redraws a
+   * plain field from the store, which is the honest thing for an engine
+   * address; the mirror of that for a secret would mean reading it back, and
+   * there is deliberately nothing to read it back WITH. So the field returns
+   * to empty -- the value the user pasted lives in the keychain and stops
+   * existing in the DOM, where the next screenshot, crash report or
+   * accessibility dump would otherwise find it.
+   */
+  const syncSecret = (key: string, refusal: string | null): void => {
+    for (const node of everyElement(root)) {
+      if (node.dataset["action"] === "set-secret" && node.dataset["settingKey"] === key) {
+        (node as HTMLElement & { value: string }).value = "";
+        continue;
+      }
+      if (node.dataset["settingError"] !== key) continue;
+      node.textContent = refusal ?? "";
+      node.hidden = refusal === null;
+    }
+  };
+
+  /**
+   * Resolve `hasSecret` for every secret def and write the answer into the
+   * row's presence node.
+   *
+   * PRESENCE, not the value: `hasSecret` is the method that exists so a screen
+   * can say "Configured" without faulting a key into memory (ports/secrets.ts
+   * rule 2), and this is the only place the app asks.
+   *
+   * Async and separate from the paint because `buildSettings` is synchronous
+   * and a keychain lookup is not. Writing into an existing node rather than
+   * rebuilding the screen is what keeps a half-pasted key in the field when
+   * the answer lands a moment later.
+   */
+  // Which presence lookup is the most recent one asked for. A save followed by
+  // a Remove fires two overlapping walks, and with a native keychain adapter
+  // (the declared next step) `hasSecret` can resolve OUT OF ORDER -- the older
+  // lookup landing last would paint "Configured" over a row the user just
+  // cleared, or "Not set" over one they just saved. Only the latest request is
+  // allowed to write; a stale one has already been superseded and is dropped.
+  let latestPresenceSeq = 0;
+  const refreshSecretPresence = (scope: HTMLElement): void => {
+    const seq = ++latestPresenceSeq;
+    void (async (): Promise<void> => {
+      const answers = new Map<string, string>();
+      for (const def of app.settings.defs()) {
+        const ref = secretRefOf(def);
+        if (ref === null) continue;
+        answers.set(def.key, presenceLabel((await app.settings.hasSecret(ref)) ? "configured" : "not-set"));
+      }
+      // A newer refresh started while this one awaited: its answer is the
+      // current truth, so this one must not overwrite it.
+      if (seq !== latestPresenceSeq) return;
+      for (const node of everyElement(scope)) {
+        const key = node.dataset["secretPresence"];
+        if (key === undefined) continue;
+        const label = answers.get(key);
+        if (label !== undefined) node.textContent = label;
+      }
+    })().catch(() => {
+      // A keychain that will not answer leaves the row at UNKNOWN, which is
+      // what it already says. Overwriting it with "Not set" would tell someone
+      // their key is gone because a lookup failed -- view-model.ts rule 2, and
+      // the reason UNKNOWN is a state at all. A floating rejection here would
+      // also reach the global crash handler and replace the whole app.
+    });
+  };
+
   // ---- screens the router drives -----------------------------------------
   // The chat screen is retained (it holds scroll position and a live stream);
   // settings and chats are built on demand and rebuilt each visit. `transition`
@@ -878,7 +1084,15 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   const screens = createScreens({
     root,
     build: (id: ScreenId): HTMLElement => {
-      if (id === "settings") return buildSettingsScreen(doc, app.settings, strings);
+      if (id === "settings") {
+        const section = buildSettingsScreen(doc, app.settings, strings);
+        // Built with presence UNKNOWN, then filled in. The alternative --
+        // awaiting the keychain before painting -- is a blank screen for as
+        // long as the platform takes to answer, and `build` is synchronous
+        // because `transition` is.
+        refreshSecretPresence(section);
+        return section;
+      }
       if (id === "chats") {
         // A fresh snapshot each visit: a chat created since the list was last
         // seen must appear, and one deleted must be gone.
@@ -1233,6 +1447,62 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         assertive.textContent = strings.chatDeleted(title);
         const list = screens.nodes.get("chats");
         if (list !== undefined) await refreshChats(list);
+        return;
+      }
+      case "set-secret": {
+        // The def comes from the LIVE facade for the same reason `set-setting`
+        // does: the screen and the registry must not be able to disagree about
+        // which key this field belongs to.
+        const def = app.settings.defs().find((d) => d.key === intent.key);
+        if (def === undefined) return;
+        // `secretRefOf` refuses a def that is not a secret, and a secret def
+        // with nowhere to write. Either would otherwise end with a pasted key
+        // going somewhere nobody chose.
+        const ref = secretRefOf(def);
+        let stored = false;
+        if (ref !== null) {
+          try {
+            // Trimmed: a key pasted from a mail client or a terminal arrives
+            // with a trailing newline, and an `Authorization` header built
+            // from it fails with an error about the key rather than about the
+            // whitespace. No provider key contains one.
+            await app.settings.setSecret(ref, intent.raw.trim());
+            stored = true;
+          } catch {
+            // SecretsPort rejects on a real device -- a locked keychain, a
+            // keystore that will not open. Left to float this reaches the
+            // global crash handler and replaces the WHOLE app with the fatal
+            // screen, on the one screen the user is trying to repair.
+            stored = false;
+          }
+        }
+        const refusal = stored ? null : strings.settingRejected(labelOf(def));
+        // The LABEL, never the value: this is an assertive live region and it
+        // is read out loud.
+        assertive.textContent = stored ? strings.secretStored(labelOf(def)) : (refusal ?? "");
+        syncSecret(intent.key, refusal);
+        // Presence has changed; ask again rather than assuming. `setSecret`
+        // resolving is not proof the store kept it.
+        refreshSecretPresence(root);
+        return;
+      }
+      case "clear-secret": {
+        const def = app.settings.defs().find((d) => d.key === intent.key);
+        if (def === undefined) return;
+        const ref = secretRefOf(def);
+        let cleared = false;
+        if (ref !== null) {
+          try {
+            await app.settings.clearSecret(ref);
+            cleared = true;
+          } catch {
+            cleared = false;
+          }
+        }
+        const refusal = cleared ? null : strings.settingRejected(labelOf(def));
+        assertive.textContent = cleared ? strings.secretCleared(labelOf(def)) : (refusal ?? "");
+        syncSecret(intent.key, refusal);
+        refreshSecretPresence(root);
         return;
       }
       case "open-chat": {

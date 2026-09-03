@@ -17,7 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -187,23 +187,27 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function runFixture(mode: string): { status: number | null; output: string } {
-  const here = dirname(fileURLToPath(import.meta.url));
+/** Spawn one fixture FILE in one break mode. Takes the path rather than
+ *  assuming `contract-fixture.ts`, because the ledger probe below runs a
+ *  generated copy of it beside the original. */
+function runFixtureAt(file: string, mode: string): { status: number | null; output: string } {
   // The reporter is FORCED. Node's default differs by version -- 22 emits TAP
   // when stdout is a pipe, 24 emits the spec reporter -- so a test that greps
   // for "not ok" passes on one and fails on the other while the code under
   // test is identical. Depending on an incidental output format is the same
   // mistake as depending on an incidental default anywhere else.
-  const run = spawnSync(
-    process.execPath,
-    ["--test-reporter=tap", join(here, "contract-fixture.ts"), mode],
-    {
-      encoding: "utf8",
-      timeout: 120_000,
-      env: childEnv(),
-    },
-  );
+  const run = spawnSync(process.execPath, ["--test-reporter=tap", file, mode], {
+    encoding: "utf8",
+    timeout: 120_000,
+    env: childEnv(),
+  });
   return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
+}
+
+const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "contract-fixture.ts");
+
+function runFixture(mode: string): { status: number | null; output: string } {
+  return runFixtureAt(FIXTURE, mode);
 }
 
 /** Each break mode, and the contract case that must go red because of it. */
@@ -247,28 +251,78 @@ test("the contract can PASS: an unbroken fixture succeeds under the same runner"
 // `rawAssert.equal(made() - made0, N, LEDGER)` the new thing worth deleting.
 //
 // So: delete a real assertion from the real contract and require the fixture
-// run to go red ON THE LEDGER. The file is edited in place and restored in a
-// finally, with a byte-for-byte check that it was -- a copy elsewhere would
-// break the contract's relative imports, and a "failure" that is really a
-// module that never loaded proves nothing.
-
+// run to go red ON THE LEDGER.
+//
+// THE HOLLOWED CONTRACT IS A COPY, AND THE ORIGINAL IS NEVER WRITTEN TO.
+//
+// It used to edit `conformance.ts` in place and restore it in a `finally`.
+// The twin probe in adapters/src/conformance/contracts.test.ts does the same
+// and states the invariant that makes it safe: "Nothing but this file and the
+// spawned fixture imports a contract, and both have already resolved theirs by
+// the time this runs." That is true over there. It is FALSE here, and this
+// probe inherited the technique without the invariant: `conformance.ts` is
+// imported by three test files -- this one, remote-http/engine.test.ts and
+// praisonai-ts/conformance.test.ts -- and `node --test` runs them in SEPARATE,
+// CONCURRENT processes. A sibling process that happens to import the contract
+// inside the write/restore window loads a contract with one assertion missing
+// and `close(made0, 3)` unchanged, and fails with `2 !== 3` on a case nobody
+// touched.
+//
+// That is not hypothetical: it turned CI red on `check (node 22.18)` while
+// `check (node 24)` passed on identical code (PR #4792). The node version was
+// a red herring -- it changes how the files get scheduled, and therefore who
+// wins the race, not what the contract asserts. The tell was the stack frame,
+// which pointed one line ABOVE `close`'s real position: the reader was looking
+// at a file with a line spliced out of it.
+//
+// A copy in a temp tree was rejected before, correctly, because it breaks the
+// contract's relative `../../core` imports and a "failure" would then only
+// prove the module never loaded. A copy BESIDE the original has neither
+// problem: every relative specifier resolves identically from the same
+// directory. The fixture is copied too, with its one import repointed, and
+// both are removed in a `finally`. The names carry the pid, so two runs of
+// this suite over one checkout cannot collide either.
 test("the engine contract's assertion ledger notices a deleted assertion", () => {
-  const file = join(dirname(fileURLToPath(import.meta.url)), "conformance.ts");
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const file = join(dir, "conformance.ts");
   const original = readFileSync(file, "utf8");
   const lines = original.split("\n");
   const at = lines.findIndex((l) => /^\s+assert\.[a-zA-Z]+\(.*\);\s*$/.test(l));
   assert.notEqual(at, -1, "the contract must contain a single-line assertion to remove");
   const removed = (lines[at] ?? "").trim();
   lines.splice(at, 1);
+  const hollowed = lines.join("\n");
+  // A splice that removed nothing would spawn a child against an intact
+  // contract, which passes -- and the probe would then report "left the run
+  // green", blaming the ledger for its own no-op.
+  assert.notEqual(hollowed, original, "the hollowed copy must actually be missing a line");
+
+  const tag = `probe-${process.pid}-${Date.now().toString(36)}`;
+  const contractCopy = join(dir, `conformance.${tag}.ts`);
+  const fixtureCopy = join(dir, `contract-fixture.${tag}.ts`);
+
+  const fixtureSource = readFileSync(FIXTURE, "utf8");
+  const SPECIFIER = 'from "./conformance.ts"';
+  // Asserted, not assumed. If the fixture's import is ever spelled differently
+  // the rewrite silently does nothing, the copy imports the REAL contract, and
+  // the probe passes for the wrong reason -- the exact class of defect the
+  // ledger exists to catch.
+  assert.ok(fixtureSource.includes(SPECIFIER), "the fixture must import the contract to be repointed");
+  const repointed = fixtureSource.replace(SPECIFIER, `from "./conformance.${tag}.ts"`);
 
   let run: { status: number | null; output: string };
   try {
-    writeFileSync(file, lines.join("\n"));
-    run = runFixture("none");
+    writeFileSync(contractCopy, hollowed);
+    writeFileSync(fixtureCopy, repointed);
+    run = runFixtureAt(fixtureCopy, "none");
   } finally {
-    writeFileSync(file, original);
+    rmSync(contractCopy, { force: true });
+    rmSync(fixtureCopy, { force: true });
   }
-  assert.equal(readFileSync(file, "utf8"), original, "the contract must be restored byte for byte");
+  // The real contract is untouched -- and stays asserted, so a future edit that
+  // goes back to writing this file in place fails here rather than in a
+  // sibling suite three files away.
+  assert.equal(readFileSync(file, "utf8"), original, "the probe must never write to the real contract");
   assert.notEqual(
     run.status,
     0,

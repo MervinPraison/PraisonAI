@@ -35,6 +35,27 @@ export type Intent =
    * see.
    */
   | { readonly kind: "set-setting"; readonly key: string; readonly raw: string }
+  /**
+   * A SECRET field was committed. Its own intent, not `set-setting` with a
+   * flag.
+   *
+   * The two go to different stores through different methods -- `setSecret`
+   * against SecretsPort versus `set` against StoragePort -- and the whole
+   * point of the split (store.ts: "One reference app keyrings its API keys and
+   * then writes its proxy password to the settings file") is that no single
+   * code path decides at runtime which one a value lands in. One shared intent
+   * with a boolean is exactly that code path: get the boolean wrong once, from
+   * a stale def or a typo'd key, and an API key is in a plaintext settings
+   * file. Two intents cannot make that mistake.
+   *
+   * `raw` is the typed text and it is NEVER stored anywhere but the keychain
+   * -- not echoed back into the field, not put in the announcer, not logged.
+   */
+  | { readonly kind: "set-secret"; readonly key: string; readonly raw: string }
+  /** Remove a stored secret. A key that can be entered and not removed is its
+   *  own trap: a wrong or revoked key can be replaced but never taken out, so
+   *  "no key configured" is a state the user can never get back to. */
+  | { readonly kind: "clear-secret"; readonly key: string }
   | { readonly kind: "retry" }
   | { readonly kind: "copy" };
 
@@ -119,6 +140,25 @@ export function intentFrom(chain: readonly Actionable[]): Intent | null {
         if (key === undefined) return null;
         const raw = el.value;
         return raw === undefined ? null : { kind: "set-setting", key, raw };
+      }
+      case "set-secret": {
+        // Same two halves as `set-setting`, and the VALUE half matters more
+        // here: an element with no field in it reporting `""` would commit an
+        // empty secret over a working key on a stray tap.
+        const key = d["settingKey"];
+        if (key === undefined) return null;
+        const raw = el.value;
+        if (raw === undefined) return null;
+        // An empty commit is REFUSED rather than treated as "delete it".
+        // Removing a credential must be something the user asked for by name
+        // (`clear-secret`), never something a cleared field does on blur.
+        if (raw.trim() === "") return null;
+        return { kind: "set-secret", key, raw };
+      }
+      case "clear-secret": {
+        const key = d["settingKey"];
+        // No `value` needed: this is a button, and buttons hold nothing.
+        return key === undefined ? null : { kind: "clear-secret", key };
       }
       default:
         // An unknown action is not an error -- a newer template can carry one

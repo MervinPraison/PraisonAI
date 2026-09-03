@@ -17,12 +17,14 @@ import {
   ENGINE_PRAISONAI_TS,
   ENGINE_REMOTE_HTTP,
   SETTING_DEFS,
+  apiKeyFor,
   defaultEngineIdFor,
   settingDefsFor,
   enginesFor,
 } from "./registry.ts";
 import { appEngines } from "./main.ts";
-import { createSettingsStore, facadeFor } from "../../core/src/settings/store.ts";
+import type { PraisonAgentModule } from "../../engines/src/praisonai-ts/load-agent.ts";
+import { createSettingsStore, facadeFor, secretRefOf } from "../../core/src/settings/store.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
 import { createFakeHttp, jsonResponse, sseResponse } from "../../testing/src/fake-http.ts";
@@ -38,7 +40,7 @@ const build = async () => {
   // A RunPersistence that records nothing: these cases are about WHICH
   // engines are offered, not about what a turn writes.
   const persistence = { async record() { return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 }; } };
-  return { store, settings: facadeFor(store, secrets), http: createFakeHttp(), storage, persistence };
+  return { store, secrets, settings: facadeFor(store, secrets), http: createFakeHttp(), storage, persistence };
 };
 
 test("the remote engine is always offered, because it needs nothing injected", async () => {
@@ -113,8 +115,8 @@ test("the engine setting offers exactly the engines the SHIPPING build can make"
   // disagree in a way it could see. It now compares against what `appEngines`
   // -- the composition main.ts actually mounts -- offers, which is the only
   // comparison that can fail.
-  const { settings, http, persistence } = await build();
-  const buildable = appEngines({ settings, http, persistence, onIgnored: () => {} }).map((c) => c.id);
+  const { settings, http, secrets, persistence } = await build();
+  const buildable = appEngines({ settings, http, secrets, persistence, onIgnored: () => {} }).map((c) => c.id);
 
   const def = SETTING_DEFS.find((d) => d.key === "engineId");
   assert.deepEqual(
@@ -164,6 +166,12 @@ function keyIsReadInSource(key: string): boolean {
   const reads = [
     new RegExp(`\\.(?:get|isSet)\\(\\s*["']${key}["']`),
     new RegExp(`(?:stringSetting|chosenStringOr)\\([^)]*["']${key}["']`),
+    // A SECRET is not read with `settings.get` -- it cannot be: the facade has
+    // no getter. Its one sanctioned read-back is `readSecretSetting`, which
+    // takes the full SecretsPort. Without this line a secret def could never
+    // satisfy the "declared settings must be read" rule at all, and the honest
+    // way to add one would have been to weaken the rule.
+    new RegExp(`readSecretSetting\\([^)]*["']${key}["']`),
   ];
   return CONSUMER_SOURCES.some((file) => {
     const source = readFileSync(join(here, file), "utf8");
@@ -207,15 +215,74 @@ test("every declared setting is one the app actually reads", async () => {
   );
 });
 
-test("there are no secret settings, so no secret is declared and never written", async () => {
-  // `apiKey` was the sharp one: `setSecret` is the only way in and nothing
-  // outside tests called it, so a configured key could never be written -- and
-  // even if it were, `enginesFor` never passed a `token`, so the Authorization
-  // header was never sent. A secret nobody can write and nothing reads is worse
-  // than absent. The store's secret machinery stays (contract-tested); it is
-  // the *declaration* that has no consumer.
+test("the app declares a secret setting, and it is the OpenAI key", async () => {
+  // The inverse of the test that used to stand here. `apiKey` was removed
+  // because `setSecret` had no caller outside tests and `secrets.get` had none
+  // at all, so a key could be neither entered nor used -- the app launched, the
+  // in-process engine loaded, and the first message died on "The
+  // OPENAI_API_KEY environment variable is missing or empty" with no field
+  // anywhere in the app to fix it.
+  //
+  // The declaration is back WITH its consumer, and the rest of this file is
+  // what makes that more than a claim: the read-back is pinned below, the
+  // handover to the agent is pinned below that, and the "every declared
+  // setting is read" test covers this key through `readSecretSetting`.
   const secrets = SETTING_DEFS.filter((d) => d.secret === true).map((d) => d.key);
-  assert.deepEqual(secrets, []);
+  assert.deepEqual(secrets, ["openaiApiKey"]);
+});
+
+test("ONE slot is declared, not one row per provider the union allows", async () => {
+  // `SecretSlot` is a closed union of five, and the temptation is to ship five
+  // rows. Four of them would be controls nothing reads -- the exact #4636
+  // defect the rule above forbids -- because `createInProcessEngine` builds one
+  // kind of agent and praisonai-ts routes its default model through
+  // OpenAIService. The union is closed for keychain-namespace safety
+  // (ports/secrets.ts rule 3), not as a shipping list.
+  const refs = SETTING_DEFS.flatMap((d) => {
+    const ref = secretRefOf(d);
+    return ref === null ? [] : [ref];
+  });
+  assert.deepEqual(refs, [{ slot: "openai", account: "default" }]);
+});
+
+test("the secret def carries the ref that says WHERE it lives", async () => {
+  // A secret def without `secretRef` is one `secretRefOf` refuses, so the
+  // screen would render a row it can never write through and the reader would
+  // return null forever -- a field that accepts a key and drops it.
+  const def = SETTING_DEFS.find((d) => d.key === "openaiApiKey");
+  assert.ok(def, "the key setting must be declared");
+  assert.equal(def.secret, true);
+  assert.notEqual(secretRefOf(def), null, "a secret def with no ref has nowhere to write");
+});
+
+test("the stored key is read back out again", async () => {
+  // `secrets.get` had ZERO non-test callers. Everything to store a key existed
+  // and nothing read one, so a key the user typed went into the keychain and
+  // stopped there. This is the read-back, through the same defs the screen
+  // renders from.
+  const { secrets, store } = await build();
+  assert.equal(await apiKeyFor(secrets, SETTING_DEFS), null, "nothing configured means null");
+
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-test-key");
+  assert.equal(await apiKeyFor(secrets, SETTING_DEFS), "sk-test-key");
+});
+
+test("a blank stored key reads as absent, not as an empty credential", async () => {
+  // "" is what an `Authorization: Bearer ` header is built from before anyone
+  // notices. Absent is the honest reading either way.
+  const { secrets, store } = await build();
+  await store.setSecret({ slot: "openai", account: "default" }, "");
+  assert.equal(await apiKeyFor(secrets, SETTING_DEFS), null);
+});
+
+test("apiKeyFor follows the defs it is given, not a list of its own", async () => {
+  // `settingDefsFor` rewrites a def per platform. A reader consulting its own
+  // copy of the registry is a reader that can disagree with the screen the
+  // user just filled in.
+  const { secrets, store } = await build();
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-test-key");
+  assert.equal(await apiKeyFor(secrets, []), null, "no def means nothing to read");
+  assert.equal(await apiKeyFor(secrets, settingDefsFor("tauri")), "sk-test-key");
 });
 
 // ---- the readiness probe has to actually be wired to the engine -------------
@@ -429,4 +496,147 @@ test("a corrected address is re-read by the health probe too", async () => {
   await choice!.probe!();
 
   assert.equal(http.sent.at(-1)?.url, "http://10.0.0.7:9000/health");
+});
+
+
+// ---- the key has to reach the AGENT, not merely be readable ----------------
+//
+// Storing a key and reading it back is two thirds of the fix. A key that is
+// read and then dropped on the floor between the registry and the agent is the
+// same bug one hop further along: the field works, the row says "Configured",
+// and the first message still fails with "The OPENAI_API_KEY environment
+// variable is missing or empty".
+
+const A_TURN = {
+  prompt: "hello",
+  chatId: "c1",
+  runId: "r1",
+  tools: false,
+  regenerateOf: null,
+  attachments: [],
+};
+
+/** A stand-in for praisonai's `Agent` that records the config it was
+ *  constructed with. Four lines, because agent-api.ts declares the coupling
+ *  structurally rather than importing it -- see reason 1 in that file. */
+function recordingAgentClass(): {
+  readonly module: PraisonAgentModule;
+  readonly configs: { instructions: string; llm?: string; apiKey?: string }[];
+} {
+  const configs: { instructions: string; llm?: string; apiKey?: string }[] = [];
+  class Recording {
+    readonly lastStopReason = "completed" as const;
+    constructor(config: { instructions: string; llm?: string; apiKey?: string }) {
+      configs.push(config);
+    }
+    async *streamEvents(): AsyncIterable<{ type: "finish"; text: string }> {
+      yield { type: "finish", text: "an answer" };
+    }
+  }
+  return { module: Recording as unknown as PraisonAgentModule, configs };
+}
+
+async function runOneTurn(
+  deps: Parameters<typeof appEngines>[0],
+): Promise<void> {
+  const choice = appEngines(deps).find((c) => c.id === ENGINE_PRAISONAI_TS);
+  assert.ok(choice, "the in-process engine must be offered");
+  const engine = await choice.create();
+  for await (const _event of engine.run(A_TURN, new AbortController().signal)) {
+    // drained: what is under test is the config the agent was built with
+  }
+  await engine.dispose();
+}
+
+test("the stored key is handed to the agent the in-process engine builds", async () => {
+  const { settings, http, secrets, store, persistence } = await build();
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-live-key");
+
+  const { module, configs } = recordingAgentClass();
+  await runOneTurn({
+    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+  });
+
+  assert.deepEqual(configs.map((c) => c.apiKey), ["sk-live-key"]);
+});
+
+test("with no key stored the field is ABSENT, not an empty string", async () => {
+  // The pair, and it is not pedantry: upstream treats a falsy apiKey as "fall
+  // back to OPENAI_API_KEY in the environment", and passing "" explicitly is
+  // the same as passing nothing -- but a null or "" that DID get through would
+  // build an Authorization header out of nothing and turn a missing-credential
+  // error into an authentication one, which reads as a bad key rather than as
+  // no key.
+  const { settings, http, secrets, persistence } = await build();
+  const { module, configs } = recordingAgentClass();
+  await runOneTurn({
+    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+  });
+  assert.equal(configs.length, 1);
+  assert.equal("apiKey" in configs[0]!, false, "an unset key must not appear in the agent config at all");
+});
+
+test("a key pasted AFTER the engine was built works on the very next message", async () => {
+  // The engine is built once, at boot, and held for the session. A key read at
+  // construction would mean the key someone just pasted into Settings does not
+  // work until they force-quit the app -- and the error they would see is the
+  // same one they were trying to clear, so the app appears to have ignored
+  // them. `enginesFor` learned this with `baseUrl`; a credential is worse.
+  const { settings, http, secrets, store, persistence } = await build();
+  const { module, configs } = recordingAgentClass();
+  const deps = {
+    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+  };
+
+  const choice = appEngines(deps).find((c) => c.id === ENGINE_PRAISONAI_TS);
+  const engine = await choice!.create();
+  // Built BEFORE the key exists, exactly as boot.ts does.
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-pasted-later");
+  for await (const _event of engine.run(A_TURN, new AbortController().signal)) {
+    // drained
+  }
+  await engine.dispose();
+
+  assert.deepEqual(configs.map((c) => c.apiKey), ["sk-pasted-later"]);
+});
+
+test("a replaced key replaces itself on the next turn", async () => {
+  // The other half of "read per turn": rotating a key must not need a relaunch
+  // either.
+  const { settings, http, secrets, store, persistence } = await build();
+  const { module, configs } = recordingAgentClass();
+  const deps = {
+    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+  };
+  const engine = await appEngines(deps).find((c) => c.id === ENGINE_PRAISONAI_TS)!.create();
+
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-first");
+  for await (const _e of engine.run(A_TURN, new AbortController().signal)) { /* drain */ }
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-second");
+  for await (const _e of engine.run({ ...A_TURN, runId: "r2" }, new AbortController().signal)) { /* drain */ }
+  await engine.dispose();
+
+  assert.deepEqual(configs.map((c) => c.apiKey), ["sk-first", "sk-second"]);
+});
+
+test("the secret never reaches the plain settings file on the way through", async () => {
+  // Rule 1 of ports/secrets.ts, asserted at the composition level rather than
+  // only in the store's own unit test: the whole path from `setSecret` to the
+  // agent must leave nothing behind in StoragePort.
+  const { settings, http, secrets, store, storage, persistence } = await build();
+  await store.setSecret({ slot: "openai", account: "default" }, "sk-do-not-leak");
+  const { module } = recordingAgentClass();
+  await runOneTurn({
+    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+  });
+  const contents: string[] = [];
+  for (const key of storage.writes) {
+    const raw = await storage.read(key);
+    if (raw !== null) contents.push(raw);
+  }
+  assert.equal(
+    contents.join("\n").includes("sk-do-not-leak"),
+    false,
+    "the key appeared in the plain settings file",
+  );
 });

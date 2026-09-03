@@ -163,7 +163,11 @@ export function labelOf(def: SettingDef): string {
   return label === "" ? def.key : label;
 }
 
-function presenceLabel(state: PresenceState): string {
+/** The words for a presence state. Exported so the renderer that REFRESHES a
+ *  row after an async `hasSecret` lands says the same thing the first paint
+ *  said -- two spellings of "Configured" is two rows that look like different
+ *  states. */
+export function presenceLabel(state: PresenceState): string {
   switch (state) {
     case "configured":
       return CONFIGURED;
