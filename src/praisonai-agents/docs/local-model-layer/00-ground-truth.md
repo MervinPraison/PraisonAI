@@ -292,3 +292,33 @@ Three facts follow, and they reframe the work:
   re-implements `_is_ollama_provider`, `_apply_ollama_defaults`, `_validate_tool_call`,
   `_should_force_tool_usage` and both prompt templates. It cannot fail in response to any change
   in `llm.py`. Do not treat it as a safety net.
+
+
+## 9. Test-gating facts (order 04)
+
+- **`not network`, not `provider_ollama`, is what deselects the mocked base_url suite.** The gating
+  plugin implies `network` from *any* provider marker (`test_gating.py:235-238`) and every CI
+  expression contains `not network`. Editing the workflows' `-m` strings accomplishes nothing.
+- `tests/unit/**` is **exempt** from provider auto-detection (`test_gating.py:215`,
+  `test_type != 'unit'`). That is why `tests/unit/llm/test_ollama_tool_reliability.py` runs in CI
+  while the integration file does not — and why live tests placed under `tests/unit/` need an
+  **explicit** marker.
+- `-m provider_ollama` currently selects **32 tests across 5 files**; only 7 are Ollama tests.
+- **4 of the 7 tests in `test_base_url_api_base_fix.py` fail when actually executed** —
+  `LLMResponseError: 'str' object has no attribute 'choices'`. The mock returns a dict; the
+  tool-calling loop needs an object with `.choices`.
+- **`tests/test_double_api_fix.py` makes a real network call when forced to run.** `llm.py` routes
+  `gpt-4o-mini` through `litellm.responses` (`llm.py:6434`), not `litellm.completion`, so its patch
+  no longer intercepts (verified: 401 from `api.openai.com/v1/responses`). It is currently masked
+  by an unconditional auto-skip — **anyone who "fixes" the skip without fixing the mock gets live
+  billed calls.**
+- **`network_guard.py` disables itself** for anything under `/integration/`, `/e2e/`, `/live/`
+  (lines 103-105) and for any `provider_*`-marked test (96-100). The suite's network blocker does
+  not cover the tests most likely to make network calls.
+- **A live Ollama suite already exists** and has never run:
+  `tests/integration/test_ollama_tool_calling_live.py`, 230 lines, 7 tests, gated on
+  `PRAISONAI_TEST_OLLAMA`. It is broken against `main` — all 7 pass `verbose=True` to `Agent()`,
+  and two pass `force_tool_usage=` / `max_tool_repairs=`; all three now raise `TypeError`.
+- **`qwen3:0.6b` is 522 MB** (not ~400 MB) and reports `completion, tools, thinking` — **no
+  vision**. Reliability through `Agent`: default 3/4; `force_tool_usage="always"` + `temperature=0`
+  **6/6**; multi-step arithmetic 0/2 (one hung past 90 s).

@@ -26,7 +26,15 @@ work and execute it correctly, in isolation, without re-deriving the analysis.
 Each order is independently revertible by design and that property is worth more than
 convenience.
 
-> **A correction this ledger has already had to make.** Its first draft told an agent to "wire
+> **Two corrections this ledger has already had to make.** Both were caught by measuring rather
+> than reasoning, and both would have sent an agent down the wrong path.
+>
+> **The D7 root cause is not `provider_ollama`.** The audit blamed the per-file `provider_ollama`
+> tag. Measurement (`04-test-gating.md` §2) shows `not network` deselects all seven tests **on its
+> own**, because the plugin implies `network` from *any* provider marker and the file also matches
+> `provider_openai`. **Removing `not provider_ollama` from the workflows would change nothing.**
+> That is why order `04` touches no YAML at all — the fix is marker-side.
+> Its first draft told an agent to "wire
 > the twelve dead adapter methods". Measurement (`06-adapter-revival.md` §1) says the opposite:
 > **12 of 20 items should be deleted, only 3 wired.** Six of the dead methods have no inline
 > equivalent anywhere — they are speculative API, and an agent told to "wire them up" would
@@ -100,8 +108,8 @@ authority. Before starting, check that no in-flight PR owns your files.
 | `01-d1-default-model` | `agent/agent.py` (branch chain only) | `llm/llm.py`, `llm/adapters/` |
 | `02-d3-provider-detection` | `llm/llm.py` (`_detect_provider`, `_is_ollama_provider` only) | `agent/agent.py`, `llm/adapters/` |
 | `03-d2-base-url-routing` | `agent/agent.py` (base_url branch), root `README.md` | `llm/llm.py`, `llm/adapters/` |
-| `04-d7-test-gating` | `tests/_pytest_plugins/test_gating.py`, `.github/workflows/*` | any `praisonaiagents/` source |
-| `05-live-ci-job` | `.github/workflows/test-optimized.yml` | any `praisonaiagents/` source |
+| `04-test-gating` | `tests/_pytest_plugins/test_gating.py`, both `pytest.ini`, `tests/conftest.py`, `tests/integration/test_base_url_api_base_fix.py`, `tests/unit/cli/test_test_command.py` | any `praisonaiagents/` source; **`.github/workflows/**` — the `-m` expressions are not the bug** |
+| `05-live-ci-job` | `.github/workflows/test-optimized.yml`, `tests/integration/test_ollama_tool_calling_live.py` | any `praisonaiagents/` source; `test_gating.py` |
 | `06-adapter-revival` | `llm/adapters/__init__.py`, `llm/llm.py` (3 response paths) | `agent/agent.py` |
 | `07-local-package` | `praisonaiagents/local/**` (new), `src/praisonai/tests/unit/llm/local/**` (new), `pyproject.toml` extras | everything else |
 | `08-reachability` | `memory/`, `eval/`, `context/`, `lite/`, `telemetry/` | `llm/`, `agent/` |
@@ -110,7 +118,9 @@ authority. Before starting, check that no in-flight PR owns your files.
 
 - **`01` then `03`** — both edit `agent/agent.py`. Land `01` first.
 - **`02` then `06`** — both edit `llm/llm.py`. Land `02` first; it is far smaller.
-- **`04` and `07` are independent** of everything above and may run in parallel with them.
+- **`04` then `05`** — before `04`, `-m provider_ollama` selects 32 tests across 5 files (only 7
+  are Ollama tests), so `05` has no usable selector and is unbuildable.
+- **`04` and `07` are independent** of orders 01/02/03/06 and may run in parallel with them.
 - **`08` requires `07`** to have landed, because it consumes `local/`.
 
 ---
@@ -124,8 +134,8 @@ Update your row in the same commit as your change. One line only.
 | 01 | D1 — provider-prefixed default model never reaches litellm | `fix/d1-default-provider-model` | — | in progress |
 | 02 | D3 — provider over-detection from base_url | — | — | planned |
 | 03 | D2 — `OPENAI_BASE_URL` to a non-OpenAI host uses the wrong client | — | — | planned |
-| 04 | D7 — per-file provider marker deselects unrelated tests | — | — | planned |
-| 05 | Live local-model CI job | — | — | planned |
+| 04 | D7 — per-file provider marker deselects unrelated tests | — | — | **spec ready** |
+| 05 | Live local-model CI job | — | — | **spec ready** |
 | 06 | A1/A2 — make the provider adapter load-bearing (6 sub-steps) | — | — | **spec ready** |
 | 07 | `praisonaiagents/local/` — discovery and capability resolver | — | — | **spec ready** |
 | 08 | A3 — reachability for the modules that bypass the LLM layer | — | — | planned |
