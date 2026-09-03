@@ -77,12 +77,14 @@ test("the real composition root offers the in-process engine", async () => {
       return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
     },
   };
+  const conversation = { messages: () => [] };
 
   const ids = appEngines({
     settings,
     http: createFakeHttp(),
     secrets,
     persistence,
+    history: conversation,
     onIgnored: () => {},
   }).map((c) => c.id);
 
@@ -112,12 +114,14 @@ test("the in-process engine, when its chunk cannot load, fails RECOVERABLY", asy
       return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
     },
   };
+  const conversation = { messages: () => [] };
 
   const inProcess = appEngines({
     settings,
     http: createFakeHttp(),
     secrets,
     persistence,
+    history: conversation,
     onIgnored: () => {},
     loadAgent: async () => {
       throw new Error("chunk-XXXXXXXX.js: failed to fetch");
@@ -1318,6 +1322,7 @@ test("on a device with nothing configured, the first message reaches the in-proc
     constructor(config: { instructions: string; llm?: string }) {
       configs.push(config);
     }
+    setHistory() {}
     async *streamEvents(prompt: string) {
       prompts.push(prompt);
       yield { type: "text", delta: "The capital of France is Paris." } as const;
@@ -1836,6 +1841,11 @@ test("END TO END: a key entered in Settings authenticates the very next message"
     constructor(config: { instructions: string; llm?: string; apiKey?: string }) {
       configs.push(config);
     }
+    // Present because the engine CALLS it on every turn, and this class is
+    // handed in through `loadAgent` as `never` -- so a missing member is not a
+    // typecheck failure, it is "agent.setHistory is not a function" rendered
+    // into the transcript where the answer should be.
+    setHistory() {}
     async *streamEvents() {
       yield { type: "text", delta: "Paris." } as const;
       yield { type: "finish", text: "Paris." } as const;
@@ -1881,5 +1891,154 @@ test("END TO END: a key entered in Settings authenticates the very next message"
   assert.equal(dom.find((n) => n.className.includes("row-error")), null, "and nothing must fail on the way");
   // And the key is still not anywhere on the page.
   assert.equal(dom.text().includes("sk-end-to-end"), false, dom.text());
+  await app?.dispose();
+});
+
+// ---- conversation memory, through the shipping composition root -------------
+//
+// engine.test.ts proves the engine restores whatever history it is handed;
+// session.test.ts proves the session projects one. Neither proves the two are
+// connected in the app that ships, and "both halves built, nothing joining
+// them" is exactly how this package lost `record()` once already. These drive
+// the real mount, the real controller, the real session and the real in-process
+// engine -- only the Agent class is scripted, through the seam appEngines
+// exposes for it.
+
+/** An Agent class that records the conversation it was restored with, per turn. */
+function rememberingAgentClass(answers: readonly string[]): {
+  readonly module: unknown;
+  readonly histories: { role: string; content: string }[][];
+  readonly prompts: string[];
+} {
+  const histories: { role: string; content: string }[][] = [];
+  const prompts: string[] = [];
+  let turn = 0;
+  class Remembering {
+    lastStopReason: "completed" | null = "completed";
+    private restored: { role: string; content: string }[] = [];
+    setHistory(messages: readonly { role: string; content: string }[]) {
+      this.restored = messages.map((m) => ({ role: m.role, content: m.content }));
+    }
+    async *streamEvents(prompt: string) {
+      histories.push(this.restored);
+      prompts.push(prompt);
+      const text = answers[Math.min(turn++, answers.length - 1)] ?? "";
+      yield { type: "finish", text } as const;
+    }
+  }
+  return { module: Remembering, histories, prompts };
+}
+
+test("ACCEPTANCE: a follow-up question reaches the model WITH the turn before it", async () => {
+  // The defect, stated as the user experiences it: ask for the capital of
+  // France, get "Paris", ask "And its population?" -- and the second question
+  // used to arrive at the provider with no subject at all, so the honest reply
+  // was a request for clarification rather than a number.
+  const { module, histories, prompts } = rememberingAgentClass([
+    "Paris.",
+    "About 2.1 million.",
+  ]);
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => module as never,
+  });
+  assert.equal(app?.engine.id, ENGINE_PRAISONAI_TS);
+
+  submit(dom, "What is the capital of France?");
+  await settle(120);
+  submit(dom, "And its population?");
+  await settle(120);
+
+  assert.deepEqual(prompts, ["What is the capital of France?", "And its population?"]);
+  assert.deepEqual(histories[0], [], "the first question has nothing behind it");
+  assert.deepEqual(
+    histories[1],
+    [
+      { role: "user", content: "What is the capital of France?" },
+      { role: "assistant", content: "Paris." },
+    ],
+    "the follow-up must carry the exchange it follows",
+  );
+  await app?.dispose();
+});
+
+test("ACCEPTANCE: a conversation REOPENED after a relaunch still has its memory", async () => {
+  // Force-stop, relaunch, reopen from the chat list, ask a follow-up. A
+  // history assembled from turns seen in the current process passes the case
+  // above and fails this one -- and this is the case a phone hits every day,
+  // because a phone kills backgrounded apps.
+  const storage = createFakeStorage();
+
+  const first = rememberingAgentClass(["Paris."]);
+  const one = harness({ storage });
+  const app1 = await mount({
+    root: one.dom.root as never,
+    platform: { ...one.platform, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => first.module as never,
+  });
+  submit(one.dom, "What is the capital of France?");
+  await settle(120);
+  await app1?.dispose();
+
+  // A second launch over the same disk. Nothing survives in memory.
+  const second = rememberingAgentClass(["About 2.1 million."]);
+  const two = harness({ storage });
+  const app2 = await mount({
+    root: two.dom.root as never,
+    platform: { ...two.platform, kind: "tauri" },
+    now: () => 2,
+    newChatId: () => "c-fresh",
+    loadAgent: async () => second.module as never,
+  });
+
+  two.dom.click(two.dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  const row = two.dom.find((n) => n.dataset["action"] === "open-chat");
+  assert.ok(row, `the stored chat must be listed:\n${two.dom.text()}`);
+  two.dom.click(row as never);
+  await settle();
+
+  submit(two.dom, "And its population?");
+  await settle(120);
+
+  assert.deepEqual(second.prompts, ["And its population?"]);
+  assert.deepEqual(
+    second.histories[0],
+    [
+      { role: "user", content: "What is the capital of France?" },
+      { role: "assistant", content: "Paris." },
+    ],
+    "a reopened conversation must contribute its stored history",
+  );
+  await app2?.dispose();
+});
+
+test("New chat starts the model with a blank memory, not the previous conversation", async () => {
+  // The pair. A history that is merely "everything ever recorded" would leak
+  // the abandoned conversation into a chat the user believes is empty.
+  const { module, histories } = rememberingAgentClass(["Paris.", "second answer"]);
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => module as never,
+  });
+
+  submit(dom, "What is the capital of France?");
+  await settle(120);
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle();
+  submit(dom, "an unrelated question");
+  await settle(120);
+
+  assert.deepEqual(histories[1], [], `the new chat must start empty:\n${JSON.stringify(histories)}`);
   await app?.dispose();
 });

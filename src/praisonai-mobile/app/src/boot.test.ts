@@ -316,6 +316,46 @@ test("the engine writes through the SAME session the app hands out", async () =>
   await result.app.dispose();
 });
 
+test("the engine reads history from the SAME session the app hands out", async () => {
+  // The mirror of the case above, and the one that was missing entirely: the
+  // engine was handed somewhere to WRITE a turn and nowhere to READ one back,
+  // so every message reached the model as a fresh conversation. Both objects
+  // must project the same session, or the model remembers a conversation other
+  // than the one on screen.
+  const storage = createFakeStorage();
+  let handedHistory: { messages: () => readonly { role: string; content: string }[] } | null = null;
+  let handedPersistence: { record: (r: { prompt: string }, a: string) => Promise<unknown> } | null =
+    null;
+
+  const result = await createApp(deps({
+    storage,
+    engines: (persistence, history) => {
+      handedPersistence = persistence as typeof handedPersistence;
+      handedHistory = history as typeof handedHistory;
+      return [{ id: "scripted", create: () => engineWith({ id: "scripted" }) }];
+    },
+  }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const persistence = handedPersistence as unknown as {
+    record: (r: { prompt: string }, a: string) => Promise<unknown>;
+  };
+  const history = handedHistory as unknown as {
+    messages: () => readonly { role: string; content: string }[];
+  };
+  assert.notEqual(history, null, "the engine factory must be handed a history");
+  assert.deepEqual(history.messages(), [], "a fresh app has nothing to remember");
+
+  await persistence.record({ prompt: "What is the capital of France?" }, "Paris.");
+
+  assert.deepEqual(history.messages(), [
+    { role: "user", content: "What is the capital of France?" },
+    { role: "assistant", content: "Paris." },
+  ]);
+  await result.app.dispose();
+});
+
 test("the engine list cannot be built before the session exists", () => {
   // Enforced by the type, not by a comment: `engines` is a factory taking the
   // persistence, so there is no way to obtain the list without being handed
@@ -349,7 +389,7 @@ test("the engine factory is handed the REAL settings, not a stub", async () => {
   const result = await createApp(deps({
     storage,
     settingDefs: [...DEFS, { key: "baseUrl", default: "http://127.0.0.1:8765" }],
-    engines: (_persistence, settings) => {
+    engines: (_persistence, _history, settings) => {
       seen = settings.get("baseUrl") as string;
       return [{ id: "scripted", create: () => engine }];
     },
@@ -416,7 +456,7 @@ test("a refusal the ENGINE reports reaches the app's transcript", async () => {
 
   const result = await createApp(deps({
     onPublish: (v) => views.push(v),
-    engines: (_persistence, _settings, onIgnored) => {
+    engines: (_persistence, _history, _settings, onIgnored) => {
       const engine: AgentEnginePort = {
         ...inner,
         id: "scripted",

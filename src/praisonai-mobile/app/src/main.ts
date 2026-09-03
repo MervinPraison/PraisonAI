@@ -70,7 +70,11 @@ import {
 } from "../../ui/src/transcript/scroll.ts";
 import type { EngineChoice } from "./engines.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
-import { createPraisonTsEngine, type RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
+import {
+  createPraisonTsEngine,
+  type ConversationHistory,
+  type RunPersistence,
+} from "../../engines/src/praisonai-ts/engine.ts";
 import { loadPraisonAgent, type PraisonAgentModule } from "../../engines/src/praisonai-ts/load-agent.ts";
 import type { PraisonAgent } from "../../engines/src/praisonai-ts/agent-api.ts";
 import { secretRefOf, type SettingDef, type SettingsFacade } from "../../core/src/settings/store.ts";
@@ -97,6 +101,7 @@ import type { HttpPort } from "../../core/src/ports/http.ts";
  */
 async function createInProcessEngine(
   persistence: RunPersistence,
+  history: ConversationHistory,
   settings: SettingsFacade,
   secrets: SecretsPort,
   loadAgent: () => Promise<PraisonAgentModule>,
@@ -107,6 +112,12 @@ async function createInProcessEngine(
   };
   return createPraisonTsEngine({
     persistence,
+    // The read side of the same store `persistence` writes to. The engine
+    // builds a fresh Agent per turn -- the model and the key come from
+    // settings and can change between messages -- so upstream's own
+    // accumulation dies with each agent and the conversation has to be
+    // restored explicitly on every turn.
+    history,
     createAgent: async (): Promise<PraisonAgent> => {
       // The chunk is fetched here, on the first turn, not at create(): a
       // fetch that fails then surfaces through engine.ts's run loop as a
@@ -166,6 +177,10 @@ export function appEngines(deps: {
    */
   readonly secrets: SecretsPort;
   readonly persistence: RunPersistence;
+  /** Where prior turns come from. Required for the same reason `secrets` is:
+   *  an optional one builds an engine that answers every message as though it
+   *  were the first. */
+  readonly history: ConversationHistory;
   readonly onIgnored: (reason: IgnoredReason, detail: string) => void;
   /** How the in-process engine's `Agent` class is fetched. Defaults to the
    *  real chunk loader. A test injects a rejecting one to drive the failure
@@ -177,9 +192,10 @@ export function appEngines(deps: {
     settings: deps.settings,
     http: deps.http,
     persistence: deps.persistence,
+    history: deps.history,
     onIgnored: deps.onIgnored,
-    createInProcess: (persistence) =>
-      createInProcessEngine(persistence, deps.settings, deps.secrets, loadAgent),
+    createInProcess: (persistence, history) =>
+      createInProcessEngine(persistence, history, deps.settings, deps.secrets, loadAgent),
   });
 }
 
@@ -838,7 +854,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // them. This used to be a stub whose `get` returned undefined, captured by
     // the engine at boot and never replaced -- so the engine address the user
     // set was read, stored, and thrown away in favour of the hardcoded default.
-    engines: (persistence, settings, onIgnored) =>
+    engines: (persistence, history, settings, onIgnored) =>
       appEngines({
         settings,
         http: platform.http,
@@ -848,6 +864,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // the one file allowed to name a concrete adapter.
         secrets: platform.secrets,
         persistence,
+        // Read side and write side, both from the session `createApp` just
+        // built. A turn is recorded through one and replayed through the
+        // other, so the model's memory and the transcript on screen cannot
+        // drift apart.
+        history,
         onIgnored,
         ...(deps.loadAgent === undefined ? {} : { loadAgent: deps.loadAgent }),
       }),

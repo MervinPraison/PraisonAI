@@ -19,7 +19,7 @@ import { readSecretSetting, type SettingDef, type SettingsFacade } from "../../c
 import type { Platform } from "./platform.ts";
 import { createRemoteHttpEngine, probeHealth } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
-import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
+import type { ConversationHistory, RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 
 export const ENGINE_REMOTE_HTTP = "remote-http";
 export const ENGINE_PRAISONAI_TS = "praisonai-ts";
@@ -195,7 +195,10 @@ export interface RegistryDeps {
    * ships as a lazy chunk and main.ts supplies the factory; the injection
    * stays because the boundary does.
    */
-  readonly createInProcess?: (persistence: RunPersistence) => AgentEnginePort | Promise<AgentEnginePort>;
+  readonly createInProcess?: (
+    persistence: RunPersistence,
+    history: ConversationHistory,
+  ) => AgentEnginePort | Promise<AgentEnginePort>;
   /**
    * Where a completed turn is written.
    *
@@ -210,6 +213,20 @@ export interface RegistryDeps {
    * store. Two engines, two owners of the write, one honest `userIndex`.
    */
   readonly persistence: RunPersistence;
+  /**
+   * Where the conversation so far is READ from.
+   *
+   * The counterpart of `persistence`, and it goes to exactly the same engines
+   * for exactly the same reason. The in-process engine owns its store, so it
+   * must replay it or the model has no memory of a chat the app is displaying.
+   * The remote engine deliberately does not take it: the server it talks to
+   * keeps its own history against the `chat_id` every request carries, so
+   * sending the client's copy as well would send every prior turn twice.
+   *
+   * Two engines, two owners of the conversation -- the same split this file
+   * already draws for the write, drawn once for the read.
+   */
+  readonly history: ConversationHistory;
   /** Called for every frame an engine's decoder refuses. Supplied by the
    *  composition root, which owns the transcript those refusals land on. */
   readonly onIgnored?: (reason: IgnoredReason, detail: string) => void;
@@ -272,7 +289,7 @@ export function enginesFor(deps: RegistryDeps): readonly EngineChoice[] {
 
   if (deps.createInProcess !== undefined) {
     const build = deps.createInProcess;
-    choices.push({ id: ENGINE_PRAISONAI_TS, create: () => build(deps.persistence) });
+    choices.push({ id: ENGINE_PRAISONAI_TS, create: () => build(deps.persistence, deps.history) });
   }
   return choices;
 }

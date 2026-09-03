@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createSession, persistenceFor, titleFrom } from "./session.ts";
+import { createSession, historyFor, persistenceFor, titleFrom } from "./session.ts";
 import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 
 const build = (over: Partial<Parameters<typeof createSession>[0]> = {}) => {
@@ -278,4 +278,90 @@ test("a title at exactly the limit is not elided -- the pair", () => {
   // Without this, a titleFrom that always elided would pass above.
   const sixty = "a".repeat(60);
   assert.equal(titleFrom(sixty), sixty);
+});
+
+// ---- the session as the engine's MEMORY ------------------------------------
+//
+// `persistenceFor` is how a turn gets written; `historyFor` is how it gets
+// remembered. The second did not exist, so the model was shown none of a
+// conversation the app was storing and rendering.
+
+test("historyFor reports the completed turns of the open chat, oldest first", async () => {
+  const { session } = build();
+  await session.record("What is the capital of France?", "Paris.");
+  await session.record("And its population?", "About 2.1 million.");
+
+  assert.deepEqual(historyFor(session).messages(), [
+    { role: "user", content: "What is the capital of France?" },
+    { role: "assistant", content: "Paris." },
+    { role: "user", content: "And its population?" },
+    { role: "assistant", content: "About 2.1 million." },
+  ]);
+});
+
+test("a REOPENED conversation reports its stored history, not an empty one", async () => {
+  // The force-stop case, and the one a session-scoped in-memory history would
+  // fail: the app is relaunched, the chat is opened from the list, and the
+  // model must still know what was said. A `historyFor` reading anything other
+  // than `current()` -- a buffer filled by `record`, say -- returns nothing
+  // here while the transcript on screen is full.
+  const storage = createFakeStorage();
+  let clock = 1000;
+  const first = createSession({
+    storage,
+    engineId: "scripted",
+    now: () => ++clock,
+    newChatId: () => "c1",
+  });
+  await first.record("What is the capital of France?", "Paris.");
+
+  // A different Session over the same storage: a new process, same disk.
+  const relaunched = createSession({
+    storage,
+    engineId: "scripted",
+    now: () => ++clock,
+    newChatId: () => "c-never-used",
+  });
+  assert.deepEqual(historyFor(relaunched).messages(), [], "nothing is open yet");
+
+  assert.equal(await relaunched.open("c1"), true);
+  assert.deepEqual(historyFor(relaunched).messages(), [
+    { role: "user", content: "What is the capital of France?" },
+    { role: "assistant", content: "Paris." },
+  ]);
+});
+
+test("history is re-read on every call, so the turn just recorded is in the next one", async () => {
+  // Captured once, this returns the empty array forever and every conversation
+  // is one question long from the model's point of view.
+  const { session } = build();
+  const history = historyFor(session);
+  assert.deepEqual(history.messages(), []);
+
+  await session.record("one", "first answer");
+
+  assert.equal(history.messages().length, 2);
+});
+
+test("a new chat has no history, and starting one clears what was there", async () => {
+  // `reset()` is what New chat calls. A history that survived it would leak the
+  // previous conversation into a chat the user believes is empty -- the same
+  // class of defect as the transcript that used to survive New chat.
+  const { session } = build();
+  await session.record("secret question", "secret answer");
+  assert.equal(historyFor(session).messages().length, 2);
+
+  session.reset();
+
+  assert.deepEqual(historyFor(session).messages(), []);
+});
+
+test("history carries roles, not just text", async () => {
+  // A projection that dropped `role` would still produce the right sentences in
+  // the right order and be useless: the model could not tell its own previous
+  // answers from the user's questions.
+  const { session } = build();
+  await session.record("q", "a");
+
+  assert.deepEqual(historyFor(session).messages().map((m) => m.role), ["user", "assistant"]);
 });

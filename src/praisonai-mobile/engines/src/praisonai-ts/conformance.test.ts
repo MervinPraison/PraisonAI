@@ -95,6 +95,12 @@ function agentFor(scenario: ScenarioName): PraisonAgent {
   }
   return {
     lastStopReason: script.stop,
+    // The contract says nothing about history -- it is an engine-level
+    // concern, not a port-level one (see ConversationHistory in engine.ts) --
+    // so the scenarios do not exercise it. It is still REQUIRED on the
+    // interface, so the fake has to answer it: an optional member is one a
+    // real composition can forget.
+    setHistory() {},
     async *streamEvents(_prompt, opts) {
       for (const event of script.events) {
         if (opts?.signal?.aborted) return;
@@ -116,6 +122,7 @@ describeEngineContract({
           return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 };
         },
       },
+      history: { messages: () => [] },
       newMsgId: () => `m${++counter}`,
     }),
   unsupported: {
