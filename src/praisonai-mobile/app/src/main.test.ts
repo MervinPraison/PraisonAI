@@ -2367,3 +2367,158 @@ test("New chat clears the finished turns too, not just the live one", async () =
   );
   app?.dispose();
 });
+
+// ---- the transcript and the model's memory, held to each other ---------------
+//
+// Two "histories" meet in `mount` and they are NOT the same list. #4816 replays
+// `Session.current()` onto a fresh agent every turn -- only what `record()`
+// actually wrote. This PR keeps every finished turn on screen, written or not,
+// because a question you asked and the error that answered it both belong in
+// the transcript.
+//
+// So they can legitimately differ, and the danger is that they differ SILENTLY:
+// a turn rendered as though it were part of the conversation while the model
+// has never heard of it. These pin the agreement in both directions, and pin
+// the one divergence to the row that announces itself.
+
+/** An Agent that records the history it was restored with and fails one turn. */
+function agentFailingTurn(failOn: number, answers: readonly string[]): {
+  readonly module: unknown;
+  readonly histories: { role: string; content: string }[][];
+} {
+  const histories: { role: string; content: string }[][] = [];
+  let turn = 0;
+  class Flaky {
+    lastStopReason: "completed" | null = "completed";
+    private restored: { role: string; content: string }[] = [];
+    setHistory(messages: readonly { role: string; content: string }[]): void {
+      this.restored = messages.map((m) => ({ role: m.role, content: m.content }));
+    }
+    async *streamEvents(
+      _prompt: string,
+    ): AsyncGenerator<{ type: "text"; delta: string } | { type: "finish"; text: string }> {
+      histories.push(this.restored);
+      const mine = turn++;
+      if (mine === failOn) throw new Error("the provider dropped the connection");
+      const text = answers[mine] ?? "";
+      // The DELTA as well as the finish. An agent that only ever yields
+      // `finish` produces a turn with no text, which `finish()` in
+      // transcript.ts correctly turns into error{empty} -- so the transcript
+      // would be all error rows and the assertions below would be measuring
+      // the harness rather than the app.
+      yield { type: "text", delta: text } as const;
+      yield { type: "finish", text } as const;
+    }
+  }
+  return { module: Flaky, histories };
+}
+
+/** The user rows on screen, as `state|text`. */
+const userRowsOnScreen = (dom: ReturnType<typeof createFakeDom>): string[] => {
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.ok(transcript, "no transcript");
+  return (transcript.children as { className: string; textContent: string; dataset: Record<string, string> }[])
+    .filter((c) => c.className.includes("row-user"))
+    .map((c) => `${c.dataset["state"]}|${c.textContent}`);
+};
+
+test("every turn the model is told about is on screen, in the same order", async () => {
+  // The agreeing direction. `Session.current()` is what the engine replays and
+  // what `historyRows` paints on reopen, so a stored turn cannot be in one and
+  // missing from the other -- and the promoted rows must not reorder it.
+  const { module, histories } = agentFailingTurn(-1, ["Paris.", "About 2.1 million."]);
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => module as never,
+  });
+
+  submit(dom, "What is the capital of France?");
+  await settle(120);
+  submit(dom, "And its population?");
+  await settle(120);
+
+  // What the model was told on the second turn...
+  const told = histories[1] ?? [];
+  assert.deepEqual(
+    told,
+    [
+      { role: "user", content: "What is the capital of France?" },
+      { role: "assistant", content: "Paris." },
+    ],
+    "the follow-up must carry the exchange it follows",
+  );
+
+  // ...must all be on screen, in that order. Not "present somewhere": a
+  // transcript that shows the same turns in a different order than the model
+  // was given them is a conversation the two parties remember differently.
+  const shown = transcriptRows(dom);
+  let cursor = -1;
+  for (const message of told) {
+    const at = shown.findIndex((r, i) => i > cursor && r.includes(message.content));
+    assert.notEqual(at, -1, `the model was told "${message.content}" and the screen never showed it:\n${shown.join("\n")}`);
+    cursor = at;
+  }
+  // And every user row that claims to be stored is one the model has.
+  assert.deepEqual(
+    userRowsOnScreen(dom).filter((r) => r.startsWith("stored|")).map((r) => r.slice("stored|".length)),
+    ["You said:What is the capital of France?", "You said:And its population?"],
+    "a row claiming to be stored must be a turn that was really written",
+  );
+  await app?.dispose();
+});
+
+test("a turn the model was NEVER told about is the one row that says it was not saved", async () => {
+  // The diverging direction, and the reason the divergence is allowed. The
+  // second turn fails, so `record()` is never called and the model is never
+  // told -- but the question stays on screen above the error explaining what
+  // happened to it. What must NOT happen is that it looks like an ordinary,
+  // remembered message: the row is `unstored` and says so in words.
+  const { module, histories } = agentFailingTurn(1, ["Paris.", "", "Still here."]);
+  const { dom, platform: web } = harness();
+  const app = await mount({
+    root: dom.root as never,
+    platform: { ...web, kind: "tauri" },
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => module as never,
+  });
+
+  submit(dom, "remembered question");
+  await settle(120);
+  submit(dom, "LOST-QUESTION");
+  await settle(150);
+  submit(dom, "third question");
+  await settle(150);
+
+  // All three are on screen -- the failed one is not swept away.
+  const rows = userRowsOnScreen(dom);
+  assert.equal(rows.length, 3, `every question asked belongs on screen:\n${rows.join("\n")}`);
+  assert.match(rows[1] ?? "", /LOST-QUESTION/);
+
+  // The failed one, and ONLY the failed one, is marked not-saved.
+  assert.ok((rows[0] ?? "").startsWith("stored|"), `turn 1 was written and must say so: ${rows[0]}`);
+  assert.ok((rows[1] ?? "").startsWith("unstored|"), `turn 2 was never written: ${rows[1]}`);
+  assert.ok((rows[2] ?? "").startsWith("stored|"), `turn 3 was written: ${rows[2]}`);
+  assert.match(rows[1] ?? "", /not in the stored conversation/i);
+
+  // And the model, on the third turn, was told about turn 1 and NOT turn 2.
+  const told = histories[2] ?? [];
+  assert.deepEqual(
+    told,
+    [
+      { role: "user", content: "remembered question" },
+      { role: "assistant", content: "Paris." },
+    ],
+    `the model must be told exactly what was stored:\n${JSON.stringify(told)}`,
+  );
+  assert.equal(
+    JSON.stringify(told).includes("LOST-QUESTION"),
+    false,
+    "a turn that was never stored must not reach the model",
+  );
+  await app?.dispose();
+});
