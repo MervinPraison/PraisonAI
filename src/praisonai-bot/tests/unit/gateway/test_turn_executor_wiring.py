@@ -111,6 +111,24 @@ async def test_wedged_worker_torn_down_not_process_exit():
     assert torn == [("s9", "wedged")]
     # The turn must be cleared from the active registry after a wedge.
     assert "s9" not in gw._active_turns
+    # A wedge is a failure, not a successful reply: the terminal turn must carry
+    # a non-ok outcome so the session queue does not persist/deliver it as ok.
+    assert getattr(result, "outcome_status", "ok") == "error"
+
+
+@pytest.mark.asyncio
+async def test_normal_turn_carries_no_failure_outcome():
+    """A successful reply must not be tagged as a failure outcome."""
+
+    gw = WebSocketGateway()
+    from praisonaiagents.agent.interrupt import InterruptController
+
+    result = await gw._drive_turn(
+        _session(), _Agent("r"), "m", InterruptController(), 0.0
+    )
+    assert result == "r:m"
+    # Plain replies carry no explicit outcome; the queue defaults them to ok.
+    assert getattr(result, "outcome_status", "ok") == "ok"
 
 
 @pytest.mark.asyncio

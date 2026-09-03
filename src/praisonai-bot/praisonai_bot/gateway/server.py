@@ -626,6 +626,26 @@ class ReloadPlan:
         self.restart_channels.clear()  # No need for selective restarts
 
 
+class _TerminalTurn(str):
+    """A terminal turn response that also carries its outcome classification.
+
+    A driven turn normally returns the agent's reply string with an implicit
+    ``ok`` outcome. Some terminal endings (e.g. a wedged worker torn down by the
+    executor) *are* the reply text the client should see but must NOT be
+    classified as a successful turn. Subclassing ``str`` keeps every existing
+    consumer (``session.add_message``, the ``content`` frame, ``.lower()`` in
+    tests) working unchanged, while ``outcome_status`` lets the session queue
+    report the true terminal outcome instead of a default ``ok``.
+    """
+
+    __slots__ = ("outcome_status",)
+
+    def __new__(cls, value: str, *, outcome_status: str = "ok") -> "_TerminalTurn":
+        obj = super().__new__(cls, value)
+        obj.outcome_status = outcome_status
+        return obj
+
+
 class WebSocketGateway:
     """WebSocket gateway server for multi-agent coordination.
     
@@ -3651,7 +3671,7 @@ class WebSocketGateway:
         content: str,
         controller: Any,
         timeout: float,
-    ) -> Any:
+    ) -> Any:  # noqa: D401 - see _TerminalTurn for the outcome-carrying return
         """Run one agent turn cancellably and under an optional per-turn timeout.
 
         Registers the driving task in ``_active_turns`` so ``_abort_active_turn``
@@ -3717,7 +3737,10 @@ class WebSocketGateway:
                     "Executor teardown failed for wedged session %s", sid,
                     exc_info=True,
                 )
-            return "Turn cancelled: worker wedged; session will be re-placed."
+            return _TerminalTurn(
+                "Turn cancelled: worker wedged; session will be re-placed.",
+                outcome_status="error",
+            )
         finally:
             existing = self._active_turns.get(sid)
             if existing is not None and existing[0] is task:
@@ -3818,6 +3841,14 @@ class WebSocketGateway:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
                     outcome_status = "error"
+                else:
+                    # A terminal turn (e.g. a wedged worker torn down by the
+                    # executor) carries its own outcome so a non-ok ending is
+                    # not misreported as a successful turn. Regular replies
+                    # keep the default ``ok``.
+                    carried = getattr(response, "outcome_status", None)
+                    if carried is not None:
+                        outcome_status = carried
                 finally:
                     # Always clean up the relay callback
                     if relay_callback and emitter is not None:
