@@ -1,5 +1,6 @@
 """Tests for praisonai.cli.features.approval — resolve_approval_backend."""
 
+import inspect
 import os
 import sys
 import pytest
@@ -41,8 +42,11 @@ class TestResolveApprovalBackend:
             assert isinstance(b, InteractiveCLIApprovalBackend), value
             # registry.py and tool_execution.py both probe for the sync variant
             # with hasattr and fall back when it is absent, so only the async
-            # entry point is part of the contract every backend must honour.
-            assert callable(getattr(b, "request_approval", None)), value
+            # entry point is part of the contract every backend must honour —
+            # and the async path awaits it, so it must be a coroutine function.
+            assert inspect.iscoroutinefunction(
+                getattr(b, "request_approval", None)
+            ), value
 
     def test_auto_returns_auto_approve_backend(self):
         b = self._resolve("auto")
