@@ -50,7 +50,8 @@ class LSPClient:
         command: Optional[str] = None,
         args: Optional[List[str]] = None,
         root_uri: Optional[str] = None,
-        workspace_file: Optional[str] = None
+        workspace_file: Optional[str] = None,
+        servers: Optional[Dict[str, Dict]] = None
     ):
         """
         Initialize the LSP client.
@@ -64,12 +65,18 @@ class LSPClient:
                 from the nearest root marker (e.g. ``pyproject.toml``,
                 ``go.mod``) when ``root_uri`` is not given, so multi-root and
                 monorepo setups initialise against the correct project root.
+            servers: Optional user-supplied server registry (from project/global
+                config) deep-merged over the built-in defaults, so a language
+                that ships no default — or one whose default should be
+                overridden — resolves from config instead of raising.
         """
+        self._servers = servers
         self.config = LSPConfig(
             language=language,
             command=command,
             args=args or [],
-            root_uri=root_uri
+            root_uri=root_uri,
+            servers=servers
         )
         self._workspace_file = workspace_file
 
@@ -107,7 +114,9 @@ class LSPClient:
         # user-supplied custom server), and only surface the registry's install
         # hint when it matches the default server for the language.
         if not shutil.which(self.config.command):
-            _, default_command, install_hint = probe(self.config.language)
+            _, default_command, install_hint = probe(
+                self.config.language, self._servers
+            )
             hint = (
                 f"; install with `{install_hint}`"
                 if install_hint and self.config.command == default_command
@@ -138,7 +147,9 @@ class LSPClient:
             # root), falling back to the CWD only when neither is available.
             root_uri = self.config.root_uri
             if root_uri is None and self._workspace_file is not None:
-                root_uri = detect_root_uri(self._workspace_file, self.config.language)
+                root_uri = detect_root_uri(
+                    self._workspace_file, self.config.language, self._servers
+                )
             if root_uri is None:
                 root_uri = path_to_uri(os.getcwd())
             
