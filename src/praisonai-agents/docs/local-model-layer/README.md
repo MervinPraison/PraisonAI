@@ -1,6 +1,6 @@
 # Local Model Layer — implementation ledger
 
-**Status:** planning complete, implementation in progress
+**Status:** every order below has an open PR. See §4.
 **Owner workstream:** local model runtimes (Ollama, LM Studio, llama.cpp, vLLM, MLX, `transformers serve`)
 **Created:** 2026-09-03
 
@@ -133,6 +133,23 @@ Additional PRs not in the original order list, found while executing it:
 D4 (local route prefixes) #4798, D5 (local embedding dimensions) #4802,
 D6 (registry accepts local providers) #4800.
 
+**Three claims in this ledger were corrected by executing it.** Each is marked
+inline where it appears, but they are collected here because a reader who trusts
+the summary would otherwise carry the wrong version:
+
+1. *"Wire the twelve dead adapter methods."* Measurement said the opposite:
+   **12 of 20 items should be deleted, only 3 wired** (`06` §1). Six had no
+   inline equivalent at all — an agent told to wire them would have invented
+   behaviour no test could fail against.
+2. *"`provider_ollama` deselects the mocked base_url suite."* It does not.
+   **`not network` deselects it on its own**, because the plugin implies
+   `network` from any provider marker (`04` §1). Editing the workflow `-m`
+   strings would have changed nothing.
+3. *"Running fully locally is unachievable, not merely unconfigured."* Not so:
+   litellm and the openai SDK both honour `OPENAI_BASE_URL`, so the bypass sites
+   **do** reach a local server. The blocker is the hardcoded model name they then
+   ask for (`00` §5, `08`).
+
 | Order | Title | Branch | PR | Status |
 |---|---|---|---|---|
 | 01 | D1 — provider-prefixed default model never reaches litellm | `fix/d1-default-provider-model` | #4795 | PR open |
@@ -142,7 +159,7 @@ D6 (registry accepts local providers) #4800.
 | 05 | Live local-model CI job | `feat/ci-ollama-live-job` | #4803 | PR open |
 | 06 | A1/A2 — make the provider adapter load-bearing (6 sub-steps) | 6 branches, stacked | #4804 #4806 #4808 #4809 #4810 #4811 | **complete — KNOWN_DEAD empty** |
 | 07 | `praisonaiagents/local/` — discovery and capability resolver | `feat/local-model-resolver` | #4807 | PR open |
-| 08 | A3 — reachability for the modules that bypass the LLM layer | — | — | in progress |
+| 08 | A3 — auxiliary-model fallback configurable everywhere | `fix/reachability-local-endpoint` | #4812 | PR open (model half; parameter half deferred) |
 
 ---
 
