@@ -1,59 +1,84 @@
 """Guard against dangling lazy-command module paths (issue #4693).
 
-``praisonai_code.cli.app._LAZY_COMMANDS`` is the authoritative registry that
-maps each CLI command to the module providing its Typer sub-app. Wrapper-,
-bot-, train-, browser-, mcp- and deploy-resident commands keep placeholder
-``.commands.*`` paths (they are re-routed to their external package at
-invocation time), so only *non-resident* entries are expected to resolve
-against ``praisonai_code.cli``.
+``praisonai_code.cli.app._LAZY_COMMANDS`` maps each CLI command to the module
+that provides its Typer sub-app. ``LazyCommandGroup._resolve_command`` imports
+exactly ``module_path`` from that table (after hiding resident commands whose
+owning package is not installed), so *every* entry must resolve — the resident
+ones (``praisonai``, ``praisonai_bot``, ``praisonai_train``, ``praisonai_browser``,
+``praisonai_mcp``) included.
 
-This test imports every non-resident lazy-command module so a genuinely
-dangling path fails in CI rather than at first use.
+History: resident entries used to carry placeholder ``.commands.<name>`` paths
+that named modules which do not exist in ``praisonai_code`` (``schedule`` after
+``66dcb788a`` was the reported one; there were 30). The dispatcher hard-coded the
+real path and never read the table, so the lie was invisible. The dispatcher now
+reads the table, and these tests import each entry the same way it does.
 
-A second parametrised test mirrors ``get_command()``'s resident dispatch: when
-the owning package (``praisonai``, ``praisonai_bot``, ``praisonai_train``,
-``praisonai_browser``, ``praisonai_mcp`` or ``praisonai_deploy``) is installed —
-as in the full monorepo CI — it imports the absolute ``…​.cli.commands.<name>``
-target the router re-routes to and asserts the attribute exists. This covers the
-``schedule`` re-route (praisonai-code → ``praisonai.cli.commands.schedule`` after
-``66dcb788a``) that the non-resident test intentionally excludes. It skips
-gracefully in a standalone ``praisonai-code`` install where those packages are
-absent.
+Resident entries whose owning package is not installed are skipped (standalone
+``praisonai-code`` install); the owning-package test below still bites there,
+because a placeholder ``.commands.*`` path resolves into ``praisonai_code``.
 """
 
 import importlib
+import importlib.util
 
+import click
 import pytest
 
 from praisonai_code.cli import app as cli_app
 
 
-def _non_resident_lazy_commands():
-    resident = (
-        cli_app._WRAPPER_RESIDENT_COMMANDS
-        | cli_app._BOT_RESIDENT_COMMANDS
-        | cli_app._TRAIN_RESIDENT_COMMANDS
-        | cli_app._BROWSER_RESIDENT_COMMANDS
-        | cli_app._MCP_RESIDENT_COMMANDS
-        | cli_app._DEPLOY_RESIDENT_COMMANDS
-    )
-    for name, (module_path, attr_name, _desc) in cli_app._LAZY_COMMANDS.items():
-        if name in resident:
-            continue
-        yield name, module_path, attr_name
+def _absolute(module_path: str) -> str:
+    """Resolve a table path exactly as the dispatcher's ``import_module`` does."""
+    return importlib.util.resolve_name(module_path, cli_app.__package__)
+
+
+def _root_package(module_path: str) -> str:
+    return _absolute(module_path).split(".")[0]
+
+
+_RESIDENT_OWNERS = (
+    (cli_app._WRAPPER_RESIDENT_COMMANDS, "praisonai"),
+    (cli_app._BOT_RESIDENT_COMMANDS, "praisonai_bot"),
+    (cli_app._TRAIN_RESIDENT_COMMANDS, "praisonai_train"),
+    (cli_app._BROWSER_RESIDENT_COMMANDS, "praisonai_browser"),
+    (cli_app._MCP_RESIDENT_COMMANDS, "praisonai_mcp"),
+)
 
 
 @pytest.mark.parametrize(
     "name,module_path,attr_name",
-    list(_non_resident_lazy_commands()),
+    [(n, mp, a) for n, (mp, a, _desc) in cli_app._LAZY_COMMANDS.items()],
     ids=lambda v: v if isinstance(v, str) else "",
 )
-def test_non_resident_lazy_command_module_resolves(name, module_path, attr_name):
+def test_every_lazy_command_module_resolves(name, module_path, attr_name):
+    """Import each table entry the way ``_resolve_command`` does."""
+    root = _root_package(module_path)
+    if importlib.util.find_spec(root) is None:
+        pytest.skip(f"owning package {root!r} for command {name!r} is not installed")
     module = importlib.import_module(module_path, cli_app.__package__)
     assert hasattr(module, attr_name), (
         f"lazy command {name!r} maps to {module_path}:{attr_name} "
         f"but attribute {attr_name!r} is missing"
     )
+
+
+def test_resident_entries_target_their_owning_package():
+    """A resident command's table path must live in the package that serves it.
+
+    This is what makes the original defect impossible even in a standalone
+    install where the sibling packages are absent: ``.commands.schedule`` resolves
+    into ``praisonai_code`` and fails here regardless of what is installed.
+    """
+    bad = []
+    for names, owner in _RESIDENT_OWNERS:
+        for name in sorted(names):
+            if name not in cli_app._LAZY_COMMANDS:
+                # ``app``/``standardise`` are resident but wired outside the table.
+                continue
+            module_path = cli_app._LAZY_COMMANDS[name][0]
+            if _root_package(module_path) != owner:
+                bad.append(f"{name!r} -> {module_path} (expected {owner}.cli.commands.*)")
+    assert not bad, "resident lazy-command entries point outside their owning package:\n  " + "\n  ".join(bad)
 
 
 def test_special_command_modules_resolve():
@@ -65,47 +90,15 @@ def test_special_command_modules_resolve():
         )
 
 
-def _resident_lazy_commands():
-    resident_groups = (
-        (cli_app._WRAPPER_RESIDENT_COMMANDS, "praisonai", cli_app.wrapper_available),
-        (cli_app._BOT_RESIDENT_COMMANDS, "praisonai_bot", cli_app.bot_package_available),
-        (cli_app._TRAIN_RESIDENT_COMMANDS, "praisonai_train", cli_app.train_package_available),
-        (cli_app._BROWSER_RESIDENT_COMMANDS, "praisonai_browser", cli_app.browser_package_available),
-        (cli_app._MCP_RESIDENT_COMMANDS, "praisonai_mcp", cli_app.mcp_package_available),
-        (cli_app._DEPLOY_RESIDENT_COMMANDS, "praisonai_deploy", cli_app.deploy_package_available),
-    )
-    deploy_names = cli_app._DEPLOY_RESIDENT_COMMANDS
-    seen = set()
-    for names, root, available in resident_groups:
-        for name in names:
-            if name in seen:
-                continue
-            if name in cli_app._LAZY_COMMANDS:
-                # Wrapper/bot/train/browser/mcp residents are dispatched through
-                # ``_LAZY_COMMANDS`` using its declared attribute name.
-                attr_name = cli_app._LAZY_COMMANDS[name][1]
-            elif name in deploy_names:
-                # Deploy commands are dispatched separately with a hardcoded
-                # ``app`` attribute and are absent from ``_LAZY_COMMANDS``.
-                attr_name = "app"
-            else:
-                # ``app``/``standardise`` are resident but handled outside the
-                # generic ``_LAZY_COMMANDS`` dispatch path, so skip them here.
-                continue
-            seen.add(name)
-            yield name, f"{root}.cli.commands.{name}", attr_name, available
+def test_schedule_dispatches_from_table_when_wrapper_installed():
+    """End-to-end: the reported command still resolves through the real dispatcher."""
+    if not cli_app.wrapper_available():
+        pytest.skip("requires the praisonai wrapper (schedule is wrapper-resident)")
+    from typer.main import get_command as typer_get_command
 
-
-@pytest.mark.parametrize(
-    "name,module_path,attr_name,available",
-    list(_resident_lazy_commands()),
-    ids=lambda v: v if isinstance(v, str) else "",
-)
-def test_resident_lazy_command_module_resolves(name, module_path, attr_name, available):
-    if not available():
-        pytest.skip(f"owning package for resident command {name!r} not installed")
-    module = importlib.import_module(module_path)
-    assert hasattr(module, attr_name), (
-        f"resident command {name!r} re-routes to {module_path}:{attr_name} "
-        f"but attribute {attr_name!r} is missing"
-    )
+    root = typer_get_command(cli_app.app)
+    ctx = click.Context(root)
+    cmd = root.get_command(ctx, "schedule")
+    assert isinstance(cmd, click.Command)
+    assert cmd.name == "schedule"
+    assert "schedule" in root.list_commands(ctx)
