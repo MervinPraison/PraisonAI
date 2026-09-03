@@ -205,7 +205,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3056`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3078`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:1310`
 - Counts: 17 python params: 1 exact, 0 camelCase, 1 alias, 0 flattened, 15 missing; 0 mismatches; 15 waived; 1 TS-only of 3
 
