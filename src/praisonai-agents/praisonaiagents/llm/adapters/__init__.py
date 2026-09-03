@@ -9,8 +9,6 @@ and integrates with Gap 2 (parallel tool execution).
 """
 
 from ..protocols import LLMProviderAdapterProtocol
-from ..model_capabilities import GEMINI_INTERNAL_TOOLS
-from ..streaming_protocol import StreamingCapableAdapter, get_streaming_adapter
 from typing import Dict, Any, List, Optional
 
 
@@ -23,14 +21,8 @@ class DefaultAdapter:
     def should_summarize_tools(self, iter_count: int) -> bool:
         return iter_count >= 5  # Conservative default
     
-    def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return tools  # No special formatting by default
     
-    def post_tool_iteration(self, state: Dict[str, Any]) -> None:
-        pass  # No post-processing by default
     
-    def supports_structured_output(self) -> bool:
-        return False  # Conservative default
     
     def supports_streaming(self) -> bool:
         return True  # Most providers support streaming
@@ -38,13 +30,7 @@ class DefaultAdapter:
     def supports_streaming_with_tools(self) -> bool:
         return True  # Most providers support streaming with tools
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get the streaming adapter for this provider."""
-        # Default providers use the default streaming adapter
-        return get_streaming_adapter("default")
     
-    def get_max_iteration_threshold(self) -> int:
-        return 10  # Conservative default
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         # Standard OpenAI-style tool result message
@@ -65,24 +51,12 @@ class DefaultAdapter:
     def get_default_settings(self) -> Dict[str, Any]:
         return {}  # No provider-specific defaults
     
-    def parse_tool_calls(self, raw_response: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-        """Default tool call parsing - use OpenAI-style format."""
-        if "choices" in raw_response and len(raw_response["choices"]) > 0:
-            message = raw_response["choices"][0].get("message", {})
-            return message.get("tool_calls")
-        return None
     
-    def should_skip_streaming_with_tools(self) -> bool:
-        return False  # Most providers support streaming with tools
     
     def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         return None  # No text recovery by default
     
-    def inject_cache_control(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return messages  # No cache control by default
     
-    def extract_reasoning_tokens(self, response: Dict[str, Any]) -> int:
-        return 0  # No reasoning tokens by default
 
 
 class OllamaAdapter(DefaultAdapter):
@@ -105,12 +79,7 @@ class OllamaAdapter(DefaultAdapter):
         # Ollama doesn't reliably support streaming with tools
         return False
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get Ollama-specific streaming adapter."""
-        return get_streaming_adapter("ollama")
     
-    def get_max_iteration_threshold(self) -> int:
-        return 1  # Ollama-specific threshold
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         # Ollama uses natural language format for tool results.
@@ -188,13 +157,6 @@ Now provide your final answer using this result. Summarize the information natur
         
         return None
     
-    def post_tool_iteration(self, state: Dict[str, Any]) -> None:
-        # Replaces: Ollama-specific post-tool summary branches
-        if (not state.get('response_text', '').strip() and 
-            state.get('formatted_tools') and 
-            state.get('iteration_count') == 0):
-            # Add Ollama-specific summary logic here
-            state['needs_summary'] = True
     
     def get_default_settings(self) -> Dict[str, Any]:
         return {
@@ -209,8 +171,6 @@ class AnthropicAdapter(DefaultAdapter):
     def supports_prompt_caching(self) -> bool:
         return True  # Claude supports prompt caching
     
-    def supports_structured_output(self) -> bool:
-        return True
 
     def supports_streaming(self) -> bool:
         # litellm.acompletion with stream=True returns a ModelResponse (not async generator)
@@ -220,9 +180,6 @@ class AnthropicAdapter(DefaultAdapter):
     def supports_streaming_with_tools(self) -> bool:
         return False
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get Anthropic-specific streaming adapter."""
-        return get_streaming_adapter("anthropic")
 
 
 class GeminiAdapter(DefaultAdapter):
@@ -235,35 +192,13 @@ class GeminiAdapter(DefaultAdapter):
     - Supports structured output
     """
     
-    def should_skip_streaming_with_tools(self) -> bool:
-        """Gemini should skip streaming when tools are present."""
-        return True
     
-    def supports_structured_output(self) -> bool:
-        return True
     
-    def format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        # Replaces: gemini_internal_tools handling in llm.py
-        # Internal tool names match GEMINI_INTERNAL_TOOLS: {'googleSearch', 'urlContext', 'codeExecution'}
-        formatted = []
-        for tool in tools:
-            if tool.get('name') in GEMINI_INTERNAL_TOOLS:
-                # Convert to Gemini internal tool format
-                formatted.append({
-                    'type': 'function',
-                    'function': tool
-                })
-            else:
-                formatted.append(tool)
-        return formatted
     
     def supports_streaming_with_tools(self) -> bool:
         # Gemini has issues with streaming + tools
         return False
     
-    def get_streaming_adapter(self) -> StreamingCapableAdapter:
-        """Get Gemini-specific streaming adapter."""
-        return get_streaming_adapter("gemini")
 
 
 # Provider adapter registry - public for extension
@@ -318,16 +253,6 @@ def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
     return _provider_adapters["default"]
 
 
-def list_provider_adapters() -> List[str]:
-    """List all registered provider adapter names."""
-    return sorted(_provider_adapters.keys())
-
-
-def has_provider_adapter(name: str) -> bool:
-    """Check if a provider adapter is registered."""
-    return name in _provider_adapters
-
-
 __all__ = [
     'DefaultAdapter',
     'OllamaAdapter', 
@@ -335,6 +260,4 @@ __all__ = [
     'GeminiAdapter',
     'get_provider_adapter',
     'add_provider_adapter',
-    'list_provider_adapters',
-    'has_provider_adapter',
 ]
