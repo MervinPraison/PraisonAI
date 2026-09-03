@@ -196,6 +196,26 @@ def test_named_model_not_served_lists_alternatives(monkeypatch):
     assert "qwen3:0.6b" in str(exc.value)
 
 
+def test_explicit_spec_model_not_served_raises_at_resolution(monkeypatch):
+    """A spec-named model absent from the server must fail here, not on the
+    first completion; Agent would otherwise send an unavailable id to Ollama."""
+    monkeypatch.setenv("OLLAMA_HOST", "127.0.0.1:11434")
+    with pytest.raises(ModelNotAvailableError) as exc:
+        resolve("ollama/does-not-exist", transport=ollama())
+    assert "does-not-exist" in str(exc.value)
+    assert "qwen3:0.6b" in str(exc.value)
+
+
+def test_reachable_server_with_no_models_raises(monkeypatch):
+    """A server that answers but lists no model must not yield a model-less
+    target -- Agent would then substitute its own default (e.g. gpt-4o-mini)
+    and send it to the local endpoint."""
+    t = ollama({("GET", "/api/tags"): ok({"models": []})})
+    with pytest.raises(NoLocalEngineError) as exc:
+        resolve("local", transport=t)
+    assert "no usable model" in str(exc.value)
+
+
 # --- the produced target ------------------------------------------------------
 
 def test_target_carries_capabilities_and_quirks_from_the_server():

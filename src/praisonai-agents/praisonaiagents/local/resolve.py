@@ -187,10 +187,30 @@ def _with_url_evidence(discovery, evidence):
     return dataclasses.replace(discovery, evidence=evidence) if evidence else discovery
 
 
+def _require_model(discovery, model_id):
+    """Reject a model-less resolution or a named model the server does not serve."""
+    available = tuple(discovery.models)
+    where = f"{discovery.engine.value} at {discovery.base_url}"
+    if model_id is None:
+        raise NoLocalEngineError(
+            f"{where} answered but lists no usable model to chat with. Pull one "
+            f"(e.g. `ollama pull qwen3:0.6b`) or name it explicitly.")
+    if available and model_id not in available:
+        raise ModelNotAvailableError(
+            f"Model {model_id!r} is not served by {where}. "
+            f"Available: {', '.join(available)}.",
+            model_id=model_id, available=available)
+
+
 def _finish(discovery, model_id, model_evidence, per_request, transport, url_evidence=None):
     if model_id is None:
         model_id = select_model(discovery, transport=transport, timeout=per_request)
         model_evidence = Evidence.SERVER
+    # An explicitly named model must be served, and a reachable server that
+    # lists none must not yield a model-less target -- Agent would otherwise
+    # substitute its own default (e.g. gpt-4o-mini) and send it to the local
+    # endpoint, failing only on the first completion instead of at resolution.
+    _require_model(discovery, model_id)
     caps, caps_evidence, extra = _model_capabilities(
         discovery, model_id, timeout=per_request, transport=transport)
     target = build_target(discovery, model_id, caps=caps, caps_evidence=caps_evidence,

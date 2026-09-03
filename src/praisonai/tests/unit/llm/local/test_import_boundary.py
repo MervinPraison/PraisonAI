@@ -121,7 +121,7 @@ def test_sloc_ceiling():
     ceilings = {
         "__init__.py": 90, "errors.py": 80, "capabilities.py": 200,
         "quirktable.py": 200, "discover.py": 345, "target.py": 200,
-        "resolve.py": 265,
+        "resolve.py": 270,
     }
     total = 0
     for path in _modules():
@@ -133,4 +133,4 @@ def test_sloc_ceiling():
         ceiling = ceilings.get(path.name)
         if ceiling:
             assert sloc <= ceiling, f"{path.name} is {sloc} SLOC, ceiling {ceiling}"
-    assert total <= 1150, f"package is {total} SLOC, ceiling 1150"
+    assert total <= 1160, f"package is {total} SLOC, ceiling 1160"
