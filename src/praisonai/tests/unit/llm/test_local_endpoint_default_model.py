@@ -104,6 +104,31 @@ def test_no_warning_for_real_openai(monkeypatch, caplog):
     assert not [r for r in caplog.records if "OPENAI_MODEL_NAME" in r.getMessage()]
 
 
+def test_no_warning_when_provider_credential_resolves_prefixed_model(monkeypatch, caplog):
+    """A provider credential (e.g. OLLAMA_HOST) resolves an already-correct
+    provider-prefixed default, so the OpenAI-default warning must stay quiet and
+    must not mislabel that model as ``gpt-4o-mini``."""
+    monkeypatch.setenv("OPENAI_BASE_URL", LOCAL_URL)
+    monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+
+    with caplog.at_level(logging.WARNING):
+        Agent(instructions="test")
+
+    assert not [r for r in caplog.records if "OPENAI_MODEL_NAME" in r.getMessage()]
+
+
+def test_warns_when_only_api_base_is_set(monkeypatch, caplog):
+    """The client reads OPENAI_API_BASE first; the message must name it."""
+    monkeypatch.setenv("OPENAI_API_BASE", LOCAL_URL)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    with caplog.at_level(logging.WARNING):
+        Agent(instructions="test")
+
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert LOCAL_URL in joined, f"warning did not name the endpoint; got: {joined!r}"
+
+
 def test_no_warning_without_any_base_url(monkeypatch, caplog):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 

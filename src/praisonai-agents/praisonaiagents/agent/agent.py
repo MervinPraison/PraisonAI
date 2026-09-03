@@ -2258,19 +2258,32 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # found", which reads like an SDK bug rather than a missing line of
             # config. Warn, don't raise: an OpenAI-compatible proxy may legitimately
             # serve that exact name.
-            if llm is None and not os.getenv('OPENAI_MODEL_NAME'):
-                _endpoint = os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE')
+            #
+            # Only fire when the resolved default really is the OpenAI default:
+            # a provider credential (e.g. OLLAMA_HOST) resolves an
+            # already-correct provider-prefixed model, so there is nothing to
+            # warn about. Read the endpoint in the order the OpenAI client uses
+            # (OPENAI_API_BASE before OPENAI_BASE_URL, see openai_client.py) so
+            # the message names the endpoint the request actually goes to.
+            if (
+                llm is None
+                and model_name == 'gpt-4o-mini'
+                and not os.getenv('OPENAI_MODEL_NAME')
+            ):
+                _endpoint = os.getenv('OPENAI_API_BASE') or os.getenv('OPENAI_BASE_URL')
                 if _endpoint and 'api.openai.com' not in _endpoint:
                     global _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED
                     if not _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED:
-                        _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = True
-                        logging.warning(
-                            "No model specified, so the OpenAI default %r will be sent to %s. "
-                            "That endpoint probably does not serve it. Set OPENAI_MODEL_NAME "
-                            "to a model it does serve (e.g. OPENAI_MODEL_NAME=ollama/llama3.2), "
-                            "or pass llm= explicitly.",
-                            model_name, _endpoint,
-                        )
+                        with Agent._env_cache_lock:
+                            if not _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED:
+                                _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = True
+                                logging.warning(
+                                    "No model specified, so the OpenAI default %r will be sent to %s. "
+                                    "That endpoint probably does not serve it. Set OPENAI_MODEL_NAME "
+                                    "to a model it does serve (e.g. OPENAI_MODEL_NAME=ollama/llama3.2), "
+                                    "or pass llm= explicitly.",
+                                    model_name, _endpoint,
+                                )
             # A provider-prefixed model must be built as an LLM instance, which
             # owns provider routing and the per-provider adapters. The
             # `"/" in llm` branch above only inspects the explicit `llm=`
