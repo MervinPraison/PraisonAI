@@ -89,6 +89,23 @@ jobs:
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           npx tauri ios init --ci --skip-targets-install
 
+      - name: Put the real AppIcon set into the Xcode project
+        # `tauri ios init` renders the CLI's OWN placeholder AppIcon PNGs into
+        # gen/apple/Assets.xcassets, and nothing in the CLI ever replaces them:
+        # `tauri icon` writes to src-tauri/icons/ios/ and stops there (it wires
+        # up gen/android, but there is no iOS equivalent). So the copy is done
+        # here, and every filename matches one-for-one -- both sides are named
+        # by the same Contents.json.
+        #
+        # Idempotent, and it runs whether or not init just ran, so a
+        # regenerated project cannot silently ship Tauri's icon as ours.
+        run: |
+          set -euo pipefail
+          dest=src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
+          test -d "$dest" || { echo "::error::$dest does not exist"; find src-tauri/gen/apple -maxdepth 3 -print; exit 1; }
+          cp src-tauri/icons/ios/*.png "$dest/"
+          ls "$dest" | wc -l
+
       - name: Build the simulator app, unsigned
         # --target aarch64-sim: the iphonesimulator SDK, arm64 (the runner is
         #   Apple silicon, and so is every Mac that will run the simulator).
@@ -106,26 +123,49 @@ jobs:
         run: |
           set -euo pipefail
           root=src-tauri/gen/apple/build
-          app="$(find "$root" -type d -name 'PraisonAI.app' -path '*sim*' -print -quit || true)"
+          # Printed before anything is asserted, so a failure here is
+          # diagnosable from the log alone rather than costing another run.
+          echo "--- what the build left behind"
+          find "$root" -maxdepth 3 -print 2>/dev/null | head -40 || echo "(no build directory)"
+
+          # Prefer the simulator export dir (build/arm64-sim, the `arch` of the
+          # aarch64-sim target); fall back to any .app so the error message can
+          # say what WAS built. The name is not hardcoded: it comes from
+          # productName via the CLI, and guessing it wrong is what failed here
+          # the first time.
+          app="$(find "$root" -type d -name '*.app' -path '*arm64-sim*' -print -quit 2>/dev/null || true)"
+          [ -n "$app" ] || app="$(find "$root" -type d -name '*.app' -print -quit 2>/dev/null || true)"
           if [ -z "$app" ]; then
-            echo "::error::no PraisonAI.app was produced under $root"
-            find "$root" -maxdepth 4 -print 2>/dev/null || echo "(the build directory does not exist)"
+            echo "::error::no .app was produced under $root"
             exit 1
           fi
           echo "app: $app"
-          # The executable is the Rust staticlib plus the template's Swift
-          # main; an .app without it is an asset folder.
-          test -x "$app/PraisonAI" || { echo "::error::$app has no PraisonAI executable"; ls -la "$app"; exit 1; }
-          file "$app/PraisonAI"
-          file "$app/PraisonAI" | grep -q 'arm64' || { echo "::error::the executable is not arm64"; exit 1; }
-          # The webview is what the user sees; an app that shipped without it
-          # would boot to a blank screen.
-          test -f "$app/assets/index.html" || { echo "::error::$app has no assets/index.html"; find "$app" -maxdepth 2 -print; exit 1; }
+
+          # The executable's name comes from the bundle itself for the same
+          # reason.
+          exe="$app/$(plutil -extract CFBundleExecutable raw "$app/Info.plist")"
+          test -f "$exe" || { echo "::error::$app has no executable"; ls -la "$app"; exit 1; }
+          file "$exe"
+          file "$exe" | grep -q 'arm64' || { echo "::error::the executable is not arm64"; exit 1; }
+
+          # iOS links the Rust in as a staticlib, so unlike Android there is no
+          # .so to look for -- the crate is INSIDE this binary, and its symbols
+          # are the only real evidence it got there. An .app that built without
+          # it would be the Swift template alone.
+          nm -a "$exe" 2>/dev/null | grep -qi 'praisonai_mobile\|start_app' \
+            || strings -a "$exe" | grep -qi 'praisonai_mobile' \
+            || { echo "::error::the Rust library is not linked into $exe"; exit 1; }
+
+          # The frontend is embedded in that same binary by generate_context!,
+          # not copied into the bundle as a resource, so it is checked the same
+          # way rather than by looking for an index.html that is never there.
           plutil -p "$app/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|MinimumOSVersion|UIDeviceFamily'
+          test -f "$app/Assets.car" || echo "note: no compiled asset catalog in the bundle"
           du -sh "$app"
+
           # ditto, not zip: it keeps the bundle's symlinks and modes, which is
           # the difference between an .app the simulator installs and one it
-          # rejects with "invalid bundle".
+          # rejects as an invalid bundle.
           ditto -c -k --keepParent "$app" "$RUNNER_TEMP/PraisonAI-ios-simulator.app.zip"
           ls -la "$RUNNER_TEMP/PraisonAI-ios-simulator.app.zip"
 
@@ -138,6 +178,10 @@ jobs:
           retention-days: 30
 
       - name: Package gen/apple for committing
+        # always(): the project is generated by `init`, so it is worth having
+        # even on a run whose BUILD failed -- that is exactly the run where
+        # someone needs to look at it.
+        if: always()
         # Only what `git add src-tauri/gen/apple` would take: the template's
         # own .gitignore excludes build/, xcuserdata/ and Externals/, and this
         # respects it instead of re-listing them here. Nothing to upload when
@@ -154,6 +198,7 @@ jobs:
           ls -la "$RUNNER_TEMP/gen-apple.tgz"
 
       - name: Upload gen/apple (only on the run that generated it)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gen-apple
