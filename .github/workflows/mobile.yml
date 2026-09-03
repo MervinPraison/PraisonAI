@@ -76,7 +76,7 @@ jobs:
       # gitignores its lockfile. `--legacy-peer-deps` for the
       # bedrock-agentcore -> @strands-agents/sdk peer conflict, exactly as
       # praisonai-ts-webview.yml does.
-      - name: Build praisonai-ts (the file: dependency)
+      - name: "Build praisonai-ts (the file: dependency)"
         working-directory: src/praisonai-ts
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps
@@ -165,7 +165,7 @@ jobs:
       # gitignores its lockfile. `--legacy-peer-deps` for the
       # bedrock-agentcore -> @strands-agents/sdk peer conflict, exactly as
       # praisonai-ts-webview.yml does.
-      - name: Build praisonai-ts (the file: dependency)
+      - name: "Build praisonai-ts (the file: dependency)"
         working-directory: src/praisonai-ts
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps
@@ -235,7 +235,7 @@ jobs:
       # gitignores its lockfile. `--legacy-peer-deps` for the
       # bedrock-agentcore -> @strands-agents/sdk peer conflict, exactly as
       # praisonai-ts-webview.yml does.
-      - name: Build praisonai-ts (the file: dependency)
+      - name: "Build praisonai-ts (the file: dependency)"
         working-directory: src/praisonai-ts
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps
