@@ -5153,8 +5153,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if _effort is not None:
                         try:
                             from ..thinking.effort import resolve_reasoning_params
-                            completion_args.update(
-                                resolve_reasoning_params(_effort, self.llm))
+                            _reasoning = resolve_reasoning_params(_effort, self.llm)
+                            for _key, _value in _reasoning.items():
+                                # ``reasoning_effort`` is a native OpenAI SDK
+                                # keyword; anything else (e.g. an extended-thinking
+                                # ``thinking`` budget for an Anthropic/Gemini-named
+                                # model reached over an OpenAI-compatible endpoint)
+                                # is a provider-specific body field the OpenAI SDK
+                                # rejects as a top-level kwarg, so route it through
+                                # ``extra_body`` instead of raising TypeError.
+                                if _key == "reasoning_effort":
+                                    completion_args[_key] = _value
+                                else:
+                                    completion_args.setdefault(
+                                        "extra_body", {})[_key] = _value
                         except ImportError:
                             pass
                     if formatted_tools:

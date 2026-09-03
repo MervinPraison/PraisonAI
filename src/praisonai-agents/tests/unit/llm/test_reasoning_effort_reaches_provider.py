@@ -74,6 +74,29 @@ class TestReasoningEffortReachesTheProvider:
         assert "reasoning_effort" not in req
         assert "thinking" not in req
 
+    def test_extended_thinking_budget_goes_through_extra_body(self):
+        """A ``thinking`` budget is not a native OpenAI SDK keyword.
+
+        resolve_reasoning_params emits ``{"thinking": ...}`` for an
+        extended-thinking-named model. On this direct path the request is
+        handed to the raw OpenAI SDK, which rejects unknown top-level kwargs
+        with TypeError, so the budget must ride inside ``extra_body`` while
+        ``reasoning_effort`` stays top-level.
+        """
+        req = _request_for("claude-3-7-sonnet", reasoning_effort="high")
+        assert "thinking" not in req, (
+            "thinking must not be a top-level kwarg; the OpenAI SDK rejects it"
+        )
+        assert req.get("extra_body", {}).get("thinking") == {
+            "type": "enabled", "budget_tokens": 16000,
+        }
+
+    def test_native_effort_stays_top_level_not_in_extra_body(self):
+        """reasoning_effort is native; it must not be buried in extra_body."""
+        req = _request_for("o4-mini", reasoning_effort="high")
+        assert req.get("reasoning_effort") == "high"
+        assert "reasoning_effort" not in req.get("extra_body", {})
+
     def test_the_ordinary_request_still_looks_right(self):
         """Guards against the merge clobbering the rest of the payload."""
         req = _request_for("gpt-4o-mini")
