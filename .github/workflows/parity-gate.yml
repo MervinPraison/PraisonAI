@@ -1,0 +1,79 @@
+name: Parity Gate
+
+# Validates Python <-> TypeScript SDK parity on pull requests and FAILS on drift.
+#
+# Two named checks, so each kind of drift is visible in the checks list:
+#   names      - the exported-name tracker (PARITY.md / FEATURE_PARITY_TRACKER.json)
+#                must be regenerated in the PR when the public surface changes.
+#   signatures - constructor/method parameters of the curated surfaces in
+#                src/praisonai/praisonai/_dev/parity/signatures/surface.yaml must
+#                match (after camelCase/alias/flattening rules) or be waived with a
+#                reason in waivers.yaml. Stale or expired waivers also fail.
+#
+# The regenerate-and-commit job stays in update-parity-tracker.yml (push to main).
+# This workflow never commits; it only reports.
+
+on:
+  pull_request:
+    paths:
+      - 'src/praisonai-agents/praisonaiagents/**/*.py'
+      - 'src/praisonai-ts/src/**/*.ts'
+      - 'src/praisonai-rust/praisonai/src/**/*.rs'
+      - 'src/praisonai/praisonai/_dev/parity/**'
+      - 'src/praisonai/praisonai/cli/features/**'
+      - 'src/praisonai-ts/PARITY.md'
+      - 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json'
+      - 'src/praisonai-ts/SIGNATURE_PARITY.md'
+      - 'src/praisonai-ts/signature-parity.json'
+      - 'src/praisonai-rust/PARITY.md'
+      - 'src/praisonai-rust/FEATURE_PARITY_TRACKER.json'
+      - '.github/workflows/parity-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  names:
+    name: names (exported-symbol tracker up to date)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - name: Tracker files match the sources
+        run: |
+          if ! python3 src/praisonai/scripts/generate_parity_tracker.py --check; then
+            echo "::error::Parity tracker is out of date. Run: python3 src/praisonai/scripts/generate_parity_tracker.py  and commit src/praisonai-ts/PARITY.md, FEATURE_PARITY_TRACKER.json and the Rust pair."
+            exit 1
+          fi
+
+  signatures:
+    name: signatures (constructor and method parameters)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install pyyaml
+      - name: Install the TypeScript compiler only
+        # praisonai-ts's full dependency tree is not needed (and does not
+        # install cleanly); the extractor needs only the `typescript` package.
+        run: |
+          mkdir -p "$RUNNER_TEMP/parity-ts"
+          npm install --prefix "$RUNNER_TEMP/parity-ts" --no-audit --no-fund typescript@5.7.3
+          echo "PARITY_TS_NODE_MODULES=$RUNNER_TEMP/parity-ts/node_modules" >> "$GITHUB_ENV"
+      - name: Signatures match, or are waived with a reason
+        env:
+          PYTHONPATH: src/praisonai
+        run: |
+          if ! python3 -m praisonai._dev.parity.signatures --check; then
+            echo "::error::Signature parity failed. See the output above for the surface and parameter. Fix the TypeScript side, or add a waiver with a reason to src/praisonai/praisonai/_dev/parity/signatures/waivers.yaml, then run: PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.signatures --write"
+            exit 1
+          fi

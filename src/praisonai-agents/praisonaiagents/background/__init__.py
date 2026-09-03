@@ -42,6 +42,8 @@ __all__ = [
     "BackgroundConfig",
     # Shared runner accessor
     "get_background_runner",
+    # Durable background job store
+    "SqliteBackgroundJobStore",
 ]
 
 
@@ -66,5 +68,9 @@ def __getattr__(name: str):
     if name == "get_background_runner":
         from .runner import get_background_runner
         return get_background_runner
+    
+    if name == "SqliteBackgroundJobStore":
+        from .sqlite_store import SqliteBackgroundJobStore
+        return SqliteBackgroundJobStore
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

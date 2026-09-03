@@ -64,9 +64,6 @@ class InteractiveConfig:
     # Sharing
     share: bool = False
     
-    # Variant (reasoning effort)
-    variant: Optional[str] = None
-    
     @classmethod
     def from_env(cls) -> "InteractiveConfig":
         """Create config from environment variables."""
@@ -97,7 +94,6 @@ class InteractiveConfig:
             memory=getattr(args, "memory", False),
             files=getattr(args, "file", []) or [],
             share=getattr(args, "share", False),
-            variant=getattr(args, "variant", None),
             autonomy=getattr(args, "autonomy", True),
             no_context=getattr(args, "no_context", False),
         )

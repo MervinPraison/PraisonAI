@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from ._paths import find_repo_root
+
 
 # Rust reserved keywords and module conflicts that cannot be directly exported
 # These are marked as N/A in parity tracking
@@ -102,13 +104,8 @@ class RustFeatureExtractor:
         self.rust_pkg = self.repo_root / "src" / "praisonai-rust" / "praisonai"
     
     def _find_repo_root(self) -> Path:
-        """Find repository root by looking for .git directory."""
-        current = Path.cwd()
-        while current != current.parent:
-            if (current / ".git").exists():
-                return current
-            current = current.parent
-        return Path("/Users/praison/praisonai-package")
+        """Find the monorepo root (see ``_paths.find_repo_root``)."""
+        return find_repo_root()
     
     def extract(self) -> RustFeatures:
         """Extract all features from Rust SDK."""
@@ -215,7 +212,7 @@ class RustFeatureExtractor:
         """Scan module files for public exports not in lib.rs."""
         existing_exports = {e.name for e in features.exports}
         
-        for rs_file in src_dir.rglob("*.rs"):
+        for rs_file in sorted(src_dir.rglob("*.rs")):  # sorted: first-seen wins, so order must not depend on the OS
             if rs_file.name == "lib.rs":
                 continue
             

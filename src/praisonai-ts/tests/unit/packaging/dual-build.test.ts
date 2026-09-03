@@ -178,3 +178,64 @@ describe('praisonai dual ESM+CJS packaging', () => {
     expect(out).toContain('SUBPATHS_OK');
   }, 120000);
 });
+
+/**
+ * The published `praisonai/mobile` entry must be buildable for the WebView floor
+ * the mobile app declares (Android minSdkVersion 26 => Chrome 58).
+ *
+ * The shim's createRequire banner is a top-level await, which esbuild cannot
+ * lower for chrome58 and refuses outright. Three files on the mobile graph used
+ * to earn that banner through a bare require() inside otherwise lazy provider
+ * loaders; the sources now import statically, so the built files need no
+ * banner and the entry bundles at the floor. Both halves are asserted here
+ * against the freshly built dist, because `npm test` runs in Node where a
+ * top-level await is perfectly fine and nothing else would notice.
+ */
+describe('praisonai/mobile entry has no top-level await on its graph', () => {
+  // The three built files that carried the banner (git log -S__praisonMod).
+  const MOBILE_GRAPH_FILES = [
+    'llm/backend-resolver.js',
+    'llm/providers/ai-sdk/index.js',
+    'llm/providers/registry.js',
+  ];
+
+  // Mechanical criterion, identical to:
+  //   grep -l "__praisonMod" dist/esm/llm/backend-resolver.js \
+  //     dist/esm/llm/providers/ai-sdk/index.js dist/esm/llm/providers/registry.js
+  // printing nothing. '__praisonMod' is the first binding of the banner; the
+  // second assertion is the banner-independent marker esm-shim-banner.test.ts
+  // uses, so a renamed banner still fails here.
+  it('emits the three former banner files with no createRequire banner', () => {
+    const bannered = MOBILE_GRAPH_FILES.filter((rel) => {
+      const code = fs.readFileSync(path.join(ESM_DIR, rel), 'utf8');
+      return code.includes('__praisonMod') || code.includes('const require =');
+    });
+    expect(bannered).toEqual([]);
+  });
+
+  it('has no bare require()/__dirname left in the sources the shim would banner', () => {
+    // The emit-time decision is needsCjsBanner() over the emitted JS; tsc's ESM
+    // emit neither adds nor removes require() calls, so the same detector over
+    // the TypeScript source is the build-independent form of the check above.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { needsCjsBanner } = require('../../../scripts/esm-shim.js');
+    const SRC = path.join(PKG_ROOT, 'src');
+    const offenders = MOBILE_GRAPH_FILES.map((rel) => rel.replace(/\.js$/, '.ts')).filter((rel) =>
+      needsCjsBanner(fs.readFileSync(path.join(SRC, rel), 'utf8'))
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('bundles dist/esm/mobile.js for chrome58 (scripts/webview-gate.mjs floor check)', () => {
+    // The gate owns the esbuild configuration (browser platform, bare specifiers
+    // external) and the floor target; run it rather than restate it. It exits
+    // non-zero on any failure, which execFileSync turns into a thrown error
+    // carrying esbuild's own diagnosis (file:line of the top-level await).
+    const out = execFileSync(process.execPath, ['scripts/webview-gate.mjs'], {
+      cwd: PKG_ROOT,
+      encoding: 'utf8',
+    });
+    expect(out).toContain('OK   dist/esm/mobile.js: bundles for chrome58');
+    expect(out).toContain('OK   dist/esm/mobile.js: loadable in a webview');
+  }, 120000);
+});

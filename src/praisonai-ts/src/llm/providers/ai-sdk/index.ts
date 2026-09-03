@@ -82,21 +82,27 @@ export {
   type AISDKMiddleware,
 } from './middleware';
 
-// Lazy-loaded backend exports
-// These use getters to avoid importing the backend module until needed
-
-let _AISDKBackend: typeof import('./backend').AISDKBackend | null = null;
-let _createAISDKBackend: typeof import('./backend').createAISDKBackend | null = null;
+// Backend exports.
+//
+// These used to `require('./backend')` on first call "to avoid importing the
+// backend module until needed" -- but `export { AISDKBackend } from './backend'`
+// below already loads it statically, so the require deferred nothing. What IS
+// lazy, and stays lazy, lives inside backend.ts: the AI SDK itself
+// (`await import('ai')`) is not touched until the first generate call
+// (tests/unit/llm/ai-sdk/lazy-import.test.ts pins that). The bare require cost
+// the ESM build a top-level-await createRequire banner from scripts/esm-shim.js,
+// which made `praisonai/mobile` unbuildable for the Android 8 WebView (chrome58).
+import {
+  AISDKBackend as AISDKBackendClass,
+  createAISDKBackend as createAISDKBackendImpl,
+} from './backend';
+import { registerCustomProvider } from './provider-map';
 
 /**
- * Get the AISDKBackend class (lazy loaded)
+ * Get the AISDKBackend class
  */
-export function getAISDKBackendClass(): typeof import('./backend').AISDKBackend {
-  if (!_AISDKBackend) {
-    const backend = require('./backend');
-    _AISDKBackend = backend.AISDKBackend;
-  }
-  return _AISDKBackend!;
+export function getAISDKBackendClass(): typeof AISDKBackendClass {
+  return AISDKBackendClass;
 }
 
 /**
@@ -116,12 +122,8 @@ export function getAISDKBackendClass(): typeof import('./backend').AISDKBackend 
 export function createAISDKBackend(
   modelString: string,
   config?: import('./types').AISDKBackendConfig
-): import('./backend').AISDKBackend {
-  if (!_createAISDKBackend) {
-    const backend = require('./backend');
-    _createAISDKBackend = backend.createAISDKBackend;
-  }
-  return _createAISDKBackend!(modelString, config);
+): AISDKBackendClass {
+  return createAISDKBackendImpl(modelString, config);
 }
 
 // Re-export the class for direct instantiation
@@ -149,7 +151,6 @@ export function registerAISDKProviders(
 ): void {
   // Register custom providers if provided
   if (customProviders) {
-    const { registerCustomProvider } = require('./provider-map');
     for (const [id, factory] of Object.entries(customProviders)) {
       registerCustomProvider(id, factory);
     }
@@ -181,11 +182,21 @@ export async function getAISDKVersion(): Promise<string | null> {
     // Use variable to prevent TypeScript from resolving at compile time
     const moduleName = 'ai';
     await import(moduleName);
-    // AI SDK doesn't export version directly, so we check package.json
+    // AI SDK doesn't export version directly, so we check package.json.
+    // A dynamic import rather than require(): a bare require() in this file
+    // makes scripts/esm-shim.js prepend a top-level-await createRequire banner
+    // to the ESM build, which no chrome58 WebView can load. Under the CJS build
+    // tsc lowers this to require(); under the ESM build the attribute is kept,
+    // which native ESM demands for JSON. Both resolve 'ai' from this file's own
+    // location exactly as the require() did.
     try {
       const pkgPath = 'ai/package.json';
-      const pkg = require(pkgPath);
-      return pkg.version;
+      // The CJS build (module=commonjs) rejects a second import() argument at
+      // the grammar level (TS1324) yet emits the right thing -- `require(s)`
+      // with the attribute dropped. The ESM build accepts it as-is.
+      // @ts-ignore
+      const pkg = await import(pkgPath, { with: { type: 'json' } });
+      return (pkg.default ?? pkg).version;
     } catch {
       return 'installed';
     }

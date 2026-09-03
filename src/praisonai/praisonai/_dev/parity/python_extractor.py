@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from ._paths import find_repo_root
+
 
 @dataclass
 class PythonExport:
@@ -108,13 +110,8 @@ class PythonFeatureExtractor:
         self.wrapper_pkg = self.repo_root / "src" / "praisonai" / "praisonai"
     
     def _find_repo_root(self) -> Path:
-        """Find repository root by looking for .git directory."""
-        current = Path.cwd()
-        while current != current.parent:
-            if (current / ".git").exists():
-                return current
-            current = current.parent
-        return Path("/Users/praison/praisonai-package")
+        """Find the monorepo root (see ``_paths.find_repo_root``)."""
+        return find_repo_root()
     
     def extract(self) -> PythonFeatures:
         """Extract all features from Python SDK."""

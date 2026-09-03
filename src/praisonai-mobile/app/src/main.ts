@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
+import { enginesFor, defaultEngineIdFor, settingDefsFor } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -63,31 +63,25 @@ import {
 import type { EngineChoice } from "./engines.ts";
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import { createPraisonTsEngine, type RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
+import { loadPraisonAgent, type PraisonAgentModule } from "../../engines/src/praisonai-ts/load-agent.ts";
 import type { PraisonAgent } from "../../engines/src/praisonai-ts/agent-api.ts";
 import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 
-/** The one member of praisonai's `Agent` constructor this seam uses. Declared
- *  structurally, never imported -- `agent-api.ts` exists precisely so no
- *  `praisonai` type crosses into this package; `check:upstream` is the
- *  out-of-band check that the real `Agent` still matches. */
-interface PraisonAgentModule {
-  new (config: { instructions: string; llm?: string }): PraisonAgent;
-}
-
 /**
  * The in-process praisonai-ts engine, built lazily.
  *
- * DYNAMIC import, and through a runtime-computed specifier so NEITHER tsc nor
- * esbuild pulls `praisonai` into this package. That preserves the invariant
- * `agent-api.ts` documents: `praisonai` is not a dependency here and cannot be
- * until its Agent graph is bundleable for a webview -- its bare `crypto` and
- * `events` imports are import-time fatal (#4437), and its own sources do not
- * even typecheck under this config (which is why `check:upstream` runs the
- * coupling check out of band). Behind a lazy import the app still builds and
- * ships with the remote engine, and the in-process one is OFFERED -- its agent
- * module loading only where praisonai-ts is resolvable at run time.
+ * `praisonai` is a dependency now, and it reaches the webview as a CHUNK: the
+ * literal `import("praisonai/mobile")` in engines/praisonai-ts/load-agent.ts
+ * is what lets esbuild split it out, so the shell that loads at first paint
+ * stays at 66kB and the engine's ~1.3MB is fetched only when this factory
+ * first runs. It used to be a runtime-computed specifier that kept `praisonai`
+ * out of both tsc's and esbuild's graphs entirely -- necessary while its Agent
+ * graph imported `crypto` and `events` statically (#4437), and the reason the
+ * engine's module was simply ABSENT from every shipped build. `praisonai/mobile`
+ * is the upstream entry without those imports; `tools/bundle.mjs` is what
+ * proves that on every build.
  *
  * The engine takes a `createAgent` factory, not an agent: the model comes from
  * settings, which can change between turns.
@@ -95,6 +89,7 @@ interface PraisonAgentModule {
 async function createInProcessEngine(
   persistence: RunPersistence,
   settings: SettingsFacade,
+  loadAgent: () => Promise<PraisonAgentModule>,
 ): Promise<AgentEnginePort> {
   const settingString = (key: string, fallback: string): string => {
     const value = settings.get(key);
@@ -103,29 +98,11 @@ async function createInProcessEngine(
   return createPraisonTsEngine({
     persistence,
     createAgent: async (): Promise<PraisonAgent> => {
-      // Computed, not a literal: a literal specifier would make tsc pull the
-      // untypecheckable upstream sources and esbuild bundle their import-time-
-      // fatal builtins. This keeps both graphs clean and the engine offerable.
-      const specifier = ["..", "..", "..", "praisonai-ts", "src", "agent", "simple.ts"].join("/");
-      // The import can REJECT: this specifier resolves at run time, and where
-      // praisonai-ts is not on disk (the shipping webview bundles only dist/,
-      // #4437) the module is simply absent. Left unwrapped, that rejection is
-      // an opaque "cannot find module" from deep inside the engine's run loop.
-      // Re-thrown as a plain Error, engine.ts turns it into a recoverable
-      // `error` event through its existing catch -- the named, on-screen
-      // failure engines.ts argues for, not a crash. This does NOT let the
-      // engine into the shipping picker (registry.ts keeps it out of
-      // engineId.choices); it makes the one path that offers it honest.
-      let mod: { Agent: PraisonAgentModule };
-      try {
-        mod = (await import(specifier)) as { Agent: PraisonAgentModule };
-      } catch (cause) {
-        throw new Error(
-          "the in-process engine is unavailable in this build: praisonai-ts could not be loaded",
-          { cause },
-        );
-      }
-      return new mod.Agent({
+      // The chunk is fetched here, on the first turn, not at create(): a
+      // fetch that fails then surfaces through engine.ts's run loop as a
+      // recoverable `error` event rather than as a factory that throws.
+      const Agent = await loadAgent();
+      return new Agent({
         instructions: "You are a helpful assistant.",
         llm: settingString("model", "gpt-4o-mini"),
       });
@@ -148,48 +125,21 @@ export function appEngines(deps: {
   readonly http: HttpPort;
   readonly persistence: RunPersistence;
   readonly onIgnored: (reason: IgnoredReason, detail: string) => void;
+  /** How the in-process engine's `Agent` class is fetched. Defaults to the
+   *  real chunk loader. A test injects a rejecting one to drive the failure
+   *  path, because with `praisonai` installed the real one simply succeeds. */
+  readonly loadAgent?: () => Promise<PraisonAgentModule>;
 }): readonly EngineChoice[] {
+  const loadAgent = deps.loadAgent ?? loadPraisonAgent;
   return enginesFor({
     settings: deps.settings,
     http: deps.http,
     persistence: deps.persistence,
     onIgnored: deps.onIgnored,
-    createInProcess: (persistence) => createInProcessEngine(persistence, deps.settings),
+    createInProcess: (persistence) => createInProcessEngine(persistence, deps.settings, loadAgent),
   });
 }
 
-/**
- * The engine to start with when settings name none.
- *
- * `remote-http` on every platform, for now, and the reason is a hard fact about
- * this build rather than a preference: the webview ships only `dist/app.js`
- * (build-webview.mjs bundles `app/src/main.ts` and copies nothing else), and
- * the in-process engine reaches praisonai-ts through a RUNTIME-computed import
- * that is deliberately outside that bundle (#4437). So on a real device the
- * in-process engine's module is simply ABSENT -- its first turn rejects with
- * "the in-process engine is unavailable in this build". Making it the device
- * DEFAULT would therefore swap the old "not answering" warning (which at least
- * names Settings as the fix) for a first prompt that fails with no recovery,
- * and would do it on the exact path registry.ts keeps the engine OUT of the
- * shipping picker to avoid ("a picker must not offer a choice that bricks the
- * app"). Until #4437 makes praisonai-ts resolvable inside the webview, the
- * honest first-launch default stays the remote engine.
- *
- * A second reason the ternary this replaced was wrong: `Platform["kind"]` is
- * only `"tauri" | "web"`, and DESKTOP Tauri (`cargo tauri dev`) reports
- * `"tauri"` too -- so keying the in-process engine off `kind === "tauri"` also
- * flipped the desktop/dev flow away from the remote engine it exists for, with
- * no way here to tell a phone from a laptop.
- *
- * Kept as an exported function, taking the platform kind, so the seam is ready
- * for the day a device can be told apart AND the engine ships -- and so a test
- * drives it directly rather than asserting an expression appears in `mount`.
- * The persisted `engineId` still wins over this (see `chosenStringOr` in
- * boot.ts), so it only ever decides the very first launch.
- */
-export function defaultEngineIdFor(_kind: Platform["kind"]): string {
-  return ENGINE_REMOTE_HTTP;
-}
 
 export interface MountDeps {
   readonly root: HTMLElement;
@@ -200,6 +150,10 @@ export interface MountDeps {
   /** The locales the user prefers, most-preferred first. Injected so a test is
    *  deterministic; defaults to the host's `navigator.languages`. */
   readonly locales?: readonly string[];
+  /** How the in-process engine's `Agent` class is fetched. Defaults to the
+   *  real chunk loader; a test hands in a scripted class so a first message
+   *  can be driven into the in-process engine with no network and no key. */
+  readonly loadAgent?: () => Promise<PraisonAgentModule>;
 }
 
 /**
@@ -701,13 +655,22 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // the engine at boot and never replaced -- so the engine address the user
     // set was read, stored, and thrown away in favour of the hardcoded default.
     engines: (persistence, settings, onIgnored) =>
-      appEngines({ settings, http: platform.http, persistence, onIgnored }),
-    settingDefs: SETTING_DEFS,
+      appEngines({
+        settings,
+        http: platform.http,
+        persistence,
+        onIgnored,
+        ...(deps.loadAgent === undefined ? {} : { loadAgent: deps.loadAgent }),
+      }),
+    // The platform's defs, so the engine Settings shows as the default and the
+    // engine that answers a first launch are the same one.
+    settingDefs: settingDefsFor(platform.kind),
     // The default when settings name none, chosen by platform: the in-process
     // engine on a device (a phone has no `127.0.0.1:8765` to reach, and a
     // cleartext localhost address is refused by iOS ATS and Android), the
-    // remote engine on desktop/dev where one actually runs. createApp prefers
-    // the persisted `engineId` over this, so it only decides the first launch.
+    // remote engine on the web where a server is what there is. createApp
+    // prefers the persisted `engineId` over this, so it only decides the
+    // first launch. registry.ts says why desktop Tauri counts as a device.
     engineId: defaultEngineIdFor(platform.kind),
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),
