@@ -486,6 +486,12 @@ Respond with ONLY a valid JSON tool call in this format:
         self._last_stop_reason = "completed"
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
+        # Optional Agent-supplied thread-safe append for deferred re-injection.
+        # When an Agent owns this LLM it wires its own history append here so a
+        # background-resolved defer(...) result lands on the list follow-up
+        # turns actually replay (the LLM's own chat_history has no readers in
+        # that case). Left None for standalone LLM usage.
+        self._agent_history_append = None
         self.verbose = extra_settings.get('verbose', True)
         self.markdown = extra_settings.get('markdown', True)
         self.self_reflect = extra_settings.get('self_reflect', False)
@@ -2020,14 +2026,22 @@ Respond with ONLY a valid JSON tool call in this format:
 
             def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
                 # Best-effort: this closure is invoked from a background worker
-                # thread; appending to the LLM's persistent ``chat_history``
-                # (the same list follow-up turns replay via _build_messages)
-                # makes the resolved value available on the next turn.
-                self.chat_history.append({
+                # thread. When driven by an Agent, follow-up turns replay the
+                # Agent's own history (passed as a parameter into
+                # _build_messages), not this LLM's ``chat_history`` — so we
+                # append via the Agent's thread-safe callback when one has been
+                # wired, and fall back to the LLM's own list only for standalone
+                # LLM usage.
+                message = {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "content": f"[deferred:{function_name}] {value}",
-                })
+                }
+                history_append = getattr(self, "_agent_history_append", None)
+                if history_append is not None:
+                    history_append(message)
+                else:
+                    self.chat_history.append(message)
 
             # Atomic: only register when not already pending, so a gateway that
             # registered its own resolver for this handle first is never

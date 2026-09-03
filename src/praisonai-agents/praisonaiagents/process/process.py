@@ -50,6 +50,12 @@ class Process:
         self.workflow_cancelled = False # ADDED: Workflow cancellation flag for timeout
         self._state_lock_init = threading.Lock()  # Thread lock for synchronous shared-state updates
         self._state_lock = None # Lazy-initialized async lock for shared state protection
+        # Ids of every synthetic ``manager_task`` this Process has injected. Each
+        # hierarchical() / ahierarchical() run adds a fresh manager via add_task
+        # and never removes prior ones, so a re-run of the same team leaves stale
+        # managers in self.tasks. Excluding all of them (not just the current one)
+        # from total_tasks / delegable ids keeps completion reachable across runs.
+        self._synthetic_manager_task_ids: set = set()
         
         # Resolve verbose from output= param (takes precedence) or legacy verbose= param
         if output is not None:
@@ -1055,9 +1061,30 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         )
         manager_task_id = yield manager_task
         logging.info(f"Created manager task with ID {manager_task_id}")
+        self._synthetic_manager_task_ids.add(manager_task_id)
 
-        completed_count = 0
-        total_tasks = len(self.tasks) - 1
+        # Exclude every synthetic manager this Process has injected — not just the
+        # current one. Re-running the same team leaves prior managers in self.tasks
+        # (they are never removed and an aborted run may not have marked its manager
+        # completed), so counting them as real work would keep completed_count below
+        # total_tasks forever and the loop could only exit via manager "stop" /
+        # max iterations. Keyed by id (not name) so a user task named "manager_task"
+        # stays delegable.
+        excluded_task_ids = self._synthetic_manager_task_ids
+
+        total_tasks = len([tid for tid in self.tasks if tid not in excluded_task_ids])
+        # Seed completion accounting with tasks already completed before this run
+        # (e.g. re-running the same team). Tracking counted ids by object identity
+        # keeps the counter idempotent: a task is counted exactly once, whether it
+        # was pre-completed or completes during this run. Without this seed,
+        # pre-completed tasks would hit the re-selection branch and never be
+        # counted, making completed_count < total_tasks permanently and the loop
+        # only exitable via manager "stop" / max iterations.
+        counted_task_ids = {
+            tid for tid, tk in self.tasks.items()
+            if tid not in excluded_task_ids and tk.status == "completed"
+        }
+        completed_count = len(counted_task_ids)
         logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
         
         # Track invalid selection attempts and error context
@@ -1068,7 +1095,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             tasks_summary = []
             for tid, tk in self.tasks.items():
-                if tid == manager_task_id:
+                if tid in excluded_task_ids:
                     continue
                 task_info = {
                     "task_id": tid,
@@ -1141,10 +1168,11 @@ Provide a JSON with the structure:
                 break
 
             selected_task = self.tasks.get(selected_task_id)
-            if selected_task is None or selected_task_id == manager_task_id:
-                # Reject unknown ids and the synthetic manager_task by its actual id
-                # (it must never delegate to itself). Matching by id avoids colliding
-                # with a legitimate user task that happens to be named "manager_task".
+            if selected_task is None or selected_task_id in excluded_task_ids:
+                # Reject unknown ids and any synthetic manager_task by its actual id
+                # (the manager must never delegate to itself, nor to a stale manager
+                # left by a prior run of the same team). Matching by id avoids
+                # colliding with a legitimate user task named "manager_task".
                 # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
@@ -1154,7 +1182,7 @@ Provide a JSON with the structure:
                     break
 
                 valid_task_ids = [
-                    tid for tid in self.tasks if tid != manager_task_id
+                    tid for tid in self.tasks if tid not in excluded_task_ids
                 ]
                 logging.warning(
                     f"Manager selected invalid task_id={selected_task_id} "
@@ -1183,10 +1211,21 @@ Provide a JSON with the structure:
                 logging.info(f"Starting execution of task {selected_task_id}")
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
-
-            if self.tasks[selected_task_id].status == "completed":
-                completed_count += 1
-                logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+                # Count a task toward completion only the first time it actually
+                # transitions to "completed" (tracked by id). Counting on every
+                # status check would double-count a task the manager re-selects
+                # after it is already completed, letting completed_count reach
+                # total_tasks early and silently skipping genuinely unexecuted
+                # tasks.
+                if (
+                    self.tasks[selected_task_id].status == "completed"
+                    and selected_task_id not in counted_task_ids
+                ):
+                    counted_task_ids.add(selected_task_id)
+                    completed_count += 1
+                    logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+            else:
+                logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
         self.tasks[manager_task.id].status = "completed"
         if self.verbose >= 1:
@@ -1666,9 +1705,30 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         )
         manager_task_id = yield manager_task
         logging.info(f"Created manager task with ID {manager_task_id}")
+        self._synthetic_manager_task_ids.add(manager_task_id)
 
-        completed_count = 0
-        total_tasks = len(self.tasks) - 1
+        # Exclude every synthetic manager this Process has injected — not just the
+        # current one. Re-running the same team leaves prior managers in self.tasks
+        # (they are never removed and an aborted run may not have marked its manager
+        # completed), so counting them as real work would keep completed_count below
+        # total_tasks forever and the loop could only exit via manager "stop" /
+        # max iterations. Keyed by id (not name) so a user task named "manager_task"
+        # stays delegable.
+        excluded_task_ids = self._synthetic_manager_task_ids
+
+        total_tasks = len([tid for tid in self.tasks if tid not in excluded_task_ids])
+        # Seed completion accounting with tasks already completed before this run
+        # (e.g. re-running the same team). Tracking counted ids by object identity
+        # keeps the counter idempotent: a task is counted exactly once, whether it
+        # was pre-completed or completes during this run. Without this seed,
+        # pre-completed tasks would hit the re-selection branch and never be
+        # counted, making completed_count < total_tasks permanently and the loop
+        # only exitable via manager "stop" / max iterations.
+        counted_task_ids = {
+            tid for tid, tk in self.tasks.items()
+            if tid not in excluded_task_ids and tk.status == "completed"
+        }
+        completed_count = len(counted_task_ids)
         logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
         
         # Track invalid selection attempts and error context
@@ -1679,7 +1739,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             tasks_summary = []
             for tid, tk in self.tasks.items():
-                if tid == manager_task_id:
+                if tid in excluded_task_ids:
                     continue
                 task_info = {
                     "task_id": tid,
@@ -1725,10 +1785,11 @@ Provide a JSON with the structure:
                 break
 
             selected_task = self.tasks.get(selected_task_id)
-            if selected_task is None or selected_task_id == manager_task_id:
-                # Reject unknown ids and the synthetic manager_task by its actual id
-                # (it must never delegate to itself). Matching by id avoids colliding
-                # with a legitimate user task that happens to be named "manager_task".
+            if selected_task is None or selected_task_id in excluded_task_ids:
+                # Reject unknown ids and any synthetic manager_task by its actual id
+                # (the manager must never delegate to itself, nor to a stale manager
+                # left by a prior run of the same team). Matching by id avoids
+                # colliding with a legitimate user task named "manager_task".
                 # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
@@ -1738,7 +1799,7 @@ Provide a JSON with the structure:
                     break
 
                 valid_task_ids = [
-                    tid for tid in self.tasks if tid != manager_task_id
+                    tid for tid in self.tasks if tid not in excluded_task_ids
                 ]
                 logging.warning(
                     f"Manager selected invalid task_id={selected_task_id} "
@@ -1767,10 +1828,21 @@ Provide a JSON with the structure:
                 logging.info(f"Starting execution of task {selected_task_id}")
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
-
-            if self.tasks[selected_task_id].status == "completed":
-                completed_count += 1
-                logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+                # Count a task toward completion only the first time it actually
+                # transitions to "completed" (tracked by id). Counting on every
+                # status check would double-count a task the manager re-selects
+                # after it is already completed, letting completed_count reach
+                # total_tasks early and silently skipping genuinely unexecuted
+                # tasks.
+                if (
+                    self.tasks[selected_task_id].status == "completed"
+                    and selected_task_id not in counted_task_ids
+                ):
+                    counted_task_ids.add(selected_task_id)
+                    completed_count += 1
+                    logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+            else:
+                logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
         self.tasks[manager_task.id].status = "completed"
         if self.verbose >= 1:
