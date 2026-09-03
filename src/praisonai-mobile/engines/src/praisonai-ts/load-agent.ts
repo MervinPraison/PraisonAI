@@ -16,9 +16,23 @@
  */
 import type { PraisonAgent } from "./agent-api.ts";
 
-/** The one member of praisonai's `Agent` constructor this seam uses. */
+/**
+ * The one member of praisonai's `Agent` constructor this seam uses.
+ *
+ * `apiKey` is upstream's `SimpleAgentConfig.apiKey` ("Mirrors Python's
+ * per-agent `api_key`. Falls back to OPENAI_API_KEY when omitted"), and it is
+ * declared here because a webview has no environment to fall back TO: `getEnv`
+ * in praisonai-ts returns undefined when `process` is absent, which is every
+ * phone. Without this field the only way to authenticate the in-process engine
+ * was a variable that cannot exist on the platform the engine was written for,
+ * and the first message failed with "the OPENAI_API_KEY environment variable
+ * is missing or empty" and no field anywhere in the app to fix it.
+ *
+ * OPTIONAL, not required: a build pointed at a local OpenAI-compatible server
+ * needs no key, and a required field would make "no key" unexpressible.
+ */
 export interface PraisonAgentModule {
-  new (config: { instructions: string; llm?: string }): PraisonAgent;
+  new (config: { instructions: string; llm?: string; apiKey?: string }): PraisonAgent;
 }
 
 /**

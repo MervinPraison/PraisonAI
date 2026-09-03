@@ -14,7 +14,8 @@
 import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
-import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
+import type { SecretsPort } from "../../core/src/ports/secrets.ts";
+import { readSecretSetting, type SettingDef, type SettingsFacade } from "../../core/src/settings/store.ts";
 import type { Platform } from "./platform.ts";
 import { createRemoteHttpEngine, probeHealth } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
@@ -35,10 +36,17 @@ export const ENGINE_PRAISONAI_TS = "praisonai-ts";
  * #4636). A declared-but-unread setting is a control the UI promises and the
  * app does not keep: moving it does nothing, and `showDiagnostics`'s `false`
  * default even described a hiding that never happened, since the dropped row is
- * rendered unconditionally. They are removed rather than half-wired; the
- * store's secret and validation machinery stays (it is contract-tested) so a
- * real setting can be added the day its consumer does. `registry.test.ts` pins
+ * rendered unconditionally. They were removed rather than half-wired; the
+ * store's secret and validation machinery stayed (it is contract-tested) so a
+ * real setting could be added the day its consumer did. `registry.test.ts` pins
  * that every declared key is one the app reads, so re-adding an inert one fails.
+ *
+ * `openaiApiKey` is that day, and it arrives with its consumer in the same
+ * commit rather than ahead of one: `apiKeyFor` below reads it back through the
+ * keychain port, and `createInProcessEngine` in main.ts hands it to the agent
+ * on every turn. Before it, the app launched, loaded its engine, and failed
+ * the first message with "The OPENAI_API_KEY environment variable is missing or
+ * empty" -- with no field anywhere in the app to put one in.
  */
 export const SETTING_DEFS: readonly SettingDef[] = [
   {
@@ -68,6 +76,39 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     label: "Engine address",
     help: "Only used by the remote engine.",
     section: "Engine",
+  },
+  /**
+   * The one credential the shipping app can actually use.
+   *
+   * ONE slot, not five. `SecretSlot` is a closed union of openai | anthropic |
+   * google | openrouter | custom, and it is closed for a keychain-namespace
+   * reason (ports/secrets.ts rule 3), not as an instruction to ship five rows
+   * on day one. The in-process engine builds exactly one kind of agent -- see
+   * `createInProcessEngine` in main.ts, whose model falls back to
+   * `gpt-4o-mini`, which praisonai-ts routes through its OpenAIService -- so
+   * `openai` is the only slot with a reader. An `anthropic` row would be a
+   * control nobody reads, which is exactly the #4636 defect the test below
+   * forbids and exactly what `apiKey` was before it was removed. The other
+   * four slots stay available for the commit that adds a provider setting AND
+   * the code that honours it, in that order.
+   *
+   * `secret: true` routes it to SecretsPort and never to the settings file
+   * (store.ts, and its test asserting the fake StoragePort never saw the
+   * value). `secretRef` is what says WHERE, in the registry that declares it,
+   * rather than in whoever happened to build the view.
+   *
+   * `default: ""` is never stored and never shown: a secret def has no value
+   * row at all (view-model.ts rule 1). It is here because `SettingDef.default`
+   * is required, and "" is the only honest stand-in for "there isn't one".
+   */
+  {
+    key: "openaiApiKey",
+    default: "",
+    label: "OpenAI API key",
+    help: "Used by the in-process engine. Kept in the platform secret store, never in the settings file, and never shown back to you.",
+    section: "Engine",
+    secret: true,
+    secretRef: { slot: "openai", account: "default" },
   },
 ];
 
@@ -107,7 +148,37 @@ export function settingDefsFor(kind: Platform["kind"]): readonly SettingDef[] {
   );
 }
 
-export const CONSUMED_SETTING_KEYS: readonly string[] = ["engineId", "baseUrl"];
+export const CONSUMED_SETTING_KEYS: readonly string[] = ["engineId", "baseUrl", "openaiApiKey"];
+
+/**
+ * The credential the in-process engine authenticates with, or null.
+ *
+ * The first non-test caller of `SecretsPort.get` in this package. Everything
+ * needed to store a key existed -- the `secret` flag, the routing in
+ * store.ts, the keychain port, its conformance suite -- and nothing read one
+ * back, so a key the user typed went into the store and stopped there.
+ *
+ * It takes the full port, not the `SettingsFacade`: the facade has no getter
+ * by design, so this function is unreachable from `ui/` with what `ui/` is
+ * handed. That is rule 2 of ports/secrets.ts enforced by a signature rather
+ * than by a review.
+ *
+ * The DEFS are passed in rather than read from `SETTING_DEFS`, so this follows
+ * the same list the settings screen was rendered from -- `settingDefsFor`
+ * rewrites one def per platform, and a resolver reading a different list from
+ * the one the screen shows is how a setting stops meaning what it says.
+ *
+ * Called per TURN (see main.ts), never captured at boot: `enginesFor` learned
+ * that lesson with `baseUrl`, where a value read once at construction meant a
+ * corrected setting could not take effect without force-quitting the app. A
+ * key pasted into Settings must work on the very next message.
+ */
+export function apiKeyFor(
+  secrets: SecretsPort,
+  defs: readonly SettingDef[],
+): Promise<string | null> {
+  return readSecretSetting(secrets, defs, "openaiApiKey");
+}
 
 export interface RegistryDeps {
   readonly settings: SettingsFacade;

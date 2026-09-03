@@ -89,6 +89,27 @@ export interface Strings {
    * may already have scrolled off.
    */
   readonly settingRejected: (label: string) => string;
+  /**
+   * A secret field's placeholder, and its accessible name.
+   *
+   * Deliberately NOT the stored value and not a masked stand-in like
+   * "sk-...abcd": the field is empty on every paint (view-model.ts rule 1 --
+   * the facade has no getter, so there is nothing to echo even if a renderer
+   * wanted to), and a placeholder describing what to type is the honest way to
+   * say so. A row that showed dots would read as "a key is already here",
+   * which is what the presence label is for and what a masked echo would make
+   * ambiguous.
+   */
+  readonly secretPlaceholder: string;
+  /** Confirmation that a key was stored. NEVER contains any part of the key --
+   *  this goes to an assertive live region, which is read aloud. */
+  readonly secretStored: (label: string) => string;
+  /** Confirmation that a key was removed. Said for the same reason a refusal
+   *  is: a control that changes nothing visible and says nothing has, for the
+   *  user, done nothing. */
+  readonly secretCleared: (label: string) => string;
+  /** The button that removes a stored key. */
+  readonly actionClearSecret: string;
 
   // ---- chat list ---------------------------------------------------------
   /** A chat whose title is blank. A blank row has no hit target and reads as a
@@ -309,6 +330,13 @@ export const en: Strings = {
   // neither the setting nor the outcome. "was not changed" is the fact the
   // user needs: the old value is still in force.
   settingRejected: (label) => `${label} was not changed: that value was refused.`,
+  // "Paste" rather than "Enter": on a phone nobody types an API key, and the
+  // instruction that matches what the user is actually about to do is the one
+  // that reads as written for them.
+  secretPlaceholder: "Paste a key to set or replace it",
+  secretStored: (label) => `${label} saved.`,
+  secretCleared: (label) => `${label} removed.`,
+  actionClearSecret: "Remove",
 
   untitled: "Untitled",
   chatUnreadable: (id) => `Could not be read: ${id}`,

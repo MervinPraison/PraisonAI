@@ -103,6 +103,40 @@ export function secretRefOf(def: SettingDef): SecretRef | null {
   return def.secretRef ?? null;
 }
 
+/**
+ * The VALUE of a secret setting, by key. The read-back half.
+ *
+ * `secretRefOf` says WHERE a secret lives; until this existed nothing said how
+ * to get it out again, and `SecretsPort.get` had no caller outside its own
+ * conformance suite. A key the user could store and nothing could read is the
+ * same bug as no key field at all, one layer further in.
+ *
+ * It takes the full `SecretsPort` and NOT `SettingsFacade`, which is the whole
+ * point: the facade deliberately has no getter (store.ts's header, and rule 2
+ * in ports/secrets.ts -- "Only the engine receives the full port; ui/ receives
+ * a facade that exposes presence and no getter"). So a view cannot reach this
+ * function with what a view is given, and the type system is what says so
+ * rather than a comment.
+ *
+ * An empty stored value comes back as null, not as "". An empty string is what
+ * an `Authorization: Bearer ` header is built from before anyone notices, and
+ * "absent" is the honest reading of it either way.
+ */
+export async function readSecretSetting(
+  secrets: SecretsPort,
+  defs: readonly SettingDef[],
+  key: string,
+): Promise<string | null> {
+  const def = defs.find((d) => d.key === key);
+  if (def === undefined) return null;
+  // Refuses the same two mismatches `secretRefOf` refuses -- a non-secret def,
+  // or a secret one with nowhere to read from -- rather than guessing a slot.
+  const ref = secretRefOf(def);
+  if (ref === null) return null;
+  const value = await secrets.get(ref);
+  return value === null || value === "" ? null : value;
+}
+
 const STORAGE_KEY = { namespace: "settings" as const, id: "app" };
 
 /**
