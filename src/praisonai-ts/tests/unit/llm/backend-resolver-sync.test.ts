@@ -48,8 +48,26 @@ class StubProvider implements LLMProvider {
 }
 
 describe('resolveBackendSync', () => {
+  // Provider constructors require a key (AnthropicProvider throws
+  // 'ANTHROPIC_API_KEY is required'), so these tests passed only on a machine
+  // that happened to have one exported and failed in CI. Resolution is what is
+  // under test, not authentication: pin placeholder keys and restore them.
+  const KEY_VARS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_API_KEY'] as const;
+  const savedKeys: Record<string, string | undefined> = {};
+
   beforeEach(() => {
+    for (const name of KEY_VARS) {
+      savedKeys[name] = process.env[name];
+      process.env[name] = `test-${name.toLowerCase()}`;
+    }
     resetAISDKAvailabilityCache();
+  });
+
+  afterEach(() => {
+    for (const name of KEY_VARS) {
+      if (savedKeys[name] === undefined) delete process.env[name];
+      else process.env[name] = savedKeys[name] as string;
+    }
   });
 
   it('resolves a built-in native provider when the native backend is requested', () => {
