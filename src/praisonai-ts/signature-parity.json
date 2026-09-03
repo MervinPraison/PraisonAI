@@ -1069,7 +1069,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:583",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:603",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -1737,7 +1737,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:831",
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832",
         "resolved_class": "ExecutionMixin"
       },
       "ts_only": [

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -715,6 +716,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# A source location is `path/to/file.ext:LINE`. Editing an unrelated part of a
+# covered file shifts those line numbers without changing a single fact about
+# parity, and comparing the reports byte for byte turned that into a red build
+# on main -- the same "a number moved, nothing happened" noise this checker was
+# built to remove. Staleness is judged on the report with line numbers masked;
+# `--write` still records the real ones.
+_SOURCE_LOCATION_RE = re.compile(r'(?P<path>[\w./-]+\.(?:py|ts|mjs|tsx)):(?P<line>\d+)')
+
+
+def strip_source_lines(text: str) -> str:
+    """The report with `file.ext:123` reduced to `file.ext`, for staleness checks."""
+    return _SOURCE_LOCATION_RE.sub(lambda m: m.group('path'), text)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -762,7 +777,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 rel = path.relative_to(repo_root)
                 if not path.is_file():
                     evaluation.failures.append(f'{rel} does not exist -- run --write and commit it')
-                elif path.read_text(encoding='utf-8') != content:
+                elif strip_source_lines(path.read_text(encoding='utf-8')) != strip_source_lines(content):
                     evaluation.failures.append(f'{rel} is out of date -- run --write and commit the result')
 
         _print_report(evaluation, comparisons)

@@ -662,6 +662,38 @@ export class Detector {
         assert 'threshold' in params and params['threshold']['default'] == 3
 
 
+class TestStalenessIgnoresLineNumbers:
+    """A pure line-number shift is not staleness; a content change still is."""
+
+    REPORT = (
+        "# Signature Parity\n\n"
+        "### `Agent.__init__`\n\n"
+        "- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:583`\n"
+        "- TypeScript: `src/praisonai-ts/src/agent/simple.ts:116`\n"
+        "| `name` | positional | null | exact |\n"
+    )
+
+    def test_line_shift_is_not_staleness(self):
+        shifted = self.REPORT.replace('agent.py:583', 'agent.py:603').replace('simple.ts:116', 'simple.ts:141')
+        assert shifted != self.REPORT
+        assert C.strip_source_lines(shifted) == C.strip_source_lines(self.REPORT)
+
+    def test_content_change_is_still_staleness(self):
+        """Control: masking line numbers must not hide a real difference."""
+        changed = self.REPORT.replace('| `name` |', '| `renamed` |')
+        assert C.strip_source_lines(changed) != C.strip_source_lines(self.REPORT)
+
+    def test_a_changed_path_is_still_staleness(self):
+        """Control: the file a surface points at is content, not a line number."""
+        moved = self.REPORT.replace('agent/simple.ts:116', 'agent/team.ts:116')
+        assert C.strip_source_lines(moved) != C.strip_source_lines(self.REPORT)
+
+    def test_masking_only_touches_source_locations(self):
+        """Control: a bare number in prose is left alone."""
+        text = 'Compared 15 surfaces, 219 python params: 121 exact'
+        assert C.strip_source_lines(text) == text
+
+
 class TestPruneWaivers:
     def _comparison_with_gap(self, gap_name='auth'):
         py = C.signatures_from_json([sig('python', [py_param(gap_name), py_param('name')])])[SURFACE]

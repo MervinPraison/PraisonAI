@@ -46,15 +46,38 @@ jobs:
     - name: Install dependencies
       run: pip install pyyaml
 
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install the TypeScript compiler only
+      # The signature extractor needs `typescript` and nothing else;
+      # praisonai-ts's own dependency tree does not install cleanly.
+      run: |
+        mkdir -p "$RUNNER_TEMP/parity-ts"
+        npm install --prefix "$RUNNER_TEMP/parity-ts" --no-audit --no-fund typescript@5.7.3
+        echo "PARITY_TS_NODE_MODULES=$RUNNER_TEMP/parity-ts/node_modules" >> "$GITHUB_ENV"
+
     - name: Generate parity trackers
       run: |
         cd $GITHUB_WORKSPACE
         python3 src/praisonai/scripts/generate_parity_tracker.py
 
+    - name: Regenerate the signature report
+      # Source locations in the report drift whenever a covered file is edited.
+      # The pull-request gate ignores line-number-only drift so it never reddens
+      # a build over it; refreshing here keeps the committed line numbers true.
+      env:
+        PYTHONPATH: src/praisonai
+      run: |
+        cd $GITHUB_WORKSPACE
+        python3 -m praisonai._dev.parity.signatures --write
+
     - name: Check for changes
       id: check_changes
       run: |
-        if git diff --quiet src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md 2>/dev/null; then
+        if git diff --quiet src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md src/praisonai-ts/SIGNATURE_PARITY.md src/praisonai-ts/signature-parity.json 2>/dev/null; then
           echo "changes=false" >> $GITHUB_OUTPUT
           echo "No changes to parity trackers"
         else
@@ -68,7 +91,7 @@ jobs:
       uses: stefanzweifel/git-auto-commit-action@v5
       with:
         commit_message: "docs: auto-update feature parity trackers [skip ci]"
-        file_pattern: 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md'
+        file_pattern: 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md src/praisonai-ts/SIGNATURE_PARITY.md src/praisonai-ts/signature-parity.json'
         commit_user_name: "MervinPraison"
         commit_user_email: "454862+MervinPraison@users.noreply.github.com"
         commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"

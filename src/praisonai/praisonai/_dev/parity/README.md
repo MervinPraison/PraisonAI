@@ -39,7 +39,10 @@ python3 -m praisonai._dev.parity.signatures --prune               # delete waive
 
 CI (`.github/workflows/parity-gate.yml`) runs both `--check` modes on pull requests and fails on:
 un-waived drift, a waiver that has expired, a waiver whose gap no longer exists, or a run that compared nothing.
-`update-parity-tracker.yml` still regenerates the names layer on push to main.
+It does **not** fail on source line numbers moving: `--check` compares the report with `file.ext:123`
+masked to `file.ext`, so editing an unrelated part of a covered file cannot redden a build.
+`update-parity-tracker.yml` regenerates both layers on push to main, which is what keeps the committed
+line numbers true.
 
 ## Adding a surface
 
