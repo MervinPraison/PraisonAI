@@ -113,6 +113,11 @@ jobs:
           node-version: '22.18'
           cache: npm
           cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - name: "Build praisonai-ts (the file: dependency)"
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - run: npm ci
       - name: Does the real Agent still satisfy PraisonAgent?
         # Skips loudly if the praisonai-ts checkout is missing, rather than
