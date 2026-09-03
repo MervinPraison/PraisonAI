@@ -858,6 +858,16 @@ class WebSocketGateway:
         """
         self.config = config or GatewayConfig(host=host, port=port)
 
+        # Issue #4766: resolve the per-session turn-execution seam. ``None`` (the
+        # default) resolves to the zero-cost in-process executor, so every turn
+        # runs on the current loop exactly as before — byte-for-byte backward
+        # compatible. Supplying an isolated executor via ``GatewayConfig.executor``
+        # is what contains a wedged/runaway turn to its own worker instead of the
+        # process-wide ``os._exit`` remedy.
+        from praisonaiagents.gateway.protocols import InProcessTurnExecutor
+
+        self._executor = getattr(self.config, "executor", None) or InProcessTurnExecutor()
+
         # Issue #3020: shared cross-platform identity resolver. Mirrors BotOS —
         # stamped onto each channel bot's session manager in ``start_channels``
         # / ``_start_single_channel`` so continuity works in the flagship
@@ -3658,10 +3668,30 @@ class WebSocketGateway:
         actually finish before advancing the serial session queue — otherwise a
         timed-out sync turn could keep mutating shared agent state concurrently
         with the next turn.
+
+        Issue #4766: the turn is dispatched *through the configured turn
+        executor* — ``place(session_id)`` obtains the placement that owns the
+        session's turns, then ``execute_turn`` runs it on that placement. The
+        default in-process executor awaits the turn on this loop exactly as
+        before (byte-for-byte). If an isolated executor raises
+        ``WorkerWedgedError``, only that session's worker is torn down and the
+        session recovered — the wedge no longer forces a whole-process exit.
         """
+        from praisonaiagents.gateway.protocols import WorkerWedgedError
+
         sid = session.session_id
+
+        async def _turn() -> Any:
+            return await self._dispatch_agent_turn(
+                agent, content, interrupt=controller
+            )
+
+        placement = await self._executor.place(sid)
+        limits = getattr(self.config, "executor_limits", None)
         task = asyncio.ensure_future(
-            self._dispatch_agent_turn(agent, content, interrupt=controller)
+            self._executor.execute_turn(
+                placement, _turn, cancel_token=controller, limits=limits
+            )
         )
         self._active_turns[sid] = (task, controller)
         try:
@@ -3676,6 +3706,18 @@ class WebSocketGateway:
             reason = controller.reason or "user"
             await self._settle_cancelled_turn(task, controller, reason)
             return self._finalise_aborted_turn(controller, reason)
+        except WorkerWedgedError:
+            # Scope the blast radius to this session only: reclaim the wedged
+            # worker and let the session be re-placed on its next turn, instead
+            # of the process-wide ``os._exit`` a shared loop would force.
+            try:
+                await self._executor.teardown(placement, reason="wedged")
+            except Exception:
+                logger.warning(
+                    "Executor teardown failed for wedged session %s", sid,
+                    exc_info=True,
+                )
+            return "Turn cancelled: worker wedged; session will be re-placed."
         finally:
             existing = self._active_turns.get(sid)
             if existing is not None and existing[0] is task:
