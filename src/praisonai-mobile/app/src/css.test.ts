@@ -39,10 +39,17 @@ test("the composer does not add the bottom inset twice", () => {
   const keyboardDecls = declarations.filter((d) => d.includes("--keyboard-height"));
   assert.ok(keyboardDecls.length > 0, "the composer must follow the keyboard at all");
   for (const d of keyboardDecls) {
-    assert.ok(
-      !d.includes("--safe-area-inset-bottom"),
-      `--keyboard-height is already max(keyboard, inset); adding the inset double-counts it:${d}`,
-    );
+    // BOTH names. The stylesheet now lays out against `--inset-bottom` (the
+    // effective inset main.ts writes from `shell.insets`) rather than the
+    // `--safe-area-inset-bottom` env() mirror, so a test that only knew the old
+    // name would have gone quiet the moment the rename landed and let the
+    // double-count back in under the new one.
+    for (const name of ["--safe-area-inset-bottom", "--inset-bottom"]) {
+      assert.ok(
+        !d.includes(name),
+        `--keyboard-height is already max(keyboard, inset); adding ${name} double-counts it:${d}`,
+      );
+    }
   }
 });
 

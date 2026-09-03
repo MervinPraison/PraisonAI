@@ -25,6 +25,10 @@ const pkg = join(here, "..");   // tools/ -> the package root
 
 const rust = readFileSync(join(pkg, "src-tauri/src/shell/mod.rs"), "utf8");
 const ts = readFileSync(join(pkg, "adapters/src/tauri/shell.ts"), "utf8");
+const kotlin = readFileSync(
+  join(pkg, "src-tauri/gen/android/app/src/main/java/ai/praison/mobile/MainActivity.kt"),
+  "utf8",
+);
 
 /** `pub const NAME: &str = "value";` */
 function rustConst(name) {
@@ -60,4 +64,36 @@ test("the comparison is real, not two lookups of the same file", () => {
   assert.notEqual(rust, ts);
   assert.ok(rust.includes("pub const"), "the Rust source was not read");
   assert.ok(ts.includes("const EVENTS"), "the TypeScript source was not read");
+});
+
+/**
+ * The Android insets bridge is a FIFTH string across the same seam, and it
+ * fails the same silent way: MainActivity's `evaluateJavascript` calls
+ * `window.<name> && window.<name>(...)`, so a name the shell does not install
+ * is not an error, it is a no-op -- and the app lays out as though the phone
+ * had no status bar, no navigation bar and no keyboard, which is precisely the
+ * state it was measured in on an Android 15 emulator before this existed.
+ */
+test("the Android insets global agrees across the Kotlin/TypeScript seam", () => {
+  const tsName = /NATIVE_INSETS_GLOBAL = "([^"]+)"/.exec(ts);
+  assert.ok(tsName, "NATIVE_INSETS_GLOBAL not found in the TypeScript adapter");
+  const ktName = /INSETS_GLOBAL = "([^"]+)"/.exec(kotlin);
+  assert.ok(ktName, "INSETS_GLOBAL not found in MainActivity.kt");
+  assert.equal(ktName[1], tsName[1]);
+  assert.notEqual(kotlin, ts, "two lookups of the same file would assert nothing");
+});
+
+test("MainActivity sends every edge, and the keyboard separately from them", () => {
+  // The payload is built as a string literal, so a dropped edge is a missing
+  // key the TypeScript reads as 0 -- silently flush against that edge.
+  const call = /INSETS_GLOBAL\(\{" \+([\s\S]*?)\}\)/.exec(kotlin);
+  assert.ok(call, "the insets payload literal was not found in MainActivity.kt");
+  for (const key of ["top", "right", "bottom", "left", "keyboard"]) {
+    assert.match(call[1], new RegExp(`\\b${key}:`), `MainActivity must send ${key}`);
+  }
+  // `bottom` must come from the system bars, not from the IME: the page
+  // composes the two with max(), so sending the keyboard on both channels is
+  // the double-count ui/src/layout/insets.ts warns about.
+  assert.match(call[1], /bottom:\$\{css\(bars\.bottom\)\}/, "bottom is the system bars");
+  assert.match(call[1], /keyboard:\$\{css\(ime\.bottom\)\}/, "keyboard is the IME inset");
 });

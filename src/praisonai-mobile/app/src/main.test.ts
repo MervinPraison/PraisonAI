@@ -432,12 +432,19 @@ test("the keyboard height and BOTH insets reach the layout", async () => {
   assert.ok(screen, "no screen element");
   const props = (screen as unknown as { style: { props: Record<string, string> } }).style.props;
   assert.equal(props["--keyboard-height"], "300px", "the keyboard height must reach the layout");
-  assert.equal(props["--inset-top"], `${PHONE_INSETS.top}px`, "the TOP inset must come from the top");
+  // The four insets go on ROOT, not on the chat screen: settings and chats are
+  // siblings of it, so an inset written on `screen` never reaches them -- which
+  // is what left their headings under the status bar.
+  const rootProps = (dom.root as unknown as { style: { props: Record<string, string> } }).style.props;
+  assert.equal(rootProps["--inset-top"], `${PHONE_INSETS.top}px`, "the TOP inset must come from the top");
   assert.notEqual(
-    props["--inset-top"],
+    rootProps["--inset-top"],
     `${PHONE_INSETS.bottom}px`,
     "reading the top inset from the bottom puts content under the notch",
   );
+  assert.equal(rootProps["--inset-bottom"], `${PHONE_INSETS.bottom}px`, "and the bottom from the bottom");
+  assert.equal(rootProps["--inset-left"], `${PHONE_INSETS.left}px`);
+  assert.equal(rootProps["--inset-right"], `${PHONE_INSETS.right}px`);
   app?.dispose();
 });
 
@@ -452,13 +459,12 @@ test("the layout keeps reacting after mount, not only on the first frame", async
     http: createFakeHttp(), time: nodeTime(), kind: "web",
   };
   const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
-  const screen = dom.find((n) => n.className === "screen");
-  assert.ok(screen, "no screen element");
-  const props = (screen as unknown as { style: { props: Record<string, string> } }).style.props;
+  const props = (dom.root as unknown as { style: { props: Record<string, string> } }).style.props;
 
   shell.setInsets({ top: 99, bottom: 12, left: 3, right: 4 });
   await settle(20);
   assert.equal(props["--inset-top"], "99px", "a rotation must reach the layout");
+  assert.equal(props["--inset-bottom"], "12px", "and every other edge with it");
   app?.dispose();
 });
 
