@@ -4423,15 +4423,46 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         # Execute batch and add results to conversation
                         # (forward optional per-tool timeout)
+                        # ``time`` is re-imported locally further down this
+                        # function, which makes the module-level name unbound
+                        # here; use a distinct alias.
+                        from time import perf_counter as _perf_counter
+                        _batch_started = _perf_counter()
                         tool_results = executor.execute_batch(
                             tool_calls_batch, execute_tool_fn,
                             timeout_ms=self.tool_timeout_ms,
                         )
+                        _batch_elapsed = _perf_counter() - _batch_started
                         
                         for tool_result in tool_results:
                             # Register any deferred handle so its eventual
                             # background result is re-injected, not lost.
                             self._register_deferred_if_any(tool_result)
+                            # Fire the 'tool_call' display callback exactly as
+                            # the non-streaming loop does, so streaming UIs
+                            # see tool activity (Issue #4716). Best-effort: a
+                            # callback error must never break the stream.
+                            try:
+                                if tool_result.result is None:
+                                    _result_str = None
+                                else:
+                                    try:
+                                        _result_str = json.dumps(tool_result.result)
+                                    except (TypeError, ValueError):
+                                        _result_str = str(tool_result.result)
+                                _get_display_functions()['execute_sync_callback'](
+                                    'tool_call',
+                                    message=f"Calling function: {tool_result.function_name}",
+                                    tool_name=tool_result.function_name,
+                                    tool_input=tool_result.arguments,
+                                    tool_output=_result_str[:200] if _result_str else None,
+                                    # Only the batch is timed; per-tool timing
+                                    # is not available from the executor.
+                                    elapsed_time=_batch_elapsed if len(tool_results) == 1 else None,
+                                    success=tool_result.error is None,
+                                )
+                            except Exception as _cb_error:
+                                logging.debug(f"tool_call callback failed for '{tool_result.function_name}': {_cb_error}")
                             if tool_result.error is None:
                                 # Successful execution
                                 tool_message = self._create_tool_message(

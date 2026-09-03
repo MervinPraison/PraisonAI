@@ -239,6 +239,90 @@ def session_list(
     output.print_table(headers, rows, title="Sessions")
 
 
+@app.command("search")
+def session_search(
+    query: str = typer.Argument(..., help="Free-text query to search transcripts"),
+    limit: int = typer.Option(
+        5,
+        "--limit",
+        "-n",
+        help="Maximum number of matching sessions to return",
+    ),
+    window: int = typer.Option(
+        5,
+        "--window",
+        "-w",
+        help="Number of messages to include around each hit",
+    ),
+):
+    """Ranked full-text search across session transcripts.
+
+    Delegates to :class:`SqliteSessionStore` so results are ranked by FTS5/bm25
+    with snippets and lineage dedup, reusing the same engine as the
+    ``session_search`` agent tool instead of a substring scan.
+    """
+    output = get_output_controller()
+
+    from praisonaiagents.session import SqliteSessionStore
+
+    from ..state.project_sessions import canonical_cli_stores
+
+    seen_dirs = set()
+    hits = []
+    for store in canonical_cli_stores():
+        session_dir = getattr(store, "session_dir", None)
+        if not session_dir or session_dir in seen_dirs:
+            continue
+        seen_dirs.add(session_dir)
+        try:
+            indexed = SqliteSessionStore(session_dir=session_dir)
+            hits.extend(indexed.search(query, limit=limit, window=window))
+        except Exception:
+            continue
+
+    # A session resumed from the global default store keeps a project-side
+    # shadow, so the *same* id can match in both canonical stores. Without
+    # dedup those duplicate rows each consume a slot of the small ``limit`` and
+    # crowd out distinct sessions (Issue #4701). Collapse by session id, keeping
+    # the higher-scoring copy, mirroring the lineage dedup the store already
+    # applies within a single directory.
+    best_by_id = {}
+    for h in hits:
+        sid = getattr(h, "session_id", None)
+        if sid is None:
+            continue
+        existing = best_by_id.get(sid)
+        if existing is None or getattr(h, "score", 0.0) > getattr(existing, "score", 0.0):
+            best_by_id[sid] = h
+    hits = list(best_by_id.values())
+
+    hits.sort(key=lambda h: (getattr(h, "score", 0.0), getattr(h, "when", "") or ""), reverse=True)
+    hits = hits[:limit]
+
+    if output.is_json_mode:
+        output.print_json(
+            {"query": query, "results": [h.as_dict() for h in hits]}
+        )
+        return
+
+    if not hits:
+        output.print_info(f"No sessions matched: {query}")
+        return
+
+    headers = ["ID", "Title", "Score", "Snippet", "When"]
+    rows = []
+    for h in hits:
+        sid = h.session_id
+        rows.append([
+            sid[:20] + "..." if len(sid) > 20 else sid,
+            (h.title or "-")[:40],
+            f"{h.score:.1f}",
+            (h.snippet or "-")[:60],
+            (h.when or "-")[:19],
+        ])
+    output.print_table(headers, rows, title=f"Search: {query}")
+
+
 @app.command("resume")
 def session_resume(
     session_id: str = typer.Argument(..., help="Session ID to resume"),
