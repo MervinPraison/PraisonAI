@@ -713,6 +713,7 @@ DEFAULT_SETTINGS = {
     "temperature": 0.7,
     "max_tokens": 0,
     "top_p": 1,
+    "reasoning_effort": "off",
     "base_url": "",
     "api_key": "",
     "system_prompt": "",
@@ -1100,6 +1101,11 @@ def _llm_overrides(cfg: dict) -> dict:
         out["max_tokens"] = int(cfg["max_tokens"])
     if cfg.get("top_p") != DEFAULT_SETTINGS["top_p"]:
         out["top_p"] = float(cfg["top_p"])
+    # "off" is the default no-op; anything else is a provider-portable effort
+    # level (minimal|low|medium|high) that Agent maps to each backend's native
+    # knob, exactly as the CLI's --thinking does.
+    if cfg.get("reasoning_effort") not in (None, "", DEFAULT_SETTINGS["reasoning_effort"]):
+        out["reasoning_effort"] = str(cfg["reasoning_effort"])
     _apply_env(cfg)
     return out
 
