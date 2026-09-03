@@ -2,7 +2,11 @@
 
 **Branch:** `feat/local-model-resolver`
 **Status:** normative specification. No implementation exists yet.
-**Owns:** `praisonaiagents/local/**` (new), `tests/unit/local/**` (new). Touches nothing else.
+**Owns:** `praisonaiagents/local/**` (new), `src/praisonai/tests/unit/llm/local/**` (new).
+Touches nothing else. Tests live under `src/praisonai/tests/` — **not** `src/praisonai-agents/tests/` —
+because CI runs `cd src/praisonai && pytest tests/unit/` and collects nothing from the
+agents-package tree (see `00-ground-truth.md`). Tests placed there run nowhere, so the
+import-boundary and no-socket guards below would silently never execute.
 **Verified on:** 2026-09-03, macOS (Darwin 27.0.0), Ollama 0.33.2 live on `127.0.0.1:11434`,
 `llama-server` build 7620 present, `mlx_lm.server` present.
 
@@ -830,10 +834,12 @@ __all__ = [
 
 ## 12. Tests
 
-All under `src/praisonai-agents/tests/unit/local/`. Every test carries
-`pytestmark = pytest.mark.unit`. The markers `network`, `local_service` and `provider_ollama`
-are **forbidden** in this directory — a test needing a live server belongs in
-`tests/integration/`, out of scope here.
+All under `src/praisonai/tests/unit/llm/local/` — the tree CI actually collects
+(`cd src/praisonai && pytest tests/unit/`). Do **not** place them under
+`src/praisonai-agents/tests/`, which no workflow runs (see `00-ground-truth.md`); the guards
+below would then never execute. Every test carries `pytestmark = pytest.mark.unit`. The markers
+`network`, `local_service` and `provider_ollama` are **forbidden** in this directory — a test
+needing a live server belongs in `tests/integration/`, out of scope here.
 
 **Files:** `__init__.py`, `conftest.py`, `fixtures/`, `test_import_boundary.py`,
 `test_discover.py`, `test_capabilities.py`, `test_quirktable.py`, `test_target.py`,
@@ -842,7 +848,7 @@ are **forbidden** in this directory — a test needing a live server belongs in
 ### 12.1 `conftest.py` provides exactly three things
 
 - **`no_sockets`** (autouse, session-scoped): monkeypatches `socket.socket.__init__` to
-  `raise AssertionError("tests/unit/local must not open a socket")`. This is *the* mechanism
+  `raise AssertionError("tests/unit/llm/local must not open a socket")`. This is *the* mechanism
   that proves offline safety — a test that forgets to inject a transport fails loudly instead
   of silently hitting a developer's live Ollama.
 - **`fake_transport(routes, *, default=HttpReply(0, b"", "refused"))`** — a `Transport`

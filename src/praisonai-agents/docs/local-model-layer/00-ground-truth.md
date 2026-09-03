@@ -225,8 +225,12 @@ dakera, graph, knowledge, llm, mcp, memory, mongodb, os, sandbox, search, teleme
 **none of them is local**. `import praisonaiagents` measures 0.04 s, so imports are lazy and
 cheap; discovery latency is the only startup cost to manage.
 
-**Conclusion:** `local/` should use `httpx`. It is guaranteed present, gives sync and async
-from one client with clean timeouts, and adds no dependency — satisfying I6.
+**Conclusion (superseded).** This section originally concluded `local/` should use `httpx`.
+That was reversed by the normative decision in `07-local-package-spec.md` §3: `httpx` is present
+only as an **undeclared transitive** edge (`openai -> httpx`), so building the dependency sink on
+it means a future `openai` release dropping `httpx` would silently break `local/`. The client is
+therefore stdlib `urllib.request`, and the boundary test forbids `httpx`/`requests`/`aiohttp`.
+The measurement above stands; only the recommendation drawn from it was wrong.
 
 ---
 

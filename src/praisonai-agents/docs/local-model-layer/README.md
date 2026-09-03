@@ -66,7 +66,7 @@ These come from `src/praisonai-agents/AGENTS.md` §4.6 plus the structural revie
 | I3 | **Safe defaults.** New features are opt-in. | Discovery must not fire unless the model spec is `"local"` or unset. Never probe the network on a fully-specified config. |
 | I4 | **Deterministic tests.** No dependence on timing or external state. | Every test must pass with **no server running**. Live-server tests go behind an explicit marker and never run in the default suite. |
 | I5 | **Protocol-driven core.** No heavy implementations in core. | `local/` returns dataclasses. It performs no chat calls, no retry, no request mutation. |
-| I6 | **`local/` is a dependency sink.** | It may import the standard library and `httpx` only — nothing from `praisonaiagents`. Enforced by a test. See §5. |
+| I6 | **`local/` is a dependency sink.** | It may import the **standard library only** — nothing from `praisonaiagents`, and no third-party distribution (`httpx`/`requests`/`aiohttp` are forbidden; use `urllib.request`). Enforced by a test. See §5 and `07` §3. |
 | I7 | **No second abstraction.** | `llm/adapters/` is the extension point. Do not add a parallel quirk/adapter registry beside it. |
 | I8 | **No new public knobs without a live consumer.** | Root `AGENTS.md`: do not add params, modules or exports that merely duplicate existing behaviour. |
 
@@ -81,9 +81,12 @@ into `agent/`, and 15 subpackages import `llm/` back. Consequently a shared help
 modules which currently bypass the LLM layer to adopt it later. Treat any import of
 `praisonaiagents.*` from inside `local/` as a build break, not a style issue.
 
-`httpx` is permitted because it is already a **hard transitive dependency** of the required
-core dep `openai>=2.0.0` (`httpx<1,>=0.23.0`); verified present at 0.28.1. Using it adds no
-dependency and needs no new extra.
+The HTTP client is stdlib `urllib.request`, **not** `httpx`. An earlier draft of this ledger
+permitted `httpx` on the grounds that it is a transitive dependency of `openai>=2.0.0`. That
+was reversed in `07` §3: the edge is undeclared in `pyproject.toml`, so a future `openai`
+release that drops `httpx` would silently break the sink — precisely the class of failure this
+package exists to catalogue. The boundary test in §5 hard-forbids `httpx`/`requests`/`aiohttp`
+so the decision cannot drift.
 
 ---
 
@@ -100,7 +103,7 @@ authority. Before starting, check that no in-flight PR owns your files.
 | `04-d7-test-gating` | `tests/_pytest_plugins/test_gating.py`, `.github/workflows/*` | any `praisonaiagents/` source |
 | `05-live-ci-job` | `.github/workflows/test-optimized.yml` | any `praisonaiagents/` source |
 | `06-adapter-revival` | `llm/adapters/__init__.py`, `llm/llm.py` (3 response paths) | `agent/agent.py` |
-| `07-local-package` | `praisonaiagents/local/**` (new), `pyproject.toml` extras | everything else |
+| `07-local-package` | `praisonaiagents/local/**` (new), `src/praisonai/tests/unit/llm/local/**` (new), `pyproject.toml` extras | everything else |
 | `08-reachability` | `memory/`, `eval/`, `context/`, `lite/`, `telemetry/` | `llm/`, `agent/` |
 
 ### Enforced serialisation
