@@ -13,6 +13,44 @@ import json
 from typing import Dict, Any, List, Optional
 
 
+def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """Recover a tool call a local model emitted as JSON text.
+
+    Shared by every locally-served engine: small models routinely answer with
+    the call as content instead of using the tool_calls field. Deliberately NOT
+    on DefaultAdapter -- a hosted model returning JSON prose must never have it
+    parsed as a tool call.
+    """
+    if not response_text or not tools:
+        return None
+    
+    try:
+        import json
+        response_json = json.loads(response_text.strip())
+        
+        # Normalize to list so both single and multi-tool payloads are supported
+        if isinstance(response_json, dict):
+            response_json = [response_json]
+
+        if isinstance(response_json, list):
+            tool_calls: List[Dict[str, Any]] = []
+            for idx, tool_json in enumerate(response_json):
+                if isinstance(tool_json, dict) and "name" in tool_json:
+                    tool_calls.append({
+                        "id": f"call_{tool_json['name']}_{idx}_{hash(response_text) % 10000}",
+                        "type": "function",
+                        "function": {
+                            "name": tool_json["name"],
+                            "arguments": json.dumps(tool_json.get("arguments", {}))
+                        }
+                    })
+            return tool_calls if tool_calls else None
+    except (json.JSONDecodeError, TypeError, KeyError):
+        pass
+    
+    return None
+
+
 class DefaultAdapter:
     """Default provider adapter with sensible fallbacks."""
     
@@ -144,34 +182,7 @@ Now provide your final answer using this result. Summarize the information natur
     
     def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Ollama-specific tool call recovery from response text."""
-        if not response_text or not tools:
-            return None
-        
-        try:
-            import json
-            response_json = json.loads(response_text.strip())
-            
-            # Normalize to list so both single and multi-tool payloads are supported
-            if isinstance(response_json, dict):
-                response_json = [response_json]
-
-            if isinstance(response_json, list):
-                tool_calls: List[Dict[str, Any]] = []
-                for idx, tool_json in enumerate(response_json):
-                    if isinstance(tool_json, dict) and "name" in tool_json:
-                        tool_calls.append({
-                            "id": f"call_{tool_json['name']}_{idx}_{hash(response_text) % 10000}",
-                            "type": "function",
-                            "function": {
-                                "name": tool_json["name"],
-                                "arguments": json.dumps(tool_json.get("arguments", {}))
-                            }
-                        })
-                return tool_calls if tool_calls else None
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass
-        
-        return None
+        return _recover_json_tool_calls(response_text, tools)
     
     
     def get_default_settings(self) -> Dict[str, Any]:
@@ -203,6 +214,11 @@ class LocalOpenAIAdapter(DefaultAdapter):
 
     def get_default_settings(self) -> Dict[str, Any]:
         return {'max_tool_repairs': 2}
+
+    def recover_tool_calls_from_text(self, response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        # Same reason as Ollama: these servers front small local models that
+        # answer with the tool call as text, especially after a repair prompt.
+        return _recover_json_tool_calls(response_text, tools)
 
 
 class AnthropicAdapter(DefaultAdapter):
