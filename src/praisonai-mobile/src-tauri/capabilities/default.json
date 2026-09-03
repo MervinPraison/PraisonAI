@@ -1,11 +1,20 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "default",
-  "description": "The main webview subscribes to the four shell events through Tauri's event registry, which is what plugin:event|listen needs. The back_gesture_result command is NOT listed: an app command registered via invoke_handler is always reachable and has no ACL entry to grant -- naming one that does not exist fails the build, which is how this file was broken.",
+  "description": "The main webview subscribes to the four shell events through Tauri's event registry (core:event:default), which is what plugin:event|listen needs, and opens links with the opener plugin: allow-open-url grants the command and allow-default-urls is the scope without which every http(s)/mailto/tel URL is still refused. back_gesture_result is NOT listed: an app command registered via invoke_handler is always reachable and has no ACL entry to grant -- naming one that does not exist fails the build, which is how this file was once broken. The back-gesture plugin has no JS-facing commands and so nothing to grant. platforms is explicit: everything here exists on all five, so the desktop dev build must not fail on it; a mobile-only grant belongs in its own capability scoped to its platform.",
   "windows": [
     "main"
   ],
+  "platforms": [
+    "android",
+    "iOS",
+    "macOS",
+    "windows",
+    "linux"
+  ],
   "permissions": [
-    "core:event:default"
+    "core:event:default",
+    "opener:allow-open-url",
+    "opener:allow-default-urls"
   ]
 }
