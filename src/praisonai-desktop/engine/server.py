@@ -1123,10 +1123,16 @@ def unsupported_model_reason(model: str) -> "str | None":
     the turn fail later with an import error or a bare-OpenAI 404.
     """
     if model_needs_litellm(model) and not litellm_available():
+        # Name only a remedy that actually clears the guard. The check keys on
+        # the slash alone, so a Base URL override does NOT help -- a slashed id
+        # still routes through LiteLLM. The fix is a bare id: a plain
+        # OpenAI-compatible name (optionally paired with a Base URL) reaches any
+        # OpenAI-style endpoint without the missing provider path.
         return (f"The model id \u201c{model}\u201d needs the LiteLLM provider path, "
                 "which this build does not include. Use a plain OpenAI-compatible "
-                "model id (for example gpt-4o-mini), or set a Base URL override to "
-                "reach another endpoint.")
+                "model id without a provider prefix (for example gpt-4o-mini); to "
+                "reach another endpoint, keep the bare id and set a Base URL "
+                "override.")
     return None
 
 
