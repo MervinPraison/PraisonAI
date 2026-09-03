@@ -18,16 +18,16 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 511 |
-| ✅ Agent | 22 | 56 | 17758 |
+| ✅ Agent | 22 | 56 | 17845 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 689 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 7 | 3531 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3747 |
 | ✅ Autonomy | 3 | 7 | 2790 |
 | ✅ Bots | 7 | 33 | 13860 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 123 | 38040 |
+| ✅ CLI | 5 | 123 | 38136 |
 | ✅ Chunking | 2 | 2 | 420 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4855 |
@@ -40,12 +40,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Evaluation | 1 | 8 | 3220 |
 | ✅ Events | 1 | 2 | 767 |
 | ✅ Execution | 3 | 4 | 1631 |
-| ✅ Failover | 2 | 1 | 452 |
+| ✅ Failover | 2 | 1 | 480 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 788 |
 | ✅ Gateway | 7 | 85 | 31517 |
 | ✅ Guardrails | 4 | 4 | 2288 |
-| ✅ Handoffs | 11 | 6 | 2626 |
+| ✅ Handoffs | 11 | 6 | 2674 |
 | ✅ Hooks | 2 | 9 | 4690 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 17 | 5226 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2897 |
 | ✅ Telemetry | 1 | 2 | 648 |
 | ✅ Templates | 1 | 8 | 1667 |
-| ✅ Tools | 12 | 145 | 44180 |
+| ✅ Tools | 12 | 145 | 44182 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 6 | 728 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (43 docs, 7293 lines)
+- ℹ️ Database (43 docs, 7364 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 
 ---

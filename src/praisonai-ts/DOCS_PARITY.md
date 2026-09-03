@@ -48,7 +48,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Flow | 5 | 1 | 164 |
 | ✅ Gateway | 10 | 1 | 401 |
 | ✅ Guardrails | 15 | 3 | 744 |
-| ✅ Handoffs | 16 | 1 | 179 |
+| ✅ Handoffs | 16 | 1 | 218 |
 | ✅ Hooks | 8 | 1 | 203 |
 | ✅ Image | 4 | 2 | 282 |
 | ✅ Jobs | 8 | 1 | 156 |
@@ -81,7 +81,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Skills | 9 | 2 | 380 |
 | ✅ Streaming | 2 | 4 | 1211 |
 | ✅ Tasks | 8 | 1 | 165 |
-| ✅ Teams | 1 | 1 | 170 |
+| ✅ Teams | 1 | 1 | 191 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
@@ -92,7 +92,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Vision | 4 | 1 | 155 |
 | ✅ Voice | 1 | 2 | 515 |
 | ✅ Web | 6 | 1 | 150 |
-| ✅ Workflows | 8 | 3 | 720 |
+| ✅ Workflows | 8 | 3 | 774 |
 
 ## Undocumented Categories (Need Documentation)
 
