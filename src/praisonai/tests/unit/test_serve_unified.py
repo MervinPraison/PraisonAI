@@ -174,6 +174,23 @@ class TestServeUnifiedCommands:
         # Should show help for a2u command
         assert "a2u" in result.output.lower() or result.exit_code == 0
     
+    def test_serve_jobs_command_exists(self):
+        """Test serve jobs command is registered."""
+        from praisonai.cli.commands.serve import app
+
+        result = runner.invoke(app, ["jobs", "--help"])
+
+        assert result.exit_code == 0
+        assert "jobs" in result.output.lower()
+
+    def test_serve_jobs_listed_in_help(self):
+        """Test serve --help lists the jobs subcommand (issue #4700)."""
+        from typer.main import get_command
+        from praisonai.cli.commands.serve import app
+
+        click_app = get_command(app)
+        assert "jobs" in click_app.commands
+
     def test_serve_unified_command_exists(self):
         """Test serve unified command is registered."""
         from praisonai.cli.commands.serve import app
@@ -218,6 +235,32 @@ class TestServeCommandOptions:
         result = runner.invoke(app, ["ui-gateway", "--help"])
         assert result.exit_code == 0
         assert "--agents" in result.output or "-a" in result.output
+
+    def test_serve_jobs_has_port_and_db_options(self):
+        """Test serve jobs exposes --port and --db (issue #4700)."""
+        opts = _serve_command_opts("jobs")
+        assert "--port" in opts
+        assert "--db" in opts
+
+
+class TestJobsDocstring:
+    """Test the jobs module docstring points at a real command (issue #4700)."""
+
+    def test_docstring_names_serve_jobs(self):
+        """The docstring must say 'praisonai serve jobs', not 'praisonai serve'."""
+        import praisonai.jobs as jobs
+
+        assert jobs.__doc__ is not None
+        assert "praisonai serve jobs" in jobs.__doc__
+
+    def test_docstring_command_parses(self):
+        """The command from the docstring resolves to a registered subcommand."""
+        from typer.main import get_command
+        from praisonai.cli.commands.serve import app
+
+        click_app = get_command(app)
+        # "praisonai serve jobs --port 8005" -> subcommand token is "jobs"
+        assert "jobs" in click_app.commands
 
 
 class TestDeprecationWarnings:
