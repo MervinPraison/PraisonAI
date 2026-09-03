@@ -265,21 +265,28 @@ Live Ollama, `temperature=0`, identical prompt and tool, two trials, reproducibl
 (script in `06-adapter-revival.md` §2.7):
 
 ```
-### sync   tool_calls=1   out='{\n\n\n}'
-### async  tool_calls=1   out='Paris: 21C sunny'
-### stream tool_calls=10  out=''
+sync    calls=2   'Paris: 21C sunny. Paris: 21C sunny.'
+async   calls=1   'Paris: 21C sunny'
+stream  calls=10  ''
 ```
+
+> **Corrected 2026-09-03.** An earlier draft recorded the sync path returning
+> `'{\n\n\n}'` with one tool call. That did not reproduce; the figures above did,
+> across two trials. The finding is unchanged — the paths disagree and the stream
+> path is broken — but the `'{\n\n\n}'` sample should not be cited.
 
 Three facts follow, and they reframe the work:
 
 1. **The best-compensated path produces the worst answer.** `get_response` carries 16 of the 18
-   compensations and returns `'{\n\n\n}'`; `get_response_async` carries 8 and returns the
-   correct answer. More compensation is not the goal — *the same* compensation is.
+   compensations and calls the tool twice, returning a doubled answer;
+   `get_response_async` carries 8 and returns the correct answer once. More compensation is
+   not the goal — *the same* compensation is.
 2. **The stream path is not under-compensated, it is broken.** It burns all 10 iterations of
    `max_iter`, invokes the tool **ten times** for a one-tool question, and yields nothing. That
    is a cost and side-effect amplifier, not a formatting defect.
 3. Leading hypothesis for the sync/async split: `OLLAMA_FINAL_ANSWER_PROMPT` (`llm.py:5302`,
-   async only). **Hypothesis, not measurement** — Step 06.0 settles it and records the result here.
+   async only). **Still a hypothesis, not a measurement** — it was not settled during order 06,
+   because the corrected baseline changed what needs explaining.
 
 ## 8. Two test-infrastructure traps
 

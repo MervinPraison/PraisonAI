@@ -129,16 +129,20 @@ authority. Before starting, check that no in-flight PR owns your files.
 
 Update your row in the same commit as your change. One line only.
 
+Additional PRs not in the original order list, found while executing it:
+D4 (local route prefixes) #4798, D5 (local embedding dimensions) #4802,
+D6 (registry accepts local providers) #4800.
+
 | Order | Title | Branch | PR | Status |
 |---|---|---|---|---|
-| 01 | D1 — provider-prefixed default model never reaches litellm | `fix/d1-default-provider-model` | — | in progress |
-| 02 | D3 — provider over-detection from base_url | — | — | planned |
-| 03 | D2 — `OPENAI_BASE_URL` to a non-OpenAI host uses the wrong client | — | — | planned |
-| 04 | D7 — per-file provider marker deselects unrelated tests | — | — | **spec ready** |
-| 05 | Live local-model CI job | — | — | **spec ready** |
-| 06 | A1/A2 — make the provider adapter load-bearing (6 sub-steps) | — | — | **spec ready** |
-| 07 | `praisonaiagents/local/` — discovery and capability resolver | — | — | **spec ready** |
-| 08 | A3 — reachability for the modules that bypass the LLM layer | — | — | planned |
+| 01 | D1 — provider-prefixed default model never reaches litellm | `fix/d1-default-provider-model` | #4795 | PR open |
+| 02 | D3 — provider over-detection from base_url | `fix/d3-provider-detection` | #4797 | PR open |
+| 03 | D2 — README recipe + local-endpoint diagnostic | `fix/d2-base-url-routing` | #4799 | PR open |
+| 04 | D7 — per-file provider marker deselects unrelated tests | `fix/d7-per-test-provider-markers` | #4801 | PR open |
+| 05 | Live local-model CI job | `feat/ci-ollama-live-job` | #4803 | PR open |
+| 06 | A1/A2 — make the provider adapter load-bearing (6 sub-steps) | 6 branches, stacked | #4804 #4806 #4808 #4809 #4810 #4811 | **complete — KNOWN_DEAD empty** |
+| 07 | `praisonaiagents/local/` — discovery and capability resolver | `feat/local-model-resolver` | #4807 | PR open |
+| 08 | A3 — reachability for the modules that bypass the LLM layer | — | — | in progress |
 
 ---
 

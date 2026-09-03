@@ -117,15 +117,27 @@ _format_ollama_tool_result_message        1       1        1*     3762 / 5267 / 
 
 ### 2.7 The divergence is observable — and not in the direction assumed
 
-Live Ollama, `temperature=0`, identical prompt and tool, two trials:
+> **CORRECTED 2026-09-03, during step 06.4.** The original figures in this section
+> recorded the sync path returning `'{\n\n\n}'` with 1 tool call. **That does not
+> reproduce.** Re-measured on `origin/main`, twice, `temperature=0`, same prompt and
+> tool, the sync path returns 2 tool calls and a doubled answer. The stream result
+> reproduced exactly. Every branch of the 06.1–06.6 stack was then bisected against
+> `main` and all produce byte-identical output, confirming the stack is
+> refactor-only.
+>
+> **The headline finding stands** — the three paths disagree and the stream path is
+> broken. Only the specific `'{\n\n\n}'` sample was unreproducible. Do not cite it,
+> and do not treat it as a regression signal.
+
+Live Ollama, `temperature=0`, identical prompt and tool, two trials (corrected):
 
 ```
-### t0 sync   tool_calls=1   out='{\n\n\n}'
-### t0 async  tool_calls=1   out='Paris: 21C sunny'
-### t0 stream tool_calls=10  out=''
-### t1 sync   tool_calls=1   out='{\n\n\n}'
-### t1 async  tool_calls=1   out='Paris: 21C sunny'
-### t1 stream tool_calls=10  out=''
+T1 sync    calls=2   out='Paris: 21C sunny. Paris: 21C sunny.'
+T1 async   calls=1   out='Paris: 21C sunny'
+T1 stream  calls=10  out=''
+T2 sync    calls=2   out='Paris: 21C sunny. Paris: 21C sunny.'
+T2 async   calls=1   out='Paris: 21C sunny'
+T2 stream  calls=10  out=''
 ```
 
 Reproduce:
@@ -152,16 +164,18 @@ EOF
 Three consequences, and they reframe the order:
 
 1. **The best-compensated path produces the worst answer.** `get_response` has 16 of the 18
-   compensations and returns `'{\n\n\n}'`. `get_response_async` has 8 and returns the correct
-   answer. More compensation is not the goal; *the same* compensation is.
+   compensations and calls the tool twice, returning a doubled answer.
+   `get_response_async` has 8 and returns the correct answer once. More compensation is
+   not the goal; *the same* compensation is.
 2. **The stream path is not under-compensated, it is broken.** It burns all 10 iterations of
    `max_iter`, invokes the tool **10 times** for a one-tool question, and yields nothing. That
    is a real cost and side-effect amplifier, not a formatting defect.
 3. **Leading hypothesis for the sync/async split: `OLLAMA_FINAL_ANSWER_PROMPT`**
    (`llm.py:5302`, async only). Async appends *"Based on the tool results above, please provide
-   the final answer"* and re-requests; sync does not, so at iteration 1 the model emits
-   `{\n\n\n}`, which is non-empty, so the `3844` empty-response guard does not fire and the
-   garbage is returned verbatim. **This is a hypothesis, not a measurement.** Step 06.0 settles it.
+   the final answer"* and re-requests; sync does not, so it runs another tool iteration
+   instead and concatenates the result twice. **This is a hypothesis, not a measurement**,
+   and it was not settled during order 06 — the corrected baseline changed what needs
+   explaining. Whoever takes the §5.7 follow-up should settle it first.
 
 **None of the three baselines may change during Steps 06.1–06.6.** Every step is a
 behaviour-preserving refactor. `'{\n\n\n}'` stays `'{\n\n\n}'`. Fixing it is this order's
