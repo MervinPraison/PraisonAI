@@ -406,6 +406,12 @@ export function buildChatsScreen(
       del.className = "chat-delete";
       del.dataset["action"] = "delete-chat";
       del.dataset["chatId"] = row.id;
+      // The title is carried on the button itself, not re-derived from the
+      // row's text: `parentElement.textContent` folds in the title, the
+      // relative time and the button's own word, so arming produced labels
+      // like "Delete Trip plan5m agoConfirm". Held here it stays the clean
+      // name on every rebuild and arming pass.
+      del.dataset["chatTitle"] = row.title;
       del.textContent = strings.actionDelete;
       del.setAttribute("aria-label", strings.deleteChat(row.title));
       el.append(del);
@@ -1050,9 +1056,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       }
       if (node.dataset["action"] !== "delete-chat") continue;
       const id = node.dataset["chatId"] ?? "";
-      // The title is read off the sibling the row rendered, so the button says
-      // the same name the row does even after a rebuild.
-      const title = node.parentElement?.textContent ?? id;
+      // The clean title is carried on the button's own dataset, set when the
+      // row was built. Reading `parentElement.textContent` instead folded in
+      // the visible time and the button's own word ("Delete Trip plan5m
+      // agoConfirm"); the dataset holds the name the row was rendered with.
+      const title = node.dataset["chatTitle"] ?? id;
       const armed = id !== "" && id === armedDelete;
       node.textContent = armed ? strings.actionConfirmDelete : strings.actionDelete;
       node.setAttribute("aria-label", armed ? strings.deleteChatConfirm(title) : strings.deleteChat(title));
@@ -1141,18 +1149,32 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // an intent `intents.ts` decoded for a control nothing rendered. A
         // conversation, once started, could not be removed from the device.
         //
+        // The title is a nicety for the announcement; `session.list` reads
+        // StoragePort, which REJECTS on a real device (SecurityError with site
+        // data blocked, QuotaExceededError). These reads sit OUTSIDE the remove
+        // try below, and `perform` is invoked through a floating `void`, so a
+        // rejection here floats to the global crash handler and replaces the
+        // whole app with the fatal screen for a lookup that only decides a
+        // label. Degrade to the id rather than crash.
+        const titleOf = async (): Promise<string> => {
+          try {
+            return (
+              (await app.session.list()).find((c) => c.id === intent.chatId)?.title ??
+              intent.chatId
+            );
+          } catch {
+            return intent.chatId;
+          }
+        };
         // Arm first. The second tap on the SAME row is the one that deletes;
         // a tap on a different row moves the arming rather than deleting two.
         if (armedDelete !== intent.chatId) {
           armedDelete = intent.chatId;
           syncDeleteArming();
-          const armedTitle =
-            (await app.session.list()).find((c) => c.id === intent.chatId)?.title ?? intent.chatId;
-          assertive.textContent = strings.deleteChatConfirm(armedTitle);
+          assertive.textContent = strings.deleteChatConfirm(await titleOf());
           return;
         }
-        const title =
-          (await app.session.list()).find((c) => c.id === intent.chatId)?.title ?? intent.chatId;
+        const title = await titleOf();
         armedDelete = null;
         // Read BEFORE the remove. `session.remove` clears `current` itself
         // when it deletes the open chat, so asking afterwards always answers

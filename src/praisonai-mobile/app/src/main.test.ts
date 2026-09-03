@@ -1444,6 +1444,63 @@ test("a delete that STORAGE refuses is said, not swallowed", async () => {
   app?.dispose();
 });
 
+test("a delete label names ONLY the chat, not its time and button text", async () => {
+  // `syncDeleteArming` re-derived the title from `parentElement.textContent`,
+  // which folds in the chat title, the relative time and the button's own word
+  // -- so arming turned "Delete Trip to Kyoto" into "Delete Trip to Kyoto3h
+  // agoConfirm". The clean title is carried on the button's dataset instead.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+
+  const del = dom.find((n) => n.dataset["action"] === "delete-chat");
+  assert.ok(del, `no delete control on a chat row:\n${dom.text()}`);
+  // The clean title -- exactly what `deleteChat(title)` names before arming.
+  const title = (del.getAttribute("aria-label") ?? "").replace(/^Delete /, "");
+  assert.equal(del.getAttribute("aria-label"), en.deleteChat(title), "the resting label is not the clean title");
+  dom.click(del as never); // arm
+  await settle();
+
+  const armed = dom.find((n) => n.dataset["action"] === "delete-chat");
+  const label = armed?.getAttribute("aria-label") ?? "";
+  // The armed label is the confirm string built from the SAME clean title --
+  // not the row's whole text (title + relative time + the button's own word),
+  // which is what `parentElement.textContent` used to fold in.
+  assert.equal(label, en.deleteChatConfirm(title), `the armed label was not the clean confirm string:\n${label}`);
+  assert.doesNotMatch(label, /ago/, `the armed label folded in the row's time:\n${label}`);
+  app?.dispose();
+});
+
+test("a delete when the chat list read REJECTS stays LOCAL, not fatal", async () => {
+  // The title shown in the confirmation is looked up via `session.list()`,
+  // which reads StoragePort and REJECTS on a real device. That read sits
+  // outside the remove try and `perform` is invoked through a floating `void`,
+  // so a rejection there reached the global crash handler and replaced the
+  // WHOLE app with the fatal screen -- for a lookup that only decides a label.
+  const storage = createFakeStorage();
+  const { dom, platform } = harness({ storage });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("keep me", "sure");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+
+  storage.failNext("SecurityError: site data blocked");
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+
+  assert.equal(
+    /could not start/.test(dom.text()),
+    false,
+    "a failed chat-list read must not become the app-wide crash screen",
+  );
+  assert.equal((await app!.session.list()).length, 1, "and nothing was removed");
+  app?.dispose();
+});
+
 test("a chat row SHOWS when it was last used", async () => {
   // `buildChatList` has computed `updatedLabel` for every row since it was
   // written and the renderer dropped it on the floor, so a list SORTED by
