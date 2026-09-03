@@ -10,6 +10,7 @@ Tool Groups:
 - `lsp`: LSP-powered code intelligence (symbols, definitions, references)
 - `search`: Fast codebase search (ripgrep-backed grep/glob, structural ast_grep)
 - `basic`: Basic file tools (read, list, search)
+- `clarify`: Human-in-the-loop clarify tool (gated on an interactive TTY)
 - `interactive`: Union of all groups (default)
 
 Usage:
@@ -31,6 +32,7 @@ Usage:
 
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set
 
@@ -67,6 +69,9 @@ TOOL_GROUPS = {
         "internet_search",
         "web_crawl",
     ],
+    "clarify": [
+        "clarify",
+    ],
 }
 
 # Default interactive group includes all
@@ -75,7 +80,8 @@ TOOL_GROUPS["interactive"] = (
     TOOL_GROUPS["edit"] + 
     TOOL_GROUPS["lsp"] + 
     TOOL_GROUPS["search"] + 
-    TOOL_GROUPS["basic"]
+    TOOL_GROUPS["basic"] +
+    TOOL_GROUPS["clarify"]
 )
 
 
@@ -88,6 +94,7 @@ class ToolConfig:
     enable_lsp: bool = True
     enable_search: bool = True
     enable_basic: bool = True
+    enable_clarify: bool = True
     approval_mode: str = "auto"  # auto (full privileges), manual, scoped
     lsp_enabled: bool = True
     acp_enabled: bool = True
@@ -118,6 +125,8 @@ class ToolConfig:
             self.enable_search = False
         if "basic" in disabled:
             self.enable_basic = False
+        if "clarify" in disabled:
+            self.enable_clarify = False
 
     @classmethod
     def from_env(cls) -> "ToolConfig":
@@ -180,6 +189,8 @@ def resolve_tool_groups(
             tool_names.update(TOOL_GROUPS["search"])
         if config.enable_basic:
             tool_names.update(TOOL_GROUPS["basic"])
+        if config.enable_clarify:
+            tool_names.update(TOOL_GROUPS["clarify"])
     
     # Remove disabled groups
     for group in disable:
@@ -229,6 +240,94 @@ def _load_basic_tools() -> Dict[str, Callable]:
     except ImportError:
         logger.debug("web_crawl not available")
     
+    return tools
+
+
+def _interactive_channel_available() -> bool:
+    """Whether a live interactive channel exists for asking the user.
+
+    The ``clarify`` tool is only useful when the agent can actually pause and
+    read an answer from the operator. We treat a channel as available when both
+    stdin and stdout are TTYs and the run has not been explicitly marked as
+    headless/machine-output. In non-interactive/headless/CI runs the tool is
+    withheld so the core ``ClarifyHandler`` best-judgment fallback keeps
+    scripted runs from blocking on an unanswerable prompt.
+
+    Operators can force the tool off with ``PRAISON_NO_CLARIFY`` (mirroring a
+    ``--no-clarify`` override) or the shared ``PRAISON_TOOLS_DISABLE=clarify``.
+    """
+    no_clarify = os.environ.get("PRAISON_NO_CLARIFY", "").strip().lower()
+    if no_clarify in ("1", "true", "yes"):
+        return False
+
+    # CI runners can allocate pseudo-terminals, so both streams may report as
+    # TTYs while no human is present to answer. Treat any truthy ``CI`` signal
+    # as headless and withhold the tool, so an unattended run falls back to the
+    # core best-judgment path instead of blocking on ``input()``.
+    ci = os.environ.get("CI", "").strip().lower()
+    if ci not in ("", "0", "false", "no"):
+        return False
+
+    # A structured/JSON output mode is a machine consumer; never prompt.
+    output_mode = os.environ.get("PRAISON_OUTPUT_MODE", "").strip().lower()
+    if output_mode in ("json", "stream-json", "actions"):
+        return False
+
+    try:
+        return bool(sys.stdin and sys.stdin.isatty()
+                    and sys.stdout and sys.stdout.isatty())
+    except (ValueError, AttributeError, OSError):
+        return False
+
+
+def _load_clarify_tools(config: ToolConfig) -> Dict[str, Callable]:
+    """Lazy-load the human-in-the-loop ``clarify`` tool for interactive runs.
+
+    Wires the existing core ``ClarifyTool`` + ``create_cli_clarify_handler``
+    (stdin prompt) into the default interactive toolset so a terminal agent can
+    pause and ask one focused question instead of silently guessing on genuine
+    ambiguity.
+
+    Gated on an interactive channel (:func:`_interactive_channel_available`):
+    in headless/non-TTY/JSON/CI runs the tool is withheld entirely, preserving
+    the core best-judgment fallback so scripted runs never block.
+    """
+    tools: Dict[str, Callable] = {}
+
+    if not _interactive_channel_available():
+        logger.debug("clarify tool withheld: no interactive channel")
+        return tools
+
+    try:
+        from praisonaiagents.tools.clarify import (
+            ClarifyTool,
+            create_cli_clarify_handler,
+        )
+    except ImportError as e:
+        logger.debug(f"clarify tool not available: {e}")
+        return tools
+
+    clarify_tool = ClarifyTool(handler=create_cli_clarify_handler())
+
+    async def clarify(question: str, choices: Optional[List[str]] = None) -> str:
+        """Ask the user a focused clarifying question when genuinely ambiguous.
+
+        Use sparingly — only when you cannot proceed without the user's input.
+        Pauses the turn and reads the answer from the terminal.
+
+        Args:
+            question: The single, focused question to ask.
+            choices: Optional list of predefined answer choices (rendered as a
+                numbered menu; the user may also type free text).
+
+        Returns:
+            The user's answer.
+        """
+        return await clarify_tool.run(question=question, choices=choices)
+
+    tools["clarify"] = clarify
+    logger.debug("Loaded clarify tool (interactive channel available)")
+
     return tools
 
 
@@ -670,6 +769,12 @@ def get_interactive_tools(
     if config.enable_basic and not (disable and "basic" in disable):
         basic_tools = _load_basic_tools()
         all_tools.update(basic_tools)
+    
+    # Load the human-in-the-loop clarify tool (gated on an interactive channel;
+    # withheld in headless/non-TTY/JSON runs so scripted runs never block).
+    if config.enable_clarify and not (disable and "clarify" in disable):
+        clarify_tools = _load_clarify_tools(config)
+        all_tools.update(clarify_tools)
     
     # Load fast search tools (always available, no runtime needed)
     if config.enable_search and not (disable and "search" in disable):

@@ -69,6 +69,7 @@ class TestToolGroups:
             | set(TOOL_GROUPS["lsp"])
             | set(TOOL_GROUPS["search"])
             | set(TOOL_GROUPS["basic"])
+            | set(TOOL_GROUPS["clarify"])
         )
         assert set(TOOL_GROUPS["interactive"]) == expected
 
