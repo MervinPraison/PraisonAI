@@ -43,20 +43,47 @@ const advance = async (_time: TimePort, ms: number): Promise<void> => {
 
 // ---- secrets ---------------------------------------------------------------
 
-function secrets(): SecretsPort {
-  const store = new Map<string, string>();
+/**
+ * One store shared by every `make()`, for the `secrets_one_store_for_all` mode.
+ *
+ * That mode is what gives the contract's CONTROL case teeth: an adapter whose
+ * every instance is the same store passes "a stored secret survives a
+ * relaunch" without any store surviving anything, because the "relaunched"
+ * port is the one that was already holding the value.
+ */
+const oneStoreForAll = new Map<string, string>();
+
+interface FixtureSecrets extends SecretsPort {
+  /** Values actually read out, so the contract can hold `has()` to rule 2. */
+  readonly reads: number;
+}
+
+function secrets(backing: Map<string, string> = new Map()): FixtureSecrets {
+  const store = mode === "secrets_one_store_for_all" ? oneStoreForAll : backing;
+  let reads = 0;
   // The defect: keying by slot alone, so two accounts share one credential.
   const key = (ref: { slot: string; account: string }): string =>
     mode === "secrets_slot_only" ? ref.slot : `${ref.slot}:${ref.account}`;
+  const read = (ref: { slot: string; account: string }): string | undefined => {
+    reads += 1;
+    return store.get(key(ref));
+  };
   return {
     isHardwareBacked: false,
+    get reads() {
+      return reads;
+    },
     async has(ref) {
+      // The defect: presence answered by reading the value out -- which is
+      // rule 2 of core/src/ports/secrets.ts broken while every boolean stays
+      // correct.
+      if (mode === "secrets_has_reads_the_value") return read(ref) !== undefined;
       return mode === "secrets_empty_is_absent"
         ? (store.get(key(ref)) ?? "") !== ""
         : store.has(key(ref));
     },
     async get(ref) {
-      return store.get(key(ref)) ?? null;
+      return read(ref) ?? null;
     },
     async set(ref, value) {
       store.set(key(ref), value);
@@ -261,7 +288,29 @@ function shellHarness(): ShellHarness {
   };
 }
 
-describeSecretsContract("fixture secrets", () => secrets());
+// Registered WITH a reopen and a read counter, so the durability and
+// presence cases run here too and can be reddened by
+// `secrets_forgets_on_relaunch`, `secrets_one_store_for_all` and
+// `secrets_has_reads_the_value`. A secret store that forgets when the process
+// ends is the exact defect this whole change exists to close, and the contract
+// can only catch it if something asks it to relaunch.
+const secretBackings = new WeakMap<SecretsPort, Map<string, string>>();
+const openFixtureSecrets = (backing: Map<string, string>): FixtureSecrets => {
+  const port = secrets(backing);
+  secretBackings.set(port, backing);
+  return port;
+};
+describeSecretsContract(
+  "fixture secrets",
+  () => openFixtureSecrets(new Map()),
+  (previous) =>
+    mode === "secrets_forgets_on_relaunch"
+      ? // The defect: a "reopened" keychain that is actually a fresh empty one
+        // -- the user's API key gone on the next launch, silently.
+        openFixtureSecrets(new Map())
+      : openFixtureSecrets(secretBackings.get(previous) ?? new Map()),
+  (port) => (port as FixtureSecrets).reads,
+);
 // Registered WITH a reopen, so the durability cases run here too and can be
 // reddened by `storage_forgets_on_relaunch`. A store that forgets when the
 // process ends is what makes "Your conversations are saved" a lie, and the

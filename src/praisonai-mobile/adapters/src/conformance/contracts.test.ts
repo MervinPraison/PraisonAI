@@ -36,8 +36,10 @@ import {
   preparedStorage,
 } from "../storage/migrate.ts";
 import { createWebSecrets } from "../web/secrets.ts";
+import { createTauriSecrets, SECRET_COMMANDS } from "../tauri/secrets.ts";
 import { createWebTime } from "../web/time.ts";
 import { createFakeSecrets } from "../../../testing/src/fake-secrets.ts";
+import type { SecretsPort } from "../../../core/src/ports/secrets.ts";
 import { createFakeTime } from "../../../testing/src/fake-time.ts";
 import { createWebShell } from "../web/shell.ts";
 import { INSET_VARIABLES } from "../../../core/src/ports/shell.ts";
@@ -180,8 +182,111 @@ function nativeHost(files: Map<string, string>): StrictInvoke {
 // The SecretsPort had no contract and no test of any kind. Collapsing the web
 // adapter's key from `${slot}:${account}` to `${slot}` survived the whole
 // suite -- two accounts in one slot then share one credential.
-describeSecretsContract("fake secrets", () => createFakeSecrets());
+//
+// The fake gets the PRESENCE branch (it counts reads); neither it nor the web
+// adapter gets the durability branch, because neither claims it -- both are a
+// module-scoped Map on purpose.
+describeSecretsContract(
+  "fake secrets",
+  () => createFakeSecrets(),
+  undefined,
+  (port) => (port as ReturnType<typeof createFakeSecrets>).reads,
+);
 describeSecretsContract("web secrets", () => createWebSecrets());
+
+// ---- the Tauri adapter, against a stand-in for the Rust commands ----------
+//
+// What this proves and what it does not. It proves the ADAPTER: that it invokes
+// the four command names `src-tauri/src/secrets.rs` declares, with the argument
+// names the Rust parameters are called; that it keeps slots and accounts apart;
+// that it turns a reply into the port's own vocabulary; that `has` goes to the
+// PRESENCE command and never to the read one; and that a key written before a
+// "relaunch" is still there afterwards. It does NOT prove that the Keychain or
+// the Keystore is hardware backed -- `src-tauri/plugins/secrets` is where the
+// Apple half is tested against the real keychain, the Android half is proved on
+// a device, and `tools/secrets-seam.test.mjs` is what stops the two sides
+// drifting apart on a name.
+//
+// The host is STRICT: an unknown command or a missing argument throws rather
+// than resolving to null. A forgiving stand-in would let the adapter send
+// `slotName` to a command expecting `slot` and stay green, which on a device is
+// every secret call failing with nothing pointing at the cause.
+interface KeychainHost {
+  readonly invoke: StrictInvoke;
+  /** How many times the adapter asked for a VALUE. */
+  reads(): number;
+}
+
+function keychainHost(items: Map<string, string>): KeychainHost {
+  let reads = 0;
+  const need = (args: Record<string, unknown> | undefined, name: string): string => {
+    const value = args?.[name];
+    if (typeof value !== "string") throw new Error(`missing string argument "${name}"`);
+    return value;
+  };
+  // The Rust side composes `service_for(slot)` + account; the shape that
+  // matters out here is only that the PAIR is the identity.
+  const at = (args: Record<string, unknown> | undefined): string =>
+    `${need(args, "slot")}\u0000${need(args, "account")}`;
+
+  return {
+    reads: () => reads,
+    invoke: async (command, args) => {
+      switch (command) {
+        case SECRET_COMMANDS.read: {
+          reads += 1;
+          return items.get(at(args)) ?? null;
+        }
+        case SECRET_COMMANDS.has:
+          return items.has(at(args));
+        case SECRET_COMMANDS.write: {
+          items.set(at(args), need(args, "value"));
+          return null;
+        }
+        case SECRET_COMMANDS.remove: {
+          items.delete(at(args));
+          return null;
+        }
+        default:
+          throw new Error(`no such command: ${command}`);
+      }
+    },
+  };
+}
+
+{
+  const hosts = new WeakMap<SecretsPort, KeychainHost>();
+  // The items each port was opened over, so a "relaunch" is a new adapter over
+  // the same keychain rather than the same object handed back -- which would
+  // make every durability case vacuous.
+  const backings = new WeakMap<SecretsPort, Map<string, string>>();
+
+  const openKeychain = (items: Map<string, string>): SecretsPort => {
+    const host = keychainHost(items);
+    const port = createTauriSecrets({ invoke: host.invoke });
+    hosts.set(port, host);
+    backings.set(port, items);
+    return port;
+  };
+
+  describeSecretsContract(
+    "tauri secrets",
+    () => openKeychain(new Map()),
+    // A relaunch: a brand new adapter over a keychain that outlived it. On a
+    // device the keychain is not in the process at all, which is the whole
+    // point -- see src-tauri/plugins/secrets.
+    (previous) => {
+      const items = backings.get(previous);
+      assert.ok(items, "reopen was handed a port this registration did not build");
+      return openKeychain(items);
+    },
+    (port) => {
+      const host = hosts.get(port);
+      assert.ok(host, "reads was handed a port this registration did not build");
+      return host.reads();
+    },
+  );
+}
 
 // The TimePort had no test file and no contract, and scored 3 of 3 surviving
 // in a mutation sweep -- the worst module in the package. Both implementations
@@ -1212,6 +1317,11 @@ function runAdapterFixture(mode: string): { status: number | null; output: strin
 const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp }[] = [
   { mode: "secrets_slot_only", expects: /two ACCOUNTS in one slot are two different secrets/ },
   { mode: "secrets_empty_is_absent", expects: /an empty string is a stored value, not an absence/ },
+  // The three that this change's own gates rest on. Each one is a way the
+  // native keychain could be wrong while every other case stays green.
+  { mode: "secrets_forgets_on_relaunch", expects: /a stored secret survives a relaunch/ },
+  { mode: "secrets_one_store_for_all", expects: /a FRESH store has none of another store's secrets/ },
+  { mode: "secrets_has_reads_the_value", expects: /has\(\) answers without reading the value/ },
   { mode: "storage_missing_is_undefined", expects: /a missing key reads as null, never undefined/ },
   { mode: "storage_namespaces_collide", expects: /namespaces are isolated/ },
   { mode: "time_every_fires_once", expects: /every\(\) repeats, rather than firing once/ },
@@ -1279,7 +1389,9 @@ test("a contract cannot quietly shrink", () => {
   const casesFor = (prefix: string): number =>
     passed.filter((line) => line.includes(`fixture ${prefix}:`)).length;
 
-  assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
+  // 14, not 9: the fixture now registers with a reopen and a read counter, so
+  // the four durability cases and the presence case run there too.
+  assert.ok(casesFor("secrets") >= 14, `the secrets contract shrank to ${casesFor("secrets")} cases`);
   assert.ok(casesFor("storage") >= 15, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
   assert.ok(casesFor("shell") >= 37, `the shell contract shrank to ${casesFor("shell")} cases`);
@@ -1288,7 +1400,7 @@ test("a contract cannot quietly shrink", () => {
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
   // signal is a smaller number that nothing reads. Guarding the guard.
   assert.ok(
-    ADAPTER_BREAKS.length >= 15,
+    ADAPTER_BREAKS.length >= 18,
     `the break table shrank to ${ADAPTER_BREAKS.length} modes`,
   );
 });

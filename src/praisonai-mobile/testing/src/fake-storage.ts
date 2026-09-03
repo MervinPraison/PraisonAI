@@ -10,8 +10,21 @@
 import type { Namespace, StorageKey, StoragePort } from "../../core/src/ports/storage.ts";
 
 export interface FakeStorage extends StoragePort {
-  /** Every key ever written, so a test can assert a secret never landed here. */
+  /** Every key ever written. */
   readonly writes: readonly StorageKey[];
+  /**
+   * Every VALUE ever written, so a test can assert a secret never landed here
+   * under any key at all.
+   *
+   * `writes` alone cannot do that, though its comment used to claim it could:
+   * knowing WHICH keys were written says nothing about what was in them. The
+   * gap was measured -- adding one `storage.write` of the credential under a
+   * new id to `SettingsStore.setSecret` survived the entire core suite,
+   * because the one test that watches for a leak reads a single document by
+   * name. Rule 1 of core/src/ports/secrets.ts is "a secret never passes
+   * through StoragePort", not "not through settings/app".
+   */
+  readonly writtenValues: readonly string[];
   /** Force the next call to reject, to exercise the failure path. */
   failNext(error: string): void;
 }
@@ -21,6 +34,7 @@ const compose = (key: StorageKey): string => `${key.namespace}/${key.id}`;
 export function createFakeStorage(): FakeStorage {
   const store = new Map<string, string>();
   const writes: StorageKey[] = [];
+  const writtenValues: string[] = [];
   let pendingFailure: string | null = null;
 
   const check = (): void => {
@@ -32,6 +46,7 @@ export function createFakeStorage(): FakeStorage {
 
   return {
     writes,
+    writtenValues,
     failNext(error) {
       pendingFailure = error;
     },
@@ -44,6 +59,7 @@ export function createFakeStorage(): FakeStorage {
     async write(key, value) {
       check();
       writes.push(key);
+      writtenValues.push(value);
       store.set(compose(key), value);
     },
     async remove(key) {

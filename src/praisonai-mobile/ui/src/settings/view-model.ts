@@ -138,8 +138,33 @@ export interface SettingsView {
   readonly secretsAreHardwareBacked: boolean;
 }
 
+/**
+ * What the user is told when there is no keychain under their credentials.
+ *
+ * REWRITTEN, not deleted, when the Tauri build got a real keychain. The old
+ * sentence -- "Secrets are stored in app memory on this platform, not in a
+ * hardware-backed keychain" -- was shown on a phone AND in a browser, because
+ * `platform.ts` handed `createWebSecrets()` to both. Now that a device gets
+ * `src-tauri/plugins/secrets`, "this platform" is only ever the browser, and a
+ * message that still said "this platform" would be technically true and
+ * useless: it would name the one thing the reader already knows and omit the
+ * two things they need to act on -- that the key goes no further than this tab,
+ * and that it will be gone when the tab does.
+ *
+ * Deleting it instead was the other option and it is worse. The web build is
+ * still real, its "keychain" is still a `Map`, and a settings screen that says
+ * nothing reads as a settings screen with nothing to say. A message that lies
+ * about where a user's API key lives is worse than no message; a message that
+ * is silent about it is not much better.
+ *
+ * It stays keyed off `secretsAreHardwareBacked` rather than off a platform
+ * name, so it is the ADAPTER that decides -- which means a future adapter that
+ * cannot reach a keychain gets the warning without anyone remembering to add
+ * it.
+ */
 export const SOFTWARE_SECRETS_WARNING =
-  "Secrets are stored in app memory on this platform, not in a hardware-backed keychain.";
+  "This browser has no keychain, so a key you enter is kept in this tab's memory only. " +
+  "It is not saved anywhere, and you will have to enter it again next time.";
 
 /**
  * The control a def needs.
