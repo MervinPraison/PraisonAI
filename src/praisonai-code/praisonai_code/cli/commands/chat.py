@@ -162,6 +162,8 @@ def chat_main(
     """
     import os
 
+    _warn_about_unwired_options(ctx)
+
     # Ingest piped stdin so `chat` composes in Unix pipelines and CI, e.g.
     #   echo "$STACKTRACE" | praisonai chat "Explain this"
     # The prompt argument comes first, then the piped body. Non-blocking/EOF-safe
@@ -376,6 +378,54 @@ def _run_profiled_chat(
     # only a raised exception or a logged auth error (with no response) exits 1.
     if failed or (not response and log_capture.find_auth_error()):
         raise typer.Exit(1)
+
+
+# Options `chat` declares but never passes to the runtime. chat_main dispatches to
+# AsyncTUI via AsyncTUIConfig, which consumes only a subset of its parameters; these
+# twelve reach neither that config nor any other path in the body, so `praisonai chat
+# --planning --guardrails strict` looked like it had configured something and had not.
+# Wiring them up is twelve separate features; saying so is one line, and stops the CLI
+# making a promise it does not keep. test_every_listed_option_really_is_unread pins
+# this list against the body so it cannot rot once an option is genuinely wired.
+_UNWIRED_CHAT_OPTIONS = {
+    "knowledge": "--knowledge",
+    "guardrails": "--guardrails",
+    "web": "--web",
+    "reflection": "--reflection",
+    "planning": "--planning",
+    "context": "--context",
+    "execution": "--execution",
+    "hooks": "--hooks",
+    "caching": "--caching",
+    "ui_backend": "--ui-backend",
+    "no_color": "--no-color",
+    "theme": "--theme",
+}
+
+
+def _warn_about_unwired_options(ctx) -> None:
+    """Tell the user which supplied options this command will ignore.
+
+    Only complains about options actually supplied -- an untouched default is
+    not a broken promise. Uses click's parameter source, so a value that merely
+    equals the default is not mistaken for one that was typed.
+    """
+    try:
+        supplied = sorted(
+            flag for name, flag in _UNWIRED_CHAT_OPTIONS.items()
+            if (ctx.get_parameter_source(name) is not None
+                and ctx.get_parameter_source(name).name != "DEFAULT")
+        )
+    except (AttributeError, TypeError):
+        return
+    if supplied:
+        import sys as _sys
+        print(
+            "warning: praisonai chat does not implement "
+            + ", ".join(supplied)
+            + " yet; the value was ignored.",
+            file=_sys.stderr,
+        )
 
 
 def _run_legacy_terminal_chat(
