@@ -200,6 +200,16 @@ describe('default handoff tool name (Python: transfer_to_<snake_case agent>)', (
     }
   });
 
+  it('caps a very long name at the provider 64-char limit', () => {
+    // Python does not truncate, so a name over 52 chars yields a
+    // `transfer_to_...` string the API rejects; we cap it and stay legal.
+    const longName = 'A'.repeat(80);
+    const toolName = defaultHandoffToolName(longName);
+    expect(toolName.length).toBeLessThanOrEqual(64);
+    expect(toolName).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    expect(toolName).not.toMatch(/_$/);
+  });
+
   it('a Handoff object and a bare Agent produce the same tool name', () => {
     const target = new Agent({ name: 'Support Bot', instructions: 'help', ...quiet });
 

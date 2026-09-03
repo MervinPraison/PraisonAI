@@ -100,13 +100,20 @@ export interface HandoffErrorOptions {
  * Any character Python's transform leaves unsafe is folded to `_` as a final
  * guard; for every name Python handles correctly the two agree byte for byte.
  *
+ * The whole result is finally capped at the provider's 64-character function
+ * name limit (`^[a-zA-Z0-9_-]{1,64}$`). Python does not truncate, so an agent
+ * name over 52 characters produces an over-length name there that the API
+ * rejects outright; capping here keeps the common case byte-identical while
+ * turning that pathological case from a hard API rejection into a usable name.
+ *
  * @param agentName - The target agent's name.
- * @returns A provider-legal tool name, e.g. `transfer_to_support_bot`.
+ * @returns A provider-legal tool name (<=64 chars), e.g. `transfer_to_support_bot`.
  */
 export function defaultHandoffToolName(agentName: string): string {
   const snake = String(agentName ?? '').toLowerCase().replace(/ /g, '_');
   const safe = snake.replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
-  return `transfer_to_${safe || 'agent'}`;
+  const name = `transfer_to_${safe || 'agent'}`;
+  return name.length > 64 ? name.slice(0, 64).replace(/_+$/g, '') : name;
 }
 
 /**
