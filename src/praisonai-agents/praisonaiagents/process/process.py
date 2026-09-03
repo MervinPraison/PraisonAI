@@ -1056,8 +1056,19 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         manager_task_id = yield manager_task
         logging.info(f"Created manager task with ID {manager_task_id}")
 
-        completed_count = 0
         total_tasks = len(self.tasks) - 1
+        # Seed completion accounting with tasks already completed before this run
+        # (e.g. re-running the same team). Tracking counted ids by object identity
+        # keeps the counter idempotent: a task is counted exactly once, whether it
+        # was pre-completed or completes during this run. Without this seed,
+        # pre-completed tasks would hit the re-selection branch and never be
+        # counted, making completed_count < total_tasks permanently and the loop
+        # only exitable via manager "stop" / max iterations.
+        counted_task_ids = {
+            tid for tid, tk in self.tasks.items()
+            if tid != manager_task_id and tk.status == "completed"
+        }
+        completed_count = len(counted_task_ids)
         logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
         
         # Track invalid selection attempts and error context
@@ -1183,12 +1194,17 @@ Provide a JSON with the structure:
                 logging.info(f"Starting execution of task {selected_task_id}")
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
-                # Only count a task toward completion the first time it actually
-                # transitions to "completed" here. Counting on every status check
-                # would double-count a task the manager re-selects after it is
-                # already completed, letting completed_count reach total_tasks
-                # early and silently skipping genuinely unexecuted tasks.
-                if self.tasks[selected_task_id].status == "completed":
+                # Count a task toward completion only the first time it actually
+                # transitions to "completed" (tracked by id). Counting on every
+                # status check would double-count a task the manager re-selects
+                # after it is already completed, letting completed_count reach
+                # total_tasks early and silently skipping genuinely unexecuted
+                # tasks.
+                if (
+                    self.tasks[selected_task_id].status == "completed"
+                    and selected_task_id not in counted_task_ids
+                ):
+                    counted_task_ids.add(selected_task_id)
                     completed_count += 1
                     logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
             else:
@@ -1673,8 +1689,19 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         manager_task_id = yield manager_task
         logging.info(f"Created manager task with ID {manager_task_id}")
 
-        completed_count = 0
         total_tasks = len(self.tasks) - 1
+        # Seed completion accounting with tasks already completed before this run
+        # (e.g. re-running the same team). Tracking counted ids by object identity
+        # keeps the counter idempotent: a task is counted exactly once, whether it
+        # was pre-completed or completes during this run. Without this seed,
+        # pre-completed tasks would hit the re-selection branch and never be
+        # counted, making completed_count < total_tasks permanently and the loop
+        # only exitable via manager "stop" / max iterations.
+        counted_task_ids = {
+            tid for tid, tk in self.tasks.items()
+            if tid != manager_task_id and tk.status == "completed"
+        }
+        completed_count = len(counted_task_ids)
         logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
         
         # Track invalid selection attempts and error context
@@ -1773,12 +1800,17 @@ Provide a JSON with the structure:
                 logging.info(f"Starting execution of task {selected_task_id}")
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
-                # Only count a task toward completion the first time it actually
-                # transitions to "completed" here. Counting on every status check
-                # would double-count a task the manager re-selects after it is
-                # already completed, letting completed_count reach total_tasks
-                # early and silently skipping genuinely unexecuted tasks.
-                if self.tasks[selected_task_id].status == "completed":
+                # Count a task toward completion only the first time it actually
+                # transitions to "completed" (tracked by id). Counting on every
+                # status check would double-count a task the manager re-selects
+                # after it is already completed, letting completed_count reach
+                # total_tasks early and silently skipping genuinely unexecuted
+                # tasks.
+                if (
+                    self.tasks[selected_task_id].status == "completed"
+                    and selected_task_id not in counted_task_ids
+                ):
+                    counted_task_ids.add(selected_task_id)
                     completed_count += 1
                     logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
             else:

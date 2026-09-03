@@ -144,6 +144,60 @@ def test_reject_manager_task_id_selection_async():
     assert 1 not in yielded
 
 
+def test_precompleted_task_lets_loop_terminate_sync():
+    """Re-running a team whose task is already ``completed`` must still be able
+    to terminate normally: pre-completed tasks are seeded into the completion
+    count so ``completed_count`` can reach ``total_tasks`` without relying on the
+    manager emitting ``stop``. Regression for the hierarchical termination gap.
+    """
+    process, user_task, add_task = _build_process()
+    # Simulate a prior run: the single user task (id 0) is already completed.
+    process.tasks[0].status = "completed"
+    # Manager keeps re-selecting the already-completed task; without seeding the
+    # count this would loop until MAX_INVALID_SELECTIONS / stop. With the fix the
+    # loop never enters because completed_count already equals total_tasks.
+    seq = [ManagerInstructions(task_id=0, agent_name="Worker", action="execute")]
+    yielded, _ = _drive_sync(process, add_task, seq)
+    # Nothing new to execute; the loop exits immediately.
+    assert yielded == []
+
+
+def test_precompleted_task_lets_loop_terminate_async():
+    process, user_task, add_task = _build_process()
+    process.tasks[0].status = "completed"
+    seq = [ManagerInstructions(task_id=0, agent_name="Worker", action="execute")]
+    yielded = _drive_async(process, add_task, seq)
+    assert yielded == []
+
+
+def test_reselected_completed_task_not_double_counted_sync():
+    """A manager that re-selects a task after it completes must not advance the
+    counter twice and skip a genuinely unexecuted task."""
+    worker = Agent(name="Worker", role="Analyst", goal="Analyze", backstory="Analyst")
+    t0 = Task(name="t0", description="A", expected_output="A", agent=worker)
+    t1 = Task(name="t1", description="B", expected_output="B", agent=worker)
+    tasks = {}
+    process = Process(tasks=tasks, agents=[worker], manager_llm="gpt-4o-mini")
+
+    def add_task(task):
+        tid = len(tasks)
+        task.id = tid
+        tasks[tid] = task
+        return tid
+
+    add_task(t0)  # id 0
+    add_task(t1)  # id 1
+    # Execute t0, then manager re-selects the now-completed t0 (ignored, not
+    # counted again), then finally executes t1. Both real tasks must run.
+    seq = [
+        ManagerInstructions(task_id=0, agent_name="Worker", action="execute"),
+        ManagerInstructions(task_id=0, agent_name="Worker", action="execute"),
+        ManagerInstructions(task_id=1, agent_name="Worker", action="execute"),
+    ]
+    yielded, _ = _drive_sync(process, add_task, seq)
+    assert yielded == [0, 1]
+
+
 def test_user_task_named_manager_task_is_still_delegable_sync():
     """Rejection must key off the synthetic task's *id*, not its name, so a
     legitimate user task named ``manager_task`` (id 0) still executes while the
