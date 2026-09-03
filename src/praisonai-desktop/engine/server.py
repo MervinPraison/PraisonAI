@@ -1538,6 +1538,42 @@ def redacted(cfg: dict) -> dict:
     return out
 
 
+# --- request origin -----------------------------------------------------------
+# The engine binds loopback, which keeps other machines out but NOT other pages:
+# any site open in the user's browser can reach 127.0.0.1 with a two-line fetch.
+# With `Access-Control-Allow-Origin: *` and no auth, that page could POST
+# /settings and repoint `base_url` at a host it controls -- the stored API key
+# then travels to that host on the next turn. Redacting replies (see redacted())
+# stopped the key being echoed; it did nothing about the key being *sent*.
+#
+# A browser attaches Origin to every cross-origin request and a page cannot forge
+# it, so refusing unknown origins closes that path without a shared secret (which
+# would need the Rust shell to carry one). Requests with NO Origin are allowed:
+# that is cli.py, the tests and curl -- local processes that already have the
+# user's filesystem, so a token would protect nothing.
+ALLOWED_ORIGIN_HOSTS = {"tauri.localhost", "localhost", "127.0.0.1", "[::1]", "::1"}
+
+
+def origin_allowed(origin: str) -> bool:
+    """Whether a browser Origin may talk to the engine.
+
+    Accepts the webview's own origin on every platform Tauri targets --
+    `tauri://localhost` on macOS and Linux, `http://tauri.localhost` on Windows
+    and Android -- plus localhost on any port for `npm run dev`.
+    """
+    if not origin:
+        return True                      # not a browser; see the note above
+    if origin == "null":
+        return False                     # sandboxed iframe / file:// document
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("tauri", "http", "https"):
+        return False
+    return (parsed.hostname or "") in ALLOWED_ORIGIN_HOSTS
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -1545,10 +1581,37 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # Echo the caller's own origin rather than "*", so only the origins
+        # origin_allowed() admits can read a reply.
+        origin = self.headers.get("Origin") or ""
+        if origin and origin_allowed(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "content-type")
 
+    def _origin_ok(self) -> bool:
+        """Refuse a browser origin the engine does not recognise.
+
+        Answers the request with 403 and no CORS headers, so the calling page
+        cannot read the reply either.
+        """
+        if origin_allowed(self.headers.get("Origin") or ""):
+            return True
+        self._drain()
+        body = b'{"error":"origin not allowed"}'
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        return False
+
     def do_OPTIONS(self):
+        if not self._origin_ok():
+            return
         self.send_response(204)
         self._cors()
         self.send_header("Content-Length", "0")
@@ -1655,6 +1718,8 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(0.25)
 
     def do_GET(self):
+        if not self._origin_ok():
+            return
         if self.path.startswith("/train/progress"):
             trainer = self._training()
             from urllib.parse import parse_qs, urlparse
@@ -1772,6 +1837,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_DELETE(self):
+        if not self._origin_ok():
+            return
         if not self.path.startswith("/chats/"):
             self.send_error(404)
             return
@@ -1788,6 +1855,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
     def do_POST(self):
+        if not self._origin_ok():
+            return
         if self.path == "/train/start":
             payload = self._body()
             config = payload.get("config") or {}
