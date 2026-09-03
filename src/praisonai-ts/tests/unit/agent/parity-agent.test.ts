@@ -206,11 +206,13 @@ describe('Agent.__init__ parity: wired options', () => {
     const main = new Agent({ instructions: 'triage', handoffs: [specialist, custom], ...quiet });
 
     const toolNames = (main as any).tools.map((t: any) => t.function.name);
-    expect(toolNames).toEqual(expect.arrayContaining(['transfer_to_Billing_Agent', 'custom_handoff']));
+    // Python parity (`Handoff.default_tool_name`): lower-cased, spaces to
+    // underscores -- `transfer_to_billing_agent`, not `transfer_to_Billing_Agent`.
+    expect(toolNames).toEqual(expect.arrayContaining(['transfer_to_billing_agent', 'custom_handoff']));
     expect(main.handoffs).toHaveLength(2);
     expect((main as any).createSystemPrompt()).toContain('Billing Agent');
 
-    const reply = await (main as any).toolFunctions.transfer_to_Billing_Agent({ reason: 'refund question' });
+    const reply = await (main as any).toolFunctions.transfer_to_billing_agent({ reason: 'refund question' });
     expect(reply).toBe('billing reply');
     expect(spy).toHaveBeenCalledWith('refund question');
   });

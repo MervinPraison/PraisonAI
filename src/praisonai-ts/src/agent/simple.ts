@@ -6,6 +6,7 @@ import type { LLMProvider } from '../llm/providers/types';
 import type { BackendResolutionResult } from '../llm/backend-resolver';
 import { ApprovalManager, createCLIApprovalPrompt } from '../ai/tool-approval';
 import { getEnv } from '../llm/openaiClientOptions';
+import { resolveDefaultModel } from '../llm/default-model';
 import { randomUUID } from '../utils/uuid';
 import { parseModelString } from '../llm/backend-resolver';
 import { notYetHonoured } from '../utils/parity-notice';
@@ -526,11 +527,6 @@ async function loadWebSearchProvider(name: string): Promise<(config?: any) => an
   );
 }
 
-/** A tool name the OpenAI API accepts (^[a-zA-Z0-9_-]+$). */
-function toolSafeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'agent';
-}
-
 /**
  * Wrap `fetch` so JSON chat-completion bodies gain extra fields (reasoning_effort,
  * seed, max_tokens). OpenAIService exposes no hook for provider-specific body
@@ -632,6 +628,19 @@ async function toJsonSchema(schema: any): Promise<Record<string, any> | undefine
 export class Agent {
   private instructions: string;
   public name: string;
+  /**
+   * Python parity: `Agent.role` (`role or "Assistant"`). Python always
+   * materialises role/goal/backstory and exposes them via `to_dict()` and
+   * `__repr__`; TypeScript used to read them once to build `instructions` and
+   * then drop them, so `agent.role` was `undefined` where Python said
+   * `"Assistant"`, and anything deriving text from them (a handoff's tool
+   * description) had nothing to read.
+   */
+  public readonly role: string;
+  /** Python parity: `Agent.goal` (`goal or instructions or "Help the user with their tasks"`). */
+  public readonly goal: string;
+  /** Python parity: `Agent.backstory` (`backstory or instructions or "I am an AI assistant"`). */
+  public readonly backstory: string;
   private verbose: boolean;
   private pretty: boolean;
   private llm: string;
@@ -755,7 +764,19 @@ export class Agent {
     } else {
       this.instructions = 'You are a helpful AI assistant.';
     }
-    
+
+    // Python parity (agent.py: the `if instructions:` / `else` branches). Kept
+    // as stored fields, not just constructor locals, so `agent.role` reads back
+    // the same value Python reports.
+    this.role = config.role || 'Assistant';
+    if (config.instructions) {
+      this.goal = config.goal || config.instructions;
+      this.backstory = config.backstory || config.instructions;
+    } else {
+      this.goal = config.goal || 'Help the user with their tasks';
+      this.backstory = config.backstory || 'I am an AI assistant';
+    }
+
     this.name = config.name || `Agent_${Math.random().toString(36).substr(2, 9)}`;
     this.verbose = config.verbose ?? getEnv('PRAISON_VERBOSE') !== 'false';
     this.pretty = config.pretty ?? getEnv('PRAISON_PRETTY') === 'true';
@@ -763,7 +784,11 @@ export class Agent {
     // LLMConfig whose apiKey/baseURL/temperature/maxTokens are honoured too.
     const llmConfig: LLMConfig | undefined = typeof config.llm === 'object' && config.llm !== null ? config.llm : undefined;
     const llmName = typeof config.llm === 'string' ? config.llm : llmConfig?.model;
-    this.llm = config.model || llmName || getEnv('OPENAI_MODEL_NAME') || getEnv('PRAISONAI_MODEL') || 'gpt-4o-mini';
+    // Python parity (`Agent._resolve_default_model`): an unnamed model is
+    // resolved from whichever provider credential is actually present, so a
+    // user holding only ANTHROPIC_API_KEY gets a Claude model rather than an
+    // OpenAI default that cannot authenticate.
+    this.llm = config.model || llmName || resolveDefaultModel();
     this._llmExplicit = config.model !== undefined || config.llm !== undefined;
     if (llmConfig?.temperature !== undefined) this.defaultTemperature = llmConfig.temperature;
     this.defaultMaxTokens = llmConfig?.maxTokens;
@@ -1027,9 +1052,12 @@ export class Agent {
     if (!handoffs || handoffs.length === 0) return;
     for (const entry of handoffs) {
       // Python names the tool transfer_to_<agent>; a Handoff object keeps its own name.
+      // Both forms go through defaultHandoffToolName so a bare Agent and an
+      // explicit Handoff for the same target cannot disagree about the name
+      // the model sees.
       const h = entry instanceof Handoff
         ? entry
-        : new Handoff({ agent: entry as any, name: `transfer_to_${toolSafeName(entry.name)}` });
+        : new Handoff({ agent: entry as any });
       this.handoffs.push(h);
       const def = h.getToolDefinition();
       this.registerToolFunction(def.name, async (args: Record<string, unknown>) => this.executeHandoff(h, args));
@@ -1775,24 +1803,46 @@ export class Agent {
     return results;
   }
 
+  /**
+   * Run one turn and return the response.
+   *
+   * @param prompt - The task to run. Optional (Python parity: `start(prompt=None)`):
+   *   when omitted, the agent's own `instructions` become the task, so
+   *   `new Agent({ instructions: 'Summarise AI news' }).start()` works with no
+   *   argument. Falls back to `'Hello'` only if there are no instructions
+   *   either.
+   * @param previousResult - Prior agent output to chain into this turn.
+   * @param onToken - Token sink; defaults to stdout.
+   * @param signal - Cancels the run.
+   * @param onEvent - Structured events, for callers that need to SEE tool
+   *   activity rather than infer it from prose. Optional and additive: every
+   *   existing caller passes four arguments and gets exactly the behaviour it
+   *   had before.
+   * @param options - Per-call options (see {@link AgentChatOptions}). AgentTeam
+   *   uses this to carry a Task's `tools` and `outputJson` into the run.
+   */
   async start(
-    prompt: string,
+    prompt?: string,
     previousResult?: string,
     onToken?: (token: string) => void,
     signal?: AbortSignal,
-    /**
-     * Structured events, for callers that need to SEE tool activity rather
-     * than infer it from prose. Optional and additive: every existing caller
-     * passes four arguments and gets exactly the behaviour it had before.
-     */
     onEvent?: (event: AgentEvent) => void,
-    /**
-     * Per-call options (see {@link AgentChatOptions}). AgentTeam uses this to
-     * carry a Task's `tools` and `outputJson` into the run.
-     */
     options?: AgentChatOptions,
   ): Promise<string> {
-    return this.runTurn(prompt, previousResult, onToken, signal, onEvent, options);
+    // Python parity (execution_mixin.py: `if prompt is None: prompt =
+    // self.instructions or "Hello"`). An agent whose instructions ALREADY
+    // describe the job should not have to repeat them as a prompt.
+    return this.runTurn(this.resolveStartPrompt(prompt), previousResult, onToken, signal, onEvent, options);
+  }
+
+  /**
+   * The task for a `start()` call that named no prompt: the agent's own
+   * instructions, else `'Hello'`. An explicit prompt always wins -- including
+   * an explicit empty string, which is a caller's choice, not an omission.
+   */
+  private resolveStartPrompt(prompt?: string): string {
+    if (prompt !== undefined && prompt !== null) return prompt;
+    return this.instructions || 'Hello';
   }
 
   /**

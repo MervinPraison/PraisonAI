@@ -87,6 +87,56 @@ export interface HandoffErrorOptions {
 }
 
 /**
+ * The tool name a handoff gets when the caller named none.
+ *
+ * Python parity (`Handoff.default_tool_name`, handoff.py): the target agent's
+ * name is lower-cased with spaces turned into underscores and prefixed with
+ * `transfer_to_`. Getting this wrong is not cosmetic -- the string is the
+ * function name in the tool schema sent to the provider. The previous
+ * `handoff_to_${agent.name}` form passed the name through raw, so an agent
+ * called "Support Bot" produced `handoff_to_Support Bot`, which contains a
+ * space and is rejected by the OpenAI tool-name rule `^[a-zA-Z0-9_-]{1,64}$`.
+ *
+ * Any character Python's transform leaves unsafe is folded to `_` as a final
+ * guard; for every name Python handles correctly the two agree byte for byte.
+ *
+ * The whole result is finally capped at the provider's 64-character function
+ * name limit (`^[a-zA-Z0-9_-]{1,64}$`). Python does not truncate, so an agent
+ * name over 52 characters produces an over-length name there that the API
+ * rejects outright; capping here keeps the common case byte-identical while
+ * turning that pathological case from a hard API rejection into a usable name.
+ *
+ * @param agentName - The target agent's name.
+ * @returns A provider-legal tool name (<=64 chars), e.g. `transfer_to_support_bot`.
+ */
+export function defaultHandoffToolName(agentName: string): string {
+  const snake = String(agentName ?? '').toLowerCase().replace(/ /g, '_');
+  const safe = snake.replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  const name = `transfer_to_${safe || 'agent'}`;
+  return name.length > 64 ? name.slice(0, 64).replace(/_+$/g, '') : name;
+}
+
+/**
+ * The tool description a handoff gets when the caller supplied none.
+ *
+ * Python parity (`Handoff.default_tool_description`, handoff.py): the target's
+ * name, then its role in parentheses and its goal after a dash, both only when
+ * present. This string is the tool's `description` in the schema the model
+ * reads and is repeated in the system prompt, so the old
+ * `Transfer conversation to <name>` gave the model strictly less to route on
+ * than Python did.
+ *
+ * @param agent - The handoff target; `role` and `goal` are read when set.
+ * @returns e.g. `Transfer task to Support Bot (Assistant) - Help users`.
+ */
+export function defaultHandoffToolDescription(agent: { name: string; role?: string; goal?: string }): string {
+  let description = `Transfer task to ${agent.name}`;
+  if (agent.role) description += ` (${agent.role})`;
+  if (agent.goal) description += ` - ${agent.goal}`;
+  return description;
+}
+
+/**
  * Agent handoff/delegation failed.
  *
  * Includes source/target agent context (`context.source_agent`,
@@ -676,8 +726,8 @@ export class Handoff {
       config[key] !== undefined ? config[key] : nested[key];
 
     this.targetAgent = config.agent;
-    this.name = config.name || nested.name || `handoff_to_${config.agent.name}`;
-    this.description = config.description || nested.description || `Transfer conversation to ${config.agent.name}`;
+    this.name = config.name || nested.name || defaultHandoffToolName(config.agent.name);
+    this.description = config.description || nested.description || defaultHandoffToolDescription(config.agent as any);
     this.condition = pick('condition');
     this.transformContext = pick('transformContext');
     this.inputType = pick('inputType');

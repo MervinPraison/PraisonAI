@@ -355,12 +355,38 @@ function extractInterface(ts, sf, target, location) {
   };
 }
 
+// `name: constructor` addresses a class's constructor declaration, which has no
+// `name` node of its own. Used for ported classes whose constructor takes plain
+// positional parameters and no options interface (e.g. `constructor(stateFile:
+// string | null = null)`), so they are checked like any other method.
+const CONSTRUCTOR_NAME = 'constructor';
+
 function extractMethod(ts, sf, target, location) {
+  const wantsCtor = target.name === CONSTRUCTOR_NAME;
   const matches = findAll(ts, sf, (n) =>
-    (ts.isMethodDeclaration(n) || ts.isFunctionDeclaration(n)) && n.name && n.name.getText(sf) === target.name
-      && (!target.cls || enclosingClassName(ts, n) === target.cls));
-  const decl = matches[0];
+    wantsCtor
+      ? ts.isConstructorDeclaration(n) && (!target.cls || enclosingClassName(ts, n) === target.cls)
+      : (ts.isMethodDeclaration(n) || ts.isFunctionDeclaration(n)) && n.name && n.name.getText(sf) === target.name
+        && (!target.cls || enclosingClassName(ts, n) === target.cls));
+  // For a constructor the implementation is the real signature: TypeScript forbids
+  // parameter initializers on overload signatures, so a bodyless match would report
+  // every parameter as having no default. Named methods keep the long-standing
+  // first-match rule: their leading overload is the documented public signature
+  // (AgentTeam.start declares `options?: AgentTeamStartOptions` there and widens to
+  // a union type alias in the implementation, which has no interface to flatten).
+  const decl = wantsCtor ? (matches.find((m) => m.body) || matches[0]) : matches[0];
   if (!decl) {
+    if (wantsCtor) {
+      if (target.cls
+        && !findAll(ts, sf, (n) => ts.isClassDeclaration(n) && n.name && n.name.text === target.cls)[0]) {
+        return { error: `${target.surface}: class ${target.cls} not found in ${target.file}` };
+      }
+      return {
+        error: target.cls
+          ? `${target.surface}: class ${target.cls} declares no constructor in ${target.file}`
+          : `${target.surface}: no class in ${target.file} declares a constructor`,
+      };
+    }
     const where = target.cls ? `${target.cls}.${target.name}` : target.name;
     return { error: `${target.surface}: method ${where} not found in ${target.file}` };
   }

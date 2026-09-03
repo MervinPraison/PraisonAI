@@ -212,7 +212,11 @@ export class FunctionTool<TParams = any, TResult = any> {
 
   constructor(config: ToolConfig<TParams, TResult>) {
     this.name = config.name;
-    this.description = config.description || `Function ${config.name}`;
+    // Python parity (`FunctionTool.__init__`: `description or func.__doc__ or
+    // f"Tool: {self.name}"`). The fallback is not internal text -- it ships in
+    // the tool schema the model reads, so a different wording is a different
+    // prompt.
+    this.description = config.description || `Tool: ${config.name}`;
     this.parameters = this.normalizeParameters(config.parameters);
     this.category = config.category;
     this.executeFn = config.execute;
