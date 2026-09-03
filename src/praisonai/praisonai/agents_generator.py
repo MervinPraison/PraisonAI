@@ -23,12 +23,6 @@ from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_r
 logger = logging.getLogger("praisonai.agents_generator")
 
 
-def _rich_print(*args, **kwargs):
-    """Lazy alias for rich.print — pays the import cost only on first use."""
-    from rich import print as _rp
-    return _rp(*args, **kwargs)
-
-
 def _yaml_safe_load(stream):
     """Lazy alias for yaml.safe_load."""
     import yaml
