@@ -184,8 +184,15 @@ def _build_per_test_provider_map(filepath: Path) -> Optional[Dict[tuple, Set[str
     """Map ``(class_name, func_name)`` -> provider markers for one test file.
 
     The text considered for a test is that test's own source segment plus its
-    decorators, not the whole file. A mocked OpenAI test that happens to sit next
-    to an Ollama test therefore no longer inherits ``provider_ollama``.
+    decorators, **plus the file's module-level scope** (docstring, imports,
+    module constants, ``pytestmark``, and fixture/helper bodies). A mocked OpenAI
+    test that sits next to an Ollama test therefore no longer inherits
+    ``provider_ollama`` from that *sibling's* body -- but a live test whose
+    provider identity comes from a shared fixture or module-level config is still
+    marked, so positive selectors like ``-m "provider_openai or real"`` keep it.
+
+    Only test functions leak nothing to each other; everything at module scope is
+    shared by design, mirroring how a fixture is shared at runtime.
 
     Returns ``None`` if the file cannot be parsed, so callers fall back to the
     whole-file behaviour rather than under-marking.
@@ -198,6 +205,40 @@ def _build_per_test_provider_map(filepath: Path) -> Optional[Dict[tuple, Set[str
     try:
         source = _get_file_content(filepath)
         tree = ast.parse(source)
+
+        # Provider keywords visible at module scope are shared by every test in
+        # the file: blank out each test's own body so only genuinely shared
+        # context (fixtures, module constants, pytestmark) contributes here.
+        module_segments = []
+
+        def _is_test_callable(node) -> bool:
+            return (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name.startswith('test')
+            )
+
+        for child in tree.body:
+            if _is_test_callable(child):
+                continue
+            if isinstance(child, ast.ClassDef):
+                # Keep decorators/class-level code, drop only the test bodies.
+                for grandchild in child.body:
+                    if _is_test_callable(grandchild):
+                        continue
+                    seg = ast.get_source_segment(source, grandchild)
+                    if seg:
+                        module_segments.append(seg)
+                for decorator in child.decorator_list:
+                    seg = ast.get_source_segment(source, decorator)
+                    if seg:
+                        module_segments.append(seg)
+                continue
+            seg = ast.get_source_segment(source, child)
+            if seg:
+                module_segments.append(seg)
+
+        module_providers = _detect_providers_in_text("\n".join(module_segments))
+
         result = {}
 
         def _visit(node, class_name=None):
@@ -208,7 +249,9 @@ def _build_per_test_provider_map(filepath: Path) -> Optional[Dict[tuple, Set[str
                     segment = ast.get_source_segment(source, child) or ""
                     for decorator in child.decorator_list:
                         segment += "\n" + (ast.get_source_segment(source, decorator) or "")
-                    result[(class_name, child.name)] = _detect_providers_in_text(segment)
+                    result[(class_name, child.name)] = (
+                        _detect_providers_in_text(segment) | module_providers
+                    )
 
         _visit(tree)
     except (SyntaxError, ValueError, RecursionError):

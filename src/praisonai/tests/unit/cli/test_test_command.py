@@ -395,3 +395,53 @@ def test_module_level_plain():
         for ini in ("praisonai/pytest.ini", "praisonai-agents/pytest.ini"):
             text = (root / ini).read_text()
             assert "offline:" in text, f"{ini} is missing the offline marker"
+
+    FIXTURE_SUPPLIED_SOURCE = '''
+import pytest
+
+@pytest.fixture
+def sample_document():
+    """A doc that names OpenAI, mirroring a live RAG fixture."""
+    return "PraisonAI supports OpenAI, Anthropic and Google."
+
+class TestRAGLive:
+    def test_rag_query(self, sample_document):
+        assert sample_document
+
+def test_plain(sample_document):
+    assert sample_document
+'''
+
+    def test_module_scope_provider_reaches_every_test(self, tmp_path):
+        """A provider named only in a shared fixture must still mark each test.
+
+        Guards the D7 follow-up: positive selectors like
+        ``-m "provider_openai or real"`` must keep live tests whose provider
+        identity is supplied by a module-level fixture, not the test body.
+        """
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_fixture_supplied.py"
+        f.write_text(self.FIXTURE_SUPPLIED_SOURCE)
+        m = _build_per_test_provider_map(f)
+        assert 'provider_openai' in m[('TestRAGLive', 'test_rag_query')]
+        assert 'provider_openai' in m[(None, 'test_plain')]
+
+    def test_module_scope_does_not_leak_sibling_bodies(self, tmp_path):
+        """Module-scope union must not reintroduce sibling-body leakage.
+
+        A provider named only inside one test body stays out of its siblings.
+        """
+        from tests._pytest_plugins.test_gating import (
+            _build_per_test_provider_map, _file_provider_cache, _file_content_cache,
+        )
+        _file_provider_cache.clear()
+        _file_content_cache.clear()
+        f = tmp_path / "test_mixed_providers.py"
+        f.write_text(self.MIXED_SOURCE)
+        m = _build_per_test_provider_map(f)
+        assert 'provider_ollama' not in m[('TestMixed', 'test_mocked_openai_only')]
+        assert 'provider_openai' not in m[('TestMixed', 'test_mentions_ollama')]
