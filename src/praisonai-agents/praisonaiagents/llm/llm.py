@@ -2979,19 +2979,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                 )
 
                                 # Append tool result as standard tool message
-                                if tool_result is None:
-                                    content = "Function returned an empty output"
-                                elif isinstance(tool_result, dict) and 'error' in tool_result:
-                                    content = f"Error: {tool_result.get('error', 'Unknown error')}. Please inform the user."
-                                elif isinstance(tool_result, list) and tool_result and isinstance(tool_result[0], dict) and 'error' in tool_result[0]:
-                                    content = f"Error: {tool_result[0].get('error', 'Unknown error')}. Please inform the user."
-                                else:
-                                    content = json.dumps(tool_result)
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_result_obj.tool_call_id,
-                                    "content": content,
-                                })
+                                messages.append(self._create_tool_message(
+                                    function_name, tool_result,
+                                    tool_result_obj.tool_call_id, is_ollama=False))
 
                             # Report any unparseable tool-call arguments so the
                             # model can re-emit them (never dispatched with {}).
@@ -3800,20 +3790,8 @@ Respond with ONLY a valid JSON tool call in this format:
                                 pass
                             else:
                                 # For other providers, use tool role with tool_call_id
-                                # Format error results more clearly
-                                if tool_result is None:
-                                    content = "Function returned an empty output"
-                                elif isinstance(tool_result, dict) and 'error' in tool_result:
-                                    content = f"Error: {tool_result.get('error', 'Unknown error')}. Please inform the user that the operation could not be completed."
-                                elif isinstance(tool_result, list) and len(tool_result) > 0 and isinstance(tool_result[0], dict) and 'error' in tool_result[0]:
-                                    content = f"Error: {tool_result[0].get('error', 'Unknown error')}. Please inform the user that the operation could not be completed."
-                                else:
-                                    content = json.dumps(tool_result)
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "content": content
-                                })
+                                messages.append(self._create_tool_message(
+                                    function_name, tool_result, tool_call_id, is_ollama=False))
 
                             # Check if we should continue (for tools like sequential thinking)
                             # This mimics the logic from agent.py lines 1004-1007
@@ -5022,17 +5000,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 _get_display_functions()['display_tool_call'](display_message, console=self.console)
 
                             # Append tool result
-                            if tool_result is None:
-                                content = "Function returned an empty output"
-                            elif isinstance(tool_result, dict) and 'error' in tool_result:
-                                content = f"Error: {tool_result.get('error', 'Unknown error')}. Please inform the user."
-                            else:
-                                content = json.dumps(tool_result)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "content": content,
-                            })
+                            messages.append(self._create_tool_message(
+                                function_name, tool_result, tool_call_id, is_ollama=False))
 
                         if iteration_count + 1 >= max_iterations:
                             self._last_stop_reason = "max_steps"
@@ -5305,20 +5274,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             pass
                         else:
                             # For other providers, use tool role with tool_call_id
-                            # Format error results more clearly
-                            if tool_result is None:
-                                content = "Function returned an empty output"
-                            elif isinstance(tool_result, dict) and 'error' in tool_result:
-                                content = f"Error: {tool_result.get('error', 'Unknown error')}. Please inform the user that the operation could not be completed."
-                            elif isinstance(tool_result, list) and len(tool_result) > 0 and isinstance(tool_result[0], dict) and 'error' in tool_result[0]:
-                                content = f"Error: {tool_result[0].get('error', 'Unknown error')}. Please inform the user that the operation could not be completed."
-                            else:
-                                content = json.dumps(tool_result)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "content": content
-                            })
+                            messages.append(self._create_tool_message(
+                                function_name, tool_result, tool_call_id, is_ollama=False))
 
                     # Flush deferred media follow-ups after all tool replies
                     # for this turn have been appended (provider contract).
@@ -6821,21 +6778,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         if is_ollama:
             return self._format_ollama_tool_result_message(function_name, result)
-        if result is None:
-            content = "Function returned an empty output"
-        elif isinstance(result, dict) and 'error' in result:
-            content = (f"Error: {result.get('error', 'Unknown error')}. "
-                       "Please inform the user that the operation could not be completed.")
-        elif (isinstance(result, list) and result
-                and isinstance(result[0], dict) and 'error' in result[0]):
-            content = (f"Error: {result[0].get('error', 'Unknown error')}. "
-                       "Please inform the user that the operation could not be completed.")
-        else:
-            try:
-                content = json.dumps(result)
-            except (TypeError, ValueError):
-                content = str(result)
-        return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        adapter = getattr(self, '_provider_adapter', None)
+        if adapter is None:
+            from .adapters import DefaultAdapter
+            adapter = DefaultAdapter()
+        return adapter.format_tool_result_message(function_name, result, tool_call_id)
 
     def _serialize_tool_calls(self, tool_calls) -> List[Dict]:
         """Convert tool calls to a serializable format for all providers."""
