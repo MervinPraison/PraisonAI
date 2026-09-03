@@ -30,8 +30,20 @@ logger = logging.getLogger(__name__)
 import os
 import warnings
 
-CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
 _LOCALHOST_HOSTS = frozenset({'127.0.0.1', 'localhost', '::1'})
+
+
+def _call_server_token() -> Optional[str]:
+    """Live-read the shared server token from the environment.
+
+    The environment is the single source of truth; capturing it at import time
+    broke any host that mounts this router without going through
+    ``praisonai.api.call.main()`` (AgentOS, ``serve``, tests, embedders) and
+    made a late-loaded ``.env`` or runtime rotation impossible. Reading here —
+    like ``_call_auth_disabled`` / ``_configured_bind_host`` already do — makes
+    every request observe the current value.
+    """
+    return os.getenv('CALL_SERVER_TOKEN')
 
 
 def _call_auth_disabled() -> bool:
@@ -67,7 +79,8 @@ async def verify_token(
             stacklevel=2,
         )
         return
-    if not CALL_SERVER_TOKEN:
+    expected = _call_server_token()
+    if not expected:
         raise HTTPException(
             status_code=503,
             detail="CALL_SERVER_TOKEN is not configured. Set CALL_SERVER_TOKEN to enable authentication.",
@@ -96,7 +109,7 @@ async def verify_token(
     
     # Constant-time comparison to avoid a token-recovery timing side channel.
     import hmac
-    if not token or not hmac.compare_digest(token, CALL_SERVER_TOKEN):
+    if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Request/Response Models
@@ -185,6 +198,17 @@ class AgentRegistry:
 _default_registry = AgentRegistry()
 
 
+def _registry_dependency() -> AgentRegistry:
+    """Which ``AgentRegistry`` serves this request?
+
+    Returns the process-default registry by default, but is overridable via
+    ``app.dependency_overrides[_registry_dependency] = ...`` so an ``AgentOS`` /
+    ``serve`` host can bind its own registry per app instance and get real
+    per-tenant isolation through the router (not just the free functions).
+    """
+    return _default_registry
+
+
 def register_agent(agent_id: str, agent: Any,
                    *, registry: Optional[AgentRegistry] = None) -> None:
     """Register an agent for invocation via API."""
@@ -256,7 +280,8 @@ def _clone_agent(agent: Any) -> Any:
     return _copy.deepcopy(agent)
 
 
-def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
+def resolve_session_agent(agent_id: str, session_id: Optional[str],
+                          *, registry: Optional[AgentRegistry] = None) -> Any:
     """Resolve an isolated, session-scoped agent for a single request.
 
     The registry holds a *template* agent, not a live conversation. Every
@@ -272,7 +297,7 @@ def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
     Agents that don't support cloning/session binding (e.g. plain mocks) fall
     back to the shared registry instance for backward compatibility.
     """
-    template = get_agent(agent_id)
+    template = get_agent(agent_id, registry=registry)
     if template is None:
         return None
 
@@ -438,7 +463,8 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
     async def invoke_agent(
         agent_id: str,
         request: AgentInvokeRequest,
-        _: None = Depends(verify_token)
+        _: None = Depends(verify_token),
+        registry: AgentRegistry = Depends(_registry_dependency),
     ) -> Union[AgentInvokeResponse, ErrorResponse]:
         """
         Invoke a PraisonAI agent with a message.
@@ -472,7 +498,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         # share mutable chat_history. A provided session_id gives continuity via
         # the shared session store; its absence yields an ephemeral conversation.
         try:
-            agent = resolve_session_agent(agent_id, request.session_id)
+            agent = resolve_session_agent(agent_id, request.session_id, registry=registry)
         except Exception as e:
             logger.error(f"Failed to isolate agent {agent_id}: {e}")
             raise HTTPException(
@@ -533,14 +559,17 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             )
 
     @router.get("/agents")
-    async def list_agents(_: None = Depends(verify_token)) -> Dict[str, Any]:
+    async def list_agents(
+        _: None = Depends(verify_token),
+        registry: AgentRegistry = Depends(_registry_dependency),
+    ) -> Dict[str, Any]:
         """
         List all registered agents.
         
         Returns:
             Dictionary containing list of available agents
         """
-        agents = list_registered_agents()
+        agents = list_registered_agents(registry=registry)
         return {
             "agents": agents,
             "count": len(agents),
@@ -564,11 +593,15 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         }
 
     @router.delete("/agents/{agent_id}")
-    async def unregister_agent_endpoint(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
+    async def unregister_agent_endpoint(
+        agent_id: str,
+        _: None = Depends(verify_token),
+        registry: AgentRegistry = Depends(_registry_dependency),
+    ) -> Dict[str, Any]:
         """
         Unregister an agent from API access.
         """
-        success = unregister_agent(agent_id)
+        success = unregister_agent(agent_id, registry=registry)
         if success:
             return {
                 "message": f"Agent '{agent_id}' unregistered successfully",
@@ -581,11 +614,15 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             )
 
     @router.get("/agents/{agent_id}")
-    async def get_agent_info(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
+    async def get_agent_info(
+        agent_id: str,
+        _: None = Depends(verify_token),
+        registry: AgentRegistry = Depends(_registry_dependency),
+    ) -> Dict[str, Any]:
         """
         Get information about a registered agent.
         """
-        agent = get_agent(agent_id)
+        agent = get_agent(agent_id, registry=registry)
         if not agent:
             raise HTTPException(
                 status_code=404,
