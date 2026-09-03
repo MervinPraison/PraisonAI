@@ -39,7 +39,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:583`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:603`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:112` (ctor `src/praisonai-ts/src/agent/simple.ts:744`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 4 mismatches; 4 waived; 14 TS-only of 59
 
@@ -198,7 +198,7 @@ TS-only members: `dependencies`?
 
 ### `Agent.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:831`
+- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:832`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:1778`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 20 TS-only of 21
 
