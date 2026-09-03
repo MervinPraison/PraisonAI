@@ -40,7 +40,12 @@ on:
   pull_request:
     paths: &watched
       - 'src/praisonai-mobile/**'
-      - 'src/praisonai-ts/src/**'
+      # The whole package, not just src/**: the break this workflow now
+      # guards against came from praisonai-ts's package.json gaining a
+      # `dependencies` entry (#4727), which fires `prepare` -> `rimraf dist`.
+      # A filter blind to package.json, the lockfile, tsconfig or the build
+      # scripts is blind to exactly the file that broke it.
+      - 'src/praisonai-ts/**'
       - '.github/workflows/mobile-platforms.yml'
   # Without this, no platform build had ever run on main -- so a break
   # introduced by two PRs that were each green apart could sit on main
