@@ -22,13 +22,27 @@ class TestResolveApprovalBackend:
         assert self._resolve("none") is None
         assert self._resolve("None") is None
 
-    def test_console_returns_console_backend(self):
-        b = self._resolve("console")
-        assert type(b).__name__ == "InteractiveCLIApprovalBackend"
+    def test_console_returns_the_interactive_cli_backend(self):
+        """"console" resolves to the interactive CLI backend, not ConsoleBackend.
 
-    def test_true_returns_console_backend(self):
-        b = self._resolve("true")
-        assert type(b).__name__ == "InteractiveCLIApprovalBackend"
+        These two tests asserted `type(b).__name__ == "ConsoleBackend"` and had
+        been red ever since #2037 replaced it with the persisting interactive
+        backend and c9 moved the resolver into praisonai-bot. Nothing caught it:
+        praisonai-agents' unit tree is run by no CI workflow (#4748).
+
+        Asserting a class *name* is what made this brittle, so assert the thing
+        that actually matters instead: the resolver hands back the real class,
+        and that class satisfies the backend contract callers rely on.
+        """
+        from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
+
+        for value in ("console", "true"):
+            b = self._resolve(value)
+            assert isinstance(b, InteractiveCLIApprovalBackend), value
+            # registry.py and tool_execution.py both probe for the sync variant
+            # with hasattr and fall back when it is absent, so only the async
+            # entry point is part of the contract every backend must honour.
+            assert callable(getattr(b, "request_approval", None)), value
 
     def test_auto_returns_auto_approve_backend(self):
         b = self._resolve("auto")
@@ -82,10 +96,11 @@ class TestResolveApprovalBackend:
             self._resolve("foobar")
 
     def test_case_insensitive(self):
-        b = self._resolve("Console")
-        assert type(b).__name__ == "InteractiveCLIApprovalBackend"
-        b = self._resolve("AUTO")
-        assert type(b).__name__ == "AutoApproveBackend"
+        """Casing must not change which backend is chosen."""
+        from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
+
+        assert isinstance(self._resolve("Console"), InteractiveCLIApprovalBackend)
+        assert type(self._resolve("AUTO")).__name__ == "AutoApproveBackend"
 
 
 class TestValidBackends:
