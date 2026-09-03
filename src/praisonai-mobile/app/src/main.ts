@@ -811,6 +811,25 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   const keyed = (rows: readonly Row[], seq: number): readonly Row[] =>
     rows.map((row) => ({ ...row, id: `t${seq}:${row.id}` }));
 
+  /**
+   * Whether a publish from the controller belongs to the chat now on screen.
+   *
+   * Stopping the previous chat's run on a switch aborts it, but the abort still
+   * drives one FINAL publish (the controller always paints the terminal frame,
+   * see controller.ts) -- and that frame carries the OLD chat's turn. Left
+   * ungated it reconciles the old answer or a "Stopped" row into the transcript
+   * we have just seeded with the NEW chat's history, and it is then promoted
+   * into `history` and reopens there. `setChat` cannot help: by the time the
+   * late publish lands the controller already reports the new chat's id.
+   *
+   * So every chat switch sets this false -- from that point the only publishes
+   * worth painting are for a turn THIS chat issued -- and `submit` sets it true
+   * for the turn it is about to start. A stale terminal publish from the run we
+   * left arrives while false and is dropped; the new chat's own first frame
+   * (`beginTurn`, from inside `send`) arrives after `submit` re-armed it.
+   */
+  let expectingTurn = false;
+
   /** Forget every turn on screen. Shared by New chat, Open chat and deleting
    *  the chat that is open, because getting one of the three resets wrong is
    *  how a previous conversation's rows leak into the next one. */
@@ -819,6 +838,9 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     liveRows = [];
     turnSeq = 0;
     turnEnded = false;
+    // A switched-to chat has issued no turn yet, so any publish still arriving
+    // is the run we just left painting its last frame into the wrong chat.
+    expectingTurn = false;
   };
 
   // ---- composer state (draft, key policy, autosize) ----------------------
@@ -845,6 +867,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   };
 
   const publish = (view: RunView): void => {
+    // Drop a frame from the run we switched away from. A chat switch stops the
+    // previous run, but the abort still drives one terminal publish carrying
+    // the OLD chat's turn; painting it here reconciles that turn into the chat
+    // we just opened. `expectingTurn` is armed only by the turn THIS chat
+    // issued (see `submit`), so an idle, cleared chat drops the straggler and
+    // stays empty. See `expectingTurn`.
+    if (!expectingTurn) return;
+
     // A new turn has begun and the previous one had ended: keep it. See
     // `liveRows` -- without this the answer above is removed by the very
     // reconcile that draws the new question.
@@ -1614,6 +1644,15 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         // list back into a stored transcript.
         const opened = await app.session.open(intent.chatId);
         if (!opened) return;
+        // Stop the previous chat's run FIRST, exactly as New chat and deleting
+        // the open chat already do. Without this, a run still in flight from the
+        // conversation being left keeps streaming, and its terminal `publish()`
+        // reconciles the old chat's answer or error row into the transcript we
+        // are about to seed with THIS chat's history -- where it is then promoted
+        // into `history` and reopens with the wrong conversation. `setChat`
+        // clears the controller's turn, but it cannot cancel a run the engine is
+        // still driving; only `stop()` does.
+        void app.controller.stop();
         app.controller.setChat(intent.chatId);
         render = emptyRender;
         nodes.nodes.clear();
@@ -1661,6 +1700,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     input.value = "";
     syncComposer();
     if (result.sent === null) return; // refused while a turn is in flight
+    // Arm the transcript for THIS chat's own turn. A switch left `expectingTurn`
+    // false so a straggling publish from the run we left is dropped; issuing a
+    // run here is the moment publishes become ours to paint again. Set before
+    // `send`, which publishes `beginTurn` synchronously on the way in.
+    expectingTurn = true;
     await app.controller.send(result.sent);
   };
 

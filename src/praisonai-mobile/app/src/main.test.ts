@@ -1111,6 +1111,89 @@ test("a turn sent AFTER reopening a chat lands below the history, not above it",
   app?.dispose();
 });
 
+test("opening another chat mid-run keeps that run's answer OUT of it", async () => {
+  // The cross-chat leak (greptile P1). New chat and deleting the open chat both
+  // stop the run in flight before reseeding the screen; Open chat did not. So a
+  // run still streaming in the conversation you LEFT kept going, and its
+  // terminal publish -- which the controller always emits, even on abort --
+  // reconciled the old chat's answer into the transcript just seeded with the
+  // chat you OPENED, where it was then promoted into history and reopened there.
+  //
+  // Two defences, both asserted here: Open chat now stops the previous run, and
+  // the app drops any publish arriving for a chat that has issued no turn of its
+  // own -- so even the guaranteed terminal frame paints nothing into the wrong
+  // conversation.
+  const { dom, http, platform } = harness();
+
+  // Chat A's run stays open: `start` and a `delta`, then the stream hangs until
+  // the test releases it -- exactly the shape of a reply still in flight.
+  let release: (() => void) | null = null;
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(sse([["start", { msg_id: "mA", run_id: "rA" }]])));
+        controller.enqueue(enc.encode(sse([["delta", { msg_id: "mA", text: "LEAKED-ANSWER-A" }]])));
+        release = () => {
+          controller.enqueue(
+            enc.encode(
+              sse([["end", { msg_id: "mA", user_index: 0, assistant_index: 1, versions: 1, active: 0 }]]),
+            ),
+          );
+          controller.close();
+        };
+      },
+    }),
+  }));
+
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  // A second, stored conversation to open into. Recorded through the session so
+  // the chat list has a real row to tap.
+  await app!.session.record("chat B question", "chat B answer");
+
+  // Start chat A's run and let it stream the delta, but NOT the end.
+  submit(dom, "chat A question");
+  await settle(80);
+  assert.match(transcriptRows(dom).join("\n"), /LEAKED-ANSWER-A/, "chat A never started streaming");
+
+  // Open chat B WHILE chat A is still in flight.
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "open-chat") as never);
+  await settle();
+
+  // Now let chat A's run finish. Its terminal publish must not reach chat B.
+  release?.();
+  await settle(120);
+
+  // Chat B shows its OWN stored conversation and nothing else. With the leak
+  // present, chat A's terminated run publishes into B as a spurious error row
+  // (its turn was cleared by `setChat`, so its `end` lands on an idle turn and
+  // `finish` synthesises "the engine produced no output") plus a "before_start"
+  // dropped row -- both belonging to a run that was never chat B's.
+  const rows = transcriptRows(dom);
+  const joined = rows.join("\n");
+  assert.match(joined, /chat B question/, `chat B's own history was lost:\n${joined}`);
+  assert.match(joined, /chat B answer/, `chat B's own answer was lost:\n${joined}`);
+  assert.equal(
+    rows.some((r) => r.startsWith("row row-error") || r.startsWith("row row-dropped")),
+    false,
+    `the previous chat's terminated run leaked a row into the opened conversation:\n${joined}`,
+  );
+  assert.equal(
+    joined.includes("LEAKED-ANSWER-A") || joined.includes("chat A question"),
+    false,
+    `the previous chat's message leaked into the opened conversation:\n${joined}`,
+  );
+  // Exactly chat B's two rows -- nothing appended below them.
+  assert.equal(rows.length, 2, `chat B must show only its own turn:\n${joined}`);
+  app?.dispose();
+});
+
 test("a storage failure while the chat list loads stays LOCAL, not fatal", async () => {
   // The list load was a floating `void (async ...)()` with no rejection
   // handler. A StoragePort rejection -- SecurityError, QuotaExceeded -- reached
