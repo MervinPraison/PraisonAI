@@ -824,6 +824,7 @@ Write the complete compiled report:"""
                     api_key=self._openai_api_key,
                 )
                 self._using_custom_llm = True
+                self._wire_deferred_history_callback()
             except ImportError:
                 # If LLM class not available, just update the model string
                 pass

@@ -1183,10 +1183,16 @@ Provide a JSON with the structure:
                 logging.info(f"Starting execution of task {selected_task_id}")
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
-
-            if self.tasks[selected_task_id].status == "completed":
-                completed_count += 1
-                logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+                # Only count a task toward completion the first time it actually
+                # transitions to "completed" here. Counting on every status check
+                # would double-count a task the manager re-selects after it is
+                # already completed, letting completed_count reach total_tasks
+                # early and silently skipping genuinely unexecuted tasks.
+                if self.tasks[selected_task_id].status == "completed":
+                    completed_count += 1
+                    logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+            else:
+                logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
         self.tasks[manager_task.id].status = "completed"
         if self.verbose >= 1:
@@ -1767,10 +1773,16 @@ Provide a JSON with the structure:
                 logging.info(f"Starting execution of task {selected_task_id}")
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
-
-            if self.tasks[selected_task_id].status == "completed":
-                completed_count += 1
-                logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+                # Only count a task toward completion the first time it actually
+                # transitions to "completed" here. Counting on every status check
+                # would double-count a task the manager re-selects after it is
+                # already completed, letting completed_count reach total_tasks
+                # early and silently skipping genuinely unexecuted tasks.
+                if self.tasks[selected_task_id].status == "completed":
+                    completed_count += 1
+                    logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+            else:
+                logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
         self.tasks[manager_task.id].status = "completed"
         if self.verbose >= 1:

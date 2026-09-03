@@ -4630,6 +4630,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                    # Rollback chat history so a failed async turn does not leave
+                    # a dangling, unanswered user message (mirrors the sync path
+                    # and achat()'s own guardrail handler).
+                    self._rollback_chat_history_to(chat_history_length)
                     return None
         except ToolExecutionError:
             raise
@@ -4638,6 +4642,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if get_logger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+            # Rollback chat history so a failed async turn does not leave a
+            # dangling, unanswered user message (mirrors the sync path).
+            self._rollback_chat_history_to(chat_history_length)
             return None
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
