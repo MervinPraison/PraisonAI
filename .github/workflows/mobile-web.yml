@@ -108,6 +108,12 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+      # `gh api repos/<owner>/<repo>/pages` needs Pages read. Without it the
+      # request is rejected on a private repo, `2>/dev/null || echo '{}'`
+      # swallows the error to `{}`, build_type falls to "none", and the deploy
+      # SKIPS even though Pages is on -- the exact silent skip this file exists
+      # to prevent. `contents: read` alone leaves this permission at `none`.
+      pages: read
     outputs:
       ready: ${{ steps.check.outputs.ready }}
     steps:
