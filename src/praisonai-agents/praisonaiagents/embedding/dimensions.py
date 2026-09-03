@@ -29,6 +29,14 @@ MODEL_DIMENSIONS: Dict[str, int] = {
     # Jina models
     "jina-embeddings-v3": 1024,
     "jina-embeddings-v2-base-en": 768,
+    # Locally-served embedders (Ollama tags). Dimensions measured by embedding a
+    # probe string through a live Ollama 0.33.2 and counting the returned vector,
+    # cross-checked against `<family>.embedding_length` from /api/show. Without
+    # these every local embedder inherited DEFAULT_DIMENSION (1536, OpenAI's),
+    # so a vector index was built 2x-4x the size the model actually produces.
+    "nomic-embed-text": 768,      # measured
+    "mxbai-embed-large": 1024,    # measured
+    "all-minilm": 384,            # measured; Ollama's short tag for all-MiniLM
     # HuggingFace common models
     "all-MiniLM-L6-v2": 384,
     "all-mpnet-base-v2": 768,
@@ -70,20 +78,30 @@ def get_dimensions(model_name: str) -> int:
         1536
         >>> get_dimensions("openai/text-embedding-3-large")
         3072
+        >>> get_dimensions("ollama/nomic-embed-text:v1.5")
+        768
         >>> get_dimensions("unknown-model")
         1536
     """
     model_lower = model_name.lower()
-    
+
     # Check for exact match first (lowercased lookup handles mixed-case keys)
     if model_lower in _LOWER_MODEL_DIMENSIONS:
         return _LOWER_MODEL_DIMENSIONS[model_lower]
+
+    # Local models are written the way their runtime names them:
+    # "ollama/nomic-embed-text:v1.5". Strip the litellm-style provider prefix
+    # and the version tag, then retry the exact match, so a tagged local model
+    # resolves instead of falling through to the OpenAI default.
+    normalised = model_lower.rsplit("/", 1)[-1].split(":", 1)[0]
+    if normalised != model_lower and normalised in _LOWER_MODEL_DIMENSIONS:
+        return _LOWER_MODEL_DIMENSIONS[normalised]
     
     # Check if model name contains known model identifiers.
     # Entries are pre-sorted by key length (longest first) so more specific
     # keys like "voyage-3-lite" match before shorter prefixes like "voyage-3".
     for model_key, dimensions in _SORTED_MODEL_DIMENSIONS:
-        if model_key in model_lower:
+        if model_key in model_lower or model_key in normalised:
             return dimensions
     
     # Default to 1536 for unknown models (OpenAI standard)

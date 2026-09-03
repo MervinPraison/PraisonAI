@@ -424,6 +424,21 @@ class MongoDBMemoryAdapter:
         self.pymongo = pymongo
         
         config = kwargs.get("config", {})
+
+        # Resolve the embedding model once, at construction. Previously
+        # _get_embedding hardcoded "text-embedding-3-small" and __init__ stored
+        # nothing about embeddings, so an agent configured entirely against a
+        # local runtime still embedded against OpenAI with no way to say
+        # otherwise. Accepts both the flat key and the `embedder` block used
+        # elsewhere in the memory layer.
+        _embedder = config.get("embedder") or {}
+        self.embedding_model = (
+            kwargs.get("embedding_model")
+            or config.get("embedding_model")
+            or (_embedder.get("config") or {}).get("model")
+            or "text-embedding-3-small"
+        )
+
         connection_string = config.get("connection_string", "mongodb://localhost:27017/")
         database_name = config.get("database", "praisonai")
         self.use_vector_search = config.get("use_vector_search", False)
@@ -584,7 +599,7 @@ class MongoDBMemoryAdapter:
         """Get embedding for text."""
         try:
             from praisonaiagents.embedding import embedding
-            result = embedding(text, model="text-embedding-3-small")
+            result = embedding(text, model=self.embedding_model)
             return result.embeddings[0] if result.embeddings else None
         except Exception:
             return None
