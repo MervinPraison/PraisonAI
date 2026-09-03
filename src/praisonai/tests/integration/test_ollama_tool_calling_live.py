@@ -54,9 +54,21 @@ def check_ollama_available():
 
 @pytest.fixture(scope="module")
 def ollama_available():
-    """Fixture to check Ollama availability."""
+    """Fixture to check Ollama availability.
+
+    When PRAISONAI_TEST_OLLAMA=1 the caller has explicitly asked for these
+    tests to run against a server it is responsible for (the CI job starts and
+    pulls the model itself). In that mode an unreachable server is a real
+    failure, not a reason to skip: a skip would let the "required" CI step exit
+    successfully without ever exercising the tool-call contract. Only a plain
+    local invocation (env var unset — reached via -m or an explicit path) is
+    allowed to skip gracefully.
+    """
     if not check_ollama_available():
-        pytest.skip("Ollama is not running at localhost:11434")
+        message = "Ollama is not running at localhost:11434"
+        if os.getenv("PRAISONAI_TEST_OLLAMA"):
+            pytest.fail(message)
+        pytest.skip(message)
     return True
 
 
@@ -241,7 +253,7 @@ if __name__ == "__main__":
     if not check_ollama_available():
         print("ERROR: Ollama is not running at localhost:11434")
         print("Start Ollama with: ollama serve")
-        print("Pull model with: ollama pull $PRAISONAI_OLLAMA_TEST_MODEL")
+        print(f"Pull model with: ollama pull {OLLAMA_MODEL.split('/', 1)[1]}")
         exit(1)
     
     print("Ollama is available. Running tests...")
