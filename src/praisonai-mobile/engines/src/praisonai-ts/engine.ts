@@ -32,6 +32,11 @@ import type { ApprovalChoice, RunEvent } from "../../../protocol/src/events.ts";
 import { PROTOCOL_VERSION } from "../../../protocol/src/version.ts";
 import { classifyError } from "./classify.ts";
 import type { PraisonAgentFactory } from "./agent-api.ts";
+import {
+  truncateHistory,
+  HISTORY_CHAR_BUDGET,
+  type HistoryMessage,
+} from "../../../core/src/chat/history.ts";
 
 export const PRAISONAI_TS_ENGINE_ID = "praisonai-ts";
 
@@ -47,6 +52,36 @@ export interface RunPersistence {
   /** Returns null when the turn could NOT be written. Null is a real value
    *  here: it is what makes `end.userIndex === null` mean "not on disk". */
   record(request: RunRequest, answer: string): Promise<PersistedIndices | null>;
+}
+
+/**
+ * Where the conversation so far comes from.
+ *
+ * WHY THE ENGINE ASSEMBLES IT, and not the controller or the port.
+ *
+ * The obvious move is to widen `RunRequest` with a `history` field, so every
+ * engine is handed the conversation and the controller owns the assembly. That
+ * is the wrong seam here, and `remote-http/engine.ts` is the reason: it POSTs
+ * `chat_id` to a server that keeps its OWN history for that id -- boot.ts says
+ * so in as many words ("against an engine keying server-side history by
+ * chat_id, every user's first chat was one shared thread"). Sending history
+ * from the client to that engine would send every prior turn TWICE, once from
+ * the client and once from the server's store, and a doubled conversation is a
+ * far worse failure than a missing one: it is silent, it grows, and it makes
+ * the model contradict itself.
+ *
+ * So conversation memory is an ENGINE-LEVEL responsibility, owned by whoever
+ * owns the store. `RegistryDeps.persistence` already reasons this way about
+ * the WRITE -- "the remote engine deliberately does not take it: the server it
+ * talks to persists" -- and this is the same split applied to the READ. Two
+ * engines, two owners of the conversation, one shape for the port.
+ */
+export interface ConversationHistory {
+  /** Prior COMPLETED turns of the open conversation, oldest first. Never
+   *  includes the prompt of the turn being run: that arrives as
+   *  `RunRequest.prompt` and sending it in both places asks the model the same
+   *  question twice. */
+  messages(): readonly HistoryMessage[];
 }
 
 /** Capabilities, stated against what the engine can REPORT. */
@@ -66,8 +101,22 @@ export const PRAISONAI_TS_CAPABILITIES: EngineCapabilities = {
 export interface PraisonEngineOptions {
   readonly createAgent: PraisonAgentFactory;
   readonly persistence: RunPersistence;
+  /**
+   * The conversation this engine's turns continue.
+   *
+   * REQUIRED, alongside `persistence`, and paired with it on purpose: the
+   * thing that records a turn and the thing that replays it must be the same
+   * store, or the model remembers a different conversation from the one on
+   * screen. An optional field would let a composition supply one and forget
+   * the other and still build.
+   */
+  readonly history: ConversationHistory;
   /** Injected so tests are deterministic. */
   readonly newMsgId: () => string;
+  /** Characters of prior conversation a turn may carry. Injected only so a
+   *  test can drive the truncation path without building a 24,000-character
+   *  chat; production uses the constant. */
+  readonly historyBudget?: number;
 }
 
 export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEnginePort {
@@ -104,6 +153,23 @@ export function createPraisonTsEngine(options: PraisonEngineOptions): AgentEngin
 
     try {
       const agent = await options.createAgent();
+
+      // THE CONVERSATION, restored before the prompt is sent.
+      //
+      // A fresh agent is built per turn, so upstream's own accumulation across
+      // `streamEvents` calls never survives one -- see agent-api.ts. Without
+      // this line the model is handed a single sentence with no antecedent and
+      // "And its population?" is unanswerable, which is exactly what a device
+      // reported: a request for clarification instead of a number.
+      //
+      // Called UNCONDITIONALLY, including with an empty history. A guard would
+      // make the empty case a different code path from the ordinary one, and
+      // the empty case is the first turn of every conversation -- the one path
+      // that must not diverge.
+      agent.setHistory(
+        truncateHistory(options.history.messages(), options.historyBudget ?? HISTORY_CHAR_BUDGET)
+          .messages,
+      );
 
       for await (const event of agent.streamEvents(request.prompt, { signal: controller.signal })) {
         if (event.type === "text") {

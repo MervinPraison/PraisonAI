@@ -40,12 +40,25 @@ const build = async () => {
   // A RunPersistence that records nothing: these cases are about WHICH
   // engines are offered, not about what a turn writes.
   const persistence = { async record() { return { userIndex: 0, assistantIndex: 1, versions: 1, active: 0 }; } };
-  return { store, secrets, settings: facadeFor(store, secrets), http: createFakeHttp(), storage, persistence };
+  // Likewise a ConversationHistory with nothing in it: what a turn REMEMBERS is
+  // engine.test.ts's subject. Required rather than defaulted, for the reason
+  // RegistryDeps gives -- an engine built without one answers every message as
+  // though it were the first.
+  const history = { messages: () => [] };
+  return {
+    store,
+    secrets,
+    settings: facadeFor(store, secrets),
+    http: createFakeHttp(),
+    storage,
+    persistence,
+    history,
+  };
 };
 
 test("the remote engine is always offered, because it needs nothing injected", async () => {
-  const { settings, http, persistence } = await build();
-  const ids = enginesFor({ settings, http, persistence }).map((c) => c.id);
+  const { settings, http, persistence, history } = await build();
+  const ids = enginesFor({ settings, http, persistence, history }).map((c) => c.id);
   assert.deepEqual(ids, [ENGINE_REMOTE_HTTP]);
 });
 
@@ -54,18 +67,19 @@ test("the in-process engine is omitted when no factory is supplied", async () =>
   // factory is how main.ts supplies the engine (RegistryDeps says why it is
   // injected); without one there is nothing behind the id, so offering it
   // would be a lie.
-  const { settings, http, persistence } = await build();
-  assert.equal(enginesFor({ settings, http, persistence }).some((c) => c.id === ENGINE_PRAISONAI_TS), false);
+  const { settings, http, persistence, history } = await build();
+  assert.equal(enginesFor({ settings, http, persistence, history }).some((c) => c.id === ENGINE_PRAISONAI_TS), false);
 });
 
 test("the in-process engine appears once a factory is supplied", async () => {
   // The pair: without it, "never offer it" would satisfy the test above and
   // the engine could never be selected at all.
-  const { settings, http, persistence } = await build();
+  const { settings, http, persistence, history } = await build();
   const choices = enginesFor({
     settings,
     http,
       persistence,
+      history,
     createInProcess: () => createScriptedEngine({ id: ENGINE_PRAISONAI_TS, script: SCRIPTS.happy }),
   });
   assert.deepEqual(choices.map((c) => c.id), [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS]);
@@ -73,8 +87,8 @@ test("the in-process engine appears once a factory is supplied", async () => {
 
 test("every offered engine actually constructs", async () => {
   // The registry's whole job. An id that cannot be built is worse than absent.
-  const { settings, http, persistence } = await build();
-  for (const choice of enginesFor({ settings, http, persistence })) {
+  const { settings, http, persistence, history } = await build();
+  for (const choice of enginesFor({ settings, http, persistence, history })) {
     const engine = await choice.create();
     assert.equal(engine.id, choice.id, "an engine must report the id it is registered under");
     await engine.dispose();
@@ -84,9 +98,9 @@ test("every offered engine actually constructs", async () => {
 test("the engine address comes from settings and loses a trailing slash", async () => {
   // `${baseUrl}/v1/run` against "http://host/" produces a double slash, which
   // some servers 404 and others silently redirect -- losing the POST body.
-  const { store, settings, http, persistence } = await build();
+  const { store, settings, http, persistence, history } = await build();
   await store.set("baseUrl", "http://example.test:9000///");
-  const engine = await enginesFor({ settings, http, persistence })[0]!.create();
+  const engine = await enginesFor({ settings, http, persistence, history })[0]!.create();
   assert.ok(engine);
   await engine.dispose();
 });
@@ -115,8 +129,8 @@ test("the engine setting offers exactly the engines the SHIPPING build can make"
   // disagree in a way it could see. It now compares against what `appEngines`
   // -- the composition main.ts actually mounts -- offers, which is the only
   // comparison that can fail.
-  const { settings, http, secrets, persistence } = await build();
-  const buildable = appEngines({ settings, http, secrets, persistence, onIgnored: () => {} }).map((c) => c.id);
+  const { settings, http, secrets, persistence, history } = await build();
+  const buildable = appEngines({ settings, http, secrets, persistence, history, onIgnored: () => {} }).map((c) => c.id);
 
   const def = SETTING_DEFS.find((d) => d.key === "engineId");
   assert.deepEqual(
@@ -293,11 +307,11 @@ test("enginesFor wires a health probe that refuses an engine answering 200 with 
   // the choice `enginesFor` builds must carry a probe that runs the shipping
   // `/health` classifier. A 200 with `{"ok": false}` is the engine saying it is
   // NOT ready, and the probe must report exactly that.
-  const { settings, persistence } = await build();
+  const { settings, persistence, history } = await build();
   const http = createFakeHttp();
   http.on("/health", () => jsonResponse(200, { ok: false }));
 
-  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  const choice = enginesFor({ settings, http, persistence, history }).find((c) => c.id === ENGINE_REMOTE_HTTP);
   assert.ok(choice?.probe, "the remote engine must carry a readiness probe");
 
   const verdict = await choice.probe();
@@ -307,11 +321,11 @@ test("enginesFor wires a health probe that refuses an engine answering 200 with 
 
 test("enginesFor's probe lets a healthy engine through -- the pair", async () => {
   // Without this, a probe hard-wired to refuse would satisfy the case above.
-  const { settings, persistence } = await build();
+  const { settings, persistence, history } = await build();
   const http = createFakeHttp();
   http.on("/health", () => jsonResponse(200, { ok: true, version: PROTOCOL_VERSION }));
 
-  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  const choice = enginesFor({ settings, http, persistence, history }).find((c) => c.id === ENGINE_REMOTE_HTTP);
   const verdict = await choice!.probe!();
   assert.equal(verdict.ready, true);
 });
@@ -320,12 +334,12 @@ test("enginesFor's probe targets the configured engine address", async () => {
   // The probe must reach the address the user set, not a hardcoded default:
   // otherwise a healthy default masks a broken configured engine, or the
   // reverse. The trailing slash is stripped so `${baseUrl}/health` is clean.
-  const { store, settings, persistence } = await build();
+  const { store, settings, persistence, history } = await build();
   await store.set("baseUrl", "http://configured.test:9000/");
   const http = createFakeHttp();
   http.on("/health", () => jsonResponse(200, { ok: true, version: PROTOCOL_VERSION }));
 
-  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  const choice = enginesFor({ settings, http, persistence, history }).find((c) => c.id === ENGINE_REMOTE_HTTP);
   await choice!.probe!();
   assert.equal(http.sent.at(-1)?.url, "http://configured.test:9000/health");
 });
@@ -338,7 +352,7 @@ test("enginesFor hands the refusal callback to the engine it builds", async () =
   // so it never exercises the real one. A callback the composition root
   // creates and the registry quietly declines to pass on is the same
   // mechanism-connected-to-nothing this channel exists to undo.
-  const { settings, persistence } = await build();
+  const { settings, persistence, history } = await build();
   const http = createFakeHttp();
   const refused: { reason: string; detail: string }[] = [];
 
@@ -356,6 +370,7 @@ test("enginesFor hands the refusal callback to the engine it builds", async () =
   const choice = enginesFor({
     settings,
     http,
+    history,
     persistence,
     onIgnored: (reason, detail) => refused.push({ reason, detail }),
   }).find((c) => c.id === ENGINE_REMOTE_HTTP);
@@ -374,7 +389,7 @@ test("enginesFor hands the refusal callback to the engine it builds", async () =
 
 test("a clean stream through the same engine reports no refusal", async () => {
   // The pair: a registry that invented a refusal would satisfy the above.
-  const { settings, persistence } = await build();
+  const { settings, persistence, history } = await build();
   const http = createFakeHttp();
   const refused: unknown[] = [];
   http.on("/chat", () =>
@@ -387,7 +402,7 @@ test("a clean stream through the same engine reports no refusal", async () => {
   );
 
   const choice = enginesFor({
-    settings, http, persistence,
+    settings, http, persistence, history,
     onIgnored: (...args) => refused.push(args),
   }).find((c) => c.id === ENGINE_REMOTE_HTTP);
   const engine = await choice!.create();
@@ -450,13 +465,13 @@ async function drain(engine: { run: (r: typeof A_RUN, s: AbortSignal) => AsyncIt
 }
 
 test("a turn goes to the address the user set AFTER the engine was built", async () => {
-  const { store, settings, persistence } = await build();
+  const { store, settings, persistence, history } = await build();
   const http = createFakeHttp();
   http.on("/chat", () => sseResponse(""));
 
   // Built first, exactly as boot.ts does: the engine exists before the user
   // ever reaches Settings.
-  const engine = await enginesFor({ settings, http, persistence })[0]!.create();
+  const engine = await enginesFor({ settings, http, persistence, history })[0]!.create();
   await store.set("baseUrl", "http://10.0.0.7:9000");
   await drain(engine as never);
 
@@ -471,11 +486,11 @@ test("a turn goes to the address the user set AFTER the engine was built", async
 test("an untouched setting still reaches the address the engine was built with", async () => {
   // The pair. Reading the setting late must not mean reading it wrongly: with
   // nothing changed, the default is still where a turn goes.
-  const { settings, persistence } = await build();
+  const { settings, persistence, history } = await build();
   const http = createFakeHttp();
   http.on("/chat", () => sseResponse(""));
 
-  const engine = await enginesFor({ settings, http, persistence })[0]!.create();
+  const engine = await enginesFor({ settings, http, persistence, history })[0]!.create();
   await drain(engine as never);
 
   assert.equal(http.sent.at(-1)?.url, "http://127.0.0.1:8765/chat");
@@ -487,11 +502,11 @@ test("a corrected address is re-read by the health probe too", async () => {
   // produces the "not answering" warning the user is trying to clear. Probing
   // the OLD address after the address was fixed reports a failure about a
   // machine nobody is talking to any more.
-  const { store, settings, persistence } = await build();
+  const { store, settings, persistence, history } = await build();
   const http = createFakeHttp();
   http.on("/health", () => jsonResponse(200, { ok: true, version: PROTOCOL_VERSION }));
 
-  const choice = enginesFor({ settings, http, persistence }).find((c) => c.id === ENGINE_REMOTE_HTTP);
+  const choice = enginesFor({ settings, http, persistence, history }).find((c) => c.id === ENGINE_REMOTE_HTTP);
   await store.set("baseUrl", "http://10.0.0.7:9000/");
   await choice!.probe!();
 
@@ -549,12 +564,12 @@ async function runOneTurn(
 }
 
 test("the stored key is handed to the agent the in-process engine builds", async () => {
-  const { settings, http, secrets, store, persistence } = await build();
+  const { settings, http, secrets, store, persistence, history } = await build();
   await store.setSecret({ slot: "openai", account: "default" }, "sk-live-key");
 
   const { module, configs } = recordingAgentClass();
   await runOneTurn({
-    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+    settings, http, secrets, persistence, history, onIgnored: () => {}, loadAgent: async () => module,
   });
 
   assert.deepEqual(configs.map((c) => c.apiKey), ["sk-live-key"]);
@@ -567,10 +582,10 @@ test("with no key stored the field is ABSENT, not an empty string", async () => 
   // build an Authorization header out of nothing and turn a missing-credential
   // error into an authentication one, which reads as a bad key rather than as
   // no key.
-  const { settings, http, secrets, persistence } = await build();
+  const { settings, http, secrets, persistence, history } = await build();
   const { module, configs } = recordingAgentClass();
   await runOneTurn({
-    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+    settings, http, secrets, persistence, history, onIgnored: () => {}, loadAgent: async () => module,
   });
   assert.equal(configs.length, 1);
   assert.equal("apiKey" in configs[0]!, false, "an unset key must not appear in the agent config at all");
@@ -582,10 +597,10 @@ test("a key pasted AFTER the engine was built works on the very next message", a
   // work until they force-quit the app -- and the error they would see is the
   // same one they were trying to clear, so the app appears to have ignored
   // them. `enginesFor` learned this with `baseUrl`; a credential is worse.
-  const { settings, http, secrets, store, persistence } = await build();
+  const { settings, http, secrets, store, persistence, history } = await build();
   const { module, configs } = recordingAgentClass();
   const deps = {
-    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+    settings, http, secrets, persistence, history, onIgnored: () => {}, loadAgent: async () => module,
   };
 
   const choice = appEngines(deps).find((c) => c.id === ENGINE_PRAISONAI_TS);
@@ -603,10 +618,10 @@ test("a key pasted AFTER the engine was built works on the very next message", a
 test("a replaced key replaces itself on the next turn", async () => {
   // The other half of "read per turn": rotating a key must not need a relaunch
   // either.
-  const { settings, http, secrets, store, persistence } = await build();
+  const { settings, http, secrets, store, persistence, history } = await build();
   const { module, configs } = recordingAgentClass();
   const deps = {
-    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+    settings, http, secrets, persistence, history, onIgnored: () => {}, loadAgent: async () => module,
   };
   const engine = await appEngines(deps).find((c) => c.id === ENGINE_PRAISONAI_TS)!.create();
 
@@ -623,11 +638,11 @@ test("the secret never reaches the plain settings file on the way through", asyn
   // Rule 1 of ports/secrets.ts, asserted at the composition level rather than
   // only in the store's own unit test: the whole path from `setSecret` to the
   // agent must leave nothing behind in StoragePort.
-  const { settings, http, secrets, store, storage, persistence } = await build();
+  const { settings, http, secrets, store, storage, persistence, history } = await build();
   await store.setSecret({ slot: "openai", account: "default" }, "sk-do-not-leak");
   const { module } = recordingAgentClass();
   await runOneTurn({
-    settings, http, secrets, persistence, onIgnored: () => {}, loadAgent: async () => module,
+    settings, http, secrets, persistence, history, onIgnored: () => {}, loadAgent: async () => module,
   });
   const contents: string[] = [];
   for (const key of storage.writes) {

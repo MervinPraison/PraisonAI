@@ -58,14 +58,52 @@ export interface PraisonStreamOptions {
 }
 
 /**
+ * One prior turn, as `setHistory` accepts it.
+ *
+ * Upstream's `AgentMessage` has four roles (`system`, `user`, `assistant`,
+ * `tool`), a nullable `content`, and optional `tool_calls` / `tool_call_id` /
+ * `name`. This declares the SUBSET this engine actually restores, which is the
+ * house rule of this file -- "the exact slice, and nothing more".
+ *
+ * Narrower is safe and wider would not be. Method parameters are checked
+ * bivariantly, so the real `Agent` still satisfies this and
+ * `check-upstream-parity` still catches a rename or a signature change. But
+ * `core/src/chat/repository.ts` persists two roles and no tool context, so a
+ * `tool` message here would be a shape this app can never produce -- and an
+ * unpaired tool result is a 400 from every provider, which is why upstream's
+ * own `setHistory` rejects one.
+ */
+export interface PraisonHistoryMessage {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
+/**
  * The structural contract the real `Agent` satisfies.
  *
  * `lastStopReason` is a mutable field upstream, read AFTER the stream ends.
  * That ordering matters: read before, it is the previous turn's value.
+ *
+ * `setHistory` is what makes the app a conversation rather than a sequence of
+ * unrelated questions. Upstream's `Agent` accumulates turns in a private
+ * `messages` array and sends the whole array on every call -- but this engine
+ * builds a FRESH agent per turn (the model and the key come from settings,
+ * which can change between messages), so that array starts empty every time
+ * and the accumulated memory is thrown away with the agent. `setHistory` is
+ * upstream's documented answer to exactly this: "Restore a previously saved
+ * conversation so the model regains its memory of it."
+ *
+ * REQUIRED, not optional. An optional member is a composition that can forget
+ * it and still typecheck -- and what it builds is the amnesiac engine this
+ * change exists to remove.
  */
 export interface PraisonAgent {
   streamEvents(prompt: string, opts?: PraisonStreamOptions): AsyncIterable<PraisonAgentEvent>;
   readonly lastStopReason: PraisonStopReason | null;
+  /** Replaces the agent's conversation, oldest first. Throws on a malformed
+   *  history: upstream validates because the input comes from disk, and disk
+   *  outlives the code that wrote it. */
+  setHistory(messages: readonly PraisonHistoryMessage[]): void;
 }
 
 /** How the engine obtains an agent. A factory, not an instance: the model and

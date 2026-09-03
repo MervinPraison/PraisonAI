@@ -17,7 +17,7 @@ import type { ShellPort } from "../../core/src/ports/shell.ts";
 import type { StoragePort } from "../../core/src/ports/storage.ts";
 import type { SecretsPort } from "../../core/src/ports/secrets.ts";
 import type { TimePort } from "../../core/src/ports/time.ts";
-import { createSession, persistenceFor, type Session } from "../../core/src/chat/session.ts";
+import { createSession, historyFor, persistenceFor, type Session } from "../../core/src/chat/session.ts";
 import {
   createSettingsStore,
   facadeFor,
@@ -30,7 +30,7 @@ import { attachBackGesture, createRouter, type Router } from "../../ui/src/route
 import { selectEngine, type EngineChoice } from "./engines.ts";
 import { createDropSink } from "../../core/src/run/drop-sink.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
-import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
+import type { ConversationHistory, RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
 
 export interface AppDeps {
   readonly storage: StoragePort;
@@ -45,9 +45,14 @@ export interface AppDeps {
    * never ran in a real turn and no conversation was ever saved. Taking a
    * factory makes that impossible to express: there is no way to obtain the
    * engine list without being handed the thing engines write through.
+   *
+   * It now hands over the READ side too. The same argument applies twice: an
+   * engine list obtainable without a history is an engine list whose engines
+   * can be built with no memory of the chat they are answering in.
    */
   readonly engines: (
     persistence: RunPersistence,
+    history: ConversationHistory,
     settings: SettingsFacade,
     onIgnored: (reason: IgnoredReason, detail: string) => void,
   ) => readonly EngineChoice[];
@@ -160,7 +165,11 @@ export async function createApp(deps: AppDeps): Promise<BootResult> {
 
   const selection = await selectEngine(
     chosenEngineId,
-    deps.engines(persistenceFor(session), settings, dropSink.note),
+    // Both halves of the same store, from the same session. Passing a
+    // persistence built here and a history built anywhere else is the failure
+    // this single expression exists to make unspellable: the model would
+    // remember a conversation other than the one the UI is showing.
+    deps.engines(persistenceFor(session), historyFor(session), settings, dropSink.note),
   );
   if (!selection.ok) {
     // Includes a health-probe refusal: a remote that answered 200 with
