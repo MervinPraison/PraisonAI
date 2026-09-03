@@ -214,6 +214,12 @@ class TestShellStreaming:
 
         calls = {"count": 0}
 
+        # Must mirror _communicate_streaming's real signature, cancel_event
+        # included: execute_command calls it positionally with the cancel event
+        # (shell_tools.py:144). A three-parameter stand-in raises TypeError
+        # instead, which execute_command reports as a failed command -- so both
+        # timeout tests passed their "success is False" assertions for entirely
+        # the wrong reason and stopped guarding the kill path (#4724).
         def _raise_drain_timeout(self, process, timeout, cancel_event=None):
             calls["count"] += 1
             raise _StreamDrainTimeout()
