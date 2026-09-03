@@ -36,6 +36,7 @@ from .workflow_configs import (
     TaskContextConfig, TaskOutputConfig, TaskExecutionConfig, TaskRoutingConfig,
 )
 from ..task.task import Task
+from ..llm.model_providers import default_auxiliary_model
 
 logger = get_logger(__name__)
 
@@ -1267,7 +1268,7 @@ class AgentFlow:
         self._validate_framework()
         
         # Use default LLM if not specified
-        model = llm or self.llm or "gpt-4o-mini"
+        model = default_auxiliary_model(llm or self.llm)
         logger.debug(f"Workflow using model: {model} (llm={llm}, default_llm={self.llm})")
 
         # Agents the flow builds itself already receive the default via

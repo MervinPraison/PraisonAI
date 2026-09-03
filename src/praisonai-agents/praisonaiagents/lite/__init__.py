@@ -91,7 +91,7 @@ class LiteAgent:
             import openai
             client = openai.OpenAI()
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=default_auxiliary_model(),
                 messages=messages
             )
             return response.choices[0].message.content
@@ -235,7 +235,7 @@ def create_openai_llm_fn(
         LLM function compatible with LiteAgent
         
     Example:
-        llm_fn = create_openai_llm_fn(model="gpt-4o-mini")
+        llm_fn = create_openai_llm_fn(model=default_auxiliary_model())
         agent = LiteAgent(llm_fn=llm_fn)
     """
     def llm_fn(messages: List[Dict]) -> str:
@@ -312,6 +312,7 @@ def create_anthropic_llm_fn(
 from ..tools.tools import Tools
 from ..tools.base import BaseTool, ToolResult
 from ..tools.decorator import tool
+from ..llm.model_providers import default_auxiliary_model
 
 
 __all__ = [

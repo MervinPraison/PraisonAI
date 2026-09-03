@@ -10,6 +10,7 @@ import os
 import time
 
 from .protocols import TaskStatus, TaskLifecycleManager
+from ..llm.model_providers import default_auxiliary_model
 
 # Set up logger
 logger = get_logger(__name__)
@@ -729,7 +730,7 @@ class Task:
                         if hasattr(self.agent.llm_instance, 'model'):
                             llm_model = self.agent.llm_instance.model
                         else:
-                            llm_model = "gpt-4o-mini"  # Default fallback
+                            llm_model = default_auxiliary_model()
                     elif hasattr(self.agent, 'llm') and self.agent.llm:
                         # For standard model strings
                         llm_model = self.agent.llm

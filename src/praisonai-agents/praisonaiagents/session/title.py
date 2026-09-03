@@ -7,10 +7,11 @@ exchange in a conversation. Uses a lightweight model for fast generation.
 
 import asyncio
 from typing import Optional
+from ..llm.model_providers import default_auxiliary_model
 
 __all__ = ["generate_title", "generate_title_async"]
 
-_DEFAULT_SMALL_MODEL = "gpt-4o-mini"
+_DEFAULT_SMALL_MODEL = default_auxiliary_model()
 
 
 def _resolve_small_model(llm_model: Optional[str], primary_model: Optional[str]) -> str:
