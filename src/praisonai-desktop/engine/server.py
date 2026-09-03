@@ -518,10 +518,17 @@ def _builtin_tools():
     user cannot refuse is the wrong order to build in.
     """
 
+    # Risk class per tool. "smart" mode waves through low-risk reads and only
+    # prompts for medium-or-higher; anything unlisted is treated as high so a
+    # new tool is guarded by default rather than silently trusted.
+    _low_risk = {"read_file", "list_directory", "current_time", "web_search"}
+
     def _gate(name, args):
         """Ask the user before a filesystem read. Returns True when allowed."""
         mode = load_settings().get("approval_mode", "ask")
         if mode == "never" or name in _always_allow:
+            return True
+        if mode == "smart" and name in _low_risk:
             return True
         if getattr(_tool_events, "emit", None) is None:
             # No stream to ask on. Blocking here would hang the turn for the
