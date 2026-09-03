@@ -2191,7 +2191,10 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 # base_url supplied through config -- which is the shape the rest
                 # of the memory layer uses.
                 _client_kwargs = {}
-                _base_url = (self.config or {}).get("base_url") if hasattr(self, "config") else None
+                _cfg = getattr(self, "cfg", None) or {}
+                _base_url = _cfg.get("base_url")
+                if not _base_url and isinstance(_cfg.get("config"), dict):
+                    _base_url = _cfg["config"].get("base_url")
                 _base_url = _base_url or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
                 if _base_url:
                     _client_kwargs["base_url"] = _base_url
