@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import collections
+import itertools
 import os
 import re
 import shlex
@@ -232,6 +233,11 @@ class Trainer:
         # without limit -- each retains its event ring and metric series.
         self.history = collections.deque(maxlen=MAX_HISTORY)
         self._lock = threading.Lock()
+        # A monotonic counter so each _persist writes to its own temp file even
+        # when two threads persist the same run at once. itertools.count.__next__
+        # is atomic in CPython, so no extra lock is needed on the hot path. Set
+        # before _reload(), which persists reaped runs.
+        self._persist_seq = itertools.count()
         # Rebuild what an earlier engine process left on disk. Without this a
         # restart during a run reports the run as never having happened: it
         # vanishes from history, stop() has nothing to stop, and start()
@@ -260,7 +266,14 @@ class Trainer:
         the whole new one.
         """
         path = self._state_path(run.id)
-        tmp = f"{path}.{os.getpid()}.tmp"
+        # Unique per write, not just per process: start() persists on the main
+        # thread while the supervisor thread persists the spawn and the RUNNING
+        # transition, so two _persist calls for the same run overlap. A name
+        # keyed only on the pid gave both the identical temp path -- one thread's
+        # os.replace moved it, the other's then wrote and left an orphan .tmp
+        # behind (and could replace() a file the first had already renamed). A
+        # per-write name keeps each atomic swap isolated.
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.{next(self._persist_seq)}.tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump({**run.summary(), "pid": run.pid,

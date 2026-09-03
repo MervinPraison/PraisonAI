@@ -95,6 +95,51 @@ class ChatMixin:
             return _TurnCancelToken(source)
         return _TurnCancelToken(source, turn_id=begin_turn())
 
+    @staticmethod
+    def _notify_tool_call(tool_name, tool_input, tool_result, elapsed_time=None, success=True):
+        """Fire the ``tool_call`` display callback for one tool execution.
+
+        The non-streaming path fires this from the OpenAI client after every
+        tool (``display_tool_call`` -> ``execute_sync_callback('tool_call')``),
+        which is how streaming UIs such as the desktop learn that a tool ran.
+        The streaming path executes tools inline here, so it has to fire the
+        same callback itself with the same kwargs (Issue #4716).
+
+        Best-effort by design: a callback failure is logged and swallowed so
+        it can never break the stream it is reporting on.
+
+        A durable run converts a raising tool into an ``{"error": ...}`` result
+        instead of re-raising (see ``DurableRunContext.wrap_sync``), so the
+        raising-tool ``except`` branch never fires for it. Detect that shape
+        here and report ``success=False`` so streaming UIs do not label a failed
+        tool as successful (Issue #4735 review).
+        """
+        if (
+            success
+            and isinstance(tool_result, dict)
+            and tool_result.get("error") is not None
+        ):
+            success = False
+        try:
+            if tool_result is None:
+                result_str = None
+            else:
+                try:
+                    result_str = json.dumps(tool_result)
+                except (TypeError, ValueError):
+                    result_str = str(tool_result)
+            _get_display_functions()['execute_sync_callback'](
+                'tool_call',
+                message=f"Calling function: {tool_name}",
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_output=result_str[:200] if result_str else None,
+                elapsed_time=elapsed_time,
+                success=success,
+            )
+        except Exception as callback_error:
+            logging.debug(f"tool_call callback failed for '{tool_name}': {callback_error}")
+
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
         context = self._get_durable_run_context()
@@ -2782,28 +2827,6 @@ Your Goal: {self.goal}"""
                               task_id=None)  # Not available in this context
             self._final_display_shown = True
 
-    def _emit_tool_call_callback(self, tool_name, tool_input, tool_output, elapsed_time=None, success=True):
-        """Fire the ``tool_call`` display callback for a tool that just ran.
-
-        The streaming path executes tool calls inline and previously emitted no
-        ``tool_call`` event, leaving streaming UIs blind to tool activity. This
-        mirrors the non-stream native-tools loop (``display_tool_call`` in
-        ``openai_client``) using the same structured kwargs.
-        """
-        try:
-            _output_str = str(tool_output) if tool_output is not None else None
-            _get_display_functions()['execute_sync_callback'](
-                'tool_call',
-                message=f"Calling function: {tool_name}",
-                tool_name=tool_name,
-                tool_input=tool_input,
-                tool_output=_output_str[:200] if _output_str else None,
-                elapsed_time=elapsed_time,
-                success=success,
-            )
-        except Exception as callback_error:
-            logging.debug(f"tool_call callback failed: {callback_error}")
-
     def _display_generating(self, content: str, start_time: float):
         """Display function for generating animation with agent info."""
         from rich.panel import Panel
@@ -5209,22 +5232,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         )
                                         else {}
                                     )
-                                    _tool_started_at = time_module.perf_counter()
-                                    tool_result = executor(
-                                        tool_call['function']['name'],
-                                        parsed_args,
-                                        tool_call_id=tool_call.get('id'),
-                                        **iteration_kwargs,
-                                    )
-                                    # Fire the tool_call display callback so streaming
-                                    # UIs see tool activity, matching the non-stream
-                                    # native-tools loop (openai_client display_tool_call).
-                                    self._emit_tool_call_callback(
+                                    _tool_started = time_module.perf_counter()
+                                    try:
+                                        tool_result = executor(
+                                            tool_call['function']['name'],
+                                            parsed_args,
+                                            tool_call_id=tool_call.get('id'),
+                                            **iteration_kwargs,
+                                        )
+                                    except Exception as _exec_error:
+                                        # Streaming UIs only learn about tool
+                                        # activity through this callback; report
+                                        # the failure before re-raising.
+                                        self._notify_tool_call(
+                                            tool_call['function']['name'],
+                                            parsed_args,
+                                            {"error": str(_exec_error)},
+                                            elapsed_time=time_module.perf_counter() - _tool_started,
+                                            success=False,
+                                        )
+                                        raise
+                                    # Parity with the non-streaming path, which
+                                    # fires 'tool_call' after every tool run.
+                                    self._notify_tool_call(
                                         tool_call['function']['name'],
                                         parsed_args,
                                         tool_result,
-                                        time_module.perf_counter() - _tool_started_at,
-                                        True,
+                                        elapsed_time=time_module.perf_counter() - _tool_started,
+                                        success=True,
                                     )
                                     # Add tool result to chat history (multimodal-aware)
                                     from .tool_execution import build_tool_result_message_pair
@@ -5252,14 +5287,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     raise
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
-                                    # Surface the failed tool call to streaming UIs too.
-                                    self._emit_tool_call_callback(
-                                        tool_call['function']['name'],
-                                        parsed_args,
-                                        f"Error: {str(tool_error)}",
-                                        None,
-                                        False,
-                                    )
                                     # Add error result to chat history
                                     self._append_to_chat_history({
                                         "role": "tool", 

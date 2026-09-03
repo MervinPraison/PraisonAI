@@ -361,6 +361,59 @@ def list_chats() -> list:
                         "count": 0, "corrupt": True})
     return sorted(out, key=lambda c: c["updated"], reverse=True)
 
+
+def _search_chats(query: str) -> list:
+    """Ranked full-text search over stored chats.
+
+    Delegates to the library's ``SqliteSessionStore`` (FTS5/bm25 with snippets
+    and lineage dedup) over the on-disk chat transcripts instead of loading
+    every chat JSON and doing a substring ``in`` scan. The chats already live
+    on disk as ``<id>.json`` with a ``messages`` list, which the store indexes
+    directly. Falls back to the substring scan if the store is unavailable so
+    search never breaks.
+    """
+    try:
+        from praisonaiagents.session import SqliteSessionStore
+
+        class _ChatSessionStore(SqliteSessionStore):
+            # Desktop chats persist their identity under ``id`` (see save_chat),
+            # not the ``session_id`` the session schema expects, so a loaded
+            # chat's ``session_id`` is empty and every chat would collide on the
+            # same empty index key. Backfill it from the filename-derived id so
+            # each chat is indexed and addressable independently.
+            def _read_session_fresh(self, session_id):
+                session = super()._read_session_fresh(session_id)
+                if not getattr(session, "session_id", ""):
+                    session.session_id = session_id
+                return session
+
+        # An in-memory index is rebuilt from the current on-disk transcripts on
+        # each query, so an edited chat is never served stale — a persistent
+        # index would skip re-indexing chats whose id is already present.
+        store = _ChatSessionStore(session_dir=str(CHATS_DIR), db_path=":memory:")
+        hits = store.search(query, limit=20)
+        titles = {c["id"]: c["title"] for c in list_chats()}
+        return [
+            {
+                "id": h.session_id,
+                "title": titles.get(h.session_id, h.title or "New chat"),
+                "snippet": h.snippet,
+            }
+            for h in hits
+        ]
+    except Exception:
+        needle = query.lower()
+        hits = []
+        for meta in list_chats():
+            chat = load_chat(meta["id"])
+            for m in chat.get("messages", []):
+                if needle in str(m.get("content", "")).lower():
+                    hits.append({"id": meta["id"], "title": meta["title"],
+                                 "snippet": str(m.get("content"))[:120]})
+                    break
+        return hits
+
+
 _agent_lock = threading.Lock()
 _agents = {}
 
@@ -1134,6 +1187,54 @@ def _apply_env(cfg: dict) -> None:
         _unset_if_ours("OPENAI_API_KEY")
 
 
+def model_needs_litellm(model: str) -> bool:
+    """Whether this model id would take praisonaiagents' custom-LLM path.
+
+    A string model id containing a slash routes through LiteLLM in
+    praisonaiagents (agent.py: `elif isinstance(llm, str) and "/" in llm`).
+    Bare names go to the plain-OpenAI client instead. The desktop provisions
+    only the base package, which does not depend on litellm, so a slashed id
+    imports nothing and fails on the first turn -- this predicts that before it
+    is saved.
+    """
+    return isinstance(model, str) and "/" in model
+
+
+def litellm_available() -> bool:
+    """Whether the custom-LLM (litellm) path can actually run in this venv.
+
+    The lean desktop venv installs praisonaiagents without its `llm` extra, so
+    litellm is usually absent. Checked by import spec rather than importing, so
+    this stays cheap and has no side effects.
+    """
+    try:
+        import importlib.util
+        return importlib.util.find_spec("litellm") is not None
+    except Exception:  # noqa: BLE001 - a broken meta-path finder is "not available"
+        return False
+
+
+def unsupported_model_reason(model: str) -> "str | None":
+    """Why this model id cannot run in this build, or None if it can.
+
+    The message names the constraint the user can act on -- a slashed id needs
+    the LiteLLM path, which this lean build does not ship -- rather than letting
+    the turn fail later with an import error or a bare-OpenAI 404.
+    """
+    if model_needs_litellm(model) and not litellm_available():
+        # Name only a remedy that actually clears the guard. The check keys on
+        # the slash alone, so a Base URL override does NOT help -- a slashed id
+        # still routes through LiteLLM. The fix is a bare id: a plain
+        # OpenAI-compatible name (optionally paired with a Base URL) reaches any
+        # OpenAI-style endpoint without the missing provider path.
+        return (f"The model id \u201c{model}\u201d needs the LiteLLM provider path, "
+                "which this build does not include. Use a plain OpenAI-compatible "
+                "model id without a provider prefix (for example gpt-4o-mini); to "
+                "reach another endpoint, keep the bare id and set a Base URL "
+                "override.")
+    return None
+
+
 def _installed_version() -> str:
     try:
         from importlib.metadata import version
@@ -1621,17 +1722,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/search?"):
             from urllib.parse import parse_qs, urlparse
-            q = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].lower().strip()
-            hits = []
-            if q:
-                for meta in list_chats():
-                    chat = load_chat(meta["id"])
-                    for m in chat.get("messages", []):
-                        if q in str(m.get("content", "")).lower():
-                            hits.append({"id": meta["id"], "title": meta["title"],
-                                         "snippet": str(m.get("content"))[:120]})
-                            break
-            self._json({"hits": hits})
+            q = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
+            self._json({"hits": _search_chats(q) if q else []})
             return
         if self.path == "/chats":
             self._json({"chats": list_chats()})
@@ -1667,6 +1759,10 @@ class Handler(BaseHTTPRequestHandler):
                            "shell_version": os.environ.get(
                                "PRAISONAI_DESKTOP_VERSION", "unknown"),
                            "agents_version": _installed_version(),
+                           # Whether the LiteLLM provider path is importable, so
+                           # the picker can mark slashed provider ids this build
+                           # cannot run rather than offering them silently.
+                           "litellm": litellm_available(),
                            "data_dir": str(DATA_DIR)}).encode()
         self.send_response(200)
         self._cors()
@@ -1774,6 +1870,14 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 self.send_error(400)
                 return
+            # Reject a model this build cannot run before it is saved, so the
+            # failure lands here with an explanation rather than on the first
+            # turn as an import error or a bare-OpenAI 404.
+            if "model" in patch:
+                reason = unsupported_model_reason(patch["model"])
+                if reason is not None:
+                    self._json({"ok": False, "error": reason}, 422)
+                    return
             if "launch_at_login" in patch:
                 # Persist what actually happened, not what was asked. Writing
                 # the request first made the toggle report a login item that
