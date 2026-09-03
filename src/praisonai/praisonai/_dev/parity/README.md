@@ -1,50 +1,83 @@
 # Python ↔ TypeScript parity tooling
 
-Two layers, both with Python (`src/praisonai-agents/praisonaiagents`) as the source of truth.
+Three layers, each answering a different question, with Python
+(`src/praisonai-agents/praisonaiagents`) as the source of truth. They exist as three
+because each was added after the previous one was found to pass something it should
+have caught.
 
-| Layer | Question it answers | Generated files | Config |
+| Layer | Question | Generated files | Gate |
 |---|---|---|---|
-| **Names** (`generator.py`) | Is a Python export name present in the TS barrel? | `src/praisonai-ts/PARITY.md`, `FEATURE_PARITY_TRACKER.json` (+ Rust pair) | `python_extractor.py` / `typescript_extractor.py` mapping tables |
-| **Signatures** (`signatures/`) | Do the parameters of a curated surface match, after naming rules? | `src/praisonai-ts/SIGNATURE_PARITY.md`, `signature-parity.json` | `signatures/surface.yaml`, `rules.yaml`, `waivers.yaml` |
+| **Names** (`generator.py`) | Is the Python export name present in TypeScript? | `PARITY.md`, `FEATURE_PARITY_TRACKER.json` (+ Rust) | `names` |
+| **Signatures** (`signatures/`) | Does every parameter exist, with a matching default? | `SIGNATURE_PARITY.md`, `signature-parity.json` | `signatures` |
+| **Behaviour** (`behaviour.py`) | Is the option actually acted on? | `BEHAVIOUR_PARITY.md`, `behaviour-parity.json` | `behaviour` |
 
-A name row marked `⚠️ stub exported` means the only TS provider is `src/praisonai-ts/src/parity/index.ts`,
-the shim written to satisfy name matching. Treat it as missing.
+**Read them in that order and the trap is obvious.** A name can exist while the
+parameter is missing. A parameter can exist while the option is ignored. Only the
+third layer sees the last case, and it was added after 76 ignored options had
+accumulated without any number moving.
+
+## One number to watch
+
+```bash
+PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.behaviour
+# behaviour parity: 76 options not yet acted on, across 5 surfaces; 10 partial
+```
+
+Names and signatures are at zero and are gated so they stay there. Behaviour is the
+number that still moves, and `BEHAVIOUR_PARITY.md` is the work queue: one row per
+option, grouped by surface.
 
 ## Commands
 
 ```bash
-# Names layer
-python3 src/praisonai/scripts/generate_parity_tracker.py          # regenerate
-python3 src/praisonai/scripts/generate_parity_tracker.py --check  # exit 1 on drift
+# Names
+python3 src/praisonai/scripts/generate_parity_tracker.py           # regenerate
+python3 src/praisonai/scripts/generate_parity_tracker.py --check   # exit 1 on drift
 
-# Signatures layer (needs node + the `typescript` package; point at any node_modules that has it)
+# Signatures (needs node plus the `typescript` package)
 export PARITY_TS_NODE_MODULES=src/praisonai-ts/node_modules
 export PYTHONPATH=src/praisonai
-python3 -m praisonai._dev.parity.signatures --write               # regenerate report
-python3 -m praisonai._dev.parity.signatures --check               # exit 1 on drift or un-waived gap, 2 on tooling failure
-python3 -m praisonai._dev.parity.signatures --diff Agent.__init__ # one surface, side by side
-python3 -m praisonai._dev.parity.signatures --baseline            # add waivers for every current un-waived gap
-python3 -m praisonai._dev.parity.signatures --prune               # delete waivers whose gap has been closed
+python3 -m praisonai._dev.parity.signatures --write
+python3 -m praisonai._dev.parity.signatures --check
+python3 -m praisonai._dev.parity.signatures --diff Agent.__init__  # one surface, side by side
+python3 -m praisonai._dev.parity.signatures --prune                # drop waivers whose gap is closed
+
+# Behaviour
+python3 -m praisonai._dev.parity.behaviour                         # the count, and the queue
+python3 -m praisonai._dev.parity.behaviour --write
+python3 -m praisonai._dev.parity.behaviour --check                 # ratchet: the total may fall, never rise
 ```
 
-## Keeping the SDKs in sync
+## Closing one option
 
-1. Add or change a parameter on the Python side.
-2. Run `--diff <surface>`. The row shows the canonical TS name the convention expects
-   (snake_case → camelCase unless `rules.yaml` names an alias or a flattening) and the default to carry over.
-3. Port it in `src/praisonai-ts`, or add a waiver with a `reason` and `owner` to `waivers.yaml`.
-   A method that takes an options object (`chat(prompt, options?: AgentChatOptions)`) counts the
-   interface's members as parameters, so Python keyword arguments map onto it one to one.
-4. Run `--write` and commit the regenerated report with the change.
+The unit of work is a single row of `BEHAVIOUR_PARITY.md`, and the layers are designed
+so two people can take two rows without colliding.
 
-CI (`.github/workflows/parity-gate.yml`) runs both `--check` modes on pull requests and fails on:
-un-waived drift, a waiver that has expired, a waiver whose gap no longer exists, or a run that compared nothing.
-It does **not** fail on source line numbers moving: `--check` compares the report with `file.ext:123`
-masked to `file.ext`, so editing an unrelated part of a covered file cannot redden a build.
-`update-parity-tracker.yml` regenerates both layers on push to main, which is what keeps the committed
-line numbers true.
+1. Pick a row. Its surface names the file that owns it: `Agent.__init__` and
+   `Agent.chat` live in `agent/simple.ts`, `AgentTeam.__init__` in `agent/team.ts`,
+   `Task.__init__` in `agent/types.ts`, `Handoff` in `agent/handoff.ts`.
+2. Implement the behaviour, preferably in its own module under `agent/features/`, so the
+   large files gain a call rather than a block and two people editing two options do not
+   meet in the same hunk.
+3. Delete the option from `UNHONOURED_OPTIONS` in `src/praisonai-ts/src/utils/parity-notice.ts`.
+   That is the only list; the surfaces iterate it, so nothing else needs touching.
+4. Add a test proving the option changes what the code does, with a control showing the
+   behaviour is absent when the option is not passed.
+5. `python3 -m praisonai._dev.parity.behaviour --write` and commit the report with the change.
 
-## Adding a surface
+## Waivers
 
-Append an entry to `signatures/surface.yaml` with the Python `file`/`class`/`function` and the TS
-`file`/`kind` (`interface` or `method`)/`name`, run `--baseline` to waive its current gaps, then `--write`.
+A signature difference that is deliberate goes in `signatures/waivers.yaml` with a
+`reason` and an `owner`. Treat every waiver as a claim, not a decision: of the 21 that
+were written in one sitting, four were hiding real gaps and four more described Python
+behaviour that did not exist. `--prune` deletes waivers whose gap has closed.
+
+## Notes that cost time to learn
+
+- `--check` on the signature report ignores source line numbers. Comparing them byte for
+  byte reddened the branch whenever an unrelated commit shifted a line, which is the
+  noise this tooling exists to remove.
+- `npm install` in `src/praisonai-ts` needs `--legacy-peer-deps`; the tree does not
+  otherwise resolve.
+- The signature extractor needs only the `typescript` package, not praisonai-ts's full
+  dependency tree.

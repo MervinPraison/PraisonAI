@@ -74,10 +74,17 @@ jobs:
         cd $GITHUB_WORKSPACE
         python3 -m praisonai._dev.parity.signatures --write
 
+    - name: Regenerate the behaviour report
+      env:
+        PYTHONPATH: src/praisonai
+      run: |
+        cd $GITHUB_WORKSPACE
+        python3 -m praisonai._dev.parity.behaviour --write
+
     - name: Check for changes
       id: check_changes
       run: |
-        if git diff --quiet src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md src/praisonai-ts/SIGNATURE_PARITY.md src/praisonai-ts/signature-parity.json 2>/dev/null; then
+        if git diff --quiet src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md src/praisonai-ts/SIGNATURE_PARITY.md src/praisonai-ts/signature-parity.json src/praisonai-ts/BEHAVIOUR_PARITY.md src/praisonai-ts/behaviour-parity.json 2>/dev/null; then
           echo "changes=false" >> $GITHUB_OUTPUT
           echo "No changes to parity trackers"
         else
@@ -91,7 +98,7 @@ jobs:
       uses: stefanzweifel/git-auto-commit-action@v5
       with:
         commit_message: "docs: auto-update feature parity trackers [skip ci]"
-        file_pattern: 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md src/praisonai-ts/SIGNATURE_PARITY.md src/praisonai-ts/signature-parity.json'
+        file_pattern: 'src/praisonai-ts/FEATURE_PARITY_TRACKER.json src/praisonai-ts/PARITY.md src/praisonai-rust/FEATURE_PARITY_TRACKER.json src/praisonai-rust/PARITY.md src/praisonai-ts/SIGNATURE_PARITY.md src/praisonai-ts/signature-parity.json src/praisonai-ts/BEHAVIOUR_PARITY.md src/praisonai-ts/behaviour-parity.json'
         commit_user_name: "MervinPraison"
         commit_user_email: "454862+MervinPraison@users.noreply.github.com"
         commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"

@@ -1,6 +1,6 @@
 import { Logger } from '../utils/logger';
 import { getEnv } from '../llm/openaiClientOptions';
-import { notYetHonoured } from '../utils/parity-notice';
+import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 import { Agent, type AgentChatOptions } from './simple';
 import type { Task, TaskOutput } from './types';
 
@@ -248,23 +248,9 @@ export class AgentTeam {
     if (printResults !== undefined) this.verbose = printResults;
 
     // Accepted for signature parity but not yet honoured on the team surface.
-    const accepted: Array<[string, unknown]> = [
-      ['managerLlm', config.managerLlm],
-      ['memory', config.memory],
-      ['planning', config.planning],
-      ['context', config.context],
-      ['execution', config.execution],
-      ['hooks', config.hooks],
-      ['autonomy', config.autonomy],
-      ['knowledge', config.knowledge],
-      ['guardrails', config.guardrails],
-      ['web', config.web],
-      ['reflection', config.reflection],
-      ['caching', config.caching],
-      ['learn', config.learn],
-      ['toolsRunOn', config.toolsRunOn],
-      ['runOn', config.runOn],
-    ];
+    // The ledger in utils/parity-notice.ts is the single list; see it for why.
+    const accepted: Array<[string, unknown]> = unhonouredFor('AgentTeam.__init__')
+      .map((name) => [name, (config as unknown as Record<string, unknown>)[name]] as [string, unknown]);
     for (const [name, value] of accepted) {
       if (value !== undefined && value !== false && value !== null) {
         notYetHonoured('AgentTeam', name, name === 'managerLlm' ? 'A hierarchical process runs sequentially until a manager agent exists.' : undefined);

@@ -1,0 +1,143 @@
+{
+  "partial": [
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "context",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "guardrails",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "knowledge",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "memory",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "reasoningEffort",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "web",
+      "surface": "Agent"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "outputPydantic",
+      "surface": "Agent.chat"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/simple.ts",
+      "option": "seed",
+      "surface": "Agent.chat"
+    },
+    {
+      "file": "src/praisonai-ts/src/memory/adapters.ts",
+      "option": "ragDbPath",
+      "surface": "ChromaMemory"
+    },
+    {
+      "file": "src/praisonai-ts/src/agent/types.ts",
+      "option": "guardrails",
+      "surface": "Task"
+    }
+  ],
+  "surfaces": {
+    "Agent.__init__": [
+      "auth",
+      "autonomy",
+      "backend",
+      "learn",
+      "messageSteering",
+      "reflection",
+      "runOn",
+      "runtime",
+      "sandbox",
+      "selfImprove",
+      "templates",
+      "toolConfig",
+      "toolSearch",
+      "toolsRunOn",
+      "toolsets"
+    ],
+    "Agent.chat": [
+      "attachments",
+      "config",
+      "reasoningSteps",
+      "taskDescription",
+      "taskId",
+      "taskName"
+    ],
+    "AgentTeam.__init__": [
+      "autonomy",
+      "caching",
+      "context",
+      "execution",
+      "guardrails",
+      "hooks",
+      "knowledge",
+      "learn",
+      "managerLlm",
+      "memory",
+      "planning",
+      "reflection",
+      "runOn",
+      "toolsRunOn",
+      "web"
+    ],
+    "Handoff": [
+      "contextPolicy",
+      "detectCycles",
+      "maxConcurrent",
+      "maxContextMessages",
+      "maxContextTokens",
+      "maxDepth",
+      "preserveSystem",
+      "timeoutSeconds"
+    ],
+    "Task.__init__": [
+      "agentConfig",
+      "asyncExecution",
+      "autonomy",
+      "caching",
+      "condition",
+      "config",
+      "elseTask",
+      "execution",
+      "failOnMemoryError",
+      "handler",
+      "hooks",
+      "images",
+      "inputFile",
+      "isStart",
+      "knowledge",
+      "loopOver",
+      "loopState",
+      "loopVar",
+      "memory",
+      "nextTasks",
+      "outputConfig",
+      "outputPydantic",
+      "planning",
+      "reflection",
+      "rerun",
+      "retainFullContext",
+      "retryDelay",
+      "routing",
+      "skipOnFailure",
+      "thenTask",
+      "web",
+      "when"
+    ]
+  },
+  "total": 76
+}
