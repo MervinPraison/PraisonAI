@@ -31,6 +31,6 @@
     "@ai-sdk/google": "^4.0.63",
     "@ai-sdk/openai": "^4.0.57",
     "ai": "^7.0.91",
-    "praisonai": "^1.7.4"
+    "praisonai": "file:../praisonai-ts"
   }
 }

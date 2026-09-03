@@ -17,8 +17,11 @@ import {
   ENGINE_PRAISONAI_TS,
   ENGINE_REMOTE_HTTP,
   SETTING_DEFS,
+  defaultEngineIdFor,
+  settingDefsFor,
   enginesFor,
 } from "./registry.ts";
+import { appEngines } from "./main.ts";
 import { createSettingsStore, facadeFor } from "../../core/src/settings/store.ts";
 import { createFakeStorage } from "../../testing/src/fake-storage.ts";
 import { createFakeSecrets } from "../../testing/src/fake-secrets.ts";
@@ -107,11 +110,11 @@ test("the engine setting offers exactly the engines the SHIPPING build can make"
   //
   // This test used to assert the static array equalled itself -- it named the
   // same two constants the def named, so the def and reality could not
-  // disagree in a way it could see. It now compares against what `enginesFor`
-  // actually offers in the composition main.ts uses (no `createInProcess`),
-  // which is the only comparison that can fail.
+  // disagree in a way it could see. It now compares against what `appEngines`
+  // -- the composition main.ts actually mounts -- offers, which is the only
+  // comparison that can fail.
   const { settings, http, persistence } = await build();
-  const buildable = enginesFor({ settings, http, persistence }).map((c) => c.id);
+  const buildable = appEngines({ settings, http, persistence, onIgnored: () => {} }).map((c) => c.id);
 
   const def = SETTING_DEFS.find((d) => d.key === "engineId");
   assert.deepEqual(
@@ -121,10 +124,24 @@ test("the engine setting offers exactly the engines the SHIPPING build can make"
   );
 });
 
-test("the default engine is one that works with nothing configured", async () => {
-  // First launch must reach a usable state without the user picking anything.
-  const def = SETTING_DEFS.find((d) => d.key === "engineId");
-  assert.equal(def?.default, ENGINE_REMOTE_HTTP);
+test("the default engine is one that works with nothing configured, per platform", async () => {
+  // First launch must reach a usable state without the user picking anything,
+  // and what is usable depends on where it runs: a phone has no server at
+  // 127.0.0.1:8765 to reach, and the web has one.
+  assert.equal(defaultEngineIdFor("tauri"), ENGINE_PRAISONAI_TS, "a device starts in-process");
+  assert.equal(defaultEngineIdFor("web"), ENGINE_REMOTE_HTTP, "a browser tab talks to a server");
+  for (const kind of ["tauri", "web"] as const) {
+    const def = settingDefsFor(kind).find((d) => d.key === "engineId");
+    assert.equal(
+      def?.default,
+      defaultEngineIdFor(kind),
+      `${kind}: the def's default and the boot fallback must agree, or Settings shows one engine while another answers`,
+    );
+    assert.ok(def?.choices?.includes(def.default), `${kind}: the default must be a choice the picker offers`);
+  }
+  // The static list is the web's, and every other def is untouched.
+  assert.equal(SETTING_DEFS.find((d) => d.key === "engineId")?.default, ENGINE_REMOTE_HTTP);
+  assert.deepEqual(settingDefsFor("tauri").filter((d) => d.key !== "engineId"), SETTING_DEFS.filter((d) => d.key !== "engineId"));
 });
 
 // The files that actually read a setting in the shipping composition. A key is

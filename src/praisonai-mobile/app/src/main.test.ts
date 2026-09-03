@@ -7,21 +7,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { defaultEngineIdFor, stopNotice } from "./main.ts";
+import { stopNotice } from "./main.ts";
+import { defaultEngineIdFor } from "./registry.ts";
 import { en } from "../../ui/src/i18n/strings.ts";
 
-test("every platform's first-launch default is the remote engine, for now", () => {
-  // Tempting to default a device to the in-process engine -- a phone cannot
-  // reach `http://127.0.0.1:8765` and the cleartext localhost address is
-  // refused by iOS ATS and Android -- and since the split its module does
-  // ship, as a lazy chunk beside app.js. But registry.ts still keeps it out of
-  // the shipping picker, and a first-launch default that the picker does not
-  // offer is a first prompt landing on something Settings cannot show or
-  // change. Until the picker admits the engine, remote is the honest default.
-  // `Platform["kind"]` also cannot tell desktop Tauri (`cargo tauri dev`) from
-  // a phone, so a `kind === "tauri"` default would strand the desktop/dev flow
-  // too.
-  assert.equal(defaultEngineIdFor("tauri"), ENGINE_REMOTE_HTTP);
+test("a device's first-launch default is the in-process engine; the web's is remote", () => {
+  // A phone cannot reach `http://127.0.0.1:8765`, and the cleartext localhost
+  // address is refused by iOS ATS and Android -- so a remote default on a
+  // device was a first prompt that failed with a status code. The in-process
+  // engine ships as a lazy chunk beside app.js now, so it is the one choice
+  // that works with nothing configured, and the picker offers it. The web
+  // keeps the remote engine: a server is what a browser tab has.
+  // `Platform["kind"]` cannot tell desktop Tauri (`cargo tauri dev`) from a
+  // phone, so desktop starts in-process too and switches in Settings.
+  assert.equal(defaultEngineIdFor("tauri"), ENGINE_PRAISONAI_TS);
   assert.equal(defaultEngineIdFor("web"), ENGINE_REMOTE_HTTP);
 });
 
@@ -1280,4 +1279,59 @@ test("an ACCEPTED setting clears its OWN refusal, and only its own", async () =>
     `an accepted write must leave no refusal on its own field:\n${dom.text()}`,
   );
   app?.dispose();
+});
+
+test("on a device with nothing configured, the first message reaches the in-process Agent", async () => {
+  // The whole wiring, end to end, from the real composition root: platform
+  // kind "tauri", empty storage, no engine picked -- so `defaultEngineIdFor`
+  // decides -- and a message typed into the real composer. It must arrive at
+  // praisonai's `Agent`, and the answer must come back through the real
+  // engine, controller and transcript onto the screen. No network and no
+  // key: the Agent class is a scripted one handed in through the seam
+  // `appEngines` exposes for it, the way praisonai-ts's own engine tests
+  // script theirs. Every other piece is the shipping one.
+  const prompts: string[] = [];
+  const configs: { instructions: string; llm?: string }[] = [];
+  class ScriptedAgent {
+    lastStopReason: "completed" | null = "completed";
+    constructor(config: { instructions: string; llm?: string }) {
+      configs.push(config);
+    }
+    async *streamEvents(prompt: string) {
+      prompts.push(prompt);
+      yield { type: "text", delta: "The capital of France is Paris." } as const;
+      yield { type: "finish", text: "The capital of France is Paris." } as const;
+    }
+  }
+
+  const { dom, http, platform: web } = harness();
+  http.on("/chat", () => {
+    throw new Error("the remote engine must not be contacted on a device");
+  });
+  const platform: Platform = { ...web, kind: "tauri" };
+  const app = await mount({
+    root: dom.root as never,
+    platform,
+    now: () => 1,
+    newChatId: () => "c1",
+    loadAgent: async () => ScriptedAgent,
+  });
+  assert.ok(app, "the app must mount");
+  assert.equal(app.engine.id, ENGINE_PRAISONAI_TS, "with nothing configured, a device runs in-process");
+  assert.equal(
+    app.settings.get("engineId"),
+    ENGINE_PRAISONAI_TS,
+    "and Settings shows the same engine -- main.ts must hand boot the platform's defs, not the web's",
+  );
+
+  submit(dom, "capital of france?");
+  await settle(120);
+
+  assert.deepEqual(prompts, ["capital of france?"], "the typed message must reach the Agent verbatim");
+  assert.equal(configs.length, 1, "one Agent, built on the first turn -- not at boot");
+  assert.equal(configs[0]?.llm, "gpt-4o-mini", "with the model the settings default to");
+  const answer = dom.find((n) => n.textContent.includes("Paris") && n.className.includes("row"));
+  assert.ok(answer, "the Agent's answer must reach the transcript");
+  assert.equal(dom.find((n) => n.className.includes("row-error")), null, "and nothing must fail on the way");
+  await app.dispose();
 });

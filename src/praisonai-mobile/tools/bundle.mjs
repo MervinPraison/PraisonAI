@@ -21,7 +21,8 @@ import * as esbuild from "esbuild";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Node builtins that must never survive into a webview bundle. */
 /** esbuild's own metafile markers, which are not packages. */
@@ -65,47 +66,42 @@ export const FORBIDDEN_BUILTINS = [
 export const CLI_ONLY_PACKAGES = ["chalk", "boxen", "ora", "cli-table3", "figlet"];
 
 /**
- * The oldest engines the bundle must PARSE on -- DERIVED, in three steps, and
- * remembered by nobody.
+ * The oldest engines the bundle must PARSE on -- DERIVED from what the app
+ * declares, not restated here.
  *
  * iOS ships WKWebView with the OS, so the floor is the oldest iOS worth
  * supporting rather than the newest Safari. Android's WebView updates through
  * Play, but a device kept offline keeps whatever it shipped with -- so the
  * floor there is the OS too, not the current Chrome. ANDROID_WEBVIEW_FLOOR is
- * that table, keyed by `minSdkVersion`, and the Chrome floor is read THROUGH
- * it from `tauri.conf.json` rather than restated here. It has to be:
- * `chrome108` sat here while the config said `minSdkVersion: 26` (Android
- * 8.0, WebView ~Chrome 58), and nothing noticed. `index.html` loads the bundle
- * as `<script type="module">`, so post-58 syntax is a PARSE error: the module
- * body never runs, `installCrashHandler` never installs, and the AOSP,
- * Play-less and long-offline devices a floor exists to protect get a blank
- * white screen with no error surface and no telemetry.
+ * that table, keyed by `minSdkVersion`, and the Chrome target is read THROUGH
+ * it from `tauri.conf.json`. It has to be: `chrome108` sat here while the
+ * config said `minSdkVersion: 26` (Android 8.0, WebView ~Chrome 58), and
+ * nothing noticed. `index.html` loads the bundle as `<script type="module">`,
+ * so post-58 syntax is a PARSE error: the module body never runs,
+ * `installCrashHandler` never installs, and the AOSP, Play-less and
+ * long-offline devices a floor exists to protect get a blank white screen with
+ * no error surface and no telemetry. `bundle-target.test.mjs` builds the real
+ * app at this target and scans every chunk.
  *
- * Step two is the SPLIT. The in-process engine reaches the page as a chunk
- * behind an `import()`, and `import()` is Chrome 63. Below that esbuild does
- * not fail, it LOWERS: the dynamic import becomes a static one wrapped in a
- * promise, every chunk becomes eager, and the whole engine lands in the shell
- * -- measured at chrome58 with the shim removed: 1486.8kB of shell against a
- * 400kB budget, 0 lazy. So a lazily-loaded engine has a floor of its own,
- * above the declared one, and no upstream release moves it. (`<script
- * type="module">` is Chrome 61 besides, so nothing on chrome58 ever ran this
- * page at all.) Raising the target to SPLIT_MIN_CHROME is the honest minimum
- * for the shape this build ships; whether the declared minSdkVersion follows
- * is the maintainer's decision, and `bundle-target.test.mjs` is red until it
- * is made.
+ * The in-process engine (`praisonai/mobile`, a lazily-fetched chunk) builds at
+ * this floor because praisonai-ts's esm shim no longer puts top-level await on
+ * its graph (praisonai-ts #4720) -- esbuild cannot lower that, so any target
+ * below chrome89 produced no bundle at all. `praisonai` is a `file:` link to
+ * ../praisonai-ts so the build that ships is the one with that fix in it, and
+ * `bundle-target.test.mjs` asserts the built engine takes the floor.
  *
- * Step three is the ENGINE, and this one clears itself. `praisonai/mobile`
- * ships at praisonai@1.7.4 with top-level await on line 1 of three of its
- * dist files: the `__praisonMod` shim that upstream's `scripts/esm-shim.js`
- * injects wherever a module used `require()`. esbuild cannot lower top-level
- * await, so below chrome89 there is not a worse bundle, there is NO bundle:
- * "Top-level await is not available in the configured target environment".
- * Upstream has already removed the shim from those modules (praisonai-ts PR
- * #4720); what is missing is a release. The target follows the release rather
- * than a person's memory of it: `engineFloorBlockers` transforms the three
- * files at the split floor, and the target is raised to ENGINE_MIN_CHROME only
- * while one of them still refuses. Bump `praisonai` to a release containing
- * #4720 and the target drops to SPLIT_MIN_CHROME on its own.
+ * ONE construct is deliberately kept above the floor: `import()` itself, which
+ * is Chrome 63. Left to esbuild, a target below that LOWERS the dynamic import
+ * to a static one wrapped in a promise -- measured at chrome58: every chunk
+ * becomes eager and the whole engine lands in the shell, 1486.8kB against a
+ * 400kB budget, 0 lazy. So `bundle()` tells esbuild the target supports
+ * dynamic import (`supported`), and SPLIT_MIN_CHROME records what the shipped
+ * SHAPE needs regardless of the syntax target. A WebView that runs a `<script
+ * type="module">` page at all is Chrome 61+, so the gap this leaves is Chrome
+ * 61-62: the page loads and the shell's `import()` is a parse error.
+ * ANDROID_WEBVIEW_FLOOR records no level between 26 (chrome58) and 30
+ * (chrome87); whether `minSdkVersion` should move is recorded here, not
+ * decided here.
  */
 export const ANDROID_WEBVIEW_FLOOR = { 26: "chrome58", 30: "chrome87", 33: "chrome108" };
 const tauriConf = JSON.parse(
@@ -114,36 +110,20 @@ const tauriConf = JSON.parse(
 /** The Chrome the declared `minSdkVersion` ships. `undefined` when the table
  *  has no entry, and `bundle-target.test.mjs` says so rather than guessing. */
 export const DECLARED_CHROME_FLOOR = ANDROID_WEBVIEW_FLOOR[tauriConf.bundle.android.minSdkVersion];
+export const TARGETS = ["safari16", DECLARED_CHROME_FLOOR];
+
 /** `chrome89` -> 89, so two floors can be compared rather than eyeballed. */
 export function chromeMajor(target) {
   const m = /^chrome(\d+)$/.exec(target ?? "");
   return m ? Number(m[1]) : NaN;
 }
-/** The highest of several Chrome targets; `undefined` if none is one. */
-export function maxChrome(...targets) {
-  return targets
-    .filter((t) => !Number.isNaN(chromeMajor(t)))
-    .sort((a, b) => chromeMajor(b) - chromeMajor(a))[0];
-}
-/** The first Chrome whose `import()` esbuild leaves as an `import()`; measured
- *  in bundle-target.test.mjs, one below and at. Below it there is no split. */
+/** The first Chrome whose `import()` esbuild leaves as an `import()`. Measured
+ *  in bundle-target.test.mjs, one below and at; the header says why the build
+ *  keeps it regardless of the floor. */
 export const SPLIT_MIN_CHROME = "chrome63";
-/** What the shipped SHAPE needs before the engine is even considered. */
-export const SPLIT_CHROME_FLOOR = maxChrome(DECLARED_CHROME_FLOOR, SPLIT_MIN_CHROME);
-/** Where the target is raised to while the engine carries top-level await:
- *  the first Chrome that parses it. */
-export const ENGINE_MIN_CHROME = "chrome89";
-/** The files on praisonai/mobile's graph that carried the shim at 1.7.4 -- the
- *  three, and only three, esbuild named at chrome58. A new one would not slip
- *  past this list: the build itself fails with esbuild's own message, and the
- *  probe-agrees-with-the-bundler test names the file. */
-export const ENGINE_FLOOR_PROBE_FILES = [
-  "llm/backend-resolver.js",
-  "llm/providers/ai-sdk/index.js",
-  "llm/providers/registry.js",
-];
 
-/** The installed praisonai's root, or null when it is not installed. */
+/** The installed praisonai's root -- through the `file:` link, so the real
+ *  ../praisonai-ts directory -- or null when it is not installed. */
 export function praisonaiRoot() {
   try {
     return dirname(createRequire(import.meta.url).resolve("praisonai/package.json"));
@@ -151,37 +131,6 @@ export function praisonaiRoot() {
     return null;
   }
 }
-
-/**
- * Which of ENGINE_FLOOR_PROBE_FILES cannot be parsed at `floor`, by asking
- * esbuild -- `transformSync` on each file alone, a few milliseconds and no
- * bundling, which is what makes it affordable at module load. Not installed,
- * or no floor recorded: nothing blocks, and the build fails loudly on the
- * unresolved import or the invalid target instead of quietly here.
- */
-export function engineFloorBlockers(floor = SPLIT_CHROME_FLOOR) {
-  const root = praisonaiRoot();
-  if (root === null || floor === undefined) return [];
-  return ENGINE_FLOOR_PROBE_FILES.filter((file) => {
-    try {
-      esbuild.transformSync(readFileSync(join(root, "dist/esm", file), "utf8"), {
-        target: [floor], format: "esm", loader: "js",
-      });
-      return false;
-    } catch (error) {
-      if (/Top-level await is not available/.test(error.message)) return true;
-      throw error;
-    }
-  });
-}
-export const ENGINE_FLOOR_BLOCKERS = engineFloorBlockers();
-/** The Chrome target, derived: the declared floor, raised to what the split
- *  needs, raised again to what the installed engine needs -- for as long as
- *  it needs it. */
-export const CHROME_TARGET = ENGINE_FLOOR_BLOCKERS.length > 0
-  ? maxChrome(SPLIT_CHROME_FLOOR, ENGINE_MIN_CHROME)
-  : SPLIT_CHROME_FLOOR;
-export const TARGETS = ["safari16", CHROME_TARGET];
 
 /**
  * The budgets. TWO numbers, because the build emits two populations of chunk
@@ -200,17 +149,19 @@ export const TARGETS = ["safari16", CHROME_TARGET];
  * have. But it is paid once, after a deliberate choice, with the app already
  * on screen -- so it gets its own ceiling rather than being folded into the
  * shell's, which would either let the shell grow behind the engine's
- * allowance or refuse the engine for being an engine. Measured: 1361kB across
- * 19 chunks, of which zod is 426kB, `ai` 276kB, @ai-sdk/openai 166kB,
- * @ai-sdk/google 142kB, openai 102kB, and praisonai itself 79kB. The ceiling
- * sits ~10% above that on purpose: one more provider is 100-170kB (measured),
- * so adding one is a decision, not a drift.
+ * allowance or refuse the engine for being an engine. Measured at the
+ * chrome58 floor: 1459.6kB across 16 chunks -- 1361kB of engine at chrome89
+ * (zod 426kB, `ai` 276kB, @ai-sdk/openai 166kB, @ai-sdk/google 142kB, openai
+ * 102kB, praisonai itself 79kB) plus ~100kB of lowering, because async
+ * functions and classes become generators and prototypes below Chrome 55-72.
+ * The ceiling sits ~10% above that on purpose: one more provider is 100-170kB
+ * (measured), so adding one is a decision, not a drift.
  *
  * `tools/depgraph.test.mjs` pins both values; `bundle.test.mjs` proves each
  * can fail, and that neither is the other in disguise.
  */
 export const SHELL_BUDGET_BYTES = 400 * 1024;
-export const LAZY_BUDGET_BYTES = 1500 * 1024;
+export const LAZY_BUDGET_BYTES = 1600 * 1024;
 
 /**
  * Every bare (non-relative) import esbuild could not resolve.
@@ -339,6 +290,8 @@ export function eagerChunks(metafile, entryPath) {
 
 /** Marks a resolution the plugin below started itself, so it lets it through. */
 const PROBE = Symbol("resolve-probe");
+/** This package: where bare imports are resolved from FIRST (see the plugin). */
+const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 /**
  * @param options
@@ -346,12 +299,12 @@ const PROBE = Symbol("resolve-probe");
  *   everything behind an `import()` becomes a `chunk-*.js` beside it, which
  *   is the shape `index.html` loads. `outfile` is the single-file form, kept
  *   for the fixture tests and for a caller that wants one artefact.
- *   `targets` and `external` exist for `bundle-target.test.mjs`, which needs
- *   to build the shell at the DECLARED floor with the engine left out to show
- *   which of the two is the one that cannot parse there.
+ *   `targets` and `keepDynamicImport` exist for `bundle-target.test.mjs`:
+ *   the first to measure a floor other than the declared one, the second to
+ *   show that the `supported` override below is load-bearing.
  */
 export async function bundle({
-  entry, outfile, outdir, minify = true, write = true, targets = TARGETS, external = [],
+  entry, outfile, outdir, minify = true, write = true, targets = TARGETS, keepDynamicImport = true,
 }) {
   const splitting = outdir !== undefined;
   const result = await esbuild.build({
@@ -363,6 +316,12 @@ export async function bundle({
     format: "esm",
     platform: "browser",
     target: targets,
+    // `import()` is what makes the engine a chunk, and it is Chrome 63. Below
+    // that esbuild would LOWER it to a static import and quietly undo the
+    // split -- the file header has the numbers. Kept as an import() at any
+    // target; SPLIT_MIN_CHROME records what that costs. `false` leaves esbuild
+    // to its own table, which is how the test measures it.
+    ...(keepDynamicImport ? { supported: { "dynamic-import": true } } : {}),
     minify,
     sourcemap: true,
     metafile: true,
@@ -388,17 +347,31 @@ export async function bundle({
           const head = args.path.replace(/^node:/, "").split("/")[0];
           if (NODE_BUILTINS.includes(head)) return { path: args.path, external: true };
           if (CLI_ONLY_PACKAGES.includes(head)) return { path: args.path, external: true };
-          if (external.includes(args.path) || external.includes(head)) {
-            return { path: args.path, external: true };
-          }
-          // A specifier esbuild cannot resolve must not abort the build with
+          // Resolved from THIS package first, and from the importer second.
+          //
+          // Peers are the consumer's to provide: praisonai lists `ai` and
+          // `@ai-sdk/*` as optional peers, this package declares them, and a
+          // registry install hoists them beside praisonai where its imports
+          // find them. Through the `file:` link Node's real-path resolution
+          // looks in ../praisonai-ts/node_modules instead and cannot see them
+          // -- `@ai-sdk/cohere`, which praisonai imports and never declares,
+          // was reported unresolved, measured. Consumer-first is the layout a
+          // registry install produces, without depending on hoisting to
+          // produce it, and it keeps `zod` and `@ai-sdk/provider-utils` to
+          // one copy. praisonai's own dependencies (openai, and the rest) are
+          // not here and fall through to its node_modules, as they should.
+          //
+          // A specifier neither can resolve must not abort the build with
           // esbuild's own error: it is left external so it reaches the
           // metafile, where the `unresolved` check below names it in the
           // gate's words, alongside every other reason a bundle cannot ship.
-          const probe = await build.resolve(args.path, {
-            kind: args.kind, importer: args.importer, resolveDir: args.resolveDir, pluginData: PROBE,
-          });
-          return probe.errors.length > 0 ? { path: args.path, external: true } : null;
+          const probe = { kind: args.kind, importer: args.importer, pluginData: PROBE };
+          const here = await build.resolve(args.path, { ...probe, resolveDir: PACKAGE_ROOT });
+          if (here.errors.length === 0) {
+            return { path: here.path, namespace: here.namespace, external: here.external, sideEffects: here.sideEffects };
+          }
+          const there = await build.resolve(args.path, { ...probe, resolveDir: args.resolveDir });
+          return there.errors.length > 0 ? { path: args.path, external: true } : null;
         });
       },
     }],
@@ -426,9 +399,12 @@ export async function bundle({
   // The ENTRY chunk's text, for the source-level checks: a top-level
   // process.env read is only import-time fatal in a chunk that loads at
   // import time.
+  // By NAME, not "the first .js output": under `write: false` a split build's
+  // outputFiles are in no particular order, and the first one was a chunk.
+  const entryName = outPath.split("/").pop();
   const code = write
     ? await readFile(outPath, "utf8")
-    : (result.outputFiles?.find((f) => f.path.endsWith(".js"))?.text ?? "");
+    : (result.outputFiles?.find((f) => f.path.split("/").pop() === entryName)?.text ?? "");
 
   const classified = classifyBareImports(result.metafile);
   const bare = [...classified.keys()].sort();
@@ -441,46 +417,28 @@ export async function bundle({
   const cliStatic = bare.filter(
     (p) => CLI_ONLY_PACKAGES.includes(p.split("/")[0]) && classified.get(p) === "static",
   );
-  // A bare import that is NOT a Node builtin and still left the build as an
-  // external is one esbuild could not resolve -- the package is not installed.
+  // A bare import that is NOT a builtin and NOT a CLI-only external, and still
+  // left the build as an external, is one the plugin's probe could not resolve
+  // FROM ITS IMPORTER -- the same question esbuild asks, in the same place.
+  // Read off the metafile rather than re-resolved from the entry, and that
+  // matters now that `praisonai` is a `file:` link: its own dependencies
+  // (openai, and the rest) live in ../praisonai-ts/node_modules and resolve
+  // from there, not from this package's entry, so a resolve-from-the-entry
+  // would call a bundled, working import "unresolved".
   //
   // A webview has no module resolver. `import "openai"` in the shipped file is
   // a hard failure at import time, before any code runs, with the same blank
-  // screen as a Node builtin -- and until now the gate said `shippable: true`
-  // for it, because `problems` was built only from forbidden BUILTINS, top
-  // level process.env, and size.
-  //
-  // Measured: bundling praisonai-ts's webview entry through this gate reported
-  // 80.5kB, 0 problems and `shippable: true` while silently leaving out
-  // openai, ai, @ai-sdk/cohere, @ai-sdk/google, @ai-sdk/openai,
-  // @ai-sdk/provider-utils, chalk, ora, boxen, figlet and cli-table3. That
-  // bundle loads on a laptop with node_modules beside it and dies on a phone.
-  //
-  // CORRECTED. The first version of this asked "did it stay external?", which
-  // is true of EVERY bare import here -- the plugin below externalises them all
-  // on purpose, so builtins surface in the metafile instead of being shimmed.
-  // So it flagged installed, perfectly resolvable packages as unresolvable, and
-  // only passed because the shipped bundle happens to have no bare imports at
-  // all. Confirmed against a real install: `praisonai/mobile` resolves to
-  // node_modules/praisonai/dist/mobile.js and was reported unresolved anyway.
-  //
-  // The question that actually matters is whether the specifier can be
-  // RESOLVED from the entry, so it is asked directly.
-  const resolver = createRequire(resolve(entry));
-  const unresolved = bare.filter((name) => {
-    if (RUNTIME_MARKERS.has(name)) return false;
-    // Redundant in practice and kept for intent: `createRequire` resolves
-    // builtins too, so removing this line changes nothing (verified). A
-    // builtin is already classified as fatal-or-lazy above and must not be
-    // reported twice under a different heading -- that is what this says.
-    if (NODE_BUILTINS.includes(name.split("/")[0])) return false;
-    try {
-      resolver.resolve(name);
-      return false;
-    } catch {
-      return true;
-    }
-  });
+  // screen as a Node builtin -- and the gate once said `shippable: true` for
+  // exactly that: bundling praisonai-ts's webview entry reported 80.5kB, 0
+  // problems, while silently leaving out openai, ai, @ai-sdk/*, chalk, ora,
+  // boxen, figlet and cli-table3. Loads on a laptop with node_modules beside
+  // it, dies on a phone.
+  const unresolved = bare.filter(
+    (name) =>
+      !RUNTIME_MARKERS.has(name) &&
+      !NODE_BUILTINS.includes(name.split("/")[0]) &&
+      !CLI_ONLY_PACKAGES.includes(name.split("/")[0]),
+  );
   const processReads = topLevelProcessReads(code);
   // `bytes` is the SHELL cost. For a single-file build that is the whole file,
   // which is what the name always meant; for a split build it is what the

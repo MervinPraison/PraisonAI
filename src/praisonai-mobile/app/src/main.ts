@@ -15,7 +15,7 @@
  */
 import { createApp, type App } from "./boot.ts";
 import { detectPlatform, type Platform } from "./platform.ts";
-import { enginesFor, ENGINE_REMOTE_HTTP, SETTING_DEFS } from "./registry.ts";
+import { enginesFor, defaultEngineIdFor, settingDefsFor } from "./registry.ts";
 import { intentFrom, type Actionable, type Intent } from "./intents.ts";
 import { applyOps, emptyNodes, type RowNodes } from "./dom.ts";
 import { installCrashHandler } from "./crash.ts";
@@ -140,34 +140,6 @@ export function appEngines(deps: {
   });
 }
 
-/**
- * The engine to start with when settings name none.
- *
- * `remote-http` on every platform, for now. The in-process engine's module is
- * no longer absent from the shipped webview -- since the split it is a lazy
- * chunk beside `dist/app.js`, and `tools/app-bundle.test.mjs` asserts it stays
- * there -- but registry.ts still keeps the engine OUT of the shipping picker
- * (`engineId.choices`), and that is a separate decision from this one. A
- * first-launch default has to be a choice the picker offers, or the very first
- * prompt lands on something Settings cannot show or change; so until the
- * picker admits the engine, the honest first-launch default stays the remote
- * engine, whose failure mode at least names Settings as the fix.
- *
- * A second reason the ternary this replaced was wrong: `Platform["kind"]` is
- * only `"tauri" | "web"`, and DESKTOP Tauri (`cargo tauri dev`) reports
- * `"tauri"` too -- so keying the in-process engine off `kind === "tauri"` also
- * flipped the desktop/dev flow away from the remote engine it exists for, with
- * no way here to tell a phone from a laptop.
- *
- * Kept as an exported function, taking the platform kind, so the seam is ready
- * for the day a device can be told apart AND the engine ships -- and so a test
- * drives it directly rather than asserting an expression appears in `mount`.
- * The persisted `engineId` still wins over this (see `chosenStringOr` in
- * boot.ts), so it only ever decides the very first launch.
- */
-export function defaultEngineIdFor(_kind: Platform["kind"]): string {
-  return ENGINE_REMOTE_HTTP;
-}
 
 export interface MountDeps {
   readonly root: HTMLElement;
@@ -178,6 +150,10 @@ export interface MountDeps {
   /** The locales the user prefers, most-preferred first. Injected so a test is
    *  deterministic; defaults to the host's `navigator.languages`. */
   readonly locales?: readonly string[];
+  /** How the in-process engine's `Agent` class is fetched. Defaults to the
+   *  real chunk loader; a test hands in a scripted class so a first message
+   *  can be driven into the in-process engine with no network and no key. */
+  readonly loadAgent?: () => Promise<PraisonAgentModule>;
 }
 
 /**
@@ -679,13 +655,22 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // the engine at boot and never replaced -- so the engine address the user
     // set was read, stored, and thrown away in favour of the hardcoded default.
     engines: (persistence, settings, onIgnored) =>
-      appEngines({ settings, http: platform.http, persistence, onIgnored }),
-    settingDefs: SETTING_DEFS,
+      appEngines({
+        settings,
+        http: platform.http,
+        persistence,
+        onIgnored,
+        ...(deps.loadAgent === undefined ? {} : { loadAgent: deps.loadAgent }),
+      }),
+    // The platform's defs, so the engine Settings shows as the default and the
+    // engine that answers a first launch are the same one.
+    settingDefs: settingDefsFor(platform.kind),
     // The default when settings name none, chosen by platform: the in-process
     // engine on a device (a phone has no `127.0.0.1:8765` to reach, and a
     // cleartext localhost address is refused by iOS ATS and Android), the
-    // remote engine on desktop/dev where one actually runs. createApp prefers
-    // the persisted `engineId` over this, so it only decides the first launch.
+    // remote engine on the web where a server is what there is. createApp
+    // prefers the persisted `engineId` over this, so it only decides the
+    // first launch. registry.ts says why desktop Tauri counts as a device.
     engineId: defaultEngineIdFor(platform.kind),
     onPublish: publish,
     now: deps.now ?? (() => Date.now()),

@@ -15,6 +15,7 @@ import type { AgentEnginePort } from "../../core/src/ports/agent-engine.ts";
 import type { HttpPort } from "../../core/src/ports/http.ts";
 import type { IgnoredReason } from "../../protocol/src/decode.ts";
 import type { SettingDef, SettingsFacade } from "../../core/src/settings/store.ts";
+import type { Platform } from "./platform.ts";
 import { createRemoteHttpEngine, probeHealth } from "../../engines/src/remote-http/engine.ts";
 import type { EngineChoice } from "./engines.ts";
 import type { RunPersistence } from "../../engines/src/praisonai-ts/engine.ts";
@@ -46,13 +47,20 @@ export const SETTING_DEFS: readonly SettingDef[] = [
     label: "Engine",
     help: "Which agent runtime answers. Remote talks to a PraisonAI engine over HTTP; in-process runs the agent loop on this device.",
     section: "Engine",
-    // Only what `enginesFor` can actually build in the shipping composition.
-    // ENGINE_PRAISONAI_TS was listed here and is only pushed when
-    // `createInProcess` is supplied, which main.ts does not do -- so selecting
-    // it persisted an id `selectEngine` then rejects, and the NEXT launch died
-    // at `renderFatal` with no way back except editing storage by hand. A
-    // picker must not offer a choice that bricks the app.
-    choices: [ENGINE_REMOTE_HTTP],
+    // Exactly what `appEngines` in main.ts can build -- registry.test.ts
+    // compares this list against that composition, because a picker offering
+    // an id `selectEngine` rejects is a dead end: the choice persists, the
+    // NEXT launch cannot build it, and boot dies at `renderFatal` with no way
+    // back except editing storage by hand. That is what happened when
+    // ENGINE_PRAISONAI_TS was listed here while nothing supplied
+    // `createInProcess`. It is back because main.ts supplies the factory and
+    // the engine ships as a chunk beside app.js (engines/praisonai-ts/
+    // load-agent.ts).
+    //
+    // `default` here is the WEB default; `settingDefsFor` swaps in the
+    // platform's, so the value Settings shows and the engine that answers a
+    // first launch are the same one.
+    choices: [ENGINE_REMOTE_HTTP, ENGINE_PRAISONAI_TS],
   },
   {
     key: "baseUrl",
@@ -67,6 +75,38 @@ export const SETTING_DEFS: readonly SettingDef[] = [
  *  in `enginesFor` below. Exported so the test that forbids an inert setting
  *  compares `SETTING_DEFS` against a list an author has to consciously extend
  *  in the same commit that adds the code reading the new key. */
+/**
+ * The engine to start with when settings name none, by platform.
+ *
+ * On a device, the in-process engine: a phone has no `127.0.0.1:8765` to
+ * reach, and a cleartext localhost address is refused by iOS ATS and Android
+ * besides, so the remote default was a first prompt that failed with a status
+ * code. Now that the engine ships as a chunk beside app.js, it is the one
+ * choice that works with nothing configured -- up to the model itself, which
+ * still needs a key the app has no setting for yet.
+ *
+ * On the web, the remote engine: there is a server to talk to, and no reason
+ * to fetch 1.3MB of engine into a browser tab first. `Platform["kind"]` is
+ * only `"tauri" | "web"`, so desktop Tauri (`cargo tauri dev`) counts as a
+ * device here and starts in-process too; a developer with a server running
+ * switches in Settings, and the persisted `engineId` wins over this
+ * (`chosenStringOr` in boot.ts), so it only ever decides the very first launch.
+ *
+ * Exported, and called by `settingDefsFor`, so the boot fallback and the
+ * def's `default` cannot disagree -- Settings would show one engine while
+ * another answered.
+ */
+export function defaultEngineIdFor(kind: Platform["kind"]): string {
+  return kind === "tauri" ? ENGINE_PRAISONAI_TS : ENGINE_REMOTE_HTTP;
+}
+
+/** SETTING_DEFS with the engine default the platform actually starts on. */
+export function settingDefsFor(kind: Platform["kind"]): readonly SettingDef[] {
+  return SETTING_DEFS.map((def) =>
+    def.key === "engineId" ? { ...def, default: defaultEngineIdFor(kind) } : def,
+  );
+}
+
 export const CONSUMED_SETTING_KEYS: readonly string[] = ["engineId", "baseUrl"];
 
 export interface RegistryDeps {

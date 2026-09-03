@@ -27,6 +27,7 @@ import { mkdtemp } from "node:fs/promises";
 import {
   bundle,
   classifyBareImports,
+  praisonaiRoot,
   CLI_ONLY_PACKAGES,
   SHELL_BUDGET_BYTES,
   LAZY_BUDGET_BYTES,
@@ -44,7 +45,10 @@ const inputsOf = (name) => {
   const out = Object.entries(report.metafile.outputs).find(([p]) => p.split("/").pop() === name)?.[1];
   return Object.keys(out?.inputs ?? {});
 };
-const isUpstream = (input) => /node_modules\/praisonai\//.test(input);
+// Through the `file:` link, so the real ../praisonai-ts directory: esbuild
+// records inputs by real path, and a node_modules/ pattern would match nothing.
+const upstream = praisonaiRoot();
+const isUpstream = (input) => upstream !== null && resolve(process.cwd(), input).startsWith(upstream + "/");
 
 test("the real app bundles with no problems at all", () => {
   assert.deepEqual(report.problems, [], report.problems.join("\n"));
