@@ -51,6 +51,59 @@ def test_adapter_selection_matches_is_ollama_provider(model, base_url):
     assert isinstance(llm._provider_adapter, OllamaAdapter) == llm._is_ollama_provider()
 
 
+# --- the adapter must reflect the initial failover profile, not the pre-profile
+#     provider (the profile can change providers before dispatch runs) ----------
+
+class _OneShotFailover:
+    """Minimal FailoverManagerProtocol that yields a single profile once."""
+
+    def __init__(self, profile):
+        self._profile = profile
+        self._served = False
+
+    def get_next_profile(self):
+        if self._served:
+            return None
+        self._served = True
+        return self._profile
+
+    def mark_failure(self, profile, error, is_rate_limit=False):
+        pass
+
+    def mark_success(self, profile):
+        pass
+
+
+def test_initial_failover_profile_to_ollama_selects_ollama_adapter():
+    """A profile that switches openai -> ollama must dispatch through OllamaAdapter.
+
+    Adapter selection runs after the initial profile is applied, so the captured
+    adapter and _is_ollama_provider() must agree on the post-profile model.
+    """
+    from praisonaiagents.llm.failover import AuthProfile
+
+    profile = AuthProfile(
+        name="local", provider="ollama", api_key="x", model="ollama/llama3"
+    )
+    llm = LLM(model="gpt-4o", failover_manager=_OneShotFailover(profile))
+    assert llm.model == "ollama/llama3"
+    assert llm._is_ollama_provider() is True
+    assert isinstance(llm._provider_adapter, OllamaAdapter)
+
+
+def test_initial_failover_profile_to_openai_selects_default_adapter():
+    """A profile that switches ollama -> openai must not retain Ollama policy."""
+    from praisonaiagents.llm.failover import AuthProfile
+
+    profile = AuthProfile(
+        name="cloud", provider="openai", api_key="sk-test", model="gpt-4o"
+    )
+    llm = LLM(model="ollama/llama3", failover_manager=_OneShotFailover(profile))
+    assert llm.model == "gpt-4o"
+    assert llm._is_ollama_provider() is False
+    assert not isinstance(llm._provider_adapter, OllamaAdapter)
+
+
 # --- the predicate itself -----------------------------------------------------
 
 def state(**kw):
@@ -68,7 +121,7 @@ def test_whitespace_only_counts_as_empty():
 
 
 def test_non_empty_response_does_not_signal():
-    """The measured sync baseline returns '{\\n\\n\\n}' here; it must not improve."""
+    """A non-empty (even malformed) response must not trigger compensation."""
     assert OllamaAdapter().handle_empty_response_with_tools(
         state(response_text="{\n\n\n}")) is False
 
