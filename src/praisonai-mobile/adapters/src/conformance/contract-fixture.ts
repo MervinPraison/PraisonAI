@@ -69,11 +69,15 @@ function secrets(): SecretsPort {
 
 // ---- storage ---------------------------------------------------------------
 
-function storage(): StoragePort {
+function storage(files: Map<string, string> = new Map()): StoragePort {
   // Inline rather than importing a fake: `adapters` may not import `testing`,
   // and the layer rule is right to say so. The engine fixture one directory
   // over builds its broken engines the same way.
-  const files = new Map<string, string>();
+  //
+  // The map is a PARAMETER, so a "relaunch" is a new port over the same
+  // bytes -- a real reopen rather than the same object handed back, which
+  // would make the durability cases vacuous. Defaulting to a fresh map keeps
+  // every case isolated from the one before it.
   const key = (ref: { namespace: string; id: string }): string =>
     mode === "storage_namespaces_collide" ? ref.id : `${ref.namespace}/${ref.id}`;
   return {
@@ -86,6 +90,15 @@ function storage(): StoragePort {
       return mode === "storage_missing_is_undefined" ? (undefined as never) : null;
     },
     async write(ref, value) {
+      if (mode === "storage_torn_write") {
+        // The defect: truncate, then fill -- which is what a plain
+        // `fs::write` does, and what tauri-plugin-store's `save()` does. A
+        // reader that arrives in between sees half a chat. On iOS, where a
+        // suspended app is killed with no further callback, the half is what
+        // is left on disk.
+        files.set(key(ref), value.slice(0, Math.floor(value.length / 2)));
+        await Promise.resolve();
+      }
       files.set(key(ref), value);
     },
     async remove(ref) {
@@ -249,6 +262,25 @@ function shellHarness(): ShellHarness {
 }
 
 describeSecretsContract("fixture secrets", () => secrets());
-describeStorageContract("fixture storage", () => storage());
+// Registered WITH a reopen, so the durability cases run here too and can be
+// reddened by `storage_forgets_on_relaunch`. A store that forgets when the
+// process ends is what makes "Your conversations are saved" a lie, and the
+// contract can only catch that if something asks it to relaunch.
+const fixtureBackings = new WeakMap<StoragePort, Map<string, string>>();
+const openFixtureStorage = (files: Map<string, string>): StoragePort => {
+  const port = storage(files);
+  fixtureBackings.set(port, files);
+  return port;
+};
+describeStorageContract(
+  "fixture storage",
+  () => openFixtureStorage(new Map()),
+  (previous) =>
+    mode === "storage_forgets_on_relaunch"
+      ? // The defect: a "reopened" store that is actually a fresh empty one --
+        // every conversation gone on the next launch, silently.
+        openFixtureStorage(new Map())
+      : openFixtureStorage(fixtureBackings.get(previous) ?? new Map()),
+);
 describeTimeContract("fixture time", () => time(), advance, true);
 describeShellContract("fixture shell", shellHarness);

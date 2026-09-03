@@ -456,8 +456,16 @@ broken:
   stack nothing reads.
 - **Every screen except the transcript.** Settings, chat list and about have
   complete view models and no renderer.
-- **Tauri-native storage, secrets and HTTP.** Declared honestly at
-  `app/src/platform.ts`, including that WKWebView `localStorage` is evictable.
+- **Tauri-native secrets and HTTP.** Declared honestly at
+  `app/src/platform.ts`. Storage is no longer on this list: the Tauri build now
+  writes chats to the app's data directory through `src-tauri/src/store.rs`
+  (temp file, fsync, rename, fsync the directory), because the WKWebView
+  `localStorage` it used before is evictable under storage pressure -- so
+  `en.crashed`'s "Your conversations are saved" was false on a device. The
+  StoragePort contract gained an atomicity case and three relaunch cases, both
+  with break modes, and an existing install's `localStorage` data is migrated
+  once (`adapters/src/storage/migrate.ts`) so the fix cannot look like the
+  disease.
 - **The in-process praisonai-ts engine as a shipping option.** Its stated
   blocker — bare `crypto` and `events` imports on the Agent graph — is fixed
   upstream; the wiring here is not done.
