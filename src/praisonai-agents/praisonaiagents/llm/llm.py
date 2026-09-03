@@ -3814,8 +3814,11 @@ Respond with ONLY a valid JSON tool call in this format:
                         
                         # Special early stopping logic for Ollama when tool results are available
                         # Ollama often provides empty responses after successful tool execution
-                        if (self._is_ollama_provider() and accumulated_tool_results and iteration_count >= 1 and 
-                            (not response_text or response_text.strip() == "")):
+                        if self._provider_adapter.handle_empty_response_with_tools({
+                            'iteration_count': iteration_count,
+                            'accumulated_tool_results': accumulated_tool_results,
+                            'response_text': response_text or '',
+                        }):
                             # Generate coherent response from tool results
                             tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                             if tool_summary:
@@ -5416,8 +5419,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special early stopping logic for Ollama when tool results are available
                     # Ollama often provides empty responses after successful tool execution
-                    if (self._is_ollama_provider() and accumulated_tool_results and iteration_count >= 1 and 
-                        (not response_text or response_text.strip() == "")):
+                    if self._provider_adapter.handle_empty_response_with_tools({
+                        'iteration_count': iteration_count,
+                        'accumulated_tool_results': accumulated_tool_results,
+                        'response_text': response_text or '',
+                    }):
                         # Generate coherent response from tool results
                         tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                         if tool_summary:
