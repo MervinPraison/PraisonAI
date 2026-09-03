@@ -2145,6 +2145,21 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         if reasoning_effort is not None:
             self._llm_option_kwargs['reasoning_effort'] = reasoning_effort
 
+        # Local-runtime descriptor: llm="local" (or "local:<engine>/<model>").
+        # Opt-in only -- discovery never fires for any other spec, so a fully
+        # configured agent pays nothing. Resolved here into a concrete
+        # provider/model so the normal LLM path handles it unchanged.
+        if isinstance(llm, str) and (llm == "local" or llm.startswith("local:")):
+            from ..local import resolve as _resolve_local
+            _spec = llm[len("local:"):] if llm.startswith("local:") else None
+            _target = _resolve_local(_spec or None)
+            llm = _target.litellm_model
+            if base_url is None:
+                base_url = _target.base_url
+            if api_key is None:
+                api_key = _target.api_key
+            self._local_target = _target
+
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.
         # Detected inline (no heavy import) to keep Agent() construction lazy.
