@@ -1250,7 +1250,32 @@ export class Agent {
   private async ensureSkillsPrompt(): Promise<void> {
     if (this._skillsPrompt !== undefined || this._skillsInput === undefined) return;
     const input = this._skillsInput;
-    const skillsModule = await import('../skills');
+    // The skills module reads the filesystem, so it imports fs/path at its top
+    // level. Bundling it here would make those STATIC Node imports part of the
+    // agent's graph, which is exactly what scripts/webview-gate.mjs forbids: a
+    // webview would die at import time with a blank screen. The specifier is
+    // computed so the bundler leaves it as a runtime import -- the gate's own
+    // advice, "move the module behind a Node-only entry point". Nothing loads
+    // it unless an agent actually declares `skills`.
+    // Two spellings so the same code resolves from the ESM dist (explicit .js),
+    // from the CJS dist and from ts-jest against the TypeScript sources.
+    let skillsModule: typeof import('../skills') | undefined;
+    let skillsError: unknown;
+    for (const specifier of [['..', 'skills', 'index.js'].join('/'), ['..', 'skills'].join('/')]) {
+      try {
+        skillsModule = await import(specifier);
+        break;
+      } catch (err) {
+        skillsError = err;
+      }
+    }
+    if (!skillsModule) {
+      throw new Error(
+        `The 'skills' option needs the Node-only skills module, which could not be loaded: ${
+          (skillsError as Error)?.message ?? String(skillsError)
+        }`,
+      );
+    }
     let manager: SkillManager;
     let names: string[] = [];
     if (input instanceof skillsModule.SkillManager) {
