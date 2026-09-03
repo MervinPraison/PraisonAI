@@ -61,6 +61,33 @@ def test_local_base_url_does_not_capture_hosted_models(model):
     assert llm._detect_provider() != "ollama"
 
 
+@pytest.mark.parametrize(
+    "model",
+    [
+        "bedrock/anthropic.claude-3-5-sonnet",
+        "us.anthropic.claude-3-5-sonnet",
+        "vertex_ai/claude-3-5-sonnet",
+        "openrouter/anthropic/claude-3-5-sonnet",
+        "openrouter/openai/gpt-4o",
+        "openrouter/google/gemini-1.5-flash",
+    ],
+)
+def test_local_base_url_does_not_capture_nested_routed_hosted_models(model):
+    """Nested and vendor-qualified hosted routes keep their provider too.
+
+    ``bedrock/anthropic.claude-*`` and ``openrouter/openai/gpt-*`` name a
+    hosted family further down the route than the first segment. A local URL
+    must not reassign them to Ollama -- the family, not the route depth, is the
+    discriminator, matching the substring fallback in ``_detect_provider``.
+    """
+    llm = _llm(model, base_url=LOCAL_URL)
+    assert llm._is_ollama_provider() is False, (
+        f"{model!r} behind {LOCAL_URL} was detected as Ollama despite naming a "
+        "hosted family in a nested route"
+    )
+    assert llm._detect_provider() != "ollama"
+
+
 @pytest.mark.parametrize("env_var", ["OPENAI_BASE_URL", "OPENAI_API_BASE"])
 def test_env_base_url_does_not_capture_hosted_models(monkeypatch, env_var):
     """Same rule when the local URL arrives via the environment.

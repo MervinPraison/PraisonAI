@@ -52,14 +52,26 @@ HOSTED_ONLY_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "chatgpt-", "claude", "gemi
 def is_hosted_only_model(model_name: str) -> bool:
     """True if ``model_name`` names a closed-weights model no local server hosts.
 
-    Any litellm-style prefix is stripped first, so ``openai/gpt-4o`` is hosted
-    while ``openai/qwen3:0.6b`` -- a local model reached over the
-    OpenAI-compatible route -- is not.
+    Every route segment is tested, so single-prefix (``openai/gpt-4o``), nested
+    (``openrouter/openai/gpt-4o``, ``openrouter/anthropic/claude-*``) and
+    vendor-qualified (``bedrock/anthropic.claude-*``, ``us.anthropic.claude-*``)
+    forms all resolve to the hosted family they name -- mirroring the substring
+    fallback that ``_detect_provider`` uses for the same routed models. An
+    open-weights model reached over the OpenAI-compatible route
+    (``openai/qwen3:0.6b``) is not hosted-only and keeps its local treatment,
+    because the prefixes tested are themselves closed-weights families no local
+    runtime serves.
     """
     if not model_name:
         return False
-    bare = model_name.split("/", 1)[1] if "/" in model_name else model_name
-    return bare.lower().startswith(HOSTED_ONLY_PREFIXES)
+    lower = model_name.lower()
+    # Split on both route ("/") and vendor-qualifier (".") boundaries so a
+    # family name anywhere in the path is seen: bedrock/anthropic.claude-3 ->
+    # ["bedrock", "anthropic", "claude-3"].
+    for segment in lower.replace(".", "/").split("/"):
+        if segment.startswith(HOSTED_ONLY_PREFIXES):
+            return True
+    return False
 
 
 def _entry_point_matchers():
