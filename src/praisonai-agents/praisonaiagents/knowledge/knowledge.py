@@ -595,8 +595,36 @@ class Knowledge:
                     metadata = {}
                 metadata['file_type'] = file_ext.lstrip('.')
                 metadata['filename'] = os.path.basename(input_path)
+            elif os.path.isfile(input_path):
+                # An existing file whose extension is not in the table above --
+                # every source file: .py .js .ts .go .rs .java .yaml .toml .sh
+                # .ipynb .rst. This used to fall through to the raw-text branch
+                # below, which stored the PATH STRING as if it were content and
+                # reported success, so indexing a codebase produced a knowledge
+                # base of lowercased filenames. Read and chunk it like any other
+                # text instead; a file that is not decodable as UTF-8 is skipped
+                # loudly rather than stored as its own name.
+                self._log(f"Processing as text file (unlisted extension): {input_path}")
+                try:
+                    with open(input_path, 'r', encoding='utf-8') as file:
+                        content = file.read().strip()
+                except (UnicodeDecodeError, OSError) as read_error:
+                    raise ValueError(
+                        f"Cannot read {input_path} as UTF-8 text: {read_error}"
+                    ) from read_error
+                if not content:
+                    raise ValueError("Empty text file")
+                chunks = self.chunker.chunk(content)
+                memories = [chunk.text.strip() if hasattr(chunk, 'text') else str(chunk).strip()
+                            for chunk in chunks if chunk] or [content]
+                if not metadata:
+                    metadata = {}
+                suffix = os.path.splitext(input_path)[1]
+                if suffix:
+                    metadata['file_type'] = suffix.lstrip('.')
+                metadata['filename'] = os.path.basename(input_path)
             else:
-                # Treat as raw text content only if no file extension
+                # Genuinely raw text handed in instead of a path.
                 memories = [self.normalize_content(input_path)]
 
             # Create progress display
