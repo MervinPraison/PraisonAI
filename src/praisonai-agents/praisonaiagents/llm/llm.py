@@ -731,6 +731,17 @@ Respond with ONLY a valid JSON tool call in this format:
         
         return False
 
+    def _is_local_openai_provider(self) -> bool:
+        """Detect local OpenAI-compatible servers (LM Studio, vLLM, llama.cpp).
+
+        These speak the standard OpenAI protocol, so well-formed tool calls
+        arrive as ``message.tool_calls``. But after a tool-call *repair* prompt
+        the model is asked to reply with a bare JSON tool call as text content;
+        like Ollama, that text must be reconstructed into a dispatchable tool
+        call rather than returned as the final answer.
+        """
+        return self._detect_provider() == "local"
+
     def _is_qwen_provider(self) -> bool:
         """Detect if this is a Qwen provider"""
         if not self.model:
@@ -3474,8 +3485,11 @@ Respond with ONLY a valid JSON tool call in this format:
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
                     
-                    # For Ollama, parse tool calls from response text if not in tool_calls field
-                    if self._is_ollama_provider() and not tool_calls and response_text and formatted_tools:
+                    # For Ollama and local OpenAI-compatible servers, parse tool
+                    # calls from response text if not in the tool_calls field.
+                    # This is essential after a repair prompt, which asks the
+                    # model to reply with a bare JSON tool call as text content.
+                    if (self._is_ollama_provider() or self._is_local_openai_provider()) and not tool_calls and response_text and formatted_tools:
                         # Try to parse JSON tool call from response text
                         try:
                             response_json = json.loads(response_text.strip())

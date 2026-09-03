@@ -141,3 +141,33 @@ def test_explicit_max_tool_repairs_wins():
     """A user-set value is never overridden by a provider default."""
     assert LLM(model="lm_studio/qwen", max_tool_repairs=5).max_tool_repairs == 5
     assert LLM(model="ollama_chat/llama3.2", max_tool_repairs=0).max_tool_repairs == 0
+
+
+# --- repair-response reconstruction (Greptile P1) -----------------------------
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "lm_studio/qwen2.5-7b-instruct",
+        "vllm/meta-llama/Llama-3.1-8B-Instruct",
+        "hosted_vllm/Qwen2.5-7B",
+        "llamacpp/qwen2.5",
+    ],
+)
+def test_local_openai_provider_flag(model):
+    """Local OpenAI-compatible routes report as local for text reconstruction."""
+    assert LLM(model=model)._is_local_openai_provider() is True
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["gpt-4o", "ollama/llama3.2", "ollama_chat/llama3.2", "claude-3-5-sonnet-latest"],
+)
+def test_non_local_providers_are_not_local_openai(model):
+    """Hosted OpenAI, Ollama and Anthropic must not be flagged as local OpenAI."""
+    assert LLM(model=model)._is_local_openai_provider() is False
+
+
+def test_huggingface_is_not_local_openai():
+    """`huggingface/` is the hosted Inference API, not a local server."""
+    assert LLM(model="huggingface/meta-llama/Llama-3.1-8B-Instruct")._is_local_openai_provider() is False
