@@ -24,11 +24,11 @@ class TestResolveApprovalBackend:
 
     def test_console_returns_console_backend(self):
         b = self._resolve("console")
-        assert type(b).__name__ == "ConsoleBackend"
+        assert type(b).__name__ == "InteractiveCLIApprovalBackend"
 
     def test_true_returns_console_backend(self):
         b = self._resolve("true")
-        assert type(b).__name__ == "ConsoleBackend"
+        assert type(b).__name__ == "InteractiveCLIApprovalBackend"
 
     def test_auto_returns_auto_approve_backend(self):
         b = self._resolve("auto")
@@ -83,7 +83,7 @@ class TestResolveApprovalBackend:
 
     def test_case_insensitive(self):
         b = self._resolve("Console")
-        assert type(b).__name__ == "ConsoleBackend"
+        assert type(b).__name__ == "InteractiveCLIApprovalBackend"
         b = self._resolve("AUTO")
         assert type(b).__name__ == "AutoApproveBackend"
 

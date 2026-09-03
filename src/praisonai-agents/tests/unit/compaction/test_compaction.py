@@ -392,7 +392,7 @@ class TestContextCompactor:
             {"role": "user", "content": "More content here."},
         ]
         
-        compacted, result = compactor.compact_async(messages)
+        compacted, result = await compactor.compact_async(messages)
         
         assert result.strategy_used == CompactionStrategy.LLM_SUMMARIZE
         assert len(compacted) < len(messages)
@@ -423,7 +423,7 @@ class TestContextCompactor:
             {"role": "assistant", "content": "This is another long response."},
         ]
         
-        compacted, result = compactor.compact_async(messages)
+        compacted, result = await compactor.compact_async(messages)
         
         # Should fallback to naive summarization and not crash
         assert result.strategy_used == CompactionStrategy.LLM_SUMMARIZE
@@ -434,8 +434,24 @@ class TestContextCompactor:
         assert len(fallback_msgs) <= 1  # May have fallback summary
     
     def test_compactor_format_messages_for_summary(self):
-        """Test _format_messages_for_summary method."""
-        compactor = ContextCompactor()
+        """_format_messages_for_summary delegates to the injected formatter."""
+        class _Formatter:
+            def format_for_summary(self, messages):
+                lines = []
+                for i, m in enumerate(messages, 1):
+                    role = m.get("role")
+                    if m.get("tool_calls"):
+                        names = ", ".join(
+                            tc["function"]["name"] for tc in m["tool_calls"]
+                        )
+                        lines.append(f"{i}. {role}: Called tools: {names}")
+                    elif role == "tool":
+                        lines.append(f"{i}. tool {m.get('tool_call_id')}: {m.get('content')}")
+                    else:
+                        lines.append(f"{i}. {role}: {m.get('content')}")
+                return "\n".join(lines)
+
+        compactor = ContextCompactor(message_formatter=_Formatter())
         
         messages = [
             {"role": "user", "content": "Hello, how are you?"},
