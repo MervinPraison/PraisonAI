@@ -114,8 +114,9 @@ class TestAgentContextPerformance:
             Agent(instructions="test", context=False)
         elapsed = time.perf_counter() - start
         
-        # Should be very fast (< 50ms for 10 inits)
-        assert elapsed < 0.5, f"Init too slow: {elapsed}s for 10 agents"
+        # Should be fast; use a generous bound so the guard is not flaky on
+        # loaded CI runners while still catching order-of-magnitude regressions.
+        assert elapsed < 2.0, f"Init too slow: {elapsed}s for 10 agents"
     
     def test_context_true_no_init_until_access(self):
         """context=True should not initialize manager until accessed."""
