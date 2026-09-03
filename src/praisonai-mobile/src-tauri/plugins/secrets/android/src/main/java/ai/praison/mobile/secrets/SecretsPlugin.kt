@@ -66,16 +66,60 @@ class SecretsPlugin(private val activity: Activity) : Plugin(activity) {
   private fun store(): android.content.SharedPreferences {
     prefs?.let { return it }
     val context = activity.applicationContext
+    val opened = try {
+      open(context)
+    } catch (e: Exception) {
+      // The store is on disk but this device cannot open it. The one way that
+      // happens in practice is a restore: Android Auto Backup copies the
+      // shared_prefs file to a new or wiped device, but the AndroidKeyStore
+      // master key that wraps the Tink keysets is device-local and does NOT
+      // travel with it, so `create` throws trying to unwrap them.
+      //
+      // Left unhandled this is permanent: every read, write, presence check
+      // AND delete goes through here, so the user cannot even CLEAR the key to
+      // recover -- the settings screen is bricked until app data is wiped by
+      // hand. A restored ciphertext we can never decrypt is indistinguishable
+      // from no secret, so discard the unreadable file and start clean. The
+      // user re-enters the key once, which is exactly the state a fresh install
+      // is in. `back-gesture`'s precedent: recover from underneath rather than
+      // surface a failure the caller cannot act on.
+      discard(context)
+      open(context)
+    }
+    prefs = opened
+    return opened
+  }
+
+  private fun open(context: android.content.Context): android.content.SharedPreferences {
     val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-    val opened = EncryptedSharedPreferences.create(
+    return EncryptedSharedPreferences.create(
       PREFS_FILE,
       masterKeyAlias,
       context,
       EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
       EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
-    prefs = opened
-    return opened
+  }
+
+  /**
+   * Drop the on-disk store so the next `open` rebuilds it empty.
+   *
+   * `deleteSharedPreferences`, NOT `getSharedPreferences(...).edit().clear()`.
+   * Opening the file with `getSharedPreferences` would be opening it as PLAIN
+   * preferences -- the one call this plugin must never make, because it is
+   * exactly the two-word edit that writes the API key as plaintext XML, and the
+   * seam test forbids the string for that reason. `deleteSharedPreferences`
+   * removes the file (and its Tink keysets) without ever holding a plaintext
+   * handle to it. It is API 24, which is this plugin's `minSdk`.
+   */
+  private fun discard(context: android.content.Context) {
+    try {
+      context.deleteSharedPreferences(PREFS_FILE)
+    } catch (_: Exception) {
+      // Best effort. If the delete fails, `open` below throws and the command
+      // rejects -- the same honest failure as before, never a silent fallback
+      // to an unprotected store.
+    }
   }
 
   /**
