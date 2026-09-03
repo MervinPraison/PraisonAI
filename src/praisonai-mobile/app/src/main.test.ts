@@ -1335,3 +1335,202 @@ test("on a device with nothing configured, the first message reaches the in-proc
   assert.equal(dom.find((n) => n.className.includes("row-error")), null, "and nothing must fail on the way");
   await app.dispose();
 });
+
+// ---- deleting a conversation ------------------------------------------------
+//
+// `session.remove` -> `repository.remove` -> `storage.remove` were implemented,
+// unit-tested and contract-tested; `intents.ts` decoded a `delete-chat` intent
+// and had a test for it. Nothing in the app rendered a control carrying that
+// intent and `perform` had no case for it, so a conversation, once started,
+// could not be removed from the device by any sequence of taps. Storage grew
+// forever and anything typed into a chat stayed there.
+
+test("a conversation can be DELETED from the chat list", async () => {
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+  await app!.session.record("what is the capital of France", "Paris");
+  assert.equal((await app!.session.list()).length, 1, "precondition: one stored chat");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+
+  const del = dom.find((n) => n.dataset["action"] === "delete-chat");
+  assert.ok(del, `no delete control on a chat row:\n${dom.text()}`);
+  // Two taps: the first arms, the second deletes.
+  dom.click(del as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+
+  assert.deepEqual(await app!.session.list(), [], "the conversation is still on disk");
+  app?.dispose();
+});
+
+test("the FIRST tap on Delete does not delete", async () => {
+  // The pair. A single-tap irreversible delete a few millimetres from the row
+  // that opens the chat is a conversation lost to a mis-tap, and there is no
+  // undo anywhere in this app.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("keep me", "sure");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+
+  assert.equal((await app!.session.list()).length, 1, "one tap must not delete");
+  // And the control says so rather than looking unchanged.
+  const del = dom.find((n) => n.dataset["action"] === "delete-chat");
+  assert.equal(del?.dataset["armed"], "true", "the armed state must be visible");
+  assert.equal(del?.textContent, en.actionConfirmDelete);
+  app?.dispose();
+});
+
+test("deleting the chat that is OPEN clears it off the screen", async () => {
+  // Otherwise the user is left typing into a transcript that no longer exists
+  // on disk, and the next turn silently re-creates it.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "open-chat") as never);
+  await settle();
+  assert.match(dom.text(), /Paris/, "precondition: the chat is open");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.doesNotMatch(
+    transcript?.textContent ?? "",
+    /Paris/,
+    "the deleted conversation is still painted",
+  );
+  app?.dispose();
+});
+
+test("a delete that STORAGE refuses is said, not swallowed", async () => {
+  // `storage.remove` rejects on a real device -- SecurityError with site data
+  // blocked. A delete that quietly did nothing leaves the user believing a
+  // conversation is gone when it is still there.
+  const storage = createFakeStorage();
+  const { dom, platform } = harness({ storage });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("keep me", "sure");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  const remove = storage.remove.bind(storage);
+  (storage as { remove: (k: unknown) => Promise<void> }).remove = async () => {
+    throw new Error("SecurityError");
+  };
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "delete-chat") as never);
+  await settle();
+  (storage as { remove: (k: unknown) => Promise<void> }).remove = remove as never;
+
+  const assertive = dom.find((n) => n.getAttribute("aria-live") === "assertive");
+  assert.match(assertive?.textContent ?? "", /could not be deleted/i, `said nothing:\n${dom.text()}`);
+  assert.equal((await app!.session.list()).length, 1, "and nothing was actually removed");
+  app?.dispose();
+});
+
+test("a chat row SHOWS when it was last used", async () => {
+  // `buildChatList` has computed `updatedLabel` for every row since it was
+  // written and the renderer dropped it on the floor, so a list SORTED by
+  // recency displayed none of it -- and two chats both called "Untitled" were
+  // indistinguishable. The label reaches the row's visible text AND its
+  // accessible name, from one string, so the two cannot drift.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1_000_000, newChatId: () => "c1" });
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+
+  const open = dom.find((n) => n.dataset["action"] === "open-chat");
+  assert.ok(open, "no chat row");
+  assert.match(open.textContent, /just now/, `no relative time on the row:\n${dom.text()}`);
+  assert.match(
+    open.getAttribute("aria-label") ?? "",
+    /just now/,
+    "the spoken name must carry the same time the row shows",
+  );
+  app?.dispose();
+});
+
+test("the WALL CLOCK is read through TimePort.epochMs, not Date.now", async () => {
+  // `TimePort.epochMs` was implemented and conformance-tested and had zero
+  // callers in the whole application: every wall-clock read in main.ts was a
+  // bare `Date.now()`, so the seam that makes time injectable ran past its own
+  // port. `now` is deliberately NOT passed here, which is the production path.
+  const { dom, platform } = harness();
+  const FIXED = 1_700_000_000_000;
+  const timed: Platform = { ...platform, time: { ...platform.time, epochMs: () => FIXED } };
+  const app = await mount({ root: dom.root as never, platform: timed, newChatId: () => "c1" });
+  await app!.session.record("hello", "hi");
+  const [chat] = await app!.session.list();
+  assert.equal(chat?.updated, FIXED, "the chat's timestamp did not come from the port");
+  app?.dispose();
+});
+
+test("streaming announcements are paced by the MONOTONIC clock, not the wall clock", async () => {
+  // `announce` rate-limits with `nowMs - lastStreamAtMs >= ANNOUNCE_INTERVAL_MS`
+  // -- an ELAPSED comparison, which `core/src/ports/time.ts` says in as many
+  // words must use `nowMs` and never the wall clock: "Conflating them is how a
+  // clock correction mid-stream makes a coalescer wait forever". main.ts passed
+  // `Date.now()`, so an NTP correction moving the clock backwards mid-answer
+  // silences every further streaming announcement until real time catches up
+  // with the pre-correction reading, and a screen-reader user simply stops
+  // being told what the model is saying.
+  //
+  // Driven here by a monotonic clock that advances a second per read against a
+  // turn that never ends: with the port's clock BOTH finished sentences are
+  // spoken during the stream, and with `Date.now()` the second one waits for a
+  // terminal event that is not coming.
+  const { dom, http, platform } = harness();
+  let tick = 0;
+  const timed: Platform = {
+    ...platform,
+    time: { ...platform.time, nowMs: () => (tick += 1000) },
+  };
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode(sse([["start", { msg_id: "m1", run_id: "r1" }]])));
+        controller.enqueue(enc.encode(sse([["delta", { msg_id: "m1", text: "The first sentence. " }]])));
+        await new Promise((r) => setTimeout(r, 40));
+        controller.enqueue(enc.encode(sse([["delta", { msg_id: "m1", text: "The second sentence. " }]])));
+        // Never closed: an `end` would flush everything held back regardless
+        // of which clock paced it, and the test would pass against the defect.
+      },
+    }),
+  }));
+  const app = await mount({ root: dom.root as never, platform: timed, now: () => 1, newChatId: () => "c1" });
+  submit(dom, "two sentences please");
+  await settle(200);
+
+  // The region is REASSIGNED per publish (each utterance replaces the last),
+  // so what it holds at the end is the most recent thing said. With the port's
+  // clock that is the second sentence; rate-limited by the wall clock, the
+  // second announcement never happens and the region still reads the first.
+  const polite = dom.find((n) => n.getAttribute("aria-live") === "polite");
+  assert.match(
+    polite?.textContent ?? "",
+    /second sentence/i,
+    `the second sentence never reached the live region:\n${polite?.textContent}`,
+  );
+  app?.dispose();
+});

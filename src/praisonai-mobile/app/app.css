@@ -130,6 +130,21 @@ html, body {
 .row-notice { color: var(--soft); font-size: .88rem; text-align: center; }
 .row-dropped { color: var(--warn); font-size: .8rem; }
 
+/* A chat row is a DIV holding two controls now -- one that opens the chat and
+   one that deletes it -- because a button cannot legally contain a button and
+   there was no way to delete a conversation at all before. Only new selectors
+   are added here; nothing above changes. */
+.row-chat { display: flex; align-items: baseline; gap: .5rem; padding: 0; }
+.chat-open { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: .5rem;
+  text-align: start; background: none; border: none; }
+.chat-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+/* The time the list is SORTED by, which nothing rendered until now. Muted and
+   smaller: it is context for the title, not a second title. */
+.chat-updated { flex: 0 0 auto; color: var(--soft); font-size: .8rem; }
+.chat-delete { flex: 0 0 auto; }
+.chat-delete[data-armed="true"] { border-color: var(--bad); color: var(--bad); }
+
 .composer {
   display: flex;
   gap: .5rem;

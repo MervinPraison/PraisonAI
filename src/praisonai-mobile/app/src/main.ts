@@ -355,17 +355,61 @@ export function buildChatsScreen(
     section.append(note);
   }
   for (const row of view.rows) {
-    const el = doc.createElement("button");
-    el.type = "button";
+    // A DIV wrapping the controls, not a button that IS the row. A delete
+    // control has to live inside the row it deletes, and a button inside a
+    // button is invalid markup that browsers un-nest -- which puts the delete
+    // control somewhere other than where it was written.
+    const el = doc.createElement("div");
     el.className = `row row-chat row-chat-${row.kind}`;
+    el.dataset["chatId"] = row.id;
+
+    const open = doc.createElement("button");
+    open.type = "button";
+    open.className = "chat-open";
     // A tap on an unreadable row has nowhere useful to go, so only real chats
     // carry the open-chat intent -- intents.ts refuses a missing chatId anyway.
     if (row.kind === "chat") {
-      el.dataset["action"] = "open-chat";
-      el.dataset["chatId"] = row.id;
+      open.dataset["action"] = "open-chat";
+      open.dataset["chatId"] = row.id;
     }
-    el.setAttribute("aria-label", chatRowName(strings, row));
-    el.textContent = row.title;
+    // Title AND when it was last touched, from one string so the visible time
+    // and the spoken time cannot differ. `buildChatList` has computed
+    // `updatedLabel` for every row on every visit since it was written and
+    // nothing rendered it: the list is SORTED by recency and showed none of
+    // it, so two chats called "Untitled" were indistinguishable.
+    open.setAttribute(
+      "aria-label",
+      row.kind === "chat"
+        ? strings.chatUpdated(chatRowName(strings, row), row.updatedLabel)
+        : chatRowName(strings, row),
+    );
+    const title = doc.createElement("span");
+    title.className = "chat-title";
+    title.textContent = row.title;
+    open.append(title);
+    if (row.kind === "chat") {
+      const when = doc.createElement("span");
+      when.className = "chat-updated";
+      when.textContent = row.updatedLabel;
+      open.append(when);
+    }
+    el.append(open);
+
+    if (row.kind === "chat") {
+      // The affordance for `session.remove` -> `repository.remove` ->
+      // `storage.remove`. All three were implemented and contract-tested, the
+      // `delete-chat` intent was decoded and tested, and NOTHING in the app
+      // rendered a control carrying it -- so a conversation, once started,
+      // could never be removed from the device by any sequence of taps.
+      const del = doc.createElement("button");
+      del.type = "button";
+      del.className = "chat-delete";
+      del.dataset["action"] = "delete-chat";
+      del.dataset["chatId"] = row.id;
+      del.textContent = strings.actionDelete;
+      del.setAttribute("aria-label", strings.deleteChat(row.title));
+      el.append(del);
+    }
     section.append(el);
   }
   return section;
@@ -454,6 +498,20 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   });
 
   const platform = deps.platform ?? detectPlatform();
+
+  /**
+   * The WALL clock, and it comes from the port.
+   *
+   * `TimePort.epochMs` existed, was implemented by the web adapter, was
+   * conformance-tested, and had zero callers anywhere in the application: every
+   * wall-clock read in this file was a bare `Date.now()`, so the seam that is
+   * supposed to make time injectable ran past its own port. The port draws the
+   * distinction in its doc comment -- `nowMs` is monotonic and for elapsed
+   * intervals, `epochMs` is the wall clock and for timestamps -- and "conflating
+   * them is how a clock correction mid-stream makes a coalescer wait forever or
+   * flush every frame".
+   */
+  const nowEpochMs = deps.now ?? ((): number => platform.time.epochMs());
 
   // ---- locale and direction ----------------------------------------------
   // Detected, not the literal "en" this used to hardcode. The English table is
@@ -598,7 +656,14 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       turn: view.turn,
       strings,
       locale: activeLocale,
-      nowMs: Date.now(),
+      // MONOTONIC, not the wall clock. `announce` compares
+      // `nowMs - lastStreamAtMs` against its rate-limit interval, and a
+      // `Date.now()` there is exactly the conflation `core/src/ports/time.ts`
+      // is written against: an NTP correction that moves the clock backwards
+      // mid-answer silences every further streaming announcement until real
+      // time catches up with the pre-correction reading, so a screen-reader
+      // user simply stops being told what the model is saying.
+      nowMs: platform.time.nowMs(),
     });
     announcer = spoken.state;
     // Each region is assigned ONCE, with every utterance of that politeness
@@ -673,7 +738,7 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // first launch. registry.ts says why desktop Tauri counts as a device.
     engineId: defaultEngineIdFor(platform.kind),
     onPublish: publish,
-    now: deps.now ?? (() => Date.now()),
+    now: nowEpochMs,
     newChatId: mintChatId,
   });
 
@@ -738,6 +803,47 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   // The chat screen is retained (it holds scroll position and a live stream);
   // settings and chats are built on demand and rebuilt each visit. `transition`
   // decides what to mount, hide and destroy; this half only obeys it.
+  /**
+   * Redraw a chats section from storage, in place.
+   *
+   * Extracted from the `build` callback because a DELETE has to refresh a list
+   * that is already on screen: the chats screen is rebuilt on each VISIT, and
+   * deleting a row is not a visit. Rebuilding through the same function is
+   * what keeps "the row is gone" and "the list is now empty" the same
+   * rendering -- removing the node by hand would leave a list showing nothing
+   * where `chatsEmpty` belongs.
+   */
+  const refreshChats = async (section: HTMLElement): Promise<void> => {
+    try {
+      const [summaries, unreadable] = await Promise.all([
+        app.session.list(),
+        app.session.repository.listUnreadable(),
+      ]);
+      const fresh = buildChatsScreen(
+        doc,
+        summaries as readonly ChatSummary[],
+        unreadable,
+        nowEpochMs(),
+        strings,
+      );
+      section.textContent = "";
+      for (const child of [...fresh.children]) section.append(child as HTMLElement);
+    } catch {
+      // Storage can reject while the list loads -- SecurityError with site
+      // data blocked, QuotaExceededError. A floating rejection here reaches
+      // the global crash handler and replaces the WHOLE app with the fatal
+      // screen; a failed chat list must stay a LOCAL failure, so the user
+      // can go back and keep using the conversation they are in.
+      section.textContent = "";
+      const notice = doc.createElement("p");
+      notice.className = "row row-notice";
+      notice.dataset["tone"] = "warning";
+      notice.setAttribute("role", "alert");
+      notice.textContent = strings.crashed;
+      section.append(notice);
+    }
+  };
+
   const screens = createScreens({
     root,
     build: (id: ScreenId): HTMLElement => {
@@ -745,35 +851,8 @@ export async function mount(deps: MountDeps): Promise<App | null> {
       if (id === "chats") {
         // A fresh snapshot each visit: a chat created since the list was last
         // seen must appear, and one deleted must be gone.
-        const section = buildChatsScreen(doc, [], [], deps.now?.() ?? Date.now(), strings);
-        void (async (): Promise<void> => {
-          const [summaries, unreadable] = await Promise.all([
-            app.session.list(),
-            app.session.repository.listUnreadable(),
-          ]);
-          const fresh = buildChatsScreen(
-            doc,
-            summaries as readonly ChatSummary[],
-            unreadable,
-            deps.now?.() ?? Date.now(),
-            strings,
-          );
-          section.textContent = "";
-          for (const child of [...fresh.children]) section.append(child as HTMLElement);
-        })().catch(() => {
-          // Storage can reject while the list loads -- SecurityError with site
-          // data blocked, QuotaExceededError. A floating rejection here reaches
-          // the global crash handler and replaces the WHOLE app with the fatal
-          // screen; a failed chat list must stay a LOCAL failure, so the user
-          // can go back and keep using the conversation they are in.
-          section.textContent = "";
-          const notice = doc.createElement("p");
-          notice.className = "row row-notice";
-          notice.dataset["tone"] = "warning";
-          notice.setAttribute("role", "alert");
-          notice.textContent = strings.crashed;
-          section.append(notice);
-        });
+        const section = buildChatsScreen(doc, [], [], nowEpochMs(), strings);
+        void refreshChats(section);
         return section;
       }
       // "about" and "chat" have no builder here: chat is the pre-built root
@@ -808,6 +887,19 @@ export async function mount(deps: MountDeps): Promise<App | null> {
   // the settings button -- so the user lands where they were, not at the top of
   // a list they have to scroll down again.
   let restoreFocus: HTMLElement | null = null;
+
+  /**
+   * The chat whose delete control is ARMED, or null.
+   *
+   * Deleting a conversation is the only irreversible thing in this app, and a
+   * chat row's delete button sits a few millimetres from the row that opens
+   * it, on a touch screen. So the first tap arms and the second deletes.
+   *
+   * Held by chat id rather than by element, for the same reason `syncSettings`
+   * walks: the chats screen is rebuilt on every visit, so any element held
+   * across a navigation is detached.
+   */
+  let armedDelete: string | null = null;
 
   // The three lines focus.ts deliberately does NOT do -- move focus, save it,
   // restore it -- because they are the only part it cannot unit test. Doing
@@ -848,6 +940,11 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     // focus on the screen the user just left, or on <body> once that screen was
     // hidden -- exactly the failure focus.ts's ids exist to fix.
     applyFocus(focus);
+    // Leaving the list disarms it. A delete armed before a navigation and
+    // still armed on the way back would turn the FIRST tap after returning
+    // into a deletion, with nothing on screen saying so -- the two-tap guard
+    // silently spending itself while the user was elsewhere.
+    armedDelete = null;
     currentRoute = route;
   };
   // The router's root is `chats`, but the app opens on the chat screen; align
@@ -942,6 +1039,27 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     }
   };
 
+  /** Put every delete control in step with `armedDelete`. */
+  const syncDeleteArming = (): void => {
+    const stack: HTMLElement[] = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (node === undefined) break;
+      for (const child of node.children) {
+        if (child instanceof HTMLElement) stack.push(child);
+      }
+      if (node.dataset["action"] !== "delete-chat") continue;
+      const id = node.dataset["chatId"] ?? "";
+      // The title is read off the sibling the row rendered, so the button says
+      // the same name the row does even after a rebuild.
+      const title = node.parentElement?.textContent ?? id;
+      const armed = id !== "" && id === armedDelete;
+      node.textContent = armed ? strings.actionConfirmDelete : strings.actionDelete;
+      node.setAttribute("aria-label", armed ? strings.deleteChatConfirm(title) : strings.deleteChat(title));
+      node.dataset["armed"] = armed ? "true" : "false";
+    }
+  };
+
   const perform = async (intent: Intent): Promise<void> => {
     switch (intent.kind) {
       case "send":
@@ -1015,6 +1133,59 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         const refusal = stored ? null : strings.settingRejected(labelOf(def));
         if (refusal !== null) assertive.textContent = refusal;
         syncSettings(intent.key, refusal);
+        return;
+      }
+      case "delete-chat": {
+        // `session.remove` -> `repository.remove` -> `storage.remove`: three
+        // implemented, contract-tested methods with no caller in the app, and
+        // an intent `intents.ts` decoded for a control nothing rendered. A
+        // conversation, once started, could not be removed from the device.
+        //
+        // Arm first. The second tap on the SAME row is the one that deletes;
+        // a tap on a different row moves the arming rather than deleting two.
+        if (armedDelete !== intent.chatId) {
+          armedDelete = intent.chatId;
+          syncDeleteArming();
+          const armedTitle =
+            (await app.session.list()).find((c) => c.id === intent.chatId)?.title ?? intent.chatId;
+          assertive.textContent = strings.deleteChatConfirm(armedTitle);
+          return;
+        }
+        const title =
+          (await app.session.list()).find((c) => c.id === intent.chatId)?.title ?? intent.chatId;
+        armedDelete = null;
+        // Read BEFORE the remove. `session.remove` clears `current` itself
+        // when it deletes the open chat, so asking afterwards always answers
+        // null and the transcript is left on screen -- a conversation the user
+        // can keep typing into that no longer exists on disk.
+        const wasOpen = app.session.current()?.id === intent.chatId;
+        try {
+          await app.session.remove(intent.chatId);
+        } catch {
+          // StoragePort rejects on a real device. Left to float this reaches
+          // the crash handler and replaces the whole app; and a delete that
+          // silently did nothing leaves the user believing it worked.
+          assertive.textContent = strings.chatDeleteFailed;
+          syncDeleteArming();
+          return;
+        }
+        // The conversation on screen may be the one just deleted. Leaving it
+        // there is a transcript the user can keep typing into that no longer
+        // exists on disk -- the next turn would silently re-create it.
+        if (wasOpen) {
+          void app.controller.stop();
+          app.controller.setChat(mintChatId());
+          app.session.reset();
+          history = [];
+          render = emptyRender;
+          nodes.nodes.clear();
+          announcer = initialAnnouncer;
+          transcript.textContent = "";
+          polite.textContent = "";
+        }
+        assertive.textContent = strings.chatDeleted(title);
+        const list = screens.nodes.get("chats");
+        if (list !== undefined) await refreshChats(list);
         return;
       }
       case "open-chat": {

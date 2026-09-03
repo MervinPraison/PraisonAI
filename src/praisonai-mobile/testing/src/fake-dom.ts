@@ -38,6 +38,7 @@ interface FakeNode {
   ownerDocument: unknown;
   setAttribute(name: string, value: string): void;
   getAttribute(name: string): string | null;
+  removeAttribute(name: string): void;
   append(...nodes: FakeNode[]): void;
   insertBefore(node: FakeNode, ref: FakeNode | null): FakeNode;
   remove(): void;
@@ -160,6 +161,10 @@ export function createFakeDom(): FakeDom {
 
     el.setAttribute = (n: string, v: string): void => { el.attrs[n] = v; };
     el.getAttribute = (n: string): string | null => el.attrs[n] ?? null;
+    // Real removal, not an empty string. `aria-label=""` and no aria-label
+    // are different to a screen reader, and app/src/dom.ts relies on the
+    // difference to let a text row be announced by its own words.
+    el.removeAttribute = (n: string): void => { delete el.attrs[n]; };
     el.append = (...nodes: FakeNode[]): void => {
       for (const n of nodes) { n.parentElement = el; el.children.push(n); }
     };
