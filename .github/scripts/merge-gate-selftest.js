@@ -213,6 +213,33 @@ assert(
   mg.findMergeGateVerdict(recentVerdictOnHead, null, '2026-06-27T09:55:00Z') === 'APPROVE'
 );
 
+assert(
+  'scan kickoff text is not a verdict',
+  mg.findMergeGateVerdict([
+    {
+      body: '**Merge gate scan** — eligible for assessment. Claude merge gate will assess and may auto-merge if `MERGE_GATE_VERDICT: APPROVE`.',
+      created_at: '2026-06-27T10:05:00Z',
+    },
+  ], null, '2026-06-27T09:55:00Z') === null
+);
+
+const finalWithFinished = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: 'Claude finished', created_at: '2026-06-27T10:05:00Z' },
+];
+assert('final complete requires Claude finished reply', mg.finalClaudeCompletedOnSha(finalWithFinished, '2026-06-27T09:55:00Z'));
+assert('final trigger alone is incomplete', !mg.finalClaudeCompletedOnSha(
+  [{ user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-06-27T10:00:00Z' }],
+  '2026-06-27T09:55:00Z'
+));
+
+assert('recent scan comment detected', mg.hasRecentMergeGateScanComment([
+  { body: '**Merge gate scan** — eligible', created_at: new Date().toISOString() },
+]));
+assert('old scan comment not recent', !mg.hasRecentMergeGateScanComment([
+  { body: '**Merge gate scan** — eligible', created_at: '2020-01-01T00:00:00Z' },
+]));
+
 // Sensitive + secrets
 assert('workflow path sensitive', mg.sensitivePathReasons([{ filename: '.github/workflows/foo.yml' }]).length === 1);
 assert('ci-only label exempts workflows', mg.sensitivePathReasons(
@@ -257,8 +284,13 @@ const finalAfterRebase = {
   body: '@claude You are the FINAL architecture reviewer.',
   created_at: conflictIso(-20 * 60 * 1000),
 };
+const claudeFinishedAfterRebase = {
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: 'Claude finished',
+  created_at: conflictIso(-19 * 60 * 1000),
+};
 const headAfterRebase = conflictIso(-21 * 60 * 1000);
-const rebaseComments = [conflictTrigger, rebaseDone, finalAfterRebase];
+const rebaseComments = [conflictTrigger, rebaseDone, finalAfterRebase, claudeFinishedAfterRebase];
 assert('conflict blocks before rebase done', mg.hasRecentConflictComment([conflictTrigger], headAfterRebase));
 assert('conflict clears after rebase + FINAL on HEAD', !mg.hasRecentConflictComment(rebaseComments, headAfterRebase));
 assert('conflict still blocks without FINAL on HEAD', mg.hasRecentConflictComment(
@@ -325,5 +357,26 @@ assert('substantive dispatches still counted', mg.countSubstantiveMergeGateRuns(
   { event: 'schedule' },
 ]) === 2);
 assert('countSubstantiveMergeGateRuns null-safe', mg.countSubstantiveMergeGateRuns(null) === 0);
+assert('rate limit threshold is 200', mg.MIN_CORE_RATE_LIMIT_REMAINING === 200);
 
-process.exit(failed ? 1 : 0);
+(async () => {
+  const skipLow = await mg.shouldSkipMergeGateDispatch(
+    {
+      rest: {
+        rateLimit: {
+          get: async () => ({ data: { resources: { core: { remaining: 50 } } } }),
+        },
+      },
+    },
+    'owner',
+    'repo',
+    1,
+    { info: () => {} }
+  );
+  assert('rate limit low skips dispatch', skipLow === true);
+
+  process.exit(failed ? 1 : 0);
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
