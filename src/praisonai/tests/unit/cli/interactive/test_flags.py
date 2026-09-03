@@ -210,39 +210,6 @@ class TestShareFlag:
         assert config.share is False
 
 
-class TestVariantFlag:
-    """Tests for --variant flag."""
-    
-    def test_config_from_args_variant(self):
-        """Config correctly parses --variant flag."""
-        from praisonai.cli.interactive.config import InteractiveConfig
-        
-        args = Namespace(
-            model=None,
-            session=None,
-            continue_session=False,
-            workspace=os.getcwd(),
-            no_acp=False,
-            no_lsp=False,
-            verbose=False,
-            memory=False,
-            file=[],
-            variant="high"
-        )
-        
-        config = InteractiveConfig.from_args(args)
-        
-        assert config.variant == "high"
-    
-    def test_config_variant_defaults_none(self):
-        """Config variant defaults to None."""
-        from praisonai.cli.interactive.config import InteractiveConfig
-        
-        config = InteractiveConfig()
-        
-        assert config.variant is None
-
-
 class TestFlagParity:
     """Tests to ensure flag parity across modes."""
     
@@ -263,7 +230,6 @@ class TestFlagParity:
             "approval_mode",
             "files",
             "share",
-            "variant",
         ]
         
         config = InteractiveConfig()
