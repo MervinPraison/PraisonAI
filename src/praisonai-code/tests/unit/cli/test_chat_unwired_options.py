@@ -1,9 +1,8 @@
 """`praisonai chat` must not accept options it silently ignores.
 
-chat_main declares 39 parameters. _run_legacy_terminal_chat takes 13 of them
-and builds an argparse Namespace with nine fields. Twelve reach neither, and
-nothing forwards them indirectly -- there is no locals(), ctx.params or
-**kwargs pass-through in the command body.
+chat_main declares many parameters and dispatches to the async TUI. Twelve of
+those options reach neither the TUI config nor any other runtime path -- there
+is no locals(), ctx.params or **kwargs pass-through in the command body.
 
 So `praisonai chat --planning auto --guardrails strict` looked like it had
 configured something and had not: accepted, validated by typer, and dropped.
@@ -11,6 +10,10 @@ configured something and had not: accepted, validated by typer, and dropped.
 Wiring the twelve up is twelve separate features. Saying so is one line, and
 it stops the CLI making a promise it does not keep. These tests pin that the
 warning names exactly what was supplied, and stays quiet otherwise.
+
+The tests stub the *actual* runtime chat_main dispatches to -- the credential
+gate and the async TUI -- so a supplied option exercises the warning without
+depending on external state (an API key, a local endpoint, or a real TTY).
 """
 import typer
 from typer.testing import CliRunner
@@ -18,9 +21,36 @@ from typer.testing import CliRunner
 import praisonai_code.cli.commands.chat as chat_module
 
 
+class _StubTUI:
+    """Stand-in for AsyncTUI: constructs cleanly and never runs a real chat."""
+
+    execution_failed = False
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def run_single(self, prompt):
+        return ""
+
+    def run(self):
+        return None
+
+
 def _app(monkeypatch):
-    """chat_main, with the interactive REPL stubbed out."""
-    monkeypatch.setattr(chat_module, "_run_legacy_terminal_chat", lambda **kw: None)
+    """chat_main, with the credential gate and async TUI stubbed out.
+
+    chat_main resolves a model, runs the credential gate, then dispatches to
+    AsyncTUI -- none of which should touch the network or exit non-zero in a
+    unit test. Both are imported locally inside chat_main, so they are patched
+    at their source modules.
+    """
+    monkeypatch.setattr(
+        "praisonai_code.llm.credentials.ensure_configured_or_onboard",
+        lambda model=None, interactive=True: model,
+    )
+    monkeypatch.setattr(
+        "praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI
+    )
     app = typer.Typer()
     app.command()(chat_module.chat_main)
     return app

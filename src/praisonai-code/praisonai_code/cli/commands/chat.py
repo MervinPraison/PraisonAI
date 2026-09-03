@@ -380,12 +380,13 @@ def _run_profiled_chat(
         raise typer.Exit(1)
 
 
-# Options `chat` declares but never passes to the runtime. _run_legacy_terminal_chat
-# takes 13 of chat_main's 39 parameters and builds an argparse Namespace with nine
-# fields; these twelve reach neither, so `praisonai chat --planning --guardrails
-# strict` looked like it had configured something and had not. Wiring them up is
-# twelve separate features; saying so is one line, and stops the CLI making a
-# promise it does not keep.
+# Options `chat` declares but never passes to the runtime. chat_main dispatches to
+# AsyncTUI via AsyncTUIConfig, which consumes only a subset of its parameters; these
+# twelve reach neither that config nor any other path in the body, so `praisonai chat
+# --planning --guardrails strict` looked like it had configured something and had not.
+# Wiring them up is twelve separate features; saying so is one line, and stops the CLI
+# making a promise it does not keep. test_every_listed_option_really_is_unread pins
+# this list against the body so it cannot rot once an option is genuinely wired.
 _UNWIRED_CHAT_OPTIONS = {
     "knowledge": "--knowledge",
     "guardrails": "--guardrails",
