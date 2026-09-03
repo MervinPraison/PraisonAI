@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { SIZE_BUDGET_BYTES, TARGETS } from "./bundle.mjs";
+import { SHELL_BUDGET_BYTES, LAZY_BUDGET_BYTES, TARGETS } from "./bundle.mjs";
 import { importsOf, layerOf, targetOf, matchesAllowlist, ungovernedRootsIn, violations, sourceFilesUnder } from "./depgraph.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -347,13 +347,17 @@ test("an ungoverned directory holding only .mjs is still reported", () => {
   }
 });
 
-test("the size budget and the webview targets are the values the gate claims", () => {
-  // `SIZE_BUDGET_BYTES` and `TARGETS` are the entire contract of the bundle
-  // gate, and both could be changed silently -- 400kB to 4MB, or the baseline
-  // moved from safari16/chrome108 to a browser no target device runs. A gate
+test("the size budgets and the webview targets are the values the gate claims", () => {
+  // `SHELL_BUDGET_BYTES`, `LAZY_BUDGET_BYTES` and `TARGETS` are the entire
+  // contract of the bundle gate, and each could be changed silently -- 400kB
+  // to 4MB, or the baseline moved to a browser no target device runs. A gate
   // whose threshold can be edited without a failing test is a gate that can be
   // turned off.
-  assert.equal(SIZE_BUDGET_BYTES, 400 * 1024, "the budget is what makes a dependency a decision");
+  assert.equal(SHELL_BUDGET_BYTES, 400 * 1024, "the shell budget is what makes a dependency a decision");
+  // The lazy allowance is a second number on purpose (bundle.mjs says why),
+  // pinned for the same reason as the first: the engine went from 0 to 1460kB
+  // in one PR, and the next provider is 100-170kB.
+  assert.equal(LAZY_BUDGET_BYTES, 1600 * 1024, "the lazy allowance is a decision too");
   // The Chrome floor is DERIVED from `minSdkVersion`, not restated here. This
   // line said `chrome108` while tauri.conf.json declared `minSdkVersion: 26`
   // -- Android 8.0, WebView ~Chrome 58 -- so the two numbers disagreed and a

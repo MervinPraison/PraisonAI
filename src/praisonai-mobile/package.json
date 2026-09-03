@@ -25,5 +25,12 @@
     "@types/node": "^22.20.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@ai-sdk/cohere": "^4.0.37",
+    "@ai-sdk/google": "^4.0.63",
+    "@ai-sdk/openai": "^4.0.57",
+    "ai": "^7.0.91",
+    "praisonai": "file:../praisonai-ts"
   }
 }
