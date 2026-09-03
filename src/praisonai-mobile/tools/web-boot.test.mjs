@@ -276,10 +276,17 @@ test("a redeployed site replaces the cached one instead of being pinned behind i
 
   // A cache left behind by a build older than this browser session. `activate`
   // is the only thing that will ever remove it.
-  await page.evaluate(async () => {
+  // ...and a cache owned by a DIFFERENT app on this same GitHub Pages origin
+  // (all of an account's project sites share one *.github.io origin, and Cache
+  // Storage is partitioned by origin, not by worker scope). `activate` must
+  // leave this one alone -- deleting it would wipe a sibling site's offline data.
+  const siblingCache = "some-other-app-cache";
+  await page.evaluate(async (sibling) => {
     const old = await caches.open("praisonai-mobile-000000000000dead");
     await old.put("./stale.js", new Response("// from a build two deploys ago"));
-  });
+    const other = await caches.open(sibling);
+    await other.put("./other.js", new Response("// a different app's asset"));
+  }, siblingCache);
 
   // ---- the site is redeployed: new HTML, same worker ----------------------
   // The worker's bytes are untouched, so NO new worker installs and nothing
@@ -304,17 +311,28 @@ test("a redeployed site replaces the cached one instead of being pinned behind i
     await reg.update();
   });
 
+  // `activate` deletes only THIS app's stale caches: the old praisonai-mobile
+  // cache is gone, the current one remains, and the sibling app's cache is
+  // untouched. The expected set is sorted -- "praisonai-mobile-1..." precedes
+  // "some-other-app-cache".
+  const expected = [v2Cache, siblingCache].sort();
+  const settled = (k) => k.length === expected.length && k.every((v, i) => v === expected[i]);
   const deadline = Date.now() + 20_000;
   let keys = await activeCaches();
-  while (!(keys.length === 1 && keys[0] === v2Cache) && Date.now() < deadline) {
+  while (!settled(keys) && Date.now() < deadline) {
     await new Promise((ok) => setTimeout(ok, 100));
     keys = await activeCaches();
   }
   assert.deepEqual(
     keys,
-    [v2Cache],
+    expected,
     "after the new worker activated the old caches are still there: `activate` must delete every " +
-      "cache but the current one, or a replaced build's bytes live on the user's disk forever",
+      "praisonai-mobile cache but the current one, or a replaced build's bytes live on the user's disk forever",
+  );
+  assert.ok(
+    keys.includes(siblingCache),
+    "`activate` deleted a cache owned by a DIFFERENT app on the same origin: cleanup must be scoped " +
+      "to the praisonai-mobile- prefix, or updating this app wipes a sibling GitHub Pages site's offline data",
   );
 
   // The new build is the one being served, from its own cache.

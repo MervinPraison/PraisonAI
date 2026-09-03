@@ -13,6 +13,7 @@
 //   anything else same-origin -- straight to the network. Cross-origin (the
 //                  engine at 127.0.0.1:8765, an https engine) is never touched.
 const CACHE = "praisonai-mobile-__BUILD_ID__";
+const CACHE_PREFIX = "praisonai-mobile-";
 const PRECACHE = __PRECACHE__;
 
 const INDEX = new URL("./index.html", self.location.href).href;
@@ -30,7 +31,13 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
+            .map((key) => caches.delete(key)),
+        ),
+      )
       .then(() => self.clients.claim()),
   );
 });
