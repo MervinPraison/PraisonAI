@@ -38,6 +38,12 @@ KNOWN_DEAD = frozenset({
 # name -- from counting as a call site for DefaultAdapter.format_tools.
 ADAPTER_RECEIVERS = frozenset({"_provider_adapter", "adapter", "provider_adapter"})
 
+# The factory that returns a provider adapter. A direct call on its result --
+# get_provider_adapter(provider).foo() -- is a genuine adapter call site, so it
+# is recognised via this marker rather than being mistaken for a bare receiver.
+ADAPTER_FACTORIES = frozenset({"get_provider_adapter"})
+ADAPTER_FACTORY_RECEIVER = "<adapter-factory>"
+
 
 def _llm_package_root() -> pathlib.Path:
     import praisonaiagents.llm as llm_pkg
@@ -62,9 +68,9 @@ def _receiver_name(func: ast.Attribute):
     if isinstance(value, ast.Call):            # get_provider_adapter(p).foo()
         inner = value.func
         if isinstance(inner, ast.Name):
-            return inner.id
+            return ADAPTER_FACTORY_RECEIVER if inner.id in ADAPTER_FACTORIES else inner.id
         if isinstance(inner, ast.Attribute):
-            return inner.attr
+            return ADAPTER_FACTORY_RECEIVER if inner.attr in ADAPTER_FACTORIES else inner.attr
     return None
 
 
@@ -89,7 +95,9 @@ def _call_sites() -> dict:
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
                 continue
             name = node.func.attr
-            if name in methods and _receiver_name(node.func) in ADAPTER_RECEIVERS:
+            if name in methods and _receiver_name(node.func) in (
+                ADAPTER_RECEIVERS | {ADAPTER_FACTORY_RECEIVER}
+            ):
                 found.setdefault(name, []).append(
                     f"{path.relative_to(root)}:{node.lineno}")
     return found
