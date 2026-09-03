@@ -38,9 +38,18 @@ name: mobile platforms
 on:
   workflow_dispatch:
   pull_request:
-    paths:
+    paths: &watched
       - 'src/praisonai-mobile/**'
+      - 'src/praisonai-ts/src/**'
       - '.github/workflows/mobile-platforms.yml'
+  # Without this, no platform build had ever run on main -- so a break
+  # introduced by two PRs that were each green apart could sit on main
+  # unnoticed. That is exactly what happened: #4737 branched from before
+  # #4727 added the `file:` dependency, so the two were never installed
+  # together until they had both landed.
+  push:
+    branches: [main]
+    paths: *watched
 
 concurrency:
   group: mobile-platforms-${{ github.ref }}
@@ -72,6 +81,18 @@ jobs:
         with:
           workspaces: src/praisonai-mobile/src-tauri
           key: ios-sim
+      - name: "Build praisonai-ts (the file: dependency)"
+        # praisonai-mobile depends on praisonai by `file:`, so `npm ci`
+        # here runs praisonai-ts's own `prepare` -> `rimraf dist`. On a
+        # fresh runner praisonai-ts has no node_modules, so rimraf is not
+        # installed and `npm ci` dies with code 127 before a single
+        # platform step runs. mobile.yml gives all four of its jobs this
+        # step; these two were written against the tree from before the
+        # dependency existed and never got it.
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - run: npm ci
 
       - name: Generate the Xcode project (only if gen/apple is not committed)
@@ -255,6 +276,18 @@ jobs:
         with:
           workspaces: src/praisonai-mobile/src-tauri
           key: android-apk
+      - name: "Build praisonai-ts (the file: dependency)"
+        # praisonai-mobile depends on praisonai by `file:`, so `npm ci`
+        # here runs praisonai-ts's own `prepare` -> `rimraf dist`. On a
+        # fresh runner praisonai-ts has no node_modules, so rimraf is not
+        # installed and `npm ci` dies with code 127 before a single
+        # platform step runs. mobile.yml gives all four of its jobs this
+        # step; these two were written against the tree from before the
+        # dependency existed and never got it.
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - run: npm ci
 
       - name: Generate the Android project (only if gen/android is not committed)

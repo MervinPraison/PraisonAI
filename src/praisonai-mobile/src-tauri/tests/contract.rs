@@ -42,3 +42,10 @@ fn an_unknown_window_event_reports_nothing() {
     assert_eq!(phase_for("resized"), None);
     assert_eq!(phase_for(""), None);
 }
+
+#[test]
+fn the_back_plugin_name_is_the_one_the_acl_knows() {
+    // No permission is granted for it (it has no JS commands), but the name
+    // is still what tauri's plugin store keys on; the crate pins it.
+    assert_eq!(tauri_plugin_back_gesture::PLUGIN_NAME, "back-gesture");
+}

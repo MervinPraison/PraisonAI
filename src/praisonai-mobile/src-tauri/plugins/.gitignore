@@ -1,0 +1,15 @@
+# Build output for every in-repo Tauri mobile plugin. All of it is machine
+# generated on each android build and none of it belongs in git:
+#
+#   .tauri/          the tauri-api Kotlin sources + their Gradle build, copied
+#                    in from the tauri crate by tauri-plugin's build script
+#   build/           Gradle/Kotlin output: .jar, .dex, .bin, generated Java
+#   .gradle/         Gradle's per-project caches
+#   local.properties the developer's own SDK path
+#
+# Each plugin's own android/.gitignore repeats the first two; this file is the
+# one that covers a plugin added later whose generated .gitignore is missing.
+.tauri/
+build/
+.gradle/
+local.properties

@@ -1,0 +1,25 @@
+[package]
+name = "tauri-plugin-back-gesture"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Delivers Android's system back gesture to Rust, and lets Rust hand it back to the system."
+publish = false
+# Required by tauri-plugin's build script, and load-bearing beyond that: it is
+# what turns this crate's `cargo:android_library_path` into the
+# `DEP_TAURI_PLUGIN_BACK_GESTURE_ANDROID_LIBRARY_PATH` that tauri-build reads
+# to add android/ to the app's Gradle project. Drop it and the Kotlin half is
+# silently never compiled in.
+links = "tauri-plugin-back-gesture"
+
+[lib]
+name = "tauri_plugin_back_gesture"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

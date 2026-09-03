@@ -1400,9 +1400,9 @@ test("a FULLY present Tauri global is treated as present -- the pair", () => {
 
 test("the TAURI shell reports the keyboard height, without any native event", async () => {
   // `keyboardHeightPx` was a hard 0 whose only writer was the native
-  // `keyboard-height` event -- and nothing emits it: src-tauri/src/lib.rs's
-  // `on_window_event` is an empty closure, left unwired until the mobile
-  // targets are initialised. On a device --keyboard-height stayed 0 forever,
+  // `keyboard-height` event -- and nothing emits it: the Rust shell emits
+  // lifecycle, safe-area and back, and has no keyboard observer to emit
+  // this from. On a device --keyboard-height stayed 0 forever,
   // and app.css pins #root to `position: fixed; inset: 0` so the layout
   // viewport does not shrink either. The composer sat under the keyboard the
   // moment anyone tapped it -- the first thing anyone does with the app.

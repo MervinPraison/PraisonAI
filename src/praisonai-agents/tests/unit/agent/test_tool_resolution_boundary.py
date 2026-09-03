@@ -7,7 +7,15 @@ from unittest.mock import MagicMock, patch
 from praisonaiagents.agent.tool_execution import ToolExecutionMixin
 
 
+class _HookRegistry:
+    def has_hooks(self, event):
+        return False
+
+
 class _HookRunner:
+    def __init__(self):
+        self.registry = _HookRegistry()
+
     def execute_sync(self, *args, **kwargs):
         return []
 

@@ -60,6 +60,19 @@ curl -fsSL https://praison.ai/install.sh | bash
   </a>
 </div>
 
+<div align="center">
+  <h3>⬇️ Download the latest release</h3>
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+  </a>
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
+  </a>
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
+  </a>
+</div>
+
 ---
 
 ## 🎯 Use Cases
