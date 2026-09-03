@@ -198,6 +198,71 @@ def test_reselected_completed_task_not_double_counted_sync():
     assert yielded == [0, 1]
 
 
+def test_stale_manager_from_prior_run_lets_loop_terminate_sync():
+    """Re-running the same team injects a fresh synthetic ``manager_task`` while
+    the prior run's manager stays in ``self.tasks``. The stale manager must be
+    excluded from ``total_tasks`` so ``completed_count`` can reach it and the
+    loop terminates normally after the single real user task completes — instead
+    of looping forever because a phantom "task" can never be executed.
+    """
+    process, user_task, add_task = _build_process()  # user task id 0
+
+    # Simulate a completed prior run: its synthetic manager was injected (id 1)
+    # and recorded, and the user task is already completed.
+    prior_manager = Task(name="manager_task", description="prior", expected_output="x")
+    prior_id = add_task(prior_manager)  # id 1
+    process._synthetic_manager_task_ids.add(prior_id)
+    process.tasks[prior_id].status = "completed"
+    process.tasks[0].status = "completed"
+
+    # Second run: manager keeps selecting the already-completed user task. Without
+    # excluding the stale manager, total_tasks would be 2 (user + stale manager)
+    # but only the user task can ever complete -> infinite manager loop. With the
+    # fix total_tasks is 1 and the seeded count makes the loop exit immediately.
+    seq = [ManagerInstructions(task_id=0, agent_name="Worker", action="execute")]
+    yielded, _ = _drive_sync(process, add_task, seq)
+    assert yielded == []
+
+
+def test_aborted_prior_manager_not_selectable_sync(caplog):
+    """A stale manager left NOT completed by an aborted prior run must still be
+    rejected as a delegation target (by id) and excluded from the count so the
+    loop can finish once the real work is done."""
+    import logging
+
+    process, user_task, add_task = _build_process()  # user task id 0
+
+    prior_manager = Task(name="manager_task", description="prior", expected_output="x")
+    prior_id = add_task(prior_manager)  # id 1 — aborted: left "not started"
+    process._synthetic_manager_task_ids.add(prior_id)
+
+    # Manager tries to delegate to the stale manager (id 1), then to the real
+    # user task (id 0). The stale id must be refused and absent from valid IDs.
+    seq = [
+        ManagerInstructions(task_id=1, agent_name="Worker", action="execute"),
+        ManagerInstructions(task_id=0, agent_name="Worker", action="execute"),
+    ]
+    with caplog.at_level(logging.WARNING):
+        yielded, _ = _drive_sync(process, add_task, seq)
+    # Only the real user task runs; the stale manager (id 1) is never executed.
+    assert yielded == [0]
+    assert 1 not in yielded
+    # Re-prompt must advertise only the delegable user id, never the stale manager.
+    assert "valid IDs: [0]" in caplog.text
+
+
+def test_stale_manager_from_prior_run_lets_loop_terminate_async():
+    process, user_task, add_task = _build_process()  # user task id 0
+    prior_manager = Task(name="manager_task", description="prior", expected_output="x")
+    prior_id = add_task(prior_manager)  # id 1
+    process._synthetic_manager_task_ids.add(prior_id)
+    process.tasks[prior_id].status = "completed"
+    process.tasks[0].status = "completed"
+    seq = [ManagerInstructions(task_id=0, agent_name="Worker", action="execute")]
+    yielded = _drive_async(process, add_task, seq)
+    assert yielded == []
+
+
 def test_user_task_named_manager_task_is_still_delegable_sync():
     """Rejection must key off the synthetic task's *id*, not its name, so a
     legitimate user task named ``manager_task`` (id 0) still executes while the
