@@ -25,6 +25,16 @@ import { describeShellContract, type ShellHarness } from "./shell-contract.ts";
 import { createFakeStorage } from "../../../testing/src/fake-storage.ts";
 import { createFakeShell, PHONE_INSETS } from "../../../testing/src/fake-shell.ts";
 import { createWebStorage } from "../web/storage.ts";
+import {
+  createTauriStorage,
+  STORAGE_COMMANDS,
+  type StrictInvoke,
+} from "../tauri/storage.ts";
+import {
+  MIGRATION_MARKER,
+  migrateStorage,
+  preparedStorage,
+} from "../storage/migrate.ts";
 import { createWebSecrets } from "../web/secrets.ts";
 import { createWebTime } from "../web/time.ts";
 import { createFakeSecrets } from "../../../testing/src/fake-secrets.ts";
@@ -61,7 +71,111 @@ function memoryStorage(): Storage {
 // ---- both adapters must agree ---------------------------------------------
 
 describeStorageContract("fake storage", () => createFakeStorage());
-describeStorageContract("web storage", () => createWebStorage(memoryStorage()));
+
+// The web adapter is asked to survive a RELAUNCH: a second adapter over the
+// same backing Storage is exactly what the next launch builds. The fake is
+// not, and deliberately -- it is in-memory by design and claims no
+// durability, and asking it would be asserting that the fake is broken.
+//
+// Each `make()` gets its OWN backing, so the contract's cases stay isolated
+// from one another; the WeakMap is what lets `reopen` find the one backing
+// that particular port was built over. Sharing a single backing across every
+// case instead makes half the contract fail on the previous case's leftovers,
+// which is a test-harness bug wearing an adapter's clothes.
+{
+  const backings = new WeakMap<StoragePort, Storage>();
+  const openWeb = (backing: Storage): StoragePort => {
+    const port = createWebStorage(backing);
+    backings.set(port, backing);
+    return port;
+  };
+  describeStorageContract(
+    "web storage",
+    () => openWeb(memoryStorage()),
+    (previous) => {
+      const backing = backings.get(previous);
+      assert.ok(backing, "reopen was handed a port this registration did not build");
+      return openWeb(backing);
+    },
+  );
+}
+
+// ---- the Tauri adapter, against a stand-in for the Rust commands ----------
+//
+// What this proves and what it does not, stated plainly because the difference
+// matters. It proves the ADAPTER: that it invokes the five command names the
+// Rust side declares, with the argument names the Rust parameters are called,
+// that it keeps namespaces apart, that it turns a reply into the port's own
+// vocabulary, and that a value written before a "relaunch" is asked for again
+// afterwards. It does NOT prove the file store is atomic or durable -- that is
+// `src-tauri/src/store.rs`'s own test suite, where the filesystem actually is,
+// and `tools/storage-seam.test.mjs` is what stops the two sides drifting apart
+// on a name.
+//
+// The host is STRICT on purpose: an unknown command or a missing argument
+// throws rather than resolving to null. A forgiving stand-in would let the
+// adapter send `chatId` to a command expecting `id` and stay green, which is
+// the exact bug that costs a device every write with no error anywhere.
+function nativeHost(files: Map<string, string>): StrictInvoke {
+  const need = (args: Record<string, unknown> | undefined, name: string): string => {
+    const value = args?.[name];
+    if (typeof value !== "string") {
+      throw new Error(`missing string argument "${name}"`);
+    }
+    return value;
+  };
+  const prefixOf = (ns: string): string => `${ns}/`;
+
+  return async (command, args) => {
+    switch (command) {
+      case STORAGE_COMMANDS.read: {
+        const at = `${need(args, "namespace")}/${need(args, "id")}`;
+        return files.get(at) ?? null;
+      }
+      case STORAGE_COMMANDS.write: {
+        const at = `${need(args, "namespace")}/${need(args, "id")}`;
+        files.set(at, need(args, "value"));
+        return null;
+      }
+      case STORAGE_COMMANDS.remove: {
+        files.delete(`${need(args, "namespace")}/${need(args, "id")}`);
+        return null;
+      }
+      case STORAGE_COMMANDS.listIds: {
+        const prefix = prefixOf(need(args, "namespace"));
+        return [...files.keys()]
+          .filter((k) => k.startsWith(prefix))
+          .map((k) => k.slice(prefix.length));
+      }
+      case STORAGE_COMMANDS.clear: {
+        const prefix = prefixOf(need(args, "namespace"));
+        for (const k of [...files.keys()]) if (k.startsWith(prefix)) files.delete(k);
+        return null;
+      }
+      default:
+        throw new Error(`no such command: ${command}`);
+    }
+  };
+}
+
+{
+  const hosts = new WeakMap<StoragePort, Map<string, string>>();
+  const openNative = (files: Map<string, string>): StoragePort => {
+    const port = createTauriStorage({ invoke: nativeHost(files) });
+    hosts.set(port, files);
+    return port;
+  };
+  describeStorageContract(
+    "tauri storage",
+    () => openNative(new Map()),
+    // A relaunch: a brand new adapter over a store that outlived it.
+    (previous) => {
+      const files = hosts.get(previous);
+      assert.ok(files, "reopen was handed a port this registration did not build");
+      return openNative(files);
+    },
+  );
+}
 
 // The SecretsPort had no contract and no test of any kind. Collapsing the web
 // adapter's key from `${slot}:${account}` to `${slot}` survived the whole
@@ -279,6 +393,13 @@ function probeBridge(options: { readonly slowListen?: boolean } = {}): BridgePro
     bridge: {
       isPresent: () => true,
       invoke(command, args) {
+        invocations.push({ command, args: args ?? {} });
+        return Promise.resolve(null);
+      },
+      // The shell probe never reaches for storage, but the interface it stands
+      // in for now carries the strict form -- and a probe that omits it would
+      // stop compiling the day the shell does use it.
+      invokeStrict(command, args) {
         invocations.push({ command, args: args ?? {} });
         return Promise.resolve(null);
       },
@@ -1107,6 +1228,11 @@ const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp
   // hollowed out with a green build. One break mode per hollowable case is
   // what closes that, because a mode reddens the case BY NAME.
   { mode: "storage_empty_is_absent", expects: /an empty string is a value, not an absence/ },
+  // The port's atomicity clause had NO case and therefore no break mode: the
+  // one sentence in storage.ts that names a data-loss bug rather than a
+  // theoretical one was the only clause nothing tested.
+  { mode: "storage_torn_write", expects: /a concurrent read never sees a torn value/ },
+  { mode: "storage_forgets_on_relaunch", expects: /a written value survives a relaunch/ },
   { mode: "time_unsubscribe_does_nothing", expects: /the unsubscribe actually stops it/ },
   { mode: "shell_scheme_case_sensitive", expects: /an uppercase JAVASCRIPT: URL is refused/ },
   { mode: "shell_negative_insets", expects: /no inset is negative/ },
@@ -1154,7 +1280,7 @@ test("a contract cannot quietly shrink", () => {
     passed.filter((line) => line.includes(`fixture ${prefix}:`)).length;
 
   assert.ok(casesFor("secrets") >= 9, `the secrets contract shrank to ${casesFor("secrets")} cases`);
-  assert.ok(casesFor("storage") >= 11, `the storage contract shrank to ${casesFor("storage")} cases`);
+  assert.ok(casesFor("storage") >= 15, `the storage contract shrank to ${casesFor("storage")} cases`);
   assert.ok(casesFor("time") >= 8, `the time contract shrank to ${casesFor("time")} cases`);
   assert.ok(casesFor("shell") >= 37, `the shell contract shrank to ${casesFor("shell")} cases`);
 
@@ -1162,7 +1288,7 @@ test("a contract cannot quietly shrink", () => {
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
   // signal is a smaller number that nothing reads. Guarding the guard.
   assert.ok(
-    ADAPTER_BREAKS.length >= 13,
+    ADAPTER_BREAKS.length >= 15,
     `the break table shrank to ${ADAPTER_BREAKS.length} modes`,
   );
 });
@@ -1269,6 +1395,221 @@ test("the web storage adapter namespaces its keys", () => {
       assert.match(keys[0] ?? "", /^praisonai\./, `the key was not namespaced: ${keys[0]}`);
       assert.match(keys[0] ?? "", /chats/);
     });
+});
+
+// ---- the native store's seam ----------------------------------------------
+
+test("the tauri storage adapter invokes the command names Rust declares", () => {
+  // A rename on either side is SILENT on a device: every chat write rejects,
+  // the repository reports `unreadable`, and the app keeps running. Asserting
+  // the literals here is half of the defence; tools/storage-seam.test.mjs
+  // compares them against the Rust source, which is the other half.
+  assert.deepEqual(STORAGE_COMMANDS, {
+    read: "storage_read",
+    write: "storage_write",
+    remove: "storage_remove",
+    listIds: "storage_list_ids",
+    clear: "storage_clear",
+  });
+});
+
+test("the tauri storage adapter sends the argument names the Rust parameters have", async () => {
+  // Tauri deserialises a command's arguments by NAME. `chatId` where Rust says
+  // `id` is a rejected call on every single write, and the only symptom is
+  // that nothing is ever saved.
+  const calls: { command: string; args: Record<string, unknown> | undefined }[] = [];
+  const storage = createTauriStorage({
+    invoke: async (command, args) => {
+      calls.push({ command, args });
+      return command === STORAGE_COMMANDS.listIds ? [] : null;
+    },
+  });
+
+  await storage.write({ namespace: "chats", id: "c1" }, "body");
+  await storage.read({ namespace: "chats", id: "c1" });
+  await storage.remove({ namespace: "chats", id: "c1" });
+  await storage.listIds("chats");
+  await storage.clear("chats");
+
+  assert.deepEqual(calls[0], {
+    command: "storage_write",
+    args: { namespace: "chats", id: "c1", value: "body" },
+  });
+  assert.deepEqual(calls[1], { command: "storage_read", args: { namespace: "chats", id: "c1" } });
+  assert.deepEqual(calls[2], { command: "storage_remove", args: { namespace: "chats", id: "c1" } });
+  assert.deepEqual(calls[3], { command: "storage_list_ids", args: { namespace: "chats" } });
+  assert.deepEqual(calls[4], { command: "storage_clear", args: { namespace: "chats" } });
+});
+
+test("a native reply of the wrong shape is an I/O failure, not an empty chat list", async () => {
+  // The defect this guards is the quiet one. `undefined` read as `null` means
+  // "no such chat": every conversation reads as missing, `list()` returns
+  // nothing, and the user is shown an empty app with no error at all -- while
+  // the next save writes over what is still on disk. Throwing routes it
+  // through repository.load's `unreadable` branch, which the UI reports.
+  const undefinedReply = createTauriStorage({ invoke: async () => undefined });
+  await assert.rejects(
+    () => undefinedReply.read({ namespace: "chats", id: "c1" }),
+    /not a string or null/,
+  );
+
+  const objectReply = createTauriStorage({ invoke: async () => ({ oops: true }) });
+  await assert.rejects(() => objectReply.read({ namespace: "chats", id: "c1" }), /not a string/);
+
+  const notAList = createTauriStorage({ invoke: async () => "nope" });
+  await assert.rejects(() => notAList.listIds("chats"), /not an array/);
+
+  const badIds = createTauriStorage({ invoke: async () => [1, 2] });
+  await assert.rejects(() => badIds.listIds("chats"), /non-string id/);
+
+  // The pair: a genuine null is an ABSENCE and must not throw.
+  const missing = createTauriStorage({ invoke: async () => null });
+  assert.equal(await missing.read({ namespace: "chats", id: "c1" }), null);
+});
+
+test("a failing native store rejects rather than reporting an empty one", async () => {
+  const failing = createTauriStorage({
+    invoke: async () => {
+      throw new Error("disk is full");
+    },
+  });
+  await assert.rejects(() => failing.read({ namespace: "chats", id: "c1" }), /disk is full/);
+  await assert.rejects(() => failing.write({ namespace: "chats", id: "c1" }, "x"), /disk is full/);
+  await assert.rejects(() => failing.listIds("chats"), /disk is full/);
+});
+
+test("invokeStrict rejects where invoke resolves to null", async () => {
+  // The two must not be collapsed into one. `invoke` swallowing a failure is
+  // right for a haptic tap and catastrophic for a chat write.
+  const angry = {
+    invoke: () => Promise.reject(new Error("plugin missing")),
+    transformCallback: () => 1,
+  };
+  const bridge = createTauriBridge({ scope: { __TAURI_INTERNALS__: angry } });
+
+  assert.equal(await bridge.invoke("anything"), null, "the forgiving invoke still forgives");
+  await assert.rejects(() => bridge.invokeStrict("anything"), /plugin missing/);
+});
+
+test("invokeStrict rejects when there is no native host at all", async () => {
+  // Resolving to null here would present "there is no storage on this device"
+  // as "you have no conversations", which is the failure this whole change
+  // exists to remove.
+  const bridge = createTauriBridge({ scope: {} });
+  await assert.rejects(() => bridge.invokeStrict("storage_read"), /no native host/);
+});
+
+// ---- the one-time migration off localStorage -------------------------------
+
+test("migration carries an existing install's chats onto the new store", async () => {
+  // Without this, switching the Tauri build to the native store would empty
+  // every existing install on upgrade -- indistinguishable, to the user, from
+  // the eviction bug being fixed.
+  const from = createFakeStorage();
+  await from.write({ namespace: "chats", id: "c1" }, "first conversation");
+  await from.write({ namespace: "chats", id: "c2" }, "second conversation");
+  await from.write({ namespace: "settings", id: "engineId" }, "praisonai-ts");
+  await from.write({ namespace: "drafts", id: "c1" }, "half-typed");
+
+  const to = createFakeStorage();
+  const result = await migrateStorage(from, to);
+
+  assert.equal(result.ran, true);
+  assert.equal(result.copied, 4);
+  assert.equal(await to.read({ namespace: "chats", id: "c1" }), "first conversation");
+  assert.equal(await to.read({ namespace: "chats", id: "c2" }), "second conversation");
+  assert.equal(await to.read({ namespace: "settings", id: "engineId" }), "praisonai-ts");
+  assert.equal(await to.read({ namespace: "drafts", id: "c1" }), "half-typed");
+  // The source is left intact, so a rollback to the previous build still has
+  // its data.
+  assert.equal(await from.read({ namespace: "chats", id: "c1" }), "first conversation");
+});
+
+test("migration runs once and never overwrites newer data", async () => {
+  // The way a migration destroys what it is protecting: run it twice and the
+  // second run rolls a conversation back to the stale copy the old store still
+  // holds.
+  const from = createFakeStorage();
+  await from.write({ namespace: "chats", id: "c1" }, "the OLD copy");
+
+  const to = createFakeStorage();
+  await migrateStorage(from, to);
+  await to.write({ namespace: "chats", id: "c1" }, "the NEW copy, written since");
+
+  const second = await migrateStorage(from, to);
+  assert.equal(second.ran, false, "the marker must stop a second run");
+  assert.equal(await to.read({ namespace: "chats", id: "c1" }), "the NEW copy, written since");
+
+  // And even with the marker gone -- a cleared cache namespace -- an existing
+  // key still wins.
+  await to.remove(MIGRATION_MARKER);
+  const third = await migrateStorage(from, to);
+  assert.equal(third.ran, true);
+  assert.equal(third.copied, 0);
+  assert.equal(third.kept, 1);
+  assert.equal(await to.read({ namespace: "chats", id: "c1" }), "the NEW copy, written since");
+});
+
+test("an unreadable old store does not stop the app from starting", async () => {
+  // localStorage can be absent or throwing -- a host with none, a quota error,
+  // an eviction mid-read. None of those is a reason to refuse to boot on a
+  // store that works.
+  const throwing: StoragePort = {
+    async read() { throw new Error("localStorage is gone"); },
+    async write() { throw new Error("localStorage is gone"); },
+    async remove() { throw new Error("localStorage is gone"); },
+    async listIds() { throw new Error("localStorage is gone"); },
+    async clear() { throw new Error("localStorage is gone"); },
+  };
+  const to = createFakeStorage();
+  const result = await migrateStorage(throwing, to);
+  assert.equal(result.copied, 0);
+  assert.equal(result.ran, true, "a missing source is a clean install, not a failure");
+});
+
+test("preparedStorage runs its migration ONCE, before the first read", async () => {
+  // detectPlatform is synchronous, so the copy cannot happen during it. If it
+  // ran after the first read instead, the boot sequence's very first `list()`
+  // would return nothing and the user would see an empty app that fills in
+  // later -- or never, since boot only lists once.
+  const target = createFakeStorage();
+  const order: string[] = [];
+  let runs = 0;
+  const storage = preparedStorage(target, async () => {
+    runs += 1;
+    await Promise.resolve();
+    order.push("migrated");
+    await target.write({ namespace: "chats", id: "old" }, "carried over");
+  });
+
+  const [first] = await Promise.all([
+    storage.read({ namespace: "chats", id: "old" }).then((v) => {
+      order.push("read");
+      return v;
+    }),
+    storage.listIds("chats"),
+    storage.write({ namespace: "chats", id: "new" }, "x"),
+  ]);
+
+  assert.equal(first, "carried over", "the first read must see the migrated data");
+  assert.equal(runs, 1, "concurrent calls at boot must not run the migration three times");
+  assert.equal(order[0], "migrated");
+});
+
+test("a failed migration leaves the new store usable", async () => {
+  // Blocking every read on the copy would turn "we could not find your old
+  // chats" into "the app does not start".
+  const target = createFakeStorage();
+  const reported: unknown[] = [];
+  const storage = preparedStorage(
+    target,
+    () => Promise.reject(new Error("the old store exploded")),
+    (error) => void reported.push(error),
+  );
+
+  await storage.write({ namespace: "chats", id: "c1" }, "still works");
+  assert.equal(await storage.read({ namespace: "chats", id: "c1" }), "still works");
+  assert.equal(reported.length, 1, "a failure must be reported, not swallowed");
 });
 
 test("the web shell re-pushes history after consuming a back gesture", () => {

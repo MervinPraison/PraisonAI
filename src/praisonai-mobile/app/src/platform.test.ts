@@ -89,3 +89,151 @@ test("the web platform stores chats in localStorage, not sessionStorage", () => 
   assert.ok(used.includes("local"), `the chat store must be localStorage, got ${used.join(",") || "none"}`);
   assert.equal(used.includes("session"), false, "sessionStorage dies with the tab");
 });
+
+// ---- the store a device actually gets ---------------------------------------
+
+/** A `__TAURI_INTERNALS__` that records what the app invoked. */
+function nativeScope(): { scope: object; calls: { command: string; args: unknown }[] } {
+  const calls: { command: string; args: unknown }[] = [];
+  const files = new Map<string, string>();
+  return {
+    calls,
+    scope: {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args: Record<string, unknown>) => {
+          calls.push({ command, args });
+          const at = `${String(args["namespace"])}/${String(args["id"])}`;
+          switch (command) {
+            case "storage_read":
+              return Promise.resolve(files.get(at) ?? null);
+            case "storage_write":
+              files.set(at, String(args["value"]));
+              return Promise.resolve(null);
+            case "storage_list_ids":
+              return Promise.resolve([]);
+            default:
+              return Promise.resolve(null);
+          }
+        },
+        transformCallback: () => 1,
+      },
+    },
+  };
+}
+
+test("a native host stores chats in the NATIVE store, not localStorage", async () => {
+  // The mutation this exists to kill: `storageFor` handing the Tauri build the
+  // web adapter. That is not a hypothetical -- it is what this file did until
+  // now, and platform.ts's own comment called it "the honest interim". Nothing
+  // failed, on any platform, and on iOS the WebKit data store `localStorage`
+  // lives in is evictable, so the user's history disappears with no error.
+  const touched: string[] = [];
+  const spy = {
+    getItem: () => { touched.push("localStorage.getItem"); return null; },
+    setItem: () => void touched.push("localStorage.setItem"),
+    removeItem: () => void touched.push("localStorage.removeItem"),
+    key: () => null,
+    clear: () => void touched.push("localStorage.clear"),
+    length: 0,
+  } as unknown as Storage;
+
+  const fake = createFakeWindow();
+  (fake.window as unknown as { localStorage: Storage }).localStorage = spy;
+  const host = nativeScope();
+
+  const platform = detectPlatform({
+    isNative: () => true,
+    view: fake.window as unknown as Window,
+    scope: host.scope,
+  });
+
+  await platform.storage.write({ namespace: "chats", id: "c1" }, "a conversation");
+  assert.equal(await platform.storage.read({ namespace: "chats", id: "c1" }), "a conversation");
+
+  const commands = host.calls.map((c) => c.command);
+  assert.ok(commands.includes("storage_write"), `the write never reached Rust: ${commands.join(",")}`);
+  assert.ok(commands.includes("storage_read"), `the read never reached Rust: ${commands.join(",")}`);
+  assert.equal(
+    touched.includes("localStorage.setItem"),
+    false,
+    `a chat was written to evictable localStorage: ${touched.join(",")}`,
+  );
+});
+
+test("the browser keeps localStorage -- the pair", async () => {
+  // A `storageFor` that always returned the native store would break the web
+  // build completely: there is no Tauri host in a browser, and invokeStrict
+  // rejects rather than degrading.
+  const touched: string[] = [];
+  const spy = {
+    getItem: () => { touched.push("get"); return null; },
+    setItem: () => void touched.push("set"),
+    removeItem: () => {},
+    key: () => null,
+    clear: () => {},
+    length: 0,
+  } as unknown as Storage;
+
+  const fake = createFakeWindow();
+  (fake.window as unknown as { localStorage: Storage }).localStorage = spy;
+
+  const platform = detectPlatform({ isNative: () => false, view: fake.window as unknown as Window });
+  await platform.storage.write({ namespace: "chats", id: "c1" }, "a conversation");
+  assert.ok(touched.includes("set"), "the web build must still use localStorage");
+});
+
+test("an existing install's chats are carried onto the native store", async () => {
+  // The upgrade path. Without the migration, the first launch on the new build
+  // reads an empty store and every conversation appears to have been deleted
+  // by the update -- which the user cannot tell apart from the eviction bug
+  // this change fixes.
+  const backing = new Map<string, string>([["praisonai.chats.old", "a conversation from before"]]);
+  const legacy = {
+    getItem: (k: string) => backing.get(k) ?? null,
+    setItem: (k: string, v: string) => void backing.set(k, v),
+    removeItem: (k: string) => void backing.delete(k),
+    key: (i: number) => [...backing.keys()][i] ?? null,
+    clear: () => backing.clear(),
+    get length() { return backing.size; },
+  } as unknown as Storage;
+
+  const fake = createFakeWindow();
+  (fake.window as unknown as { localStorage: Storage }).localStorage = legacy;
+
+  // A native host with a real map behind it, so the copy has somewhere to land.
+  const files = new Map<string, string>();
+  const scope = {
+    __TAURI_INTERNALS__: {
+      invoke: (command: string, args: Record<string, unknown>) => {
+        const ns = String(args["namespace"]);
+        const at = `${ns}/${String(args["id"])}`;
+        switch (command) {
+          case "storage_read":
+            return Promise.resolve(files.get(at) ?? null);
+          case "storage_write":
+            files.set(at, String(args["value"]));
+            return Promise.resolve(null);
+          case "storage_list_ids":
+            return Promise.resolve(
+              [...files.keys()].filter((k) => k.startsWith(`${ns}/`)).map((k) => k.slice(ns.length + 1)),
+            );
+          default:
+            return Promise.resolve(null);
+        }
+      },
+      transformCallback: () => 1,
+    },
+  };
+
+  const platform = detectPlatform({
+    isNative: () => true,
+    view: fake.window as unknown as Window,
+    scope,
+  });
+
+  assert.equal(
+    await platform.storage.read({ namespace: "chats", id: "old" }),
+    "a conversation from before",
+    "the upgrade lost an existing install's conversation",
+  );
+});

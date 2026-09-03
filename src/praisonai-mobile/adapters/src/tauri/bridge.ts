@@ -92,6 +92,23 @@ export interface TauriBridge {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
 
   /**
+   * `invoke`, but a failure REJECTS instead of resolving to `null`.
+   *
+   * The swallowing above is right for a haptic tap and wrong for a chat write.
+   * `StoragePort.read` uses `null` to mean "no such key", so an adapter built
+   * on the forgiving `invoke` would report a failing disk as an EMPTY chat
+   * list -- the user's conversations look deleted rather than unreadable, and
+   * the next save writes over them. `core/src/chat/repository.ts` already
+   * distinguishes `missing` from `unreadable`; it can only do that if
+   * something down here still knows the difference.
+   *
+   * Rejects rather than resolving when Tauri is absent, for the same reason: a
+   * silent "no storage here" is the failure mode this whole change exists to
+   * remove.
+   */
+  invokeStrict(command: string, args?: Record<string, unknown>): Promise<unknown>;
+
+  /**
    * Resolves to an Unsubscribe -- a no-op one when there is nothing to listen
    * to. Callers therefore never branch on presence, which is what stops
    * "if (tauri)" from spreading back above this file.
@@ -228,6 +245,15 @@ export function createTauriBridge(deps: TauriBridgeDeps = {}): TauriBridge {
     isPresent: () => internals !== null,
 
     invoke,
+
+    async invokeStrict(command, args) {
+      if (internals === null) {
+        // A message a device log can be read against. "undefined is not a
+        // function" three frames up is not.
+        throw new Error(`no native host for ${command}`);
+      }
+      return await internals.invoke(command, args ?? {});
+    },
 
     async listen(event, handler) {
       if (internals !== null) {

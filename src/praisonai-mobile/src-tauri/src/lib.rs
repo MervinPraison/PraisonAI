@@ -22,6 +22,9 @@
 //! bridge speaks to — those invokes reject and the bridge degrades.
 
 pub mod shell;
+pub mod store;
+
+use tauri::Manager;
 
 /// The single entry point for all three platforms.
 ///
@@ -39,6 +42,33 @@ pub mod shell;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     configure(tauri::Builder::default())
+        .setup(|app| {
+            // The store's root, resolved ONCE at startup.
+            //
+            // `app_data_dir()` is the app container: on iOS
+            // Library/Application Support inside the sandbox, which is backed
+            // up and — unlike the WebKit data store `localStorage` lives in —
+            // NOT evictable when the device runs low on space. That eviction is
+            // the entire bug this exists to close: the user does nothing wrong
+            // and their conversations are gone.
+            //
+            // A failure here is fatal ON PURPOSE. Booting with no store means
+            // every chat write fails for the whole session while the crash
+            // screen keeps promising the conversations are saved, and that is
+            // a worse outcome than refusing to start with a message.
+            //
+            // It lives on `run`, not in `configure`, because `configure` is what
+            // `tests/wiring.rs` builds on the mock runtime, where there is no
+            // app container to resolve; the store commands themselves are in
+            // `configure`'s `generate_handler!` so the webview can reach them.
+            let dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("no app data directory to store conversations in: {e}"))?
+                .join(store::STORE_DIR);
+            app.manage(store::StoreState(store::FileStore::new(dir)));
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running the PraisonAI mobile shell");
 }
@@ -54,13 +84,25 @@ pub fn run() {
 /// the `on_window_event` line and nothing at all is emitted. Neither shows up
 /// as a failure anywhere except on a device, which is why
 /// `tests/wiring.rs` builds this and asserts on the result.
+///
+/// The five `store::storage_*` commands are registered here too: a command in
+/// `store.rs` but missing from `generate_handler!` is unreachable, the invoke
+/// rejects with "command not found", and only that one operation silently stops
+/// working. `tools/storage-seam.test.mjs` asserts all five are present.
 pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_back_gesture::init(commands::on_back_pressed))
         .manage(commands::BackState::default())
         .manage(shell::LifecycleState::default())
-        .invoke_handler(tauri::generate_handler![commands::back_gesture_result])
+        .invoke_handler(tauri::generate_handler![
+            commands::back_gesture_result,
+            store::storage_read,
+            store::storage_write,
+            store::storage_remove,
+            store::storage_list_ids,
+            store::storage_clear
+        ])
         .on_window_event(shell::on_window_event)
 }
 
