@@ -214,6 +214,24 @@ class TestShellStreaming:
 
         calls = {"count": 0}
 
+        # Spy on the kill path directly rather than on _FakeProc.kill(): with
+        # psutil installed, _kill_process_tree(_FakeProc()) resolves pid=-1 to a
+        # psutil.NoSuchProcess and returns WITHOUT ever calling _FakeProc.kill(),
+        # so an erroneous kill would slip past a proc-level assertion. Patching
+        # _kill_process_tree makes the guard catch every kill attempt regardless
+        # of whether psutil is present.
+        monkeypatch.setattr(
+            ShellTools,
+            "_kill_process_tree",
+            lambda self, process: killed.__setitem__("called", True),
+        )
+
+        # Must mirror _communicate_streaming's real signature, cancel_event
+        # included: execute_command calls it positionally with the cancel event
+        # (shell_tools.py:144). A three-parameter stand-in raises TypeError
+        # instead, which execute_command reports as a failed command -- so both
+        # timeout tests passed their "success is False" assertions for entirely
+        # the wrong reason and stopped guarding the kill path (#4724).
         def _raise_drain_timeout(self, process, timeout, cancel_event=None):
             calls["count"] += 1
             raise _StreamDrainTimeout()
