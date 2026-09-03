@@ -356,11 +356,19 @@ class Knowledge:
         except Exception:
             pass  # Silent fail - tracing should never break knowledge operations
 
-    def store(self, content, user_id=None, agent_id=None, run_id=None, metadata=None):
-        """Store a memory."""
+    def store(self, content, user_id=None, agent_id=None, run_id=None, metadata=None, is_content=False):
+        """Store a memory.
+
+        Args:
+            is_content: When True, ``content`` is treated as literal text and the
+                file-path heuristic is skipped. Callers that have already read a
+                file's contents (e.g. chunks from ``_process_single_input``) must
+                set this so a chunk ending in ``.txt``/``.pdf``/``.doc``/``.docx``
+                is not mistaken for a path and re-dispatched to ``add()``.
+        """
         try:
             if isinstance(content, str):
-                if any(content.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt']):
+                if not is_content and any(content.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt']):
                     self._log(f"Content appears to be a file path, processing file: {content}")
                     return self.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
                 
@@ -620,8 +628,7 @@ class Knowledge:
                 if not metadata:
                     metadata = {}
                 suffix = os.path.splitext(input_path)[1]
-                if suffix:
-                    metadata['file_type'] = suffix.lstrip('.')
+                metadata['file_type'] = suffix.lstrip('.') if suffix else ''
                 metadata['filename'] = os.path.basename(input_path)
             else:
                 # Genuinely raw text handed in instead of a path.
@@ -643,8 +650,13 @@ class Knowledge:
                 store_task = progress.add_task(f"Adding to Knowledge from {os.path.basename(input_path)}", total=len(memories))
                 for memory in memories:
                     if memory:
+                        # memories here are already-read file contents or literal
+                        # text the caller handed in -- never a path to re-open, so
+                        # bypass store()'s file-path heuristic (a chunk ending in
+                        # ".txt"/".pdf"/".doc"/".docx" would otherwise be mistaken
+                        # for a filename and silently dropped).
                         memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, 
-                                                 run_id=run_id, metadata=metadata)
+                                                 run_id=run_id, metadata=metadata, is_content=True)
                         if memory_result:
                             # Handle both dict and list formats for backward compatibility
                             if isinstance(memory_result, dict):
