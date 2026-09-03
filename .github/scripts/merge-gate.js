@@ -315,7 +315,16 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
 function finalClaudeCompletedOnSha(comments, headPushedAt) {
   if (!hasFinalClaudeReviewTrigger(comments)) return false;
   if (isStaleFinalAfterPush(comments, headPushedAt)) return false;
-  return true;
+  const finals = comments.filter(isFinalClaudeTriggerComment);
+  if (finals.length === 0) return false;
+  const latestFinal = finals.reduce((a, b) =>
+    new Date(a.created_at) > new Date(b.created_at) ? a : b
+  );
+  const finalTime = new Date(latestFinal.created_at).getTime();
+  return comments.some((c) => {
+    if (!isClaudeFinalReplyComment(c)) return false;
+    return new Date(c.created_at).getTime() >= finalTime - 60000;
+  });
 }
 
 const FINAL_CLAUDE_REVIEW_BODY =
@@ -478,6 +487,7 @@ function hasBlockingClaudeRunForPr(runs, headRef) {
 const MERGE_GATE_WORKFLOW_FILE = 'claude-merge-gate.yml';
 const MERGE_GATE_ACTIVE_LABEL = 'claude-merge-gate-active';
 const MAX_PENDING_MERGE_GATE_RUNS = 3;
+const MIN_CORE_RATE_LIMIT_REMAINING = 200;
 
 function mergeGateDispatchBlockedReason({ labels, pendingRuns, maxPending = MAX_PENDING_MERGE_GATE_RUNS }) {
   if ((labels || []).includes(MERGE_GATE_ACTIVE_LABEL)) {
@@ -514,8 +524,25 @@ async function countPendingMergeGateRuns(github, owner, repo) {
   return pending;
 }
 
+async function getCoreRateLimitRemaining(github) {
+  try {
+    const { data } = await github.rest.rateLimit.get();
+    return data?.resources?.core?.remaining ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function shouldSkipMergeGateDispatch(github, owner, repo, prNumber, core, options = {}) {
   const maxPending = options.maxPending ?? MAX_PENDING_MERGE_GATE_RUNS;
+  const minCoreRemaining = options.minCoreRemaining ?? MIN_CORE_RATE_LIMIT_REMAINING;
+  const remaining = await getCoreRateLimitRemaining(github);
+  if (remaining !== null && remaining < minCoreRemaining) {
+    core?.info?.(
+      `Skip merge gate dispatch for PR #${prNumber}: rate limit low (${remaining} core remaining)`
+    );
+    return true;
+  }
   const ctx = await loadPrContext(github, owner, repo, prNumber);
   const pendingRuns = await countPendingMergeGateRuns(github, owner, repo);
   const reason = mergeGateDispatchBlockedReason({
@@ -1002,9 +1029,24 @@ async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCand
 }
 
 const AUTOMATED_FALLBACK_MARKER = 'Automated fallback —';
+const MERGE_GATE_SCAN_MARKER = 'Merge gate scan';
 
 function isAutomatedFallbackVerdict(body) {
   return (body || '').includes(AUTOMATED_FALLBACK_MARKER);
+}
+
+function isMergeGateVerdictComment(body) {
+  const text = body || '';
+  if (text.includes(MERGE_GATE_SCAN_MARKER)) return false;
+  return /(?:^|\n)\s*MERGE_GATE_VERDICT:\s*(APPROVE|BLOCK)\b/m.test(text);
+}
+
+function hasRecentMergeGateScanComment(comments, withinMinutes = 30) {
+  const cutoff = Date.now() - withinMinutes * 60 * 1000;
+  return (comments || []).some((c) => {
+    if (!(c.body || '').includes(MERGE_GATE_SCAN_MARKER)) return false;
+    return new Date(c.created_at).getTime() > cutoff;
+  });
 }
 
 function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null, options = {}) {
@@ -1013,7 +1055,7 @@ function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null
   const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
   const gateComments = comments
     .filter((c) => {
-      if (!(c.body || '').includes('MERGE_GATE_VERDICT:')) return false;
+      if (!isMergeGateVerdictComment(c.body)) return false;
       if (excludeAutomatedFallback && isAutomatedFallbackVerdict(c.body)) return false;
       const created = new Date(c.created_at).getTime();
       if (minTime && created < minTime) return false;
@@ -1023,8 +1065,8 @@ function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (gateComments.length === 0) return null;
   const body = gateComments[0].body || '';
-  if (body.includes('MERGE_GATE_VERDICT: APPROVE')) return 'APPROVE';
-  if (body.includes('MERGE_GATE_VERDICT: BLOCK')) return 'BLOCK';
+  if (/MERGE_GATE_VERDICT:\s*APPROVE\b/.test(body)) return 'APPROVE';
+  if (/MERGE_GATE_VERDICT:\s*BLOCK\b/.test(body)) return 'BLOCK';
   return null;
 }
 
@@ -1095,10 +1137,14 @@ module.exports = {
   selectMergeGateCandidates,
   isAutomatedFallbackVerdict,
   AUTOMATED_FALLBACK_MARKER,
+  isMergeGateVerdictComment,
+  hasRecentMergeGateScanComment,
   findMergeGateVerdict,
   MERGE_GATE_WORKFLOW_FILE,
   MERGE_GATE_ACTIVE_LABEL,
   MAX_PENDING_MERGE_GATE_RUNS,
+  MIN_CORE_RATE_LIMIT_REMAINING,
+  getCoreRateLimitRemaining,
   mergeGateDispatchBlockedReason,
   countSubstantiveMergeGateRuns,
   countPendingMergeGateRuns,

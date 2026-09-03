@@ -201,17 +201,26 @@ jobs:
                 '**Actions:** wait for CI and the Claude review chain, or add label `needs-manual-review` and merge manually.',
                 '**Opt out:** label `no-auto-merge`.',
               ].join('\n');
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: skipped[0].pr, body,
-              });
+              const ctx = await mergeGate.loadPrContext(github, owner, repo, skipped[0].pr);
+              if (!mergeGate.hasRecentMergeGateScanComment(ctx.comments)) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: skipped[0].pr, body,
+                });
+              }
             } else if (inputPr && candidates.length === 1) {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: candidates[0].pr_number,
-                body: '**Merge gate scan** — eligible for assessment. Claude merge gate will assess and may auto-merge if `MERGE_GATE_VERDICT: APPROVE`.',
-              });
+              const prNum = candidates[0].pr_number;
+              const ctx = await mergeGate.loadPrContext(github, owner, repo, prNum);
+              if (!mergeGate.hasRecentMergeGateScanComment(ctx.comments)) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: prNum,
+                  body: '**Merge gate scan** — eligible for assessment. Claude merge gate will assess and may auto-merge on an APPROVE verdict.',
+                });
+              }
             }
 
-            await ps.syncOpenPullRequests(github, owner, repo, { maxPrs: 10 }, core);
+            await ps.syncOpenPullRequests(
+              github, owner, repo, { maxPrs: 10, dispatchMergeGate: false }, core
+            );
 
   claude-assess:
     needs: scan-candidates
@@ -267,6 +276,7 @@ jobs:
 
       - name: Claude merge gate assessment (read-only)
         id: assess
+        continue-on-error: true
         uses: ./.github/actions/claude-code-action
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -355,7 +365,8 @@ jobs:
             });
             core.info('Posted fallback BLOCK — Opus verdict required');
 
-      - name: Require Opus MERGE_GATE_VERDICT
+      - name: Capture Opus MERGE_GATE_VERDICT
+        id: capture_verdict
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -371,14 +382,14 @@ jobs:
             const verdict = mergeGate.findMergeGateVerdict(
               comments, minCreatedAt, ctx.headPushedAt, { excludeAutomatedFallback: true }
             );
+            core.setOutput('verdict', verdict || 'NONE');
             if (!verdict) {
-              core.setFailed(
-                'Opus merge gate assessment must post MERGE_GATE_VERDICT on this PR (automated fallback APPROVE is not accepted).'
+              core.warning(
+                'Opus MERGE_GATE_VERDICT not posted yet (OAuth may be rate-limited). Merge waits for Opus APPROVE.'
               );
-              return;
+            } else {
+              core.info(`Opus merge gate verdict: ${verdict}`);
             }
-            core.info(`Opus merge gate verdict: ${verdict}`);
-            core.setOutput('verdict', verdict);
 
       - name: Remove merge gate active label
         if: always()
@@ -398,10 +409,6 @@ jobs:
             } catch (e) {
               core.info(`Label claude-merge-gate-active already removed or missing on PR #${prNumber}`);
             }
-
-      - name: Fail job if assessment failed
-        if: steps.assess.outcome == 'failure'
-        run: exit 1
 
   merge-only:
     needs: [scan-candidates, claude-assess]
