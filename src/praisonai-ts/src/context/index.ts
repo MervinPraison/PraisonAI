@@ -53,7 +53,32 @@ export {
     createContextSnapshot,
     type ManagerConfig,
     createManagerConfig,
+    compactionStrategyToOptimizerStrategy,
+    applyCompactionPolicy,
 } from './models';
+
+// Context compaction policy (Python parity with context/policy.py,
+// context/protocols.py and context/adapters.py)
+export {
+    CompactionRoute,
+    type CompactionRouteType,
+    CompactionStrategy,
+    type CompactionStrategyType,
+    toCompactionStrategy,
+    ContextBudgetResult,
+    type ContextBudgetResultInit,
+    type ContextCompactionPolicyProtocol,
+    isContextCompactionPolicy,
+    ContextCompactionPolicy,
+    type ContextCompactionPolicyConfig,
+    type ContextMessage,
+    type ToolSchema,
+    type ModelOverrides,
+    CONSERVATIVE_POLICY,
+    BALANCED_POLICY,
+    AGGRESSIVE_POLICY,
+    getDefaultPolicy,
+} from './policy';
 
 // Default export
 export { default } from './manager';

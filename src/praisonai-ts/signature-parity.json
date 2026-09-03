@@ -10,8 +10,8 @@
         "mismatches": 4,
         "missing": 0,
         "params": 42,
-        "ts_only": 13,
-        "ts_total": 58,
+        "ts_only": 14,
+        "ts_total": 59,
         "waived": 4
       },
       "params": [
@@ -1074,6 +1074,16 @@
       },
       "ts_only": [
         {
+          "canonical": "config",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "config",
+          "required": true,
+          "type_class": "object",
+          "type_text": "SimpleAgentConfig"
+        },
+        {
           "canonical": "pretty",
           "default": "getEnv('PRAISON_PRETTY') === 'true'",
           "default_kind": "expr",
@@ -1949,8 +1959,8 @@
         "mismatches": 1,
         "missing": 0,
         "params": 23,
-        "ts_only": 2,
-        "ts_total": 25,
+        "ts_only": 3,
+        "ts_total": 26,
         "waived": 1
       },
       "params": [
@@ -2543,6 +2553,16 @@
       },
       "ts_only": [
         {
+          "canonical": "configOrAgents",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "configOrAgents",
+          "required": true,
+          "type_class": "union",
+          "type_text": "AgentTeamConfig | Agent[]"
+        },
+        {
           "canonical": "verbose",
           "default": null,
           "default_kind": null,
@@ -2564,8 +2584,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:2866",
-        "location": "src/praisonai-ts/src/agent/simple.ts:2673"
+        "ctor_location": "src/praisonai-ts/src/agent/team.ts:210",
+        "location": "src/praisonai-ts/src/agent/team.ts:17"
       }
     },
     "AgentTeam.start": {
@@ -2675,11 +2695,601 @@
         }
       ],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3053",
+        "location": "src/praisonai-ts/src/agent/team.ts:397",
         "options_interfaces": [
           "options: AgentTeamStartOptions"
         ],
         "resolved_class": "AgentTeam"
+      }
+    },
+    "DoomLoopDetector.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 0,
+        "exact": 1,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 0,
+        "params": 1,
+        "ts_only": 15,
+        "ts_total": 16,
+        "waived": 0
+      },
+      "params": [
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "config",
+          "required": false,
+          "ts": {
+            "canonical": "config",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "config",
+            "required": false,
+            "type_class": "object",
+            "type_text": "DoomLoopConfig | DoomLoopConfigOptions | null"
+          },
+          "ts_name": "config",
+          "type_class": "object",
+          "type_text": "Optional[DoomLoopConfig]",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/escalation/doom_loop.py:113",
+        "resolved_class": "DoomLoopDetector"
+      },
+      "ts_only": [
+        {
+          "canonical": "maxIdenticalActions",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxIdenticalActions",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxSimilarActions",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxSimilarActions",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxConsecutiveFailures",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxConsecutiveFailures",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxNoProgressSteps",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxNoProgressSteps",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "similarityThreshold",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "similarityThreshold",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxTimePerAction",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxTimePerAction",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxTotalTime",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxTotalTime",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "enableAutoRecovery",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "enableAutoRecovery",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "maxRecoveryAttempts",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxRecoveryAttempts",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "escalateOnLoop",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "escalateOnLoop",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
+          "canonical": "initialBackoff",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "initialBackoff",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "backoffMultiplier",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "backoffMultiplier",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxBackoff",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxBackoff",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "maxRepeatedChunks",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "maxRepeatedChunks",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        },
+        {
+          "canonical": "contentChunkSize",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "contentChunkSize",
+          "required": false,
+          "type_class": "number",
+          "type_text": "number"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/escalation/doom-loop.ts:235",
+        "location": "src/praisonai-ts/src/escalation/doom-loop.ts:51"
+      }
+    },
+    "EscalationPipeline.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 2,
+        "exact": 3,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 0,
+        "params": 5,
+        "ts_only": 4,
+        "ts_total": 9,
+        "waived": 0
+      },
+      "params": [
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "config",
+          "required": false,
+          "ts": {
+            "canonical": "config",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "config",
+            "required": false,
+            "type_class": "object",
+            "type_text": "EscalationConfig | EscalationConfigOptions | null"
+          },
+          "ts_name": "config",
+          "type_class": "object",
+          "type_text": "Optional[EscalationConfig]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "agent",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "agent",
+          "required": false,
+          "ts": {
+            "canonical": "agent",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "agent",
+            "required": false,
+            "type_class": "object",
+            "type_text": "EscalationAgent | null"
+          },
+          "ts_name": "agent",
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "tools",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "tools",
+          "required": false,
+          "ts": {
+            "canonical": "tools",
+            "default": [],
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "tools",
+            "required": false,
+            "type_class": "array",
+            "type_text": "unknown[] | null"
+          },
+          "ts_name": "tools",
+          "type_class": "array",
+          "type_text": "Optional[List[Any]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "checkpointService",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "checkpoint_service",
+          "required": false,
+          "ts": {
+            "canonical": "checkpointService",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "checkpointService",
+            "required": false,
+            "type_class": "object",
+            "type_text": "CheckpointServiceLike | null"
+          },
+          "ts_name": "checkpointService",
+          "type_class": "unknown",
+          "type_text": "Optional[Any]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "onStageChange",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "on_stage_change",
+          "required": false,
+          "ts": {
+            "canonical": "onStageChange",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "onStageChange",
+            "required": false,
+            "type_class": "object",
+            "type_text": "StageChangeCallback | null"
+          },
+          "ts_name": "onStageChange",
+          "type_class": "callable",
+          "type_text": "Optional[Callable[[EscalationStage, EscalationStage], None]]",
+          "waived": null,
+          "warnings": [
+            "type differs: python callable (Optional[Callable[[EscalationStage, EscalationStage], None]]) vs typescript object (StageChangeCallback | null)"
+          ]
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/escalation/pipeline.py:44",
+        "resolved_class": "EscalationPipeline"
+      },
+      "ts_only": [
+        {
+          "canonical": "options",
+          "default": {},
+          "default_kind": "literal",
+          "kind": "positional",
+          "name": "options",
+          "required": false,
+          "type_class": "object",
+          "type_text": "EscalationPipelineOptions"
+        },
+        {
+          "canonical": "autonomousRunner",
+          "default": null,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "autonomousRunner",
+          "required": false,
+          "type_class": "object",
+          "type_text": "AutonomousRunner | null"
+        },
+        {
+          "canonical": "observability",
+          "default": null,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "observability",
+          "required": false,
+          "type_class": "object",
+          "type_text": "ObservabilityHooks | null"
+        },
+        {
+          "canonical": "doomLoopConfig",
+          "default": null,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "doomLoopConfig",
+          "required": false,
+          "type_class": "object",
+          "type_text": "DoomLoopConfig | DoomLoopConfigOptions | null"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/escalation/pipeline.ts:103",
+        "location": "src/praisonai-ts/src/escalation/pipeline.ts:51"
+      }
+    },
+    "GoalEngineer.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 2,
+        "exact": 4,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 0,
+        "params": 6,
+        "ts_only": 2,
+        "ts_total": 8,
+        "waived": 0
+      },
+      "params": [
+        {
+          "canonical": "model",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "model",
+          "required": false,
+          "ts": {
+            "canonical": "model",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "model",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string | null"
+          },
+          "ts_name": "model",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "maxCriteria",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "max_criteria",
+          "required": false,
+          "ts": {
+            "canonical": "maxCriteria",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "maxCriteria",
+            "required": false,
+            "type_class": "number",
+            "type_text": "number | null"
+          },
+          "ts_name": "maxCriteria",
+          "type_class": "number",
+          "type_text": "Optional[int]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "threshold",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "threshold",
+          "required": false,
+          "ts": {
+            "canonical": "threshold",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "threshold",
+            "required": false,
+            "type_class": "number",
+            "type_text": "number | null"
+          },
+          "ts_name": "threshold",
+          "type_class": "number",
+          "type_text": "Optional[float]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "autoDecompose",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "auto_decompose",
+          "required": false,
+          "ts": {
+            "canonical": "autoDecompose",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "autoDecompose",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean | null"
+          },
+          "ts_name": "autoDecompose",
+          "type_class": "boolean",
+          "type_text": "Optional[bool]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "config",
+          "required": false,
+          "ts": {
+            "canonical": "config",
+            "default": {},
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "config",
+            "required": false,
+            "type_class": "object",
+            "type_text": "GoalConfig | GoalConfigOptions | null"
+          },
+          "ts_name": "config",
+          "type_class": "object",
+          "type_text": "Optional[GoalConfig]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "verbose",
+          "default": false,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "verbose",
+          "required": false,
+          "ts": {
+            "canonical": "verbose",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "verbose",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean"
+          },
+          "ts_name": "verbose",
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/goal/engineer.py:58",
+        "resolved_class": "GoalEngineer"
+      },
+      "ts_only": [
+        {
+          "canonical": "options",
+          "default": {},
+          "default_kind": "literal",
+          "kind": "positional",
+          "name": "options",
+          "required": false,
+          "type_class": "object",
+          "type_text": "GoalEngineerOptions"
+        },
+        {
+          "canonical": "llm",
+          "default": null,
+          "default_kind": "literal",
+          "kind": "property",
+          "name": "llm",
+          "required": false,
+          "type_class": "object",
+          "type_text": "GoalLLM"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/goal/engineer.ts:74",
+        "location": "src/praisonai-ts/src/goal/engineer.ts:42"
       }
     },
     "Handoff.__init__": {
@@ -2691,8 +3301,8 @@
         "mismatches": 2,
         "missing": 0,
         "params": 7,
-        "ts_only": 11,
-        "ts_total": 18,
+        "ts_only": 13,
+        "ts_total": 21,
         "waived": 2
       },
       "params": [
@@ -2936,6 +3546,16 @@
           "type_text": "boolean"
         },
         {
+          "canonical": "toolPolicy",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "toolPolicy",
+          "required": false,
+          "type_class": "object",
+          "type_text": "HandoffToolPolicy"
+        },
+        {
           "canonical": "timeoutSeconds",
           "default": null,
           "default_kind": null,
@@ -2976,6 +3596,16 @@
           "type_text": "number"
         },
         {
+          "canonical": "allowParallel",
+          "default": null,
+          "default_kind": null,
+          "kind": "property",
+          "name": "allowParallel",
+          "required": false,
+          "type_class": "boolean",
+          "type_text": "boolean"
+        },
+        {
           "canonical": "onComplete",
           "default": null,
           "default_kind": null,
@@ -2997,8 +3627,8 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:338",
-        "location": "src/praisonai-ts/src/agent/handoff.ts:172"
+        "ctor_location": "src/praisonai-ts/src/agent/handoff.ts:670",
+        "location": "src/praisonai-ts/src/agent/handoff.ts:434"
       }
     },
     "LLM.__init__": {
@@ -3010,8 +3640,8 @@
         "mismatches": 0,
         "missing": 0,
         "params": 25,
-        "ts_only": 0,
-        "ts_total": 25,
+        "ts_only": 1,
+        "ts_total": 26,
         "waived": 0
       },
       "params": [
@@ -3457,7 +4087,7 @@
             "name": "events",
             "required": false,
             "type_class": "array",
-            "type_text": "unknown[]"
+            "type_text": "LLMEventListener[]"
           },
           "ts_name": "events",
           "type_class": "array",
@@ -3557,7 +4187,7 @@
             "name": "claudeMemory",
             "required": false,
             "type_class": "union",
-            "type_text": "boolean | unknown"
+            "type_text": "boolean | ClaudeMemoryBackend"
           },
           "ts_name": "claudeMemory",
           "type_class": "union",
@@ -3581,8 +4211,8 @@
             "kind": "property",
             "name": "failoverManager",
             "required": false,
-            "type_class": "unknown",
-            "type_text": "unknown"
+            "type_class": "object",
+            "type_text": "LLMFailoverManager"
           },
           "ts_name": "failoverManager",
           "type_class": "object",
@@ -3606,14 +4236,16 @@
             "kind": "property",
             "name": "auth",
             "required": false,
-            "type_class": "string",
-            "type_text": "string"
+            "type_class": "object",
+            "type_text": "LLMAuthSource"
           },
           "ts_name": "auth",
           "type_class": "string",
           "type_text": "Optional[str]",
           "waived": null,
-          "warnings": []
+          "warnings": [
+            "type differs: python string (Optional[str]) vs typescript object (LLMAuthSource)"
+          ]
         },
         {
           "canonical": "maxIter",
@@ -3645,10 +4277,212 @@
         "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:413",
         "resolved_class": "LLM"
       },
-      "ts_only": [],
+      "ts_only": [
+        {
+          "canonical": "config",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "config",
+          "required": true,
+          "type_class": "object",
+          "type_text": "LLMConfig"
+        }
+      ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/llm/index.ts:110",
-        "location": "src/praisonai-ts/src/llm/index.ts:18"
+        "ctor_location": "src/praisonai-ts/src/llm/index.ts:466",
+        "location": "src/praisonai-ts/src/llm/index.ts:286"
+      }
+    },
+    "PraisonAIError.__init__": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 4,
+        "exact": 2,
+        "flattened": 0,
+        "mismatches": 1,
+        "missing": 0,
+        "params": 6,
+        "ts_only": 1,
+        "ts_total": 7,
+        "waived": 1
+      },
+      "params": [
+        {
+          "canonical": "message",
+          "default": null,
+          "default_kind": null,
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "message",
+          "required": true,
+          "ts": {
+            "canonical": "message",
+            "default": null,
+            "default_kind": null,
+            "kind": "positional",
+            "name": "message",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "message",
+          "type_class": "string",
+          "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "agentId",
+          "default": "unknown",
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "agent_id",
+          "required": false,
+          "ts": {
+            "canonical": "agentId",
+            "default": "unknown",
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "agentId",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "agentId",
+          "type_class": "string",
+          "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "runId",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "default differs: python=null typescript=`randomUUID()` (TS `runId`)",
+            "kind": "default"
+          },
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "run_id",
+          "required": false,
+          "ts": {
+            "canonical": "runId",
+            "default": "randomUUID()",
+            "default_kind": "expr",
+            "kind": "property",
+            "name": "runId",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "runId",
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "PraisonAIError.__init__.run_id",
+          "warnings": []
+        },
+        {
+          "canonical": "errorCategory",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "error_category",
+          "required": false,
+          "ts": {
+            "canonical": "errorCategory",
+            "default": null,
+            "default_kind": null,
+            "kind": "property",
+            "name": "errorCategory",
+            "required": false,
+            "type_class": "union",
+            "type_text": "AgentErrorKind | LegacyErrorCategory | string"
+          },
+          "ts_name": "errorCategory",
+          "type_class": "object",
+          "type_text": "Optional[AgentErrorKind]",
+          "waived": null,
+          "warnings": [
+            "type differs: python object (Optional[AgentErrorKind]) vs typescript union (AgentErrorKind | LegacyErrorCategory | string)"
+          ]
+        },
+        {
+          "canonical": "isRetryable",
+          "default": false,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "camelCase",
+          "name": "is_retryable",
+          "required": false,
+          "ts": {
+            "canonical": "isRetryable",
+            "default": false,
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "isRetryable",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean"
+          },
+          "ts_name": "isRetryable",
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "context",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "context",
+          "required": false,
+          "ts": {
+            "canonical": "context",
+            "default": {},
+            "default_kind": "literal",
+            "kind": "property",
+            "name": "context",
+            "required": false,
+            "type_class": "object",
+            "type_text": "Record<string, any>"
+          },
+          "ts_name": "context",
+          "type_class": "object",
+          "type_text": "Optional[Dict[str, Any]]",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/errors.py:87",
+        "resolved_class": "PraisonAIError"
+      },
+      "ts_only": [
+        {
+          "canonical": "options",
+          "default": {},
+          "default_kind": "literal",
+          "kind": "positional",
+          "name": "options",
+          "required": false,
+          "type_class": "object",
+          "type_text": "PraisonAIErrorOptions"
+        }
+      ],
+      "typescript": {
+        "ctor_location": "src/praisonai-ts/src/errors.ts:239",
+        "location": "src/praisonai-ts/src/errors.ts:212"
       }
     },
     "Session.__init__": {
@@ -3660,8 +4494,8 @@
         "mismatches": 1,
         "missing": 0,
         "params": 7,
-        "ts_only": 4,
-        "ts_total": 11,
+        "ts_only": 5,
+        "ts_total": 12,
         "waived": 1
       },
       "params": [
@@ -3850,6 +4684,16 @@
       },
       "ts_only": [
         {
+          "canonical": "config",
+          "default": {},
+          "default_kind": "literal",
+          "kind": "positional",
+          "name": "config",
+          "required": false,
+          "type_class": "object",
+          "type_text": "SessionConfig"
+        },
+        {
           "canonical": "id",
           "default": "config.sessionId || randomUUID().slice(0, 8)",
           "default_kind": "expr",
@@ -3905,7 +4749,7 @@
         "missing": 0,
         "params": 60,
         "ts_only": 1,
-        "ts_total": 61,
+        "ts_total": 62,
         "waived": 7
       },
       "params": [
@@ -5466,6 +6310,156 @@
         "location": "src/praisonai-ts/src/agent/types.ts:64"
       }
     },
+    "ToolsetRegistry.register_toolset": {
+      "counts": {
+        "alias": 0,
+        "camelCase": 0,
+        "exact": 5,
+        "flattened": 0,
+        "mismatches": 0,
+        "missing": 0,
+        "params": 5,
+        "ts_only": 0,
+        "ts_total": 5,
+        "waived": 0
+      },
+      "params": [
+        {
+          "canonical": "name",
+          "default": null,
+          "default_kind": null,
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "name",
+          "required": true,
+          "ts": {
+            "canonical": "name",
+            "default": null,
+            "default_kind": null,
+            "kind": "positional",
+            "name": "name",
+            "required": true,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "name",
+          "type_class": "string",
+          "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "tools",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "tools",
+          "required": false,
+          "ts": {
+            "canonical": "tools",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "tools",
+            "required": false,
+            "type_class": "array",
+            "type_text": "string[] | null"
+          },
+          "ts_name": "tools",
+          "type_class": "array",
+          "type_text": "Optional[List[str]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "includes",
+          "default": null,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "includes",
+          "required": false,
+          "ts": {
+            "canonical": "includes",
+            "default": null,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "includes",
+            "required": false,
+            "type_class": "array",
+            "type_text": "string[] | null"
+          },
+          "ts_name": "includes",
+          "type_class": "array",
+          "type_text": "Optional[List[str]]",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "description",
+          "default": "",
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "description",
+          "required": false,
+          "ts": {
+            "canonical": "description",
+            "default": "",
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "description",
+            "required": false,
+            "type_class": "string",
+            "type_text": "string"
+          },
+          "ts_name": "description",
+          "type_class": "string",
+          "type_text": "str",
+          "waived": null,
+          "warnings": []
+        },
+        {
+          "canonical": "overwrite",
+          "default": false,
+          "default_kind": "literal",
+          "gap": null,
+          "kind": "positional",
+          "match": "exact",
+          "name": "overwrite",
+          "required": false,
+          "ts": {
+            "canonical": "overwrite",
+            "default": false,
+            "default_kind": "literal",
+            "kind": "positional",
+            "name": "overwrite",
+            "required": false,
+            "type_class": "boolean",
+            "type_text": "boolean"
+          },
+          "ts_name": "overwrite",
+          "type_class": "boolean",
+          "type_text": "bool",
+          "waived": null,
+          "warnings": []
+        }
+      ],
+      "python": {
+        "location": "src/praisonai-agents/praisonaiagents/toolsets.py:55",
+        "resolved_class": "ToolsetRegistry"
+      },
+      "ts_only": [],
+      "typescript": {
+        "location": "src/praisonai-ts/src/toolsets.ts:115",
+        "resolved_class": "ToolsetRegistry"
+      }
+    },
     "tool()": {
       "counts": {
         "alias": 1,
@@ -5475,8 +6469,8 @@
         "mismatches": 4,
         "missing": 0,
         "params": 11,
-        "ts_only": 2,
-        "ts_total": 13,
+        "ts_only": 3,
+        "ts_total": 14,
         "waived": 4
       },
       "params": [
@@ -5773,6 +6767,16 @@
       },
       "ts_only": [
         {
+          "canonical": "config",
+          "default": null,
+          "default_kind": null,
+          "kind": "positional",
+          "name": "config",
+          "required": true,
+          "type_class": "object",
+          "type_text": "ToolConfig<TParams, TResult>"
+        },
+        {
           "canonical": "parameters",
           "default": null,
           "default_kind": null,
@@ -5794,23 +6798,23 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:163",
-        "location": "src/praisonai-ts/src/tools/decorator.ts:49"
+        "ctor_location": "src/praisonai-ts/src/tools/decorator.ts:213",
+        "location": "src/praisonai-ts/src/tools/decorator.ts:48"
       }
     }
   },
   "totals": {
     "alias": 9,
-    "camelCase": 79,
-    "exact": 106,
+    "camelCase": 87,
+    "exact": 121,
     "flattened": 2,
-    "mismatches": 20,
+    "mismatches": 21,
     "missing": 0,
-    "params": 196,
-    "surfaces": 10,
-    "ts_only": 56,
-    "ts_total": 255,
-    "waived": 20
+    "params": 219,
+    "surfaces": 15,
+    "ts_only": 85,
+    "ts_total": 309,
+    "waived": 21
   },
   "waivers": [
     {
@@ -5868,6 +6872,13 @@
       "key": "Handoff.__init__.tool_name_override",
       "owner": "praisonai-ts",
       "reason": "TS derives handoff_to_<agent> when unset; Python derives the same in the body"
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "PraisonAIError.__init__.run_id",
+      "owner": "praisonai-ts",
+      "reason": "TS assigns a run id at construction; Python leaves it None and fills it when the run starts"
     },
     {
       "expires": null,

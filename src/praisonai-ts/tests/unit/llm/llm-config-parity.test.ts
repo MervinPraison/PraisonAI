@@ -1,7 +1,9 @@
 /**
  * LLMConfig parity tests - every Python `LLM.__init__` parameter is accepted,
  * request-shaped ones reach the outgoing Chat Completions body, transport
- * ones reach the client, and the rest are reported as not yet honoured.
+ * ones reach the client, and every remaining option is honoured (see
+ * llm-tool-loop.test.ts and llm-honoured-options.test.ts) so nothing is
+ * reported as not yet honoured.
  */
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
@@ -32,11 +34,14 @@ const FULL_CONFIG: LLMConfig = {
   stopPhrases: ['END', 'STOP'],
   events: [],
   webSearch: true,
-  webFetch: true,
+  // webFetch / claudeMemory are Anthropic-only request shapes: on an OpenAI
+  // model they throw when truthy, so the acceptance config carries them as
+  // `false` and llm-honoured-options.test.ts exercises them on a Claude model.
+  webFetch: false,
   promptCaching: true,
-  claudeMemory: true,
+  claudeMemory: false,
   failoverManager: { getNextProfile: () => null },
-  auth: 'claude-code',
+  auth: { apiKey: 'sk-auth' },
   maxIter: 5,
 };
 
@@ -187,43 +192,29 @@ describe('LLMConfig parity', () => {
     });
   });
 
-  describe('not-yet-honoured notices', () => {
-    it('reports auth, failoverManager, claudeMemory, webFetch, events, maxIter', () => {
+  describe('parity notices', () => {
+    it('reports nothing: every accepted option is honoured', () => {
+      new BaseLLM(FULL_CONFIG);
+      expect(unhonouredOptions()).toEqual([]);
+    });
+
+    it('reports nothing for Anthropic-only options on a Claude model', () => {
       new BaseLLM({
-        model: 'gpt-4o-mini',
-        auth: 'claude-code',
-        failoverManager: {},
-        claudeMemory: true,
+        model: 'claude-sonnet-4',
+        promptCaching: true,
         webFetch: { max_uses: 3 },
+        claudeMemory: true,
         events: [() => undefined],
         maxIter: 3,
+        failoverManager: {},
+        auth: () => ({ apiKey: 'sk' }),
       });
-      expect(unhonouredOptions()).toEqual([
-        'LLM.auth',
-        'LLM.claudeMemory',
-        'LLM.events',
-        'LLM.failoverManager',
-        'LLM.maxIter',
-        'LLM.webFetch',
-      ]);
-    });
-
-    it('does not report an empty events list (the Python default)', () => {
-      new BaseLLM({ model: 'gpt-4o-mini', events: [] });
       expect(unhonouredOptions()).toEqual([]);
     });
 
-    it('reports promptCaching only where Python would emit Anthropic cache breakpoints', () => {
-      new BaseLLM({ model: 'gpt-4o-mini', promptCaching: true });
-      expect(unhonouredOptions()).toEqual([]);
-      new BaseLLM({ model: 'claude-sonnet-4', promptCaching: true });
-      expect(unhonouredOptions()).toEqual(['LLM.promptCaching']);
-    });
-
-    it('does not report any wired option', () => {
-      const { auth, failoverManager, claudeMemory, webFetch, maxIter, promptCaching, ...wired } = FULL_CONFIG;
-      new BaseLLM(wired);
-      expect(unhonouredOptions()).toEqual([]);
+    it('rejects Anthropic-only options on a non-Anthropic model instead of ignoring them', () => {
+      expect(() => new BaseLLM({ model: 'gpt-4o-mini', webFetch: true })).toThrow(/webFetch.*Anthropic-style model/);
+      expect(() => new BaseLLM({ model: 'gpt-4o-mini', claudeMemory: true })).toThrow(/claudeMemory.*Anthropic-style model/);
     });
   });
 });

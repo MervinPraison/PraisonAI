@@ -5,7 +5,6 @@
  */
 
 import { getApprovalManager, ToolApprovalDeniedError } from '../ai/tool-approval';
-import { notYetHonoured } from '../utils/parity-notice';
 
 export interface ToolParameters {
   type: 'object';
@@ -66,7 +65,14 @@ export interface ToolConfig<TParams = any, TResult = any> {
   requiresApproval?: boolean | RiskLevel | string;
   /** Python parity: to_model_output (Optional[Callable[[Any], Any]], default None). Shapes the value execute() hands to the model; executeRaw() keeps the full result. */
   toModelOutput?: (result: TResult) => unknown;
-  /** Python parity: restart_safe (Optional[bool], default None). Replay contract for durable resume; stored, not yet honoured. */
+  /**
+   * Python parity: restart_safe (Optional[bool], default None). Replay
+   * contract for durable resume. `true` marks a read-only/idempotent tool
+   * that may be re-run after a crash; `false` marks an effectful tool that
+   * must never be silently re-executed on resume; `undefined` falls back to
+   * the read-only name heuristic ({@link isReadOnlyToolName}). Enforced by
+   * `execute()` when the context carries `resumed: true`.
+   */
   restartSafe?: boolean;
 }
 
@@ -75,6 +81,50 @@ export interface ToolContext {
   sessionId?: string;
   runId?: string;
   signal?: AbortSignal;
+  /**
+   * Set by a durable-resume caller when this call was in flight at the time
+   * of a crash and is being replayed. Tools that are not restart-safe refuse
+   * to run in that case (Python `DurableRunState.wrap_sync` gate).
+   */
+  resumed?: boolean;
+}
+
+/**
+ * Python parity: `ToolExecutionMixin._is_read_only_tool`. Tools whose names
+ * imply mutation (write/edit/delete/create/run/exec/...) are not read-only.
+ */
+export function isReadOnlyToolName(name: string | undefined | null): boolean {
+  if (!name) return true;
+  const lower = String(name).toLowerCase();
+  const writeMarkers = [
+    'write', 'edit', 'append', 'delete', 'remove', 'create', 'mkdir',
+    'rm', 'put', 'post', 'patch', 'update', 'insert', 'save', 'move',
+    'rename', 'chmod', 'chown', 'exec', 'run', 'shell', 'bash', 'command',
+    'kill', 'apply_patch', 'install', 'deploy',
+  ];
+  return !writeMarkers.some(marker => lower.includes(marker));
+}
+
+/**
+ * Thrown when a tool that is not restart-safe is asked to re-run a call
+ * that was in flight when a durable run crashed. Mirrors Python's
+ * `NotSafelyResumable` result.
+ */
+export class ToolNotRestartSafeError extends Error {
+  readonly toolName: string;
+  readonly errorType = 'NotSafelyResumable';
+  readonly notSafelyResumable = true;
+  readonly restartSafe = false;
+
+  constructor(toolName: string) {
+    super(
+      `Tool '${toolName}' was in-flight when the durable run crashed and is not declared restartSafe; ` +
+        'its outcome could not be confirmed. It was not re-executed on resume to avoid a duplicate side effect. ' +
+        'Reconcile the external action manually or mark the tool tool({ restartSafe: true }) if it is idempotent.'
+    );
+    this.name = 'ToolNotRestartSafeError';
+    this.toolName = toolName;
+  }
 }
 
 export interface ToolDefinition {
@@ -173,9 +223,18 @@ export class FunctionTool<TParams = any, TResult = any> {
     this.approval = resolveApproval(config.approval, config.requiresApproval, config.name);
     this.toModelOutputFn = config.toModelOutput;
     this.restartSafe = config.restartSafe;
-    if (config.restartSafe !== undefined) {
-      notYetHonoured('tool', 'restartSafe', 'Durable resume is not ported; the flag is stored on the tool.');
+  }
+
+  /**
+   * Python parity: `durable._is_restart_safe`. An explicit boolean
+   * declaration wins; a malformed (non-boolean) declaration fails closed;
+   * an undeclared tool falls back to the read-only name heuristic.
+   */
+  get isRestartSafe(): boolean {
+    if (this.restartSafe !== undefined && this.restartSafe !== null) {
+      return typeof this.restartSafe === 'boolean' ? this.restartSafe : false;
     }
+    return isReadOnlyToolName(this.name);
   }
 
   private normalizeParameters(params: any): ToolParameters {
@@ -339,6 +398,9 @@ export class FunctionTool<TParams = any, TResult = any> {
    * under the retry policy. `toModelOutput` is not applied here.
    */
   async executeRaw(params: TParams, context?: ToolContext): Promise<TResult> {
+    if (context?.resumed && !this.isRestartSafe) {
+      throw new ToolNotRestartSafeError(this.name);
+    }
     await this.gateApproval(params, context);
     return this.runWithRetry(params, context);
   }
@@ -448,6 +510,11 @@ export class ToolRegistry {
 
   getByCategory(category: string): FunctionTool[] {
     return this.list().filter(t => t.category === category);
+  }
+
+  /** Registered tools that may be re-run after a durable-resume crash ({@link FunctionTool.isRestartSafe}). */
+  listRestartSafe(): FunctionTool[] {
+    return this.list().filter(t => t.isRestartSafe);
   }
 
   /** Definitions offered to a model: unavailable tools are excluded. */

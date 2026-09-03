@@ -109,3 +109,14 @@ export {
   type RAGChunker,
   type RAGReranker
 } from './rag-pipeline';
+
+// Export incremental indexing infrastructure (port of praisonaiagents/knowledge/indexing.py)
+export * from './indexing';
+
+// Export knowledge store protocol, result models and errors (port of protocols.py / models.py)
+export * from './protocols';
+
+// Export the Knowledge store (port of knowledge.py). NOTE: this barrel's own
+// `Knowledge` interface above shadows the class; import the class from
+// './knowledge/knowledge' directly until the top-level barrel is switched over.
+export * from './knowledge';

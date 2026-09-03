@@ -20,7 +20,7 @@ export type {
 
 // AudioAgent - Speech synthesis and transcription
 export { AudioAgent, createAudioAgent } from './audio';
-export type { AudioAgentConfig, SpeakOptions, TranscribeOptions, SpeakResult, TranscribeResult, AudioProvider } from './audio';
+export type { AudioAgentConfig, AudioConfig, SpeakOptions, TranscribeOptions, SpeakResult, TranscribeResult, AudioProvider } from './audio';
 
 // CodeAgent - Code generation, execution, review, refactoring (Python parity)
 export { CodeAgent, createCodeAgent } from './code';
@@ -47,7 +47,7 @@ export { RealtimeAgent, createRealtimeAgent } from './realtime';
 export type { RealtimeConfig, RealtimeAgentConfig, RealtimeEvent, RealtimeEventType } from './realtime';
 
 // DeepResearchAgent - Research with citations (Python parity enhanced)
-export { DeepResearchAgent, createDeepResearchAgent } from './research';
+export { DeepResearchAgent, createDeepResearchAgent, Provider } from './research';
 export type {
   DeepResearchConfig,
   DeepResearchResponse,
@@ -58,7 +58,6 @@ export type {
   FileSearchCall,
   MCPCall,
   WebSearchCall,
-  Provider,
 } from './research';
 
 // Router exports

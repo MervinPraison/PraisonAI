@@ -30,6 +30,9 @@ waivers:
   Handoff.__init__.tool_name_override:
     owner: praisonai-ts
     reason: TS derives handoff_to_<agent> when unset; Python derives the same in the body
+  PraisonAIError.__init__.run_id:
+    owner: praisonai-ts
+    reason: TS assigns a run id at construction; Python leaves it None and fills it when the run starts
   Session.__init__.user_id:
     owner: praisonai-ts
     reason: TS sets "default_user" eagerly; Python resolves the same value lazily

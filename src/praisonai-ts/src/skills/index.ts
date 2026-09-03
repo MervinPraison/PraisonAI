@@ -4,6 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { findSkillMd, parseYamlFrontmatter } from './parser';
 
 export interface SkillMetadata {
   name: string;
@@ -55,47 +56,6 @@ export function parseSkillFile(content: string): Skill {
     },
     instructions: instructions.trim()
   };
-}
-
-/**
- * Simple YAML frontmatter parser
- */
-function parseYamlFrontmatter(yaml: string): Record<string, any> {
-  const result: Record<string, any> = {};
-  const lines = yaml.split('\n');
-  let currentKey = '';
-  let inMetadata = false;
-  const metadataObj: Record<string, string> = {};
-
-  for (const line of lines) {
-    if (line.startsWith('metadata:')) {
-      inMetadata = true;
-      continue;
-    }
-
-    if (inMetadata && line.startsWith('  ')) {
-      const match = line.match(/^\s+(\w+):\s*(.*)$/);
-      if (match) {
-        metadataObj[match[1]] = match[2].replace(/^["']|["']$/g, '');
-      }
-      continue;
-    } else if (inMetadata && !line.startsWith('  ')) {
-      inMetadata = false;
-      result.metadata = metadataObj;
-    }
-
-    const match = line.match(/^(\S+):\s*(.*)$/);
-    if (match) {
-      currentKey = match[1];
-      result[currentKey] = match[2].replace(/^["']|["']$/g, '');
-    }
-  }
-
-  if (inMetadata) {
-    result.metadata = metadataObj;
-  }
-
-  return result;
 }
 
 /**
@@ -284,8 +244,8 @@ export class SkillLoader {
    * Load skill metadata only (Level 1 - ~100 tokens).
    */
   async loadMetadata(skillPath: string): Promise<SkillProperties> {
-    const skillMdPath = path.join(skillPath, 'SKILL.md');
-    if (!fs.existsSync(skillMdPath)) {
+    const skillMdPath = findSkillMd(skillPath);
+    if (!skillMdPath) {
       throw new Error(`SKILL.md not found at ${skillPath}`);
     }
 
@@ -311,8 +271,8 @@ export class SkillLoader {
       return this.cache.get(skillPath)!;
     }
 
-    const skillMdPath = path.join(skillPath, 'SKILL.md');
-    if (!fs.existsSync(skillMdPath)) {
+    const skillMdPath = findSkillMd(skillPath);
+    if (!skillMdPath) {
       throw new Error(`SKILL.md not found at ${skillPath}`);
     }
 
@@ -369,3 +329,28 @@ export class SkillLoader {
 export function createSkillLoader(): SkillLoader {
   return new SkillLoader();
 }
+
+// ============================================================================
+// Python Parity: enums, parser, validator, discovery (module-level functions)
+// ============================================================================
+// Kept at the bottom: discovery.ts imports SkillLoader from this module, so
+// the re-export must run after the class is defined.
+
+export { SkillState, EnforcementLevel } from './models';
+export { ParseError, findSkillMd, parseFrontmatter, parseYamlFrontmatter } from './parser';
+export {
+  validateSkill,
+  validate,
+  validateMetadata,
+  ALLOWED_FIELDS,
+  MAX_SKILL_NAME_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_COMPATIBILITY_LENGTH,
+} from './validator';
+export {
+  discoverSkills,
+  discoverSkill,
+  loadSkill,
+  getDefaultSkillDirs,
+  type RemoteSkillSource,
+} from './discovery';

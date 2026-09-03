@@ -1,7 +1,8 @@
 /**
  * ToolConfig parity tests - every Python `tool()` keyword is accepted and
  * either wired (version, availability, dynamicSchemaOverrides, retryPolicy,
- * approval/requiresApproval, toModelOutput) or reported (restartSafe).
+ * approval/requiresApproval, toModelOutput, restartSafe); nothing is
+ * reported as not yet honoured.
  */
 
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
@@ -293,10 +294,11 @@ describe('ToolConfig parity', () => {
   });
 
   describe('restartSafe', () => {
-    it('is stored and reported as not yet honoured', () => {
+    it('is stored, honoured by isRestartSafe and not reported as unhonoured', () => {
       const t = tool({ name: 'ro', execute: () => 1, restartSafe: false });
       expect(t.restartSafe).toBe(false);
-      expect(unhonouredOptions()).toEqual(['tool.restartSafe']);
+      expect(t.isRestartSafe).toBe(false);
+      expect(unhonouredOptions()).toEqual([]);
     });
 
     it('is not reported when left undeclared', () => {

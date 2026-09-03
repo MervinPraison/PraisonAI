@@ -18,17 +18,22 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 | Surface | Params | Exact | camelCase | Alias | Flattened | Missing | Mismatches | Waived | TS-only / TS total |
 |---|---|---|---|---|---|---|---|---|---|
-| `Agent.__init__` | 42 | 29 | 8 | 3 | 2 | 0 | 4 | 4 | 13 / 58 |
-| `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 2 / 25 |
-| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 1 / 61 |
+| `Agent.__init__` | 42 | 29 | 8 | 3 | 2 | 0 | 4 | 4 | 14 / 59 |
+| `AgentTeam.__init__` | 23 | 20 | 3 | 0 | 0 | 0 | 1 | 1 | 3 / 26 |
+| `Task.__init__` | 60 | 31 | 29 | 0 | 0 | 0 | 7 | 7 | 1 / 62 |
 | `Agent.start` | 1 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 20 / 21 |
 | `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 0 | 0 | 2 / 19 |
 | `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 / 4 |
-| `Handoff.__init__` | 7 | 2 | 2 | 3 | 0 | 0 | 2 | 2 | 11 / 18 |
-| `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 0 / 25 |
-| `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 4 / 11 |
-| `tool()` | 11 | 5 | 5 | 1 | 0 | 0 | 4 | 4 | 2 / 13 |
-| **Total (10 surfaces)** | 196 | 106 | 79 | 9 | 2 | 0 | 20 | 20 | 56 / 255 |
+| `Handoff.__init__` | 7 | 2 | 2 | 3 | 0 | 0 | 2 | 2 | 13 / 21 |
+| `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 1 / 26 |
+| `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 5 / 12 |
+| `tool()` | 11 | 5 | 5 | 1 | 0 | 0 | 4 | 4 | 3 / 14 |
+| `GoalEngineer.__init__` | 6 | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 2 / 8 |
+| `DoomLoopDetector.__init__` | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 15 / 16 |
+| `EscalationPipeline.__init__` | 5 | 3 | 2 | 0 | 0 | 0 | 0 | 0 | 4 / 9 |
+| `ToolsetRegistry.register_toolset` | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 5 |
+| `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
+| **Total (15 surfaces)** | 219 | 121 | 87 | 9 | 2 | 0 | 21 | 21 | 85 / 309 |
 
 ## Surfaces
 
@@ -36,7 +41,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:583`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:116` (ctor `src/praisonai-ts/src/agent/simple.ts:712`)
-- Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 4 mismatches; 4 waived; 13 TS-only of 58
+- Counts: 42 python params: 29 exact, 8 camelCase, 3 alias, 2 flattened, 0 missing; 4 mismatches; 4 waived; 14 TS-only of 59
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -83,14 +88,14 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `retry` | keyword | null | `Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']]` | exact | `retry` | undefined | `boolean \| AgentRetryConfig` | ok |
 | `reasoning_effort` | keyword | null | `Optional[str]` | camelCase | `reasoningEffort` | undefined | `'off' \| 'minimal' \| 'low' \| 'medium' \| 'high' \| string` | ok |
 
-TS-only members: `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `cacheTTL`?, `telemetry`?
+TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `toolFunctions`?, `db`?, `sessionId`?, `runId`?, `historyLimit`?, `autoRestore`?, `autoPersist`?, `cacheTTL`?, `telemetry`?
 
 ### `AgentTeam.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:648`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:2673` (ctor `src/praisonai-ts/src/agent/simple.ts:2866`)
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:17` (ctor `src/praisonai-ts/src/agent/team.ts:210`)
 - Python aliases: PraisonAIAgents, Agents
-- Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 2 TS-only of 25
+- Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -118,13 +123,13 @@ TS-only members: `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaName`?, `too
 | `tools_run_on` | positional | null | `Optional[Any]` | camelCase | `toolsRunOn` | undefined | `unknown` | ok |
 | `run_on` | positional | null | `Optional[Any]` | camelCase | `runOn` | undefined | `unknown` | ok |
 
-TS-only members: `verbose`?, `pretty`?
+TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 
 ### `Task.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/task/task.py:47`
 - TypeScript: `src/praisonai-ts/src/agent/types.ts:64` (ctor `src/praisonai-ts/src/agent/types.ts:327`)
-- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 61
+- Counts: 60 python params: 31 exact, 29 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 62
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -234,7 +239,7 @@ TS-only members: `previousResult`?, `options`?
 ### `AgentTeam.start`
 
 - Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2007`
-- TypeScript: `src/praisonai-ts/src/agent/simple.ts:3053`
+- TypeScript: `src/praisonai-ts/src/agent/team.ts:397`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -248,8 +253,8 @@ TS-only members: `options`?
 ### `Handoff.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:320`
-- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:172` (ctor `src/praisonai-ts/src/agent/handoff.ts:338`)
-- Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 11 TS-only of 18
+- TypeScript: `src/praisonai-ts/src/agent/handoff.ts:434` (ctor `src/praisonai-ts/src/agent/handoff.ts:670`)
+- Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 13 TS-only of 21
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -261,13 +266,13 @@ TS-only members: `options`?
 | `input_filter` | positional | null | `Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]]` | alias | `transformContext` | undefined | `(messages: any[]) => any[]` | ok (type differs) |
 | `config` | positional | null | `Optional[HandoffConfig]` | exact | `config` | undefined | `Partial<HandoffConfig>` | ok |
 
-TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContextMessages`?, `preserveSystem`?, `timeoutSeconds`?, `maxConcurrent`?, `detectCycles`?, `maxDepth`?, `onComplete`?, `onError`?
+TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContextMessages`?, `preserveSystem`?, `toolPolicy`?, `timeoutSeconds`?, `maxConcurrent`?, `detectCycles`?, `maxDepth`?, `allowParallel`?, `onComplete`?, `onError`?
 
 ### `LLM.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:413`
-- TypeScript: `src/praisonai-ts/src/llm/index.ts:18` (ctor `src/praisonai-ts/src/llm/index.ts:110`)
-- Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 0 TS-only of 25
+- TypeScript: `src/praisonai-ts/src/llm/index.ts:286` (ctor `src/praisonai-ts/src/llm/index.ts:466`)
+- Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -288,22 +293,22 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 | `stop_phrases` | positional | null | `Optional[Union[str, List[str]]]` | camelCase | `stopPhrases` | undefined | `string \| string[]` | ok |
 | `api_key` | positional | null | `Optional[str]` | camelCase | `apiKey` | undefined | `string` | ok |
 | `base_url` | positional | null | `Optional[str]` | alias | `baseURL` | undefined | `string` | ok |
-| `events` | positional | [] | `List[Any]` | exact | `events` | [] | `unknown[]` | ok |
+| `events` | positional | [] | `List[Any]` | exact | `events` | [] | `LLMEventListener[]` | ok |
 | `web_search` | positional | null | `Optional[Union[bool, Dict[str, Any]]]` | camelCase | `webSearch` | undefined | `boolean \| Record<string, unknown>` | ok |
 | `web_fetch` | positional | null | `Optional[Union[bool, Dict[str, Any]]]` | camelCase | `webFetch` | undefined | `boolean \| Record<string, unknown>` | ok |
 | `prompt_caching` | positional | null | `Optional[bool]` | camelCase | `promptCaching` | undefined | `boolean` | ok |
-| `claude_memory` | positional | null | `Optional[Union[bool, Any]]` | camelCase | `claudeMemory` | undefined | `boolean \| unknown` | ok |
-| `failover_manager` | positional | null | `Optional[FailoverManagerProtocol]` | camelCase | `failoverManager` | undefined | `unknown` | ok |
-| `auth` | positional | null | `Optional[str]` | exact | `auth` | undefined | `string` | ok |
+| `claude_memory` | positional | null | `Optional[Union[bool, Any]]` | camelCase | `claudeMemory` | undefined | `boolean \| ClaudeMemoryBackend` | ok |
+| `failover_manager` | positional | null | `Optional[FailoverManagerProtocol]` | camelCase | `failoverManager` | undefined | `LLMFailoverManager` | ok |
+| `auth` | positional | null | `Optional[str]` | exact | `auth` | undefined | `LLMAuthSource` | ok (type differs) |
 | `max_iter` | positional | null | `Optional[int]` | camelCase | `maxIter` | undefined | `number` | ok |
 
-TS-only members: none
+TS-only members: `config`
 
 ### `Session.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/session/api.py:66`
 - TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:132`)
-- Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 4 TS-only of 11
+- Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 5 TS-only of 12
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -315,13 +320,13 @@ TS-only members: none
 | `timeout` | positional | 30 | `int` | exact | `timeout` | 30 | `number` | ok |
 | `session_ttl` | positional | null | `Optional[int]` | camelCase | `sessionTtl` | undefined | `number` | ok |
 
-TS-only members: `id`?, `parent`?, `db`?, `ttl`?
+TS-only members: `config`?, `id`?, `parent`?, `db`?, `ttl`?
 
 ### `tool()`
 
 - Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:235`
-- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:49` (ctor `src/praisonai-ts/src/tools/decorator.ts:163`)
-- Counts: 11 python params: 5 exact, 5 camelCase, 1 alias, 0 flattened, 0 missing; 4 mismatches; 4 waived; 2 TS-only of 13
+- TypeScript: `src/praisonai-ts/src/tools/decorator.ts:48` (ctor `src/praisonai-ts/src/tools/decorator.ts:213`)
+- Counts: 11 python params: 5 exact, 5 camelCase, 1 alias, 0 flattened, 0 missing; 4 mismatches; 4 waived; 3 TS-only of 14
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -337,7 +342,85 @@ TS-only members: `id`?, `parent`?, `db`?, `ttl`?
 | `to_model_output` | keyword | null | `Optional[Callable[[Any], Any]]` | camelCase | `toModelOutput` | undefined | `(result: TResult) => unknown` | ok |
 | `restart_safe` | keyword | null | `Optional[bool]` | camelCase | `restartSafe` | undefined | `boolean` | ok |
 
-TS-only members: `parameters`?, `category`?
+TS-only members: `config`, `parameters`?, `category`?
+
+### `GoalEngineer.__init__`
+
+- Python: `src/praisonai-agents/praisonaiagents/goal/engineer.py:58`
+- TypeScript: `src/praisonai-ts/src/goal/engineer.ts:42` (ctor `src/praisonai-ts/src/goal/engineer.ts:74`)
+- Counts: 6 python params: 4 exact, 2 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 8
+
+| Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
+|---|---|---|---|---|---|---|---|---|
+| `model` | positional | null | `Optional[str]` | exact | `model` | undefined | `string \| null` | ok |
+| `max_criteria` | positional | null | `Optional[int]` | camelCase | `maxCriteria` | undefined | `number \| null` | ok |
+| `threshold` | positional | null | `Optional[float]` | exact | `threshold` | undefined | `number \| null` | ok |
+| `auto_decompose` | positional | null | `Optional[bool]` | camelCase | `autoDecompose` | undefined | `boolean \| null` | ok |
+| `config` | positional | null | `Optional[GoalConfig]` | exact | `config` | {} | `GoalConfig \| GoalConfigOptions \| null` | ok |
+| `verbose` | positional | false | `bool` | exact | `verbose` | undefined | `boolean` | ok |
+
+TS-only members: `options`?, `llm`?
+
+### `DoomLoopDetector.__init__`
+
+- Python: `src/praisonai-agents/praisonaiagents/escalation/doom_loop.py:113`
+- TypeScript: `src/praisonai-ts/src/escalation/doom-loop.ts:51` (ctor `src/praisonai-ts/src/escalation/doom-loop.ts:235`)
+- Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 15 TS-only of 16
+
+| Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
+|---|---|---|---|---|---|---|---|---|
+| `config` | positional | null | `Optional[DoomLoopConfig]` | exact | `config` | null | `DoomLoopConfig \| DoomLoopConfigOptions \| null` | ok |
+
+TS-only members: `maxIdenticalActions`?, `maxSimilarActions`?, `maxConsecutiveFailures`?, `maxNoProgressSteps`?, `similarityThreshold`?, `maxTimePerAction`?, `maxTotalTime`?, `enableAutoRecovery`?, `maxRecoveryAttempts`?, `escalateOnLoop`?, `initialBackoff`?, `backoffMultiplier`?, `maxBackoff`?, `maxRepeatedChunks`?, `contentChunkSize`?
+
+### `EscalationPipeline.__init__`
+
+- Python: `src/praisonai-agents/praisonaiagents/escalation/pipeline.py:44`
+- TypeScript: `src/praisonai-ts/src/escalation/pipeline.ts:51` (ctor `src/praisonai-ts/src/escalation/pipeline.ts:103`)
+- Counts: 5 python params: 3 exact, 2 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 4 TS-only of 9
+
+| Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
+|---|---|---|---|---|---|---|---|---|
+| `config` | positional | null | `Optional[EscalationConfig]` | exact | `config` | undefined | `EscalationConfig \| EscalationConfigOptions \| null` | ok |
+| `agent` | positional | null | `Optional[Any]` | exact | `agent` | null | `EscalationAgent \| null` | ok |
+| `tools` | positional | null | `Optional[List[Any]]` | exact | `tools` | [] | `unknown[] \| null` | ok |
+| `checkpoint_service` | positional | null | `Optional[Any]` | camelCase | `checkpointService` | null | `CheckpointServiceLike \| null` | ok |
+| `on_stage_change` | positional | null | `Optional[Callable[[EscalationStage, EscalationStage], None]]` | camelCase | `onStageChange` | null | `StageChangeCallback \| null` | ok (type differs) |
+
+TS-only members: `options`?, `autonomousRunner`?, `observability`?, `doomLoopConfig`?
+
+### `ToolsetRegistry.register_toolset`
+
+- Python: `src/praisonai-agents/praisonaiagents/toolsets.py:55`
+- TypeScript: `src/praisonai-ts/src/toolsets.ts:115`
+- Counts: 5 python params: 5 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 0 TS-only of 5
+
+| Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
+|---|---|---|---|---|---|---|---|---|
+| `name` | positional | *required* | `str` | exact | `name` | *required* | `string` | ok |
+| `tools` | positional | null | `Optional[List[str]]` | exact | `tools` | null | `string[] \| null` | ok |
+| `includes` | positional | null | `Optional[List[str]]` | exact | `includes` | null | `string[] \| null` | ok |
+| `description` | positional | "" | `str` | exact | `description` | "" | `string` | ok |
+| `overwrite` | positional | false | `bool` | exact | `overwrite` | false | `boolean` | ok |
+
+TS-only members: none
+
+### `PraisonAIError.__init__`
+
+- Python: `src/praisonai-agents/praisonaiagents/errors.py:87`
+- TypeScript: `src/praisonai-ts/src/errors.ts:212` (ctor `src/praisonai-ts/src/errors.ts:239`)
+- Counts: 6 python params: 2 exact, 4 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 7
+
+| Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
+|---|---|---|---|---|---|---|---|---|
+| `message` | positional | *required* | `str` | exact | `message` | *required* | `string` | ok |
+| `agent_id` | positional | "unknown" | `str` | camelCase | `agentId` | "unknown" | `string` | ok |
+| `run_id` | positional | null | `Optional[str]` | camelCase | `runId` | `randomUUID()` | `string` | default mismatch (waived) |
+| `error_category` | positional | null | `Optional[AgentErrorKind]` | camelCase | `errorCategory` | undefined | `AgentErrorKind \| LegacyErrorCategory \| string` | ok (type differs) |
+| `is_retryable` | positional | false | `bool` | camelCase | `isRetryable` | false | `boolean` | ok |
+| `context` | positional | null | `Optional[Dict[str, Any]]` | exact | `context` | {} | `Record<string, any>` | ok |
+
+TS-only members: `options`?
 
 ## Active waivers
 
@@ -351,6 +434,7 @@ TS-only members: `parameters`?, `category`?
 | `AgentTeam.__init__.process` | TS treats an undefined process as sequential, the Python default | praisonai-ts |  |  |
 | `Handoff.__init__.tool_description_override` | TS derives "Transfer conversation to <agent>"; Python derives the same in the body | praisonai-ts |  |  |
 | `Handoff.__init__.tool_name_override` | TS derives handoff_to_<agent> when unset; Python derives the same in the body | praisonai-ts |  |  |
+| `PraisonAIError.__init__.run_id` | TS assigns a run id at construction; Python leaves it None and fills it when the run starts | praisonai-ts |  |  |
 | `Session.__init__.user_id` | TS sets "default_user" eagerly; Python resolves the same value lazily | praisonai-ts |  |  |
 | `Task.__init__.action` | TS action mirrors description; Python resolves the same in the body | praisonai-ts |  |  |
 | `Task.__init__.depends_on` | TS dependsOn falls back to context then []; Python None means empty (same as the waived context alias) | praisonai-ts |  |  |

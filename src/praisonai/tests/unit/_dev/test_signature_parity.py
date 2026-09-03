@@ -533,8 +533,10 @@ class TestCli:
 
     def test_config_files_load(self):
         catalogue = C.load_surfaces()
-        assert len(catalogue.surfaces) == 10
+        # A minimum, not an exact count: surface.yaml grows as surfaces are curated.
+        assert len(catalogue.surfaces) >= 10
         assert {s.key for s in catalogue.surfaces} >= {'Agent.__init__', 'AgentTeam.__init__', 'tool()'}
+        assert len({s.key for s in catalogue.surfaces}) == len(catalogue.surfaces), 'duplicate surface keys'
         rules = C.load_rules()
         assert rules.aliases['Agent.__init__']['base_url'] == 'baseURL'
         assert rules.flattened['Agent.__init__']['output'] == ['verbose', 'markdown', 'stream']
@@ -594,6 +596,70 @@ export class Agent {
         ])
         assert [p['name'] for p in items[0]['params']] == ['prompt']
         assert 'options_interfaces' not in items[0]['extra']
+
+
+class TestPositionalConstructorParams:
+    """A constructor's positional parameters are reported alongside the flattened options."""
+
+    FIXTURE = """
+export interface ErrOptions {
+  agentId?: string;
+  runId?: string;
+}
+export class PraisonAIError extends Error {
+  constructor(message: string, options: ErrOptions = {}) {
+    super(message);
+    const a = options.agentId ?? 'unknown';
+    void a;
+  }
+}
+export interface DetectorOptions { threshold?: number; }
+export class Detector {
+  constructor(config: DetectorOptions | null = null) {
+    const t = config?.threshold ?? 3;
+    void t;
+  }
+}
+"""
+
+    @staticmethod
+    def _fake_repo(tmp_path):
+        src = tmp_path / 'src' / 'praisonai-ts' / 'src'
+        src.mkdir(parents=True)
+        (src / 'errors.ts').write_text(TestPositionalConstructorParams.FIXTURE)
+        return tmp_path
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_positional_param_is_reported_and_options_still_flattened(self, tmp_path):
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [
+            {'surface': 'PraisonAIError.__init__', 'file': 'errors.ts', 'kind': 'interface',
+             'name': 'ErrOptions', 'ctorClass': 'PraisonAIError'},
+        ])
+        params = {p['name']: p for p in items[0]['params']}
+        # The positional `message` is reported, and so are the flattened options members.
+        assert 'message' in params
+        assert params['message']['kind'] == 'positional' and params['message']['required'] is True
+        assert {'agentId', 'runId'} <= set(params)
+        assert params['agentId']['default'] == 'unknown'
+
+    @pytest.mark.skipif(shutil.which('node') is None, reason='node is not on PATH')
+    @pytest.mark.skipif(not _typescript_resolvable(),
+                        reason='typescript module not resolvable (set PARITY_TS_NODE_MODULES)')
+    def test_options_parameter_is_also_reported_under_its_own_name(self, tmp_path):
+        """A Python parameter literally named `config` matches the TS options parameter."""
+        repo = self._fake_repo(tmp_path)
+        items = C.run_ts_extractor(repo, [
+            {'surface': 'Detector.__init__', 'file': 'errors.ts', 'kind': 'interface',
+             'name': 'DetectorOptions', 'ctorClass': 'Detector'},
+        ])
+        params = {p['name']: p for p in items[0]['params']}
+        assert 'config' in params, 'the options parameter should be reported by name'
+        assert params['config']['required'] is False
+        # Control: its members are still flattened, so both spellings resolve.
+        assert 'threshold' in params and params['threshold']['default'] == 3
 
 
 class TestPruneWaivers:

@@ -12,6 +12,12 @@
  * - ContextConfig class
  */
 
+import {
+  CompactionStrategy,
+  type CompactionStrategyType,
+  type ContextCompactionPolicyProtocol,
+} from './policy';
+
 // ============================================================================
 // Context Segment Enum
 // ============================================================================
@@ -319,6 +325,59 @@ export function createContextConfig(partial?: Partial<ContextConfig>): ContextCo
     allowAbsolutePaths: false,
     source: 'defaults',
     ...partial,
+  };
+}
+
+/**
+ * Map a CompactionStrategy (context/policy.ts, Python context/protocols.py)
+ * onto the OptimizerStrategy used by ContextConfig / ManagerConfig.
+ *
+ * - truncate          -> truncate
+ * - summarise         -> summarize
+ * - drop_oldest_tools -> prune_tools
+ * - sliding_window    -> sliding_window
+ */
+export function compactionStrategyToOptimizerStrategy(
+  strategy: CompactionStrategyType | string,
+): OptimizerStrategyType {
+  switch (String(strategy).toLowerCase()) {
+    case CompactionStrategy.TRUNCATE:
+      return OptimizerStrategy.TRUNCATE;
+    case CompactionStrategy.SUMMARISE:
+      return OptimizerStrategy.SUMMARIZE;
+    case CompactionStrategy.DROP_OLDEST_TOOLS:
+      return OptimizerStrategy.PRUNE_TOOLS;
+    case CompactionStrategy.SLIDING_WINDOW:
+      return OptimizerStrategy.SLIDING_WINDOW;
+    default:
+      return OptimizerStrategy.SMART;
+  }
+}
+
+/**
+ * Derive the compaction fields of a ContextConfig from a compaction policy.
+ *
+ * Returns a new config (the input is not mutated) whose `compactThreshold`
+ * is the policy's `triggerAt`, `keepRecentTurns` its `preserveLastNTurns`,
+ * `compressionMaxAttempts` its `maxCompactionAttempts`, and `strategy` the
+ * mapped {@link compactionStrategyToOptimizerStrategy}. `autoCompact` is
+ * switched on because a policy exists to be acted upon.
+ *
+ * Python keeps these as separate objects (ContextConfig vs
+ * ContextCompactionPolicyAdapter); this helper is the TypeScript bridge that
+ * lets the policy drive `compactThreshold`.
+ */
+export function applyCompactionPolicy(
+  config: ContextConfig,
+  policy: ContextCompactionPolicyProtocol,
+): ContextConfig {
+  return {
+    ...config,
+    autoCompact: true,
+    compactThreshold: policy.triggerAt,
+    keepRecentTurns: policy.preserveLastNTurns,
+    compressionMaxAttempts: policy.maxCompactionAttempts,
+    strategy: compactionStrategyToOptimizerStrategy(policy.strategy),
   };
 }
 

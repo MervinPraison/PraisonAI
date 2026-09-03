@@ -4,6 +4,8 @@
  * Standard interfaces for tool registration, execution, and middleware.
  */
 
+import { PraisonAIError } from '../../errors';
+
 /**
  * Tool execution context - passed to every tool call
  */
@@ -267,8 +269,34 @@ export class MissingEnvVarError extends Error {
 }
 
 /**
- * Error thrown when an agent exceeds its budget/cost limit.
- * Mirrors Python SDK: BudgetExceededError(agent_name, total_cost, max_budget)
+ * Keyword options of `BudgetExceededError` (Python's new-style constructor).
+ * Python parity: praisonaiagents/errors.py:192-202 (`BudgetExceededError.__init__`)
+ */
+export interface BudgetExceededErrorOptions {
+  /** What ran out: `"tokens"` (default), `"cost"`, `"time"`, ... */
+  budgetType?: string;
+  /** The configured ceiling. Recorded in `context.limit` (`null` when unknown). */
+  limit?: number | null;
+  /** How much was consumed. Recorded in `context.used` (`null` when unknown). */
+  used?: number | null;
+  agentId?: string;
+  runId?: string;
+  context?: Record<string, any>;
+}
+
+/**
+ * Budget limits exceeded (tokens, time, cost, ...). Category `"billing"`,
+ * never retryable without intervention.
+ * Python parity: praisonaiagents/errors.py:185-266 (`BudgetExceededError`)
+ *
+ * Two constructor forms, exactly as in Python:
+ *
+ *   new BudgetExceededError('Token budget exhausted', { budgetType: 'tokens', limit: 1000, used: 1200 })
+ *   new BudgetExceededError(agentName, totalCost, maxBudget)   // legacy, cost-based
+ *
+ * The legacy form derives the message
+ * `Agent '<name>' exceeded budget: $<used> >= $<limit>` (4 decimals), sets
+ * `budgetType` to `"cost"` and uses the agent name as `agentId`.
  *
  * Usage:
  *   try { await agent.start("..."); }
@@ -277,15 +305,63 @@ export class MissingEnvVarError extends Error {
  *       console.log(`Agent '${e.agentName}' spent $${e.totalCost} of $${e.maxBudget}`);
  *   }
  */
-export class BudgetExceededError extends Error {
+export class BudgetExceededError extends PraisonAIError {
+  readonly budgetType: string;
+  readonly limit: number | null;
+  readonly used: number | null;
+  /** Legacy alias: the agent name (legacy form) or `agentId` (new form). */
+  readonly agentName: string;
+  /** Legacy alias of `used`. */
+  readonly totalCost: number | null;
+  /** Legacy alias of `limit`. */
+  readonly maxBudget: number | null;
+
+  constructor(message: string, options?: BudgetExceededErrorOptions);
+  /** Legacy cost-based form: `(agentName, totalCost, maxBudget)`. */
+  constructor(agentName: string, totalCost: number, maxBudget: number);
   constructor(
-    public readonly agentName: string,
-    public readonly totalCost: number,
-    public readonly maxBudget: number
+    messageOrAgentName: string,
+    optionsOrTotalCost: BudgetExceededErrorOptions | number = {},
+    maxBudgetArg?: number
   ) {
-    super(
-      `Agent '${agentName}' exceeded budget: $${totalCost.toFixed(4)} >= $${maxBudget.toFixed(4)}`
-    );
+    const legacy = typeof optionsOrTotalCost === 'number' && typeof maxBudgetArg === 'number';
+    let message: string;
+    let budgetType: string;
+    let limit: number | null;
+    let used: number | null;
+    let agentId: string;
+    let options: BudgetExceededErrorOptions;
+    if (legacy) {
+      const totalCost = optionsOrTotalCost as number;
+      const maxBudget = maxBudgetArg as number;
+      message = `Agent '${messageOrAgentName}' exceeded budget: $${totalCost.toFixed(4)} >= $${maxBudget.toFixed(4)}`;
+      budgetType = 'cost'; // Legacy errors are cost-based
+      limit = maxBudget;
+      used = totalCost;
+      agentId = messageOrAgentName;
+      options = {};
+    } else {
+      options = (optionsOrTotalCost as BudgetExceededErrorOptions) ?? {};
+      message = messageOrAgentName;
+      budgetType = options.budgetType ?? 'tokens';
+      limit = options.limit ?? null;
+      used = options.used ?? null;
+      agentId = options.agentId ?? 'unknown';
+    }
+    super(message, {
+      agentId,
+      runId: options.runId,
+      errorCategory: 'billing',
+      isRetryable: false,
+      context: { ...(options.context ?? {}), budget_type: budgetType, limit, used },
+    });
     this.name = 'BudgetExceededError';
+    this.budgetType = budgetType;
+    this.limit = limit;
+    this.used = used;
+    // Legacy attributes for backward compatibility
+    this.agentName = agentId;
+    this.totalCost = used;
+    this.maxBudget = limit;
   }
 }

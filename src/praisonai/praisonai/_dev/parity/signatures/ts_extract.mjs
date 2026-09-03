@@ -189,10 +189,60 @@ function flattenChain(ts, node, opKind) {
   return [node];
 }
 
-function collectCtorDefaults(ts, cls, sf) {
+// Pick the constructor parameter that carries the options object: the one whose
+// type annotation names the target interface, else the first object-typed one,
+// else the first parameter. Anything else is a positional parameter in its own
+// right (e.g. `constructor(message: string, options: FooOptions = {})`), which
+// `positionalCtorParams` reports so a Python positional argument can match it.
+function pickConfigParam(ts, ctor, sf, interfaceName) {
+  const params = ctor.parameters;
+  if (!params.length) return { config: undefined, positional: [] };
+  let idx = -1;
+  if (interfaceName) {
+    idx = params.findIndex((prm) => prm.type && compact(prm.type.getText(sf)).includes(interfaceName));
+  }
+  if (idx < 0) {
+    idx = params.findIndex((prm) => {
+      if (!prm.type) return false;
+      const t = compact(prm.type.getText(sf));
+      return /^\{|Options$|Config$|Record</.test(t);
+    });
+  }
+  if (idx < 0) idx = 0;
+  return { config: params[idx], positional: params.filter((_, i) => i !== idx) };
+}
+
+function positionalCtorParams(ts, ctor, sf, positional) {
+  return positional.map((prm) => {
+    const name = prm.name.getText(sf);
+    const typeText = prm.type ? compact(prm.type.getText(sf)) : 'any';
+    const d = prm.initializer
+      ? literalOf(ts, prm.initializer, sf)
+      : { default: null, default_kind: null };
+    return {
+      name,
+      canonical: name,
+      kind: 'positional',
+      required: !prm.questionToken && !prm.initializer,
+      default: d.default,
+      default_kind: d.default_kind,
+      type_text: typeText,
+      type_class: typeClass(typeText),
+    };
+  });
+}
+
+function collectCtorDefaults(ts, cls, sf, interfaceName) {
   const ctor = cls.members.find((m) => ts.isConstructorDeclaration(m) && m.body);
-  if (!ctor) return { defaults: new Map(), line: null };
-  return collectDefaultsFrom(ts, ctor, sf, ctor.parameters[0]);
+  if (!ctor) return { defaults: new Map(), line: null, positional: [] };
+  const { config, positional } = pickConfigParam(ts, ctor, sf, interfaceName);
+  const info = collectDefaultsFrom(ts, ctor, sf, config);
+  // Report the options parameter under its own name too: its interface members are
+  // flattened below, but TypeScript really does expose a parameter of that name, so
+  // a Python parameter called e.g. `config` matches it instead of reading as missing.
+  const selfNamed = config ? positionalCtorParams(ts, ctor, sf, [config]) : [];
+  info.positional = [...positionalCtorParams(ts, ctor, sf, positional), ...selfNamed];
+  return info;
 }
 
 // Defaults read from `<param>.x ?? v`, `<param>.x || v`, ternaries on
@@ -269,13 +319,14 @@ function extractInterface(ts, sf, target, location) {
   if (target.ctorClass) {
     const cls = findAll(ts, sf, (n) => ts.isClassDeclaration(n) && n.name && n.name.text === target.ctorClass)[0];
     if (!cls) return { error: `${target.surface}: ctor class ${target.ctorClass} not found in ${target.file}` };
-    ctorInfo = collectCtorDefaults(ts, cls, sf);
+    ctorInfo = collectCtorDefaults(ts, cls, sf, target.name);
     if (ctorInfo.line) extra.ctor_location = `${location}:${ctorInfo.line}`;
   }
   if (decl.heritageClauses && decl.heritageClauses.length) {
     extra.extends = decl.heritageClauses.flatMap((h) => h.types.map((t) => compact(t.getText(sf))));
   }
-  const params = [];
+  // Positional constructor parameters come first: they precede the options object.
+  const params = [...(ctorInfo.positional || [])];
   for (const m of decl.members) {
     if (!ts.isPropertySignature(m) && !ts.isMethodSignature(m)) continue;
     const name = m.name.getText(sf);
