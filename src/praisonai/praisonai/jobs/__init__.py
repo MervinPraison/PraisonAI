@@ -15,8 +15,8 @@ Zero Performance Impact:
 
 Usage:
     # Start the jobs server
-    praisonai serve --port 8005
-    
+    praisonai serve jobs --port 8005
+
     # Or programmatically
     from praisonai.jobs import start_server
     start_server(port=8005)

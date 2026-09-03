@@ -66,15 +66,29 @@ export const BUILT_ENTRIES = ["dist/esm/mobile.js", "dist/esm/agent/simple.js"];
  *  oldest iOS worth supporting rather than the newest Safari. */
 export const TARGETS = ["safari16", "chrome108"];
 
-export async function inspect(entry) {
-  const result = await esbuild.build({
+/**
+ * The SYNTAX floor, which is lower than the baseline above and checked
+ * separately because it fails differently.
+ *
+ * The mobile app declares Android minSdkVersion 26 (8.0), whose system WebView
+ * shipped as Chrome 58. Most modern syntax esbuild can lower for that target;
+ * top-level await it cannot, and refuses. That is not academic: the
+ * createRequire banner scripts/esm-shim.js prepended to three files on the
+ * mobile graph was a top-level await, so the published entry bundled fine at
+ * chrome108 -- the metafile check above passed -- and was unbuildable at the
+ * floor the app actually ships with. Laziness does not help here: esbuild
+ * rejects a top-level await anywhere on the graph, dynamically imported or not.
+ */
+export const FLOOR_TARGET = "chrome58";
+
+function buildOptions(entry, target) {
+  return {
     entryPoints: [entry],
     bundle: true,
     write: false,
-    metafile: true,
     platform: "browser",
     format: "esm",
-    target: TARGETS,
+    target,
     logLevel: "silent",
     plugins: [{
       name: "surface-bare",
@@ -84,7 +98,25 @@ export async function inspect(entry) {
         build.onResolve({ filter: /^[^.\/]/ }, (args) => ({ path: args.path, external: true }));
       },
     }],
-  });
+  };
+}
+
+/** Does the entry bundle at all for FLOOR_TARGET? esbuild's own errors are the
+ *  diagnosis (each names the file and line, e.g. the top-level await). */
+export async function bundlesAtFloor(entry) {
+  try {
+    await esbuild.build(buildOptions(entry, [FLOOR_TARGET]));
+    return { entry, ok: true, errors: [] };
+  } catch (e) {
+    const errors = (e.errors ?? [{ text: String(e) }]).map((m) =>
+      m.location ? `${m.text} (${m.location.file}:${m.location.line})` : m.text
+    );
+    return { entry, ok: false, errors };
+  }
+}
+
+export async function inspect(entry) {
+  const result = await esbuild.build({ ...buildOptions(entry, TARGETS), metafile: true });
 
   const fatal = new Set();
   const lazy = new Set();
@@ -131,6 +163,17 @@ if (invokedDirectly) {
       console.error(`       behind a Node-only entry point.`);
     } else {
       console.log(`  OK   ${entry}: loadable in a webview`);
+    }
+
+    const floor = await bundlesAtFloor(entry);
+    if (!floor.ok) {
+      failed = true;
+      console.error(`  FAIL ${entry}: does not bundle for ${FLOOR_TARGET} (the Android 8 WebView floor):`);
+      for (const err of floor.errors) console.error(`       - ${err}`);
+      console.error(`       A top-level await here usually means a file on the graph still uses`);
+      console.error(`       require()/__dirname and got the esm-shim createRequire banner.`);
+    } else {
+      console.log(`  OK   ${entry}: bundles for ${FLOOR_TARGET}`);
     }
   }
   if (failed) {

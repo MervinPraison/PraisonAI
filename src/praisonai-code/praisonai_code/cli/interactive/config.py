@@ -64,7 +64,7 @@ class InteractiveConfig:
     # Sharing
     share: bool = False
     
-    # Variant (reasoning effort)
+    # Model reasoning/effort variant (e.g. "high", "medium", "low")
     variant: Optional[str] = None
     
     @classmethod

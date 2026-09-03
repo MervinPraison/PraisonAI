@@ -240,9 +240,9 @@ export function createTauriShell(deps: TauriShellDeps = {}): TauriShell {
   // Seeded and driven from `visualViewport`, exactly as the web shell does.
   //
   // This was a hard `0` whose only writer was the native `keyboard-height`
-  // event -- and nothing emits that event: `src-tauri/src/lib.rs`'s
-  // `on_window_event` is an empty closure, left unwired until the mobile
-  // targets are initialised. So on a device `--keyboard-height` stayed 0
+  // event -- and nothing emits that event. The Rust shell now emits the other
+  // three (`src-tauri/src/shell/mod.rs`) but still not this one: Tauri has no
+  // keyboard observer to wire. So on a device `--keyboard-height` stayed 0
   // forever, and because `app.css` pins `#root` to `position: fixed; inset: 0`
   // the layout viewport does not shrink either. The composer sat underneath
   // the keyboard the instant anyone tapped it -- the first thing anyone does.

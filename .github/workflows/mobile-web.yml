@@ -1,0 +1,140 @@
+# The mobile package's WEB build: built, booted in a real browser, and
+# deployed to GitHub Pages.
+#
+# mobile.yml proves the package's tests pass. This workflow proves the thing
+# that ships to a browser actually ships: dist/ is built, served under the
+# repository subpath and driven through first paint, install, and an offline
+# reload by tools/web-boot.test.mjs, then published. A PR gets the build and
+# the proof; only main deploys.
+#
+# One setting is outside this file's reach: the repository's Pages source must
+# be "GitHub Actions" (Settings -> Pages -> Build and deployment -> Source).
+# Until a human turns that on, the deploy job SKIPS with a notice rather than
+# failing -- a red main every push because of a setting no workflow can set
+# would train people to ignore the mobile checks, which is how the last silent
+# breakage in this package survived.
+name: mobile web
+
+on:
+  push:
+    branches: [main]
+    paths: &watched
+      - 'src/praisonai-mobile/**'
+      - '.github/workflows/mobile-web.yml'
+      # `praisonai` is a `file:` link to ../praisonai-ts, and the web bundle is
+      # built FROM it -- so drift on that side changes what ships to a browser
+      # and must trigger this gate. mobile.yml watches these same paths for the
+      # same reason; a web gate that watched only praisonai-mobile would go
+      # quiet exactly when the dependency it bundles moved.
+      - 'src/praisonai-ts/src/**'
+      - 'src/praisonai-ts/scripts/**'
+      - 'src/praisonai-ts/package.json'
+  pull_request:
+    paths: *watched
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: src/praisonai-mobile
+
+jobs:
+  build:
+    name: build and boot
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: mobile-web-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      # `praisonai` is a `file:` link to ../praisonai-ts, so its dist/ must
+      # exist before this package can even INSTALL: npm runs the linked
+      # package's prepare/prebuild, which fails without its own node_modules.
+      # `npm install`, not `npm ci`: praisonai-ts gitignores its lockfile.
+      # `--legacy-peer-deps` for the bedrock-agentcore -> @strands-agents/sdk
+      # peer conflict, exactly as mobile.yml and praisonai-ts-webview.yml do.
+      - name: "Build praisonai-ts (the file: dependency)"
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
+      - run: npm ci
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/praisonai-mobile/package-lock.json') }}
+      - name: Install Chromium for the boot proof
+        run: npx playwright install --with-deps chromium
+      - name: Build
+        run: npm run build
+      - name: Boot proof
+        # Serves dist/ under /PraisonAI/ in headless Chromium: composer and
+        # Send render, manifest served as application/manifest+json, service
+        # worker activates with the subpath as scope, an offline reload still
+        # renders, and an injected inline script is blocked by the CSP.
+        run: npm run test:web
+      - name: dist contents
+        run: ls -lR dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-web-dist
+          path: src/praisonai-mobile/dist
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: src/praisonai-mobile/dist
+
+  deploy:
+    name: deploy to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      # Never cancel a deployment in flight; queue behind it instead.
+      group: pages
+      cancel-in-progress: false
+    steps:
+      # Pages cannot be enabled from a workflow, so this job reports the
+      # setting rather than demanding it. `ready` false SKIPS the deploy with
+      # a notice; it does not fail the run. deploy-pages would otherwise fail
+      # with a bare 404 that says nothing about which setting is missing.
+      - name: Is the Pages source "GitHub Actions"?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: .
+        run: |
+          site=$(gh api "repos/${{ github.repository }}/pages" 2>/dev/null || echo '{}')
+          build_type=$(echo "$site" | jq -r '.build_type // "none"')
+          cname=$(echo "$site" | jq -r '.cname // ""')
+          echo "build_type=$build_type cname=${cname:-<none>}"
+          if [ "$build_type" != "workflow" ]; then
+            echo "::notice::Skipping the Pages deploy: Pages is not set to build from GitHub Actions (build_type=$build_type). A repository admin must set it at https://github.com/${{ github.repository }}/settings/pages -> Build and deployment -> Source: GitHub Actions. The built site is attached to this run as the mobile-web-dist artifact."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$cname" ]; then
+            echo "::notice::Skipping the Pages deploy: a custom domain ($cname) is set, so the app would be served there rather than at the github.io URL."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/configure-pages@v5
+        if: steps.check.outputs.ready == 'true'
+      - uses: actions/deploy-pages@v4
+        id: deployment
+        if: steps.check.outputs.ready == 'true'

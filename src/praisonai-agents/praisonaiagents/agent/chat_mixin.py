@@ -95,6 +95,51 @@ class ChatMixin:
             return _TurnCancelToken(source)
         return _TurnCancelToken(source, turn_id=begin_turn())
 
+    @staticmethod
+    def _notify_tool_call(tool_name, tool_input, tool_result, elapsed_time=None, success=True):
+        """Fire the ``tool_call`` display callback for one tool execution.
+
+        The non-streaming path fires this from the OpenAI client after every
+        tool (``display_tool_call`` -> ``execute_sync_callback('tool_call')``),
+        which is how streaming UIs such as the desktop learn that a tool ran.
+        The streaming path executes tools inline here, so it has to fire the
+        same callback itself with the same kwargs (Issue #4716).
+
+        Best-effort by design: a callback failure is logged and swallowed so
+        it can never break the stream it is reporting on.
+
+        A durable run converts a raising tool into an ``{"error": ...}`` result
+        instead of re-raising (see ``DurableRunContext.wrap_sync``), so the
+        raising-tool ``except`` branch never fires for it. Detect that shape
+        here and report ``success=False`` so streaming UIs do not label a failed
+        tool as successful (Issue #4735 review).
+        """
+        if (
+            success
+            and isinstance(tool_result, dict)
+            and tool_result.get("error") is not None
+        ):
+            success = False
+        try:
+            if tool_result is None:
+                result_str = None
+            else:
+                try:
+                    result_str = json.dumps(tool_result)
+                except (TypeError, ValueError):
+                    result_str = str(tool_result)
+            _get_display_functions()['execute_sync_callback'](
+                'tool_call',
+                message=f"Calling function: {tool_name}",
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_output=result_str[:200] if result_str else None,
+                elapsed_time=elapsed_time,
+                success=success,
+            )
+        except Exception as callback_error:
+            logging.debug(f"tool_call callback failed for '{tool_name}': {callback_error}")
+
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
         context = self._get_durable_run_context()
@@ -4861,7 +4906,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             original_verbose = self.verbose
             self.verbose = False
             memory_prefetch_context = self._prefetch_memory(prompt)
-            
+
+            # Ephemeral attachments (images / data URIs) are folded into a
+            # multimodal prompt so streaming turns reach vision models too,
+            # matching chat()/achat(). The text prompt is kept intact through
+            # knowledge retrieval below and the multimodal content is built
+            # afterwards, so knowledge augmentation never flattens the image.
+            # Only the text is stored in history.
+            attachments = kwargs.get('attachments')
+
             # For custom LLM path, use the new get_response_stream generator
             if self._using_custom_llm:
                 # Handle knowledge search
@@ -4877,6 +4930,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         else:
                             knowledge_content = "\n".join(search_results)
                         actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
+                if attachments:
+                    actual_prompt = self._build_multimodal_prompt(actual_prompt, attachments)
                 
                 # Handle tools properly
                 tools = kwargs.get('tools', self.tools)
@@ -4923,6 +4979,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream_history = durable_context.restore_messages(
                             list(stream_history)
                         )
+                    stream_sampling_kwargs = {}
+                    if kwargs.get('max_tokens') is not None:
+                        stream_sampling_kwargs['max_tokens'] = kwargs['max_tokens']
+                    if kwargs.get('top_p') is not None:
+                        stream_sampling_kwargs['top_p'] = kwargs['top_p']
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=self._build_system_prompt(
@@ -4946,7 +5007,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self.execute_tool
                         ),
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=self._resolve_max_tool_calls()
+                        max_tool_calls_per_turn=self._resolve_max_tool_calls(),
+                        **stream_sampling_kwargs
                     ):
                         response_content += chunk
                         yield chunk
@@ -4979,6 +5041,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         else:
                             knowledge_content = "\n".join(search_results)
                         actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
+                if attachments:
+                    actual_prompt = self._build_multimodal_prompt(actual_prompt, attachments)
                 
                 # Handle tools properly
                 tools = kwargs.get('tools', self.tools)
@@ -4991,6 +5056,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
                                                                kwargs.get('output_json'), kwargs.get('output_pydantic'),
                                                                memory_prefetch_context=memory_prefetch_context)
+                
+                # Apply context management so the streaming path compacts long
+                # histories the same way the non-streaming path does (Issue #4714).
+                # The system prompt is embedded as messages[0]; split it out so the
+                # token ledger accounts for it, then reattach after optimization.
+                if self.context_manager and messages:
+                    if messages[0].get("role") == "system":
+                        stream_system_prompt = messages[0].get("content", "")
+                        optimized_history, _ = self._apply_context_management(
+                            messages=messages[1:],
+                            system_prompt=stream_system_prompt,
+                            tools=tool_param,
+                        )
+                        messages = [messages[0]] + list(optimized_history)
+                    else:
+                        optimized_history, _ = self._apply_context_management(
+                            messages=messages,
+                            system_prompt="",
+                            tools=tool_param,
+                        )
+                        messages = list(optimized_history)
                 
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)
@@ -5021,6 +5107,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         "temperature": kwargs.get('temperature', 1.0),
                         "stream": True
                     }
+                    if kwargs.get('max_tokens') is not None:
+                        completion_args["max_tokens"] = kwargs['max_tokens']
+                    if kwargs.get('top_p') is not None:
+                        completion_args["top_p"] = kwargs['top_p']
                     if formatted_tools:
                         completion_args["tools"] = formatted_tools
                     
@@ -5156,11 +5246,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         )
                                         else {}
                                     )
-                                    tool_result = executor(
+                                    _tool_started = time_module.perf_counter()
+                                    try:
+                                        tool_result = executor(
+                                            tool_call['function']['name'],
+                                            parsed_args,
+                                            tool_call_id=tool_call.get('id'),
+                                            **iteration_kwargs,
+                                        )
+                                    except Exception as _exec_error:
+                                        # Streaming UIs only learn about tool
+                                        # activity through this callback; report
+                                        # the failure before re-raising.
+                                        self._notify_tool_call(
+                                            tool_call['function']['name'],
+                                            parsed_args,
+                                            {"error": str(_exec_error)},
+                                            elapsed_time=time_module.perf_counter() - _tool_started,
+                                            success=False,
+                                        )
+                                        raise
+                                    # Parity with the non-streaming path, which
+                                    # fires 'tool_call' after every tool run.
+                                    self._notify_tool_call(
                                         tool_call['function']['name'],
                                         parsed_args,
-                                        tool_call_id=tool_call.get('id'),
-                                        **iteration_kwargs,
+                                        tool_result,
+                                        elapsed_time=time_module.perf_counter() - _tool_started,
+                                        success=True,
                                     )
                                     # Add tool result to chat history (multimodal-aware)
                                     from .tool_execution import build_tool_result_message_pair
@@ -5296,7 +5409,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._rollback_chat_history_to(chat_history_length)
                     logging.error(f"OpenAI streaming error: {e}")
                     # Fall back to simulated streaming
-                    response = self.chat(prompt, **kwargs)
+                    response = self._stream_fallback_chat(prompt, kwargs, e)
                     if response:
                         words = str(response).split()
                         chunk_size = max(1, len(words) // 20)
@@ -5316,11 +5429,76 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             # Restore verbose mode on any error
             self.verbose = original_verbose
+            if getattr(e, '_praisonai_stream_fallback_exhausted', False):
+                # The inner fallback already ran chat() and it failed too.
+                # Running it a second time would only bury the streaming
+                # error one level deeper; surface the chained failure as-is.
+                raise
             # Graceful fallback to non-streaming if streaming fails
             logging.warning(f"Streaming failed, falling back to regular response: {e}")
-            response = self.chat(prompt, **kwargs)
+            response = self._stream_fallback_chat(prompt, kwargs, e)
             if response:
                 yield response
+
+    def _stream_fallback_chat(self, prompt: str, kwargs: Dict[str, Any], streaming_error: BaseException) -> Optional[str]:
+        """Run the non-streaming ``chat()`` after a streaming attempt failed.
+
+        ``start(stream=True)`` hands ``_start_stream_impl`` the caller's raw
+        kwargs with ``stream=True`` already set. Forwarding them to ``chat()``
+        unchanged broke the fallback in two ways (#4719): ``stream=True``
+        reached the sync adapter, which refuses to stream; and any sampling
+        knob ``chat()`` does not declare (``max_tokens``, ``top_p``...) raised
+        ``TypeError`` before a request was made. The desktop passes
+        ``max_tokens`` on every turn, so its fallback never worked.
+
+        This builds the call from the subset of kwargs ``chat()`` actually
+        accepts (introspected, so subclass overrides are honoured), forces
+        ``stream=False``, and -- if the fallback fails as well -- raises that
+        failure chained ``from`` the original streaming exception so the real
+        cause is not lost.
+        """
+        import inspect
+
+        try:
+            parameters = inspect.signature(self.chat).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_var_kwargs = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+        )
+        accepted = {
+            name for name, p in parameters.items()
+            if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        }
+        accepted.discard('prompt')
+
+        fallback_kwargs = {
+            key: value for key, value in kwargs.items()
+            if accepts_var_kwargs or key in accepted
+        }
+        dropped = sorted(set(kwargs) - set(fallback_kwargs))
+        if dropped:
+            logging.debug(
+                f"Streaming fallback: dropping kwargs chat() does not accept: {dropped}"
+            )
+        # The fallback is, by definition, the non-streaming path.
+        if accepts_var_kwargs or 'stream' in accepted:
+            fallback_kwargs['stream'] = False
+        else:
+            fallback_kwargs.pop('stream', None)
+
+        try:
+            return self.chat(prompt, **fallback_kwargs)
+        except Exception as fallback_error:
+            logging.error(
+                f"Streaming failed ({streaming_error!r}) and the non-streaming "
+                f"fallback also failed ({fallback_error!r})"
+            )
+            try:
+                fallback_error._praisonai_stream_fallback_exhausted = True
+            except Exception:
+                pass
+            raise fallback_error from streaming_error
 
     def _create_llm_summarize_function(self):
         """

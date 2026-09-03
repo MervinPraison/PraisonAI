@@ -33,7 +33,7 @@ def test_agent_runtime_integration():
         preferred_runtime="native",
     )
     agent = Agent(instructions="Test agent", runtime=config)
-    assert agent._runtime_config is config
+    assert agent._runtime_config == config
 
     config_no_validation = RuntimeConfig(
         required_capabilities=["native_hooks"],

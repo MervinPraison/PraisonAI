@@ -13,7 +13,9 @@ Supported formats:
     "*/10s"                   → every 10s
     "3600"                    → every 3600s (raw seconds)
     "cron:0 7 * * *"          → cron expression
-    "at:2026-03-01T09:00:00"  → one-shot ISO timestamp
+    "at:2026-03-01T09:00:00"  → one-shot ISO timestamp (naive = wall clock in
+                                the schedule tz / PRAISONAI_SCHEDULE_TIMEZONE /
+                                the local zone; stored with that zone attached)
     "in 20 minutes"           → one-shot ~20min from now
     "at 9am"                  → one-shot next 09:00
     "every day at 9am"        → daily at 09:00 (cron)
@@ -21,6 +23,7 @@ Supported formats:
     "every monday 9am"        → day-of-week at clock time (cron)
 """
 
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -146,20 +149,22 @@ def _natural_to_cron(expr: str):
 def _clock_to_next_at(hour: int, minute: int, tz: str | None) -> str:
     """Return the next ISO timestamp for the given clock time (one-shot).
 
-    The clock time denotes local time in the schedule's timezone (``tz`` or
-    the process default), so ``at 9am`` fires at 09:00 in that zone rather
-    than 09:00 UTC. Falls back to UTC when the timezone cannot be resolved.
+    The clock time is a wall-clock reading in the schedule's zone -- the
+    explicit ``tz``, else ``PRAISONAI_SCHEDULE_TIMEZONE``, else the system's
+    local zone -- so ``at 9am`` typed in London fires at 09:00 London time,
+    not 09:00 UTC. The result is always timezone-aware, so ``is_due()`` never
+    has to guess which zone the person meant.
     """
-    try:
-        from .due import resolve_schedule_timezone
-        tzinfo = resolve_schedule_timezone(tz)
-    except Exception:
-        tzinfo = timezone.utc
-    now = datetime.now(tzinfo)
+    from .due import localize_wall_clock, resolve_schedule_timezone
+
+    name = tz or os.environ.get("PRAISONAI_SCHEDULE_TIMEZONE")
+    now = datetime.now(resolve_schedule_timezone(name)) if name else datetime.now()
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
-    return target.isoformat()
+    # Re-localise a naive (local-zone) target so its offset is the one in
+    # force on the target date, not the one in force right now (DST edges).
+    return localize_wall_clock(target, tz).isoformat()
 
 
 def _cron_schedule(cron_expr: str, tz: str | None) -> Schedule:
@@ -206,11 +211,21 @@ def parse_schedule(expr: str, tz: str | None = None) -> Schedule:
             raise ValueError("Empty cron expression after 'cron:' prefix")
         return _cron_schedule(cron_expr, tz)
 
-    # At prefix (ISO timestamp)
+    # At prefix (ISO timestamp). A naive timestamp is the user's wall clock:
+    # stamp it with the schedule tz / PRAISONAI_SCHEDULE_TIMEZONE / local zone
+    # now, so the stored value names an unambiguous instant and is_due() never
+    # has to guess. An explicit offset in the string is kept as written.
     if lower.startswith("at:"):
         at_str = expr[3:].strip()
         if not at_str:
             raise ValueError("Empty timestamp after 'at:' prefix")
+        try:
+            parsed = datetime.fromisoformat(at_str)
+        except ValueError:
+            parsed = None  # unparseable: stored verbatim, is_due() logs it
+        if parsed is not None:
+            from .due import localize_wall_clock
+            at_str = localize_wall_clock(parsed, tz).isoformat()
         return Schedule(kind="at", at=at_str, tz=tz)
 
     # Interval pattern: */30m, */6h, */10s

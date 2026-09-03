@@ -14,6 +14,7 @@
     "boundaries": "node tools/check-boundaries.mjs",
     "build": "node tools/build-webview.mjs",
     "test:bundle": "node --test --test-reporter=spec tools/bundle.test.mjs",
+    "test:web": "node --test --test-reporter=spec tools/web-boot.test.mjs",
     "check": "npm run typecheck && npm run boundaries && npm run test",
     "check:upstream": "node tools/check-upstream-parity.mjs",
     "build:webview": "node tools/build-webview.mjs",
@@ -24,6 +25,14 @@
     "@tauri-apps/cli": "^2",
     "@types/node": "^22.20.1",
     "esbuild": "^0.25.0",
+    "playwright": "^1.62.1",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@ai-sdk/cohere": "^4.0.37",
+    "@ai-sdk/google": "^4.0.63",
+    "@ai-sdk/openai": "^4.0.57",
+    "ai": "^7.0.91",
+    "praisonai": "file:../praisonai-ts"
   }
 }

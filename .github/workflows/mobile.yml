@@ -36,6 +36,10 @@ on:
       # drift landed on main unchecked. Verified on 71197fa80, which edited
       # src/praisonai-ts/src/agent/simple.ts: no parity check ran on it.
       - 'src/praisonai-ts/src/**'
+      # And the pieces of praisonai-ts that decide what `praisonai/mobile`
+      # RESOLVES to through the file: link -- the esm shim shapes dist/esm.
+      - 'src/praisonai-ts/scripts/**'
+      - 'src/praisonai-ts/package.json'
   pull_request:
     paths: *watched
 
@@ -66,7 +70,27 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: src/praisonai-mobile/package-lock.json
+      # `praisonai` is a `file:` link to ../praisonai-ts (see praisonai-mobile's
+      # package.json for why), so its dist/ must exist before this package can
+      # resolve `praisonai/mobile`. `npm install`, not `npm ci`: praisonai-ts
+      # gitignores its lockfile. `--legacy-peer-deps` for the
+      # bedrock-agentcore -> @strands-agents/sdk peer conflict, exactly as
+      # praisonai-ts-webview.yml does.
+      - name: "Build praisonai-ts (the file: dependency)"
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - run: npm ci
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/praisonai-mobile/package-lock.json') }}
+      - name: Install Chromium for the boot proof
+        # `npm test` includes tools/web-boot.test.mjs, which loads the built
+        # dist/ in a real browser. It fails rather than skips without one.
+        run: npx playwright install --with-deps chromium
       - name: Typecheck
         run: npm run typecheck
       - name: Layer boundaries
@@ -85,11 +109,11 @@ jobs:
     # rather than buried in another job's log.
     #
     # It needs only THIS package's install. praisonai-ts's own dependencies are
-    # neither needed nor installable -- `npm install` there fails with an
-    # ERESOLVE peer conflict (bedrock-agentcore -> @strands-agents/sdk) -- and
-    # every member the check looks at is declared locally in simple.ts. That is
-    # verified rather than assumed: with praisonai-ts's node_modules moved
-    # aside, injected drift is still caught as TS2741.
+    # not needed here (the `check` job installs them, with --legacy-peer-deps,
+    # to build the file: dependency): every member the check looks at is
+    # declared locally in simple.ts. That is verified rather than assumed:
+    # with praisonai-ts's node_modules moved aside, injected drift is still
+    # caught as TS2741.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +122,11 @@ jobs:
           node-version: '22.18'
           cache: npm
           cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - name: "Build praisonai-ts (the file: dependency)"
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - run: npm ci
       - name: Does the real Agent still satisfy PraisonAgent?
         # Skips loudly if the praisonai-ts checkout is missing, rather than
@@ -144,6 +173,17 @@ jobs:
       # generate_context! expands frontendDist (../dist) at COMPILE time, and
       # dist/ is gitignored -- absent on a fresh checkout. Without this the
       # crate cannot compile and neither test nor clippy below ever runs.
+      # `praisonai` is a `file:` link to ../praisonai-ts (see praisonai-mobile's
+      # package.json for why), so its dist/ must exist before this package can
+      # resolve `praisonai/mobile`. `npm install`, not `npm ci`: praisonai-ts
+      # gitignores its lockfile. `--legacy-peer-deps` for the
+      # bedrock-agentcore -> @strands-agents/sdk peer conflict, exactly as
+      # praisonai-ts-webview.yml does.
+      - name: "Build praisonai-ts (the file: dependency)"
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - name: Build the webview (creates ../dist for generate_context!)
         working-directory: src/praisonai-mobile
         run: |
@@ -203,6 +243,17 @@ jobs:
       # generate_context! expands frontendDist at COMPILE time and dist/ is
       # gitignored, so the crate cannot be checked without this -- the same
       # reason the job above needs it.
+      # `praisonai` is a `file:` link to ../praisonai-ts (see praisonai-mobile's
+      # package.json for why), so its dist/ must exist before this package can
+      # resolve `praisonai/mobile`. `npm install`, not `npm ci`: praisonai-ts
+      # gitignores its lockfile. `--legacy-peer-deps` for the
+      # bedrock-agentcore -> @strands-agents/sdk peer conflict, exactly as
+      # praisonai-ts-webview.yml does.
+      - name: "Build praisonai-ts (the file: dependency)"
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
       - name: Build the webview (creates ../dist for generate_context!)
         working-directory: src/praisonai-mobile
         run: |

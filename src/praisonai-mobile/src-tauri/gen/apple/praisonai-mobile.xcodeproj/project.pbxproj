@@ -1,0 +1,476 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		27B31334AD6C86A248F03946 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2820FD0C45FC3AE67E9A00D2 /* WebKit.framework */; };
+		4C389B50CE5F3EFCEC3679BD /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C25243245C6BCCD83DE2F7B /* CoreGraphics.framework */; };
+		4C96A671129DD245067207B2 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C8F06E85F3846645062327B7 /* LaunchScreen.storyboard */; };
+		5F41B8FAE2F89518C1683BAE /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5800F39FC15DFA5017459CAE /* Security.framework */; };
+		7B408A991D5993700B0DF3C6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 59EEDEF820D9FD554CBBA42D /* Assets.xcassets */; };
+		968170BE7A0E12FB3AB86B37 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0294C509C9DEDD858F0916A6 /* UIKit.framework */; };
+		9DB6FFC0235E75C5858837E1 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 146606ACAD0138B0B945B742 /* assets */; };
+		B88D1A5F1042433AF3268AD3 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = C0832B5502848158A5B4C12B /* main.mm */; };
+		C55EFE960B51DD3C35E731FB /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 035539C50959703E1FB39D15 /* QuartzCore.framework */; };
+		D6FEC6D059735E7089A74DEB /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3EE211CFA2517F8FAE26A0F3 /* libapp.a */; };
+		DA35C4DE6BF818162BA83E9E /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C9B26306C6A44199103DE749 /* Metal.framework */; };
+		F12037A4B93C6D0412853943 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6315A529C0CBBD6AAFE3F72A /* MetalKit.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0294C509C9DEDD858F0916A6 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		035539C50959703E1FB39D15 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		07AAC54B80C6F816C30F0973 /* praisonai-mobile_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "praisonai-mobile_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		13E23CAF1599323B1D01B736 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		146606ACAD0138B0B945B742 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		2820FD0C45FC3AE67E9A00D2 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		2F5E6B14F915ADAE1567660E /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		3C25243245C6BCCD83DE2F7B /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		3EE211CFA2517F8FAE26A0F3 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		43DBEE293575C4AE208735D6 /* praisonai-mobile_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "praisonai-mobile_iOS.entitlements"; sourceTree = "<group>"; };
+		5800F39FC15DFA5017459CAE /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		59EEDEF820D9FD554CBBA42D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6315A529C0CBBD6AAFE3F72A /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		66435E4C9701D6AA5D17EDCA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		75A4597335AD7342326DBAF9 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		9ACF30976B5E798AEC412825 /* lifecycle.rs */ = {isa = PBXFileReference; path = lifecycle.rs; sourceTree = "<group>"; };
+		BB9E88DBA4BDD290286859D4 /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
+		C0832B5502848158A5B4C12B /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		C8F06E85F3846645062327B7 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		C9B26306C6A44199103DE749 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		DF7283091BAC1DC75F667B19 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		F670FA2BFD5CCE8F9799CF05 /* back.rs */ = {isa = PBXFileReference; path = back.rs; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2180E347180613BB5C47121B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D6FEC6D059735E7089A74DEB /* libapp.a in Frameworks */,
+				4C389B50CE5F3EFCEC3679BD /* CoreGraphics.framework in Frameworks */,
+				DA35C4DE6BF818162BA83E9E /* Metal.framework in Frameworks */,
+				F12037A4B93C6D0412853943 /* MetalKit.framework in Frameworks */,
+				C55EFE960B51DD3C35E731FB /* QuartzCore.framework in Frameworks */,
+				5F41B8FAE2F89518C1683BAE /* Security.framework in Frameworks */,
+				968170BE7A0E12FB3AB86B37 /* UIKit.framework in Frameworks */,
+				27B31334AD6C86A248F03946 /* WebKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		21B0741E3F5B3D9F335AB3FF /* shell */ = {
+			isa = PBXGroup;
+			children = (
+				F670FA2BFD5CCE8F9799CF05 /* back.rs */,
+				9ACF30976B5E798AEC412825 /* lifecycle.rs */,
+				DF7283091BAC1DC75F667B19 /* mod.rs */,
+			);
+			path = shell;
+			sourceTree = "<group>";
+		};
+		25BCD585E2424C53356FBD42 /* Externals */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Externals;
+			sourceTree = "<group>";
+		};
+		33EE12B572849BBCBE018B24 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				3C25243245C6BCCD83DE2F7B /* CoreGraphics.framework */,
+				3EE211CFA2517F8FAE26A0F3 /* libapp.a */,
+				C9B26306C6A44199103DE749 /* Metal.framework */,
+				6315A529C0CBBD6AAFE3F72A /* MetalKit.framework */,
+				035539C50959703E1FB39D15 /* QuartzCore.framework */,
+				5800F39FC15DFA5017459CAE /* Security.framework */,
+				0294C509C9DEDD858F0916A6 /* UIKit.framework */,
+				2820FD0C45FC3AE67E9A00D2 /* WebKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		37CC560AD6F7F512D3457567 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				D112B9B522056207A899FB06 /* praisonai-mobile */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		77B4ADD20D5823AE71936BD0 /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				13E23CAF1599323B1D01B736 /* bindings.h */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		7CC34ED1ED8646DE07C60E8D /* praisonai-mobile_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				66435E4C9701D6AA5D17EDCA /* Info.plist */,
+				43DBEE293575C4AE208735D6 /* praisonai-mobile_iOS.entitlements */,
+			);
+			path = "praisonai-mobile_iOS";
+			sourceTree = "<group>";
+		};
+		B13502AF3E9760DEEF0E4AD1 = {
+			isa = PBXGroup;
+			children = (
+				146606ACAD0138B0B945B742 /* assets */,
+				59EEDEF820D9FD554CBBA42D /* Assets.xcassets */,
+				C8F06E85F3846645062327B7 /* LaunchScreen.storyboard */,
+				25BCD585E2424C53356FBD42 /* Externals */,
+				7CC34ED1ED8646DE07C60E8D /* praisonai-mobile_iOS */,
+				37CC560AD6F7F512D3457567 /* Sources */,
+				D9C416E8F982A095A5B92531 /* src */,
+				33EE12B572849BBCBE018B24 /* Frameworks */,
+				F373363277E60142876E4F42 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D112B9B522056207A899FB06 /* praisonai-mobile */ = {
+			isa = PBXGroup;
+			children = (
+				C0832B5502848158A5B4C12B /* main.mm */,
+				77B4ADD20D5823AE71936BD0 /* bindings */,
+			);
+			path = "praisonai-mobile";
+			sourceTree = "<group>";
+		};
+		D9C416E8F982A095A5B92531 /* src */ = {
+			isa = PBXGroup;
+			children = (
+				BB9E88DBA4BDD290286859D4 /* commands.rs */,
+				75A4597335AD7342326DBAF9 /* lib.rs */,
+				2F5E6B14F915ADAE1567660E /* main.rs */,
+				21B0741E3F5B3D9F335AB3FF /* shell */,
+			);
+			name = src;
+			path = ../../src;
+			sourceTree = "<group>";
+		};
+		F373363277E60142876E4F42 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				07AAC54B80C6F816C30F0973 /* praisonai-mobile_iOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		496CD10D9DDECA6E17A642FA /* praisonai-mobile_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2EE9A797BAA94DC77EE3A80F /* Build configuration list for PBXNativeTarget "praisonai-mobile_iOS" */;
+			buildPhases = (
+				80F7FCB30AD37F9CE247C3F1 /* Build Rust Code */,
+				9D6798D6A9ECD8D3CBD879A6 /* Sources */,
+				CC03147263BBECC260E6F9B6 /* Resources */,
+				2180E347180613BB5C47121B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "praisonai-mobile_iOS";
+			packageProductDependencies = (
+			);
+			productName = "praisonai-mobile_iOS";
+			productReference = 07AAC54B80C6F816C30F0973 /* praisonai-mobile_iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		478E5DEF77077F00E83E02C9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 2E386D35F6C8556D7E8D7CC2 /* Build configuration list for PBXProject "praisonai-mobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B13502AF3E9760DEEF0E4AD1;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F373363277E60142876E4F42 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				496CD10D9DDECA6E17A642FA /* praisonai-mobile_iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CC03147263BBECC260E6F9B6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B408A991D5993700B0DF3C6 /* Assets.xcassets in Resources */,
+				4C96A671129DD245067207B2 /* LaunchScreen.storyboard in Resources */,
+				9DB6FFC0235E75C5858837E1 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		80F7FCB30AD37F9CE247C3F1 /* Build Rust Code */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Code";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "npm run -- tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9D6798D6A9ECD8D3CBD879A6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B88D1A5F1042433AF3268AD3 /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		71F98B67CC23688CD64E3743 /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "praisonai-mobile_iOS/praisonai-mobile_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "praisonai-mobile_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = ai.praison.mobile;
+				PRODUCT_NAME = "PraisonAI";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+		CFA6A770822371A0CFDF297B /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = release;
+		};
+		D1BB90ED4F4C95BB0CCB2FC3 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = debug;
+		};
+		F61B81795C4899C38E24AC56 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "praisonai-mobile_iOS/praisonai-mobile_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "praisonai-mobile_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = ai.praison.mobile;
+				PRODUCT_NAME = "PraisonAI";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2E386D35F6C8556D7E8D7CC2 /* Build configuration list for PBXProject "praisonai-mobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D1BB90ED4F4C95BB0CCB2FC3 /* debug */,
+				CFA6A770822371A0CFDF297B /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		2EE9A797BAA94DC77EE3A80F /* Build configuration list for PBXNativeTarget "praisonai-mobile_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F61B81795C4899C38E24AC56 /* debug */,
+				71F98B67CC23688CD64E3743 /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 478E5DEF77077F00E83E02C9 /* Project object */;
+}

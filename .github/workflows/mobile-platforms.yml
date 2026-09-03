@@ -1,0 +1,336 @@
+# The mobile package's PLATFORM builds: a real iOS app and a real Android app.
+#
+# mobile.yml proves the crate type-checks for a phone (`cargo check` against
+# the two mobile targets). This proves the two generated platform projects,
+# src-tauri/gen/apple and src-tauri/gen/android, still turn that crate into an
+# installable app -- which is a different thing, and the thing that had never
+# happened: until #4673 neither project existed.
+#
+# What each job produces, and why that shape:
+#
+#   ios-simulator  -- an UNSIGNED arm64 simulator .app. A device build needs
+#                     an Apple Developer Team and a signing identity, which are
+#                     the maintainer's and not in this repo (bundle.iOS.
+#                     developmentTeam is unset in tauri.conf.json). A simulator
+#                     build needs neither, so it is the build that can run on
+#                     every PR. It is not decoration: it links the Rust
+#                     staticlib into the Xcode target, packages the webview
+#                     into the bundle and exercises Info.plist, i.e. every step
+#                     short of the certificate.
+#   android-apk    -- a debug APK, arm64-v8a. Debug because a release APK
+#                     needs a signing keystore, which is likewise the
+#                     maintainer's; the debug keystore is generated on the
+#                     runner. It installs on any arm64 Android 8.0+ device with
+#                     `adb install`.
+#
+# Both jobs fail if the thing they exist to produce is missing. The bundler
+# exits zero on a target it silently skipped (desktop-release.yml learned this
+# the hard way), so "the step passed" is not evidence; "the file exists and
+# contains the Rust library" is.
+#
+# The Xcode project is generated on the macOS runner the first time (this
+# laptop has no Xcode, only the Command Line Tools) and then committed, so
+# the init step is a no-op once gen/apple is in the tree. The Android project
+# was generated locally and is committed; the same guard keeps that job
+# honest if someone deletes it.
+name: mobile platforms
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: &watched
+      - 'src/praisonai-mobile/**'
+      - 'src/praisonai-ts/src/**'
+      - '.github/workflows/mobile-platforms.yml'
+  # Without this, no platform build had ever run on main -- so a break
+  # introduced by two PRs that were each green apart could sit on main
+  # unnoticed. That is exactly what happened: #4737 branched from before
+  # #4727 added the `file:` dependency, so the two were never installed
+  # together until they had both landed.
+  push:
+    branches: [main]
+    paths: *watched
+
+concurrency:
+  group: mobile-platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: src/praisonai-mobile
+
+jobs:
+  ios-simulator:
+    name: ios simulator (.app, unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both: `tauri ios init` installs whatever it thinks is missing via
+          # rustup, and having them already present keeps that step quiet and
+          # deterministic. aarch64-apple-ios-sim is the one the build below
+          # actually links against.
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/praisonai-mobile/src-tauri
+          key: ios-sim
+      - name: "Build praisonai-ts (the file: dependency)"
+        # praisonai-mobile depends on praisonai by `file:`, so `npm ci`
+        # here runs praisonai-ts's own `prepare` -> `rimraf dist`. On a
+        # fresh runner praisonai-ts has no node_modules, so rimraf is not
+        # installed and `npm ci` dies with code 127 before a single
+        # platform step runs. mobile.yml gives all four of its jobs this
+        # step; these two were written against the tree from before the
+        # dependency existed and never got it.
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
+      - run: npm ci
+
+      - name: Generate the Xcode project (only if gen/apple is not committed)
+        # `tauri ios init` renders the template and then runs `xcodegen`, a
+        # brew package the CLI would otherwise try to install itself, mid-run,
+        # with a prompt. Installing it up front is the same outcome without
+        # the prompt. cocoapods is only invoked when the config declares pods;
+        # it declares none.
+        run: |
+          set -euo pipefail
+          if [ -d src-tauri/gen/apple ]; then
+            echo "src-tauri/gen/apple is committed; not regenerating it"
+            exit 0
+          fi
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          npx tauri ios init --ci --skip-targets-install
+
+      - name: Put the real AppIcon set into the Xcode project
+        # `tauri ios init` renders the CLI's OWN placeholder AppIcon PNGs into
+        # gen/apple/Assets.xcassets, and nothing in the CLI ever replaces them:
+        # `tauri icon` writes to src-tauri/icons/ios/ and stops there (it wires
+        # up gen/android, but there is no iOS equivalent). So the copy is done
+        # here, and every filename matches one-for-one -- both sides are named
+        # by the same Contents.json.
+        #
+        # Idempotent, and it runs whether or not init just ran, so a
+        # regenerated project cannot silently ship Tauri's icon as ours.
+        run: |
+          set -euo pipefail
+          dest=src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
+          test -d "$dest" || { echo "::error::$dest does not exist"; find src-tauri/gen/apple -maxdepth 3 -print; exit 1; }
+          cp src-tauri/icons/ios/*.png "$dest/"
+          ls "$dest" | wc -l
+
+      - name: Build the simulator app, unsigned
+        # --target aarch64-sim: the iphonesimulator SDK, arm64 (the runner is
+        #   Apple silicon, and so is every Mac that will run the simulator).
+        # --no-sign: xcodebuild with CODE_SIGNING_ALLOWED=NO. For the
+        #   simulator SDK the CLI then lifts PraisonAI.app straight out of the
+        #   xcarchive instead of exporting an IPA (crates/tauri-cli/src/mobile/
+        #   ios/build.rs, the `target.sdk == "iphonesimulator"` branch), which
+        #   is exactly the artifact a simulator installs.
+        # --debug: the dev profile links in seconds rather than minutes, and a
+        #   simulator build is never the one that ships.
+        run: npx tauri ios build --debug --target aarch64-sim --no-sign --ci
+
+      - name: Is there an app, and is the Rust inside it?
+        id: app
+        run: |
+          set -euo pipefail
+          root=src-tauri/gen/apple/build
+          # Printed before anything is asserted, so a failure here is
+          # diagnosable from the log alone rather than costing another run.
+          echo "--- what the build left behind"
+          find "$root" -maxdepth 3 -print 2>/dev/null | head -40 || echo "(no build directory)"
+
+          # Prefer the simulator export dir (build/arm64-sim, the `arch` of the
+          # aarch64-sim target); fall back to any .app so the error message can
+          # say what WAS built. The name is not hardcoded: it comes from
+          # productName via the CLI, and guessing it wrong is what failed here
+          # the first time.
+          app="$(find "$root" -type d -name '*.app' -path '*arm64-sim*' -print -quit 2>/dev/null || true)"
+          [ -n "$app" ] || app="$(find "$root" -type d -name '*.app' -print -quit 2>/dev/null || true)"
+          if [ -z "$app" ]; then
+            echo "::error::no .app was produced under $root"
+            exit 1
+          fi
+          echo "app: $app"
+
+          # The executable's name comes from the bundle itself for the same
+          # reason.
+          exe="$app/$(plutil -extract CFBundleExecutable raw "$app/Info.plist")"
+          test -f "$exe" || { echo "::error::$app has no executable"; ls -la "$app"; exit 1; }
+          file "$exe"
+          file "$exe" | grep -q 'arm64' || { echo "::error::the executable is not arm64"; exit 1; }
+
+          # iOS links the Rust in as a staticlib, so unlike Android there is no
+          # .so to look for -- the crate is INSIDE this binary, and its symbols
+          # are the only real evidence it got there. An .app that built without
+          # it would be the Swift template alone.
+          #
+          # Dumped to files rather than piped into `grep -q`: grep exits on the
+          # FIRST match, the dumper then dies of SIGPIPE, and `set -o pipefail`
+          # reports that as a failed pipeline -- so the check failed precisely
+          # BECAUSE it found what it was looking for. It cost a CI run.
+          nm -a "$exe" > "$RUNNER_TEMP/symbols.txt" 2>/dev/null || true
+          strings -a "$exe" > "$RUNNER_TEMP/strings.txt" 2>/dev/null || true
+          if grep -qi 'praisonai_mobile\|start_app' "$RUNNER_TEMP/symbols.txt" \
+            || grep -qi 'praisonai_mobile' "$RUNNER_TEMP/strings.txt"; then
+            echo "the Rust crate is linked into the executable"
+          else
+            echo "::error::the Rust library is not linked into $exe"
+            exit 1
+          fi
+
+          # The frontend is embedded in that same binary by generate_context!,
+          # not copied into the bundle as a resource, so it is checked the same
+          # way rather than by looking for an index.html that is never there.
+          plutil -p "$app/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|MinimumOSVersion|UIDeviceFamily'
+          test -f "$app/Assets.car" || echo "note: no compiled asset catalog in the bundle"
+          du -sh "$app"
+
+          # ditto, not zip: it keeps the bundle's symlinks and modes, which is
+          # the difference between an .app the simulator installs and one it
+          # rejects as an invalid bundle.
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/PraisonAI-ios-simulator.app.zip"
+          ls -la "$RUNNER_TEMP/PraisonAI-ios-simulator.app.zip"
+
+      - name: Upload the simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: PraisonAI-ios-simulator-app
+          path: ${{ runner.temp }}/PraisonAI-ios-simulator.app.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Package gen/apple for committing
+        # always(): the project is generated by `init`, so it is worth having
+        # even on a run whose BUILD failed -- that is exactly the run where
+        # someone needs to look at it.
+        if: always()
+        # Only what `git add src-tauri/gen/apple` would take: the template's
+        # own .gitignore excludes build/, xcuserdata/ and Externals/, and this
+        # respects it instead of re-listing them here. Nothing to upload when
+        # the project was already committed -- the guard above skipped init.
+        run: |
+          set -euo pipefail
+          files="$(git ls-files --others --exclude-standard src-tauri/gen/apple || true)"
+          if [ -z "$files" ]; then
+            echo "gen/apple is tracked already; nothing to package"
+            exit 0
+          fi
+          echo "$files" | tar -czf "$RUNNER_TEMP/gen-apple.tgz" -T -
+          echo "$files" | wc -l
+          ls -la "$RUNNER_TEMP/gen-apple.tgz"
+
+      - name: Upload gen/apple (only on the run that generated it)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gen-apple
+          path: ${{ runner.temp }}/gen-apple.tgz
+          if-no-files-found: ignore
+          retention-days: 30
+
+  android-apk:
+    name: android apk (debug, arm64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: src/praisonai-mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          # 17, not the runner's default 21 or a laptop's 25: Gradle 8.14.3's
+          # Groovy front end rejects class files newer than it knows
+          # ("Unsupported class file major version 69" on JDK 25), and 17 is
+          # what AGP 8.11 documents.
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          # What gen/android/app/build.gradle.kts declares (compileSdk 36),
+          # plus the build-tools AGP pairs with it. Anything else AGP needs it
+          # downloads itself; the licences are accepted by this action.
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          # r28c = 28.2.13676358, the NDK gen/android was generated and first
+          # built with.
+          ndk-version: r28c
+          add-to-path: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/praisonai-mobile/src-tauri
+          key: android-apk
+      - name: "Build praisonai-ts (the file: dependency)"
+        # praisonai-mobile depends on praisonai by `file:`, so `npm ci`
+        # here runs praisonai-ts's own `prepare` -> `rimraf dist`. On a
+        # fresh runner praisonai-ts has no node_modules, so rimraf is not
+        # installed and `npm ci` dies with code 127 before a single
+        # platform step runs. mobile.yml gives all four of its jobs this
+        # step; these two were written against the tree from before the
+        # dependency existed and never got it.
+        working-directory: src/praisonai-ts
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
+      - run: npm ci
+
+      - name: Generate the Android project (only if gen/android is not committed)
+        env:
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          if [ -d src-tauri/gen/android ]; then
+            echo "src-tauri/gen/android is committed; not regenerating it"
+            exit 0
+          fi
+          npx tauri android init --ci --skip-targets-install
+
+      - name: Build the debug APK
+        env:
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        # --target aarch64 only: every phone sold in the last several years is
+        # arm64-v8a, and one target keeps the Rust build to one link. The
+        # `universal` in the output path is Gradle's name for "the APK that is
+        # not split per ABI", not a claim about what is inside it.
+        run: npx tauri android build --debug --apk --target aarch64 --ci
+
+      - name: Is there an APK, and is the Rust inside it?
+        run: |
+          set -euo pipefail
+          root=src-tauri/gen/android/app/build/outputs/apk
+          apk="$(find "$root" -name '*.apk' -print -quit || true)"
+          if [ -z "$apk" ]; then
+            echo "::error::no .apk was produced under $root"
+            find "$root" -type f -print 2>/dev/null || echo "(the outputs directory does not exist)"
+            exit 1
+          fi
+          echo "apk: $apk"
+          ls -la "$apk"
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libpraisonai_mobile_lib.so' \
+            || { echo "::error::$apk does not contain lib/arm64-v8a/libpraisonai_mobile_lib.so"; unzip -l "$apk" | head -40; exit 1; }
+          unzip -l "$apk" | grep -E 'lib/|AndroidManifest|classes.dex' | head
+          cp "$apk" "$RUNNER_TEMP/PraisonAI-android-debug-arm64.apk"
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PraisonAI-android-debug-arm64-apk
+          path: ${{ runner.temp }}/PraisonAI-android-debug-arm64.apk
+          if-no-files-found: error
+          retention-days: 30

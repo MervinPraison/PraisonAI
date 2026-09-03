@@ -18,6 +18,7 @@ Server Types:
 - recipe: Recipe runner server
 - a2a: Agent-to-Agent protocol
 - a2u: Agent-to-User event stream
+- jobs: Async jobs API server
 - unified: All providers combined
 - openai: OpenAI API compatibility layer
 """
@@ -168,6 +169,7 @@ Start any PraisonAI server with: praisonai serve <type>
   [green]recipe[/green]      Recipe runner server (port 8765)
   [green]a2a[/green]         Agent-to-Agent protocol (port 8001)
   [green]a2u[/green]         Agent-to-User events (port 8002)
+  [green]jobs[/green]        Async jobs API server (port 8005)
   [green]unified[/green]     All providers combined (port 8765)
   [green]openai[/green]      OpenAI API compatibility layer (port 8765)
 
@@ -667,6 +669,39 @@ def serve_a2u(
     except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"A2U serve module not available: {e}")
+        raise typer.Exit(4)
+
+
+@app.command("jobs")
+def serve_jobs(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(8005, "--port", "-p", help="Port to bind to"),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite path for job persistence"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
+):
+    """Start the async jobs API server.
+
+    Exposes POST /api/v1/runs plus status/result/cancel and SSE stream for
+    long-running agent tasks.
+
+    Examples:
+        praisonai serve jobs
+        praisonai serve jobs --port 8005 --db /var/lib/praisonai/jobs.db
+    """
+    try:
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
+        args = ["jobs", "--host", host, "--port", str(port)]
+        if db:
+            args.extend(["--db", db])
+        if reload:
+            args.append("--reload")
+        exit_code = handle_serve_command(args)
+        raise typer.Exit(exit_code)
+    except (ImportError, AttributeError) as e:
+        output = get_output_controller()
+        output.print_error(f"Jobs serve module not available: {e}")
         raise typer.Exit(4)
 
 

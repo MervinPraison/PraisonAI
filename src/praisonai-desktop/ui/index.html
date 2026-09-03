@@ -676,6 +676,15 @@ const SETTINGS = [
     control: { kind: "slider", min: 0, max: 1, step: 0.01 },
     default: 1, validate: clampNum(0, 1) },
 
+  { key: "reasoning_effort", section: "model", label: "Reasoning effort",
+    description: "How hard the model thinks before answering. Off leaves the provider default. Maps to each backend's native knob.",
+    keywords: ["thinking", "reasoning", "effort", "budget", "o1", "o3"],
+    control: { kind: "select", options: [
+      { value: "off", label: "Off" }, { value: "minimal", label: "Minimal" },
+      { value: "low", label: "Low" }, { value: "medium", label: "Medium" },
+      { value: "high", label: "High" }]},
+    default: "off" },
+
   { key: "base_url", section: "model", label: "Base URL override",
     description: "Point at a proxy, Azure, or a local server. Blank uses the provider default.",
     keywords: ["endpoint", "proxy", "azure", "ollama", "lm studio"],
@@ -1048,13 +1057,32 @@ async function refreshChats(){
   if(!PORT) return;
   try{
     const {chats}=await (await fetch(`http://127.0.0.1:${PORT}/chats`)).json();
+    // Standing instructions per project, so the label can show one is set and
+    // clicking it edits it. A failure here must not blank the sidebar.
+    let projInstr={};
+    try{ projInstr=(await (await fetch(`http://127.0.0.1:${PORT}/projects`)).json()).instructions||{}; }catch{}
     chatsEl.innerHTML='';
     const groups={};
     for(const c of chats){ (groups[c.project||'']??=[]).push(c); }
     const order=Object.keys(groups).sort((a,b)=>a===''?1:b===''?-1:a.localeCompare(b));
     for(const g of order){
       if(g){ const lbl=document.createElement('div'); lbl.className='sectlbl';
-             lbl.style.padding='.7rem .75rem .2rem'; lbl.textContent=g;
+             lbl.style.padding='.7rem .75rem .2rem'; lbl.style.cursor='pointer';
+             lbl.textContent=g+(projInstr[g]?' \u2699':'');
+             lbl.title='Edit project instructions';
+             lbl.tabIndex=0; lbl.setAttribute('role','button');
+             const editInstr=async()=>{
+               const text=await askText(
+                 `Instructions for project \u201c${g}\u201d (prepended to every chat here):`,
+                 projInstr[g]||'');
+               if(text===null) return;
+               await fetch('http://127.0.0.1:'+PORT+'/projects',{method:'POST',
+                 headers:{'content-type':'application/json'},
+                 body:JSON.stringify({project:g,instructions:text})});
+               refreshChats();
+             };
+             lbl.onclick=editInstr;
+             lbl.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); editInstr(); } };
              chatsEl.appendChild(lbl); }
       for(const c of groups[g]){
       const d=document.createElement('div');
@@ -1775,14 +1803,31 @@ function renderChips(){
     const c=document.createElement('span'); c.className='chip';
     c.innerHTML='<b></b><span></span><span class="x">&times;</span>';
     c.querySelector('b').textContent=a.name;
-    c.querySelector('span').textContent=(a.text.length/1024).toFixed(1)+' kB';
+    const kb=(a.text!=null ? a.text.length : (a.size||0))/1024;
+    c.querySelector('span').textContent=kb.toFixed(1)+' kB';
     c.querySelector('.x').onclick=()=>{ attached.splice(i,1); renderChips(); };
     chips.appendChild(c);
+  });
+}
+function readAsDataURL(f){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(String(r.result||''));
+    r.onerror=()=>rej(r.error);
+    r.readAsDataURL(f);
   });
 }
 async function addFiles(list){
   for(const f of [...list].slice(0,5)){
     if(f.size>2000000){ fail('File too large', f.name+' is over 2 MB.',''); continue; }
+    // Images (and PDFs) go to the model as bytes, not stringified text, so a
+    // vision model actually sees them. Everything else keeps the text path.
+    const t=(f.type||'').toLowerCase();
+    if(t.startsWith('image/') || t==='application/pdf'){
+      const url=await readAsDataURL(f);
+      attached.push({name:f.name, url, size:f.size});
+      continue;
+    }
     const text=await f.text();
     // Clipped here, while the chip reports the real size, so a truncated file
     // can never be mistaken for a complete one.
@@ -1904,7 +1949,14 @@ async function persistCfg(patch){
     r=await fetch('http://127.0.0.1:'+PORT+'/settings',{method:'POST',
       headers:{'content-type':'application/json'},body:JSON.stringify(patch)});
   }catch(_){}
-  if(!r||!r.ok){ toast('Could not save that setting.'); return false; }
+  if(!r||!r.ok){
+    // Prefer the engine's own reason (e.g. a model id this build cannot run)
+    // over the generic line, so the user is told what to change, not just that
+    // something failed.
+    let why='';
+    try{ why=(await r.json()).error||''; }catch{}
+    toast(why||'Could not save that setting.'); return false;
+  }
   let saved=null;
   try{ saved=await r.json(); }catch{}
   CFG={...CFG,...patch}; cfg={...cfg,...patch};
