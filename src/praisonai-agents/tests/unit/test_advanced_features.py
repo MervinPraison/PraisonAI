@@ -442,6 +442,122 @@ class TestBackgroundJobManagement:
             manager.list_jobs()["orphan"]
 
 
+class TestSqliteBackgroundJobStore:
+    """Tests for the durable SQLite background job store (issue #4698)."""
+
+    def _store(self, tmp_path):
+        from praisonaiagents.background.sqlite_store import (
+            SqliteBackgroundJobStore,
+        )
+
+        return SqliteBackgroundJobStore(str(tmp_path / "background_jobs.db"))
+
+    def test_upsert_and_get_roundtrip(self, tmp_path):
+        """A persisted job round-trips through upsert/get with all fields."""
+        from praisonaiagents.background.job_manager import JobInfo, JobStatus
+
+        store = self._store(tmp_path)
+        store.upsert(JobInfo(
+            job_id="j1",
+            status=JobStatus.COMPLETED,
+            result={"answer": 42},
+            origin={"chat_id": 7},
+        ))
+
+        got = store.get("j1")
+        assert got is not None
+        assert got.status == JobStatus.COMPLETED
+        assert got.result == {"answer": 42}
+        assert got.origin == {"chat_id": 7}
+        assert got.delivered is False
+
+    def test_cross_restart_reconcile_marks_running_lost(self, tmp_path):
+        """Submit a job, reopen a fresh manager over the same store path,
+        assert reconcile_on_start sees the orphaned RUNNING job and marks LOST.
+        """
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobInfo, JobStatus,
+        )
+
+        db = str(tmp_path / "background_jobs.db")
+
+        # Process 1: a job crashes mid-run, leaving a RUNNING record.
+        store1 = self._store(tmp_path)
+        store1.upsert(JobInfo(job_id="orphan", status=JobStatus.RUNNING))
+        store1.close()
+
+        # Process 2: fresh manager over the same file recovers it.
+        from praisonaiagents.background.sqlite_store import (
+            SqliteBackgroundJobStore,
+        )
+        store2 = SqliteBackgroundJobStore(db)
+        manager = BackgroundJobManager(store=store2)
+        counts = manager.reconcile_on_start()
+
+        assert counts["lost"] == 1
+        assert manager.get_status("orphan") == JobStatus.LOST
+        assert store2.get("orphan").status == JobStatus.LOST
+
+    def test_end_to_end_submit_survives_restart(self, tmp_path):
+        """A real submitted+completed job is visible to a fresh manager."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus,
+        )
+
+        db = str(tmp_path / "background_jobs.db")
+        store1 = self._store(tmp_path)
+        manager1 = BackgroundJobManager(store=store1)
+        job_id = manager1.start_job(lambda: "done")
+        manager1.get_result(job_id, timeout=5)
+        store1.close()
+
+        from praisonaiagents.background.sqlite_store import (
+            SqliteBackgroundJobStore,
+        )
+        store2 = SqliteBackgroundJobStore(db)
+        manager2 = BackgroundJobManager(store=store2)
+        manager2.reconcile_on_start()
+
+        info = manager2.get_job_info(job_id)
+        assert info.status == JobStatus.COMPLETED
+        assert info.result == "done"
+
+    def test_list_unreconciled_filters_terminal_delivered(self, tmp_path):
+        """Only orphaned or undelivered-with-origin jobs are unreconciled."""
+        from praisonaiagents.background.job_manager import JobInfo, JobStatus
+
+        store = self._store(tmp_path)
+        store.upsert(JobInfo(job_id="run", status=JobStatus.RUNNING))
+        store.upsert(JobInfo(
+            job_id="undelivered",
+            status=JobStatus.COMPLETED,
+            origin={"chat_id": 1},
+        ))
+        store.upsert(JobInfo(
+            job_id="delivered",
+            status=JobStatus.COMPLETED,
+            origin={"chat_id": 1},
+            delivered=True,
+        ))
+        store.upsert(JobInfo(job_id="plain_done", status=JobStatus.COMPLETED))
+
+        ids = {j.job_id for j in store.list_unreconciled()}
+        assert ids == {"run", "undelivered"}
+
+    def test_get_job_manager_wires_store(self, tmp_path, monkeypatch):
+        """get_job_manager() attaches a durable store (mutation guard)."""
+        import praisonaiagents.background.job_manager as jm
+
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        monkeypatch.setattr(jm, "_global_job_manager", None)
+        # Ensure the data-dir cache does not leak a prior test's location.
+        from praisonaiagents import paths
+        paths._clear_cache()
+
+        manager = jm.get_job_manager()
+        assert manager._store is not None
+
+
 # ============================================================================
 # TODO 2.1: Safe Bash Execution Tests
 # ============================================================================

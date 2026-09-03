@@ -520,10 +520,47 @@ _global_job_manager: Optional[BackgroundJobManager] = None
 _global_lock = threading.Lock()
 
 
+def _build_default_store() -> Optional[BackgroundJobStore]:
+    """Best-effort construct the durable SQLite store for the global manager.
+
+    Persists to ``<runs_dir>/background_jobs.db`` alongside the run ledger so
+    ``/tasks`` and background subagents survive a restart. Any failure (missing
+    data dir, read-only filesystem, sqlite error) is swallowed and the manager
+    falls back to pure in-memory behaviour — durability is an enhancement, never
+    a hard requirement. Set ``PRAISONAI_BACKGROUND_JOB_STORE=0`` to opt out.
+    """
+    import os
+
+    if os.environ.get("PRAISONAI_BACKGROUND_JOB_STORE", "1") in ("0", "false", "False"):
+        return None
+    try:
+        from .sqlite_store import SqliteBackgroundJobStore
+
+        return SqliteBackgroundJobStore()
+    except Exception as e:  # noqa: BLE001 — store is optional, never crash startup
+        logger.debug("Durable background job store unavailable (non-fatal): %s", e)
+        return None
+
+
 def get_job_manager() -> BackgroundJobManager:
-    """Get the global job manager instance."""
+    """Get the global job manager instance.
+
+    On first construction a durable :class:`BackgroundJobStore` is attached when
+    one can be built (see :func:`_build_default_store`) and
+    :meth:`BackgroundJobManager.reconcile_on_start` is run once so jobs orphaned
+    by a prior crash are reconciled to ``LOST`` rather than silently lost.
+    """
     global _global_job_manager
     with _global_lock:
         if _global_job_manager is None:
-            _global_job_manager = BackgroundJobManager()
+            store = _build_default_store()
+            _global_job_manager = BackgroundJobManager(store=store)
+            if store is not None:
+                try:
+                    _global_job_manager.reconcile_on_start()
+                except Exception as e:  # noqa: BLE001 — never crash on startup recovery
+                    logger.debug(
+                        "Background job reconciliation on start failed "
+                        "(non-fatal): %s", e,
+                    )
         return _global_job_manager
