@@ -205,8 +205,17 @@ class ShellTools:
                 }
                 
         except Exception as e:
-            error_msg = f"Error executing command: {str(e)}"
-            logging.error(error_msg)
+            # Name the exception type and log the traceback. Some exceptions
+            # here really are command-execution failures caused by bad caller
+            # input (e.g. a non-string command, or an env value that is not a
+            # string), which must keep returning a result dict the model can
+            # recover from rather than propagating. But an internal programming
+            # error (a signature mismatch, say) lands here too, and reporting it
+            # as a bare "Error executing command: <message>" is how such a bug
+            # gets mistaken for a command failure. The type name plus a
+            # traceback makes the difference visible at a glance.
+            error_msg = f"Error executing command: {type(e).__name__}: {e}"
+            logging.error(error_msg, exc_info=True)
             return {
                 'stdout': '',
                 'stderr': error_msg,

@@ -10,6 +10,7 @@ Covers:
   returns the full buffered (stdout, stderr) output
 """
 
+import inspect
 import subprocess
 import sys
 
@@ -60,6 +61,28 @@ class TestToolProgressChannel:
             # Parent sink is restored after the nested context exits.
             assert emit_tool_progress("outer-again") is True
         assert [e.content for e in outer] == ["outer", "outer-again"]
+
+
+def _assert_fake_matches_real(fake):
+    """Fail loudly when a ``_communicate_streaming`` test double drifts from the
+    real method's signature.
+
+    The doubles below are written with the REAL signature spelled out rather
+    than a ``*args``-tolerant one on purpose: ``*args`` is exactly what would
+    have silently swallowed the ``cancel_event`` parameter when it was added,
+    leaving these tests green while they exercised a stale contract. An exact
+    signature makes the next drift visible -- and this assertion turns it into a
+    self-describing failure instead of a ``TypeError`` that ``execute_command``
+    reports as a generic command error on a wholly unrelated assertion.
+    """
+    from praisonaiagents.tools.shell_tools import ShellTools
+
+    real_sig = inspect.signature(ShellTools._communicate_streaming)
+    fake_sig = inspect.signature(fake)
+    assert fake_sig == real_sig, (
+        f"test double {fake.__name__}{fake_sig} has drifted from "
+        f"ShellTools._communicate_streaming{real_sig}; update the double"
+    )
 
 
 class TestShellStreaming:
@@ -189,9 +212,13 @@ class TestShellStreaming:
             _shell_tools.subprocess, "Popen", lambda *a, **k: _FakeProc()
         )
 
-        def _raise_drain_timeout(self, process, timeout):
+        calls = {"count": 0}
+
+        def _raise_drain_timeout(self, process, timeout, cancel_event=None):
+            calls["count"] += 1
             raise _StreamDrainTimeout()
 
+        _assert_fake_matches_real(_raise_drain_timeout)
         monkeypatch.setattr(
             ShellTools, "_communicate_streaming", _raise_drain_timeout
         )
@@ -199,6 +226,10 @@ class TestShellStreaming:
         st = ShellTools()
         result = st.execute_command("echo hi", timeout=1)
 
+        assert calls["count"] == 1, (
+            "the patched _communicate_streaming never ran -- "
+            f"execute_command returned {result['stderr']!r}"
+        )
         assert result["success"] is False
         assert result["exit_code"] == -1
         assert "timed out" in result["stderr"]
@@ -228,14 +259,22 @@ class TestShellStreaming:
             _shell_tools.subprocess, "Popen", lambda *a, **k: _FakeProc()
         )
 
-        def _raise_timeout(self, process, timeout):
+        calls = {"count": 0}
+
+        def _raise_timeout(self, process, timeout, cancel_event=None):
+            calls["count"] += 1
             raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
 
+        _assert_fake_matches_real(_raise_timeout)
         monkeypatch.setattr(ShellTools, "_communicate_streaming", _raise_timeout)
 
         st = ShellTools()
         result = st.execute_command("sleep 100", timeout=1)
 
+        assert calls["count"] == 1, (
+            "the patched _communicate_streaming never ran -- "
+            f"execute_command returned {result['stderr']!r}"
+        )
         assert result["success"] is False
         assert result["exit_code"] == -1
         assert killed["called"] is True, "real timeout must kill the running child"
