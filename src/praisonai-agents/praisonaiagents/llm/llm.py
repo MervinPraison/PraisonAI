@@ -786,12 +786,13 @@ Respond with ONLY a valid JSON tool call in this format:
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
 
-        # Check for common rate limit indicators. Kept in step with
-        # error_classifier.classify_error(), which is the one the runtime
-        # actually consults -- this helper has no production callers, only
-        # tests, so the two silently diverged when the classifier learned
-        # 'quota exceeded' (Gemini's phrasing for a per-minute limit) and this
-        # list did not.
+        # Check for common rate limit indicators. This helper has no production
+        # callers (the runtime retry path uses classify_error_kind() /
+        # resolve_failover_decision()); it exists only for tests and is kept in
+        # step with error_classifier.classify_error() via
+        # test_rate_limit_backward_compat. The two silently diverged when that
+        # classifier learned 'quota exceeded' (Gemini's phrasing for a
+        # per-minute limit) and this list did not.
         indicators = [
             '429',
             'rate limit',
