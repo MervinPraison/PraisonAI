@@ -200,11 +200,20 @@ class TestScheduleParser:
         assert s.kind == "cron"
         assert s.cron_expr == "0 7 * * *"
 
-    def test_parse_at_iso(self):
+    def test_parse_at_iso(self, monkeypatch):
+        from datetime import datetime
         from praisonaiagents.scheduler.parser import parse_schedule
+        monkeypatch.delenv("PRAISONAI_SCHEDULE_TIMEZONE", raising=False)
         s = parse_schedule("at:2026-03-01T09:00:00")
         assert s.kind == "at"
-        assert s.at == "2026-03-01T09:00:00"
+        # A naive timestamp is the user's wall clock; the parser keeps the
+        # wall-clock reading and attaches the zone it was typed in, so the
+        # stored value is an unambiguous instant rather than a guess for
+        # is_due() to make later.
+        stored = datetime.fromisoformat(s.at)
+        assert stored.tzinfo is not None
+        assert stored.replace(tzinfo=None) == datetime(2026, 3, 1, 9, 0, 0)
+        assert stored == datetime(2026, 3, 1, 9, 0, 0).astimezone()
 
     def test_parse_numeric_seconds(self):
         from praisonaiagents.scheduler.parser import parse_schedule

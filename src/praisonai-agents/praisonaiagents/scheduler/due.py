@@ -32,6 +32,32 @@ def resolve_schedule_timezone(tz: str | None = None) -> ZoneInfo:
         raise ValueError(f"Unknown IANA timezone: {name!r}") from exc
 
 
+def localize_wall_clock(target: datetime, tz: str | None = None) -> datetime:
+    """Attach the zone a naive wall-clock timestamp was written in.
+
+    A naive ``at`` string is what a person typed from their own clock, so it
+    means *that wall-clock time in the schedule's zone*, resolved in order:
+    the schedule's explicit ``tz``, then ``PRAISONAI_SCHEDULE_TIMEZONE``, then
+    the system's local zone. It is never UTC by default -- stamping UTC is
+    exactly the defect that made one-shot jobs fire an hour off outside UTC.
+
+    An already-aware ``target`` is returned unchanged: an explicit offset in
+    the string always wins over any default.
+
+    The local-zone branch uses :meth:`datetime.astimezone` on the naive value
+    so the offset is the one in force *on that date* (DST-correct), not the
+    offset in force right now.
+
+    Raises ``ValueError`` when the named zone is not a known IANA zone.
+    """
+    if target.tzinfo is not None:
+        return target
+    name = tz or os.environ.get("PRAISONAI_SCHEDULE_TIMEZONE")
+    if name:
+        return target.replace(tzinfo=resolve_schedule_timezone(name))
+    return target.astimezone()
+
+
 def next_fire_time(
     cron_expr: str,
     base: float,
@@ -77,19 +103,17 @@ def is_due(
         if job.last_run_at is not None:
             return False  # Already ran
         try:
-            target = datetime.fromisoformat(sched.at)
-            if target.tzinfo is None:
-                # A naive ``at`` reflects the user's wall clock (they typed it
-                # from local time), so interpret it in the schedule's timezone:
-                # the explicit tz / PRAISONAI_SCHEDULE_TIMEZONE when set,
-                # otherwise the local zone rather than UTC — a naive string in a
-                # non-UTC zone would otherwise fire an hour (or more) off.
-                tz = sched.tz or default_timezone
-                if tz or os.environ.get("PRAISONAI_SCHEDULE_TIMEZONE"):
-                    tzinfo = resolve_schedule_timezone(tz)
-                else:
-                    tzinfo = datetime.now().astimezone().tzinfo
-                target = target.replace(tzinfo=tzinfo)
+            # ``parse_schedule`` stamps every ``at`` it produces with its zone,
+            # so a string reaching here is normally aware and evaluated as-is.
+            # A naive string (a job stored before zones were stamped, or a
+            # hand-written config.yaml entry) is a legacy wall-clock value:
+            # ``localize_wall_clock`` reads it in the schedule tz, else the
+            # instance default, else PRAISONAI_SCHEDULE_TIMEZONE, else the
+            # runner's local zone -- never UTC by default.
+            target = localize_wall_clock(
+                datetime.fromisoformat(sched.at),
+                sched.tz or default_timezone,
+            )
             # Evaluate against the caller-supplied ``now`` (not wall-clock) so
             # one-shot jobs are deterministic and consistent with every/cron.
             return now >= target.timestamp()
