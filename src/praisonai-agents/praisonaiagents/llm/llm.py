@@ -3150,12 +3150,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         if formatted_tools and not self._supports_streaming_tools():
                             # Provider doesn't support streaming with tools, use non-streaming
                             use_streaming = False
-                        
-                        # Gemini has issues with streaming + tools, disable streaming for Gemini when tools are present
-                        if use_streaming and formatted_tools and self._is_gemini_model():
-                            logging.debug("Disabling streaming for Gemini model with tools due to JSON parsing issues")
-                            use_streaming = False
-                        
+
                         # Track whether fallback was successful to avoid duplicate API calls
                         fallback_completed = False
                         

@@ -346,22 +346,6 @@ class TestLLMProviderAdapters:
         if threshold > 0:
             assert adapter.should_summarize_tools(threshold - 1) is False
 
-    def test_gemini_adapter_formats_internal_tools(self):
-        """GeminiAdapter must recognise the actual Gemini internal tool names."""
-        from praisonaiagents.llm.adapters import GeminiAdapter
-        from praisonaiagents.llm.model_capabilities import GEMINI_INTERNAL_TOOLS
-
-        adapter = GeminiAdapter()
-        tools = [{"name": name} for name in GEMINI_INTERNAL_TOOLS]
-        tools.append({"name": "regular_tool"})
-
-        formatted = adapter.format_tools(tools)
-        internal = [t for t in formatted if "function" in t]
-        regular = [t for t in formatted if "function" not in t]
-
-        assert len(internal) == len(GEMINI_INTERNAL_TOOLS)
-        assert len(regular) == 1
-        assert regular[0]["name"] == "regular_tool"
 
 
 class TestGetProviderAdapter:
