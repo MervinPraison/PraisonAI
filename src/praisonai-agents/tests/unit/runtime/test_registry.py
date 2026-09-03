@@ -109,6 +109,31 @@ def test_resolve_unknown_runtime():
         resolve_runtime("non-existent-runtime")
 
 
+def test_resolve_runtime_accepts_config_overrides():
+    """The module-level wrapper must forward configuration overrides.
+
+    ``RuntimeResolver.resolve_runtime_instance`` calls
+    ``resolve_runtime(runtime_id=..., config_overrides=...)`` and
+    ``RuntimeRegistry.resolve`` already declares that argument, so the wrapper
+    has to accept it too -- otherwise every registry-backed resolution through
+    the resolver raises TypeError instead of returning a runtime.
+    """
+    runtime_id = "test-runtime-overrides"
+    register_runtime(runtime_id, lambda: TestRuntime(runtime_id))
+    try:
+        runtime = resolve_runtime(
+            runtime_id=runtime_id,
+            config_overrides={"temperature": 0.1},
+        )
+        assert isinstance(runtime, TestRuntime)
+        assert runtime.runtime_id == runtime_id
+
+        # The single-argument form used by every other call site still works.
+        assert resolve_runtime(runtime_id).runtime_id == runtime_id
+    finally:
+        unregister_runtime(runtime_id)
+
+
 def test_alias_to_unknown_runtime():
     """Test creating alias to unknown runtime raises ValueError."""
     with pytest.raises(ValueError, match="Cannot create alias"):

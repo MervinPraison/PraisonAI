@@ -349,11 +349,15 @@ def list_runtimes() -> list[str]:
     return [e.runtime_id for e in entries]
 
 
-def resolve_runtime(runtime_id: str) -> AgentRuntimeProtocol:
+def resolve_runtime(
+    runtime_id: str,
+    config_overrides: Optional[Dict[str, Any]] = None,
+) -> AgentRuntimeProtocol:
     """Resolve a runtime by ID using the global registry.
     
     Args:
         runtime_id: Runtime identifier (e.g., "praisonai")
+        config_overrides: Optional configuration overrides
         
     Returns:
         AgentRuntimeProtocol instance
@@ -361,7 +365,7 @@ def resolve_runtime(runtime_id: str) -> AgentRuntimeProtocol:
     Raises:
         ValueError: If runtime_id is not registered
     """
-    return _global_registry.resolve(runtime_id)
+    return _global_registry.resolve(runtime_id, config_overrides)
 
 
 def add_runtime_alias(alias: str, canonical_runtime_id: str) -> None:
