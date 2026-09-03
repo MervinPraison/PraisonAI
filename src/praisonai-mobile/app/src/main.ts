@@ -977,7 +977,15 @@ export async function mount(deps: MountDeps): Promise<App | null> {
    * rebuilding the screen is what keeps a half-pasted key in the field when
    * the answer lands a moment later.
    */
+  // Which presence lookup is the most recent one asked for. A save followed by
+  // a Remove fires two overlapping walks, and with a native keychain adapter
+  // (the declared next step) `hasSecret` can resolve OUT OF ORDER -- the older
+  // lookup landing last would paint "Configured" over a row the user just
+  // cleared, or "Not set" over one they just saved. Only the latest request is
+  // allowed to write; a stale one has already been superseded and is dropped.
+  let latestPresenceSeq = 0;
   const refreshSecretPresence = (scope: HTMLElement): void => {
+    const seq = ++latestPresenceSeq;
     void (async (): Promise<void> => {
       const answers = new Map<string, string>();
       for (const def of app.settings.defs()) {
@@ -985,6 +993,9 @@ export async function mount(deps: MountDeps): Promise<App | null> {
         if (ref === null) continue;
         answers.set(def.key, presenceLabel((await app.settings.hasSecret(ref)) ? "configured" : "not-set"));
       }
+      // A newer refresh started while this one awaited: its answer is the
+      // current truth, so this one must not overwrite it.
+      if (seq !== latestPresenceSeq) return;
       for (const node of everyElement(scope)) {
         const key = node.dataset["secretPresence"];
         if (key === undefined) continue;
