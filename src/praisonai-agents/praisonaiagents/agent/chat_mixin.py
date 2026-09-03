@@ -4973,7 +4973,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Use the new streaming generator from LLM class
                     response_content = ""
-                    stream_history = self.chat_history
+                    # Compact before sending, exactly as the OpenAI-client
+                    # branch below does. #4729 added compaction to that branch
+                    # only, so a configured ContextManager -- auto-enabled
+                    # whenever tools are present -- was still skipped for every
+                    # agent routed through the custom-LLM path. The trigger is
+                    # the routing flag, not the vendor: llm="openai/gpt-4o-mini"
+                    # takes this branch too. Zero overhead when context=False.
+                    stream_system_prompt = self._build_system_prompt(
+                        tool_param,
+                        memory_prefetch_context=memory_prefetch_context,
+                    )
+                    if self.context_manager:
+                        stream_history, _ = self._apply_context_management(
+                            messages=self.chat_history,
+                            system_prompt=stream_system_prompt or "",
+                            tools=tool_param,
+                        )
+                        stream_history = list(stream_history)
+                    else:
+                        stream_history = self.chat_history
                     durable_context = self._get_durable_run_context()
                     if durable_context is not None:
                         stream_history = durable_context.restore_messages(
@@ -4986,10 +5005,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream_sampling_kwargs['top_p'] = kwargs['top_p']
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
-                        system_prompt=self._build_system_prompt(
-                            tool_param,
-                            memory_prefetch_context=memory_prefetch_context,
-                        ),
+                        system_prompt=stream_system_prompt,
                         chat_history=stream_history,
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
