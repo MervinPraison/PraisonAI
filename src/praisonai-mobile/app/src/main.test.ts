@@ -2042,3 +2042,223 @@ test("New chat starts the model with a blank memory, not the previous conversati
   assert.deepEqual(histories[1], [], `the new chat must start empty:\n${JSON.stringify(histories)}`);
   await app?.dispose();
 });
+
+// ---- your own message, on screen --------------------------------------------
+//
+// The plainest defect the app had: you typed, tapped Send, and only the reply
+// appeared. `ui/src/transcript/view-model.ts` defined seven row kinds and not
+// one of them was the user, so there was nothing for any renderer to draw.
+// These drive the whole composition root -- composer, controller, reducer, view
+// model, reconciler, DOM -- because every layer below was individually correct
+// and the conversation still came out with one side missing.
+
+/** The transcript's rows, in order, as `kind|text` so ORDER can be asserted. */
+const transcriptRows = (dom: ReturnType<typeof createFakeDom>): string[] => {
+  const transcript = dom.find((n) => n.className.includes("transcript"));
+  assert.ok(transcript, "no transcript");
+  return (transcript.children as { className: string; textContent: string }[]).map(
+    (c) => `${c.className}|${c.textContent}`,
+  );
+};
+
+test("your own message appears in the transcript, above the reply", async () => {
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "Paris." }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  assert.notEqual(app, null);
+
+  submit(dom, "what is the capital of France");
+  await settle(120);
+
+  const rows = transcriptRows(dom);
+  const mine = rows.findIndex((r) => r.startsWith("row row-user"));
+  assert.notEqual(mine, -1, `the user's own message never rendered:\n${rows.join("\n")}`);
+  assert.match(rows[mine] ?? "", /what is the capital of France/);
+
+  // Above the answer, which is the only thing that says which reply belongs to
+  // which question once the conversation is longer than one turn.
+  const reply = rows.findIndex((r) => r.startsWith("row row-text") && r.includes("Paris."));
+  assert.notEqual(reply, -1, `the reply never rendered:\n${rows.join("\n")}`);
+  assert.ok(mine < reply, `the question must render above its answer:\n${rows.join("\n")}`);
+  app?.dispose();
+});
+
+test("a send the composer REFUSES leaves nothing on screen", async () => {
+  // The optimistic-vs-confirmed rule, end to end: a message that was never sent
+  // must not be sitting in the transcript looking sent. The composer refuses a
+  // second submit while a turn is in flight (composer.ts rule 1) and that
+  // refusal must be total -- the row is seeded when a run is ISSUED, so a
+  // refused submit produces no turn and therefore no row.
+  const { dom, http, platform } = harness();
+  // A stream held OPEN between frames, so the turn is genuinely still running
+  // when the second submit arrives. `sseResponse` delivers everything at once,
+  // which would let the first turn finish and make the second submit a
+  // perfectly ordinary send.
+  const frames = sse([
+    ["start", { msg_id: "m1", run_id: "r1" }],
+    ["delta", { msg_id: "m1", text: "first answer" }],
+    ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+  ]).split(/(?<=\n\n)/).filter((f) => f !== "");
+  http.on("/chat", () => ({
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const next = frames.shift();
+        if (next === undefined) return controller.close();
+        await new Promise((r) => setTimeout(r, 150));
+        controller.enqueue(new TextEncoder().encode(next));
+      },
+    }),
+  }));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "the one I sent");
+  // Long enough for `start` to arrive and the button to become Stop.
+  await settle(250);
+  const stopping = dom.find((n) => n.dataset["action"] === "stop");
+  assert.ok(stopping, "the turn was not still running -- the refusal path is untested");
+  submit(dom, "REFUSED-while-busy");
+  await settle(500);
+
+  const all = transcriptRows(dom).join("\n");
+  assert.match(all, /the one I sent/, `the sent message must be on screen:\n${all}`);
+  assert.equal(
+    all.includes("REFUSED-while-busy"),
+    false,
+    `a message the composer refused was painted as though it had been sent:\n${all}`,
+  );
+  app?.dispose();
+});
+
+test("a turn that FAILED keeps the message on screen and says it was not saved", async () => {
+  // The other half of the same rule. The message WAS sent -- the engine got it
+  // and answered 401 -- so removing it would hide the question the error is
+  // about. But `end.userIndex` never arrived, so it is not in the stored
+  // conversation and the row must not imply that it is.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () => ({ ok: false, status: 401, headers: {}, body: streamOf("nope") }));
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "a question nobody answered");
+  await settle(150);
+
+  const rows = transcriptRows(dom);
+  const mine = rows.find((r) => r.startsWith("row row-user"));
+  assert.ok(mine, `a failed turn must still show what was asked:\n${rows.join("\n")}`);
+  assert.match(mine, /a question nobody answered/);
+  assert.match(mine, /not saved/i, `a message that reached no disk must say so:\n${mine}`);
+  app?.dispose();
+});
+
+test("a REOPENED conversation shows the user's messages as the USER's", async () => {
+  // `historyRows` mapped both roles to a `text` row -- the kind that means "the
+  // model said this" -- so a reopened conversation painted the user's questions
+  // in the assistant's clothes. The two sides were rendered identically and a
+  // screen reader heard one voice. The prompt is ALREADY on disk with its role;
+  // it was the role that was being discarded.
+  const { dom, platform } = harness();
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  await app!.session.record("what is the capital of France", "Paris");
+
+  dom.click(dom.find((n) => n.dataset["route"] === "chats") as never);
+  await settle();
+  dom.click(dom.find((n) => n.dataset["action"] === "open-chat") as never);
+  await settle();
+
+  const rows = transcriptRows(dom);
+  const mine = rows.findIndex((r) => r.startsWith("row row-user"));
+  assert.notEqual(mine, -1, `the reopened conversation showed no user message:\n${rows.join("\n")}`);
+  assert.match(rows[mine] ?? "", /what is the capital of France/);
+  // And the reply is still the assistant's, in order.
+  const reply = rows.findIndex((r) => r.startsWith("row row-text") && r.includes("Paris"));
+  assert.notEqual(reply, -1, `the stored answer was lost:\n${rows.join("\n")}`);
+  assert.ok(mine < reply, `a reopened conversation must read in order:\n${rows.join("\n")}`);
+  // The question must NOT be painted as model output.
+  assert.equal(
+    (rows[mine] ?? "").startsWith("row row-text"),
+    false,
+    "the user's stored message was rendered as the assistant's",
+  );
+  app?.dispose();
+});
+
+test("a finished turn stays on screen when the NEXT one begins", async () => {
+  // The controller publishes only the CURRENT turn and resets it per run, so
+  // the reconciler saw the previous turn's ids missing and removed every one of
+  // them. Measured on main: after a second Send the transcript contained the
+  // second answer and nothing else -- the first question and its reply gone
+  // from a conversation that was still open. Invisible while there were no user
+  // rows (one anonymous paragraph replacing another) and glaring with them.
+  const { dom, http, platform } = harness();
+  let n = 0;
+  http.on("/chat", () => {
+    n += 1;
+    const id = `m${n}`;
+    return sseResponse(
+      sse([
+        ["start", { msg_id: id, run_id: `r${n}` }],
+        ["delta", { msg_id: id, text: `ANSWER-${n}` }],
+        ["end", { msg_id: id, user_index: 2 * n - 2, assistant_index: 2 * n - 1, versions: 1, active: 0 }],
+      ]),
+    );
+  });
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+
+  submit(dom, "QUESTION-1");
+  await settle(150);
+  submit(dom, "QUESTION-2");
+  await settle(150);
+
+  const rows = transcriptRows(dom);
+  const at = (needle: string): number => {
+    const i = rows.findIndex((r) => r.includes(needle));
+    assert.notEqual(i, -1, `"${needle}" is not on screen:\n${rows.join("\n")}`);
+    return i;
+  };
+  // All four, in the order they happened.
+  assert.ok(at("QUESTION-1") < at("ANSWER-1"), `turn 1 is out of order:\n${rows.join("\n")}`);
+  assert.ok(at("ANSWER-1") < at("QUESTION-2"), `turn 1 was erased by turn 2:\n${rows.join("\n")}`);
+  assert.ok(at("QUESTION-2") < at("ANSWER-2"), `turn 2 is out of order:\n${rows.join("\n")}`);
+  // And nothing was drawn twice: promotion must move a turn, not copy it.
+  assert.equal(rows.filter((r) => r.includes("QUESTION-1")).length, 1, "the first question rendered twice");
+  app?.dispose();
+});
+
+test("New chat clears the finished turns too, not just the live one", async () => {
+  // The promotion above gives the screen a second place a previous
+  // conversation can hide in. `setChat` clears the controller's turn; it cannot
+  // know about rows the app promoted, so New chat has to drop those as well or
+  // the "fresh" chat opens on the last one.
+  const { dom, http, platform } = harness();
+  http.on("/chat", () =>
+    sseResponse(
+      sse([
+        ["start", { msg_id: "m1", run_id: "r1" }],
+        ["delta", { msg_id: "m1", text: "an answer" }],
+        ["end", { msg_id: "m1", user_index: 0, assistant_index: 1, versions: 1, active: 0 }],
+      ]),
+    ),
+  );
+  const app = await mount({ root: dom.root as never, platform, now: () => 1, newChatId: () => "c1" });
+  submit(dom, "the old conversation");
+  await settle(150);
+  assert.match(transcriptRows(dom).join("\n"), /the old conversation/);
+
+  dom.click(dom.find((n) => n.dataset["action"] === "new-chat") as never);
+  await settle(60);
+  assert.equal(
+    transcriptRows(dom).join("\n").includes("the old conversation"),
+    false,
+    "a new chat opened on the previous conversation's messages",
+  );
+  app?.dispose();
+});

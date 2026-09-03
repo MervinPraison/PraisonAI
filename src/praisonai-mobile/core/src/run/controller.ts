@@ -41,7 +41,7 @@ import {
   type PromptQueue,
   type QueuedPrompt,
 } from "./queue.ts";
-import { apply, finish, initialTurn, noteDropped, type TurnState } from "./transcript.ts";
+import { apply, beginTurn, finish, initialTurn, noteDropped, type TurnState } from "./transcript.ts";
 import type { DropSink } from "./drop-sink.ts";
 
 /** Everything a view needs, in one object. */
@@ -170,7 +170,14 @@ export function createRunController(deps: ControllerDeps): RunController {
     // blaming itself for its predecessor; and because `send()` publishes
     // before `runTurn` begins, a stale turn was painted into what the user
     // believed was a new conversation.
-    turn = initialTurn;
+    //
+    // And it is seeded with the PROMPT, which is the only moment the prompt is
+    // available to anything downstream: no engine reports it back, so a
+    // reducer over the event stream cannot recover it. Seeding it HERE rather
+    // than in `send()` is what ties the user's row to a run that was really
+    // issued -- a queued prompt has not been sent yet, and a prompt the
+    // composer refused was never handed over at all.
+    turn = beginTurn(prompt.text);
     publish();
 
     // The approval table is per TURN, not per app.

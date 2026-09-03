@@ -124,6 +124,42 @@ html, body {
 }
 
 .row { border-radius: var(--radius); padding: .55rem .75rem; max-width: 100%; }
+
+/*
+ * The user's own message.
+ *
+ * `align-self` is the load-bearing declaration, not the background: the
+ * transcript is a flex COLUMN, so pulling this row to the end is what makes a
+ * conversation legible as a conversation at a glance. Colour alone would leave
+ * the two speakers distinguishable only to someone who can see the difference,
+ * which is the failure the whole transcript layer is written against -- so the
+ * row also carries `data-speaker="user"` and opens with a visually-hidden
+ * "You said:" (app/src/dom.ts).
+ *
+ * `max-width` short of 100% so a long message still shows the ragged left edge
+ * that says it is not full-width prose from the model.
+ *
+ * `dir`-agnostic on purpose: `flex-end` follows the writing direction, so on an
+ * Arabic device (`root[dir=rtl]`, set in main.ts) the user's side flips with
+ * the rest of the layout instead of being pinned to the right in a
+ * right-to-left column.
+ */
+.row-user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--accent);
+  color: var(--ground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Sent, and NOT in the stored conversation. A block of its own so it reads as a
+   separate statement about the message rather than as part of it. */
+.row-user .user-note {
+  display: block;
+  margin-top: .3rem;
+  font-size: .78rem;
+  opacity: .85;
+}
 .row-text { background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; }
 .row-text.streaming::after {
   content: "▍";

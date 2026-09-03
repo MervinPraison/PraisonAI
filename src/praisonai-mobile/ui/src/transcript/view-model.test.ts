@@ -23,7 +23,7 @@ import {
   type ToolRowView,
 } from "./view-model.ts";
 import { UNKNOWN, formatElapsed } from "../format.ts";
-import { apply, initialTurn, noteDropped, type TurnState } from "../../../core/src/run/transcript.ts";
+import { apply, beginTurn, initialTurn, noteDropped, type TurnState } from "../../../core/src/run/transcript.ts";
 import { add, choose, emptyApprovals } from "../../../core/src/run/approvals.ts";
 import type { RunEvent } from "../../../protocol/src/events.ts";
 import { SCRIPTS } from "../../../testing/src/scripts.ts";
@@ -565,4 +565,92 @@ test("an empty text block never becomes a message bubble", () => {
     false,
     `an empty bubble was rendered: ${JSON.stringify(textRows.map((r) => r.kind === "text" && r.text))}`,
   );
+});
+
+// ---- the user's own message -------------------------------------------------
+//
+// This file defined seven row kinds and not one of them was the user. A grep
+// for "user" or "prompt" in view-model.ts returned nothing, so a real tap on
+// Send produced a transcript containing the reply and no question. The turn was
+// drawn with one side of the conversation missing.
+
+/** A turn seeded with a prompt, the way `runTurn` seeds one. */
+const asked = (prompt: string, ...events: readonly RunEvent[]): TurnState =>
+  events.reduce<TurnState>(apply, beginTurn(prompt));
+
+test("the user's own message is a row in the transcript", () => {
+  // The whole defect, at the layer that decides what is painted. Without a
+  // `user` row here there is nothing for any renderer to draw, on any platform.
+  const view = buildTranscript(asked("what is the capital of France", start, delta("Paris")));
+  const users = view.rows.filter((r) => r.kind === "user");
+  assert.equal(users.length, 1, `expected exactly one user row, got ${JSON.stringify(view.rows.map((r) => r.kind))}`);
+  assert.equal(users[0]?.kind === "user" && users[0].text, "what is the capital of France");
+});
+
+test("the user's message renders ABOVE the answer it prompted", () => {
+  // Position is the only thing that says which reply belongs to which prompt
+  // once a chat is more than one turn long. A question below its own answer is
+  // not a conversation, and reversing the two here is a mutation that changes
+  // no count and no text -- so the count assertion above cannot catch it.
+  const turn = asked(
+    "why",
+    start,
+    { type: "reasoning", msgId: M, text: "thinking" },
+    delta("because"),
+  );
+  const kinds = buildTranscript(turn).rows.map((r) => r.kind);
+  const user = kinds.indexOf("user");
+  assert.notEqual(user, -1, "no user row at all");
+  // Above the ANSWER and above the model's reasoning about it: the model
+  // cannot have started thinking before the question arrived.
+  assert.equal(user, 0, `the user's message must be the first row, got ${JSON.stringify(kinds)}`);
+  assert.ok(user < kinds.indexOf("reasoning"));
+  assert.ok(user < kinds.indexOf("text"));
+});
+
+test("a turn nobody prompted draws no user row", () => {
+  // `initialTurn` and the cleared state `setChat` installs both have prompt "".
+  // A blank bubble in a fresh chat is a message the user did not send -- the
+  // same failure `an empty text block never becomes a message bubble` forbids
+  // on the other side of the conversation.
+  assert.equal(
+    buildTranscript(run(start, delta("hello"))).rows.some((r) => r.kind === "user"),
+    false,
+  );
+  assert.equal(buildTranscript(initialTurn).rows.length, 0);
+});
+
+test("the user row says STORED only when end reported an index it wrote", () => {
+  // Optimistic vs confirmed, decided by `end.userIndex` and never by the fact
+  // that we sent something. `isPersisted` is the sanctioned reader of that
+  // index and the same predicate that decides Fork and Delete; a user row that
+  // announced "saved" off its own bat would promise a reopen that finds nothing.
+  const live = buildTranscript(asked("q", start, delta("a"))).rows[0];
+  assert.equal(live?.kind === "user" && live.state, "sent", "a streaming turn is not stored yet");
+
+  const written = buildTranscript(asked("q", start, delta("a"), endAt(4))).rows[0];
+  assert.equal(written?.kind === "user" && written.state, "stored");
+
+  // `userIndex: null` is the engine saying the write FAILED. The message is on
+  // screen and not on disk, and saying so is the whole point of the field.
+  const lost = buildTranscript(asked("q", start, delta("a"), endAt(null))).rows[0];
+  assert.equal(lost?.kind === "user" && lost.state, "unstored");
+
+  // A turn the user stopped was never offered for persistence at all.
+  const stopped = buildTranscript(asked("q", start, delta("a"), { type: "cancelled", msgId: M, runId: "r1" })).rows[0];
+  assert.equal(stopped?.kind === "user" && stopped.state, "unstored");
+});
+
+test("the user row keeps ONE id across the whole turn, so it cannot flicker", () => {
+  // The reconciler is keyed by id. If the row's id moved with the turn's
+  // progress -- an index, a msgId, anything derived from what has arrived --
+  // every publish would remove the row and insert a new node in its place: a
+  // visible flicker on every token, and the user's text selection dropped with
+  // it. Asserted across the states the row actually passes through.
+  const ids = [
+    buildTranscript(asked("q", start)).rows[0]?.id,
+    buildTranscript(asked("q", start, delta("a"))).rows[0]?.id,
+    buildTranscript(asked("q", start, delta("a"), endAt(0))).rows[0]?.id,
+  ];
+  assert.deepEqual(new Set(ids), new Set(["user"]), `the user row changed id mid-turn: ${JSON.stringify(ids)}`);
 });

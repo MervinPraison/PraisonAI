@@ -38,6 +38,10 @@ export type Op =
  */
 export function signatureOf(row: Row): string {
   switch (row.kind) {
+    case "user":
+      // `state` is in the signature, so the row is UPDATED in place when the
+      // engine confirms the write rather than left saying "sending" forever.
+      return `user|${row.state}|${row.text}`;
     case "text":
       return `text|${row.streaming ? 1 : 0}|${row.text}`;
     case "reasoning":

@@ -78,6 +78,27 @@ export interface TurnState {
   readonly phase: "idle" | "streaming" | "ended";
   readonly msgId: string | null;
   readonly runId: string | null;
+  /**
+   * The user's message: what this turn is an answer TO.
+   *
+   * A turn used to be assistant-only, and that was a structural gap rather
+   * than an oversight -- chat/session.ts names it in as many words ("TurnState
+   * is assistant-only, StoredChat has both roles, and nothing owned the
+   * join"). The consequence was visible on a phone: you typed, tapped Send,
+   * and only the reply appeared. There was no row kind for your own words
+   * because there was no field to build one from.
+   *
+   * It is NOT an event. No engine reports the prompt back -- `start` carries
+   * only ids -- so a reducer over the event stream can never learn it. It is
+   * seeded by whoever issues the run (`beginTurn`), which is also what makes
+   * it honest: a turn that exists has been handed to an engine, so a prompt
+   * on screen is a prompt that was actually sent.
+   *
+   * "" for a turn nobody prompted -- `initialTurn`, and the cleared state
+   * `setChat` installs. The view model draws no user row for "", so an empty
+   * chat is empty rather than showing a blank bubble.
+   */
+  readonly prompt: string;
   readonly text: string;
   readonly reasoning: string;
   /** The name of a tool being drafted, or null. NEVER a row -- see below. */
@@ -112,6 +133,7 @@ export const initialTurn: TurnState = {
   phase: "idle",
   msgId: null,
   runId: null,
+  prompt: "",
   text: "",
   reasoning: "",
   drafting: null,
@@ -123,6 +145,23 @@ export const initialTurn: TurnState = {
   dropped: [],
   carry: [],
 };
+
+/**
+ * A fresh turn that already knows what it is answering.
+ *
+ * The one sanctioned way to put a prompt on a turn. Called when a run is
+ * actually ISSUED to an engine -- not when Send is tapped -- which is what
+ * makes the row it produces impossible to leave behind after a send that never
+ * happened: an empty composer, a double tap the composer refuses while a turn
+ * is in flight, and a prompt still sitting in the queue all produce no turn and
+ * therefore no row.
+ *
+ * `initialTurn` deliberately still exists and still has `prompt: ""`: switching
+ * chats installs it, and a conversation nobody has spoken in must show nothing.
+ */
+export function beginTurn(prompt: string): TurnState {
+  return { ...initialTurn, prompt };
+}
 
 const drop = (state: TurnState, reason: Dropped["reason"], detail: string): TurnState => {
   const d: Dropped = { reason, detail };
@@ -193,6 +232,14 @@ export function apply(state: TurnState, event: RunEvent): TurnState {
       // exists to undo.
       dropped: state.carry,
       carry: [],
+      // CARRIED, like `carry` above and for the same reason: `start` rebuilds
+      // the turn from `initialTurn`, and `initialTurn.prompt` is "". Without
+      // this line the user's message is painted the instant the run is issued
+      // and then ERASED by the engine's first frame -- a flicker that reads as
+      // "my message was there and then it wasn't", which is the original bug
+      // with a stutter in front of it. The prompt is not in the event stream
+      // and cannot be recovered once dropped.
+      prompt: state.prompt,
     };
   }
 
