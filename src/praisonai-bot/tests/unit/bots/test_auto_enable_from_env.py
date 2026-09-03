@@ -127,3 +127,66 @@ def test_default_agent_prefers_routing_default(monkeypatch):
 def test_no_credentials_still_fails_closed(monkeypatch):
     with pytest.raises(ValueError, match="No channels configured"):
         GatewayConfigSchema(agents=_agents())
+
+
+class _EnvBackedField:
+    """Minimal ChannelField stand-in for plugin-descriptor credential tests."""
+
+    def __init__(self, name, required=False, secret=False, env=None):
+        self.name = name
+        self.required = required
+        self.secret = secret
+        self.env = env
+
+
+class _Descriptor:
+    def __init__(self, config_fields):
+        self.config_fields = config_fields
+        self.system_prompt_hint = ""
+
+
+def test_plugin_secret_only_credential_env():
+    """A plugin with only an env-backed secret field is auto-enable-able."""
+    desc = _Descriptor([_EnvBackedField("token", secret=True, env="MYCHAT_TOKEN")])
+    R.register_platform("mychatsecret", object, descriptor=desc)
+    try:
+        assert R.get_platform_credential_env("mychatsecret") == ("MYCHAT_TOKEN",)
+    finally:
+        R._get_lazy_registry()._descriptors.pop("mychatsecret", None)
+
+
+def test_plugin_required_without_env_not_autoenable():
+    """A required field with no env fallback blocks env-only auto-enable (#4779).
+
+    IRC-style descriptor: a required ``server`` with no env plus an env-backed
+    secret. Auto-enabling from the secret alone would seed a channel that then
+    fails required-field validation, aborting the gateway. Must return ()."""
+    desc = _Descriptor(
+        [
+            _EnvBackedField("server", required=True),
+            _EnvBackedField("password", secret=True, env="IRC_NICKSERV_PASSWORD"),
+        ]
+    )
+    R.register_platform("ircguard", object, descriptor=desc)
+    try:
+        assert R.get_platform_credential_env("ircguard") == ()
+    finally:
+        R._get_lazy_registry()._descriptors.pop("ircguard", None)
+
+
+def test_plugin_required_all_env_sourceable():
+    """All required fields env-sourceable → those env vars gate auto-enable."""
+    desc = _Descriptor(
+        [
+            _EnvBackedField("api_key", required=True, env="MYCHAT_API_KEY"),
+            _EnvBackedField("secret", required=True, secret=True, env="MYCHAT_SECRET"),
+        ]
+    )
+    R.register_platform("mychatreq", object, descriptor=desc)
+    try:
+        assert R.get_platform_credential_env("mychatreq") == (
+            "MYCHAT_API_KEY",
+            "MYCHAT_SECRET",
+        )
+    finally:
+        R._get_lazy_registry()._descriptors.pop("mychatreq", None)

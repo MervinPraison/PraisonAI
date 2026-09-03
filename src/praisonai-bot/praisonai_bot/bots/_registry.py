@@ -526,16 +526,25 @@ def get_platform_credential_env(name: str) -> tuple:
     Single source of truth for credential-presence auto-enablement. Built-in
     platforms come from ``_BUILTIN_CREDENTIAL_ENV`` (the same mapping the
     onboarding wizard uses); plugin/entry-point channels self-describe theirs
-    via their ``ChannelDescriptor``'s ``config_fields`` — every field marked
-    ``required`` (or, failing that, ``secret``) that declares an ``env``
-    fallback is treated as a required credential. All returned vars must be
-    present for the channel to be auto-enabled.
+    via their ``ChannelDescriptor``'s ``config_fields``.
+
+    A plugin channel is only auto-enable-able when **every** ``required`` field
+    it declares can be sourced from the environment (i.e. declares an ``env``
+    fallback). If any required field lacks an ``env`` fallback, the channel
+    could not be brought up from env vars alone — auto-enabling it would seed a
+    channel that ``apply_channel_descriptor`` then rejects for the missing
+    required field, aborting the whole gateway. In that case we return ``()``
+    so the platform is left for explicit configuration. When there are no
+    required fields, an env-backed ``secret`` field is sufficient to identify a
+    ready-to-use credential. All returned vars must be present for the channel
+    to be auto-enabled.
 
     Args:
         name: Platform identifier.
 
     Returns:
-        A tuple of env-var names (empty when the platform declares none).
+        A tuple of env-var names (empty when the platform declares none, or
+        when a required field cannot be sourced from the environment).
     """
     key = name.lower()
     builtin = _BUILTIN_CREDENTIAL_ENV.get(key)
@@ -545,14 +554,19 @@ def get_platform_credential_env(name: str) -> tuple:
     if descriptor is None:
         return ()
     fields = getattr(descriptor, "config_fields", None) or []
-    required = tuple(
-        env
-        for spec in fields
-        if getattr(spec, "required", False)
-        and (env := getattr(spec, "env", None))
-    )
-    if required:
-        return required
+    required_fields = [spec for spec in fields if getattr(spec, "required", False)]
+    if required_fields:
+        # Every required field must be env-sourceable, otherwise the channel
+        # cannot be auto-enabled from the environment alone — return () so the
+        # platform is left for explicit config instead of failing at startup.
+        required_env = tuple(
+            env
+            for spec in required_fields
+            if (env := getattr(spec, "env", None))
+        )
+        if len(required_env) != len(required_fields):
+            return ()
+        return required_env
     secret = tuple(
         env
         for spec in fields
