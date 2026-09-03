@@ -14,6 +14,27 @@
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
 
+  /*
+   * The EFFECTIVE insets, and what every layout rule below consumes.
+   *
+   * The four above are a one-way mirror of `env()` for ShellPort to read; these
+   * are what the app lays out against, and app/src/main.ts overwrites them on
+   * `#root` from `shell.insets` as soon as it has them. The two differ on
+   * Android, where `env(safe-area-inset-*)` reports the DISPLAY CUTOUT and
+   * nothing else: measured on an Android 15 emulator with no cutout configured,
+   * `env(safe-area-inset-top)` was 0px against a 24px status bar and the
+   * topbar's title was painted straight through the clock; with a cutout it was
+   * 49px, the cutout, and the 24px status bar still contributed nothing.
+   * MainActivity.kt reads the real `WindowInsetsCompat` and feeds it in.
+   *
+   * The env() value is the fallback rather than a hard 0 so the FIRST paint --
+   * before any script has run -- is still inset on iOS, where env() is right.
+   */
+  --inset-top: var(--safe-area-inset-top);
+  --inset-right: var(--safe-area-inset-right);
+  --inset-bottom: var(--safe-area-inset-bottom);
+  --inset-left: var(--safe-area-inset-left);
+
   --ground: #ffffff;
   --panel: #f5f6f8;
   --ink: #14171c;
@@ -82,9 +103,9 @@ html, body {
   display: flex;
   align-items: center;
   gap: .5rem;
-  padding: calc(var(--safe-area-inset-top) + .5rem) 
-           calc(var(--safe-area-inset-right) + .75rem) .5rem
-           calc(var(--safe-area-inset-left) + .75rem);
+  padding: calc(var(--inset-top) + .5rem) 
+           calc(var(--inset-right) + .75rem) .5rem
+           calc(var(--inset-left) + .75rem);
   border-bottom: 1px solid var(--rule);
   background: var(--ground);
 }
@@ -95,8 +116,8 @@ html, body {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: .75rem calc(var(--safe-area-inset-right) + .75rem) .75rem
-           calc(var(--safe-area-inset-left) + .75rem);
+  padding: .75rem calc(var(--inset-right) + .75rem) .75rem
+           calc(var(--inset-left) + .75rem);
   display: flex;
   flex-direction: column;
   gap: .6rem;
@@ -151,9 +172,9 @@ html, body {
   align-items: flex-end;
   border-top: 1px solid var(--rule);
   background: var(--ground);
-  padding: .5rem calc(var(--safe-area-inset-right) + .75rem)
-           calc(var(--safe-area-inset-bottom) + .5rem)
-           calc(var(--safe-area-inset-left) + .75rem);
+  padding: .5rem calc(var(--inset-right) + .75rem)
+           calc(var(--inset-bottom) + .5rem)
+           calc(var(--inset-left) + .75rem);
   /* main.ts sets this from the shell's live keyboard height. It is a padding
      rather than a transform so the transcript's scroll height shrinks with it
      and the last message stays reachable. */
@@ -197,11 +218,58 @@ button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .empty { margin: auto; color: var(--soft); text-align: center; padding: 2rem 1rem; }
-.chat-row { display: flex; align-items: center; gap: .5rem; width: 100%;
+/*
+ * A row in the chat list. `.row-chat` is the class `buildChatsScreen` emits;
+ * this block was written as `.chat-row`, which the app has never painted, so
+ * every row fell back to the bare `button` rule: a centre-aligned, auto-width
+ * pill instead of a full-width list row. The `.title` / `.when` children it
+ * also styled do not exist either -- the row's title is its own text node --
+ * so the truncation lives on the row itself, where a chat named from a long
+ * first message would otherwise wrap to as many lines as it liked.
+ */
+.row-chat { display: flex; align-items: center; gap: .5rem; width: 100%;
   border: 1px solid var(--rule); border-radius: var(--radius); padding: .6rem .75rem;
-  background: var(--panel); text-align: left; }
-.chat-row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-row .when { color: var(--soft); font-size: .78rem; }
+  background: var(--panel); text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-chat-unreadable { color: var(--warn); border-color: var(--warn); }
+
+/*
+ * Every screen that is NOT the chat screen.
+ *
+ * `.topbar` is the only rule in this file that consumes
+ * `--safe-area-inset-top`, and only the chat screen builds a `.topbar`
+ * (app/src/main.ts). `buildSettingsScreen` and `buildChatsScreen` emit a bare
+ * `<section class="screen screen-settings">` / `screen-chats` whose first child
+ * is an `<h2 class="screen-heading">` -- so on a device those two screens were
+ * laid out from y = 0 with no inset on any edge. Measured on an Android 15
+ * emulator (Pixel-class, 49px cutout inset): the "Settings" heading's box
+ * started at y = 20 with a 49px top inset, i.e. 29px of the title painted
+ * underneath the status-bar clock, and every heading sat at x = 0 -- inside the
+ * left cutout in landscape.
+ *
+ * `overflow-y: auto` is the second half. `.screen` is `flex: 1; min-height: 0`
+ * with the default `overflow: visible`, so a settings list taller than the
+ * viewport -- a longer registry, a large font scale, landscape -- overflowed
+ * with no way to scroll to the rows at the bottom. The chat screen never hit
+ * this because its scroller is the inner `.transcript`; these screens ARE their
+ * own scroller and have to say so.
+ *
+ * The gutter is added to the inset rather than replacing it, for the reason
+ * app/src/main.ts states about the composer: a device with no inset on a side
+ * must still keep its 12px gutter instead of going flush to the glass.
+ */
+.screen-settings,
+.screen-chats {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: calc(var(--inset-top) + .75rem)
+           calc(var(--inset-right) + .75rem)
+           calc(var(--inset-bottom) + .75rem)
+           calc(var(--inset-left) + .75rem);
+}
+/* The rows already carry `.row`'s own .75rem inline padding, so without this
+   they would be indented twice as far as the headings they sit under. */
+.screen-settings .row-setting { padding-inline: 0; }
 
 .setting { display: flex; flex-direction: column; gap: .25rem; padding: .6rem 0; border-bottom: 1px solid var(--rule); }
 .setting .label { font-weight: 550; }

@@ -791,7 +791,32 @@ export async function mount(deps: MountDeps): Promise<App | null> {
     layout = withKeyboard(layout, platform.shell.keyboardHeightPx);
     const geometry = geometryOf(layout);
     screen.style.setProperty("--keyboard-height", `${geometry.composerBottomPx}px`);
-    screen.style.setProperty("--inset-top", `${geometry.scrollTopPx}px`);
+    // The four EFFECTIVE insets, on the container every screen lives in.
+    //
+    // app.css declares `--inset-*` as `var(--safe-area-inset-*)` so the first
+    // paint has something, and every layout rule consumes `--inset-*` rather
+    // than the env() mirror. This is why: on Android `env(safe-area-inset-*)`
+    // is the DISPLAY CUTOUT and nothing else -- measured on an Android 15
+    // emulator with no cutout configured, `--safe-area-inset-top` was 0px
+    // against a 24px status bar and 24px navigation bar, and the topbar's title
+    // was painted straight through the clock. `shell.insets` is the OS's own
+    // numbers (MainActivity.kt feeds them in through the bridge in
+    // adapters/src/tauri/shell.ts), so writing them here is what makes the
+    // stylesheet see a status bar at all.
+    //
+    // Written on `root`, not on `screen`: settings and chats are SIBLINGS of
+    // the chat screen, so anything set on `screen` never reaches them -- which
+    // is the shape the original `--inset-top` had, and it was consumed by no
+    // rule at all.
+    //
+    // The env() mirror is deliberately NOT overwritten. It is what
+    // `readInsets` reads, and writing our own value back into the variable we
+    // read from would make the shell echo itself instead of the device.
+    const insets = layout.insets;
+    root.style.setProperty("--inset-top", `${insets.top}px`);
+    root.style.setProperty("--inset-right", `${insets.right}px`);
+    root.style.setProperty("--inset-bottom", `${insets.bottom}px`);
+    root.style.setProperty("--inset-left", `${insets.left}px`);
     const logical = logicalInsets(bundle.direction, geometry.composerLeftPx, geometry.composerRightPx);
     // The GUTTER is added here, not left to the stylesheet. An inline style
     // beats `app.css`'s `calc(var(--safe-area-inset-left) + .75rem)`, so
