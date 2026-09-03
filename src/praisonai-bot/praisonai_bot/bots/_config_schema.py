@@ -322,6 +322,11 @@ class ChannelConfigSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     platform: Optional[str] = None
+    # Explicit enable/disable switch (Issue #4779). Defaults to True so every
+    # declared channel keeps working. Set ``enabled: false`` to opt a channel
+    # out — an explicit opt-out that also suppresses credential-presence
+    # auto-enablement for that platform even when its token env var is set.
+    enabled: bool = True
     # Zero-code custom channel (Issue #4104): point a channel at an adapter
     # class by dotted import string (``"pkg.mod:AdapterClass"``) so a custom
     # platform is reachable from YAML/CLI with no packaging or bootstrap Python.
@@ -760,6 +765,15 @@ class GatewayConfigSchema(BaseModel):
     
     # Channel configuration
     channels: Dict[str, ChannelConfigSchema] = Field(default_factory=dict)
+
+    # Credential-presence auto-enablement (Issue #4779). When true (default),
+    # the gateway auto-registers a channel for any known platform whose
+    # credential env var(s) are present and that the user has neither declared
+    # nor explicitly disabled — so ``export TELEGRAM_BOT_TOKEN=... && praisonai
+    # gateway`` brings up a working bot with no ``channels:`` block. Explicit
+    # ``channels:`` entries and ``enabled: false`` always win. Set to false to
+    # restore the strict "must declare a channel" behaviour.
+    auto_enable_from_env: bool = True
     
     # Platform dict for BotOS compatibility
     platforms: Optional[Dict[str, Dict[str, Any]]] = None
@@ -808,11 +822,30 @@ class GatewayConfigSchema(BaseModel):
                     **platform_config
                 )
                 
+        # Credential-presence auto-enablement (Issue #4779). Runs BEFORE the
+        # "no channels configured" guard so a present platform credential
+        # brings a channel up with zero ``channels:`` config. Explicit
+        # ``channels:`` entries and ``enabled: false`` always win (handled
+        # inside), so this is fully backward compatible.
+        self._autofill_channels_from_env()
+
+        # Drop channels the user explicitly disabled (``enabled: false``) so
+        # they are neither started nor validated as active. Captured after
+        # auto-enable (which already skips disabled platforms) so an explicit
+        # opt-out stays authoritative.
+        self.channels = {
+            name: channel
+            for name, channel in self.channels.items()
+            if getattr(channel, "enabled", True)
+        }
+
         # Ensure at least one channel is configured
         if not self.channels:
             raise ValueError(
                 "No channels configured. Add at least one channel "
-                "(telegram, discord, slack, whatsapp) to your config"
+                "(telegram, discord, slack, whatsapp) to your config, "
+                "or set a platform credential env var (e.g. "
+                "TELEGRAM_BOT_TOKEN) to auto-enable one."
             )
             
         # Zero-code custom channels (Issue #4104): a channel may point at an
@@ -887,6 +920,85 @@ class GatewayConfigSchema(BaseModel):
                     channel.apply_channel_descriptor(descriptor)
 
         return self
+
+    def _default_agent_id(self) -> str:
+        """Resolve the agent id to route auto-enabled channels to (#4779).
+
+        Prefers an explicit ``routing.default``; then the first declared
+        ``agents:`` key; then the single-bot ``agent`` name; falling back to
+        ``"assistant"`` (the default agent name). This mirrors how a
+        hand-written channel's ``routes.default`` would name its agent.
+        """
+        if self.routing and self.routing.default:
+            return self.routing.default
+        if self.agents:
+            return next(iter(self.agents))
+        if self.agent and getattr(self.agent, "name", None):
+            return self.agent.name
+        return "assistant"
+
+    def _autofill_channels_from_env(self) -> None:
+        """Auto-register channels from present platform credentials (#4779).
+
+        For every registered platform whose credential env var(s) are all
+        present, and which the user has neither declared under ``channels:``
+        nor explicitly disabled (``enabled: false``), register a channel with
+        default routes (all traffic → the default agent). No-op when
+        ``auto_enable_from_env`` is false. Explicit config always wins: a
+        platform already present in ``self.channels`` (enabled or disabled) is
+        never touched. Best-effort — a registry failure leaves ``channels``
+        unchanged so the existing "no channels" guard still applies.
+        """
+        if not self.auto_enable_from_env:
+            return
+        try:
+            from ._registry import (
+                get_platform_credential_env,
+                list_platforms,
+            )
+        except Exception:  # pragma: no cover - registry always in-tree
+            return
+
+        # Platforms the user already spoke to — by config key or by the
+        # channel's ``platform`` — must not be auto-enabled again (explicit
+        # config, incl. an explicit ``enabled: false`` opt-out, wins).
+        declared = set()
+        for name, channel in self.channels.items():
+            declared.add(name.lower())
+            plat = getattr(channel, "platform", None)
+            if plat:
+                declared.add(plat.lower())
+
+        try:
+            platforms = list(list_platforms())
+        except Exception:
+            return
+
+        default_agent = self._default_agent_id()
+        for platform in platforms:
+            key = platform.lower()
+            if key in declared:
+                continue
+            try:
+                cred_vars = get_platform_credential_env(key)
+            except Exception:
+                cred_vars = ()
+            if not cred_vars:
+                continue
+            if not all(os.environ.get(v) for v in cred_vars):
+                continue
+            self.channels[key] = ChannelConfigSchema(
+                platform=key,
+                token="${%s}" % cred_vars[0],
+                routes={
+                    "dm": default_agent,
+                    "group": default_agent,
+                    "default": default_agent,
+                },
+            )
+            logger.info(
+                "Auto-enabled channel %r from %s", key, cred_vars[0]
+            )
 
     def _register_adapter_refs(self) -> None:
         """Import & self-register any channel declaring an ``adapter:`` ref.
