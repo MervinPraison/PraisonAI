@@ -1,9 +1,14 @@
-"""
-Comprehensive test suite for Issue #467: base_url to api_base mapping for litellm compatibility
+"""Issue #467: a configured base_url must reach the litellm call.
 
-This test ensures that when users provide 'base_url' in their llm dictionary,
-it properly maps to 'api_base' for litellm, enabling OpenAI-compatible endpoints
-like KoboldCPP to work correctly.
+Measured against `_build_completion_params`, the endpoint is forwarded as
+`base_url` and `api_base` is never set, so the historical "maps to api_base"
+framing is stale. What matters, and what these tests now assert, is that the
+endpoint survives into the kwargs litellm is called with. The test names are
+kept as-is because they are referenced from the issue.
+
+Every test here is fully mocked and makes no network call, hence the module-level
+`offline` marker: without it the gating plugin infers `network` from the provider
+names appearing in the file and CI deselects all of them.
 """
 
 import pytest
@@ -23,23 +28,32 @@ except ImportError as e:
     pytest.skip(f"Could not import required modules: {e}", allow_module_level=True)
 
 
+# Every test in this module patches litellm and makes no network call.
+pytestmark = pytest.mark.offline
+
+
+def make_completion_response(text="Test response"):
+    """A litellm.completion stand-in the LLM tool-calling loop can consume.
+
+    A bare dict is NOT sufficient: the loop reads ``.choices[0].message`` and a
+    dict raises ``'str' object has no attribute 'choices'`` -- which is why four
+    of these tests failed the moment they were actually executed.
+    """
+    resp = MagicMock()
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = text
+    resp.choices[0].message.tool_calls = None
+    resp.choices[0].finish_reason = "stop"
+    return resp
+
+
 class TestBaseUrlApiBaseMapping:
     """Test suite for base_url to api_base parameter mapping in litellm integration."""
     
     @patch('litellm.completion')
     def test_llm_class_maps_base_url_to_api_base(self, mock_completion):
         """Test that LLM class properly maps base_url to api_base for litellm."""
-        mock_completion.return_value = {
-            'choices': [
-                {
-                    'message': {
-                        'content': 'Test response',
-                        'role': 'assistant', 
-                        'tool_calls': None
-                    }
-                }
-            ]
-        }
+        mock_completion.return_value = make_completion_response()
         
         llm = LLM(
             model='openai/mistral',
@@ -53,10 +67,14 @@ class TestBaseUrlApiBaseMapping:
         assert llm.api_key == 'sk-test'
         
         # Trigger a completion 
-        llm.get_response("test")
+        llm.get_response("test", stream=False)
         
         # Verify litellm.completion was called
-        mock_completion.assert_called()
+        kwargs = mock_completion.call_args.kwargs
+        assert 'model' in kwargs, 'litellm was called without a model'
+        assert kwargs['base_url'] == 'http://localhost:4000'
+        assert kwargs['api_key'] == 'sk-test'
+        assert kwargs['model'] == 'openai/mistral'
     
     @patch('litellm.completion')
     def test_agent_with_llm_dict_base_url_parameter(self, mock_completion):
@@ -67,17 +85,7 @@ class TestBaseUrlApiBaseMapping:
             'api_key': 'sk-1234'
         }
         
-        mock_completion.return_value = {
-            'choices': [
-                {
-                    'message': {
-                        'content': 'Test response',
-                        'role': 'assistant',
-                        'tool_calls': None
-                    }
-                }
-            ]
-        }
+        mock_completion.return_value = make_completion_response()
         
         agent = Agent(
             name="Test Agent",
@@ -119,17 +127,7 @@ class TestBaseUrlApiBaseMapping:
         }
         
         # Mock successful response (not OpenAI key error)
-        mock_completion.return_value = {
-            'choices': [
-                {
-                    'message': {
-                        'content': 'KoboldCPP response',
-                        'role': 'assistant',
-                        'tool_calls': None
-                    }
-                }
-            ]
-        }
+        mock_completion.return_value = make_completion_response()
         
         llm = LLM(**llm_config)
         
@@ -139,26 +137,18 @@ class TestBaseUrlApiBaseMapping:
         assert llm.api_key == "sk-1234"
         
         # This should not raise an OpenAI key error
-        response = llm.get_response("test")
+        response = llm.get_response("test", stream=False)
         
         # Verify that completion was called
-        mock_completion.assert_called()
+        kwargs = mock_completion.call_args.kwargs
+        assert 'model' in kwargs, 'litellm was called without a model'
+        assert kwargs['base_url'] == "http://127.0.0.1:5001/v1"
     
     @patch('litellm.completion')
     def test_litellm_documentation_example_compatibility(self, mock_completion):
         """Test compatibility with the litellm documentation example from Issue #467."""
         # This is the exact example from litellm docs mentioned in the issue
-        mock_completion.return_value = {
-            'choices': [
-                {
-                    'message': {
-                        'content': 'Documentation example response',
-                        'role': 'assistant',
-                        'tool_calls': None
-                    }
-                }
-            ]
-        }
+        mock_completion.return_value = make_completion_response()
         
         llm = LLM(
             model="openai/mistral",
@@ -174,22 +164,14 @@ class TestBaseUrlApiBaseMapping:
         response = llm.get_response("Hey, how's it going?")
         
         # Verify that completion was called
-        mock_completion.assert_called()
+        kwargs = mock_completion.call_args.kwargs
+        assert 'model' in kwargs, 'litellm was called without a model'
+        assert kwargs['base_url'] == "http://0.0.0.0:4000"
     
     @patch('litellm.completion')
     def test_backward_compatibility_with_api_base(self, mock_completion):
         """Test that existing code using api_base still works."""
-        mock_completion.return_value = {
-            'choices': [
-                {
-                    'message': {
-                        'content': 'Backward compatibility response',
-                        'role': 'assistant',
-                        'tool_calls': None
-                    }
-                }
-            ]
-        }
+        mock_completion.return_value = make_completion_response()
         
         # Test basic LLM functionality works
         llm_config = {
@@ -207,17 +189,7 @@ class TestBaseUrlApiBaseMapping:
     def test_ollama_environment_variable_compatibility(self, mock_completion):
         """Test Ollama compatibility with OLLAMA_API_BASE environment variable."""
         with patch.dict(os.environ, {'OLLAMA_API_BASE': 'http://localhost:11434'}):
-            mock_completion.return_value = {
-                'choices': [
-                    {
-                        'message': {
-                            'content': 'Ollama response',
-                            'role': 'assistant',
-                            'tool_calls': None
-                        }
-                    }
-                ]
-            }
+            mock_completion.return_value = make_completion_response('Ollama response')
             
             llm = LLM(
                 model='ollama/llama2',
@@ -228,10 +200,14 @@ class TestBaseUrlApiBaseMapping:
             assert llm.model == 'ollama/llama2'
             assert llm.api_key == 'not-needed-for-ollama'
             
-            response = llm.get_response("test")
+            response = llm.get_response("test", stream=False)
             
             # Should work without errors when environment variable is set
-            mock_completion.assert_called()
+            kwargs = mock_completion.call_args.kwargs
+            assert 'model' in kwargs, 'litellm was called without a model'
+            assert kwargs['model'] == 'ollama/llama2'
+            # No base_url was configured on this LLM, so none must be injected.
+            assert not kwargs.get('base_url')
 
 
 if __name__ == '__main__':
