@@ -47,5 +47,9 @@ default_equivalences:
   # Python "None means empty" (`tools if tools else []`) vs a TS empty literal.
   - {python: null, typescript: []}
   - {python: null, typescript: {}}
+  # A boolean flag left undefined in TS is falsy, which is what Python's False means.
+  - {python: false, typescript: undefined}
+  # Python spells numeric zero defaults as 0.0 for floats; TS has one number type.
+  - {python: 0.0, typescript: 0}
   - {python: true, typescript: true}
   - {python: false, typescript: false}

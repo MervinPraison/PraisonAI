@@ -46,6 +46,12 @@ export interface LoopConfig<T = any> {
     continueOnError?: boolean;
     /** Callback for each iteration */
     onIteration?: (item: T, index: number, total: number) => void;
+    /** Run iterations concurrently when executed inside an AgentFlow (default: false). Python: parallel */
+    parallel?: boolean;
+    /** Cap on concurrent iterations when `parallel` is set (default: DEFAULT_MAX_PARALLEL_WORKERS). Python: max_workers */
+    maxWorkers?: number;
+    /** Context variable that receives every iteration's output (default: 'loop_outputs'). Python: output_variable */
+    outputVariable?: string;
 }
 
 /**
@@ -68,7 +74,7 @@ export interface LoopResult<T = any> {
 export class Loop<TStep = any, TItem = any, TOutput = string> {
     readonly id: string;
     readonly step: TStep;
-    readonly config: Required<LoopConfig<TItem>>;
+    readonly config: Required<Omit<LoopConfig<TItem>, 'maxWorkers'>> & { maxWorkers?: number };
 
     constructor(step: TStep, config: LoopConfig<TItem> = {}) {
         this.id = randomUUID();
@@ -81,13 +87,17 @@ export class Loop<TStep = any, TItem = any, TOutput = string> {
             maxIterations: config.maxIterations ?? 1000,
             continueOnError: config.continueOnError ?? false,
             onIteration: config.onIteration ?? (() => { }),
+            parallel: config.parallel ?? false,
+            maxWorkers: config.maxWorkers,
+            outputVariable: config.outputVariable ?? '',
         };
     }
 
     /**
-     * Get items to iterate over from context or file
+     * Get items to iterate over from context or file.
+     * Public so AgentFlow can drive iterations itself (nested patterns, parallel).
      */
-    private async getItems(context: WorkflowContext): Promise<TItem[]> {
+    async getItems(context: WorkflowContext): Promise<TItem[]> {
         // Priority: over (variable) > fromCsv > fromFile
 
         // 1. From variable in context

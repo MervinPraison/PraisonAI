@@ -115,6 +115,80 @@ export interface GatewayEvent {
 }
 
 /**
+ * Standard gateway event types.
+ * Python parity: `EventType(str, Enum)` in praisonaiagents/gateway/protocols.py,
+ * exported from the package as `GatewayEventType`.
+ */
+export enum GatewayEventType {
+  // Connection events
+  CONNECT = 'connect',
+  DISCONNECT = 'disconnect',
+  RECONNECT = 'reconnect',
+
+  // Session events
+  SESSION_START = 'session_start',
+  SESSION_END = 'session_end',
+  SESSION_UPDATE = 'session_update',
+
+  // Agent events
+  AGENT_REGISTER = 'agent_register',
+  AGENT_UNREGISTER = 'agent_unregister',
+  AGENT_STATUS = 'agent_status',
+
+  // Message events
+  MESSAGE = 'message',
+  MESSAGE_ACK = 'message_ack',
+  MESSAGE_ABORT = 'message_abort',
+  TYPING = 'typing',
+
+  // Streaming events (relayed from agent's StreamEventEmitter)
+  TOKEN_STREAM = 'token_stream',
+  TOOL_CALL_STREAM = 'tool_call_stream',
+  REASONING_STREAM = 'reasoning_stream',
+  TOOL_PROGRESS_STREAM = 'tool_progress_stream',
+  STREAM_ERROR = 'stream_error',
+  STREAM_END = 'stream_end',
+  MODEL_FALLBACK_STREAM = 'model_fallback_stream',
+  RETRY_STREAM = 'retry_stream',
+  TODO_STREAM = 'todo_stream',
+  TOOL_RESULT_STREAM = 'tool_result_stream',
+
+  // System events
+  HEALTH = 'health',
+  ERROR = 'error',
+  BROADCAST = 'broadcast',
+
+  // Liveness events (application-level heartbeat, transport-agnostic)
+  PING = 'ping',
+  PONG = 'pong',
+
+  // Push channel events
+  CHANNEL_SUBSCRIBE = 'channel_subscribe',
+  CHANNEL_UNSUBSCRIBE = 'channel_unsubscribe',
+  CHANNEL_MESSAGE = 'channel_message',
+  CHANNEL_CREATED = 'channel_created',
+  CHANNEL_DELETED = 'channel_deleted',
+
+  // Presence events
+  PRESENCE_JOIN = 'presence_join',
+  PRESENCE_LEAVE = 'presence_leave',
+  PRESENCE_UPDATE = 'presence_update',
+
+  // Delivery events
+  MESSAGE_NACK = 'message_nack',
+  DELIVERY_RETRY = 'delivery_retry',
+
+  // Polling events
+  POLL_REQUEST = 'poll_request',
+  POLL_RESPONSE = 'poll_response',
+
+  // Handshake events
+  HELLO = 'hello',
+  HELLO_OK = 'hello_ok',
+  HELLO_ERROR = 'hello_error',
+}
+
+/**
  * Gateway message.
  * Python parity: praisonaiagents/gateway
  */

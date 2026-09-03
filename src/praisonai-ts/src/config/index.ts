@@ -1167,3 +1167,251 @@ export class ConfigValidationError extends Error {
     this.name = 'ConfigValidationError';
   }
 }
+
+// ============================================================================
+// Learn enums (Python parity)
+// ============================================================================
+
+/**
+ * Scope for learning data visibility.
+ * Python parity: praisonaiagents/config/feature_configs.py:105-112 (`LearnScope`)
+ */
+export enum LearnScope {
+  /** Private to this user/agent (default, safest). */
+  PRIVATE = 'private',
+  /** Shared with all agents. */
+  SHARED = 'shared',
+}
+
+/**
+ * Learning mode for automatic learning extraction.
+ * PROPOSE is defined but not yet implemented; it behaves like DISABLED.
+ * Python parity: praisonaiagents/config/feature_configs.py:115-126 (`LearnMode`)
+ */
+export enum LearnMode {
+  DISABLED = 'disabled',
+  AGENTIC = 'agentic',
+  PROPOSE = 'propose',
+}
+
+/**
+ * Storage backend for learning data.
+ * Python parity: praisonaiagents/config/feature_configs.py:129-140 (`LearnBackend`)
+ */
+export enum LearnBackend {
+  FILE = 'file',
+  SQLITE = 'sqlite',
+  REDIS = 'redis',
+  MONGODB = 'mongodb',
+}
+
+// ============================================================================
+// Dataclass-style configs (Python parity)
+// ============================================================================
+
+/**
+ * Constructor fields of `RulesConfig`.
+ * Python parity: praisonaiagents/config/feature_configs.py:534-541
+ */
+export interface RulesConfigOptions {
+  /** Character budget for injected rules context (undefined = manager default). */
+  charBudget?: number;
+  /** Extra instruction file paths/globs to include beyond auto-discovery. */
+  files?: string[];
+  /** Workspace path override (defaults to the current working directory). */
+  workspacePath?: string;
+}
+
+/**
+ * Configuration for auto-applying per-project rules/instructions.
+ *
+ * Discovers and injects per-repository instruction files (AGENTS.md,
+ * CLAUDE.md, .praisonai/rules/*.md, ...) into the agent system prompt on
+ * every run, honouring activation modes, priority ordering and a character
+ * budget.
+ * Python parity: praisonaiagents/config/feature_configs.py:510-549 (`RulesConfig`)
+ */
+export class RulesConfig {
+  charBudget?: number;
+  files?: string[];
+  workspacePath?: string;
+
+  constructor(config: RulesConfigOptions = {}) {
+    this.charBudget = config.charBudget;
+    this.files = config.files;
+    this.workspacePath = config.workspacePath;
+  }
+
+  /** Convert to a plain object (snake_case keys, as Python's `to_dict`). */
+  toDict(): Record<string, any> {
+    return {
+      char_budget: this.charBudget ?? null,
+      files: [...(this.files ?? [])],
+      workspace_path: this.workspacePath ?? null,
+    };
+  }
+}
+
+/**
+ * Constructor fields of `PreCompactionMemoryFlushConfig`.
+ * Python parity: praisonaiagents/config/feature_configs.py:812-816
+ */
+export interface PreCompactionMemoryFlushConfigOptions {
+  /** Default `true` (the containing execution feature stays default-off). */
+  enabled?: boolean;
+  /** Must be finite and positive. Default `20`. */
+  timeoutSeconds?: number;
+  /** Must be >= 1. Default `2`. */
+  minTurnsToFlush?: number;
+  /** Must be >= 1. Default `8000`. */
+  maxFlushTokens?: number;
+  /** Model used for extraction (undefined = agent default). */
+  llm?: string;
+}
+
+/**
+ * Bounded policy for extracting durable memories before compaction.
+ *
+ * Validation mirrors Python's `__post_init__`: `timeoutSeconds` is coerced
+ * with `Number()` and must be finite and positive; `minTurnsToFlush` and
+ * `maxFlushTokens` must be >= 1. Violations throw `ConfigValidationError`.
+ * Python parity: praisonaiagents/config/feature_configs.py:802-836 (`PreCompactionMemoryFlushConfig`)
+ */
+export class PreCompactionMemoryFlushConfig {
+  enabled: boolean;
+  timeoutSeconds: number;
+  minTurnsToFlush: number;
+  maxFlushTokens: number;
+  llm?: string;
+
+  constructor(config: PreCompactionMemoryFlushConfigOptions = {}) {
+    this.enabled = config.enabled ?? true;
+    // Only `undefined` means "use the default": Python's `float(None)` raises.
+    const timeoutSeconds = Number(config.timeoutSeconds === undefined ? 20.0 : config.timeoutSeconds);
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+      throw new ConfigValidationError(
+        'timeoutSeconds must be finite and positive',
+        'timeoutSeconds',
+        config.timeoutSeconds
+      );
+    }
+    this.timeoutSeconds = timeoutSeconds;
+    this.minTurnsToFlush = config.minTurnsToFlush ?? 2;
+    if (!(this.minTurnsToFlush >= 1)) {
+      throw new ConfigValidationError('minTurnsToFlush must be >= 1', 'minTurnsToFlush', config.minTurnsToFlush);
+    }
+    this.maxFlushTokens = config.maxFlushTokens ?? 8000;
+    if (!(this.maxFlushTokens >= 1)) {
+      throw new ConfigValidationError('maxFlushTokens must be >= 1', 'maxFlushTokens', config.maxFlushTokens);
+    }
+    this.llm = config.llm;
+  }
+
+  /** Convert to a plain object (snake_case keys, as Python's `to_dict`). */
+  toDict(): Record<string, any> {
+    return {
+      enabled: this.enabled,
+      timeout_seconds: this.timeoutSeconds,
+      min_turns_to_flush: this.minTurnsToFlush,
+      max_flush_tokens: this.maxFlushTokens,
+      llm: this.llm ?? null,
+    };
+  }
+}
+
+/**
+ * `ToolSearchConfig.enabled`: `"auto"` (default), `"on"`, `"off"`, or a boolean.
+ * Python parity: praisonaiagents/tools/tool_search.py:55
+ */
+export type ToolSearchEnabled = boolean | 'auto' | 'on' | 'off' | string;
+
+/**
+ * Constructor fields of `ToolSearchConfig`.
+ * Python parity: praisonaiagents/tools/tool_search.py:55-59
+ */
+export interface ToolSearchConfigOptions {
+  /** auto | on | off | true | false. Default `"auto"`. */
+  enabled?: ToolSearchEnabled;
+  /** Percentage of the context window used as the deferral threshold. Default `10`. */
+  thresholdPct?: number;
+  /** Default number of search results. Default `5`. */
+  searchDefaultLimit?: number;
+  /** Maximum search results allowed. Default `20`. */
+  maxSearchLimit?: number;
+  /** Override of the core (never deferred) tool set. */
+  coreTools?: Iterable<string>;
+}
+
+const TOOL_SEARCH_KEY_ALIASES: Readonly<Record<string, keyof ToolSearchConfigOptions>> = Object.freeze({
+  enabled: 'enabled',
+  threshold_pct: 'thresholdPct',
+  thresholdPct: 'thresholdPct',
+  search_default_limit: 'searchDefaultLimit',
+  searchDefaultLimit: 'searchDefaultLimit',
+  max_search_limit: 'maxSearchLimit',
+  maxSearchLimit: 'maxSearchLimit',
+  core_tools: 'coreTools',
+  coreTools: 'coreTools',
+});
+
+/**
+ * Configuration for the Tool Search feature.
+ * Python parity: praisonaiagents/tools/tool_search.py:53-79 (`ToolSearchConfig`)
+ */
+export class ToolSearchConfig {
+  enabled: ToolSearchEnabled;
+  thresholdPct: number;
+  searchDefaultLimit: number;
+  maxSearchLimit: number;
+  coreTools?: ReadonlySet<string>;
+
+  constructor(config: ToolSearchConfigOptions = {}) {
+    this.enabled = config.enabled ?? 'auto';
+    this.thresholdPct = config.thresholdPct ?? 10.0;
+    this.searchDefaultLimit = config.searchDefaultLimit ?? 5;
+    this.maxSearchLimit = config.maxSearchLimit ?? 20;
+    this.coreTools = config.coreTools === undefined || config.coreTools === null
+      ? undefined
+      : new Set(config.coreTools);
+  }
+
+  /**
+   * Create a config from the raw `tool_search` value: an existing
+   * `ToolSearchConfig`, a boolean, one of the strings
+   * `true|on|yes|1|false|off|no|0|auto` (case-insensitive), or a plain object
+   * whose keys may be Python snake_case or camelCase. Anything else throws
+   * `ConfigValidationError` (Python: `ValueError`/`TypeError`).
+   * Python parity: praisonaiagents/tools/tool_search.py:61-79 (`ToolSearchConfig.from_raw`)
+   */
+  static fromRaw(rawConfig: unknown): ToolSearchConfig {
+    if (rawConfig instanceof ToolSearchConfig) {
+      return rawConfig;
+    }
+    if (typeof rawConfig === 'boolean') {
+      return new ToolSearchConfig({ enabled: rawConfig ? 'on' : 'off' });
+    }
+    if (typeof rawConfig === 'string') {
+      const lower = rawConfig.toLowerCase();
+      if (['true', 'on', 'yes', '1'].includes(lower)) return new ToolSearchConfig({ enabled: 'on' });
+      if (['false', 'off', 'no', '0'].includes(lower)) return new ToolSearchConfig({ enabled: 'off' });
+      if (lower === 'auto') return new ToolSearchConfig({ enabled: 'auto' });
+      throw new ConfigValidationError(`Invalid tool_search string value: ${rawConfig}`, 'tool_search', rawConfig);
+    }
+    if (rawConfig !== null && typeof rawConfig === 'object' && !Array.isArray(rawConfig)) {
+      const options: ToolSearchConfigOptions = {};
+      for (const [key, value] of Object.entries(rawConfig as Record<string, unknown>)) {
+        const mapped = TOOL_SEARCH_KEY_ALIASES[key];
+        if (!mapped) {
+          throw new ConfigValidationError(`Unknown tool_search option: ${key}`, key, value);
+        }
+        (options as Record<string, unknown>)[mapped] = value;
+      }
+      return new ToolSearchConfig(options);
+    }
+    throw new ConfigValidationError(
+      `Invalid tool_search type: ${rawConfig === null ? 'null' : typeof rawConfig}`,
+      'tool_search',
+      rawConfig
+    );
+  }
+}

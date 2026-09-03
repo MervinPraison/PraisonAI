@@ -45,6 +45,12 @@
 // AgentTeam is the primary class (Python parity), Agents/PraisonAIAgents are silent aliases
 export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from './agent';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './agent';
+export type {
+  AgentChatOptions, AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,
+  AgentGuardrailInput, AgentHooksInput, AgentWebConfig, AgentTeamProcess, AgentTeamStartOptions,
+  AgentTeamStartDictOptions, AgentTeamStartOptionsInput, TaskCallback, TaskGuardrail, TaskOnError,
+} from './agent';
+export { TASK_STATUS } from './agent';
 
 // Workflow - Step-based workflow execution
 // AgentFlow is the primary class (Python parity), Workflow/Pipeline are silent aliases
@@ -88,6 +94,11 @@ export {
 } from './tools';
 export * from './tools/arxivTools';
 export * from './tools/mcpSse';
+// `MCP` at the package root is tools/mcp.ts, not tools/mcpSse.ts: it is a strict
+// superset (same initialize/iterate/toOpenAITools/close API plus transport
+// auto-detection between SSE and HTTP streaming, matching Python's MCP which
+// accepts both SSE and streamable-HTTP URLs). mcpSse.MCP is SSE-only.
+export { MCP, type TransportType as MCPToolTransportType } from './tools/mcp';
 
 // AI SDK Tools Registry
 export { tools, registerBuiltinTools } from './tools/tools';
@@ -123,18 +134,34 @@ export {
 // SESSION & MEMORY
 // ============================================================================
 export * from './session';
+// `Session` at the package root is the Python-parity class in session/session.ts
+// (the signature checker's surface.yaml declares it as the ctor for Session.__init__).
+// The lighter conversation-only Session in session/index.ts stays reachable via
+// the praisonai/session subpath; session/session.ts is also exported above as
+// `EnhancedSession` for backward compatibility.
+export { Session } from './session/session';
 
 // ============================================================================
 // KNOWLEDGE & RAG
 // ============================================================================
 export * from './knowledge';
+// INTERIM: Python `Knowledge` (praisonaiagents/knowledge/knowledge.py) is a vector
+// knowledge base with add/search. The closest real TS implementation today is
+// `KnowledgeBase` in knowledge/rag.ts (add/addBatch/search/list/clear). Export it
+// under the Python name until a dedicated Knowledge class lands; the knowledge/index.ts
+// `Knowledge` record interface remains available as `KnowledgeRecord` below.
+export { KnowledgeBase, createKnowledgeBase, type KnowledgeBaseConfig, type Document as KnowledgeDocument, type SearchResult as KnowledgeSearchResult } from './knowledge/rag';
+// Python `Knowledge` (praisonaiagents/knowledge/knowledge.py): the store class, not the record interface.
+export { Knowledge } from './knowledge/knowledge';
+export type { KnowledgeStoreConfig, KnowledgeStoreOptions, KnowledgeSearchCallOptions, KnowledgeIndexOptions } from './knowledge/knowledge';
+export type { Knowledge as KnowledgeRecord } from './knowledge';
 
 // RAG Module (Python parity with praisonaiagents/rag)
 export {
   RAG, createRAG,
   RetrievalStrategy, type RetrievalStrategyType,
   type Citation as RAGCitation, createCitation, formatCitation,
-  type ContextPack as RAGContextPack, createContextPack, hasCitations, formatContextPackForPrompt,
+  type ContextPack, type ContextPack as RAGContextPack, createContextPack, hasCitations, formatContextPackForPrompt,
   type RAGResult, createRAGResult, formatAnswerWithCitations,
   type RAGConfig, DEFAULT_RAG_TEMPLATE, createRAGConfig,
   RetrievalPolicy, type RetrievalPolicyType,
@@ -177,17 +204,24 @@ export * from './guardrails';
 export {
   Handoff, handoff, handoffFilters,
   RECOMMENDED_PROMPT_PREFIX, promptWithHandoffInstructions,
+  // snake_case aliases (Python parity: praisonaiagents.agent.handoff)
+  handoffFilters as handoff_filters,
+  promptWithHandoffInstructions as prompt_with_handoff_instructions,
   HandoffError, HandoffCycleError, HandoffDepthError, HandoffTimeoutError,
   ContextPolicy,
   type HandoffConfig, type HandoffContext, type HandoffResult,
-  type HandoffInputData, type ContextPolicyType
+  type HandoffInputData, type ContextPolicyType,
+  HandoffToolPolicyMode, DEFAULT_HANDOFF_TOOL_POLICY, resolveHandoffToolPolicy, handoffToolName, listAgentTools,
+  parallelHandoffs, parallelHandoffs as parallel_handoffs,
+  type HandoffToolPolicy, type ResolvedHandoffToolPolicy, type HandoffAgentLike,
+  type ParallelHandoffTarget, type ParallelHandoffsOptions, type ParallelHandoffResult,
 } from './agent/handoff';
 
 // Export router agent
 export { RouterAgent, createRouter, routeConditions, type RouterConfig, type RouteConfig, type RouteContext } from './agent/router';
 
 // Export context agent
-export { ContextAgent, createContextAgent, type ContextAgentConfig, type ContextMessage } from './agent/context';
+export { ContextAgent, createContextAgent, createContextAgent as create_context_agent, type ContextAgentConfig, type ContextMessage } from './agent/context';
 
 
 // Export evaluation framework
@@ -298,6 +332,13 @@ export {
   // Python parity additions
   MinimalTelemetry, getMinimalTelemetry,
   enablePerformanceMode, disablePerformanceMode, cleanupTelemetryResources,
+  // snake_case aliases (Python parity: praisonaiagents.telemetry)
+  enableTelemetry as enable_telemetry,
+  disableTelemetry as disable_telemetry,
+  getTelemetry as get_telemetry,
+  enablePerformanceMode as enable_performance_mode,
+  disablePerformanceMode as disable_performance_mode,
+  cleanupTelemetryResources as cleanup_telemetry_resources,
   type TelemetryEvent, type TelemetryConfig, type AgentStats,
   type MetricEntry, type PerformanceStats, type PerformanceMonitorConfig,
   type TelemetryRecord, type TelemetrySink
@@ -313,6 +354,7 @@ export { ImageAgent, createImageAgent, type ImageAgentConfig, type ImageGenerati
 export { AudioAgent, createAudioAgent } from './agent/audio';
 export type {
   AudioAgentConfig,
+  AudioConfig,
   SpeakOptions as AudioSpeakOptions,
   TranscribeOptions as AudioTranscribeOptions,
   SpeakResult as AudioSpeakResult,
@@ -321,7 +363,12 @@ export type {
 } from './agent/audio';
 
 // Export DeepResearchAgent
-export { DeepResearchAgent, createDeepResearchAgent, type DeepResearchConfig, type ResearchResponse, type Citation, type ReasoningStep } from './agent/research';
+export {
+  DeepResearchAgent, createDeepResearchAgent,
+  Provider,
+  type DeepResearchConfig, type ResearchResponse, type Citation, type ReasoningStep,
+  type DeepResearchResponse, type CodeExecutionStep, type FileSearchCall, type MCPCall, type WebSearchCall,
+} from './agent/research';
 
 // Export QueryRewriterAgent
 export { QueryRewriterAgent, createQueryRewriterAgent, type QueryRewriterConfig, type RewriteResult, type RewriteStrategy } from './agent/query-rewriter';
@@ -379,6 +426,8 @@ export {
   get_config, get_config_path, get_default, get_defaults_config, get_plugins_config,
   // Errors
   ConfigValidationError,
+  LearnScope, LearnMode, LearnBackend, RulesConfig, PreCompactionMemoryFlushConfig, ToolSearchConfig,
+  type RulesConfigOptions, type PreCompactionMemoryFlushConfigOptions, type ToolSearchConfigOptions, type ToolSearchEnabled,
 } from './config';
 
 // Export Events
@@ -834,6 +883,16 @@ export {
   getPluginManager, getDefaultPluginDirs, ensurePluginDir,
   discoverPlugins, loadPlugin, discoverAndLoadPlugins, getPluginTemplate,
   parsePluginHeader, parsePluginHeaderFromFile,
+  // snake_case aliases (Python parity: praisonaiagents.plugins)
+  getPluginManager as get_plugin_manager,
+  getDefaultPluginDirs as get_default_plugin_dirs,
+  ensurePluginDir as ensure_plugin_dir,
+  getPluginTemplate as get_plugin_template,
+  loadPlugin as load_plugin,
+  parsePluginHeader as parse_plugin_header,
+  parsePluginHeaderFromFile as parse_plugin_header_from_file,
+  discoverPlugins as discover_plugins,
+  discoverAndLoadPlugins as discover_and_load_plugins,
   enable as enablePlugins, disable as disablePlugins,
   listPlugins, isEnabled as isPluginEnabled,
 } from './plugins';
@@ -844,10 +903,24 @@ export {
   type DisplayCallback, type AsyncDisplayCallback, type DisplayContext,
   type FlowDisplayConfig as DisplayFlowConfig,
   // Functions
-  registerDisplayCallback as registerDisplay, syncDisplayCallbacks, asyncDisplayCallbacks,
+  // NB: the unaliased registerDisplayCallback name belongs to the per-type
+  // callback registry (callbacks module, above); the display one stays registerDisplay.
+  registerDisplayCallback as registerDisplay,
+  syncDisplayCallbacks, asyncDisplayCallbacks,
   clearDisplayCallbacks, displayError, displayGenerating, displayInstruction,
   displayInteraction, displaySelfReflection, displayToolCall,
   errorLogs, logError, clearErrorLogs,
+  // snake_case aliases (Python parity: praisonaiagents.display / main)
+  registerDisplayCallback as register_display_callback,
+  syncDisplayCallbacks as sync_display_callbacks,
+  asyncDisplayCallbacks as async_display_callbacks,
+  displayError as display_error,
+  displayGenerating as display_generating,
+  displayInstruction as display_instruction,
+  displayInteraction as display_interaction,
+  displaySelfReflection as display_self_reflection,
+  displayToolCall as display_tool_call,
+  errorLogs as error_logs,
   // Classes
   FlowDisplay as DisplayFlow,
 } from './display';
@@ -859,6 +932,7 @@ export {
   // Functions
   embed, embedding, embeddings, aembed, aembedding, aembeddings,
   getDimensions, setEmbeddingConfig,
+  getDimensions as get_dimensions,
   cosineSimilarity, euclideanDistance, normalizeEmbedding,
 } from './embeddings';
 
@@ -874,6 +948,7 @@ export {
   ContextTraceEmitter,
   // Functions
   createContextEvent, traceContext, trackWorkflow,
+  traceContext as trace_context, trackWorkflow as track_workflow,
 } from './trace';
 
 // Export Conditions Module (Python parity with praisonaiagents/conditions)
@@ -884,6 +959,7 @@ export {
   DictCondition, ExpressionCondition, FunctionCondition,
   // Functions
   evaluateCondition, createCondition, andConditions, orConditions, notCondition,
+  evaluateCondition as evaluate_condition,
 } from './conditions';
 
 // Export Gateway/Bot Module (Python parity with praisonaiagents/gateway)
@@ -901,6 +977,7 @@ export {
   SandboxStatus, AutonomyLevel, RagRetrievalPolicy,
   // Classes
   FailoverManager,
+  GatewayEventType,
 } from './gateway';
 
 // Export Task Module (Python parity with praisonaiagents/task)
@@ -933,87 +1010,200 @@ export {
   // Guardrail policies
   type GuardrailPolicy,
   resolveGuardrailPolicies,
+  resolveGuardrailPolicies as resolve_guardrail_policies,
   GUARDRAIL_POLICY_PRESETS,
   // AgentManager alias type
   type AgentManager,
 } from './protocols';
 
-// Export Parity Module (All remaining P0-P3 gaps for full Python SDK parity)
-// Only export items that don't conflict with existing exports from other modules
+// ============================================================================
+// SPECIALIZED AGENTS (Python parity: praisonaiagents.agent.{code,ocr,vision,video,realtime,embedding}_agent)
+// ============================================================================
 export {
-  // P0: Specialized Agent Configs (new)
-  type AudioConfig,
-  type CodeConfig,
-  type OCRConfig,
-  type VisionConfig,
-  type VideoConfig,
-  type RealtimeConfig,
-  // P0: Specialized Agents (new)
-  CodeAgent,
-  OCRAgent,
-  VisionAgent,
-  VideoAgent,
-  RealtimeAgent,
-  EmbeddingAgent,
-  // P0: Call Types (new)
-  type MCPCall,
-  type WebSearchCall,
-  type FileSearchCall,
-  type CodeExecutionStep,
-  type DeepResearchResponse,
-  type Provider,
-  // P0: Handoff Functions (new)
-  createContextAgent as create_context_agent,
-  handoffFilters as handoff_filters,
-  promptWithHandoffInstructions as prompt_with_handoff_instructions,
-  // P1: Workflow Patterns (new)
-  Chunking,
-  If,
-  when,
-  Knowledge,
-  Parallel,
-  Route,
-  Session,
-  // P2: Context Types (new - only items not already exported)
-  ContextManager,
-  MCP,
-  type ManagerConfig,
-  type OptimizerStrategy,
-  type ContextPack,
-  type GuardrailResult,
-  type ContextConfig,
-  // P2: Telemetry Functions (new)
-  enableTelemetry as enable_telemetry,
-  disableTelemetry as disable_telemetry,
-  getTelemetry as get_telemetry,
-  enablePerformanceMode as enable_performance_mode,
-  disablePerformanceMode as disable_performance_mode,
-  cleanupTelemetryResources as cleanup_telemetry_resources,
-  // P3: Display callbacks (snake_case for Python parity)
-  register_display_callback,
-  sync_display_callbacks,
-  async_display_callbacks,
-  display_error,
-  display_generating,
-  display_instruction,
-  display_interaction,
-  display_self_reflection,
-  display_tool_call,
-  error_logs,
-  // P3: Plugin functions
-  get_plugin_manager,
-  get_default_plugin_dirs,
-  ensure_plugin_dir,
-  get_plugin_template,
-  load_plugin,
-  parse_plugin_header,
-  parse_plugin_header_from_file,
-  discover_plugins,
-  discover_and_load_plugins,
-  // P3: Trace & condition functions
-  evaluate_condition,
-  get_dimensions,
-  track_workflow,
-  resolve_guardrail_policies,
-  trace_context,
-} from './parity';
+  CodeAgent, createCodeAgent,
+  OCRAgent, createOCRAgent,
+  VisionAgent, createVisionAgent,
+  VideoAgent, createVideoAgent,
+  RealtimeAgent, createRealtimeAgent,
+  EmbeddingAgent, createEmbeddingAgent,
+  type CodeConfig, type CodeAgentConfig, type CodeExecutionResult,
+  type OCRConfig, type OCRAgentConfig, type OCRResult, type OCRPage,
+  type VisionConfig, type VisionAgentConfig, type VisionResult,
+  type VideoConfig, type VideoAgentConfig, type VideoResult,
+  type RealtimeConfig, type RealtimeAgentConfig, type RealtimeEvent, type RealtimeEventType,
+  type EmbeddingAgentConfig,
+} from './agent';
+
+// ============================================================================
+// PER-MODULE EXPORT BLOCKS
+// Each block below is owned by one parity workstream. Add that module's exports
+// inside its marker only; do not reorder or merge blocks.
+// ============================================================================
+
+// ---- goal ----
+export * from './goal';
+
+// ---- errors ----
+export {
+  PraisonAIError, ToolExecutionError, LLMError, ValidationError, NetworkError, PraisonAIConfigError,
+  isErrorContext, resolveErrorCategory, isAgentErrorKind, AGENT_ERROR_KINDS, LEGACY_ERROR_CATEGORY_MAP,
+  FailoverDecision, IdleTimeoutBreaker,
+} from './errors';
+export type {
+  ErrorContextProtocol, AgentErrorKind, LegacyErrorCategory, FailoverAction, FailoverDecisionOptions,
+  PraisonAIErrorOptions, ToolExecutionErrorOptions, LLMErrorOptions, ValidationErrorOptions,
+  NetworkErrorOptions, PraisonAIConfigErrorOptions,
+} from './errors';
+export {
+  AgentRunOutcome, RunOutcome, TerminationReason, TERMINATION_TO_RUN_STATUS, AGENT_RUN_STATUSES,
+  terminationToRunStatus, terminationToRunStatus as termination_to_run_status,
+  validateDecisionString, validateDecisionString as validate_decision_string,
+  classifyFinishReason, PROVIDER_BLOCK_REASONS, TERMINAL_REASON_PRECEDENCE,
+} from './agent/run-outcome';
+export type {
+  AgentRunStatus, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunOutcomeFailureOptions,
+  TerminalReason, RunOutcomeInit,
+} from './agent/run-outcome';
+
+// ---- managed ----
+export {
+  ManagedEvent, AgentMessageEvent, ToolUseEvent, CustomToolUseEvent, ToolConfirmationEvent,
+  SessionIdleEvent, SessionRunningEvent, SessionErrorEvent, UsageEvent, isManagedBackend,
+} from './managed';
+export type {
+  ManagedEventType, ManagedStopReason, ManagedEventInit, ManagedContentBlock, AgentMessageEventInit,
+  ToolUseEventInit, CustomToolUseEventInit, ToolConfirmationEventInit, SessionIdleEventInit,
+  SessionErrorEventInit, UsageEventInit, ManagedBackendProtocol, ManagedBackendKwargs,
+} from './managed';
+
+// ---- toolsets ----
+export {
+  ToolsetSpec, ToolsetRegistry, TOOLSET_TOOL_ID_MAP, toolsetToolId,
+  getToolsetRegistry, getToolsetRegistry as get_toolset_registry,
+  registerToolset, registerToolset as register_toolset,
+  resolveToolset, resolveToolset as resolve_toolset,
+  resolveToolsets, resolveToolsets as resolve_toolsets,
+  resolveToolsetsForModel, resolveToolsetsForModel as resolve_toolsets_for_model,
+  listToolsets, listToolsets as list_toolsets,
+  getToolset, getToolset as get_toolset,
+  unregisterToolset, unregisterToolset as unregister_toolset,
+  hasToolset, hasToolset as has_toolset,
+  resolveToolsetBuiltinIds,
+} from './toolsets';
+export type { ToolsetSpecConfig } from './toolsets';
+export {
+  HarnessProfile, DEFAULT_PROFILE, registerProfile, registerProfile as register_profile,
+  resolveHarness, resolveHarness as resolve_harness, listHarnessProfiles, resetHarnessRegistry,
+} from './model-harness';
+export type { HarnessProfileConfig, HarnessResolverProtocol, HarnessRegistryEntry } from './model-harness';
+
+// ---- runtime ----
+export {
+  RuntimeRegistry, RuntimeRegistryEntry, RuntimeRegistryError, PraisonAIRuntime, isAgentRuntime,
+  getRuntimeRegistry, registerRuntime, registerRuntime as register_runtime,
+  unregisterRuntime, listRuntimes, listRuntimes as list_runtimes,
+  resolveRuntime, resolveRuntime as resolve_runtime, addRuntimeAlias, isRuntimeAvailable,
+} from './runtime';
+export type {
+  RuntimeMode, TurnRuntimeProtocol, TurnContextBuilderProtocol, RuntimeConfig, RuntimeResult, RuntimeDelta,
+  RuntimeDeltaType, RuntimeCapabilityMatrix, RunTurnOptions, AgentRuntimeProtocol, RuntimeRegistryEntryInit,
+  RuntimeFactory, RuntimeRegistryProtocol,
+} from './runtime';
+export { AdapterRegistry, BackendNotAvailableError as AdapterBackendNotAvailableError, AdapterCreationError, isBackendUnavailableError } from './utils/adapter-registry';
+export type { AdapterKwargs, AdapterClass, AdapterFactory } from './utils/adapter-registry';
+export {
+  MemoryAdapterRegistry, getDefaultMemoryRegistry, resetDefaultMemoryRegistry,
+  registerMemoryAdapter, registerMemoryAdapter as register_memory_adapter,
+  registerMemoryFactory, registerMemoryFactory as register_memory_factory,
+  getMemoryAdapter, getMemoryAdapter as get_memory_adapter,
+  listMemoryAdapters, listMemoryAdapters as list_memory_adapters,
+  addMemoryAdapter, addMemoryAdapter as add_memory_adapter,
+  addMemoryFactory, addMemoryFactory as add_memory_factory,
+  hasMemoryAdapter, hasMemoryAdapter as has_memory_adapter,
+  MEMORY_PROVIDER_ALIASES, resolveMemoryAdapterName, getFirstAvailableMemoryAdapter,
+  InMemoryAdapter, ChromaMemory, sanitizeChromaMetadata,
+  createChromaMemoryAdapter, createMem0MemoryAdapter, createMongodbMemoryAdapter, createDakeraMemoryAdapter, createSqliteMemoryAdapter,
+} from './memory/adapters';
+export type { MaybePromise, MemoryRecord, MemoryProtocol, MemoryEmbedder, ChromaMemoryConfig } from './memory/adapters';
+
+// ---- bots ----
+// `RunStatus` collides with the session lifecycle type of the same name; the bots
+// enum (praisonaiagents/bots/protocols.py) is re-exported under a qualified name.
+export * from './bots';
+export { RunStatus as BotRunStatus } from './bots/protocols';
+// Disambiguate the star exports: the session lifecycle type keeps the bare name.
+export type { RunStatus } from './session';
+
+// ---- frameworks ----
+export * from './frameworks';
+
+// ---- cli-backend ----
+export * from './cli-backend';
+
+// ---- approval ----
+export * from './approval';
+
+// ---- escalation ----
+export * from './escalation';
+
+// ---- learn ----
+// `LearnMode` is already exported from ./config (Python config/feature_configs.py);
+// the learn package's own copy is re-exported under a qualified name.
+export {
+  LearnManager, resolveLearnConfig, BaseStore, LearnEntry, PersonaStore, InsightStore, ThreadStore,
+  PatternStore, DecisionStore, FeedbackStore, ImprovementStore, SQLiteLearnBackend, RedisLearnBackend,
+  MongoDBLearnBackend, getDataDir, getLearnDir, LearnError, LearnBackendNotAvailableError,
+  toLearnEntryDict, LearnMode as LearnManagerMode,
+} from './memory/learn';
+export type {
+  LearnManagerConfig, ResolvedLearnConfig, LearnExtractor, LearnStore, BaseStoreOptions,
+  LearnEntryInit, LearnStorageBackend, LearnEntryData, LearnEntryConvertible, LearnEntryLike,
+  LearnMessage, LearnProtocol, AsyncLearnProtocol, LearnManagerProtocol, ProcessConversationResult,
+} from './memory/learn';
+
+// ---- a2ui ----
+export {
+  A2UI, A2UI_MIME_TYPE, A2UINotInstalledError, createA2uiPart, isA2uiPart, parseA2uiResponse, getSchemaManager,
+} from './ui/a2ui';
+export type { A2UIToolResultProtocol, A2UISystemPromptOptions, A2UIAdapter } from './ui/a2ui';
+
+// ---- knowledge protocols ----
+export * from './knowledge/protocols';
+export * from './knowledge/indexing';
+
+// ---- context policy ----
+
+// ---- version/logging/retry/heartbeat ----
+export { VERSION, __version__, getVersion } from './version';
+export {
+  Logger, StructuredFormatter, PraisonLogger, getLogger, getLogger as get_logger,
+  configureStructuredLogging, configureStructuredLogging as configure_structured_logging,
+  normalizeLoggerName, ROOT_LOGGER_NAME,
+} from './utils/logger';
+export type { LogLevelName, LogRecord, LogFormatter, StructuredFormatterOptions, GetLoggerOptions } from './utils/logger';
+export { RetryBackoffConfig, jitteredBackoff, interruptibleSleep } from './agent/retry-utils';
+export type { RetryBackoffConfigOptions, JitteredBackoffOptions } from './agent/retry-utils';
+export { Heartbeat, HeartbeatConfig, parseHeartbeatSchedule } from './agent/heartbeat';
+export type { HeartbeatAgent, HeartbeatOnError, HeartbeatOptions } from './agent/heartbeat';
+
+// ---- skills ----
+export {
+  SkillState, EnforcementLevel, discoverSkills, discoverSkill, loadSkill, getDefaultSkillDirs,
+  validateSkill, validateMetadata, parseFrontmatter, findSkillMd, ParseError as SkillParseError,
+  discoverSkills as discover_skills, loadSkill as load_skill, validateMetadata as validate_metadata, validateSkill as validate,
+} from './skills';
+export type { RemoteSkillSource } from './skills';
+
+// ---- workflows patterns: exported by workflows stream ----
+export {
+  If, Parallel, Route, Include,
+  when, if_, ifStep, include, routePattern, parallelPattern,
+  MAX_NESTING_DEPTH, DEFAULT_MAX_PARALLEL_WORKERS, PARALLEL_ON_FAILURE_MODES,
+  WorkflowStepError, NestingDepthError, evaluateWorkflowCondition, substituteWorkflowVariables,
+  setRecipeResolver, getRecipeResolver, isControlFlowPattern,
+} from './workflows';
+export { YAMLWorkflowParser } from './workflows/yaml-parser';
+export type {
+  FlowStep, AgentLikeStep, IncludableWorkflow, RecipeResolver, ParallelOnFailure, ParallelBranchError,
+} from './workflows';
+// If, Parallel, Route, when (real classes land in src/workflows/patterns.ts)

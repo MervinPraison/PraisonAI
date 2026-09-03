@@ -98,20 +98,20 @@ export interface WebSearchCall {
 }
 
 /**
- * Python parity: Provider configuration for research
+ * Supported Deep Research providers.
+ *
+ * Python parity: praisonaiagents/agent/deep_research_agent.py `class Provider(Enum)`
+ * (OPENAI = "openai", GEMINI = "gemini", LITELLM = "litellm").
+ *
+ * Exposed as a const object plus a string-literal union so that both
+ * `Provider.OPENAI` (value) and `Provider` (type) work, mirroring the enum.
  */
-export interface Provider {
-  /** Provider name (openai, anthropic, etc.) */
-  name: string;
-  /** Model to use */
-  model: string;
-  /** API key (optional, uses env var if not provided) */
-  apiKey?: string;
-  /** Base URL for API */
-  baseUrl?: string;
-  /** Additional options */
-  options?: Record<string, any>;
-}
+export const Provider = {
+  OPENAI: 'openai',
+  GEMINI: 'gemini',
+  LITELLM: 'litellm',
+} as const;
+export type Provider = (typeof Provider)[keyof typeof Provider];
 
 export interface DeepResearchConfig {
   name?: string;

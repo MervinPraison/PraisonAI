@@ -5,6 +5,8 @@
  */
 
 import { randomUUID } from '../utils/uuid';
+import { CompactionStrategy } from './compaction-types';
+import type { ContextBudgetResult, ContextCompactionPolicyProtocol } from './policy';
 
 /**
  * Context item
@@ -41,6 +43,22 @@ export interface ContextManagerConfig {
     tokenRatio?: number;
     /** Priority threshold for eviction */
     evictionThreshold?: number;
+    /**
+     * Compaction policy (see context/policy.ts; Python parity with
+     * `ContextCompactionPolicy` in praisonaiagents/context/policy.py).
+     * When given, its `triggerAt` becomes the manager's compaction
+     * threshold, `targetUtilization` the post-compaction target,
+     * `preserveLastNTurns` the number of recent non-system items that are
+     * never compacted, and `strategy` decides what is dropped first.
+     */
+    policy?: ContextCompactionPolicyProtocol | null;
+    /**
+     * Fraction (0-1) of the usable budget (maxTokens - reservedTokens) at
+     * which `add()` compacts. Defaults to `policy.triggerAt` when a policy
+     * is given; with neither, policy-driven compaction is off and only the
+     * hard limit is enforced (the pre-policy behaviour).
+     */
+    compactThreshold?: number;
 }
 
 /**
@@ -53,6 +71,8 @@ export class ContextManager {
     private reservedTokens: number;
     private tokenRatio: number;
     private evictionThreshold: number;
+    private policy: ContextCompactionPolicyProtocol | null;
+    private compactThreshold: number | null;
 
     constructor(config: ContextManagerConfig = {}) {
         this.id = randomUUID();
@@ -61,6 +81,107 @@ export class ContextManager {
         this.reservedTokens = config.reservedTokens ?? 1000;
         this.tokenRatio = config.tokenRatio ?? 4;
         this.evictionThreshold = config.evictionThreshold ?? 0.3;
+        this.policy = config.policy ?? null;
+        this.compactThreshold = config.compactThreshold ?? this.policy?.triggerAt ?? null;
+        if (this.compactThreshold !== null && !(this.compactThreshold > 0 && this.compactThreshold <= 1)) {
+            throw new Error('compactThreshold must be in (0, 1]');
+        }
+    }
+
+    /**
+     * The compaction policy driving this manager, if any.
+     */
+    getPolicy(): ContextCompactionPolicyProtocol | null {
+        return this.policy;
+    }
+
+    /**
+     * Fraction of the usable budget at which `add()` compacts, or null when
+     * policy-driven compaction is disabled.
+     */
+    getCompactThreshold(): number | null {
+        return this.compactThreshold;
+    }
+
+    /**
+     * Current utilization: used tokens over the usable budget
+     * (maxTokens - reservedTokens). 1.0 when there is no usable budget.
+     */
+    getUtilization(): number {
+        const usable = this.maxTokens - this.reservedTokens;
+        if (usable <= 0) return 1.0;
+        return this.getBudget().usedTokens / usable;
+    }
+
+    /**
+     * Whether the policy (or explicit compactThreshold) says the context
+     * should be compacted now.
+     */
+    shouldCompact(): boolean {
+        if (this.compactThreshold === null) return false;
+        return this.getUtilization() >= this.compactThreshold;
+    }
+
+    /**
+     * Run the policy's budget analysis over the current items, using the
+     * model's context window rather than this manager's maxTokens.
+     * Returns null when no policy is configured.
+     */
+    evaluateBudget(model: string = 'gpt-4o-mini'): ContextBudgetResult | null {
+        if (!this.policy) return null;
+        return this.policy.computeContextBudget(this.buildMessages(), model);
+    }
+
+    /**
+     * Compact the context according to the policy until utilization is at or
+     * below the policy's `targetUtilization` (or the compactThreshold when
+     * there is no policy).
+     *
+     * System items and the most recent `preserveLastNTurns` non-system items
+     * are never removed. With `drop_oldest_tools`, tool items are dropped
+     * oldest-first before anything else; the other strategies drop the
+     * oldest non-system items (`summarise` has no summarizer here, so it
+     * falls back to dropping oldest -- pass a summarizer to `compress()` for
+     * LLM-backed summaries).
+     *
+     * @returns Number of tokens removed.
+     */
+    compact(): number {
+        const usable = this.maxTokens - this.reservedTokens;
+        const targetFraction = this.policy?.targetUtilization ?? this.compactThreshold;
+        if (usable <= 0 || targetFraction === null) return 0;
+
+        const target = Math.floor(usable * targetFraction);
+        let total = this.getBudget().usedTokens;
+        if (total <= target) return 0;
+
+        const preserve = Math.max(0, this.policy?.preserveLastNTurns ?? 0);
+        const nonSystem = this.items.filter(i => i.role !== 'system');
+        const protectedIds = new Set(nonSystem.slice(nonSystem.length - preserve).map(i => i.id));
+        const strategy = this.policy ? String(this.policy.strategy).toLowerCase() : CompactionStrategy.TRUNCATE;
+
+        const passes: Array<(item: ContextItem) => boolean> =
+            strategy === CompactionStrategy.DROP_OLDEST_TOOLS
+                ? [(i) => i.role === 'tool', () => true]
+                : [() => true];
+
+        const removed = new Set<string>();
+        const before = total;
+        for (const pass of passes) {
+            for (const item of this.items) {
+                if (total <= target) break;
+                if (item.role === 'system' || protectedIds.has(item.id) || removed.has(item.id)) continue;
+                if (!pass(item)) continue;
+                removed.add(item.id);
+                total -= item.tokens;
+            }
+            if (total <= target) break;
+        }
+
+        if (removed.size > 0) {
+            this.items = this.items.filter(i => !removed.has(i.id));
+        }
+        return before - total;
     }
 
     /**
@@ -80,6 +201,9 @@ export class ContextManager {
 
         this.items.push(item);
         this.enforceLimit();
+        if (this.shouldCompact()) {
+            this.compact();
+        }
         return item;
     }
 

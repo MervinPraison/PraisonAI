@@ -47,6 +47,31 @@ export type ElevenLabsVoice = string; // Voice ID from ElevenLabs
 export type AudioFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
 
 /**
+ * Audio processing settings.
+ *
+ * Python parity: praisonaiagents/agent/audio_agent.py `AudioConfig` dataclass
+ * (voice, speed, response_format, language, temperature, timeout, api_base, api_key).
+ */
+export interface AudioConfig {
+  /** TTS voice (Python default "alloy") */
+  voice?: string;
+  /** TTS playback speed (Python default 1.0) */
+  speed?: number;
+  /** TTS output format (Python `response_format`, default "mp3") */
+  responseFormat?: AudioFormat;
+  /** STT language hint (Python default None) */
+  language?: string;
+  /** STT sampling temperature (Python default 0.0) */
+  temperature?: number;
+  /** Request timeout in seconds (Python default 600) */
+  timeout?: number;
+  /** API base URL override (Python `api_base`) */
+  apiBase?: string;
+  /** API key override (Python `api_key`) */
+  apiKey?: string;
+}
+
+/**
  * Configuration for AudioAgent
  */
 export interface AudioAgentConfig {

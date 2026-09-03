@@ -21,7 +21,7 @@ surfaces:
       discover: {init_first_param: agents}
       aliases: [PraisonAIAgents, Agents]
       function: __init__
-    typescript: {file: agent/simple.ts, kind: interface, name: AgentTeamConfig, ctorClass: AgentTeam}
+    typescript: {file: agent/team.ts, kind: interface, name: AgentTeamConfig, ctorClass: AgentTeam}
 
   - key: Task.__init__
     python: {file: task/task.py, class: Task, function: __init__}
@@ -40,7 +40,7 @@ surfaces:
       file: agents/agents.py
       discover: {init_first_param: agents}
       function: start
-    typescript: {file: agent/simple.ts, kind: method, name: start, cls: AgentTeam}
+    typescript: {file: agent/team.ts, kind: method, name: start, cls: AgentTeam}
 
   - key: Handoff.__init__
     python: {file: agent/handoff.py, class: Handoff, function: __init__}
@@ -57,3 +57,28 @@ surfaces:
   - key: tool()
     python: {file: tools/decorator.py, function: tool}
     typescript: {file: tools/decorator.ts, kind: interface, name: ToolConfig, ctorClass: FunctionTool}
+
+  # ---- surfaces added with the feature port (2026-09-03) ----
+  - key: GoalEngineer.__init__
+    python: {file: goal/engineer.py, class: GoalEngineer, function: __init__}
+    typescript: {file: goal/engineer.ts, kind: interface, name: GoalEngineerOptions, ctorClass: GoalEngineer}
+
+  - key: DoomLoopDetector.__init__
+    python: {file: escalation/doom_loop.py, class: DoomLoopDetector, function: __init__}
+    typescript: {file: escalation/doom-loop.ts, kind: interface, name: DoomLoopConfigOptions, ctorClass: DoomLoopDetector}
+
+  - key: EscalationPipeline.__init__
+    python: {file: escalation/pipeline.py, class: EscalationPipeline, function: __init__}
+    typescript: {file: escalation/pipeline.ts, kind: interface, name: EscalationPipelineOptions, ctorClass: EscalationPipeline}
+
+  - key: ToolsetRegistry.register_toolset
+    python: {file: toolsets.py, class: ToolsetRegistry, function: register_toolset}
+    typescript: {file: toolsets.ts, kind: method, name: registerToolset, cls: ToolsetRegistry}
+
+  - key: PraisonAIError.__init__
+    python: {file: errors.py, class: PraisonAIError, function: __init__}
+    typescript: {file: errors-base.ts, kind: interface, name: PraisonAIErrorOptions, ctorClass: PraisonAIError}
+
+  # TODO: FileTracker.__init__ and Knowledge.__init__ take positional constructor
+  # parameters with no options interface; add them once ts_extract can address a
+  # bare `constructor` under `kind: method`.
