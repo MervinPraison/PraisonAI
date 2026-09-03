@@ -309,7 +309,7 @@ Methods:
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">normalize_content</a>(content)</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">reset</a>()</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">search</a>(query, user_id = None, agent_id = None, run_id = None, rerank = None, **kwargs)</code>
-* <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">store</a>(content, user_id = None, agent_id = None, run_id = None, metadata = None)</code>
+* <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">store</a>(content, user_id = None, agent_id = None, run_id = None, metadata = None, is_content = False)</code>
 * <code title="class Knowledge">Knowledge.<a href="./src/praisonai-agents/praisonaiagents/knowledge/knowledge.py">update</a>(memory_id, data)</code>
 * <code title="class KnowledgeConfig">KnowledgeConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 
