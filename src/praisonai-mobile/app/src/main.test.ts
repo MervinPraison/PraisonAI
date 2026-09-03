@@ -1127,7 +1127,29 @@ test("opening another chat mid-run keeps that run's answer OUT of it", async () 
 
   // Chat A's run stays open: `start` and a `delta`, then the stream hangs until
   // the test releases it -- exactly the shape of a reply still in flight.
+  //
+  // Released through a NAMED ACCESSOR rather than by calling `release?.()`, for
+  // two reasons that turn out to be the same reason.
+  //
+  // The compiler's: `release` is assigned only inside the stream's `start`
+  // callback, and TypeScript's control-flow analysis does not follow
+  // assignments made inside a callback. At the call site below it is therefore
+  // still narrowed to the `null` it was initialised with, `?.` short-circuits,
+  // and the call target is `never` -- TS2349, "Type 'never' has no call
+  // signatures".
+  //
+  // The test's: that narrowing is right about the risk. `release?.()` on a null
+  // releaser silently does NOTHING. Chat A's run would never terminate, no
+  // terminal publish would ever be emitted, and every assertion below -- all of
+  // which say chat B is free of chat A's rows -- would pass for the wrong
+  // reason, proving only that a leak that never happened did not happen. An
+  // optional call is the wrong tool for a value the test depends on. This one
+  // fails loudly instead.
   let release: (() => void) | null = null;
+  const releaseChatA = (): void => {
+    assert.ok(release !== null, "chat A's stream never opened, so there was nothing to release");
+    release();
+  };
   http.on("/chat", () => ({
     status: 200,
     headers: { "content-type": "text/event-stream" },
@@ -1167,7 +1189,7 @@ test("opening another chat mid-run keeps that run's answer OUT of it", async () 
   await settle();
 
   // Now let chat A's run finish. Its terminal publish must not reach chat B.
-  release?.();
+  releaseChatA();
   await settle(120);
 
   // Chat B shows its OWN stored conversation and nothing else. With the leak
