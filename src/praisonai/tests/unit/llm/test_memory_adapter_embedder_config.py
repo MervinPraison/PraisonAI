@@ -51,11 +51,33 @@ def test_configured_embedding_model_is_used():
 
 
 def test_embedder_block_form_is_honoured():
-    """The `embedder` config shape used elsewhere in the memory layer."""
+    """The `embedder` config shape used elsewhere in the memory layer.
+
+    The provider must be recombined with the model into litellm's
+    "<provider>/<model>" form, otherwise a bare local model name is sent to
+    the OpenAI default endpoint and never reaches the local runtime.
+    Mirrors knowledge/adapters/mongodb_adapter._init_embedding_model.
+    """
     adapter = _make_adapter(
         config={"embedder": {"provider": "ollama", "config": {"model": "mxbai-embed-large"}}}
     )
-    assert _captured_model(adapter) == "mxbai-embed-large"
+    assert _captured_model(adapter) == "ollama/mxbai-embed-large"
+
+
+def test_embedder_block_openai_provider_stays_bare():
+    """OpenAI is the litellm default, so its models keep their bare name."""
+    adapter = _make_adapter(
+        config={"embedder": {"provider": "openai", "config": {"model": "text-embedding-3-large"}}}
+    )
+    assert _captured_model(adapter) == "text-embedding-3-large"
+
+
+def test_embedder_block_without_provider_stays_bare():
+    """A model with no provider is left untouched (backward compatible)."""
+    adapter = _make_adapter(
+        config={"embedder": {"config": {"model": "nomic-embed-text"}}}
+    )
+    assert _captured_model(adapter) == "nomic-embed-text"
 
 
 def test_top_level_embedding_model_kwarg_is_honoured():

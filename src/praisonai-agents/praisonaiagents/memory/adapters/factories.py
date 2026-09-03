@@ -431,11 +431,25 @@ class MongoDBMemoryAdapter:
         # local runtime still embedded against OpenAI with no way to say
         # otherwise. Accepts both the flat key and the `embedder` block used
         # elsewhere in the memory layer.
+        #
+        # The `embedder` block carries the provider separately from the model
+        # (e.g. {"provider": "ollama", "config": {"model": "mxbai-embed-large"}}),
+        # so recombine them into the litellm-style "<provider>/<model>" litellm
+        # needs to route the call. Dropping the provider would send a bare local
+        # model name to the OpenAI default endpoint, the embedding would fail,
+        # and _get_embedding swallows that into "no vector" — documents stored
+        # without embeddings and vector search silently degraded to text search.
+        # Mirrors knowledge/adapters/mongodb_adapter._init_embedding_model.
         _embedder = config.get("embedder") or {}
+        _embedder_model = (_embedder.get("config") or {}).get("model")
+        if _embedder_model:
+            _provider = _embedder.get("provider")
+            if _provider and _provider != "openai":
+                _embedder_model = f"{_provider}/{_embedder_model}"
         self.embedding_model = (
             kwargs.get("embedding_model")
             or config.get("embedding_model")
-            or (_embedder.get("config") or {}).get("model")
+            or _embedder_model
             or "text-embedding-3-small"
         )
 
