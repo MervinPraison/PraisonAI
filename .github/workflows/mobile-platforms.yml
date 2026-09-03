@@ -53,7 +53,17 @@ on:
 
 concurrency:
   group: mobile-platforms-${{ github.ref }}
-  cancel-in-progress: true
+  # On a PR, superseding an in-flight build is right: only the tip
+  # matters and these jobs cost ~3 minutes on two runners.
+  #
+  # On main it is actively harmful, and measurably so. Adding the push
+  # trigger was supposed to make main's platform build observable;
+  # with cancel-in-progress the first two runs on main were BOTH
+  # cancelled by the next merge before finishing (33729635382,
+  # 33730049750). During a busy merge window main would never complete
+  # one -- the trigger would exist and prove nothing, which is the
+  # blindness the trigger was added to remove.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 defaults:
   run:
