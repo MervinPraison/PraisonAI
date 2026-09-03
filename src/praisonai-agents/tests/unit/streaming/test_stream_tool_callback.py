@@ -202,6 +202,27 @@ def test_stream_survives_a_raising_tool_call_callback():
     assert [m["content"] for m in followup_tool_turns] == ["42"]
 
 
+def test_notify_tool_call_reports_error_result_as_failure(tool_call_events):
+    """A durable run returns a raising tool as ``{"error": ...}`` instead of
+    re-raising, so the inline success branch would otherwise mislabel it.
+    ``_notify_tool_call`` must downgrade an error-shaped result to
+    ``success=False`` (Issue #4735 review)."""
+    from praisonaiagents.agent.chat_mixin import ChatMixin
+
+    ChatMixin._notify_tool_call(
+        "f",
+        {"x": 21},
+        {"error": "boom"},
+        elapsed_time=0.01,
+        success=True,
+    )
+
+    assert len(tool_call_events) == 1, tool_call_events
+    event = tool_call_events[0]
+    assert event["tool_name"] == "f"
+    assert event["success"] is False
+
+
 # --- custom-LLM streaming path (LLM.get_response_stream) ---------------------
 
 def _custom_llm_with_tool_round():

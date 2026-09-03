@@ -107,7 +107,19 @@ class ChatMixin:
 
         Best-effort by design: a callback failure is logged and swallowed so
         it can never break the stream it is reporting on.
+
+        A durable run converts a raising tool into an ``{"error": ...}`` result
+        instead of re-raising (see ``DurableRunContext.wrap_sync``), so the
+        raising-tool ``except`` branch never fires for it. Detect that shape
+        here and report ``success=False`` so streaming UIs do not label a failed
+        tool as successful (Issue #4735 review).
         """
+        if (
+            success
+            and isinstance(tool_result, dict)
+            and tool_result.get("error") is not None
+        ):
+            success = False
         try:
             if tool_result is None:
                 result_str = None
