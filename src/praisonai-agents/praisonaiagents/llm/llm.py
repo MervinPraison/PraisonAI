@@ -3450,39 +3450,16 @@ Respond with ONLY a valid JSON tool call in this format:
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
                     
-                    # For Ollama, parse tool calls from response text if not in tool_calls field
-                    if self._is_ollama_provider() and not tool_calls and response_text and formatted_tools:
-                        # Try to parse JSON tool call from response text
-                        try:
-                            response_json = json.loads(response_text.strip())
-                            if isinstance(response_json, dict) and "name" in response_json:
-                                # Convert Ollama format to standard tool_calls format
-                                tool_calls = [{
-                                    "id": f"tool_{iteration_count}",
-                                    "type": "function",
-                                    "function": {
-                                        "name": response_json["name"],
-                                        "arguments": json.dumps(response_json.get("arguments", {}))
-                                    }
-                                }]
-                                logging.debug(f"Parsed Ollama tool call from response: {tool_calls}")
-                            elif isinstance(response_json, list):
-                                # Handle multiple tool calls
-                                tool_calls = []
-                                for idx, tool_json in enumerate(response_json):
-                                    if isinstance(tool_json, dict) and "name" in tool_json:
-                                        tool_calls.append({
-                                            "id": f"tool_{iteration_count}_{idx}",
-                                            "type": "function",
-                                            "function": {
-                                                "name": tool_json["name"],
-                                                "arguments": json.dumps(tool_json.get("arguments", {}))
-                                            }
-                                        })
-                                if tool_calls:
-                                    logging.debug(f"Parsed multiple Ollama tool calls from response: {tool_calls}")
-                        except (json.JSONDecodeError, KeyError) as e:
-                            logging.debug(f"Could not parse Ollama tool call from response: {e}")
+                    # Recover a tool call the provider emitted as response text
+                    # instead of in the tool_calls field. Which providers do this
+                    # is the adapter's business, not this loop's; DefaultAdapter
+                    # returns None so no other provider is affected.
+                    if not tool_calls and response_text and formatted_tools:
+                        recovered = self._provider_adapter.recover_tool_calls_from_text(
+                            response_text, formatted_tools)
+                        if recovered:
+                            tool_calls = recovered
+                            logging.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
                     # Parse tool calls from XML format in response text 
                     # Try for known XML models first, or fallback for any model that might output XML
