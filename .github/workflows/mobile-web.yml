@@ -92,25 +92,28 @@ jobs:
         with:
           path: src/praisonai-mobile/dist
 
-  deploy:
-    name: deploy to GitHub Pages
+  # The readiness check is its OWN job, and deliberately declares no
+  # `environment:`. A job that names `environment: github-pages` cannot START
+  # until that environment exists, so when Pages is off the runner fails the
+  # job outright -- zero steps, about one second -- and every carefully
+  # written skip inside it is unreachable. Measured: run 33730322658 on main,
+  # "deploy to GitHub Pages" failed with steps: 0.
+  #
+  # Splitting the decision out means the check runs with no preconditions and
+  # the environment-bearing job is never scheduled unless it can succeed.
+  pages-ready:
+    name: is GitHub Pages enabled?
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-22.04
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      # Never cancel a deployment in flight; queue behind it instead.
-      group: pages
-      cancel-in-progress: false
+      contents: read
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
     steps:
-      # Pages cannot be enabled from a workflow, so this job reports the
-      # setting rather than demanding it. `ready` false SKIPS the deploy with
-      # a notice; it does not fail the run. deploy-pages would otherwise fail
+      # Pages cannot be enabled from a workflow, so this reports the setting
+      # rather than demanding it. `ready` false SKIPS the deploy with a
+      # notice; it does not fail the run. deploy-pages would otherwise fail
       # with a bare 404 that says nothing about which setting is missing.
       - name: Is the Pages source "GitHub Actions"?
         id: check
@@ -133,8 +136,23 @@ jobs:
             exit 0
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: pages-ready
+    if: needs.pages-ready.outputs.ready == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      # Never cancel a deployment in flight; queue behind it instead.
+      group: pages
+      cancel-in-progress: false
+    steps:
       - uses: actions/configure-pages@v5
-        if: steps.check.outputs.ready == 'true'
       - uses: actions/deploy-pages@v4
         id: deployment
-        if: steps.check.outputs.ready == 'true'
