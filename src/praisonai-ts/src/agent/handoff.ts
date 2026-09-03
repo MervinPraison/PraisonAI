@@ -14,7 +14,7 @@
 
 import type { EnhancedAgent } from './enhanced';
 import { ToolRegistry, FunctionTool } from '../tools/decorator';
-import { notYetHonoured } from '../utils/parity-notice';
+import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 // Import the base module, not the barrel: see the note at the top of errors-base.ts.
 import { PraisonAIError, type AgentErrorKind, type LegacyErrorCategory } from '../errors-base';
 
@@ -753,8 +753,17 @@ export class Handoff {
     // Settings that Handoff.execute() does not consult yet. They are exposed on
     // `this.config` for callers that drive the handoff themselves; a
     // non-default value is reported so it is never silently ignored.
-    for (const key of Object.keys(HANDOFF_DEFAULTS) as Array<keyof typeof HANDOFF_DEFAULTS>) {
-      if (this.config[key] !== HANDOFF_DEFAULTS[key]) notYetHonoured('Handoff', key);
+    //
+    // The set of option names is read from the single `UNHONOURED_OPTIONS`
+    // ledger (surface `Handoff`), the same source the behaviour-parity gate
+    // counts, so the runtime notices and the published total cannot drift.
+    // `HANDOFF_DEFAULTS` supplies only the default *value* each name is
+    // compared against.
+    for (const option of unhonouredFor('Handoff')) {
+      const key = option as keyof typeof HANDOFF_DEFAULTS;
+      if (key in HANDOFF_DEFAULTS && this.config[key] !== HANDOFF_DEFAULTS[key]) {
+        notYetHonoured('Handoff', option);
+      }
     }
   }
 

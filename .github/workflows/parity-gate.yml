@@ -5,6 +5,8 @@ name: Parity Gate
 # Two named checks, so each kind of drift is visible in the checks list:
 #   names      - the exported-name tracker (PARITY.md / FEATURE_PARITY_TRACKER.json)
 #                must be regenerated in the PR when the public surface changes.
+#   behaviour  - options accepted for parity but not yet acted on; a ratchet,
+#                so the count may fall and never rise.
 #   signatures - constructor/method parameters of the curated surfaces in
 #                src/praisonai/praisonai/_dev/parity/signatures/surface.yaml must
 #                match (after camelCase/alias/flattening rules) or be waived with a
@@ -75,5 +77,23 @@ jobs:
         run: |
           if ! python3 -m praisonai._dev.parity.signatures --check; then
             echo "::error::Signature parity failed. See the output above for the surface and parameter. Fix the TypeScript side, or add a waiver with a reason to src/praisonai/praisonai/_dev/parity/signatures/waivers.yaml, then run: PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.signatures --write"
+            exit 1
+          fi
+
+  behaviour:
+    name: behaviour (options accepted but not acted on)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - name: The count of ignored options has not grown
+        env:
+          PYTHONPATH: src/praisonai
+        run: |
+          if ! python3 -m praisonai._dev.parity.behaviour --check; then
+            echo "::error::An option accepted for Python parity is not acted on, and the total grew. The name and signature gates cannot see this: they check that a parameter EXISTS. Implement the behaviour and delete its entry from src/praisonai-ts/src/utils/parity-notice.ts, then run: PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.behaviour --write"
             exit 1
           fi

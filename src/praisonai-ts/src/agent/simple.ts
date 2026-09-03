@@ -9,7 +9,7 @@ import { getEnv } from '../llm/openaiClientOptions';
 import { resolveDefaultModel } from '../llm/default-model';
 import { randomUUID } from '../utils/uuid';
 import { parseModelString } from '../llm/backend-resolver';
-import { notYetHonoured } from '../utils/parity-notice';
+import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 import { Handoff, promptWithHandoffInstructions } from './handoff';
 import { Memory, type MemoryConfig } from '../memory/memory';
 import { KnowledgeBase, type KnowledgeBaseConfig } from '../knowledge/rag';
@@ -996,23 +996,9 @@ export class Agent {
   private initialiseParityOptions(config: SimpleAgentConfig): void {
     // Accepted for signature parity but not yet honoured: say so, once, rather
     // than silently dropping the setting.
-    const accepted: Array<[string, unknown]> = [
-      ['auth', config.auth],
-      ['toolsets', config.toolsets],
-      ['reflection', config.reflection],
-      ['autonomy', config.autonomy],
-      ['templates', config.templates],
-      ['selfImprove', config.selfImprove],
-      ['toolConfig', config.toolConfig],
-      ['learn', config.learn],
-      ['backend', config.backend],
-      ['runOn', config.runOn],
-      ['toolsRunOn', config.toolsRunOn],
-      ['runtime', config.runtime],
-      ['toolSearch', config.toolSearch],
-      ['messageSteering', config.messageSteering],
-      ['sandbox', config.sandbox],
-    ];
+    // The ledger in utils/parity-notice.ts is the single list; see it for why.
+    const accepted: Array<[string, unknown]> = unhonouredFor('Agent.__init__')
+      .map((name) => [name, (config as unknown as Record<string, unknown>)[name]] as [string, unknown]);
     for (const [name, value] of accepted) {
       if (value !== undefined && value !== false) notYetHonoured('Agent', name);
     }
@@ -1901,14 +1887,9 @@ export class Agent {
       prompt = prompt.replace('{{previous}}', previousResult);
     }
     const opts = options ?? {};
-    const accepted: Array<[string, unknown]> = [
-      ['reasoningSteps', opts.reasoningSteps],
-      ['taskName', opts.taskName],
-      ['taskDescription', opts.taskDescription],
-      ['taskId', opts.taskId],
-      ['config', opts.config],
-      ['attachments', opts.attachments],
-    ];
+    // The ledger in utils/parity-notice.ts is the single list; see it for why.
+    const accepted: Array<[string, unknown]> = unhonouredFor('Agent.chat')
+      .map((name) => [name, (opts as Record<string, unknown>)[name]] as [string, unknown]);
     for (const [name, value] of accepted) {
       if (value !== undefined && value !== false) notYetHonoured('Agent.chat', name);
     }

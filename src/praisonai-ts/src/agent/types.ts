@@ -3,7 +3,7 @@ import * as path from 'path';
 import { OpenAIService } from '../llm/openai';
 import { Logger } from '../utils/logger';
 import { randomUUID } from '../utils/uuid';
-import { notYetHonoured } from '../utils/parity-notice';
+import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 
 /**
  * Result of running a task. Mirrors Python `praisonaiagents.output.models.TaskOutput`.
@@ -187,13 +187,8 @@ export interface TaskConfig {
 }
 
 /** Options Task accepts for parity but whose behaviour lives in the execution engine, not in Task. */
-const ENGINE_LEVEL_OPTIONS: ReadonlyArray<keyof TaskConfig> = [
-    'asyncExecution', 'config', 'outputPydantic', 'images', 'nextTasks', 'condition', 'isStart',
-    'loopState', 'memory', 'inputFile', 'rerun', 'retainFullContext', 'agentConfig', 'skipOnFailure',
-    'retryDelay', 'handler', 'loopOver', 'loopVar', 'execution', 'routing', 'outputConfig', 'when',
-    'thenTask', 'elseTask', 'autonomy', 'knowledge', 'web', 'reflection', 'planning', 'hooks',
-    'caching', 'failOnMemoryError',
-];
+// The ledger in utils/parity-notice.ts is the single list; see it for why.
+const ENGINE_LEVEL_OPTIONS = unhonouredFor('Task.__init__') as ReadonlyArray<keyof TaskConfig>;
 
 function isTask(value: unknown): value is Task {
     return value instanceof Task;
