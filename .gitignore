@@ -116,3 +116,6 @@ src/praisonai/build*.egg-info/
 src/praisonai/PraisonAI.egg-info/
 jobs/*
 *.egg-info
+# Local Android SDK/NDK/JDK for building praisonai-mobile on a laptop without
+# Android Studio (how: .github/workflows/mobile-platforms.yml). Several GB.
+.android-sdk/
