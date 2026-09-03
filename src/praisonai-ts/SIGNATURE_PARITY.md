@@ -364,7 +364,7 @@ TS-only members: `options`?, `llm`?
 ### `DoomLoopDetector.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/escalation/doom_loop.py:113`
-- TypeScript: `src/praisonai-ts/src/escalation/doom-loop.ts:51` (ctor `src/praisonai-ts/src/escalation/doom-loop.ts:235`)
+- TypeScript: `src/praisonai-ts/src/escalation/doom-loop.ts:51` (ctor `src/praisonai-ts/src/escalation/doom-loop.ts:250`)
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 15 TS-only of 16
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |

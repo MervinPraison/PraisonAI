@@ -2899,7 +2899,7 @@
         }
       ],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/escalation/doom-loop.ts:235",
+        "ctor_location": "src/praisonai-ts/src/escalation/doom-loop.ts:250",
         "location": "src/praisonai-ts/src/escalation/doom-loop.ts:51"
       }
     },
