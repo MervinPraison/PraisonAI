@@ -74,6 +74,22 @@ _BUILTIN_PLATFORMS = {
     "local": _local_loader,
 }
 
+# Credential env var(s) that identify a present, ready-to-use platform token
+# (Issue #4779). This is the single in-tree source of truth for built-in
+# platforms — the same mapping the onboarding wizard hard-codes — so the
+# gateway can auto-enable a channel from a present credential with no
+# ``channels:`` block. The first entry is the primary token used to seed the
+# auto-filled channel's ``token: ${ENV}`` reference; any further entries are
+# additional required credentials that must all be present. Plugin channels
+# self-describe theirs via their ``ChannelDescriptor`` (see
+# ``get_platform_credential_env``), so this only lists built-ins.
+_BUILTIN_CREDENTIAL_ENV: Dict[str, tuple] = {
+    "telegram": ("TELEGRAM_BOT_TOKEN",),
+    "discord": ("DISCORD_BOT_TOKEN",),
+    "slack": ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"),
+    "whatsapp": ("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"),
+}
+
 
 class BotPlatformRegistry(PluginRegistry):
     """Registry for bot platform adapters with capability descriptors."""
@@ -502,6 +518,62 @@ def get_platform_descriptor(name: str) -> Optional[ChannelDescriptor]:
     if isinstance(registry, BotPlatformRegistry):
         return registry.get_descriptor(name.lower())
     return None
+
+
+def get_platform_credential_env(name: str) -> tuple:
+    """Return the credential env var(s) that identify a present token (#4779).
+
+    Single source of truth for credential-presence auto-enablement. Built-in
+    platforms come from ``_BUILTIN_CREDENTIAL_ENV`` (the same mapping the
+    onboarding wizard uses); plugin/entry-point channels self-describe theirs
+    via their ``ChannelDescriptor``'s ``config_fields``.
+
+    A plugin channel is only auto-enable-able when **every** ``required`` field
+    it declares can be sourced from the environment (i.e. declares an ``env``
+    fallback). If any required field lacks an ``env`` fallback, the channel
+    could not be brought up from env vars alone — auto-enabling it would seed a
+    channel that ``apply_channel_descriptor`` then rejects for the missing
+    required field, aborting the whole gateway. In that case we return ``()``
+    so the platform is left for explicit configuration. When there are no
+    required fields, an env-backed ``secret`` field is sufficient to identify a
+    ready-to-use credential. All returned vars must be present for the channel
+    to be auto-enabled.
+
+    Args:
+        name: Platform identifier.
+
+    Returns:
+        A tuple of env-var names (empty when the platform declares none, or
+        when a required field cannot be sourced from the environment).
+    """
+    key = name.lower()
+    builtin = _BUILTIN_CREDENTIAL_ENV.get(key)
+    if builtin:
+        return builtin
+    descriptor = get_platform_descriptor(key)
+    if descriptor is None:
+        return ()
+    fields = getattr(descriptor, "config_fields", None) or []
+    required_fields = [spec for spec in fields if getattr(spec, "required", False)]
+    if required_fields:
+        # Every required field must be env-sourceable, otherwise the channel
+        # cannot be auto-enabled from the environment alone — return () so the
+        # platform is left for explicit config instead of failing at startup.
+        required_env = tuple(
+            env
+            for spec in required_fields
+            if (env := getattr(spec, "env", None))
+        )
+        if len(required_env) != len(required_fields):
+            return ()
+        return required_env
+    secret = tuple(
+        env
+        for spec in fields
+        if getattr(spec, "secret", False)
+        and (env := getattr(spec, "env", None))
+    )
+    return secret
 
 
 def get_channel_system_prompt_hint(name: str) -> str:
