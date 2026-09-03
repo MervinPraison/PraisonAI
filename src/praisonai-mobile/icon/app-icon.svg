@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PraisonAI mobile app icon: the master, 1024x1024, opaque.
+
+  Programmatic, not drawn: a geometric "P" (a 120-unit stem and a 120-unit
+  bowl, the same weight, so it reads as one stroke) with a single amber dot
+  where a cursor would sit, because the app is a chat with an agent. One colour on
+  one colour, no gradients, no text, so it survives every size from 20px to
+  1024px and the App Store's flat 1024 requirement (no alpha, square corners;
+  iOS rounds them itself, and Android composes its own shape from
+  android-fg.svg / the bg colour in icon.json).
+
+  Regenerate every platform's icon set from this file's siblings with:
+    cd src/praisonai-mobile/icon && ./render.sh && cd .. && npx tauri icon icon/icon.json
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#312E81"/>
+  <path fill="#FFFFFF" fill-rule="evenodd"
+        d="M252,152 H512 A260,260 0 0 1 512,672 H372 V872 H252 Z
+           M372,272 H512 A140,140 0 0 1 512,552 H372 Z"/>
+  <circle cx="712" cy="812" r="60" fill="#F59E0B"/>
+</svg>
