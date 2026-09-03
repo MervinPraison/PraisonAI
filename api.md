@@ -925,17 +925,23 @@ Methods:
 
 Types/Exports:
 ```ts
-export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from "./agent";
-export type { AgentEvent, AgentMessage, AgentStreamOptions, AgentTeamConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig, StopReason } from "./agent";
+export { Agent, AgentTeam, Agents, CodeAgent, EmbeddingAgent, OCRAgent, PraisonAIAgents, RealtimeAgent, Router, TASK_STATUS, VideoAgent, VisionAgent, createCodeAgent, createEmbeddingAgent, createOCRAgent, createRealtimeAgent, createVideoAgent, createVisionAgent } from "./agent";
+export type { AgentChatOptions, AgentEvent, AgentGuardrailEntry, AgentGuardrailFunction, AgentGuardrailInput, AgentHooksInput, AgentMemoryStore, AgentMessage, AgentRetryConfig, AgentStreamOptions, AgentTeamConfig, AgentTeamProcess, AgentTeamStartDictOptions, AgentTeamStartOptions, AgentTeamStartOptionsInput, AgentWebConfig, PraisonAIAgentsConfig, SimpleAgentConfig, SimpleRouteConfig, SimpleRouterConfig, StopReason, TaskCallback, TaskGuardrail, TaskOnError } from "./agent";
 export { AudioAgent, createAudioAgent } from "./agent/audio";
-export type { AudioAgentConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
-export { ContextAgent, createContextAgent } from "./agent/context";
-export { ContextPolicy, Handoff, HandoffCycleError, HandoffDepthError, HandoffError, HandoffTimeoutError, RECOMMENDED_PROMPT_PREFIX, handoff, handoffFilters, promptWithHandoffInstructions } from "./agent/handoff";
+export type { AudioAgentConfig, AudioConfig, AudioProvider, AudioSpeakOptions, AudioSpeakResult, AudioTranscribeOptions, AudioTranscribeResult } from "./agent/audio";
+export { ContextAgent, createContextAgent, create_context_agent } from "./agent/context";
+export { ContextPolicy, DEFAULT_HANDOFF_TOOL_POLICY, Handoff, HandoffCycleError, HandoffDepthError, HandoffError, HandoffTimeoutError, HandoffToolPolicyMode, RECOMMENDED_PROMPT_PREFIX, handoff, handoffFilters, handoffToolName, handoff_filters, listAgentTools, parallelHandoffs, parallel_handoffs, promptWithHandoffInstructions, prompt_with_handoff_instructions, resolveHandoffToolPolicy } from "./agent/handoff";
+export { Heartbeat, HeartbeatConfig, parseHeartbeatSchedule } from "./agent/heartbeat";
+export type { HeartbeatAgent, HeartbeatOnError, HeartbeatOptions } from "./agent/heartbeat";
 export { ImageAgent, createImageAgent } from "./agent/image";
 export { PromptExpanderAgent, createPromptExpanderAgent } from "./agent/prompt-expander";
 export { QueryRewriterAgent, createQueryRewriterAgent } from "./agent/query-rewriter";
-export { DeepResearchAgent, createDeepResearchAgent } from "./agent/research";
+export { DeepResearchAgent, Provider, createDeepResearchAgent } from "./agent/research";
+export { RetryBackoffConfig, interruptibleSleep, jitteredBackoff } from "./agent/retry-utils";
+export type { JitteredBackoffOptions, RetryBackoffConfigOptions } from "./agent/retry-utils";
 export { RouterAgent, createRouter, routeConditions } from "./agent/router";
+export { AGENT_RUN_STATUSES, AgentRunOutcome, PROVIDER_BLOCK_REASONS, RunOutcome, TERMINAL_REASON_PRECEDENCE, TERMINATION_TO_RUN_STATUS, TerminationReason, classifyFinishReason, terminationToRunStatus, termination_to_run_status, validateDecisionString, validate_decision_string } from "./agent/run-outcome";
+export type { AgentRunOutcomeFailureOptions, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunStatus, RunOutcomeInit, TerminalReason } from "./agent/run-outcome";
 export { // Agent loop
   createAgentLoop, // DevTools
   enableDevTools, // MCP
@@ -952,6 +958,7 @@ export { // Agent loop
   defineTool, // UI Message (AI SDK v6 parity)
   convertToModelMessages, AIAgentStep, AIEmbedManyResult, AIEmbedOptions, AIEmbedResult, AIFilePart, AIGenerateImageOptions, AIGenerateImageResult, AIGenerateObjectOptions, AIGenerateObjectResult, AIGenerateTextOptions, AIGenerateTextResult, AIImagePart, AIMiddleware, AIMiddlewareConfig, AIModelMessage, AISpan, AISpanKind, AISpanOptions, AISpanStatus, AIStreamObjectOptions, AIStreamObjectResult, AIStreamTextOptions, AIStreamTextResult, AITelemetryEvent, AITelemetrySettings, AITextPart, AIToolDefinition, AITracer, AgentLoop, DANGEROUS_PATTERNS, MCPClientType, MODEL_ALIASES, SPEECH_MODELS, TRANSCRIPTION_MODELS, ToolApprovalDeniedError, ToolApprovalTimeoutError, aiEmbed, aiEmbedMany, aiGenerateImage, aiGenerateObject, aiGenerateText, aiStreamObject, aiStreamText, applyMiddleware, autoEnableDevTools, base64ToUint8Array, clearAICache, clearEvents, closeAllMCPClients, closeMCPClient, convertToUIMessages, createAILoggingMiddleware, createAISpan, createApprovalResponse, createDangerousPatternChecker, createDevToolsMiddleware, createExpressHandler, createFastifyHandler, createFilePart, createHonoHandler, createMultimodalMessage, createNestHandler, createPagesHandler, createPdfPart, createSystemMessage, createTelemetryMiddleware, createTelemetrySettings, createTextMessage, createTextPart, createToolSet, disableAITelemetry, disableDevTools, enableAITelemetry, functionToTool, getAICacheStats, getApprovalManager, getDevToolsState, getDevToolsUrl, getEvents, getMCPClient, getModel, getTelemetrySettings, getToolsNeedingApproval, getTracer, hasModelAlias, hasPendingApprovals, initOpenTelemetry, isDangerous, isDataUrl, isDevToolsEnabled, isTelemetryEnabled, isUrl, listModelAliases, mcpToolsToAITools, parseModel, pipeUIMessageStreamToResponse, recordEvent, resolveModelAlias, safeValidateUIMessages, setApprovalManager, stopAfterSteps, stopWhen, stopWhenNoToolCalls, toMessageContent, toUIMessageStreamResponse, transcribe, uint8ArrayToBase64, validateUIMessages, withApproval, withSpan, wrapModel } from "./ai";
 export { AutoAgents, AutoTaskConfig, createAutoAgents } from "./auto";
+export { BotRunStatus } from "./bots/protocols";
 export { BaseCache, FileCache, MemoryCache, createFileCache, createMemoryCache } from "./cache";
 export { CLI_SPEC_VERSION, executeCommand, parseArgs } from "./cli";
 export { // Autonomy Mode
@@ -973,23 +980,27 @@ export { // Autonomy Mode
 export { // Classes
   DictCondition, // Functions
   evaluateCondition, // Types
-  type ConditionProtocol, ExpressionCondition, FunctionCondition, andConditions, createCondition, notCondition, orConditions } from "./conditions";
+  type ConditionProtocol, ExpressionCondition, FunctionCondition, andConditions, createCondition, evaluate_condition, notCondition, orConditions } from "./conditions";
 export { // Enums
   MemoryBackend, // Errors
   ConfigValidationError, // Parse utilities
   detect_url_scheme, // Presets
   MEMORY_PRESETS, // Resolver functions
-  resolve, AUTONOMY_PRESETS, ArrayMode, CACHING_PRESETS, CONTEXT_PRESETS, ChunkingStrategy, EXECUTION_PRESETS, ExecutionPreset, FeatureMemoryConfig, GUARDRAIL_PRESETS, GuardrailAction, KNOWLEDGE_PRESETS, MEMORY_URL_SCHEMES, MULTI_AGENT_EXECUTION_PRESETS, MULTI_AGENT_OUTPUT_PRESETS, OUTPUT_PRESETS, OutputPreset, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS, WebSearchProvider, apply_config_defaults, clean_triple_backticks, get_config, get_config_path, get_default, get_defaults_config, get_plugins_config, is_path_like, is_policy_string, parse_policy_string, resolve_autonomy, resolve_caching, resolve_context, resolve_execution, resolve_guardrails, resolve_hooks, resolve_knowledge, resolve_memory, resolve_output, resolve_planning, resolve_reflection, resolve_routing, resolve_skills, resolve_web, suggest_similar, validate_config } from "./config";
+  resolve, AUTONOMY_PRESETS, ArrayMode, CACHING_PRESETS, CONTEXT_PRESETS, ChunkingStrategy, EXECUTION_PRESETS, ExecutionPreset, FeatureMemoryConfig, GUARDRAIL_PRESETS, GuardrailAction, KNOWLEDGE_PRESETS, LearnBackend, LearnMode, LearnScope, MEMORY_URL_SCHEMES, MULTI_AGENT_EXECUTION_PRESETS, MULTI_AGENT_OUTPUT_PRESETS, OUTPUT_PRESETS, OutputPreset, PLANNING_PRESETS, PreCompactionMemoryFlushConfig, REFLECTION_PRESETS, RulesConfig, ToolSearchConfig, WEB_PRESETS, WebSearchProvider, apply_config_defaults, clean_triple_backticks, get_config, get_config_path, get_default, get_defaults_config, get_plugins_config, is_path_like, is_policy_string, parse_policy_string, resolve_autonomy, resolve_caching, resolve_context, resolve_execution, resolve_guardrails, resolve_hooks, resolve_knowledge, resolve_memory, resolve_output, resolve_planning, resolve_reflection, resolve_routing, resolve_skills, resolve_web, suggest_similar, validate_config } from "./config";
 export { createDbAdapter, db, getDefaultDbAdapter, setDefaultDbAdapter } from "./db";
 export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from "./db";
 export { MemoryPostgresAdapter, NeonPostgresAdapter, PostgresSessionStorage, createMemoryPostgres, createNeonPostgres, createPostgresSessionStorage } from "./db/postgres";
 export { MemoryRedisAdapter, UpstashRedisAdapter, createMemoryRedis, createUpstashRedis } from "./db/redis";
 export { SQLiteAdapter, createSQLiteAdapter } from "./db/sqlite";
-export { // Types
-  type DisplayCallback, DisplayFlow, DisplayFlowConfig, asyncDisplayCallbacks, clearDisplayCallbacks, clearErrorLogs, displayError, displayGenerating, displayInstruction, displayInteraction, displaySelfReflection, displayToolCall, errorLogs, logError, registerDisplay, syncDisplayCallbacks } from "./display";
+export { // Functions
+  // NB: the unaliased registerDisplayCallback name belongs to the per-type
+  // callback registry (callbacks module, // Types
+  type DisplayCallback, DisplayFlow, DisplayFlowConfig, asyncDisplayCallbacks, async_display_callbacks, clearDisplayCallbacks, clearErrorLogs, displayError, displayGenerating, displayInstruction, displayInteraction, displaySelfReflection, displayToolCall, display_error, display_generating, display_instruction, display_interaction, display_self_reflection, display_tool_call, errorLogs, error_logs, logError, registerDisplay, register_display_callback, syncDisplayCallbacks, sync_display_callbacks } from "./display";
 export { // Functions
   embed, // Types
-  type EmbeddingResult, aembed, aembedding, aembeddings, cosineSimilarity, embedding, embeddings, euclideanDistance, getDimensions, normalizeEmbedding, setEmbeddingConfig } from "./embeddings";
+  type EmbeddingResult, aembed, aembedding, aembeddings, cosineSimilarity, embedding, embeddings, euclideanDistance, getDimensions, get_dimensions, normalizeEmbedding, setEmbeddingConfig } from "./embeddings";
+export { AGENT_ERROR_KINDS, FailoverDecision, IdleTimeoutBreaker, LEGACY_ERROR_CATEGORY_MAP, LLMError, NetworkError, PraisonAIConfigError, PraisonAIError, ToolExecutionError, ValidationError, isAgentErrorKind, isErrorContext, resolveErrorCategory } from "./errors";
+export type { AgentErrorKind, ErrorContextProtocol, FailoverAction, FailoverDecisionOptions, LLMErrorOptions, LegacyErrorCategory, NetworkErrorOptions, PraisonAIConfigErrorOptions, PraisonAIErrorOptions, ToolExecutionErrorOptions, ValidationErrorOptions } from "./errors";
 export { // LLM-as-Judge
   Judge, AccuracyJudge, CriteriaJudge, EvalResults, EvalSuite, Evaluator, RecipeJudge, accuracyEval, addJudge, addOptimizationRule, containsKeywordsCriterion, createDefaultEvaluator, createEvalResults, createEvaluator, getJudge, getOptimizationRule, lengthCriterion, listJudges, listOptimizationRules, noHarmfulContentCriterion, parseJudgeResponse, performanceEval, relevanceCriterion, reliabilityEval, removeJudge, removeOptimizationRule } from "./eval";
 export { AgentEventBus, AgentEvents, EventEmitterPubSub, PubSub, createEventBus, createPubSub } from "./events";
@@ -998,7 +1009,7 @@ export { // Bot types
   FailoverManager, // Enums
   SandboxStatus, // Gateway types
   type GatewayConfig, // Other types
-  type ProviderStatus, AutonomyLevel, RagRetrievalPolicy } from "./gateway";
+  type ProviderStatus, AutonomyLevel, GatewayEventType, RagRetrievalPolicy } from "./gateway";
 export { LLMGuardrail, createLLMGuardrail } from "./guardrails/llm-guardrail";
 export { DisplayTypes, HooksManager, WorkflowHooksExecutor, clearAllCallbacks, clearApprovalCallback, createHooksManager, createLoggingOperationHooks, createLoggingWorkflowHooks, createTimingWorkflowHooks, createValidationOperationHooks, createWorkflowHooks, executeCallback, executeSyncCallback, getRegisteredDisplayTypes, hasApprovalCallback, registerApprovalCallback, registerDisplayCallback, requestApproval, unregisterDisplayCallback } from "./hooks";
 export { // Computer Use
@@ -1010,7 +1021,11 @@ export { // Slack
   createSlackBot, SlackBot, parseSlackMessage, verifySlackSignature } from "./integrations/slack";
 export { BaseVectorStore, ChromaVectorStore, MemoryVectorStore, PineconeVectorStore, QdrantVectorStore, VectorQueryResult, WeaviateVectorStore, createChromaStore, createMemoryVectorStore, createPineconeStore, createQdrantStore, createWeaviateStore } from "./integrations/vector";
 export { BaseVoiceProvider, ElevenLabsVoiceProvider, OpenAIVoiceProvider, createElevenLabsVoice, createOpenAIVoice } from "./integrations/voice";
+export type { KnowledgeRecord } from "./knowledge";
 export { GraphRAG, GraphStore, createGraphRAG } from "./knowledge/graph-rag";
+export { Knowledge } from "./knowledge/knowledge";
+export type { KnowledgeIndexOptions, KnowledgeSearchCallOptions, KnowledgeStoreConfig, KnowledgeStoreOptions } from "./knowledge/knowledge";
+export { KnowledgeBase, KnowledgeDocument, KnowledgeSearchResult, createKnowledgeBase } from "./knowledge/rag";
 export { BaseReranker, CohereReranker, CrossEncoderReranker, LLMReranker, createCohereReranker, createCrossEncoderReranker, createLLMReranker } from "./knowledge/reranker";
 export { // Provider classes
   OpenAIProvider, // Provider factory and utilities
@@ -1018,14 +1033,22 @@ export { // Provider classes
   ProviderRegistry, // Types
   type LLMProvider, AnthropicProvider, BaseProvider, GoogleProvider, ProviderMessage, ProviderToolDefinition, createProviderRegistry, getAvailableProviders, getDefaultProvider, getDefaultRegistry, hasProvider, isProviderAvailable, listProviders, parseModelString, registerBuiltinProviders, registerProvider, unregisterProvider } from "./llm/providers";
 export { ADAPTERS, AISDK_PROVIDERS, COMMUNITY_PROVIDERS, PROVIDER_ALIASES } from "./llm/providers/ai-sdk/types";
+export { AgentMessageEvent, CustomToolUseEvent, ManagedEvent, SessionErrorEvent, SessionIdleEvent, SessionRunningEvent, ToolConfirmationEvent, ToolUseEvent, UsageEvent, isManagedBackend } from "./managed";
+export type { AgentMessageEventInit, CustomToolUseEventInit, ManagedBackendKwargs, ManagedBackendProtocol, ManagedContentBlock, ManagedEventInit, ManagedEventType, ManagedStopReason, SessionErrorEventInit, SessionIdleEventInit, ToolConfirmationEventInit, ToolUseEventInit, UsageEventInit } from "./managed";
 export { MCPClient, MCPSecurity, MCPServer, MCPSessionManager, createApiKeyPolicy, createMCPClient, createMCPSecurity, createMCPServer, createMCPSession, createRateLimitPolicy, getMCPTools } from "./mcp";
+export { ChromaMemory, InMemoryAdapter, MEMORY_PROVIDER_ALIASES, MemoryAdapterRegistry, addMemoryAdapter, addMemoryFactory, add_memory_adapter, add_memory_factory, createChromaMemoryAdapter, createDakeraMemoryAdapter, createMem0MemoryAdapter, createMongodbMemoryAdapter, createSqliteMemoryAdapter, getDefaultMemoryRegistry, getFirstAvailableMemoryAdapter, getMemoryAdapter, get_memory_adapter, hasMemoryAdapter, has_memory_adapter, listMemoryAdapters, list_memory_adapters, registerMemoryAdapter, registerMemoryFactory, register_memory_adapter, register_memory_factory, resetDefaultMemoryRegistry, resolveMemoryAdapterName, sanitizeChromaMetadata } from "./memory/adapters";
+export type { ChromaMemoryConfig, MaybePromise, MemoryEmbedder, MemoryProtocol, MemoryRecord } from "./memory/adapters";
 export { AutoMemory, AutoMemoryKnowledgeBase, AutoMemoryVectorStore, DEFAULT_POLICIES, createAutoMemory, createLLMSummarizer } from "./memory/auto-memory";
 export { DocsManager, createDocsManager } from "./memory/docs-manager";
 export { FileMemory, createFileMemory } from "./memory/file-memory";
 export { MemoryHooks, createEncryptionHooks, createLoggingHooks, createMemoryHooks, createValidationHooks } from "./memory/hooks";
+export { BaseStore, DecisionStore, FeedbackStore, ImprovementStore, InsightStore, LearnBackendNotAvailableError, LearnEntry, LearnError, LearnManager, LearnManagerMode, MongoDBLearnBackend, PatternStore, PersonaStore, RedisLearnBackend, SQLiteLearnBackend, ThreadStore, getDataDir, getLearnDir, resolveLearnConfig, toLearnEntryDict } from "./memory/learn";
+export type { AsyncLearnProtocol, BaseStoreOptions, LearnEntryConvertible, LearnEntryData, LearnEntryInit, LearnEntryLike, LearnExtractor, LearnManagerConfig, LearnManagerProtocol, LearnMessage, LearnProtocol, LearnStorageBackend, LearnStore, ProcessConversationResult, ResolvedLearnConfig } from "./memory/learn";
 export { Memory, createMemory } from "./memory/memory";
 export type { MemoryConfig, MemoryEntry } from "./memory/memory";
 export { RulesManager, createRulesManager, createSafetyRules } from "./memory/rules-manager";
+export { DEFAULT_PROFILE, HarnessProfile, listHarnessProfiles, registerProfile, register_profile, resetHarnessRegistry, resolveHarness, resolve_harness } from "./model-harness";
+export type { HarnessProfileConfig, HarnessRegistryEntry, HarnessResolverProtocol } from "./model-harness";
 export { // Adapters
   NoopObservabilityAdapter, // Constants
   OBSERVABILITY_TOOLS, // Global adapter management
@@ -1033,15 +1056,6 @@ export { // Adapters
   type SpanKind, ConsoleObservabilityAdapter, MemoryObservabilityAdapter, clearAdapterCache, createConsoleAdapter, createMemoryAdapter, createObservabilityAdapter, getObservabilityAdapter, getObservabilityToolInfo, hasObservabilityToolEnvVar, listObservabilityTools, noopAdapter, resetObservabilityAdapter, trace } from "./observability";
 export { AgentApp, AgentAppConfig, AgentAppProtocol, AgentOS, AgentOSConfig, AgentOSProtocol, DEFAULT_AGENTOS_CONFIG, mergeConfig } from "./os";
 export type { AgentAppOptions, AgentOSOptions } from "./os";
-export { // P0: Call Types (new)
-  type MCPCall, // P0: Specialized Agent Configs (new)
-  type AudioConfig, // P0: Specialized Agents (new)
-  CodeAgent, // P1: Workflow Patterns (new)
-  Chunking, // P2: Context Types (new - only items not already exported)
-  ContextManager, // P3: Display callbacks (snake_case for Python parity)
-  register_display_callback, // P3: Plugin functions
-  get_plugin_manager, // P3: Trace & condition functions
-  evaluate_condition, EmbeddingAgent, If, Knowledge, MCP, OCRAgent, Parallel, RealtimeAgent, Route, Session, VideoAgent, VisionAgent, async_display_callbacks, cleanup_telemetry_resources, create_context_agent, disable_performance_mode, disable_telemetry, discover_and_load_plugins, discover_plugins, display_error, display_generating, display_instruction, display_interaction, display_self_reflection, display_tool_call, enable_performance_mode, enable_telemetry, ensure_plugin_dir, error_logs, get_default_plugin_dirs, get_dimensions, get_plugin_template, get_telemetry, handoff_filters, load_plugin, parse_plugin_header, parse_plugin_header_from_file, prompt_with_handoff_instructions, resolve_guardrail_policies, sync_display_callbacks, trace_context, track_workflow, when } from "./parity";
 export { // Core classes
   Plan, // Python parity additions
   ApprovalCallback, PlanStep, PlanStorage, PlanningAgent, READ_ONLY_TOOLS, RESEARCH_TOOLS, RESTRICTED_TOOLS, TaskAgent, TodoItem, TodoList, createApprovalCallback, createPlan, createPlanStorage, createPlanningAgent, createTaskAgent, createTodoList } from "./planning";
@@ -1049,36 +1063,51 @@ export { // Classes
   Plugin, // Enums
   PluginHook, // Functions
   getPluginManager, // Interfaces
-  type PluginMetadata, FunctionPlugin, PluginManager, PluginParseError, PluginType, disablePlugins, discoverAndLoadPlugins, discoverPlugins, enablePlugins, ensurePluginDir, getDefaultPluginDirs, getPluginTemplate, isPluginEnabled, listPlugins, loadPlugin, parsePluginHeader, parsePluginHeaderFromFile } from "./plugins";
+  type PluginMetadata, FunctionPlugin, PluginManager, PluginParseError, PluginType, disablePlugins, discoverAndLoadPlugins, discoverPlugins, discover_and_load_plugins, discover_plugins, enablePlugins, ensurePluginDir, ensure_plugin_dir, getDefaultPluginDirs, getPluginTemplate, get_default_plugin_dirs, get_plugin_manager, get_plugin_template, isPluginEnabled, listPlugins, loadPlugin, load_plugin, parsePluginHeader, parsePluginHeaderFromFile, parse_plugin_header, parse_plugin_header_from_file } from "./plugins";
 export { // A2A Protocol
   A2ATaskState, // AGUI Protocol
   AGUI, // AgentManager alias type
   type AgentManager, // Global singletons
   config, // Guardrail policies
   type GuardrailPolicy, // Tools class
-  type ToolDefinition, A2A, A2ARole, AutoRagAgent, AutoRetrievalPolicy, DEFAULT_AUTO_KEYWORDS, GUARDRAIL_POLICY_PRESETS, Tools, memory, obs, resolveGuardrailPolicies, workflows } from "./protocols";
+  type ToolDefinition, A2A, A2ARole, AutoRagAgent, AutoRetrievalPolicy, DEFAULT_AUTO_KEYWORDS, GUARDRAIL_POLICY_PRESETS, Tools, memory, obs, resolveGuardrailPolicies, resolve_guardrail_policies, workflows } from "./protocols";
 export { CitationsMode, DEFAULT_RAG_TEMPLATE, RAG, RAGCitation, RAGContextPack, RetrievalPolicy, RetrievalStrategy, createCitation, createContextPack, createRAG, createRAGConfig, createRAGResult, createRetrievalConfig, createSimpleRetrievalConfig, createSmartRetrievalConfig, formatAnswerWithCitations, formatCitation, formatContextPackForPrompt, hasCitations } from "./rag";
+export { PraisonAIRuntime, RuntimeRegistry, RuntimeRegistryEntry, RuntimeRegistryError, addRuntimeAlias, getRuntimeRegistry, isAgentRuntime, isRuntimeAvailable, listRuntimes, list_runtimes, registerRuntime, register_runtime, resolveRuntime, resolve_runtime, unregisterRuntime } from "./runtime";
+export type { AgentRuntimeProtocol, RunTurnOptions, RuntimeCapabilityMatrix, RuntimeConfig, RuntimeDelta, RuntimeDeltaType, RuntimeFactory, RuntimeMode, RuntimeRegistryEntryInit, RuntimeRegistryProtocol, RuntimeResult, TurnContextBuilderProtocol, TurnRuntimeProtocol } from "./runtime";
+export type { RunStatus } from "./session";
+export { Session } from "./session/session";
 export { // Python parity additions
-  SkillLoader, SkillManager, createSkillLoader, createSkillManager, createSkillProperties, parseSkillFile } from "./skills";
+  SkillLoader, EnforcementLevel, SkillManager, SkillParseError, SkillState, createSkillLoader, createSkillManager, createSkillProperties, discoverSkill, discoverSkills, discover_skills, findSkillMd, getDefaultSkillDirs, loadSkill, load_skill, parseFrontmatter, parseSkillFile, validate, validateMetadata, validateSkill, validate_metadata } from "./skills";
+export type { RemoteSkillSource } from "./skills";
 export { AgentTask, AgentTaskConfig, BaseTask, createTaskOutput } from "./task";
 export { // Python parity additions
-  MinimalTelemetry, AgentTelemetry, PerformanceMonitor, TelemetryCollector, TelemetryIntegration, cleanupTelemetry, cleanupTelemetryResources, createAgentTelemetry, createConsoleSink, createHTTPSink, createPerformanceMonitor, createTelemetryIntegration, disablePerformanceMode, disableTelemetry, enablePerformanceMode, enableTelemetry, getMinimalTelemetry, getTelemetry } from "./telemetry";
+  MinimalTelemetry, AgentTelemetry, PerformanceMonitor, TelemetryCollector, TelemetryIntegration, cleanupTelemetry, cleanupTelemetryResources, cleanup_telemetry_resources, createAgentTelemetry, createConsoleSink, createHTTPSink, createPerformanceMonitor, createTelemetryIntegration, disablePerformanceMode, disableTelemetry, disable_performance_mode, disable_telemetry, enablePerformanceMode, enableTelemetry, enable_performance_mode, enable_telemetry, getMinimalTelemetry, getTelemetry, get_telemetry } from "./telemetry";
 export { // Subagent Tool (agent-as-tool pattern)
   SubagentTool, BaseTool, FunctionTool, ToolRegistry, ToolResult, ToolValidationError, createDelegator, createSubagentTool, createSubagentTools, createTool, getRegistry, getTool, registerTool, tool, validateTool } from "./tools";
 export { airweaveSearch, bedrockBrowserClick, bedrockBrowserFill, bedrockBrowserNavigate, bedrockCodeInterpreter, codeExecution, codeMode, createCustomTool, crwCrawl, crwScrape, exaSearch, firecrawlCrawl, firecrawlScrape, parallelSearch, perplexitySearch, registerCustomTool, registerLocalTool, registerNpmTool, superagentGuard, superagentRedact, superagentVerify, tavilyCrawl, tavilyExtract, tavilySearch, valyuBioSearch, valyuCompanyResearch, valyuEconomicsSearch, valyuFinanceSearch, valyuPaperSearch, valyuPatentSearch, valyuSecSearch, valyuWebSearch } from "./tools/builtins";
+export { MCP, MCPToolTransportType } from "./tools/mcp";
 export { BudgetExceededError, MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddleware, createLoggingMiddleware, createRateLimitMiddleware, createRedactionMiddleware, createRetryMiddleware, createTimeoutMiddleware, createToolsRegistry, createTracingMiddleware, createValidationMiddleware, getToolsRegistry, get_registry, get_tool, register_tool, resetToolsRegistry, validate_tool } from "./tools/registry";
 export type { InstallHints, PraisonTool, RedactionHooks, RegisteredTool, ToolCapabilities, ToolExecutionContext, ToolExecutionResult, ToolFactory, ToolHooks, ToolInstallStatus, ToolLimits, ToolLogger, ToolMetadata, ToolMiddleware, ToolParameterProperty, ToolParameterSchema } from "./tools/registry";
 export { registerBuiltinTools, tools } from "./tools/tools";
+export { TOOLSET_TOOL_ID_MAP, ToolsetRegistry, ToolsetSpec, getToolset, getToolsetRegistry, get_toolset, get_toolset_registry, hasToolset, has_toolset, listToolsets, list_toolsets, registerToolset, register_toolset, resolveToolset, resolveToolsetBuiltinIds, resolveToolsets, resolveToolsetsForModel, resolve_toolset, resolve_toolsets, resolve_toolsets_for_model, toolsetToolId, unregisterToolset, unregister_toolset } from "./toolsets";
+export type { ToolsetSpecConfig } from "./toolsets";
 export { // Classes
   TraceSink, // Enums
   ContextEventType, // Functions
   createContextEvent, // Types
-  type ContextEvent, ContextListSink, ContextNoOpSink, ContextTraceEmitter, ContextTraceSink, EventType, MessageType, TraceCtx, traceContext, trackWorkflow } from "./trace";
+  type ContextEvent, ContextListSink, ContextNoOpSink, ContextTraceEmitter, ContextTraceSink, EventType, MessageType, TraceCtx, traceContext, trace_context, trackWorkflow, track_workflow } from "./trace";
+export { A2UI, A2UINotInstalledError, A2UI_MIME_TYPE, createA2uiPart, getSchemaManager, isA2uiPart, parseA2uiResponse } from "./ui/a2ui";
+export type { A2UIAdapter, A2UISystemPromptOptions, A2UIToolResultProtocol } from "./ui/a2ui";
+export { AdapterBackendNotAvailableError, AdapterCreationError, AdapterRegistry, isBackendUnavailableError } from "./utils/adapter-registry";
+export type { AdapterClass, AdapterFactory, AdapterKwargs } from "./utils/adapter-registry";
+export { Logger, PraisonLogger, ROOT_LOGGER_NAME, StructuredFormatter, configureStructuredLogging, configure_structured_logging, getLogger, get_logger, normalizeLoggerName } from "./utils/logger";
+export type { GetLoggerOptions, LogFormatter, LogLevelName, LogRecord, StructuredFormatterOptions } from "./utils/logger";
+export { VERSION, __version__, getVersion } from "./version";
 export { // New: Python-parity Loop and Repeat classes
   Loop, // Task class
-  Task, AgentFlow, Pipeline, Repeat, Workflow, loop, loopPattern, parallel, repeat, repeatPattern, route } from "./workflows";
-export type { LoopConfig, LoopResult, RepeatConfig, RepeatContext, RepeatResult, StepContextConfig, StepExecutionConfig, StepOutputConfig, StepResult, StepRoutingConfig, TaskConfig, WorkflowContext } from "./workflows";
-export { createWorkflowFromYAML, loadWorkflowFromFile, parseYAMLWorkflow, validateWorkflowDefinition } from "./workflows/yaml-parser";
+  Task, AgentFlow, DEFAULT_MAX_PARALLEL_WORKERS, If, Include, MAX_NESTING_DEPTH, NestingDepthError, PARALLEL_ON_FAILURE_MODES, Parallel, Pipeline, Repeat, Route, Workflow, WorkflowStepError, evaluateWorkflowCondition, getRecipeResolver, ifStep, if_, include, isControlFlowPattern, loop, loopPattern, parallel, parallelPattern, repeat, repeatPattern, route, routePattern, setRecipeResolver, substituteWorkflowVariables, when } from "./workflows";
+export type { AgentLikeStep, FlowStep, IncludableWorkflow, LoopConfig, LoopResult, ParallelBranchError, ParallelOnFailure, RecipeResolver, RepeatConfig, RepeatContext, RepeatResult, StepContextConfig, StepExecutionConfig, StepOutputConfig, StepResult, StepRoutingConfig, TaskConfig, WorkflowContext } from "./workflows";
+export { YAMLWorkflowParser, createWorkflowFromYAML, loadWorkflowFromFile, parseYAMLWorkflow, validateWorkflowDefinition } from "./workflows/yaml-parser";
 ```
 
 # Optional Plugins
