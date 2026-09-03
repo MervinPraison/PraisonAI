@@ -35,15 +35,19 @@ curl -fsSL https://praison.ai/install.sh | bash
     <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
   </a>
   <br>
+  <br>
   <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
     <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
   </a>
+  &nbsp;&nbsp;
   <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
     <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
   </a>
+  &nbsp;&nbsp;
   <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
     <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
   </a>
+  <br>
 </div>
 
 <p align="center">
