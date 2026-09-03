@@ -20,7 +20,6 @@ import pytest
 # adapter method with no consumer is the exact defect this file prevents
 # (root AGENTS.md: no exports without a live consumer).
 KNOWN_DEAD = frozenset({
-    "handle_empty_response_with_tools",  # has an exact inline equivalent; wire it
     "recover_tool_calls_from_text",      # duplicated inline at llm.py:3468-3500; wire it
 })
 
